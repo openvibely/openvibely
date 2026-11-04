@@ -1,0 +1,391 @@
+package pages
+
+import (
+	"fmt"
+	"net/url"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+// PluginPageView is everything the host shell needs to render one plugin page instance.
+type PluginPageView struct {
+	InstanceID       string
+	Title            string
+	PluginName       string
+	Version          string
+	OwningProjectID  string
+	OwningProject    string
+	RequestProjectID string
+	Handle           string
+	AssetURL         string
+	ChatEnabled      bool
+	ChatTaskID       string
+	ChatExecutions   []models.Execution
+	ChatTask         *models.Task
+	ChatRunningExec  string
+}
+
+func pluginAPI(v PluginPageView, suffix string) string {
+	return "/api/plugin-pages/" + url.PathEscape(v.InstanceID) + suffix + "?project_id=" + url.QueryEscape(v.OwningProjectID)
+}
+
+templ PluginPage(projects []models.Project, currentProjectID string, v PluginPageView) {
+	@layout.Base(v.Title, projects, currentProjectID) {
+		@PluginPageContent(v)
+	}
+}
+
+templ PluginPageContent(v PluginPageView) {
+	@layout.PageTitle(v.Title)
+	<div
+		id="plugin-page-root"
+		class="flex flex-col h-[calc(100vh-6rem)] min-h-0"
+		data-plugin-instance={ v.InstanceID }
+		data-plugin-handle={ v.Handle }
+		data-project-id={ v.OwningProjectID }
+		data-request-project-id={ v.RequestProjectID }
+		data-bridge-url={ pluginAPI(v, "/bridge") }
+		data-events-url={ pluginAPI(v, "/events") }
+		data-retire-url={ pluginAPI(v, "/handle/retire") }
+		data-approvals-url={ pluginAPI(v, "/approvals") }
+	>
+		<div data-page-header class="flex items-center justify-between gap-2 mb-3">
+			<div class="min-w-0">
+				<h2 class="text-2xl font-bold truncate">{ v.Title }</h2>
+				<div class="text-xs opacity-60">
+					{ v.PluginName } { v.Version } · project <span data-plugin-owning-project>{ v.OwningProject }</span>
+				</div>
+			</div>
+			if v.ChatEnabled {
+				<button type="button" class="btn btn-sm btn-outline" data-plugin-chat-toggle aria-controls="plugin-side-chat" aria-expanded="false">Chat about this page</button>
+			}
+		</div>
+		<div id="plugin-approvals" class="space-y-2 mb-2" aria-live="polite"></div>
+		<div class="flex flex-1 min-h-0 gap-3">
+			<iframe
+				id="plugin-frame"
+				title={ v.Title }
+				class="flex-1 min-w-0 w-full h-full rounded-lg border border-base-300 bg-base-100"
+				sandbox="allow-scripts allow-forms"
+				referrerpolicy="no-referrer"
+				src={ v.AssetURL }
+			></iframe>
+			if v.ChatEnabled {
+				@pluginSideChat(v)
+			}
+		</div>
+		@pluginHostBridgeScript()
+	</div>
+}
+
+templ pluginSideChat(v PluginPageView) {
+	<aside id="plugin-side-chat" class="hidden w-96 max-w-[45%] flex-col min-h-0 border border-base-300 rounded-lg bg-base-100" data-project-id={ v.OwningProjectID }>
+		<div class="px-3 py-2 border-b border-base-300 text-sm font-semibold flex items-center justify-between">
+			<span>Chat · { v.Title }</span>
+			<span class="text-xs opacity-60">uses page context + tools</span>
+		</div>
+		<div id="plugin-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.OwningProjectID }>
+			if len(v.ChatExecutions) > 0 {
+				@components.ChatMessages(v.ChatExecutions, v.ChatTask, nil, "plugin-chat-messages", "", false, v.OwningProjectID)
+			}
+		</div>
+		<form
+			id="plugin-chat-form"
+			class="p-2 border-t border-base-300 flex gap-2 items-end"
+			hx-post={ pluginAPI(v, "/chat") }
+			hx-target="#plugin-chat-messages"
+			hx-swap="beforeend"
+			hx-on::after-request="if(event.detail.successful){this.reset();}"
+		>
+			<textarea name="message" rows="2" class="textarea textarea-bordered textarea-sm flex-1" placeholder="Ask about this page…" required></textarea>
+			<div class="flex flex-col gap-1">
+				<button type="submit" class="btn btn-sm btn-primary">Send</button>
+				<button type="button" class="btn btn-sm btn-ghost" hx-post={ pluginAPI(v, "/chat/stop") } hx-swap="none">Stop</button>
+			</div>
+		</form>
+		@components.ChatAutoScrollScript()
+	</aside>
+}
+
+// PluginApprovalCard renders a pending agent action that needs user confirmation.
+templ PluginApprovalCard(v PluginPageView, id, operation, input string) {
+	<div class="alert alert-warning text-sm" data-plugin-approval={ id }>
+		<div class="flex-1 min-w-0">
+			<div class="font-semibold">The agent wants to run <code>{ operation }</code></div>
+			<pre class="text-xs whitespace-pre-wrap break-all opacity-80">{ input }</pre>
+		</div>
+		<button class="btn btn-xs btn-primary" hx-post={ pluginAPI(v, "/approvals/"+url.PathEscape(id)+"/approve") } hx-target="closest [data-plugin-approval]" hx-swap="outerHTML">Approve</button>
+		<button class="btn btn-xs" hx-post={ pluginAPI(v, "/approvals/"+url.PathEscape(id)+"/deny") } hx-target="closest [data-plugin-approval]" hx-swap="outerHTML">Deny</button>
+	</div>
+}
+
+// PluginNavEntry is one enabled page instance in the left rail.
+type PluginNavEntry struct {
+	InstanceID   string
+	Title        string
+	ProjectID    string
+	ProjectLabel string
+}
+
+templ PluginNav(entries []PluginNavEntry, showProject bool) {
+	for _, e := range entries {
+		<li data-plugin-nav-entry={ e.InstanceID }>
+			<a
+				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID)) }
+				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID) }
+				hx-target="#main-content"
+				hx-push-url="true"
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16M4 12h16M4 19h10"></path></svg>
+				<span class="sidebar-text">
+					{ e.Title }
+					if showProject {
+						<span class="text-xs opacity-60">· { e.ProjectLabel }</span>
+					}
+				</span>
+			</a>
+		</li>
+	}
+}
+
+// PluginSettingsRow is one project instance shown in settings.
+type PluginSettingsRow struct {
+	Instance      models.PagePluginInstance
+	NeedsApproval bool
+	RunsProcess   bool
+	Permissions   []PluginPermission
+	ProcessStatus string
+}
+
+type PluginPermission struct {
+	Name        string
+	Description string
+}
+
+type PluginSettingsPackage struct {
+	Package     models.PagePluginPackage
+	Pages       []string
+	Permissions []PluginPermission
+	RunsProcess bool
+	InUse       int
+}
+
+type PluginSettingsView struct {
+	ProjectID string
+	Packages  []PluginSettingsPackage
+	Instances []PluginSettingsRow
+	Error     string
+	Notice    string
+}
+
+templ PluginSettings(projects []models.Project, currentProjectID string, v PluginSettingsView) {
+	@layout.Base("Plugin pages", projects, currentProjectID) {
+		@PluginSettingsContent(v)
+	}
+}
+
+func pluginSettingsURL(projectID, suffix string) string {
+	return "/settings/plugin-pages" + suffix + "?project_id=" + url.QueryEscape(projectID)
+}
+
+templ PluginSettingsContent(v PluginSettingsView) {
+	@layout.PageTitle("Plugin pages")
+	<div id="plugin-settings" class="space-y-6 max-w-4xl">
+		<div data-page-header>
+			<h2 class="text-2xl font-bold">Plugin pages</h2>
+			<p class="text-sm opacity-70">Installed packages are shared by the server; each project enables its own page instances with separate configuration, state, and side chat.</p>
+		</div>
+		if v.Error != "" {
+			<div class="alert alert-error text-sm" role="alert">{ v.Error }</div>
+		}
+		if v.Notice != "" {
+			<div class="alert alert-success text-sm" role="status">{ v.Notice }</div>
+		}
+		<section class="card bg-base-100 border border-base-300"><div class="card-body gap-3">
+			<h3 class="font-semibold">Install a package</h3>
+			<form class="flex gap-2" hx-post={ pluginSettingsURL(v.ProjectID, "/install") } hx-target="#plugin-settings" hx-swap="outerHTML">
+				<input name="path" class="input input-bordered input-sm flex-1" placeholder="/path/to/prebuilt/plugin (directory containing plugin.json)" required/>
+				<button class="btn btn-sm btn-primary" type="submit">Install</button>
+			</form>
+			<button class="btn btn-sm btn-outline w-fit" hx-post={ pluginSettingsURL(v.ProjectID, "/install-example") } hx-target="#plugin-settings" hx-swap="outerHTML">Install Sales example</button>
+		</div></section>
+		<section class="card bg-base-100 border border-base-300"><div class="card-body gap-3">
+			<h3 class="font-semibold">Installed packages</h3>
+			if len(v.Packages) == 0 {
+				<p class="text-sm opacity-60">No packages installed.</p>
+			}
+			for _, p := range v.Packages {
+				<div class="border border-base-300 rounded-lg p-3 space-y-2" data-plugin-package={ p.Package.PluginID }>
+					<div class="flex justify-between gap-2">
+						<div>
+							<div class="font-medium">{ p.Package.Name } <span class="opacity-60 text-xs">{ p.Package.PluginID } { p.Package.Version }</span></div>
+							<div class="text-xs opacity-60 break-all">{ p.Package.ContentHash }</div>
+						</div>
+						if p.InUse == 0 {
+							<button class="btn btn-xs btn-ghost text-error" hx-post={ pluginSettingsURL(v.ProjectID, "/packages/"+url.PathEscape(p.Package.ID)+"/remove") } hx-target="#plugin-settings" hx-swap="outerHTML">Remove package</button>
+						}
+					</div>
+					@pluginPermissionList(p.Permissions, p.RunsProcess)
+					<div class="flex flex-wrap gap-2">
+						for _, page := range p.Pages {
+							<button class="btn btn-xs btn-outline" hx-post={ pluginSettingsURL(v.ProjectID, "/instances") } hx-vals={ fmt.Sprintf(`{"package_id":%q,"page_id":%q}`, p.Package.ID, page) } hx-target="#plugin-settings" hx-swap="outerHTML">Add "{ page }" to this project</button>
+						}
+					</div>
+				</div>
+			}
+		</div></section>
+		<section class="card bg-base-100 border border-base-300"><div class="card-body gap-3">
+			<h3 class="font-semibold">Pages in this project</h3>
+			if len(v.Instances) == 0 {
+				<p class="text-sm opacity-60">No plugin pages in this project yet.</p>
+			}
+			for _, r := range v.Instances {
+				<div class="border border-base-300 rounded-lg p-3 space-y-2" data-plugin-instance-row={ r.Instance.ID }>
+					<div class="flex justify-between items-center gap-2">
+						<div>
+							<div class="font-medium">{ r.Instance.Title } <span class="text-xs opacity-60">{ r.Instance.PluginID } { r.Instance.Version }</span></div>
+							<div class="text-xs opacity-60">
+								if r.Instance.Enabled {
+									Enabled
+								} else {
+									Disabled
+								}
+								if r.RunsProcess {
+									· backend { r.ProcessStatus }
+								}
+							</div>
+						</div>
+						<div class="flex gap-1">
+							if r.NeedsApproval {
+								<button class="btn btn-xs btn-warning" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/approve") } hx-target="#plugin-settings" hx-swap="outerHTML">Approve backend</button>
+							}
+							if r.Instance.Enabled {
+								<button class="btn btn-xs" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button>
+							} else {
+								<button class="btn btn-xs btn-primary" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button>
+							}
+							<button class="btn btn-xs btn-ghost text-error" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/remove") } hx-confirm="Remove this page from the project? Its stored state and side chat are deleted." hx-target="#plugin-settings" hx-swap="outerHTML">Remove</button>
+						</div>
+					</div>
+					if r.NeedsApproval {
+						<div class="text-xs text-warning">This page runs a local executable. An administrator must approve this exact package content before it can be enabled.</div>
+						@pluginPermissionList(r.Permissions, r.RunsProcess)
+					}
+				</div>
+			}
+		</div></section>
+	</div>
+}
+
+templ pluginPermissionList(perms []PluginPermission, runsProcess bool) {
+	if len(perms) > 0 {
+		<ul class="text-xs list-disc pl-5 opacity-80">
+			for _, p := range perms {
+				<li><code>{ p.Name }</code> — { p.Description }</li>
+			}
+		</ul>
+	}
+	if runsProcess {
+		<div class="text-xs text-warning">Backend processes are not sandboxed: they run with this server's OS user permissions and a minimal environment.</div>
+	}
+}
+
+// pluginHostBridgeScript is the host side of bridge v1. It accepts messages
+// only from this page's iframe window, validates the envelope, and relays them
+// to the server, which re-validates and authorizes everything.
+templ pluginHostBridgeScript() {
+	<script>
+	(function () {
+		var root = document.currentScript.closest('#plugin-page-root');
+		if (!root) return;
+		var frame = root.querySelector('#plugin-frame');
+		var handle = root.getAttribute('data-plugin-handle');
+		var bridgeURL = root.getAttribute('data-bridge-url');
+		var eventsURL = root.getAttribute('data-events-url');
+		var retireURL = root.getAttribute('data-retire-url');
+		var approvalsURL = root.getAttribute('data-approvals-url');
+		var projectID = root.getAttribute('data-project-id');
+		var MAX = 65536;
+		var ALLOWED = ['ready', 'op.invoke', 'context.set', 'analyze.request', 'events.subscribe'];
+		var dead = false, loads = 0, events = null, subscribed = false, streams = [];
+
+		function post(type, replyTo, payload) {
+			if (dead || !frame.contentWindow) return;
+			// Sandboxed frames have an opaque origin, so "*" is required; the
+			// recipient is pinned to this iframe's window object.
+			frame.contentWindow.postMessage({v: 1, type: type, replyTo: replyTo, handle: handle, payload: payload || {}}, '*');
+		}
+		function refreshApprovals() {
+			if (typeof htmx !== 'undefined') htmx.ajax('GET', approvalsURL, {target: '#plugin-approvals', swap: 'innerHTML'});
+		}
+		function startEvents() {
+			if (events || dead) return;
+			events = new EventSource(eventsURL + '&handle=' + encodeURIComponent(handle));
+			events.onmessage = function (e) {
+				var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+				if (ev.type === 'approval.pending') refreshApprovals();
+				if (subscribed) post('event', null, ev);
+			};
+			events.addEventListener('closed', function () { events.close(); events = null; });
+		}
+		function streamAnalysis(execID) {
+			if (!window.openVibelyLive) { post('analysis.done', null, {exec_id: execID, error: 'live transport unavailable'}); return; }
+			var s = window.openVibelyLive.execution(execID, 0, projectID);
+			streams.push(s);
+			s.addEventListener('message', function (e) { post('analysis.delta', null, {exec_id: execID, text: e.data}); });
+			s.addEventListener('done', function () { post('analysis.done', null, {exec_id: execID}); });
+			s.addEventListener('error', function (e) { post('analysis.done', null, {exec_id: execID, error: e.data || 'analysis failed'}); });
+		}
+		function cleanup() {
+			if (dead) return;
+			dead = true;
+			if (events) { events.close(); events = null; }
+			streams.forEach(function (s) { try { s.close(); } catch (_) {} });
+			try { fetch(retireURL + '&handle=' + encodeURIComponent(handle), {method: 'POST', keepalive: true, credentials: 'same-origin', headers: {'X-OpenVibely-Plugin-Bridge': '1'}}); } catch (_) {}
+			window.removeEventListener('message', onMessage);
+			document.removeEventListener('htmx:beforeSwap', onSwap);
+		}
+		function onSwap(e) {
+			var t = e.detail && e.detail.target;
+			if (t && (t.id === 'main-content' || t.contains(root))) cleanup();
+		}
+		function onMessage(ev) {
+			if (dead || ev.source !== frame.contentWindow) return;
+			var msg = ev.data;
+			if (!msg || typeof msg !== 'object' || msg.v !== 1 || msg.handle !== handle || typeof msg.id !== 'string' || ALLOWED.indexOf(msg.type) < 0) return;
+			var body;
+			try { body = JSON.stringify({v: 1, type: msg.type, id: msg.id, handle: msg.handle, payload: msg.payload || {}}); } catch (_) { return; }
+			if (body.length > MAX) { post('error', msg.id, {message: 'bridge message too large'}); return; }
+			fetch(bridgeURL, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OpenVibely-Plugin-Bridge': '1'}, body: body})
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (!res || !res.ok) { post('error', msg.id, {message: (res && res.error) || 'request failed'}); return; }
+					if (msg.type === 'events.subscribe') { subscribed = true; startEvents(); }
+					if (msg.type === 'analyze.request' && res.result && res.result.exec_id) streamAnalysis(res.result.exec_id);
+					post('result', msg.id, res.result);
+				})
+				.catch(function () { post('error', msg.id, {message: 'network error'}); });
+		}
+		frame.addEventListener('load', function () {
+			loads++;
+			// The bridge is bound to the entry document; a navigated frame loses it.
+			if (loads > 1) { cleanup(); root.querySelector('#plugin-approvals').textContent = 'The plugin page navigated away; reload to reconnect.'; }
+		});
+		window.addEventListener('message', onMessage);
+		document.addEventListener('htmx:beforeSwap', onSwap);
+		window.addEventListener('pagehide', cleanup, {once: true});
+		startEvents();
+		refreshApprovals();
+		var toggle = root.querySelector('[data-plugin-chat-toggle]');
+		var chat = root.querySelector('#plugin-side-chat');
+		if (toggle && chat) toggle.addEventListener('click', function () {
+			var open = chat.classList.toggle('hidden') === false;
+			chat.classList.toggle('flex', open);
+			toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+			if (open) { var m = chat.querySelector('#plugin-chat-messages'); if (m) m.scrollTop = m.scrollHeight; }
+		});
+	})();
+	</script>
+}

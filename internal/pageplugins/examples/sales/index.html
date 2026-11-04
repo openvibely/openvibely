@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sales</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, -apple-system, sans-serif; font-size: 14px; }
+  body { margin: 0; padding: 16px; background: transparent; color: CanvasText; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  button, select, input { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #8884; background: Canvas; color: CanvasText; }
+  button.primary { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+  button:disabled { opacity: .6; }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #8883; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.selected { background: #4f46e522; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+  .card { border: 1px solid #8884; border-radius: 8px; padding: 8px 12px; }
+  .card .v { font-size: 20px; font-weight: 600; }
+  .muted { opacity: .7; font-size: 12px; }
+  #analysis { white-space: pre-wrap; border: 1px solid #8884; border-radius: 8px; padding: 10px; margin-top: 12px; min-height: 2em; display: none; }
+  #status { min-height: 1.2em; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <button id="refresh" class="primary" type="button">Refresh</button>
+    <button id="analyze" type="button">Analyze</button>
+    <label>Region
+      <select id="region">
+        <option value="all">All</option><option value="north">North</option><option value="south">South</option>
+        <option value="east">East</option><option value="west">West</option>
+      </select>
+    </label>
+    <label>From <input id="from" type="date"></label>
+    <label>To <input id="to" type="date"></label>
+    <span id="status" class="muted"></span>
+  </div>
+  <div class="cards">
+    <div class="card"><div class="muted">Revenue</div><div class="v" id="revenue">–</div></div>
+    <div class="card"><div class="muted">Units</div><div class="v" id="units">–</div></div>
+    <div class="card"><div class="muted">Target attainment</div><div class="v" id="attain">–</div></div>
+    <div class="card"><div class="muted">Revision</div><div class="v" id="rev">–</div></div>
+  </div>
+  <table>
+    <thead><tr><th>Date</th><th>Region</th><th>Product</th><th class="num">Units</th><th class="num">Revenue</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="analysis"></div>
+  <script src="app.js"></script>
+</body>
+</html>

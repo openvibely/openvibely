@@ -604,6 +604,9 @@ func (h *Handler) DeleteProject(c echo.Context) error {
 		applog.Infof("[handler] DeleteProject filesystem cleanup warning: %v", cleanupErr)
 	}
 
+	if h.pagePlugins != nil {
+		h.pagePlugins.ReleaseProject(projectID)
+	}
 	applog.Infof("[handler] DeleteProject success id=%s", projectID)
 
 	// Find the default project to redirect to

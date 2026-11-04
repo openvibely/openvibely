@@ -32,6 +32,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
@@ -1162,6 +1163,12 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 			ChatInputRequests: stores.ChatInputRequests,
 		},
 	)
+	pagePluginRoot := os.Getenv("OPENVIBELY_PAGE_PLUGIN_ROOT")
+	if pagePluginRoot == "" {
+		pagePluginRoot = filepath.Join(cfg.AppDataDir, "page-plugins")
+	}
+	pagePluginMgr := pageplugins.NewManager(stores.PagePlugins, pagePluginRoot)
+	h.SetPagePlugins(pagePluginMgr)
 	for _, option := range options {
 		h.SetDesktopFileSaver(option.DesktopFileSaver)
 		if option.ProjectFolderPicker != nil {
@@ -1355,6 +1362,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		automationDispatcher.Stop()
 		automationReconciler.Stop()
 		workerSvc.Stop()
+		pagePluginMgr.StopAll()
 		if telegramSvc != nil {
 			telegramSvc.Stop()
 		}

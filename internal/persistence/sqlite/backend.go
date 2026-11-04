@@ -93,6 +93,7 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 		XInboundReceipts:     NewXInboundReceiptRepo(db),
 		XTaskContexts:        NewXTaskContextRepo(db),
 		XUserProjects:        NewXUserProjectRepo(db),
+		PagePlugins:          NewPagePluginRepo(db),
 	}
 }
 

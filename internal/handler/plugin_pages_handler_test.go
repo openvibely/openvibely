@@ -1,0 +1,274 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageintegration"
+	"github.com/openvibely/openvibely/internal/pageplugins"
+)
+
+type pluginTestEnv struct {
+	h      *Handler
+	e      *echo.Echo
+	mgr    *pageplugins.Manager
+	projA  *models.Project
+	projB  *models.Project
+	inA    *models.PagePluginInstance
+	inB    *models.PagePluginInstance
+	agent  *models.LLMConfig
+	starts []streamingResponseParams
+}
+
+func setupPluginPages(t *testing.T) *pluginTestEnv {
+	t.Helper()
+	h, e, llmRepo, stores := setupTestHandlerWithStores(t)
+	mgr := pageplugins.NewManager(stores.PagePlugins, t.TempDir())
+	h.SetPagePlugins(mgr)
+	env := &pluginTestEnv{h: h, e: e, mgr: mgr, projA: createProject(t, h, "Alpha"), projB: createProject(t, h, "Beta")}
+	env.agent = createAgent(t, llmRepo)
+	h.startStreamingResponseOverride = func(p streamingResponseParams) error {
+		env.starts = append(env.starts, p)
+		return nil
+	}
+	ctx := context.Background()
+	pkg, err := mgr.InstallExample(ctx, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []struct {
+		proj *models.Project
+		out  **models.PagePluginInstance
+	}{{env.projA, &env.inA}, {env.projB, &env.inB}} {
+		in, err := mgr.CreateInstance(ctx, target.proj.ID, pkg.ID, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := mgr.Enable(ctx, in.ID); err != nil {
+			t.Fatal(err)
+		}
+		*target.out = in
+	}
+	return env
+}
+
+func (env *pluginTestEnv) do(t *testing.T, method, target, body string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	env.e.ServeHTTP(rec, req)
+	return rec
+}
+
+var handlePattern = regexp.MustCompile(`data-plugin-handle="([0-9a-f]+)"`)
+
+func (env *pluginTestEnv) openPage(t *testing.T, in *models.PagePluginInstance) string {
+	t.Helper()
+	rec := env.do(t, http.MethodGet, "/p/"+in.ID+"?project_id="+in.ProjectID, "", map[string]string{"HX-Request": "true"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("open page: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `sandbox="allow-scripts allow-forms"`) {
+		t.Fatal("plugin iframe is not sandboxed")
+	}
+	m := handlePattern.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatal("no bridge handle rendered")
+	}
+	return m[1]
+}
+
+func bridgeHeaders() map[string]string {
+	return map[string]string{"Content-Type": "application/json", "X-OpenVibely-Plugin-Bridge": "1"}
+}
+
+func (env *pluginTestEnv) bridge(t *testing.T, in *models.PagePluginInstance, projectID, handle, typ, payload string) (*httptest.ResponseRecorder, pluginBridgeResponse) {
+	t.Helper()
+	msg := `{"v":1,"type":"` + typ + `","id":"m1","handle":"` + handle + `","payload":` + payload + `}`
+	rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+in.ID+"/bridge?project_id="+url.QueryEscape(projectID), msg, bridgeHeaders())
+	var resp pluginBridgeResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	return rec, resp
+}
+
+func TestPluginPage_CrossProjectAccessDenied(t *testing.T) {
+	env := setupPluginPages(t)
+	rec := env.do(t, http.MethodGet, "/p/"+env.inA.ID+"?project_id="+env.projB.ID, "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-project page load = %d", rec.Code)
+	}
+	handleA := env.openPage(t, env.inA)
+	rec, _ = env.bridge(t, env.inA, env.projB.ID, handleA, "op.invoke", `{"operation":"get_report"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-project bridge = %d", rec.Code)
+	}
+	handleB := env.openPage(t, env.inB)
+	rec, _ = env.bridge(t, env.inA, env.projA.ID, handleB, "op.invoke", `{"operation":"get_report"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("foreign handle accepted = %d", rec.Code)
+	}
+	rec = env.do(t, http.MethodGet, "/p/"+env.inA.ID+"?project_id="+models.AllProjectsID, "", nil)
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "project_id="+env.projA.ID) {
+		t.Fatalf("all-projects open did not keep owning project: %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestPluginBridge_RequiresBridgeHeader(t *testing.T) {
+	env := setupPluginPages(t)
+	handle := env.openPage(t, env.inA)
+	msg := `{"v":1,"type":"ready","id":"m1","handle":"` + handle + `","payload":{}}`
+	rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/bridge?project_id="+env.projA.ID, msg, map[string]string{"Content-Type": "text/plain"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("simple cross-site post accepted: %d", rec.Code)
+	}
+	h := bridgeHeaders()
+	h["Origin"] = "https://evil.example"
+	rec = env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/bridge?project_id="+env.projA.ID, msg, h)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin post accepted: %d", rec.Code)
+	}
+}
+
+func TestPluginNav_AllProjectsShowsOwningProject(t *testing.T) {
+	env := setupPluginPages(t)
+	rec := env.do(t, http.MethodGet, "/plugin-pages/nav?project_id="+models.AllProjectsID, "", nil)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, "Alpha") || !strings.Contains(body, "Beta") {
+		t.Fatalf("all-projects nav missing project labels: %d %s", rec.Code, body)
+	}
+	if !strings.Contains(body, "project_id="+env.projA.ID) || !strings.Contains(body, "project_id="+env.projB.ID) {
+		t.Fatal("nav links do not open in owning project")
+	}
+	rec = env.do(t, http.MethodGet, "/plugin-pages/nav?project_id="+env.projA.ID, "", nil)
+	if strings.Contains(rec.Body.String(), env.inB.ID) {
+		t.Fatal("project nav leaked another project's page")
+	}
+}
+
+func TestPluginBridge_ButtonAndAgentToolShareOperation(t *testing.T) {
+	env := setupPluginPages(t)
+	handle := env.openPage(t, env.inA)
+
+	rec, resp := env.bridge(t, env.inA, env.projA.ID, handle, "op.invoke", `{"operation":"refresh_data","input":{}}`)
+	if rec.Code != http.StatusOK || !resp.OK {
+		t.Fatalf("page refresh failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var rep struct {
+		Revision int `json:"revision"`
+	}
+	json.Unmarshal(resp.Result, &rep)
+	if rep.Revision != 2 {
+		t.Fatalf("revision after page refresh = %d", rep.Revision)
+	}
+
+	rec, _ = env.bridge(t, env.inA, env.projA.ID, handle, "context.set", `{"summary":"North region, March","filters":{"region":"north"},"selection":["r1"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("context.set failed: %s", rec.Body.String())
+	}
+	rec = env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat?project_id="+env.projA.ID, "message=Refresh+the+data+and+summarize+it", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
+	if rec.Code != http.StatusOK || len(env.starts) != 1 {
+		t.Fatalf("side chat turn not started: %d %s", rec.Code, rec.Body.String())
+	}
+	p := env.starts[0]
+	if p.ProjectID != env.projA.ID || p.RuntimeTools == nil {
+		t.Fatalf("chat turn not bound to page project/tools: %+v", p.ProjectID)
+	}
+	if !strings.Contains(p.SystemContext, "North region, March") || !strings.Contains(p.SystemContext, "untrusted_page_context") {
+		t.Fatalf("explicit page context missing from turn:\n%s", p.SystemContext)
+	}
+	out, _, isErr, err := p.RuntimeTools.Executor(context.Background(), pageintegration.ToolName("refresh_data"), json.RawMessage(`{}`))
+	if err != nil || isErr {
+		t.Fatalf("agent refresh tool failed: %s %v", out, err)
+	}
+	json.Unmarshal([]byte(out), &rep)
+	if rep.Revision != 3 {
+		t.Fatalf("agent tool did not run the page's operation: revision %d", rep.Revision)
+	}
+	snap, err := env.mgr.Store().GetTurnContext(context.Background(), p.ExecID)
+	if err != nil || !strings.Contains(snap, "North region") {
+		t.Fatalf("turn context not persisted: %q %v", snap, err)
+	}
+
+	// Second turn while the first is running is rejected instead of interleaving.
+	rec = env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat?project_id="+env.projA.ID, "message=again", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("concurrent turn = %d", rec.Code)
+	}
+	rec = env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat/stop?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("stop = %d", rec.Code)
+	}
+	taskID, _ := env.mgr.Store().GetConversationTask(context.Background(), env.inA.ID)
+	task, _ := env.h.taskRepo.GetByID(context.Background(), taskID)
+	if task == nil || task.ProjectID != env.projA.ID || task.Status == models.StatusRunning {
+		t.Fatalf("conversation task not persisted/stopped: %+v", task)
+	}
+
+	// Project B's page is unaffected by project A's refreshes.
+	handleB := env.openPage(t, env.inB)
+	_, resp = env.bridge(t, env.inB, env.projB.ID, handleB, "op.invoke", `{"operation":"get_report"}`)
+	json.Unmarshal(resp.Result, &rep)
+	if rep.Revision != 1 {
+		t.Fatalf("project B state changed: revision %d", rep.Revision)
+	}
+}
+
+func TestPluginAsset_SandboxHeadersAndBlockedFiles(t *testing.T) {
+	env := setupPluginPages(t)
+	handle := env.openPage(t, env.inA)
+	rec := env.do(t, http.MethodGet, "/plugin-assets/"+handle+"/app.js", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset = %d", rec.Code)
+	}
+	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "sandbox allow-scripts") || !strings.Contains(csp, "connect-src 'none'") {
+		t.Fatalf("missing sandbox CSP: %q", csp)
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("missing nosniff")
+	}
+	for _, p := range []string{"plugin.json", "..%2f..%2fplugin.json", "missing.js"} {
+		if rec := env.do(t, http.MethodGet, "/plugin-assets/"+handle+"/"+p, "", nil); rec.Code != http.StatusNotFound {
+			t.Errorf("%s served: %d", p, rec.Code)
+		}
+	}
+	rec = env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/handle/retire?project_id="+env.projA.ID+"&handle="+handle, "", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("retire = %d", rec.Code)
+	}
+	if rec := env.do(t, http.MethodGet, "/plugin-assets/"+handle+"/app.js", "", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("retired handle still serves assets: %d", rec.Code)
+	}
+}
+
+func TestPluginSettings_DisableRemovesFromNavAndBlocksAPI(t *testing.T) {
+	env := setupPluginPages(t)
+	handle := env.openPage(t, env.inA)
+	rec := env.do(t, http.MethodPost, "/settings/plugin-pages/instances/"+env.inA.ID+"/disable?project_id="+env.projB.ID, "", map[string]string{"HX-Request": "true"})
+	if in, _ := env.mgr.Store().GetInstance(context.Background(), env.inA.ID); !in.Enabled {
+		t.Fatalf("instance disabled from another project's settings (status %d)", rec.Code)
+	}
+	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/instances/"+env.inA.ID+"/disable?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable = %d %s", rec.Code, rec.Body.String())
+	}
+	rec, _ = env.bridge(t, env.inA, env.projA.ID, handle, "op.invoke", `{"operation":"get_report"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("disabled page bridge = %d", rec.Code)
+	}
+	rec = env.do(t, http.MethodGet, "/plugin-pages/nav?project_id="+env.projA.ID, "", nil)
+	if strings.Contains(rec.Body.String(), env.inA.ID) {
+		t.Fatal("disabled page still in nav")
+	}
+}

@@ -72,4 +72,5 @@ type Stores struct {
 	XInboundReceipts     XInboundReceiptStore
 	XTaskContexts        XTaskContextStore
 	XUserProjects        XUserProjectStore
+	PagePlugins          PagePluginStore
 }

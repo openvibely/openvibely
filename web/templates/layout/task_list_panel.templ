@@ -1388,6 +1388,19 @@ templ SettingsLinks(currentProjectID string) {
 	</a>
 	<a
 		class="task-list-row"
+		data-nav-base="/settings/plugin-pages"
+		href={ templ.SafeURL(fmt.Sprintf("/settings/plugin-pages?project_id=%s", currentProjectID)) }
+		hx-get={ fmt.Sprintf("/settings/plugin-pages?project_id=%s", currentProjectID) }
+		hx-target="#main-content"
+		hx-push-url="true"
+	>
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16M4 12h16M4 19h10"></path>
+		</svg>
+		<span class="task-list-title">Plugin pages</span>
+	</a>
+	<a
+		class="task-list-row"
 		data-nav-base="/personality"
 		href={ templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)) }
 		hx-get={ fmt.Sprintf("/personality?project_id=%s", currentProjectID) }

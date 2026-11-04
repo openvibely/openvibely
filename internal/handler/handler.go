@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"github.com/openvibely/openvibely/internal/pageplugins"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 )
 
 type Handler struct {
+	pagePlugins                *pageplugins.Manager
 	diffChunks                 diffChunkCache
 	channelOAuthMu             sync.Mutex
 	channelOAuthFlows          map[string]channelOAuthFlow
@@ -988,6 +990,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Worker settings
 	e.GET("/workers", h.WorkerSettings)
 	e.GET("/settings/workers", h.WorkerSettings)
+	h.registerPluginPageRoutes(e)
 	e.POST("/workers", h.UpdateWorkerSettings)
 	e.POST("/workers/projects/:projectId/limit", h.UpdateProjectWorkerLimit)
 	// Worker stats polling endpoints

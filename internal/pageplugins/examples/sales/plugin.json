@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "openvibely.sales-example",
+  "name": "Sales (example)",
+  "version": "1.0.0",
+  "description": "Example plugin page with generated sales data, a refresh operation shared by the page and the agent, live updates, and in-page analysis.",
+  "pages": [
+    {"id": "sales", "title": "Sales", "icon": "chart", "entry": "index.html"}
+  ],
+  "backend": {"builtin": "sales-demo"},
+  "permissions": ["storage", "events", "agent"],
+  "operations": [
+    {
+      "name": "refresh_data",
+      "description": "Regenerate the latest sales figures for this project's Sales page and return the updated report. Optional region filter.",
+      "kind": "read",
+      "expose_as_tool": true,
+      "permissions": ["storage", "events"],
+      "emits": ["data.changed"],
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "region": {"type": "string", "enum": ["all", "north", "south", "east", "west"]}
+        }
+      },
+      "output_schema": {"type": "object", "required": ["rows", "totals", "revision"]}
+    },
+    {
+      "name": "get_report",
+      "description": "Return the current sales report for this page, optionally filtered by region.",
+      "kind": "read",
+      "expose_as_tool": true,
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "region": {"type": "string", "enum": ["all", "north", "south", "east", "west"]}
+        }
+      },
+      "output_schema": {"type": "object", "required": ["rows", "totals", "revision"]}
+    },
+    {
+      "name": "set_target",
+      "description": "Set the monthly revenue target used for attainment. This changes stored page data and requires user approval when requested by the agent.",
+      "kind": "action",
+      "expose_as_tool": true,
+      "permissions": ["storage", "events"],
+      "emits": ["data.changed"],
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target"],
+        "properties": {"target": {"type": "number", "minimum": 0, "maximum": 1000000000}}
+      },
+      "output_schema": {"type": "object", "required": ["target"]}
+    }
+  ]
+}
