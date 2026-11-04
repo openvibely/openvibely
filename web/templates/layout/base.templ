@@ -4175,9 +4175,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 const choice = event.target.closest('[data-menu-close-on-select]');
                 const owner = choice && menuDropdownForTarget(choice);
                 if (!owner || owner.hasAttribute('data-kanban-menu-key')) return;
-                const trigger = owner.querySelector(':scope > label');
-                if (trigger) trigger.focus({preventScroll: true});
+                const trigger = owner.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
                 closeGenericDropdown(owner);
+                if (trigger) trigger.focus({preventScroll: true});
+                // Restoring focus must not reopen a focus-driven dropdown.
+                owner.setAttribute('data-menu-dismissed', '');
             });
             // Consume dismissal before document navigation and pointer handlers.
             // Keep menus open until click so that the matching click is consumed too.

@@ -399,3 +399,31 @@ func TestBrowserFunctional_UnmarkedDropdownsConsumeOutsideClick(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_AutomationViewSelectionRestoresMenuFocus(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	graph := models.AutomationLiveGraph{Automation: models.Automation{ID: "focus", Name: "Focus", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{ID: "saved"}, YAML: "schema_version: 1\nname: Focus\n"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path != "/fixture" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := layout.Base("Selection focus", nil, "project").Render(templ.WithChildren(r.Context(), AutomationLiveContent(graph, "project", true)), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/fixture", "automation-selection-focus", func(b *composerFocusCDP) {
+		b.waitFor("ready", `String(document.readyState==='complete' && !!document.querySelector('[data-automation-view-yaml]'))`, "true")
+		for _, view := range []string{"yaml", "graph", "yaml"} {
+			b.click(`[data-automation-live-menu] > label`)
+			b.waitFor("menu reopened", `String(getComputedStyle(document.querySelector('[data-automation-live-menu] > ul')).visibility==='visible')`, "true")
+			b.click(`[data-automation-view-` + view + `]`)
+			b.waitFor("view selected", `document.querySelector('[data-automation-view-`+view+`]').getAttribute('aria-pressed')`, "true")
+			b.waitFor("selection closes menu and restores focus", `String(document.activeElement===document.querySelector('[data-automation-live-menu] > label') && getComputedStyle(document.querySelector('[data-automation-live-menu] > ul')).visibility==='hidden')`, "true")
+		}
+	})
+}
