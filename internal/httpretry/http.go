@@ -178,15 +178,17 @@ func IsRetryableNetworkError(err error) bool {
 // IsRetryableError recognizes transient transport and provider errors. It is
 // intentionally conservative and is only acted on when replay is allowed.
 func IsRetryableError(err error) bool {
+	// A provider's explicit status takes precedence over network-related words
+	// in its message, such as a 429 telling the caller to wait for a timeout.
+	var responseErr *ResponseError
+	if errors.As(err, &responseErr) {
+		return IsRetryableStatus(responseErr.StatusCode)
+	}
 	if IsRetryableNetworkError(err) {
 		return true
 	}
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
-	}
-	var responseErr *ResponseError
-	if errors.As(err, &responseErr) {
-		return IsRetryableStatus(responseErr.StatusCode)
 	}
 	msg := strings.ToLower(err.Error())
 	if isNonRetryableRateLimitMessage(msg) {

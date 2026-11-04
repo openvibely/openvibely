@@ -125,6 +125,10 @@ func categorizeProviderError(err error) error {
 	if errors.As(err, &categorized) {
 		return err
 	}
+	var compatibleErr *openaiclient.CompatibleStreamError
+	if errors.As(err, &compatibleErr) {
+		return openaiclient.CategorizeCompatibleStreamError(err)
+	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "max output tokens") || strings.Contains(msg, "max_tokens limit") || strings.Contains(msg, "output budget") {
 		return llmcontracts.NewCategorizedError(llmcontracts.ErrorOutputTokenLimitReached, "provider response", err)
@@ -229,6 +233,10 @@ func recognizedContextLengthError(err error) bool {
 	}
 	if llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) || llmcontracts.ErrorIs(err, llmcontracts.ErrorCompactionInputInfeasible) {
 		return true
+	}
+	var compatibleErr *openaiclient.CompatibleStreamError
+	if errors.As(err, &compatibleErr) {
+		return compatibleErr.IsContextOverflow()
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "max output tokens") || strings.Contains(msg, "max_tokens") || strings.Contains(msg, "output budget") {

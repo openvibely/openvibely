@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
@@ -363,7 +364,14 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			if text := partialText.String(); text != "" {
 				exchange.Append(CompletionsHistoryMessage{Role: "assistant", Content: text})
 			}
-			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
+			wrapped := fmt.Errorf("turn %d: %w", turn+1, err)
+			if !opts.FirstPartyOpenAI {
+				var compatibleErr *CompatibleStreamError
+				if errors.As(err, &compatibleErr) {
+					return nil, CategorizeCompatibleStreamError(wrapped)
+				}
+			}
+			return nil, CategorizeProviderError(wrapped)
 		}
 
 		result.InputTokens += turnResult.inputTokens
@@ -784,7 +792,7 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed))
 	}
 
-	result, err := c.parseCompletionsStreamCapturing(resp.Body, opts.OnText, opts.responseText)
+	result, err := c.parseCompletionsStreamWithMode(resp.Body, opts.OnText, opts.responseText, !opts.FirstPartyOpenAI)
 	if err != nil {
 		return result, httpretry.NewStreamError(err)
 	}
@@ -795,6 +803,10 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 	return c.parseCompletionsStreamCapturing(body, onText, nil)
 }
 func (c *Client) parseCompletionsStreamCapturing(body io.Reader, onText func(string), textBuilder *strings.Builder) (*completionsTurnResult, error) {
+	return c.parseCompletionsStreamWithMode(body, onText, textBuilder, false)
+}
+
+func (c *Client) parseCompletionsStreamWithMode(body io.Reader, onText func(string), textBuilder *strings.Builder, compatible bool) (*completionsTurnResult, error) {
 	scanner := streamdecode.Scanner(body, 10*1024*1024)
 
 	result := &completionsTurnResult{}
@@ -823,6 +835,9 @@ func (c *Client) parseCompletionsStreamCapturing(body io.Reader, onText func(str
 		var chunk completionsStreamChunk
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			continue
+		}
+		if compatible && len(chunk.Error) > 0 && !bytes.Equal(bytes.TrimSpace(chunk.Error), []byte("null")) {
+			return nil, completionsStreamError(chunk.Error, chunk.Status, chunk.StatusCode)
 		}
 		if result.model == "" {
 			result.model = chunk.Model
@@ -906,8 +921,11 @@ func (c *Client) parseCompletionsStreamCapturing(body io.Reader, onText func(str
 
 // Typed chunks avoid a map and boxed interface value for every text delta.
 type completionsStreamChunk struct {
-	Model   string `json:"model"`
-	Choices []struct {
+	Error      json.RawMessage `json:"error"`
+	Status     json.RawMessage `json:"status"`
+	StatusCode json.RawMessage `json:"status_code"`
+	Model      string          `json:"model"`
+	Choices    []struct {
 		Delta *struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`

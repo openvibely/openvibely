@@ -159,6 +159,17 @@ func TestRetryableStatuses(t *testing.T) {
 	}
 }
 
+func TestRetryableErrorExplicitStatusOverridesNetworkWording(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 404, 422, 429, 408, 500, 502, 503, 504, 529} {
+		for _, message := range []string{"timeout", "connection reset", "unexpected EOF"} {
+			err := NewStreamError(NewResponseError(&http.Response{StatusCode: status}, errors.New(message)))
+			if got := IsRetryableError(err); got != IsRetryableStatus(status) {
+				t.Errorf("status %d, message %q: retryable = %v", status, message, got)
+			}
+		}
+	}
+}
+
 func TestRetryableErrorRequiresExactStatusToken(t *testing.T) {
 	if IsRetryableError(errors.New("invalid request: maximum is 500-token units")) {
 		t.Fatal("embedded number must not make a permanent error retryable")
@@ -485,7 +496,7 @@ func TestDoStreamTurnDoesNotRetry429(t *testing.T) {
 	_, err := DoStreamTurn(context.Background(), policy, func(context.Context) (string, error) {
 		attempts++
 		resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"1"}}}
-		return "", NewResponseError(resp, errors.New("rate limited"))
+		return "", NewStreamError(NewResponseError(resp, errors.New("rate limit exceeded; retry after the timeout")))
 	})
 	if err == nil || attempts != 1 {
 		t.Fatalf("error/attempts = %v/%d, want error/1", err, attempts)
