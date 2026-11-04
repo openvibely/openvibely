@@ -4165,6 +4165,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 dropdown.setAttribute('data-menu-dismissed', '');
             }
             document.addEventListener('click', function(event) {
+                // Focus-only triggers (such as Merge and the user menu) stay
+                // focused after Escape, so reopening cannot rely on focusin.
+                const dropdown = menuDropdownForTarget(event.target);
+                if (dropdown && dropdown.hasAttribute('data-menu-dismissed') && !dropdown.hasAttribute('data-kanban-menu-key')) {
+                    const trigger = dropdown.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
+                    if (trigger && trigger.contains(event.target)) dropdown.removeAttribute('data-menu-dismissed');
+                }
                 const choice = event.target.closest('[data-menu-close-on-select]');
                 const owner = choice && menuDropdownForTarget(choice);
                 if (!owner || owner.hasAttribute('data-kanban-menu-key')) return;
@@ -4218,7 +4225,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 if (!owner || owner.hasAttribute('data-kanban-menu-key') || event.key !== 'Escape') return;
                 event.preventDefault();
                 closeGenericDropdown(owner);
-                const trigger = owner.querySelector(':scope > label');
+                const trigger = owner.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
                 if (trigger) trigger.focus({preventScroll: true});
                 owner.setAttribute('data-menu-dismissed', '');
             });

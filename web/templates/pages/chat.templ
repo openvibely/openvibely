@@ -1914,9 +1914,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 
 						if (!window._chatInputRequestClickBound) {
 							window._chatInputRequestClickBound = true;
-                            document.body.addEventListener('focusin', function(event) {
+                            function showProjectSearchResults(event) {
                                 if (event.target.matches('[data-project-search]')) event.target.closest('[data-project-picker]').querySelector('[data-project-results]').classList.remove('hidden');
-                            });
+                            }
+                            document.body.addEventListener('focusin', showProjectSearchResults);
+                            // Dismissal consumes pointer focus changes, so the input may
+                            // still be focused when the user clicks it to reopen results.
+                            document.body.addEventListener('click', showProjectSearchResults);
                             function dismissOutsideProjectPicker(event) {
                                 if (event.type === 'pointerdown' && event.button !== 0) return;
                                 var modal = document.querySelector('dialog:modal');
