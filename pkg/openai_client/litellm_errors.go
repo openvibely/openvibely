@@ -69,6 +69,14 @@ func isCompatibleContextOverflow(e *APIError) bool {
 	// Router diagnostics can mention failures from other models. They must not
 	// change the classification of the original request failure.
 	primary, _, _ := strings.Cut(e.Message, "\n\n")
+	if name != "" {
+		// LiteLLM appends routing history with single newlines too. Only
+		// recognized LiteLLM messages use these diagnostic boundaries; keep
+		// the full APIError message intact for reporting.
+		for _, marker := range []string{"Received Model Group=", "Available Model Group Fallbacks=", "Error doing the fallback:", "LiteLLM: model group"} {
+			primary, _, _ = strings.Cut(primary, marker)
+		}
+	}
 	msg := strings.ToLower(strings.ReplaceAll(primary, "`", ""))
 	if strings.Contains(msg, "input length and max_tokens exceed context limit") ||
 		strings.Contains(msg, "input tokens + max_tokens exceed") ||
