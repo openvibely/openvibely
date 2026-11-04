@@ -30,6 +30,9 @@ func TestAllProjectsEveryAnalyticsChartInChrome(t *testing.T) {
 	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
 	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
 	ctx := t.Context()
+	// Transition fixtures are stored at whole-second precision. Derive both
+	// endpoints from one anchor so setup latency cannot turn 60 seconds into 61.
+	transitionStart := time.Now().UTC().Truncate(time.Second).Add(-10 * time.Minute)
 	for _, name := range []string{"First", "Second"} {
 		project := createProject(t, h, name)
 		config := &models.LLMConfig{Name: name + " model", Provider: models.ProviderTest, Model: name}
@@ -68,7 +71,7 @@ func TestAllProjectsEveryAnalyticsChartInChrome(t *testing.T) {
 					EventKey: key, ToNodeID: binding.NodeID, Transition: state,
 				})
 				require.NoError(t, err)
-				require.NoError(t, stores.Fixtures.SetAutomationTransitionTime(ctx, binding.AutomationID, key, time.Now().UTC().Add(time.Duration(-10+i)*time.Minute)))
+				require.NoError(t, stores.Fixtures.SetAutomationTransitionTime(ctx, binding.AutomationID, key, transitionStart.Add(time.Duration(i)*time.Minute)))
 			}
 		}
 	}
@@ -121,7 +124,7 @@ func TestAllProjectsEveryAnalyticsChartInChrome(t *testing.T) {
     history.pushState({},'','/analytics?project_id=__all_projects__&range=all&group_by='+group+'&view=automations&workflow='+encodeURIComponent(option.value));dispatchEvent(new PopStateEvent('popstate'));
     await wait(()=>ids.every(id=>chart(id))&&chart(ids[0])!==previous);
     assert(sum(ids[0])===1,'one work item entered');
-    assert(Math.abs(sum(ids[1])-60)<0.1,'one minute node duration');
+    assert(Math.abs(sum(ids[1])-60)<0.1,'one minute node duration: expected 60 seconds, got '+sum(ids[1]));
     assert(sum(ids[2])===2,'two failed activities');
     assert(sum(ids[3])===1,'one blocked work item');
    }
