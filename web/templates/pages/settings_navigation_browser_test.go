@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/a-h/templ"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -283,4 +284,49 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 			})
 		})
 	}
+}
+
+// Exercise real pointer input: neither document navigation handlers nor the
+// underlying control should receive the dismissal gesture.
+func assertMenuConsumesOutsideClick(b *composerFocusCDP, closed string) {
+	b.evaluate(`window.menuOutsidePresses=0;window.menuOutsideClicks=0;window.menuOutsideAbort=new AbortController();document.addEventListener('pointerdown',()=>window.menuOutsidePresses++,{capture:true,signal:window.menuOutsideAbort.signal});document.addEventListener('click',()=>window.menuOutsideClicks++,{capture:true,signal:window.menuOutsideAbort.signal});var probe=document.createElement('button');probe.id='menu-outside-probe';probe.type='button';probe.textContent='Outside';probe.style='position:fixed;top:4px;left:4px;z-index:2147483647';(document.querySelector('dialog:modal')||document.body).append(probe);'ready'`)
+	b.click(`#menu-outside-probe`)
+	b.waitFor("first outside click only dismisses", `String((`+closed+`) && window.menuOutsidePresses===0 && window.menuOutsideClicks===0)`, "true")
+	b.click(`#menu-outside-probe`)
+	b.waitFor("second outside click acts normally", `String(window.menuOutsidePresses===1 && window.menuOutsideClicks===1)`, "true")
+	b.evaluate(`window.menuOutsideAbort.abort();document.getElementById('menu-outside-probe').remove();'removed'`)
+}
+
+func TestBrowserFunctional_ChatProjectPickerConsumesOutsideClick(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		requests := []*events.ChatInputRequestEvent{{ID: "projects", ProjectID: "project", Questions: []events.ChatInputRequestQuestion{{ID: "scope", Kind: "projects", Question: "Choose projects", Options: []events.ChatInputRequestOption{{Label: "Specific projects"}}, Projects: []events.ChatInputProject{{ID: "project", Name: "Project"}}}}}}
+		if r.URL.Path == "/chat/input-requests" {
+			if err := ChatInputRequestCards(requests).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		if r.URL.Path != "/chat" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := Chat([]models.Project{{ID: "project", Name: "Project"}}, "project", nil, nil, nil, nil, requests, false, false, 20).Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/chat", "chat-project-dismissal", func(b *composerFocusCDP) {
+		b.waitFor("chat initialized", `String(!!window._chatInputRequestClickBound && !!document.querySelector('[data-project-picker]'))`, "true")
+		b.click(`[data-option-label="Specific projects"]`)
+		b.click(`[data-project-search]`)
+		b.waitFor("project results visible", `String(document.querySelector('[data-project-results]').checkVisibility())`, "true")
+		assertMenuConsumesOutsideClick(b, `document.querySelector('[data-project-results]').classList.contains('hidden')`)
+		b.click(`[data-project-search]`)
+		b.click(`[data-project-choice="project"]`)
+		b.waitFor("project selection still works", `document.querySelector('[data-project-choice="project"]').getAttribute('aria-pressed')`, "true")
+	})
 }

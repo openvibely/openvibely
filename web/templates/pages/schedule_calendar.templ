@@ -304,7 +304,16 @@ templ ScheduleCalendarScript() {
   document.addEventListener('keydown', function(event) {
    if (event.key === 'Escape') { cancelGesture(); closeMenus(); window.clearScheduleDates(); clearScheduleSelection(); }
   }, {signal: signal});
-  document.addEventListener('pointerdown', function(event) { var projectMenu = root.querySelector('#schedule-project-menu'); if (!projectMenu.contains(event.target)) projectMenu.open = false; }, {signal: signal});
+  function dismissOutsideProjectMenu(event) {
+   if(event.type==='pointerdown'&&event.button!==0)return;
+   var menu=root.querySelector('#schedule-project-menu');
+   if(!menu.open||menu.contains(event.target))return;
+   var modal=document.querySelector('dialog:modal');if(modal&&!modal.contains(menu))return;
+   event.preventDefault();event.stopImmediatePropagation();
+   if(event.type==='click')menu.open=false;
+  }
+  window.addEventListener('pointerdown',dismissOutsideProjectMenu,{capture:true,signal:signal});
+  window.addEventListener('click',dismissOutsideProjectMenu,{capture:true,signal:signal});
   root.addEventListener('pointerdown', function(event) {
    if (busy || event.button !== 0 || event.target.closest('[data-schedule-card]')) return;
    var day = event.target.closest('[data-calendar-day], [data-calendar-hour]');

@@ -104,6 +104,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("property highlight clears panel edges", `(function(){var row=document.querySelector('[data-detail-property="priority"]').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(row.left-panel.left>=12 && panel.right-row.right>=12)})()`, "true")
 		b.waitFor("property highlight inset", `(function(){var row=document.querySelector('[data-detail-property="priority"]'),text=row.firstElementChild;return String(Math.abs(text.getBoundingClientRect().left-row.getBoundingClientRect().left-12)<1 && getComputedStyle(row).paddingRight==='12px')})()`, "true")
 		b.click(`[data-detail-property="priority"]`)
+		assertMenuConsumesOutsideClick(b, `!document.getElementById('task-property-picker').matches(':popover-open')`)
+		b.click(`[data-detail-property="priority"]`)
 		b.click(`[data-options="priority"] [data-value="4"]`)
 		b.waitFor("draft priority", `document.querySelector('[data-draft-property="priority"]').value`, "4")
 		b.click(`[data-detail-property="agent_id"]`)

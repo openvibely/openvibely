@@ -215,7 +215,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		if !saved {
 			b.evaluate(`document.querySelector('[popovertarget="changes-actions-menu"]').click();'actions'`)
 			b.waitFor("actions menu opens while scrolled", `String(document.getElementById('changes-actions-menu').matches(':popover-open'))`, "true")
-			b.evaluate(`document.getElementById('changes-actions-menu').hidePopover();'close actions'`)
+			assertMenuConsumesOutsideClick(b, `!document.getElementById('changes-actions-menu').matches(':popover-open')`)
 		}
 		b.evaluate(`document.getElementById('tab-changes').style.maxWidth='360px';'narrow changes'`)
 		b.waitFor("wrapped toolbar updates sticky offset", `String((()=>{const bar=document.querySelector('[data-diff-toolbar]'),header=document.querySelector('#diff-file-1 .diff-file-header');return bar.getBoundingClientRect().height>60 && Math.abs(header.getBoundingClientRect().top-bar.getBoundingClientRect().bottom)<2})())`, "true")

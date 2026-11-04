@@ -171,7 +171,7 @@ templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, l
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 								</svg>
 							</button>
-							<ul id="changes-actions-menu" popover="auto" class="ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]" style="position:fixed;inset:auto;margin:0;">
+							<ul id="changes-actions-menu" popover="manual" class="ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]" style="position:fixed;inset:auto;margin:0;">
 
 								if conflictRecovery {
 									<li class="menu-title"><span>Conflict recovery</span></li>
@@ -314,6 +314,22 @@ templ changesActionsPopoverScript() {
   window._changesActionsPopoverInstalled = true;
   const current = () => document.getElementById('changes-actions-menu');
   const close = () => { const menu=current(); if(menu && menu.matches(':popover-open')) menu.hidePopover(); };
+  function dismissOutside(event) {
+   if(event.type==='pointerdown' && event.button!==0)return;
+   const menu=current();
+   if(!menu || !menu.matches(':popover-open') || menu.contains(event.target) || event.target.closest('[popovertarget="changes-actions-menu"]'))return;
+   const modal=document.querySelector('dialog:modal');if(modal&&!modal.contains(menu))return;
+   event.preventDefault();event.stopImmediatePropagation();
+   if(event.type==='click')close();
+  }
+  window.addEventListener('pointerdown',dismissOutside,true);
+  window.addEventListener('click',dismissOutside,true);
+  document.addEventListener('keydown',event=>{
+   const menu=current();
+   if(event.key!=='Escape' || !menu || !menu.matches(':popover-open') || document.querySelector('dialog:modal'))return;
+   event.preventDefault();event.stopPropagation();close();
+   document.querySelector('[popovertarget="changes-actions-menu"]')?.focus();
+  },true);
   function position(menu) {
    if(!menu || !menu.isConnected || !menu.matches(':popover-open')) return;
    const trigger=document.querySelector('[popovertarget="changes-actions-menu"]');

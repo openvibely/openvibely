@@ -188,7 +188,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(hourCount()===2,'keyboard modifier adds hour');
    context(hours[9]);
    check(hourCount()===2 && !selectionMenu.classList.contains('hidden'),'right-click preserves nonadjacent hours');
-   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));
+   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));document.body.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
    check(selectionMenu.classList.contains('hidden') && toolbar.getAttribute('aria-hidden')==='false' && hourCount()===2,'outside click restores toolbar without clearing hours');
    var selectedZone=root.querySelector('.drop-zone[data-hour="9"]');
    context(selectedZone.querySelector('[data-schedule-card]') || selectedZone);
@@ -273,12 +273,12 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    root.querySelector('.drop-zone').dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));check(document.getElementById('ov-shared-tooltip').hidden,'context menu suppresses empty cell hints');
    check(selectedScheduleCards.size===2,'right click must preserve multi-selection');
    check(getComputedStyle(toolbar).display==='none' && toolbar.inert,'context menu hides and disables header controls for multiple cards');
-   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));
+   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));document.body.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
    check(getComputedStyle(toolbar).display!=='none' && !toolbar.inert,'dismissing context menu restores selection controls');
    clearScheduleSelection();
    a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
    check(selectedScheduleCards.size===1 && getComputedStyle(toolbar).display==='none','right click on one card only shows context controls');
-   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));
+   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));document.body.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
    b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));
    a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
    root.querySelector('#schedule-context-menu [data-calendar-action="pause"]').click();await tick();

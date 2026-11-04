@@ -14,7 +14,7 @@ templ ScheduleDateTime(value string) {
   <input type="text" hidden name="run_at" value={ value }/>
   <input type="text" value={ scheduleDateTimeLabel(value) } data-run-at-picker class="input input-bordered cursor-pointer w-full" required placeholder="Choose date and time" onbeforeinput="event.preventDefault()" aria-label="Run at" aria-haspopup="dialog" aria-expanded="false" autocomplete="off" onclick="window.openScheduleDateTime(this)" onkeydown="if(event.key==='ArrowDown'||event.key==='Enter'||event.key===' '){event.preventDefault();window.openScheduleDateTime(this)}"/>
   <svg class="schedule-datetime-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 11h18"></path></svg>
-  <div class="schedule-datetime-popup" popover="auto" role="dialog" aria-label="Choose date and time">
+  <div class="schedule-datetime-popup" popover="manual" role="dialog" aria-label="Choose date and time">
    <div class="schedule-datetime-body">
     <div class="schedule-datetime-calendar">
      <div class="schedule-datetime-month">
@@ -223,7 +223,6 @@ templ ScheduleDateTime(value string) {
    popup.querySelectorAll('[data-time-column]').forEach(column=>column.replaceChildren());
    calendar(state); timeColumns(state,false);
    popup.ontoggle=()=>{if(!popup.matches(':popover-open'))close(state,false);};
-   popup.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(state,true);}};
    // Safari does not focus buttons on mouse down. Keep focus in the popup
    // while replacing calendar days so modal focus handling cannot dismiss it.
    popup.onmousedown=event=>{if(event.target.closest('button'))event.preventDefault();};
@@ -247,9 +246,20 @@ templ ScheduleDateTime(value string) {
     write(state); calendar(state); timeColumns(state,true);
    }
   });
-  // Close before native menus open on press; leave their default action intact.
-  document.addEventListener('pointerdown',event=>{
-   if(active && !event.composedPath().includes(active.popup) && !event.composedPath().includes(active.input))close(active,false);
+  // Suppress native controls on press, then consume the matching dismissal click.
+  function dismissOutside(event){
+   if(event.type==='pointerdown' && event.button!==0)return;
+   if(!active || event.composedPath().includes(active.popup) || event.composedPath().includes(active.input))return;
+   const modal=document.querySelector('dialog:modal');if(modal&&!modal.contains(active.input))return;
+   event.preventDefault();event.stopImmediatePropagation();
+   if(event.type==='click')close(active,false);
+  }
+  window.addEventListener('pointerdown',dismissOutside,true);
+  window.addEventListener('click',dismissOutside,true);
+  document.addEventListener('keydown',event=>{
+   if(event.key!=='Escape'||!active)return;
+   const modal=document.querySelector('dialog:modal');if(modal&&!modal.contains(active.input))return;
+   event.preventDefault();event.stopPropagation();close(active,true);
   },true);
   window.addEventListener('resize',()=>{if(active)position(active);});
   document.addEventListener('scroll',event=>{if(active && !active.popup.contains(event.target))position(active);},true);

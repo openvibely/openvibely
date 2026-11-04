@@ -1004,11 +1004,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								document.addEventListener('keydown', function(event) {
 									if (event.key === 'Escape') closeMenu(true);
 								}, {signal: signal});
-								document.addEventListener('pointerdown', function(event) {
-									if (!menu || menu.classList.contains('hidden')) return;
-									if (event.target && menu.contains(event.target)) return;
-									closeMenu(true);
-								}, {capture: true, signal: signal});
+                                function dismissOutsideScheduleMenu(event) {
+                                    if (event.type === 'pointerdown' && event.button !== 0) return;
+                                    if (!menu || menu.classList.contains('hidden') || menu.contains(event.target)) return;
+                                    var modal = document.querySelector('dialog:modal'); if (modal && !modal.contains(menu)) return;
+                                    event.preventDefault(); event.stopImmediatePropagation();
+                                    if (event.type === 'click') closeMenu(true);
+                                }
+                                window.addEventListener('pointerdown', dismissOutsideScheduleMenu, {capture: true, signal: signal});
+                                window.addEventListener('click', dismissOutsideScheduleMenu, {capture: true, signal: signal});
 								document.addEventListener('contextmenu', function(event) {
 									if (!menu || menu.classList.contains('hidden')) return;
 									if (event.target && event.target.closest && event.target.closest('[data-schedule-card]')) return;

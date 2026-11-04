@@ -1917,9 +1917,19 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
                             document.body.addEventListener('focusin', function(event) {
                                 if (event.target.matches('[data-project-search]')) event.target.closest('[data-project-picker]').querySelector('[data-project-results]').classList.remove('hidden');
                             });
-                            document.body.addEventListener('pointerdown', function(event) {
-                                document.querySelectorAll('[data-project-picker]').forEach(function(picker) { if (!picker.contains(event.target)) picker.querySelector('[data-project-results]').classList.add('hidden'); });
-                            });
+                            function dismissOutsideProjectPicker(event) {
+                                if (event.type === 'pointerdown' && event.button !== 0) return;
+                                var modal = document.querySelector('dialog:modal');
+                                var outside = Array.from(document.querySelectorAll('[data-project-picker]')).filter(function(picker) {
+                                    var results = picker.querySelector('[data-project-results]');
+                                    return !picker.contains(event.target) && (!modal || modal.contains(picker)) && !picker.closest('[hidden],[inert]') && results.getClientRects().length && getComputedStyle(results).visibility === 'visible';
+                                });
+                                if (!outside.length) return;
+                                event.preventDefault(); event.stopImmediatePropagation();
+                                if (event.type === 'click') outside.forEach(function(picker) { picker.querySelector('[data-project-results]').classList.add('hidden'); });
+                            }
+                            window.addEventListener('pointerdown', dismissOutsideProjectPicker, true);
+                            window.addEventListener('click', dismissOutsideProjectPicker, true);
                             document.body.addEventListener('input', function(event) {
                                 if (!event.target.matches('[data-project-search]')) return;
                                 var picker = event.target.closest('[data-project-picker]'), query = event.target.value.toLowerCase().trim(), count = 0;
