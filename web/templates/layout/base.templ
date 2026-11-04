@@ -3200,6 +3200,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background: color-mix(in srgb, oklch(var(--bc)) 10%, transparent); }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] svg { color: inherit; }
 				html[data-shell-frame] .sidebar-aside .sidebar-footer { justify-content: center; padding: 6px 0 10px; min-height: 0; border: 0; }
+				html[data-shell-frame] .sidebar-aside.sidebar-collapsed .sidebar-footer-menu,
+				html[data-shell-frame] body.sidebar-collapsed-pending .sidebar-aside .sidebar-footer-menu { transform: translateY(17px); }
 
 				/* Project tab bar shares the chrome color; tabs are detached pills. */
 				html[data-shell-frame] #desktop-project-titlebar {
