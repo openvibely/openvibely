@@ -52,6 +52,7 @@ func TestBrowserFunctional_SkillEditModalCloseDoesNotLeaveCardFocusOutline(t *te
 		page = strings.ReplaceAll(page, external, replacement)
 	}
 	page = strings.Replace(page, "</head>", `<style>
+		.dropdown:not(.dropdown-open):not(:focus-within) > .dropdown-content { display: none; }
 		.card { display: block; width: 460px; min-height: 96px; margin: 24px; border: 1px solid rgb(61, 66, 77); border-radius: 12px; background: white; }
 		.card-body { padding: 16px; }
 		.hidden { display: none !important; }

@@ -101,7 +101,7 @@ templ InspectorPickerScript() {
   on(picker,'pointermove',function(e){var b=e.target.closest('button[data-value]');if(b&&!b.disabled)highlight(b);});
   on(picker,'focusin',function(e){if(e.target.matches('button[data-value]'))highlight(e.target);});
   document.addEventListener('keydown',function(e){
-   if(e.key!=='Escape'||!isOpen())return;
+   if(e.defaultPrevented||e.isComposing||e.keyCode===229||e.key!=='Escape'||!isOpen())return;
    var modal=document.querySelector('dialog:modal');if(modal&&!modal.contains(root))return;
    e.preventDefault();e.stopPropagation();hide();returnFocus(current);
   },{capture:true,signal:abort.signal});

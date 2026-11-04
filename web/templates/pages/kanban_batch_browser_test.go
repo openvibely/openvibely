@@ -60,6 +60,7 @@ window.addEventListener('DOMContentLoaded', async function() {
   menu.querySelector('[data-kanban-menu-trigger]').click();
   await wait(() => menu.getAttribute('data-kanban-menu-positioning') !== 'true');
   if (window.innerWidth >= 640) {
+    document.body.click(); // Dismiss Completed before opening Backlog.
     for (const name of ['backlog', 'completed']) {
       const dropdown = col(name).querySelector('[data-kanban-menu-key]');
       if (dropdown.getAttribute('data-kanban-menu-open') !== 'true') dropdown.querySelector('[data-kanban-menu-trigger]').click();

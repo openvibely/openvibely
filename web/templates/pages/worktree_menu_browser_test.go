@@ -28,7 +28,7 @@ func TestBrowserFunctional_WorktreeActionsAboveDiffHeader(t *testing.T) {
 			b.waitFor("menu visible", `String(document.querySelector('#changes-actions-menu').matches(':popover-open'))`, "true")
 			b.waitFor("menu within viewport", `(function(){const r=document.querySelector('#changes-actions-menu').getBoundingClientRect();return String(r.width>0 && r.left>=0 && r.top>=0 && r.right<=innerWidth && r.bottom<=innerHeight)})()`, "true")
 			b.waitFor("menu above "+mode+" header", `(function(){var m=document.querySelector('#changes-actions-dropdown > ul'),h=Array.from(document.querySelectorAll('.diff-file-header')).find(e=>e.getClientRects().length),a=m.getBoundingClientRect(),b=h.getBoundingClientRect();var x=(Math.max(a.left,b.left)+Math.min(a.right,b.right))/2,y=(Math.max(a.top,b.top)+Math.min(a.bottom,b.bottom))/2;if(Math.min(a.bottom,b.bottom)<=Math.max(a.top,b.top))return JSON.stringify({reason:'no overlap',menu:a.toJSON(),header:b.toJSON(),style:m.getAttribute('style')});return m.contains(document.elementFromPoint(x,y)) ? 'true' : JSON.stringify({hit:document.elementFromPoint(x,y)?.outerHTML.slice(0,400),a:a.toJSON(),b:b.toJSON(),x,y,open:m.matches(':popover-open'),css:[getComputedStyle(m).opacity,getComputedStyle(m).visibility,getComputedStyle(m).pointerEvents]})})()`, "true")
-			b.click(`#changes-actions-dropdown > [role="button"]`)
+			b.clickMenuBackdrop(`#changes-actions-dropdown > [role="button"]`)
 			b.waitFor("menu closed", `String(document.querySelector('#changes-actions-menu').matches(':popover-open'))`, "false")
 			b.waitFor("closed menu has no layout", `String(document.querySelector('#changes-actions-menu').getClientRects().length === 0)`, "true")
 		}
@@ -39,7 +39,7 @@ func TestBrowserFunctional_WorktreeActionsAboveDiffHeader(t *testing.T) {
 		b.waitFor("escape dismissal", `String(document.querySelector('#changes-actions-menu').matches(':popover-open'))`, "false")
 		b.waitFor("closed menu has no layout", `String(document.querySelector('#changes-actions-menu').getClientRects().length === 0)`, "true")
 		b.click(`#changes-actions-dropdown > [role="button"]`)
-		b.click(`#changes-content h4`)
+		b.clickMenuBackdrop(`#changes-content h4`)
 		b.waitFor("outside dismissal", `String(document.querySelector('#changes-actions-menu').matches(':popover-open'))`, "false")
 		b.waitFor("closed menu has no layout", `String(document.querySelector('#changes-actions-menu').getClientRects().length === 0)`, "true")
 		b.click(`#changes-actions-dropdown > [role="button"]`)

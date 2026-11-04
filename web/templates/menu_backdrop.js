@@ -15,7 +15,17 @@
   ].join(',');
   const backdrop = document.createElement('div');
   backdrop.id = 'ov-menu-backdrop';
-  backdrop.setAttribute('popover', 'manual');
+  const nativePopover = typeof backdrop.showPopover === 'function' && typeof backdrop.hidePopover === 'function';
+  if (nativePopover) backdrop.setAttribute('popover', 'manual');
+  else {
+    backdrop.style.display = 'none';
+    backdrop.style.zIndex = '2147483647';
+  }
+  function setBackdropOpen(open) {
+    if (!nativePopover) { backdrop.style.display = open ? 'block' : 'none'; return; }
+    if (open && !backdrop.matches(':popover-open')) backdrop.showPopover();
+    else if (!open && backdrop.matches(':popover-open')) backdrop.hidePopover();
+  }
   backdrop.setAttribute('aria-hidden', 'true');
   let frame = 0, lastGeometry = '', panels = [], dirty = true;
   function schedule() {
@@ -36,7 +46,7 @@
     panels = panels.filter(panel => visible(panel, modal));
     const open = panels;
     if (!open.length) {
-      if (backdrop.matches(':popover-open')) backdrop.hidePopover();
+      setBackdropOpen(false);
       lastGeometry = '';
       return;
     }
@@ -86,7 +96,7 @@
       parent.append(hit);
       backdrop.replaceChildren(fragment);
     }
-    if (!backdrop.matches(':popover-open')) backdrop.showPopover();
+    setBackdropOpen(true);
     // Track layout transitions, scrolling and submenu movement while open only.
     frame = requestAnimationFrame(sync);
   }

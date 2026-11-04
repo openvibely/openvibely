@@ -232,6 +232,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("selected date text uses theme button text", `window.matches('.schedule-datetime-days [aria-pressed="true"]', 'color', 'var(--ov-button-fg)')`, "ok")
 		browser.waitFor("selected time uses theme button", `window.matches('[data-time-column="hour"] [data-time-selected="true"]', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
 
+		browser.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));'closed'`)
+
 		for _, palette := range []struct{ id, sidebar, accent string }{{"catppuccin-mocha", "rgb(30, 30, 46)", "#cba6f7"}, {"github-light", "rgb(246, 248, 250)", "#0969da"}} {
 			browser.evaluate(`window.openVibelyThemes.apply('` + palette.id + `');'ok'`)
 			browser.waitFor(palette.id+" enables custom theme layer", `document.documentElement.getAttribute('data-ov-theme-layer')`, "custom")

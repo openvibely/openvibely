@@ -514,6 +514,7 @@ window.addEventListener('DOMContentLoaded', function() {
       if (!selectedTask.classList.contains('task-selected') || !selectedActiveTask.classList.contains('task-selected')) fail('authoritative refresh cleared multi-selection');
       if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not restored: key=' + document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key'));
 	      await waitFor(function() { return document.activeElement === taskMenuTrigger && taskMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'removed task option fallback to menu trigger after settle (active=' + (document.activeElement && document.activeElement.outerHTML) + ', connected=' + !!(document.activeElement && document.activeElement.isConnected) + ', activeCardStatus=' + (document.activeElement && document.activeElement.closest('[data-task-status]') && document.activeElement.closest('[data-task-status]').getAttribute('data-task-status')) + ', expanded=' + taskMenuTrigger.getAttribute('aria-expanded') + ', open=' + taskMenuTrigger.closest('[data-kanban-menu-key]').hasAttribute('data-kanban-menu-open') + ')');      if (!selectedActiveTask.querySelector('[data-kanban-menu-content]').textContent.includes('Cancel')) fail('task menu did not retain authoritative running options');
+      document.body.click(); // Dismiss the task menu before opening another menu.
       var columnMenu = document.querySelector('[data-kanban-menu-key="column-backlog"]');
       var columnMenuTrigger = columnMenu.querySelector('[data-kanban-menu-trigger]');
       columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
@@ -556,9 +557,10 @@ window.addEventListener('DOMContentLoaded', function() {
       var outside = document.createElement('button');
       document.body.appendChild(outside);
       outside.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:18, pointerType:'mouse', button:0}));
+      outside.click();
       outside.focus();
       await new Promise(function(resolve) { setTimeout(resolve, 0); });
-      if (columnMenuTrigger.getAttribute('aria-expanded') !== 'false') fail('intentional outside focus must close the menu accessibly');
+      if (columnMenuTrigger.getAttribute('aria-expanded') !== 'false') fail('outside click must close the menu accessibly');
       selectedTask = document.querySelector('#task-task-drag-cursor');
       selectedActiveTask = document.querySelector('#task-task-active-status-drag');
       selectedTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
