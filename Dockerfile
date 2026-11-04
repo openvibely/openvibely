@@ -40,7 +40,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # =============================================================================
 # Stage 2: Coding/agent runtime — OpenVibely + common toolchains
 # =============================================================================
-FROM fedora:44
+FROM fedora:45
 
 ARG VERSION=dev
 ARG COMMIT=unknown

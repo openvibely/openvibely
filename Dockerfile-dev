@@ -5,7 +5,7 @@
 # includes an initial copy of the app source and starts it with Air, so it can run
 # by itself. For day-to-day development, bind-mount your checkout at /workspace;
 # Air will rebuild/restart the server from the mounted source as files change.
-FROM fedora:42
+FROM fedora:45
 ENV PATH=/usr/local/go/bin:/home/openvibely/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     HOME=/home/openvibely \
     GOPATH=/home/openvibely/go
