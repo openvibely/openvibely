@@ -480,7 +480,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						document.querySelectorAll('.sidebar-aside .menu a').forEach(function(a) {
 							var label = a.querySelector('.sidebar-text');
 							if (!label) return;
-							if (rail) { a.setAttribute('data-tip', label.textContent.trim()); a.setAttribute('data-tip-side', 'right'); }
+							var text = a.getAttribute('data-system-update-available') === 'true' ? 'Alerts · Update available' : label.textContent.trim();
+							if (a.id === 'alerts-nav-link') {
+								if (rail) a.setAttribute('aria-label', text);
+								else a.removeAttribute('aria-label');
+							}
+							if (rail) { a.setAttribute('data-tip', text); a.setAttribute('data-tip-side', 'right'); }
 							else if (a.getAttribute('data-tip-side') === 'right') { a.removeAttribute('data-tip'); a.removeAttribute('data-tip-side'); }
 						});
 					}
@@ -883,6 +888,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</li>
 				<li>
 					<a
+						id="alerts-nav-link"
 						data-nav-base="/alerts"
 						href={ templ.SafeURL(fmt.Sprintf("/alerts?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
@@ -892,6 +898,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
 						</svg>
+						<span class="sidebar-update-dot" aria-hidden="true"></span>
 						<span class="sidebar-text">Alerts</span>
 						<span class="sidebar-alert-indicators sidebar-text">
 							<span

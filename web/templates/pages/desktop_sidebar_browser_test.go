@@ -37,6 +37,19 @@ func TestBrowserFunctional_DesktopSidebarAtNarrowWidths(t *testing.T) {
 			runComposerFocusCDP(t, chrome, server.URL, "narrow-sidebar", func(b *composerFocusCDP) {
 				// The sidebar can render before the scripts that initialize toast helpers.
 				b.waitFor("sidebar and toast helpers ready", `String(document.readyState === 'complete' && !!document.getElementById('sidebar') && typeof window.showToast === 'function' && typeof window.syncToastContainerHost === 'function')`, "true")
+				b.evaluate(`window.railUpdate = {current_version:'1', distribution:'binary', staged:true, state:'available', release:{metadata:{version:'2'}, apply_supported:true}}; openVibelyHandleSystemUpdateSnapshot(railUpdate); 'ok'`)
+				b.waitFor("update accessible label", `document.getElementById('alerts-nav-link').getAttribute('aria-label')`, "Alerts · Update available")
+				b.evaluate(`document.querySelector('[data-system-update-dismiss]').click(); 'ok'`)
+				b.waitFor("dismissal preserves indicator", `document.getElementById('alerts-nav-link').getAttribute('data-system-update-available')`, "true")
+				b.evaluate(`document.dispatchEvent(new Event('openvibely:shell-frame-change')); 'ok'`)
+				b.waitFor("rail tooltip preserves update state", `document.getElementById('alerts-nav-link').getAttribute('data-tip')`, "Alerts · Update available")
+				b.waitFor("rail update dot visible", `String(document.querySelector('.sidebar-update-dot').getBoundingClientRect().width)`, "7")
+				b.evaluate(`openVibelyHandleSystemUpdateSnapshot({...railUpdate, state:'waiting_for_idle'}); 'ok'`)
+				b.waitFor("accepted update clears indicator", `document.getElementById('alerts-nav-link').getAttribute('data-system-update-available')`, "false")
+				b.waitFor("accepted update restores tooltip", `document.getElementById('alerts-nav-link').getAttribute('data-tip')`, "Alerts")
+				b.evaluate(`openVibelyHandleSystemUpdateSnapshot({...railUpdate, state:'failed'}); 'ok'`)
+				b.waitFor("retry restores indicator", `document.getElementById('alerts-nav-link').getAttribute('data-system-update-available')`, "true")
+				b.evaluate(`openVibelyHandleSystemUpdateSnapshot(null); 'ok'`)
 				b.evaluate(`showToast('Title bar overlap regression', 'completed', '', {sticky:true}); 'ok'`)
 				for _, width := range []int{800, 500, 1200} {
 					b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 800, "deviceScaleFactor": 1, "mobile": false}, nil)
@@ -64,6 +77,9 @@ func TestBrowserFunctional_DesktopSidebarAtNarrowWidths(t *testing.T) {
 					}
 					b.waitFor("mobile navbar visibility", `String(getComputedStyle(document.querySelector('.drawer-content > .navbar')).display !== 'none')`, fmt.Sprint(wantMobile))
 					b.waitFor("sidebar visibility", `String(document.getElementById('sidebar').getBoundingClientRect().right > 0)`, fmt.Sprint(!wantMobile))
+					b.waitFor("accessible label follows layout", `String(document.getElementById('alerts-nav-link').hasAttribute('aria-label'))`, fmt.Sprint(!wantMobile))
+					b.evaluate(`openVibelyHandleSystemUpdateSnapshot(railUpdate); 'ok'`)
+					b.waitFor("update snapshot respects layout", `String(document.getElementById('alerts-nav-link').getAttribute('aria-label'))`, map[bool]string{true: "null", false: "Alerts · Update available"}[wantMobile])
 					if desktop {
 						b.waitFor("compact rail", `String(Math.round(document.getElementById('sidebar').getBoundingClientRect().width))`, "44")
 						b.waitFor("rail remains in layout", `String(Math.round(document.querySelector('.drawer-content').getBoundingClientRect().left))`, "64")

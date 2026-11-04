@@ -3197,6 +3197,20 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside .sidebar-inner::-webkit-scrollbar { display: none; }
 				html[data-shell-frame] .sidebar-aside .menu a { position: relative; opacity: .75; }
 				html[data-shell-frame] .sidebar-aside .menu a:hover { opacity: 1; }
+                html[data-shell-frame] #alerts-nav-link[data-system-update-available="true"] { opacity: 1; }
+                .sidebar-update-dot { display: none; }
+                html[data-shell-frame] #alerts-nav-link[data-system-update-available="true"] .sidebar-update-dot {
+                    display: block;
+                    position: absolute;
+                    top: calc(50% - 12px);
+                    left: calc(50% + 4px);
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 50%;
+                    background: var(--ov-link, oklch(var(--p)));
+                    box-shadow: 0 0 0 2px var(--shell-rail);
+                    pointer-events: none;
+                }
 				html[data-shell-frame] .sidebar-aside .menu a svg { width: 1.125rem; height: 1.125rem; }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background: color-mix(in srgb, oklch(var(--bc)) 10%, transparent); }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] svg { color: inherit; }
@@ -6000,6 +6014,14 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				window.openVibelyNormalizeSystemUpdateSnapshot = normalizeSystemUpdateSnapshot;
 
 				function setSystemUpdateIndicators(visible) {
+					var link = document.getElementById('alerts-nav-link');
+					if (link) {
+						var label = visible ? 'Alerts · Update available' : 'Alerts';
+						link.setAttribute('data-system-update-available', String(visible));
+						if (document.documentElement.hasAttribute('data-shell-frame')) link.setAttribute('aria-label', label);
+						else link.removeAttribute('aria-label');
+						if (link.hasAttribute('data-tip')) link.setAttribute('data-tip', label);
+					}
 					var badge = document.getElementById('system-update-nav-badge');
 					if (badge) badge.classList.toggle('hidden', !visible);
 				}
