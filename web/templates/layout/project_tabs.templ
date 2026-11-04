@@ -419,9 +419,15 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var tab = event.target.closest('[data-project-tab]'); if (!tab) return;
     event.preventDefault(); var rect = tab.getBoundingClientRect(); openMenu(tab, rect.left, rect.bottom);
    });
-   document.addEventListener('pointerdown', function(event) {
-    if (!menu.contains(event.target)) closeMenu();
-   });
+   function dismissOutsideTabMenu(event) {
+    if (event.type === 'pointerdown' && event.button !== 0) return;
+    if (!(menu.hasAttribute('data-menu-open') || (typeof menu.showPopover === 'function' && menu.matches(':popover-open'))) || menu.contains(event.target)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.type === 'click') closeMenu();
+   }
+   window.addEventListener('pointerdown', dismissOutsideTabMenu, true);
+   window.addEventListener('click', dismissOutsideTabMenu, true);
    window.addEventListener('resize', closeMenu);
    list.addEventListener('scroll', closeMenu);
    menu.addEventListener('keydown', function(event) {

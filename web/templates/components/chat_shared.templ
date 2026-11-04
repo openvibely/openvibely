@@ -1958,13 +1958,18 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			window._openChatCustomSelectPanel = _csOpen;
 			window._closeChatCustomSelectPanel = _csClose;
 
-			// Close on outside click (capture phase to beat other handlers)
-			document.addEventListener('click', function(e) {
+			// The first outside click dismisses without activating the underlying UI.
+			function dismissOutsideCustomSelect(e) {
+				if (e.type === 'pointerdown' && e.button !== 0) return;
 				if (_cspanel.style.display === 'none') return;
-				if (_csActiveBtn && (_csActiveBtn === e.target || _csActiveBtn.contains(e.target))) return;
-				if (_cspanel === e.target || _cspanel.contains(e.target)) return;
-				_csClose();
-			}, true);
+				if (_csActiveBtn && _csActiveBtn.contains(e.target)) return;
+				if (_cspanel.contains(e.target)) return;
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				if (e.type === 'click') _csClose();
+			}
+			window.addEventListener('pointerdown', dismissOutsideCustomSelect, true);
+			window.addEventListener('click', dismissOutsideCustomSelect, true);
 
 			// Close on Escape
 			document.addEventListener('keydown', function(e) {

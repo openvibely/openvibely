@@ -4163,12 +4163,34 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 if (trigger) trigger.focus({preventScroll: true});
                 closeGenericDropdown(owner);
             });
-            document.addEventListener('pointerdown', function(event) {
+            // Consume dismissal before document navigation and pointer handlers.
+            // Keep menus open until click so that the matching click is consumed too.
+            function dismissOutsideDropdowns(event) {
+                if (event.type === 'pointerdown' && event.button !== 0) return;
                 const owner = menuDropdownForTarget(event.target);
-                document.querySelectorAll('[data-menu-dropdown]:not([data-kanban-menu-key])').forEach(function(dropdown) {
-                    if (dropdown !== owner) closeGenericDropdown(dropdown);
+                // A confirmation dialog may open from a menu before its request
+                // closes that menu. Background menus must not intercept the dialog.
+                const modal = document.querySelector('dialog:modal');
+                const outside = Array.from(document.querySelectorAll('[data-menu-dropdown]')).filter(function(dropdown) {
+                    if (modal && !modal.contains(dropdown)) return false;
+                    if (dropdown === owner) return false;
+                    if (dropdown.hasAttribute('data-kanban-menu-key')) return dropdown.getAttribute('data-kanban-menu-open') === 'true';
+                    const panel = dropdown.querySelector(':scope > [data-menu-content]');
+                    if (!panel || !panel.getClientRects().length) return false;
+                    const style = getComputedStyle(panel);
+                    return style.visibility === 'visible' && style.display !== 'none' && style.opacity !== '0';
                 });
-            }, true);
+                if (!outside.length) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                if (event.type !== 'click') return;
+                outside.forEach(function(dropdown) {
+                    if (dropdown.hasAttribute('data-kanban-menu-key')) window.closeKanbanMenu(dropdown, false);
+                    else closeGenericDropdown(dropdown);
+                });
+            }
+            window.addEventListener('pointerdown', dismissOutsideDropdowns, true);
+            window.addEventListener('click', dismissOutsideDropdowns, true);
             document.addEventListener('focusin', function(event) {
                 const owner = menuDropdownForTarget(event.target);
                 if (owner && !owner.hasAttribute('data-kanban-menu-key')) owner.removeAttribute('data-menu-dismissed');

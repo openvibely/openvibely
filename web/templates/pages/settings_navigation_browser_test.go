@@ -216,7 +216,7 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 		case "/chat", "/tasks/picker-thread":
 			content = components.ChatInputForm(components.ChatInputFormConfig{
 				FormID: "picker-form", InputID: "picker-message", TargetID: "messages",
-				PostEndpoint: "/chat/send", ProjectID: "project", ShowModelSelector: true,
+				PostEndpoint: "/chat/send", ProjectID: "project", ShowModelSelector: true, ShowModeSelector: true,
 				Agents:          []models.LLMConfig{{ID: "model", Name: "Test model", Provider: models.ProviderOpenAI, Model: "test"}},
 				SelectedAgentID: "model",
 			})
@@ -251,6 +251,24 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 				b.waitFor("picker and submenu dismissed", `String(document.getElementById('conversation-model-picker').hidden && document.getElementById('conversation-provider-models').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false')`, "true")
 				b.evaluate(`window.restoreSettingsWorkspace(false);window.ovModelPicker.open(window.originalPickerButton);'reopened'`)
 				b.waitFor("retained picker usable", `String(window.originalPickerButton.isConnected && !document.getElementById('conversation-model-picker').hidden)`, "true")
+				// Every shared menu consumes dismissal before Settings' capture handler.
+				windowClose := `window.ovModelPicker.close(false);`
+				for _, menu := range []struct{ name, open, closed string }{
+					{"mode", `window._openChatCustomSelectPanel(document.querySelector('.chat-mode-select'))`, `document.getElementById('chat-custom-select-panel').style.display==='none'`},
+					{"tab", `document.querySelector('[data-project-tab="project"]').dispatchEvent(new KeyboardEvent('keydown',{key:'ContextMenu',bubbles:true,cancelable:true}))`, `!document.getElementById('project-tab-menu').matches(':popover-open')`},
+					{"generic", `document.body.insertAdjacentHTML('beforeend','<div id="dismiss-test" data-menu-dropdown class="dropdown dropdown-open" style="position:fixed;left:300px;top:200px"><label tabindex="0">Actions</label><ul data-menu-content class="dropdown-content menu"><li><button>Action</button></li></ul></div>')`, `document.getElementById('dismiss-test').hasAttribute('data-menu-dismissed')`},
+					{"task context", `document.querySelector('[data-task-list-context-menu]').setAttribute('data-kanban-menu-open','true')`, `document.querySelector('[data-task-list-context-menu]').getAttribute('data-kanban-menu-open')!=='true'`},
+				} {
+					b.evaluate(windowClose + menu.open + `;'opened'`)
+					b.waitFor(menu.name+" open", `String(!(`+menu.closed+`))`, "true")
+					b.evaluate(`window.pickerNavigationRequests=0;window.pickerOriginalURL=location.href;'reset'`)
+					b.click(`#sidebar [data-nav-base="/themes"]`)
+					b.waitFor(menu.name+" first click only dismisses", `String((`+menu.closed+`) && location.href===window.pickerOriginalURL && window.pickerNavigationRequests===0 && !document.getElementById('settings-retained-workspace'))`, "true")
+					b.click(`#sidebar [data-nav-base="/themes"]`)
+					b.waitFor(menu.name+" second click navigates", `String(!!document.getElementById('settings-retained-workspace'))`, "true")
+					b.evaluate(`window.restoreSettingsWorkspace(false);document.getElementById('dismiss-test')?.remove();'restored'`)
+				}
+
 				// The same lifecycle must work without Settings or HTMX events.
 				for _, hide := range []string{"owner.hidden=true", "owner.inert=true", "owner.style.display='none'", "owner.remove()"} {
 					b.evaluate(`window.pickerOwner=window.originalPickerButton.closest('form');window.pickerParent=window.pickerOwner.parentElement;window.ovModelPicker.open(window.originalPickerButton);'opened'`)
