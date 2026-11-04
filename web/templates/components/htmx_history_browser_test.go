@@ -138,6 +138,16 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   (async function() {
     await window.openVibelyNavigate('/other');
+    // HTMX 2.0.11 stores new snapshots in sessionStorage. Check this separately
+    // from the legacy localStorage cleanup below.
+    var sessionCache = sessionStorage.getItem('htmx-history-cache') || '';
+    if (sessionCache.indexOf('` + secret + `') !== -1) throw new Error('secret entered HTMX session history cache');
+    var sessionEntries = JSON.parse(sessionCache || '[]');
+    if (sessionEntries.some(function(entry) {
+      return new URL(entry.url, window.location.href).pathname === '/models';
+    })) {
+      throw new Error('Models page entered HTMX session history cache');
+    }
     var cache = localStorage.getItem('htmx-history-cache') || '';
     if (cache.indexOf('` + secret + `') !== -1) throw new Error('secret entered HTMX history cache');
     var entries = JSON.parse(cache || '[]');
