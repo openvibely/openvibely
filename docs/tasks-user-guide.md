@@ -34,7 +34,7 @@ On wider windows, the task sidebar keeps project tasks beside the current page. 
 
 Drag the divider to resize the list or collapse it to make more room. Its width and collapsed state are remembered.
 
-Open **Appearance** to choose a floating or unified task list, attached or detached project tabs, and default or layered surfaces. Conversation controls offer full or focused width, optional assistant bubbles, and a bubble/composer color step. Task-board columns offer Faint tint, Filled, Inset cards, or Tint + header strip. Visual previews show each option with your selected theme.
+Open **Settings → Appearance** to choose a floating or unified task list, attached or detached project tabs, and default or layered surfaces. Conversation controls offer full or focused width, optional assistant bubbles, and a bubble/composer color step. Task-board columns offer Faint tint, Filled, Inset cards, or Tint + header strip. Visual previews show each option with your selected theme.
 
 ## Create a Task
 
@@ -156,3 +156,13 @@ For the full reference see <a href="https://docs.openvibely.ai/task-diffs-review
 ## No-Model Behavior
 
 Execution paths are blocked when no models are configured. You will get an error toast with a link to `/models`.
+
+## Sidebar Task Actions
+
+Right-click a sidebar task for its actions, including deletion. Drag tasks to reorder them where supported or move them between categories. Use **Show more** to browse a category; browsing and scroll positions are remembered per project tab.
+
+Moving a scheduled task to Backlog or Completed cancels its scheduled work. Moving a swarm parent to either category also stops its queued or running children.
+
+## Changes Explorer
+
+Open a task's **Changes** view and choose a file from the sidebar explorer. File contents load as needed, while sticky headers and saved scroll positions help you review large changes. Add review comments beside the diff; live updates preserve comment drafts and unchanged content. Oversized files show a placeholder instead of loading the entire diff.

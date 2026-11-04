@@ -1,6 +1,6 @@
 # Workers User Guide
 
-Use `/workers` to control execution concurrency and monitor queue pressure.
+Open **Settings → Workers** (`/workers`) to control execution concurrency and monitor queue pressure.
 
 ## What This Page Is For
 

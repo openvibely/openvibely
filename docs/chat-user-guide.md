@@ -131,7 +131,7 @@ Mermaid diagrams, SVG, and math render as complete blocks arrive during streamin
 
 ## Conversation Appearance
 
-Open **Appearance** to choose full-width or focused conversations, show or hide assistant bubbles, and adjust bubble/composer surface contrast. These settings apply to both Chat and task threads. On wider windows, the searchable task sidebar lets you open project tasks without returning to the board.
+Open **Settings → Appearance** to choose full-width or focused conversations, show or hide assistant bubbles, and adjust bubble/composer surface contrast. These settings apply to both Chat and task threads. On wider windows, the searchable task sidebar lets you open project tasks without returning to the board.
 
 ## Documents and File Previews
 
@@ -141,7 +141,7 @@ Open attached or generated files in the shared viewer. Supported previews includ
 
 ## Project Scope
 
-Chat is project-scoped. The selected sidebar project controls chat context.
+A selected project scopes its Chat conversation. **All projects** has a separate saved conversation that can work across projects; choose the destination when creating project-owned work.
 
 If results look unrelated, verify the currently selected project first.
 
@@ -161,3 +161,9 @@ If no model is configured, send attempts are blocked and a toast links directly 
 ## When To Use Tasks Instead
 
 Use Tasks instead when you already know the exact unit of work and want board status, scheduling, thread review, diff review, or worktree actions without a conversational layer around it.
+
+## Compact Output and Navigation
+
+Open **Settings → Appearance → Chat** to choose compact or full tool output. Compact output groups consecutive tool activity into expandable rows and is the default; existing saved choices are preserved. Expand activity to inspect tool details.
+
+Open **Settings → Shortcuts** for keyboard controls. Settings also contains the appearance controls and worker limits previously reached from separate navigation entries.

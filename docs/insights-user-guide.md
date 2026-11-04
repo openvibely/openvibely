@@ -13,7 +13,7 @@ Use the Insights section in the sidebar to understand project activity after tas
 
 ## Analytics
 
-Analytics is the quantitative view of whether project work is producing useful outcomes and where attention is needed. Open it from the Insights section of the sidebar, then select a time window and optional project filters. Each section uses explicit denominators so a completed run is not confused with an achieved goal or merged work.
+Analytics is the quantitative view of whether project work is producing useful outcomes and where attention is needed. Open it from the sidebar, then select a time window and optional project filters. Each section uses explicit denominators so a completed run is not confused with an achieved goal or merged work.
 
 ### Overview And Outcomes
 
@@ -35,7 +35,7 @@ Compare agents and model configurations by goal achievement, merge completion, f
 
 ### Provider Accounts
 
-OAuth-connected provider accounts (Anthropic, OpenAI) show a usage snapshot card so you can see which account is consuming capacity.
+OAuth-connected provider accounts (Anthropic, OpenAI) show a live usage card so you can see which account is consuming capacity.
 
 Analytics charts render in the browser timezone so time-axis labels match local working hours.
 
@@ -52,6 +52,13 @@ Use the task board for live execution status. Use Insights when you want to step
 - Which model is consuming the most tokens or cost?
 
 Use Analytics specifically to connect outcome and task evidence with provider spend, token consumption, execution performance, and learning across the project.
+
+## Live Provider Usage
+
+Open **Analytics** from the sidebar to see current OpenAI and Anthropic account limits, account identities, and plans. Usage cards request live provider data; a failed refresh does not display stale limits as current. Background monitoring creates deduplicated usage-limit alerts across projects.
+
+Where your provider account offers usage-reset credits or grants, the usage controls let you view and redeem them. Availability and the reset result are determined by the provider.
+
 
 ## Related Pages
 

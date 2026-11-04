@@ -159,3 +159,9 @@ Important:
 - `failed to clone GitHub repository ... local git clone failed`: confirm `git` is installed and available on `PATH`, then verify your Git credentials can clone the repository from a terminal. Configure GitHub auth in `/channels` if you want OpenVibely-managed credentials.
 - `Repository path must be an absolute path`: use a full absolute path or native folder picker.
 - Local path option missing: `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` is disabled in this environment.
+
+## All Projects
+
+Select **All projects** to work across projects from one workspace. Tasks, automations, Analytics, and Insights combine project records and show their ownership. Filter to a project when you need a narrower view. The All projects tab can be reordered or closed like other project tabs.
+
+All projects has its own saved Chat conversation. Select a destination project when creating project-owned work; tasks and automations keep their own project context. A conversation opened within a specific project stays scoped to that project.

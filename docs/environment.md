@@ -115,10 +115,10 @@ Never mount the Docker socket into OpenVibely. Without a host updater agent, use
 | Variable | Purpose | Required? | Allowed values | Default behavior (from code) | Security notes | Example (safe placeholder) |
 |---|---|---|---|---|---|---|
 | `AUTH_ENABLED` | Explicitly enable/disable built-in login middleware | Optional (explicit toggle) | `1,true,yes,on,0,false,no,off` | If unset/invalid, inferred from credentials: enabled only when both `AUTH_USERNAME` and `AUTH_PASSWORD` are set | Prefer explicit `true`/`false` in production to avoid accidental enablement from partial env changes | `true` |
-| `AUTH_USERNAME` | Login username for built-in auth | Required when auth is enabled | String | Empty by default; if set with `AUTH_PASSWORD` and `AUTH_ENABLED` unset, auth is inferred enabled | Keep non-sensitive but unique; avoid obvious defaults like `admin` in internet-exposed deployments | `openvibely_admin` |
-| `AUTH_PASSWORD` | Login password for built-in auth | Required when auth is enabled | String | Empty by default | Treat as a secret; generate a long random password and store in secret manager/env file with restricted permissions | `__REPLACE_WITH_LONG_RANDOM_PASSWORD__` |
-| `AUTH_SESSION_SECRET` | HMAC signing secret for `ov_session` cookie tokens | Required when auth is enabled | Local auth accepts the existing string format. Hosted SSO requires exactly 43 canonical unpadded-base64url characters decoding to 32 bytes | Empty by default | Treat as high-sensitivity secret. Hosted mode decodes the 32 bytes once and uses them directly as HMAC key material; rotation invalidates workspace sessions | Generate as documented below |
-| `AUTH_SESSION_TTL` | Session lifetime for signed auth cookies | Optional | Go duration string (`24h`, `12h`, `30m`, including subsecond values) | `24h`; invalid/non-positive values fall back to `24h` | Token verification preserves the configured duration precision; keep it long enough for usability but short enough for risk tolerance | `24h` |
+| `AUTH_USERNAME` | Initial owner username for built-in auth | Required when auth is enabled | String | Empty by default; if set with `AUTH_PASSWORD` and `AUTH_ENABLED` unset, auth is inferred enabled | Keep non-sensitive but unique; avoid obvious defaults like `admin` in internet-exposed deployments | `openvibely_admin` |
+| `AUTH_PASSWORD` | Initial owner password for built-in auth | Required when auth is enabled | String | Empty by default | Treat as a secret; generate a long random password and store in secret manager/env file with restricted permissions | `__REPLACE_WITH_LONG_RANDOM_PASSWORD__` |
+| `AUTH_SESSION_SECRET` | Hosted SSO HMAC secret; retained local-auth configuration requirement | Required when auth is enabled | Local auth accepts the existing string format. Hosted SSO requires exactly 43 canonical unpadded-base64url characters decoding to 32 bytes | Empty by default | Treat as high-sensitivity secret. Hosted mode decodes the 32 bytes once and uses them directly as HMAC key material; rotation invalidates workspace sessions | Generate as documented below |
+| `AUTH_SESSION_TTL` | Local session lifetime | Optional | Go duration string (`24h`, `12h`, `30m`, including subsecond values) | `24h`; invalid/non-positive values fall back to `24h` | Token verification preserves the configured duration precision; keep it long enough for usability but short enough for risk tolerance | `24h` |
 
 Runtime enforcement from code:
 - If local auth resolves enabled and `AUTH_USERNAME`/`AUTH_PASSWORD`/`AUTH_SESSION_SECRET` is missing, startup fails with `invalid auth configuration: ...`.
@@ -247,3 +247,15 @@ OAUTH_REDIRECT_MODE=auto
 - **Server mode (VPS)**: Set `APP_BASE_URL` to your public origin. OAuth callbacks route to your hostname.
 - **Desktop mode**: OAuth defaults to localhost callback flow. `APP_BASE_URL` is typically unset; the backend binds to `127.0.0.1` with an ephemeral port and OAuth providers redirect back to localhost.
 - **Troubleshooting**: If a provider rejects localhost callbacks, set `OAUTH_REDIRECT_MODE=localhost_manual` and paste the callback URL manually.
+
+## Organization Accounts
+
+Open **Settings → Organization** to manage the installation's organization, members, roles, and invitation links. Local authentication must be enabled to invite members. Invitations can grant member or admin access, expire after seven days, and can be revoked. Personal interface preferences follow each signed-in user, and conversation messages retain their sender identity.
+
+All members currently share access to all projects and global application operations. Roles restrict organization administration; they do not provide project-level isolation. Hosted SSO currently supports the workspace owner only, not multi-member invitations.
+
+On upgrade, existing authenticated sessions must sign in again. Local `AUTH_USERNAME` and `AUTH_PASSWORD` initialize the owner account once; changing them later does not change its stored credentials. Password-change/reset UI is not yet available. Authentication cannot be disabled after adding other members.
+
+## Trusted Authentication Proxies
+
+Set `AUTH_TRUSTED_PROXIES` to a comma-separated list of trusted proxy IPs or CIDRs if authentication rate limits should use forwarded client addresses. By default, forwarded headers are ignored. Trust only your reverse proxies; invalid entries prevent startup.

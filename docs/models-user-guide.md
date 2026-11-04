@@ -211,3 +211,7 @@ Use this when you want “create task -> run immediately” behavior by default 
 ## Important UX Guardrail
 
 If no models are configured, Chat and Task execution actions are blocked and show a toast linking to `/models`.
+
+## Fast Mode
+
+For supported OpenAI and Claude models, the model controls offer **Fast mode**. It requests faster service with higher cost or plan usage. Model, reasoning-effort, and Fast mode selections persist for the relevant Chat or task context.
