@@ -25,7 +25,7 @@ func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
 	if chrome == "" {
 		t.Skip("Chrome/Chromium executable not found")
 	}
-	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
 	result := make(chan string, 1)
 	mux := http.NewServeMux()
 	mux.Handle("/tasks/", app)
-	mux.HandleFunc("/htmx-2.0.4.min.js", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/htmx-2.0.11.min.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		_, _ = w.Write(htmxJS)
 	})
@@ -142,7 +142,7 @@ func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = fmt.Fprintf(w, `<!doctype html><html><head><script src="/htmx-2.0.4.min.js"></script></head><body>
+		_, _ = fmt.Fprintf(w, `<!doctype html><html><head><script src="/htmx-2.0.11.min.js"></script></head><body>
 <div id="changes-content">%s</div>
 <script>
 (function() {

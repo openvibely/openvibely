@@ -34,7 +34,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 	if chrome == "" {
 		t.Skip("Chrome/Chromium executable not found")
 	}
-	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			mux := http.NewServeMux()
 			mux.Handle(static.Prefix, static.Handler())
 			mux.Handle("/events/ws", e)
-			mux.HandleFunc("/htmx-2.0.4.min.js", func(w http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc("/htmx-2.0.11.min.js", func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 				_, _ = w.Write(htmxJS)
 			})
@@ -136,7 +136,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 				if err != nil {
 					t.Fatalf("render authoritative board: %v", err)
 				}
-				page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+				page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 				if r.Header.Get("HX-Request") == "" {
 					page = strings.Replace(page, "</head>", runner+"</head>", 1)
 				}
@@ -195,7 +195,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	if chrome == "" {
 		t.Skip("Chrome/Chromium executable not found")
 	}
-	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		cancel()
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("/htmx-2.0.4.min.js", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/htmx-2.0.11.min.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		_, _ = w.Write(htmxJS)
 	})
@@ -323,7 +323,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		if err := pages.AutomationLive([]models.Project{*project}, project.ID, *failedGraph, true).Render(r.Context(), &out); err != nil {
 			t.Fatalf("render Automation Live fixture: %v", err)
 		}
-		page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+		page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 		page = strings.Replace(page, "</head>", automationRunNowFreshnessBrowserRunner(definition.Automation.ID)+"</head>", 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(page))

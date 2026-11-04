@@ -24,7 +24,7 @@ import (
 
 func TestBrowserFunctional_ChatNavigationStateAndActiveStreamInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -258,7 +258,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 			return
 		}
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/chat":
@@ -268,7 +268,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(fragment))
 				return
 			}
-			doc := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
+			doc := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.11.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -435,7 +435,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 
 func TestBrowserFunctional_ChatActionsDropdownRuntimeInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -703,7 +703,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 			return
 		}
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/chat":
@@ -712,7 +712,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(chatFragment))
 				return
 			}
-			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
+			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.11.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -152,7 +152,7 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 	if chrome == "" {
 		t.Skip("Chrome/Chromium executable not found")
 	}
-	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 	async function coords(phase,a,b){var ac=document.getElementById('task-'+a),bc=document.getElementById('task-'+b);ac.scrollIntoView({block:'center',inline:'center'});await new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve)})});bc.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,ctrlKey:true}));ac.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,ctrlKey:true}));await wait(function(){return ac.classList.contains('task-selected')&&bc.classList.contains('task-selected')});var ar=ac.getBoundingClientRect(),br=bc.getBoundingClientRect(),zr=document.querySelector('.task-drop-zone[data-status="running"]').getBoundingClientRect();await fetch('/native-ready?phase='+phase+'&fx='+(ar.left+12)+'&fy='+(ar.top+12)+'&sx='+(br.left+12)+'&sy='+(br.top+12)+'&dx='+(zr.left+zr.width/2)+'&dy='+(zr.top+Math.min(40,zr.height/2)),{method:'POST'});await wait(function(){return ac.classList.contains('dragging')&&bc.classList.contains('dragging')});await fetch('/native-motion?phase='+phase,{method:'POST'})}
 	(async function(){await wait(function(){return window.htmx&&document.getElementById('task-` + first.ID + `')});await coords('success','` + first.ID + `','` + second.ID + `');await wait(function(){var z=document.querySelector('.task-drop-zone[data-status="pending"]'),ids=Array.from(z.querySelectorAll(':scope > [data-task-id]')).map(function(c){return c.dataset.taskId});return ids.slice(-2).join(',')==='` + first.ID + `,` + second.ID + `'&&!document.querySelector('[data-kanban-move-generation]')});await htmx.ajax('GET','/tasks?project_id=` + project.ID + `',{target:'#kanban-board',swap:'outerHTML'});await wait(function(){return document.getElementById('task-` + first.ID + `').dataset.taskStatus==='running'});var queuedCard=document.getElementById('task-` + second.ID + `');queuedCard.scrollIntoView({block:'center'});await new Promise(function(resolve){requestAnimationFrame(resolve)});var cr=queuedCard.getBoundingClientRect(),zone=queuedCard.closest('.task-drop-zone'),zr=zone.getBoundingClientRect();var reorderPath='';document.body.addEventListener('htmx:beforeRequest',function(e){if(e.detail.requestConfig.path.includes('/tasks/` + second.ID + `/'))reorderPath=e.detail.requestConfig.path;});queuedCard.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1,pointerId:99,clientX:cr.left+12,clientY:cr.top+12}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,buttons:1,pointerId:99,clientX:zr.left+20,clientY:zr.top+10}));window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,pointerId:99,clientX:zr.left+20,clientY:zr.top+10}));await wait(function(){return reorderPath!==''});if(new URL(reorderPath,location.href).pathname!=='/tasks/` + second.ID + `/reorder')throw Error('queued reorder changed lifecycle: '+reorderPath);await wait(function(){return !document.querySelector('.htmx-request')});window.beginKanbanMove(['` + failFirst.ID + `','` + failSecond.ID + `'],{category:'active',status:'running'},'PATCH','/tasks/batch-category',{task_ids:'` + failFirst.ID + `,` + failSecond.ID + `',category:'active',target_status:'running',project_id:'` + project.ID + `'},'forced failure');await wait(function(){return document.getElementById('task-` + failFirst.ID + `').dataset.taskCategory==='backlog'&&document.getElementById('task-` + failSecond.ID + `').dataset.taskCategory==='backlog'&&!document.querySelector('[data-kanban-move-generation]')});fetch('/browser-result?status=pass',{method:'POST'})})().catch(function(e){fetch('/browser-result?status=fail&message='+encodeURIComponent(e.stack||e),{method:'POST'})})});</script>`
 	mux := http.NewServeMux()
-	mux.HandleFunc("/htmx-2.0.4.min.js", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/htmx-2.0.11.min.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript")
 		_, _ = w.Write(htmxJS)
 	})
@@ -224,7 +224,7 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 			http.Error(w, loadErr.Error(), 500)
 			return
 		}
-		body := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+		body := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 		if r.Header.Get("HX-Request") == "" {
 			body = strings.Replace(body, "</head>", runner+"</head>", 1)
 		}

@@ -44,7 +44,7 @@ func TestBrowserFunctional_ChatComposerShortcutsInChrome(t *testing.T) {
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/records":
 			mu.Lock()
 			defer mu.Unlock()
@@ -234,7 +234,7 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/direct-thread":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			body := `<!doctype html><html><body data-test-result="pending"><script src="/htmx.js"></script><div id="task-thread-view"><div id="task-thread-messages"></div>` + thread + `</div><div id="browser-result">pending</div><script>
@@ -469,7 +469,7 @@ func TestBrowserFunctional_ChatComposerPreservesSteerInfoDuringSteerAndQueueInCh
 			switch r.URL.Path {
 			case "/htmx.js":
 				w.Header().Set("Content-Type", "text/javascript")
-				_, _ = w.Write(htmx204)
+				_, _ = w.Write(htmx2011)
 			case sendPath, steerPath:
 				_ = r.ParseForm()
 				if r.PostForm.Get("message") == "explicit clear" {
@@ -614,7 +614,7 @@ func TestBrowserFunctional_ChatComposerStaleSteerConflictFallsBackToNormalSendIn
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/chat/steer":
 			_ = r.ParseForm()
 			mu.Lock()
@@ -722,7 +722,7 @@ func TestBrowserFunctional_ChatComposerImmediateModifierClickSteersInChrome(t *t
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/chat/steer":
 			_ = r.ParseForm()
 			mu.Lock()
@@ -824,7 +824,7 @@ func TestBrowserFunctional_ChatComposerRunningActionModifierSteersInChrome(t *te
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/chat/steer", "/chat/stop":
 			_ = r.ParseForm()
 			mu.Lock()
@@ -932,7 +932,7 @@ func TestBrowserFunctional_ChatComposerRunningPrimaryActionSwapsWithInputContent
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/":
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">

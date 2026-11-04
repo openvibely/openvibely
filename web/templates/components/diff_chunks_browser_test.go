@@ -271,7 +271,7 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 			}
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			w.Write(htmx204)
+			w.Write(htmx2011)
 		case "/tasks/chunk-task/changes/file":
 			expectedProject := "__all_projects__"
 			if kind == "" {

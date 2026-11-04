@@ -30,7 +30,7 @@ DAISYUI_VERSION=4.12.14
 
 # dist path | source URL | sha256
 FILES=(
-  "vendor/htmx.min.js|https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js|e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447"
+  "vendor/htmx.min.js|https://cdn.jsdelivr.net/npm/htmx.org@2.0.11/dist/htmx.min.js|d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717"
   "vendor/idiomorph-ext.min.js|https://cdn.jsdelivr.net/npm/idiomorph@0.3.0/dist/idiomorph-ext.min.js|763ad5ebd0963ea9436cb480f303fc4b7e543c37c649925f032c568b4dbab7e6"
   "vendor/mermaid.min.js|https://cdn.jsdelivr.net/npm/mermaid@11.17.0/dist/mermaid.min.js|8d8e0eec56d3a83b4b3c87f42050845546dee93ebe1875d2117c12e6947c0cb3"
   "vendor/mermaid.LICENSE|https://cdn.jsdelivr.net/npm/mermaid@11.17.0/LICENSE|ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80"

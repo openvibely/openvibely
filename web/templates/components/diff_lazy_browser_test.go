@@ -180,7 +180,7 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 			w.WriteHeader(http.StatusNoContent)
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			w.Write(htmx204)
+			w.Write(htmx2011)
 		case "/fragment":
 			fmt.Fprint(w, markup.String())
 		case "/other":
@@ -277,7 +277,7 @@ func TestBrowserFunctional_DiffOversizedFilePlaceholder(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			w.Write(htmx204)
+			w.Write(htmx2011)
 		case "/tasks/lazy-task/changes/file":
 			index, _ := strconv.Atoi(r.URL.Query().Get("file_index"))
 			if index != 0 {

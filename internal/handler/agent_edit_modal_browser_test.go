@@ -98,7 +98,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	createAgentEditModalTestHook(t, lifecycleRepo, b.ID, "agent_b_hook")
 	createAgentEditModalTestHook(t, lifecycleRepo, protected.ID, "protected_hook")
 
-	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 			return
 		}
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 			return
@@ -286,7 +286,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 					http.Error(w, rec.Body.String(), rec.Code)
 					return
 				}
-				page := strings.Replace(rec.Body.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+				page := strings.Replace(rec.Body.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 				page = strings.Replace(page, "</body>", runner+"</body>", 1)
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				_, _ = w.Write([]byte(page))

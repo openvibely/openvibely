@@ -13,7 +13,7 @@ import (
 
 func TestBrowserFunctional_ChatLiveCreatedViewCleanupInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestBrowserFunctional_ChatLiveCreatedViewCleanupInChrome(t *testing.T) {
 			return
 		}
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript")
 			_, _ = w.Write(htmxJS)
 		case "/chat":

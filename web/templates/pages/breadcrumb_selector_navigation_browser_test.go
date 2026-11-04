@@ -22,7 +22,7 @@ import (
 
 func TestBrowserFunctional_BreadcrumbSelectorsNavigateAndCleanUpAcrossHTMXHistoryInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}

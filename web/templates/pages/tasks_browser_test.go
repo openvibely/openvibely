@@ -129,7 +129,7 @@ func driveNativeTaskDrags(debugPort int, serverURL string, dragReady <-chan task
 
 func TestBrowserFunctional_TasksDefaultAndPersistedSortsAcrossLiveRefreshAndDragInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -467,7 +467,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		requestMu.Unlock()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
-		case r.URL.Path == "/htmx-2.0.4.min.js":
+		case r.URL.Path == "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/tasks" && r.Method == http.MethodGet:
@@ -495,7 +495,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Tasks([]models.Project{project}, &project, sortedTasks(backlogSort, completedSort), nil, nil, backlogSort, completedSort).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case strings.HasPrefix(r.URL.Path, "/tasks/") && strings.HasSuffix(r.URL.Path, "/sort") && r.Method == http.MethodPost:
@@ -673,7 +673,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 func TestBrowserFunctional_BacklogExecuteAllSubmitsWithoutConfirmationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -752,7 +752,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		requestMu.Unlock()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
-		case r.URL.Path == "/htmx-2.0.4.min.js":
+		case r.URL.Path == "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/tasks" && r.Method == http.MethodGet:
@@ -764,7 +764,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Tasks([]models.Project{project}, &project, boardTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case strings.HasSuffix(r.URL.Path, "/run") && r.Method == http.MethodPost:
@@ -839,7 +839,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 func TestBrowserFunctional_CapacityQueuedAutomationAndTerminalTasksAreVisibleInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -933,7 +933,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/claim":
@@ -975,7 +975,7 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 			if err := Tasks([]models.Project{project}, &project, boardTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":
@@ -1533,7 +1533,7 @@ func TestTasksMergeOptionLoaderSupportsKeyboardDeduplicationAndRetry(t *testing.
 
 func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedirects(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1569,7 +1569,7 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 			return
 		}
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript")
 			_, _ = w.Write(htmxJS)
 		case "/tasks":
@@ -1577,7 +1577,7 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 			if err := Tasks([]models.Project{project}, &project, []models.Task{task}, nil, nil, "", "").Render(r.Context(), &out); err != nil {
 				t.Fatal(err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/board-refresh":
@@ -1690,7 +1690,7 @@ func TestTaskCardActionsOwnDirectRequestMetadata(t *testing.T) {
 
 func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1783,7 +1783,7 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 			return
 		}
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript")
 			_, _ = w.Write(htmxJS)
 		case "/tasks":
@@ -1809,7 +1809,7 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 			if err := Tasks([]models.Project{project}, &project, []models.Task{task}, nil, nil, "", "", menuStates()).Render(context.Background(), &out); err != nil {
 				t.Fatal(err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/arm-delayed-board-refresh":
@@ -2056,7 +2056,7 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 
 func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZoneGeometryInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -2211,7 +2211,7 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/tasks":
@@ -2226,7 +2226,7 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 			if err := AutomationsContent(automationCards, project.ID).Render(context.Background(), &automationOut); err != nil {
 				t.Fatalf("render Automation menu height reference: %v", err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</body>", automationOut.String()+"</body>", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
@@ -2269,7 +2269,7 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 }
 func TestBrowserFunctional_TaskBoardDeleteAllConfirmationFlowInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -2461,7 +2461,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
-		case r.URL.Path == "/htmx-2.0.4.min.js":
+		case r.URL.Path == "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/tasks" && r.Method == http.MethodGet:
@@ -2469,7 +2469,7 @@ window.addEventListener('DOMContentLoaded', function() {
 				_, _ = w.Write([]byte(renderBoard()))
 				return
 			}
-			page := strings.Replace(renderPage(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(renderPage(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case strings.HasPrefix(r.URL.Path, "/tasks/") && r.Method == http.MethodDelete:
@@ -2546,7 +2546,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 func TestBrowserFunctional_TaskBoardDeleteAllConfirmationResponsiveInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -2616,7 +2616,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/tasks":
@@ -2624,7 +2624,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render mobile delete-all page: %v", err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":

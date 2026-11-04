@@ -51,7 +51,7 @@ func TestXChannelsProductionHandlersInChrome(t *testing.T) {
 	if chrome == "" {
 		t.Skip("Chrome/Chromium executable not found")
 	}
-	htmx, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmx, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.11.min.js"))
 	require.NoError(t, err)
 
 	h, e, _, db := setupTestHandlerWithStores(t)
@@ -128,7 +128,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	    return feedback.innerHTML;
 	  }
 	  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });  (async function() {
-    if (!window.htmx || htmx.version !== '2.0.4') fail('real HTMX 2.0.4 was not loaded');
+    if (!window.htmx || htmx.version !== '2.0.4') fail('real HTMX 2.0.11 was not loaded');
     var add = document.querySelector('button[onclick="openXConfigModal()"]');
     if (!add) fail('missing production Add Channel X action');
     add.click();
@@ -193,7 +193,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		if static.ServeAsset(w, r) {
 			return
 		}
-		if r.URL.Path == "/htmx-2.0.4.min.js" {
+		if r.URL.Path == "/htmx-2.0.11.min.js" {
 			w.Header().Set("Content-Type", "application/javascript")
 			_, _ = w.Write(htmx)
 			return
@@ -208,7 +208,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			}
 			w.WriteHeader(recorder.Code)
 			body := recorder.Body.String()
-			body = strings.Replace(body, static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			body = strings.Replace(body, static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			if r.Header.Get("HX-Request") == "" {
 				body = strings.Replace(body, "</body>", runner+"</body>", 1)
 			}

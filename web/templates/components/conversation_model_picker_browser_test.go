@@ -483,7 +483,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/conversation/model-settings", "/ui/model-favorites":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{}`)

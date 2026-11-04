@@ -61,7 +61,7 @@ func renderTerminalBrowserComponent(t *testing.T, component templ.Component) str
 }
 
 func installTerminalBrowserPrelude(document string) string {
-	document = strings.Replace(document, static.URL("vendor/htmx.min.js"), `/htmx-2.0.4.min.js`, 1)
+	document = strings.Replace(document, static.URL("vendor/htmx.min.js"), `/htmx-2.0.11.min.js`, 1)
 	return strings.Replace(document, "<head>", "<head>"+terminalErrorBrowserPrelude(), 1)
 }
 
@@ -122,7 +122,7 @@ func awaitTerminalBrowserTransition(browser *composerFocusCDP, execID, label str
 
 func TestBrowserFunctional_TaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestBrowserFunctional_TaskThreadLiveFailureProductionWiringInChrome(t *test
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
-		case r.URL.Path == "/htmx-2.0.4.min.js":
+		case r.URL.Path == "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/tasks/"+task.ID:
@@ -331,7 +331,7 @@ func TestBrowserFunctional_TaskThreadLiveFailureProductionWiringInChrome(t *test
 
 func TestBrowserFunctional_ChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestBrowserFunctional_ChatLiveCreatedFailureProductionWiringInChrome(t *tes
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/chat":

@@ -121,7 +121,7 @@ func TestWorkerSettingsContentShowsUnlimitedForProjectRunningColumn(t *testing.T
 
 func TestBrowserFunctional_WorkerSettingsManyRowsScrollInMainContentAfterHTMXRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -205,7 +205,7 @@ window.addEventListener('DOMContentLoaded', function() {
 });
 </script>`
 
-	page := `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>` + workerSettingsBrowserCSS() + `</style><script src="/htmx-2.0.4.min.js"></script>` + runner + `</head><body class="h-screen bg-base-200 overflow-hidden"><div class="drawer lg:drawer-open h-full"><div class="drawer-content flex flex-col h-full overflow-hidden"><main id="main-content" class="p-6 flex-1 overflow-y-auto overflow-x-hidden">` + renderContent() + `</main></div></div></body></html>`
+	page := `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>` + workerSettingsBrowserCSS() + `</style><script src="/htmx-2.0.11.min.js"></script>` + runner + `</head><body class="h-screen bg-base-200 overflow-hidden"><div class="drawer lg:drawer-open h-full"><div class="drawer-content flex flex-col h-full overflow-hidden"><main id="main-content" class="p-6 flex-1 overflow-y-auto overflow-x-hidden">` + renderContent() + `</main></div></div></body></html>`
 
 	browserResult := make(chan string, 8)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +213,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			return
 		}
 		switch {
-		case r.URL.Path == "/htmx-2.0.4.min.js":
+		case r.URL.Path == "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/workers/stats/projects":

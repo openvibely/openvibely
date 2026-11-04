@@ -56,7 +56,7 @@ func TestBrowserFunctional_MenuCleanupDoesNotScanLargePagePerElement(t *testing.
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			w.Write(htmx204)
+			w.Write(htmx2011)
 		case "/other":
 			fmt.Fprint(w, `<div>Other project</div>`)
 		default:
@@ -97,7 +97,7 @@ func TestBrowserFunctional_DiffNavigationSkipsHistorySnapshot(t *testing.T) {
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			w.Write(htmx204)
+			w.Write(htmx2011)
 		case "/other":
 			fmt.Fprint(w, `<div>Other project</div>`)
 		default:

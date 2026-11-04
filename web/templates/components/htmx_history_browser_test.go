@@ -23,17 +23,17 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-//go:embed testdata/htmx-2.0.4.min.js
-var htmx204 []byte
+//go:embed testdata/htmx-2.0.11.min.js
+var htmx2011 []byte
 
-const htmx204SHA256 = "e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447"
+const htmx2011SHA256 = "d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717"
 
 func TestBrowserFunctional_HTMXHistoryNavigationAndTitlesInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
-	actualHash := fmt.Sprintf("%x", sha256.Sum256(htmx204))
-	if actualHash != htmx204SHA256 {
-		t.Fatalf("pinned HTMX 2.0.4 fixture hash = %s, want %s", actualHash, htmx204SHA256)
+	actualHash := fmt.Sprintf("%x", sha256.Sum256(htmx2011))
+	if actualHash != htmx2011SHA256 {
+		t.Fatalf("pinned HTMX 2.0.11 fixture hash = %s, want %s", actualHash, htmx2011SHA256)
 	}
 
 	var renderedBase bytes.Buffer
@@ -59,9 +59,9 @@ func TestBrowserFunctional_HTMXHistoryNavigationAndTitlesInChrome(t *testing.T) 
 			return
 		}
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/alpha":
 			isRestore := r.Header.Get("HX-History-Restore-Request") == "true"
 			if isRestore {
@@ -166,12 +166,12 @@ localStorage.setItem('htmx-history-cache', JSON.stringify([
   {url: '/models?edit=custom#oauth', content: '<div data-secret="%s">Models</div>', title: 'Models', scroll: 0},
   {url: '/retained', content: '<div>Retained</div>', title: 'Retained', scroll: 0}
 ]));
-</script><script>%s</script><script src="/htmx-2.0.4.min.js"></script><script>%s</script>%s</head><body data-test-result="pending"><main id="main-content"><div id="models-container" hx-history="false" data-secret="%s">Models</div></main></body></html>`, secret, cleanupScript, productionScript, runner, secret)
+</script><script>%s</script><script src="/htmx-2.0.11.min.js"></script><script>%s</script>%s</head><body data-test-result="pending"><main id="main-content"><div id="models-container" hx-history="false" data-secret="%s">Models</div></main></body></html>`, secret, cleanupScript, productionScript, runner, secret)
 		case "/other":
 			_, _ = w.Write([]byte(`<div id="other-page">Other</div>`))
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		default:
 			http.NotFound(w, r)
 		}
@@ -397,12 +397,12 @@ window.addEventListener('DOMContentLoaded', function() {
   }
 
   (async function() {
-    if (!window.htmx || htmx.version !== '2.0.4') fail('expected real HTMX 2.0.4, got ' + (window.htmx && htmx.version));
+    if (!window.htmx || htmx.version !== '2.0.11') fail('expected real HTMX 2.0.11, got ' + (window.htmx && htmx.version));
 
     await window.openVibelyNavigate('/beta');
     await waitForPage('beta', 'Beta', false);
     if (!history.state || history.state.htmx !== true) fail('programmatic navigation did not create HTMX history state');
-    var cache = JSON.parse(localStorage.getItem('htmx-history-cache') || '[]');
+    var cache = JSON.parse(sessionStorage.getItem('htmx-history-cache') || '[]');
     if (!cache.some(function(item) { return item.url === '/alpha'; })) fail('HTMX did not cache the outgoing alpha page');
 
     history.back();
@@ -410,7 +410,7 @@ window.addEventListener('DOMContentLoaded', function() {
     history.forward();
     await waitForPage('beta', 'Beta', false);
 
-    localStorage.removeItem('htmx-history-cache');
+    sessionStorage.removeItem('htmx-history-cache');
     history.back();
     await waitForPage('alpha', 'Alpha', true);
 
@@ -427,7 +427,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 
 	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>` + html.EscapeString(title) + ` - OpenVibely</title>` +
-		`<script src="/htmx-2.0.4.min.js"></script><script>` + productionScript + `</script>` + testScript + `</head><body>` +
+		`<script src="/htmx-2.0.11.min.js"></script><script>` + productionScript + `</script>` + testScript + `</head><body>` +
 		`<div id="history-shell" data-history-cache-miss="` + fmt.Sprintf("%t", cacheMiss) + `"><main id="main-content">` +
 		historyFixtureFragment(title, page) + `</main></div></body></html>`
 }

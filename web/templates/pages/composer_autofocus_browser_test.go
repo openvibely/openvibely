@@ -398,7 +398,7 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 
 func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		return strings.Replace(html, `<main id="main-content"`, control+`<main id="main-content"`, 1)
 	}
 	usePinnedHTMX := func(html string) string {
-		return strings.Replace(html, static.URL("vendor/htmx.min.js"), `/htmx-2.0.4.min.js`, 1)
+		return strings.Replace(html, static.URL("vendor/htmx.min.js"), `/htmx-2.0.11.min.js`, 1)
 	}
 	// Inject fixture links by their page root, independent of deduplicated styles.
 	addChatControl := func(html string) string {
@@ -447,7 +447,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/ui/preferences":

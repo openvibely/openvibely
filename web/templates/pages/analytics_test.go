@@ -149,7 +149,7 @@ func TestAnalyticsContent_CompactModelChartTitles(t *testing.T) {
 }
 
 func TestBrowserFunctional_AnalyticsContent_ProjectSwapKeepsSelectedTabInChrome(t *testing.T) {
-	htmx, err := os.ReadFile("../components/testdata/htmx-2.0.4.min.js")
+	htmx, err := os.ReadFile("../components/testdata/htmx-2.0.11.min.js")
 	if err != nil {
 		t.Fatal(err)
 	}

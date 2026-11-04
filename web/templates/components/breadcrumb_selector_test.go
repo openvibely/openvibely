@@ -134,7 +134,7 @@ func TestBrowserFunctional_BreadcrumbSelectorKeyboardFocusAndContainmentInChrome
 			_, _ = fmt.Fprint(w, page)
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/results":
 			_, _ = fmt.Fprint(w, results.String())
 		default:
@@ -215,7 +215,7 @@ func TestBrowserFunctional_BreadcrumbSelectorKeepsOpenResultsStableOnTaskSSEInCh
 			_, _ = fmt.Fprint(w, page)
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
+			_, _ = w.Write(htmx2011)
 		case "/results":
 			if resultRequests.Add(1) == 1 {
 				_, _ = fmt.Fprint(w, beforeResults)

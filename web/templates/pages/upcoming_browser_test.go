@@ -17,7 +17,7 @@ import (
 
 func TestBrowserFunctional_UpcomingStopControlUsesConfirmationRefreshAndPreservesCardNavigationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestBrowserFunctional_UpcomingStopControlUsesConfirmationRefreshAndPreserve
 		return body.String()
 	}
 	page := func(upcoming *models.Upcoming) string {
-		return `<!doctype html><html><head><script src="/htmx-2.0.4.min.js"></script></head><body>` + render(upcoming) + `<script>
+		return `<!doctype html><html><head><script src="/htmx-2.0.11.min.js"></script></head><body>` + render(upcoming) + `<script>
 			window.__pulseConfirm = false;
 			window.__pulseConfirmMessages = [];
 			window.confirm = function(message) { window.__pulseConfirmMessages.push(String(message)); return window.__pulseConfirm; };
@@ -96,7 +96,7 @@ func TestBrowserFunctional_UpcomingStopControlUsesConfirmationRefreshAndPreserve
 			return
 		}
 		switch {
-		case r.URL.Path == "/htmx-2.0.4.min.js":
+		case r.URL.Path == "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/upcoming" && r.Method == http.MethodGet:

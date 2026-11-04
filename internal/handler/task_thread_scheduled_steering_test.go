@@ -345,7 +345,7 @@ func handlerPinnedHTMX(t *testing.T) []byte {
 	if !ok {
 		t.Fatal("resolve handler browser test source path")
 	}
-	path := filepath.Join(filepath.Dir(sourceFile), "..", "..", "web", "templates", "components", "testdata", "htmx-2.0.4.min.js")
+	path := filepath.Join(filepath.Dir(sourceFile), "..", "..", "web", "templates", "components", "testdata", "htmx-2.0.11.min.js")
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)

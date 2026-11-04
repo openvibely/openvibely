@@ -351,7 +351,7 @@ func TestBrowserFunctional_AlertsInspectMarkdownAndHTMXDetailLoadingInChrome(t *
 	if err := Alerts(nil, projectID, []models.AlertSummary{summary, emptyAlert}, 0).Render(context.Background(), &renderedPage); err != nil {
 		t.Fatalf("render Alerts page: %v", err)
 	}
-	page := strings.Replace(renderedPage.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+	page := strings.Replace(renderedPage.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 	page = strings.Replace(page, static.URL("vendor/marked.min.js"), "/marked.min.js", 1)
 	expectedBody, err := json.Marshal(body)
 	if err != nil {
@@ -491,7 +491,7 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 	page = strings.Replace(page, "</head>", "<script>"+markedScript+"</script>"+runner+"</head>", 1)
 
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -503,7 +503,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch {
 		case r.URL.Path == "/tasks/sidebar":
 			w.WriteHeader(http.StatusNoContent)
-		case r.URL.Path == "/htmx-2.0.4.min.js":
+		case r.URL.Path == "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/marked.min.js":
@@ -713,7 +713,7 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 
 func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -1089,7 +1089,7 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
-		case r.URL.Path == "/htmx-2.0.4.min.js":
+		case r.URL.Path == "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/alerts" && r.Method == http.MethodGet:
@@ -1098,7 +1098,7 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 				return
 			}
 			page := renderAlertsPage()
-			page = strings.Replace(page, static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", style+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:

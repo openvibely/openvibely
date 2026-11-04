@@ -20,7 +20,7 @@ import (
 
 func TestBrowserFunctional_ThreadCacheAndVirtualRowsInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmx, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmx, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ window.addEventListener('DOMContentLoaded', function() {
 // when navigating away or preparing a history snapshot.
 func TestBrowserFunctional_VirtualRowsNavigationLayoutsInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmx, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmx, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatal(err)
 	}

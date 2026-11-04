@@ -161,7 +161,7 @@ func driveNativeGroupedTaskDrags(debugPort int, serverURL string, ready <-chan n
 
 func TestBrowserFunctional_TaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -631,7 +631,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		requestMu.Unlock()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/tasks":
@@ -652,7 +652,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Tasks([]models.Project{project}, &project, persistedTasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/refresh-kanban":
@@ -685,7 +685,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Schedule([]models.Project{project}, &project, scheduledTasks, 0, nil, nil).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Schedule page: %v", err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-native-grouped-ready":
@@ -871,7 +871,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 func TestBrowserFunctional_ScheduleCardsSupportModifierMultiSelectGroupedPointerDragAndRollback(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -961,7 +961,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/schedule":
@@ -977,7 +977,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Schedule([]models.Project{project}, &project, scheduled, 0, nil, nil).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render schedule: %v", err)
 			}
-			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.11.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/schedules/schedule-multi-b/reschedule":

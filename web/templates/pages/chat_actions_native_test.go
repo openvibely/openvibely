@@ -31,7 +31,7 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 		t.Skip("native Wails UI coverage is opt-in; set OPENVIBELY_RUN_NATIVE_UI=1")
 	}
 
-	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.11.min.js"))
 	if err != nil {
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 	historyRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/htmx-2.0.4.min.js":
+		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/chat":
@@ -195,7 +195,7 @@ func extractNativeChatNavigation(t *testing.T, html string) string {
 }
 
 func nativeChatDocument(style, navigation, chat, runner string) string {
-	return `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="desktop"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigation + `</script>` + style + `<style>
+	return `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="desktop"><head><meta charset="utf-8"><script src="/htmx-2.0.11.min.js"></script><script>` + navigation + `</script>` + style + `<style>
 html, body, #main-content { height: 100%; margin: 0; }
 .dropdown-content { display: none; visibility: hidden; opacity: 0; pointer-events: none; }
 .dropdown:focus-within > .dropdown-content { display: block; }
