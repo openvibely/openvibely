@@ -44,6 +44,7 @@ func (h *Handler) RemoveSlackAuthorizedUser(c echo.Context) error {
 
 func (h *Handler) slackAuthorizedUserCRUD() authorizedUserCRUD[models.SlackAuthorizedUser] {
 	crud := authorizedUserCRUD[models.SlackAuthorizedUser]{
+		authorize:            h.authorizeChannelTrustOperation,
 		render:               components.SlackAuthorizedUsersList,
 		notConfiguredMessage: "Slack auth not configured",
 		configured:           h.slackAuthRepo != nil,
@@ -55,4 +56,23 @@ func (h *Handler) slackAuthorizedUserCRUD() authorizedUserCRUD[models.SlackAutho
 		crud.projectID = func(user *models.SlackAuthorizedUser) string { return user.ProjectID }
 	}
 	return crud
+}
+
+// BindSlackApplicationUser records an administrator-attested workspace identity.
+func (h *Handler) BindSlackApplicationUser(c echo.Context) error {
+	projectID := c.FormValue("project_id")
+	if err := h.authorizeChannelTrustOperation(c, projectID, true); err != nil {
+		return err
+	}
+	if h.slackAuthRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Slack auth not configured")
+	}
+	teamID, userID := strings.TrimSpace(c.FormValue("team_id")), strings.TrimSpace(c.FormValue("application_user_id"))
+	if teamID == "" || userID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Workspace and application user IDs are required")
+	}
+	if err := h.slackAuthRepo.BindApplicationUser(c.Request().Context(), projectID, c.Param("id"), teamID, userID); err != nil {
+		return err
+	}
+	return h.slackAuthorizedUserCRUD().reload(c, projectID)
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 )
 
@@ -36,11 +37,15 @@ func (r *SlackInboundReceiptRepo) Exists(ctx context.Context, eventKey string) (
 // WithHandoff atomically records a Slack event receipt with its durable work.
 // If the receipt already exists, persist is not called and alreadyHandedOff is true.
 func (r *SlackInboundReceiptRepo) WithHandoff(ctx context.Context, eventKey string, persist func(persistence.Tx) error) (alreadyHandedOff bool, err error) {
+	if persist == nil {
+		return false, fmt.Errorf("Slack inbound handoff persistence is required")
+	}
 	var db *sql.DB
 	if r != nil {
 		db = r.db
 	}
 	return inboundReceiptHandoff(ctx, db, inboundReceiptHandoffSpec{
+		authorize:            func(tx sqlExecutor) error { return authorizeSlackHandoff(ctx, tx, eventKey) },
 		notConfiguredError:   "Slack inbound receipt repository is not configured",
 		persistRequiredError: "Slack inbound handoff persistence is required",
 		insertSQL: `INSERT INTO slack_inbound_receipts (event_key) VALUES (?)
@@ -48,5 +53,13 @@ func (r *SlackInboundReceiptRepo) WithHandoff(ctx context.Context, eventKey stri
 		insertArgs:        []interface{}{eventKey},
 		recordError:       "record Slack inbound receipt",
 		rowsAffectedError: "check Slack inbound receipt insertion",
-	}, withStoreTx(persist))
+	}, func(tx sqlExecutor) error {
+		if err := withStoreTx(persist)(tx); err != nil {
+			return err
+		}
+		if identity, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+			return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, "slack.message_handed_off", eventKey, `{}`)
+		}
+		return nil
+	})
 }

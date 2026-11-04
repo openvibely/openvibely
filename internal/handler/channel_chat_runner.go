@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
@@ -16,6 +17,7 @@ func (h *Handler) StartChannelChatRun(ctx context.Context, req service.ChannelCh
 	}
 	h.startStreamingResponse(streamingResponseParams{
 		ExecID:                      req.ExecID,
+		PrincipalID:                 channelRunPrincipalID(ctx),
 		TaskID:                      req.TaskID,
 		Message:                     req.Message,
 		Agent:                       req.Agent,
@@ -38,6 +40,19 @@ func (h *Handler) StartChannelChatRun(ctx context.Context, req service.ChannelCh
 func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTaskRunRequest) {
 	if req.ExecID == "" || req.TaskID == "" || req.ProjectID == "" {
 		return
+	}
+	// Reject revoked Slack identities before worktree or goal side effects.
+	accessParams := streamingResponseParams{ExecID: req.ExecID, TaskID: req.TaskID, ProjectID: req.ProjectID, ChannelReply: req.ReplyContext, Surface: req.Surface}
+	if h.projectAccessSvc != nil && isSlackChannelRun(accessParams) {
+		authorized, err := h.followupUserContext(ctx, strings.TrimPrefix(channelRunPrincipalID(ctx), "user:"))
+		if err == nil {
+			err = h.requireFollowupAccess(authorized, accessParams)
+		}
+		if err != nil {
+			h.completeWithFailure(context.WithoutCancel(ctx), req.ExecID, req.TaskID, "channel authorization failed", 0, req.ReplyContext)
+			return
+		}
+		ctx = authorized
 	}
 	task, err := h.taskRepo.GetByID(ctx, req.TaskID)
 	if err != nil || task == nil {
@@ -67,6 +82,7 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 	systemContext := combineContexts(combineContexts(req.SystemContext, h.taskGoalContext(ctx, req.TaskID, agentDef)), worktreeContext)
 	h.startStreamingResponse(streamingResponseParams{
 		ExecID:                          req.ExecID,
+		PrincipalID:                     channelRunPrincipalID(ctx),
 		TaskID:                          req.TaskID,
 		Message:                         req.Message,
 		Agent:                           req.Agent,
@@ -83,4 +99,11 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		RuntimeTools:                    req.RuntimeTools,
 		RepublishOpenPRAfterStartupSync: republishOpenPR,
 	})
+}
+
+func channelRunPrincipalID(ctx context.Context) string {
+	if principal, ok := models.PrincipalFromContext(ctx); ok && principal.UserID != "" {
+		return "user:" + principal.UserID
+	}
+	return ""
 }

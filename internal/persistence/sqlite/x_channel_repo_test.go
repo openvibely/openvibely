@@ -161,3 +161,120 @@ func explainXAuthorizedProjectQueryPlan(t *testing.T, db *sql.DB, query string, 
 	require.NoError(t, rows.Err())
 	return strings.Join(details, "\n")
 }
+
+func TestXHandoffRechecksInstallerAndAuditsAtomically(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	repo := NewXInboundReceiptRepo(db)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('installer','installer'); INSERT INTO org_memberships VALUES('default','installer','admin'); INSERT INTO app_settings(key,value) VALUES('x_run_as_user_id','installer')`)
+	require.NoError(t, err)
+	claim, err := repo.Claim(ctx, "tweet", "default", time.Now(), time.Minute)
+	require.NoError(t, err)
+	actor := models.WithPrincipal(ctx, models.Principal{UserID: "installer"})
+	called := false
+	persist := func(tx persistence.Tx) error {
+		called = true
+		exec, err := executorFromTx(tx)
+		if err != nil {
+			return err
+		}
+		_, err = exec.ExecContext(ctx, `INSERT INTO app_settings(key,value) VALUES('handoff_test','saved')`)
+		return err
+	}
+	_, err = db.Exec(`UPDATE org_memberships SET role='member' WHERE user_id='installer'`)
+	require.NoError(t, err)
+	_, err = repo.CompleteWithHandoff(actor, "tweet", claim.Token, nil, persist)
+	require.ErrorIs(t, err, persistence.ErrOrgDenied)
+	require.False(t, called)
+	_, err = db.Exec(`UPDATE org_memberships SET role='admin' WHERE user_id='installer'`)
+	require.NoError(t, err)
+	_, err = repo.CompleteWithHandoff(models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID}), "tweet", claim.Token, nil, persist)
+	require.ErrorIs(t, err, persistence.ErrOrgDenied)
+	require.False(t, called)
+	_, err = db.Exec(`CREATE TRIGGER fail_x_audit BEFORE INSERT ON project_audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	require.NoError(t, err)
+	_, err = repo.CompleteWithHandoff(actor, "tweet", claim.Token, nil, persist)
+	require.ErrorContains(t, err, "audit unavailable")
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM app_settings WHERE key='handoff_test'`).Scan(&count))
+	require.Zero(t, count)
+	var status string
+	require.NoError(t, db.QueryRow(`SELECT status FROM x_inbound_receipts WHERE tweet_id='tweet'`).Scan(&status))
+	require.Equal(t, "processing", status)
+	_, err = db.Exec(`DROP TRIGGER fail_x_audit`)
+	require.NoError(t, err)
+	_, err = repo.CompleteWithHandoff(actor, "tweet", claim.Token, nil, persist)
+	require.NoError(t, err)
+	_, err = db.Exec(`DELETE FROM org_memberships WHERE user_id='installer'`)
+	require.NoError(t, err)
+	_, err = repo.CompleteWithHandoff(actor, "tweet", claim.Token, nil, nil)
+	require.ErrorIs(t, err, persistence.ErrOrgDenied)
+}
+
+func TestXVerifiedSenderBindingAndHandoff(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	auth := NewXAuthRepo(db)
+	receipts := NewXInboundReceiptRepo(db)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('sender','sender'); INSERT INTO org_memberships VALUES('default','sender','member')`)
+	require.NoError(t, err)
+	sender := models.WithPrincipal(ctx, models.Principal{UserID: "sender"})
+	binding := &models.XAuthorizedUser{ProjectID: "default", XUserID: "123", ApplicationUserID: "sender"}
+	require.ErrorIs(t, auth.Create(sender, binding), persistence.ErrOrgDenied)
+	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+	require.NoError(t, auth.Create(owner, binding))
+	require.Equal(t, models.BootstrapUserID, binding.VerifiedBy)
+	recovered := NewXAuthRepo(db)
+	id, err := recovered.ResolveApplicationUser(ctx, "default", "123")
+	require.NoError(t, err)
+	require.Equal(t, "sender", id)
+	_, err = recovered.ResolveApplicationUser(ctx, "foreign", "123")
+	require.ErrorIs(t, err, persistence.ErrProjectDenied)
+	claim, err := receipts.Claim(ctx, "mapped-tweet", "default", time.Now(), time.Minute)
+	require.NoError(t, err)
+	ingress := models.WithXIngressIdentity(sender, models.XIngressIdentity{InstallerUserID: models.BootstrapUserID, UserID: "sender", ExternalUserID: "123", ProjectID: "default"})
+	_, err = receipts.CompleteWithHandoff(ingress, "mapped-tweet", claim.Token, nil, nil)
+	require.NoError(t, err)
+	var actor string
+	require.NoError(t, db.QueryRow(`SELECT actor_user_id FROM project_audit_events WHERE action='x.message_handed_off' AND target_id='mapped-tweet'`).Scan(&actor))
+	require.Equal(t, "sender", actor)
+	// Even an owner cannot supply their own principal for a bound sender.
+	forged := models.WithXIngressIdentity(owner, models.XIngressIdentity{InstallerUserID: models.BootstrapUserID, UserID: models.BootstrapUserID, ExternalUserID: "123", ProjectID: "default"})
+	_, err = receipts.CompleteWithHandoff(forged, "mapped-tweet", claim.Token, nil, nil)
+	require.ErrorIs(t, err, persistence.ErrProjectDenied)
+	_, err = db.Exec(`DELETE FROM org_memberships WHERE user_id='sender'`)
+	require.NoError(t, err)
+	_, err = receipts.CompleteWithHandoff(ingress, "mapped-tweet", claim.Token, nil, nil)
+	require.Error(t, err)
+}
+
+func TestXSenderManagementRechecksAndRollsBack(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	repo := NewXAuthRepo(db)
+	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('manager','manager'); INSERT INTO org_memberships VALUES('default','manager','admin')`)
+	require.NoError(t, err)
+	actor := models.WithPrincipal(ctx, models.Principal{UserID: "manager", Role: "owner"})
+	entry := &models.XAuthorizedUser{ProjectID: "default", XUserID: "42"}
+	require.NoError(t, repo.Create(actor, entry))
+	_, err = db.Exec(`UPDATE org_memberships SET role='member' WHERE user_id='manager'`)
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.Delete(actor, "default", entry.ID), persistence.ErrOrgDenied)
+	require.ErrorIs(t, repo.Create(actor, &models.XAuthorizedUser{ProjectID: "default", XUserID: "43"}), persistence.ErrOrgDenied)
+	require.ErrorIs(t, repo.Delete(owner, "foreign", entry.ID), persistence.ErrNotFound)
+	_, err = db.Exec(`CREATE TRIGGER fail_sender_audit BEFORE INSERT ON project_audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	require.NoError(t, err)
+	require.ErrorContains(t, repo.Delete(owner, "default", entry.ID), "audit unavailable")
+	require.ErrorContains(t, repo.Create(owner, &models.XAuthorizedUser{ProjectID: "default", XUserID: "43"}), "audit unavailable")
+	entries, err := repo.ListByProject(ctx, "default")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, entry.ID, entries[0].ID)
+	_, err = db.Exec(`DROP TRIGGER fail_sender_audit`)
+	require.NoError(t, err)
+	require.NoError(t, repo.Delete(owner, "default", entry.ID))
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM project_audit_events WHERE action='x.sender_removed'`).Scan(&count))
+	require.Equal(t, 1, count)
+}

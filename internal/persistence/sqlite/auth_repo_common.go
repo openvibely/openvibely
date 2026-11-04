@@ -310,11 +310,11 @@ func (h singleIdentifierAllowlist[T]) GetByID(ctx context.Context, id string) (*
 }
 
 func (h singleIdentifierAllowlist[T]) Delete(ctx context.Context, id string) error {
-	return deleteByID(ctx, h.db, h.table, h.deleteEntityLabel, id)
+	return deleteChannelAllowlist(ctx, h.db, h.table, "", id)
 }
 
 func (h singleIdentifierAllowlist[T]) DeleteForProject(ctx context.Context, projectID, id string) error {
-	return deleteByIDForProject(ctx, h.db, h.table, h.deleteEntityLabel, projectID, id)
+	return deleteChannelAllowlist(ctx, h.db, h.table, projectID, id)
 }
 
 func (h singleIdentifierAllowlist[T]) HasAny(ctx context.Context) (bool, error) {
@@ -350,8 +350,53 @@ func (h singleIdentifierAllowlist[T]) Create(ctx context.Context, projectID, ide
 
 	var id string
 	var addedAt time.Time
-	if err := queryRowBoundSQLite(ctx, h.db, query, projectID, identity, displayName, addedBy).Scan(&id, &addedAt); err != nil {
+	err := withImmediateTx(ctx, h.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+				return err
+			}
+			addedBy = actor.UserID
+		}
+		if err := tx.QueryRowContext(ctx, query, projectID, identity, displayName, addedBy).Scan(&id, &addedAt); err != nil {
+			return err
+		}
+		if identified {
+			return projectAudit(ctx, tx, projectID, actor.UserID, "channel.allowlist_saved", id, fmt.Sprintf(`{"table":%q}`, h.table))
+		}
+		return nil
+	})
+	if err != nil {
 		return identity, "", time.Time{}, err
 	}
 	return identity, id, addedAt, nil
+}
+
+// Table names are fixed repository constants, never request input.
+func deleteChannelAllowlist(ctx context.Context, db *sql.DB, table, projectID, id string) error {
+	return withImmediateTx(ctx, db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+				return err
+			}
+		}
+		query := `SELECT project_id FROM ` + table + ` WHERE id=?`
+		args := []any{id}
+		if projectID != "" {
+			query += ` AND project_id=?`
+			args = append(args, projectID)
+		}
+		var actual string
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&actual); err != nil {
+			return fmt.Errorf("find authorized user: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE id=? AND project_id=?`, id, actual); err != nil {
+			return err
+		}
+		if identified {
+			return projectAudit(ctx, tx, actual, actor.UserID, "channel.allowlist_removed", id, fmt.Sprintf(`{"table":%q}`, table))
+		}
+		return nil
+	})
 }

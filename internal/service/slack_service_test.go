@@ -4061,3 +4061,32 @@ func TestSlackServiceBoundedAttachmentCleanupHelpers(t *testing.T) {
 		t.Fatalf("save pending attachments = %q, %v", sessionID, err)
 	}
 }
+
+func TestSlackOAuthRevocationDuringExchangePreservesCredentials(t *testing.T) {
+	env := teststores.New(t)
+	ctx := t.Context()
+	org := NewOrganizationService(env.Organizations, "secret")
+	invite, err := org.Invite(ctx, models.BootstrapUserID, "admin")
+	require.NoError(t, err)
+	user, err := org.Accept(ctx, invite, "slack-connector", "long-password-value", "")
+	require.NoError(t, err)
+	old := map[string]string{SlackSettingClientID: "cid", SlackSettingClientSecret: "secret", SlackSettingBotToken: "old-token", SlackSettingTeamID: "old-team", SlackSettingOAuthState: "state"}
+	require.NoError(t, env.Settings.SetMany(ctx, old))
+	revoked := make(chan error, 1)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := env.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "member", false)
+		revoked <- err
+		fmt.Fprint(w, `{"ok":true,"access_token":"new-token","bot_user_id":"Unew","team":{"id":"Tnew","name":"New team"}}`)
+	}))
+	defer provider.Close()
+	svc := NewSlackService(env.Settings, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc.oauthBaseURL = provider.URL
+	err = svc.HandleOAuthCallback(models.WithPrincipal(ctx, user.Principal), "code", "state", "http://localhost/callback")
+	require.ErrorIs(t, err, persistence.ErrOrgDenied)
+	require.NoError(t, <-revoked)
+	for key, want := range old {
+		got, err := env.Settings.Get(ctx, key)
+		require.NoError(t, err)
+		require.Equal(t, want, got, key)
+	}
+}

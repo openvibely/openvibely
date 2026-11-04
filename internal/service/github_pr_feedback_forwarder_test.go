@@ -275,6 +275,10 @@ func TestGitHubPRFeedbackForwarderDeduplicatesPreexistingMixedCaseRepository(t *
 func TestGitHubPRFeedbackRepoAtomicallyDeduplicatesMixedCaseRepository(t *testing.T) {
 	ctx := context.Background()
 	db := teststores.New(t)
+	if err := db.GitHubAuth.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "alice", Permission: "triage", AddedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
 	projectRepo := db.Projects
 	taskRepo := db.Tasks
 	prRepo := db.TaskPullRequests
@@ -599,8 +603,8 @@ func TestGitHubPRFeedbackForwarderCachesAuthorizationDecisionsPerPass(t *testing
 				t.Fatalf("forward feedback: %v", err)
 			}
 			statements := fixture.counter.Snapshot()
-			if got := statements.GitHubAuthorizationReads; got != tc.wantAuthorization {
-				t.Fatalf("authorization lookups = %d, want %d; backend I/O: %+v", got, tc.wantAuthorization, statements)
+			if got := statements.GitHubAuthorizationReads; got != tc.wantAuthorization+tc.wantForwarded {
+				t.Fatalf("authorization lookups = %d, want %d; backend I/O: %+v", got, tc.wantAuthorization+tc.wantForwarded, statements)
 			}
 			if statements.Requests < tc.wantAuthorization {
 				t.Fatalf("total SQL statements = %d, want at least %d", statements.Requests, tc.wantAuthorization)
@@ -728,8 +732,10 @@ func TestGitHubPRFeedbackForwarderConcurrentPassesKeepCachesIndependentAndQueueO
 		forwarded += len(outcome.result.Forwarded)
 		duplicates += outcome.result.SkippedDuplicate
 	}
-	if got := fixture.counter.Snapshot().GitHubAuthorizationReads; got != 2 {
-		t.Fatalf("concurrent authorization lookups = %d, want one per forwarding pass", got)
+	// Two preliminary lookups, plus one or two transactional checks depending
+	// on whether the losing pass observes deduplication before admission.
+	if got := fixture.counter.Snapshot().GitHubAuthorizationReads; got < 3 || got > 4 {
+		t.Fatalf("concurrent authorization lookups = %d, want 3 or 4", got)
 	}
 	if forwarded != 1 || duplicates != 1 {
 		t.Fatalf("concurrent results forwarded=%d duplicates=%d, want one each", forwarded, duplicates)
@@ -743,7 +749,7 @@ func TestGitHubPRFeedbackForwarderConcurrentPassesKeepCachesIndependentAndQueueO
 	}
 }
 
-func TestGitHubPRFeedbackForwarderUsesOneAuthorizationLookupPerBatch(t *testing.T) {
+func TestGitHubPRFeedbackForwarderCachesLookupButRechecksEachAdmission(t *testing.T) {
 	for _, itemCount := range []int{1, 10, 100} {
 		t.Run(fmt.Sprintf("feedback_items=%d", itemCount), func(t *testing.T) {
 			fixture := newGitHubPRFeedbackForwarderFixture(t, []string{"alice"}, nil)
@@ -760,8 +766,9 @@ func TestGitHubPRFeedbackForwarderUsesOneAuthorizationLookupPerBatch(t *testing.
 			if len(result.Forwarded) != itemCount {
 				t.Fatalf("forwarded = %d, want %d", len(result.Forwarded), itemCount)
 			}
-			if got := fixture.counter.Snapshot().GitHubAuthorizationReads; got != 1 {
-				t.Fatalf("authorization selects = %d, want 1", got)
+			// One cached service lookup plus one current check per queue transaction.
+			if got := fixture.counter.Snapshot().GitHubAuthorizationReads; got != 1+itemCount {
+				t.Fatalf("authorization selects = %d, want %d", got, 1+itemCount)
 			}
 		})
 	}
@@ -792,7 +799,7 @@ func BenchmarkGitHubPRFeedbackForwarderAuthorizationCache(b *testing.B) {
 			fixture.counter.SetEnabled(false)
 			statements := fixture.counter.Snapshot()
 			authorizationSelects := statements.GitHubAuthorizationReads
-			wantAuthorizationSelects := 1
+			wantAuthorizationSelects := 1 + itemCount
 			if authorizationSelects != wantAuthorizationSelects {
 				b.Fatalf("warm authorization selects = %d, want %d; backend I/O: %+v", authorizationSelects, wantAuthorizationSelects, statements)
 			}

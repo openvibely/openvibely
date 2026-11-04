@@ -41,7 +41,30 @@ func NewDiscordAuthRepo(db *sql.DB) *DiscordAuthRepo {
 
 // ListByProject returns the authorized Discord users managed by one project.
 func (r *DiscordAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.DiscordAuthorizedUser, error) {
-	return r.allowlist.ListByProject(ctx, projectID)
+	users, err := r.allowlist.ListByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.allowlist.db.QueryContext(ctx, `SELECT s.allowlist_id,s.application_user_id FROM discord_sender_identities s JOIN discord_authorized_users a ON a.id=s.allowlist_id WHERE a.project_id=?`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	bindings := map[string]string{}
+	for rows.Next() {
+		var id, user string
+		if err := rows.Scan(&id, &user); err != nil {
+			return nil, err
+		}
+		bindings[id] = user
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range users {
+		users[i].ApplicationUserID = bindings[users[i].ID]
+	}
+	return users, nil
 }
 
 // CountByProject returns the authorized Discord-user count for one project.
@@ -90,10 +113,21 @@ func (r *DiscordAuthRepo) Create(ctx context.Context, u *models.DiscordAuthorize
 
 // DeleteByProject removes all Discord authorization rows owned by one project.
 func (r *DiscordAuthRepo) DeleteByProject(ctx context.Context, projectID string) error {
-	if _, err := execBoundSQLite(ctx, r.allowlist.db, `DELETE FROM discord_authorized_users WHERE project_id = ?`, projectID); err != nil {
-		return fmt.Errorf("delete discord auth users: %w", err)
-	}
-	return nil
+	return withImmediateTx(ctx, r.allowlist.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM discord_authorized_users WHERE project_id=?`, projectID); err != nil {
+			return fmt.Errorf("delete discord auth users: %w", err)
+		}
+		if identified {
+			return projectAudit(ctx, tx, projectID, actor.UserID, "channel.allowlist_cleared", "discord", "{}")
+		}
+		return nil
+	})
 }
 
 // Delete removes an authorized Discord user by ID.

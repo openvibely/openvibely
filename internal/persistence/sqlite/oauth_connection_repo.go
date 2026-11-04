@@ -189,6 +189,10 @@ func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx co
 	}
 	defer cleanup()
 
+	if err := requireCredentialActor(ctx, tx); err != nil {
+		return false, err
+	}
+
 	updated, err := replaceLinkedOAuthConnectionTx(ctx, tx, modelID, connectionID, expectedRevision, provider, accessToken, refreshToken, expiresAt, accountID, displayName, principalHash)
 	if err != nil || !updated {
 		return updated, err

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -287,10 +289,19 @@ func (s *DiscordService) ReloadFromSettings(ctx context.Context) error {
 }
 
 func (s *DiscordService) Disconnect(ctx context.Context) error {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return accessErr
+	}
+	if s.settingsRepo == nil {
+		return fmt.Errorf("settings repository not configured")
+	}
+	if err := s.settingsRepo.SetMany(ctx, map[string]string{DiscordSettingBotToken: "",
+		DiscordSettingBotUserID:     "",
+		DiscordSettingSendResponses: ""}); err != nil {
+		return err
+	}
 	s.Stop()
-	_ = s.setSetting(ctx, DiscordSettingBotToken, "")
-	_ = s.setSetting(ctx, DiscordSettingBotUserID, "")
-	_ = s.setSetting(ctx, DiscordSettingSendResponses, "")
 	return nil
 }
 
@@ -310,6 +321,10 @@ func (s *DiscordService) GetConnectionStatus(ctx context.Context) (DiscordConnec
 }
 
 func (s *DiscordService) TestConnection(ctx context.Context) error {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return accessErr
+	}
 	botToken := strings.TrimSpace(s.getSetting(ctx, DiscordSettingBotToken))
 	if botToken == "" {
 		return fmt.Errorf("discord bot token is not configured")
@@ -323,7 +338,9 @@ func (s *DiscordService) TestConnection(ctx context.Context) error {
 		return fmt.Errorf("auth test failed: %w", err)
 	}
 	if user != nil && strings.TrimSpace(user.ID) != "" {
-		_ = s.setSetting(ctx, DiscordSettingBotUserID, user.ID)
+		if err := s.setSetting(ctx, DiscordSettingBotUserID, user.ID); err != nil {
+			return fmt.Errorf("save discord bot identity: %w", err)
+		}
 	}
 	return nil
 }
@@ -337,6 +354,9 @@ func (s *DiscordService) IsSendResponsesEnabled(ctx context.Context) bool {
 }
 
 func (s *DiscordService) handleMessageCreate(ctx context.Context, sess *discordgo.Session, msg *discordgo.MessageCreate) {
+	if s.requiresVerifiedDiscordIdentity() {
+		return
+	}
 	if msg == nil || msg.Message == nil || msg.Author == nil {
 		return
 	}
@@ -404,6 +424,9 @@ type discordIncomingAttachment struct {
 }
 
 func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
+	if s.requiresVerifiedDiscordIdentity() {
+		return
+	}
 	if msg.ChannelID == "" || msg.UserID == "" || strings.TrimSpace(msg.Text) == "" {
 		return
 	}
@@ -642,6 +665,9 @@ func (s *DiscordService) SendChatResponse(ctx context.Context, task models.Task,
 }
 
 func (s *DiscordService) checkAuthorization(ctx context.Context, projectID, discordUserID string) bool {
+	if s.requiresVerifiedDiscordIdentity() {
+		return false
+	}
 	if s.discordAuthRepo == nil {
 		return true
 	}
@@ -658,6 +684,9 @@ func (s *DiscordService) checkAuthorization(ctx context.Context, projectID, disc
 }
 
 func (s *DiscordService) getActiveProject(ctx context.Context, userID string) string {
+	if s.requiresVerifiedDiscordIdentity() {
+		return ""
+	}
 	key := strings.TrimSpace(userID)
 	for {
 		s.mu.RLock()
@@ -852,10 +881,21 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		ProjectID:          projectID,
 		ProjectRepo:        s.projectRepo,
 	}))
+	for name, handler := range handlers {
+		handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
+			if s.requiresVerifiedDiscordIdentity() {
+				return "", authz.ErrDenied
+			}
+			return handler(ctx, input)
+		}
+	}
 	return handlers
 }
 
 func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID string) error {
+	if s.requiresVerifiedDiscordIdentity() {
+		return authz.ErrDenied
+	}
 	key := strings.TrimSpace(userID)
 	s.projectSelectionMutationMu.Lock()
 	defer s.projectSelectionMutationMu.Unlock()
@@ -1405,4 +1445,10 @@ func (s *DiscordService) setSetting(ctx context.Context, key, value string) erro
 		return nil
 	}
 	return s.settingsRepo.Set(ctx, key, value)
+}
+
+// Discord's installation-wide allowlist is not application identity. Do not
+// borrow a caller/installer principal until verified project bindings exist.
+func (s *DiscordService) requiresVerifiedDiscordIdentity() bool {
+	return s.workerSvc != nil && s.workerSvc.runOrganizations != nil && !s.workerSvc.runAuthOff
 }

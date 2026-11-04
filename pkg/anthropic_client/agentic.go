@@ -1680,6 +1680,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	}
 
 	buildReq := func() (*http.Request, error) {
+		if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+			return nil, err
+		}
 		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, err

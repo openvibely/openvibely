@@ -65,6 +65,7 @@ type streamingResponseParams struct {
 	AgentDefinition             *models.Agent
 	ChatHistory                 []models.Execution
 	ProjectID                   string
+	GoalID                      string
 	PrincipalID                 string
 	SystemContext               string
 	WorkDir                     string
@@ -310,7 +311,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.updateWorkDone != nil {
 		defer params.updateWorkDone()
 	}
-	baseCtx := context.Background()
+	baseCtx := h.followupAuthorizationContext(context.Background())
 	if h.organizationSvc != nil && strings.HasPrefix(params.PrincipalID, "user:") {
 		user, err := h.organizationSvc.Store.UserByID(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))
 		if err != nil || user == nil || user.Disabled || user.Role == "" {
@@ -319,6 +320,30 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		baseCtx = models.WithPrincipal(baseCtx, user.Principal)
 	}
+	if h.projectAccessSvc != nil && isGoalContinuation(params.InputOrigin, params.InputOriginAgent) {
+		authorizedCtx, err := h.queuedGoalContinuationContext(baseCtx, models.ThreadInput{GoalID: params.GoalID, TaskID: params.TaskID, Source: models.TaskOriginSystemAgent, OriginAgent: models.AgentSystemKindGoal, AuthorUserID: strings.TrimPrefix(params.PrincipalID, "user:")})
+		if err != nil {
+			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "goal continuation authorization failed", 0, params.ChannelReply)
+			return
+		}
+		baseCtx = authorizedCtx
+	}
+
+	if (params.IsTaskFollowup || isSlackChannelRun(params)) && h.projectAccessSvc != nil {
+		authorizedCtx, err := h.followupUserContext(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))
+		if err == nil {
+			err = h.requireFollowupAccess(authorizedCtx, params)
+		}
+		if err != nil {
+			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "follow-up authorization failed", 0, params.ChannelReply)
+			return
+		}
+		var authorizationCancel context.CancelFunc
+		baseCtx, authorizationCancel = context.WithCancel(authorizedCtx)
+		defer authorizationCancel()
+		h.watchFollowupAccess(baseCtx, authorizationCancel, params)
+	}
+
 	// Memory recall is injected for task-thread followups through the full task
 	// lifecycle path below. Interactive chat uses a recall-only lifecycle path so
 	// relevant project memory reaches Chat without triggering after_complete memory
@@ -759,6 +784,11 @@ modelLoop:
 			}
 		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		if h.threadInputRepo != nil && params.ExecID != "" {
+			requestCtx = llmcontracts.WithBeforeModelSend(requestCtx, func(sendCtx context.Context) error {
+				return h.threadInputRepo.CheckSteeringDelivery(sendCtx, params.ExecID, preparedSteeringInputIDs(pendingSteering))
+			})
+		}
 		requestCtx = params.withAttachmentContext(requestCtx)
 		requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, nil)
 		if params.Agent.Provider == models.ProviderOpenAI && pendingSteering.count() > 0 {
@@ -2087,6 +2117,22 @@ func (h *Handler) applySwarmChildFollowupRetryStart(ctx context.Context, task *m
 }
 
 func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.ThreadInput) error {
+	if h.projectAccessSvc != nil {
+		restored, err := h.followupUserContext(ctx, input.AuthorUserID)
+		if err == nil {
+			err = h.requireFollowupAccess(restored, streamingResponseParams{TaskID: input.TaskID, ProjectID: input.ProjectID})
+		}
+		if err != nil {
+			return h.rejectUnauthorizedQueuedFollowup(ctx, input, err)
+		}
+		ctx = restored
+	}
+	var authorizationErr error
+	ctx, authorizationErr = h.queuedGoalContinuationContext(ctx, input)
+	if authorizationErr != nil {
+		return h.rejectUnauthorizedQueuedFollowup(ctx, input, authorizationErr)
+	}
+
 	var updateWorkDone func()
 	if h.updateWorkTracker != nil {
 		var err error
@@ -2216,7 +2262,14 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			automationContext = &value
 		}
 	}
+	principalID := ""
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		principalID = "user:" + p.UserID
+	}
+
 	h.startStreamingResponse(streamingResponseParams{
+		GoalID:                          input.GoalID,
+		PrincipalID:                     principalID,
 		ExecID:                          exec.ID,
 		RetrySourceExecutionID:          input.RetrySourceExecutionID,
 		TaskID:                          exec.TaskID,
@@ -4530,6 +4583,13 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 	if task == nil {
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
+	if isGoalContinuation(origin, originAgent) {
+		ctx, err = h.resolveGoalContinuation(ctx, taskID, "")
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	agentID := ""
 	if task.AgentID != nil {
 		agentID = *task.AgentID
@@ -4553,6 +4613,7 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 	if err != nil {
 		return nil, err
 	}
+	goalID, _ := ctx.Value(continuationGoalKey{}).(string)
 	reply := firstChannelReply(channelReply)
 	queued := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
@@ -4565,6 +4626,7 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 		Content:        message,
 		Source:         origin,
 		OriginAgent:    originAgent,
+		GoalID:         goalID,
 	}
 	if origin == models.TaskOriginEmail && strings.TrimSpace(reply.EmailFrom) != "" {
 		queued.EmailFrom = reply.EmailFrom

@@ -11,6 +11,8 @@ type GitHubPRFeedbackForwarded struct {
 	FeedbackKind        string    `json:"feedback_kind"`
 	GitHubID            string    `json:"github_id"`
 	GitHubNodeID        string    `json:"github_node_id"`
+	AuthorUserID        int64     `json:"author_user_id"`
+	ProviderHost        string    `json:"provider_host"`
 	AuthorLogin         string    `json:"author_login"`
 	HTMLURL             string    `json:"html_url"`
 	Body                string    `json:"body"`

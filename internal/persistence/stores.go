@@ -229,6 +229,8 @@ type CustomPersonalityStore interface {
 
 // DiscordAuthStore persists authorized Discord users.
 type DiscordAuthStore interface {
+	BindApplicationUser(ctx context.Context, projectID, allowlistID, userID string) error
+	ResolveApplicationUser(ctx context.Context, projectID, externalID string) (string, error)
 	CountByProject(ctx context.Context, projectID string) (int, error)
 	Create(ctx context.Context, u *models.DiscordAuthorizedUser) error
 	DeleteByProject(ctx context.Context, projectID string) error
@@ -366,6 +368,9 @@ type ExecutionStore interface {
 
 // GitHubAuthStore persists authorized GitHub users.
 type GitHubAuthStore interface {
+	BindReviewerIdentity(ctx context.Context, binding models.GitHubReviewerIdentity) error
+	ListReviewerIdentities(ctx context.Context, projectID string) ([]models.GitHubReviewerIdentity, error)
+	ResolveReviewerIdentity(ctx context.Context, projectID, host string, externalID int64, login string) (string, error)
 	DeleteAuthorizedActor(ctx context.Context, id string) error
 	GetEnabledProjectInbox(ctx context.Context, projectID string) (*models.GitHubProjectInbox, error)
 	GetProjectInbox(ctx context.Context, projectID string) (*models.GitHubProjectInbox, error)
@@ -579,6 +584,7 @@ type SettingsStore interface {
 	GetMany(ctx context.Context, keys []string) (map[string]string, error)
 	MatchesInTx(ctx context.Context, tx Tx, expected map[string]string) (bool, error)
 	RemoveChannelsBulk(ctx context.Context, projectID string, values map[string]string, webhookIDs []string, removeDiscordAuthorization bool) error
+	RemoveDiscordChannel(ctx context.Context, projectID string, values map[string]string) error
 	Set(ctx context.Context, key string, value string) error
 	SetMany(ctx context.Context, values map[string]string) error
 }
@@ -591,6 +597,8 @@ type SkillAnalyticsStore interface {
 
 // SlackAuthStore persists authorized Slack users.
 type SlackAuthStore interface {
+	BindApplicationUser(ctx context.Context, projectID, allowlistID, teamID, userID string) error
+	ResolveApplicationUser(ctx context.Context, projectID, teamID, externalID string) (string, error)
 	CountByProject(ctx context.Context, projectID string) (int, error)
 	Create(ctx context.Context, u *models.SlackAuthorizedUser) error
 	DeleteForProject(ctx context.Context, projectID string, id string) error
@@ -745,6 +753,9 @@ type TaskStore interface {
 	UpdateSlackOrigin(ctx context.Context, id string) error
 	UpdateStatus(ctx context.Context, id string, status models.TaskStatus) error
 	UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status string, config string, sequence int) error
+	PrepareSwarmSuccessor(ctx context.Context, parentID, sourceID string, target *models.Task) error
+	PrepareSwarmRerun(ctx context.Context, parent, child *models.Task, parentConfig, childConfig string) error
+	PreparePlannerFollowup(ctx context.Context, parent, planner, nextPlanner *models.Task, parentConfig string) error
 	UpdateTelegramOrigin(ctx context.Context, id string, chatID int64) error
 	UpdateWorktreeInfo(ctx context.Context, id string, worktreePath string, branch string) error
 	UpdateXOrigin(ctx context.Context, id string) error
@@ -771,6 +782,7 @@ type TelegramUserProjectStore interface {
 
 // ThreadInputStore persists queued task thread and chat inputs.
 type ThreadInputStore interface {
+	CheckSteeringDelivery(ctx context.Context, executionID string, inputIDs []string) error
 	ListAppliedSteeringByExecution(ctx context.Context, executionID string) ([]models.ThreadInput, error)
 	BindPreExecutionQueuedTaskInputs(ctx context.Context, taskID string, executionID string) error
 	CancelPending(ctx context.Context, id string) (*models.ThreadInput, error)
@@ -860,6 +872,7 @@ type WorkerStore interface {
 
 // XAuthStore persists authorized X users.
 type XAuthStore interface {
+	ResolveApplicationUser(ctx context.Context, projectID, externalID string) (string, error)
 	CountByProject(ctx context.Context, projectID string) (int, error)
 	Create(ctx context.Context, u *models.XAuthorizedUser) error
 	Delete(ctx context.Context, projectID string, id string) error

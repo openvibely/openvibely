@@ -18,6 +18,7 @@ type authorizedUserCRUD[T any] struct {
 	projectID            func(*T) string
 	notConfiguredMessage string
 	configured           bool
+	authorize            func(echo.Context, string, bool) error
 }
 
 func (crud authorizedUserCRUD[T]) listHandler(c echo.Context) error {
@@ -71,6 +72,11 @@ func authorizedUserProjectLookup[T any](
 }
 
 func (crud authorizedUserCRUD[T]) listUsers(c echo.Context, projectID string) error {
+	if crud.authorize != nil {
+		if err := crud.authorize(c, projectID, false); err != nil {
+			return err
+		}
+	}
 	if projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
@@ -78,6 +84,11 @@ func (crud authorizedUserCRUD[T]) listUsers(c echo.Context, projectID string) er
 }
 
 func (crud authorizedUserCRUD[T]) createUser(c echo.Context, projectID string, create func(context.Context) error) error {
+	if crud.authorize != nil {
+		if err := crud.authorize(c, projectID, true); err != nil {
+			return err
+		}
+	}
 	if projectID == "" || projectID == models.AllProjectsID {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
@@ -97,6 +108,11 @@ func (crud authorizedUserCRUD[T]) deleteUser(
 	loadProjectID func(context.Context, string) (string, bool, error),
 	deleteUser func(context.Context, string, string) error,
 ) error {
+	if crud.authorize != nil {
+		if err := crud.authorize(c, projectID, true); err != nil {
+			return err
+		}
+	}
 	if projectID == "" || projectID == models.AllProjectsID {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}

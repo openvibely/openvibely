@@ -4,11 +4,13 @@ import "time"
 
 // XAuthorizedUser grants one X identity inbound access to one project.
 type XAuthorizedUser struct {
-	ID        string    `json:"id"`
-	ProjectID string    `json:"project_id"`
-	XUserID   string    `json:"x_user_id"`
-	Username  string    `json:"username,omitempty"`
-	AddedAt   time.Time `json:"added_at"`
+	ApplicationUserID string    `json:"application_user_id,omitempty"`
+	VerifiedBy        string    `json:"verified_by,omitempty"`
+	ID                string    `json:"id"`
+	ProjectID         string    `json:"project_id"`
+	XUserID           string    `json:"x_user_id"`
+	Username          string    `json:"username,omitempty"`
+	AddedAt           time.Time `json:"added_at"`
 }
 
 // XTaskContext preserves the tweet reply destination for channel-origin work.

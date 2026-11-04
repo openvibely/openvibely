@@ -1865,6 +1865,34 @@ func TestBrowserFunctional_AnalyticsAccountAlerts(t *testing.T) {
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsMemberSkipsAccounts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}, false).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<!doctype html><html><body><main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+ window.Chart=function(){this.destroy=function(){};};
+ let forbidden=0;
+ window.fetch=async function(url){
+  const u=new URL(url,location.href), projection=u.searchParams.get('projection');
+  if(projection==='accounts'||projection==='account_limits'||u.pathname.includes('/resets'))forbidden++;
+  return {ok:true,json:async()=>({totals:{},models:[],configuration_breakdown:[],usage_rate:[],accounts:[]})};
+ };
+ window.addEventListener('load',async()=>{
+  const result=document.getElementById('reconnect-result');
+  try {
+   for(let i=0;i<100&&!document.getElementById('accountUsageCards').textContent.includes('organization admins');i++)await new Promise(r=>setTimeout(r,20));
+   if(!document.getElementById('accountUsageCards').textContent.includes('organization admins'))throw new Error('missing permission explanation');
+   document.getElementById('refreshBtn').click();
+   await new Promise(r=>setTimeout(r,100));
+   if(forbidden)throw new Error('member requested account data');
+   result.dataset.testResult='pass';
+  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+ });</script>` + rendered.String() + `</body></html>`
+	runReconnectChromeFixture(t, fixture)
+}
+
 // A usage-alert deep link must reveal the account without scrolling hidden shell
 // ancestors. In the desktop app those ancestors also contain the native title bar.
 func TestBrowserFunctional_AnalyticsAccountLinkPreservesShellPosition(t *testing.T) {

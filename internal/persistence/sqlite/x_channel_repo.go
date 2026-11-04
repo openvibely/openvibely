@@ -16,7 +16,7 @@ type XAuthRepo struct{ db *sql.DB }
 func NewXAuthRepo(db *sql.DB) *XAuthRepo { return &XAuthRepo{db: db} }
 
 func (r *XAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.XAuthorizedUser, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, x_user_id, username, added_at FROM x_authorized_users WHERE `+analyticsProjectPredicate("project_id", projectID)+` ORDER BY username, x_user_id`, strings.TrimSpace(projectID))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, x_user_id, username, added_at, application_user_id, verified_by FROM x_authorized_users WHERE `+analyticsProjectPredicate("project_id", projectID)+` ORDER BY username, x_user_id`, strings.TrimSpace(projectID))
 	if err != nil {
 		return nil, fmt.Errorf("list X authorized users: %w", err)
 	}
@@ -24,7 +24,7 @@ func (r *XAuthRepo) ListByProject(ctx context.Context, projectID string) ([]mode
 	var users []models.XAuthorizedUser
 	for rows.Next() {
 		var u models.XAuthorizedUser
-		if err := rows.Scan(&u.ID, &u.ProjectID, &u.XUserID, &u.Username, &u.AddedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.ProjectID, &u.XUserID, &u.Username, &u.AddedAt, &u.ApplicationUserID, &u.VerifiedBy); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -62,28 +62,81 @@ func (r *XAuthRepo) FirstAuthorizedProject(ctx context.Context, userID string) (
 	return projectID, nil
 }
 
+func (r *XAuthRepo) ResolveApplicationUser(ctx context.Context, projectID, externalID string) (string, error) {
+	var userID string
+	err := r.db.QueryRowContext(ctx, `SELECT application_user_id FROM x_authorized_users WHERE project_id=? AND x_user_id=? AND verified_by<>'' AND application_user_id<>''`, projectID, externalID).Scan(&userID)
+	if err == sql.ErrNoRows {
+		return "", persistence.ErrProjectDenied
+	}
+	return userID, err
+}
+
 func (r *XAuthRepo) Create(ctx context.Context, u *models.XAuthorizedUser) error {
 	if u == nil || strings.TrimSpace(u.ProjectID) == "" || strings.TrimSpace(u.XUserID) == "" {
 		return fmt.Errorf("project and X user ID are required")
 	}
 	u.ID = persistence.NewID()
-	row := queryRowBoundSQLite(ctx, r.db, `INSERT INTO x_authorized_users(id, project_id, x_user_id, username) VALUES(?, ?, ?, ?) RETURNING added_at`, u.ID, strings.TrimSpace(u.ProjectID), strings.TrimSpace(u.XUserID), strings.TrimPrefix(strings.TrimSpace(u.Username), "@"))
-	if err := row.Scan(&u.AddedAt); err != nil {
-		return fmt.Errorf("create X authorized user: %w", err)
-	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+				return err
+			}
+		}
+		if u.ApplicationUserID != "" {
+			if !identified {
+				return persistence.ErrOrgDenied
+			}
+			role, err := projectRole(ctx, tx, u.ApplicationUserID, u.ProjectID)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+			u.VerifiedBy = actor.UserID
+		} else {
+			u.VerifiedBy = ""
+		}
+		err := tx.QueryRowContext(ctx, `INSERT INTO x_authorized_users(id,project_id,x_user_id,username,application_user_id,verified_by) VALUES(?,?,?,?,?,?) RETURNING added_at`, u.ID, strings.TrimSpace(u.ProjectID), strings.TrimSpace(u.XUserID), strings.TrimPrefix(strings.TrimSpace(u.Username), "@"), u.ApplicationUserID, u.VerifiedBy).Scan(&u.AddedAt)
+		if err != nil {
+			return err
+		}
+		if identified {
+			action := "x.sender_bound"
+			if u.ApplicationUserID == "" {
+				action = "x.sender_allowed"
+			}
+			return projectAudit(ctx, tx, u.ProjectID, actor.UserID, action, u.ID, "{}")
+		}
+		return nil
+	})
 }
 
 func (r *XAuthRepo) Delete(ctx context.Context, projectID, id string) error {
-	res, err := execBoundSQLite(ctx, r.db, `DELETE FROM x_authorized_users WHERE id = ? AND project_id = ?`, strings.TrimSpace(id), strings.TrimSpace(projectID))
-	if err != nil {
-		return fmt.Errorf("delete X authorized user: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return persistence.ErrNotFound
-	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+				return err
+			}
+		}
+		res, err := tx.ExecContext(ctx, `DELETE FROM x_authorized_users WHERE id=? AND project_id=?`, strings.TrimSpace(id), strings.TrimSpace(projectID))
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return persistence.ErrNotFound
+		}
+		if identified {
+			return projectAudit(ctx, tx, projectID, actor.UserID, "x.sender_removed", id, "{}")
+		}
+		return nil
+	})
 }
 
 func (r *XAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
@@ -194,9 +247,48 @@ func (r *XInboundReceiptRepo) Claim(ctx context.Context, tweetID, projectID stri
 // completing or releasing a receipt reclaimed by a newer worker.
 func (r *XInboundReceiptRepo) CompleteWithHandoff(ctx context.Context, tweetID, token string, taskID *string, persist func(persistence.Tx) error) (alreadyHandedOff bool, err error) {
 	err = withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		var status, currentToken string
-		if err := tx.QueryRowContext(ctx, `SELECT status, lease_token FROM x_inbound_receipts WHERE tweet_id = ?`, tweetID).Scan(&status, &currentToken); err != nil {
+		var status, currentToken, projectID string
+		if err := tx.QueryRowContext(ctx, `SELECT status, lease_token, project_id FROM x_inbound_receipts WHERE tweet_id = ?`, tweetID).Scan(&status, &currentToken, &projectID); err != nil {
 			return fmt.Errorf("load X receipt for handoff: %w", err)
+		}
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			installerID := actor.UserID
+			identity, mapped := models.XIngressIdentityFromContext(ctx)
+			if mapped {
+				if identity.ProjectID != projectID || identity.UserID != actor.UserID {
+					return persistence.ErrProjectDenied
+				}
+				var boundUser string
+				if err := tx.QueryRowContext(ctx, `SELECT application_user_id FROM x_authorized_users WHERE project_id=? AND x_user_id=? AND verified_by<>''`, projectID, identity.ExternalUserID).Scan(&boundUser); err != nil {
+					return persistence.ErrProjectDenied
+				}
+				if boundUser == "" || boundUser != actor.UserID {
+					return persistence.ErrProjectDenied
+				}
+				installerID = identity.InstallerUserID
+			}
+			if _, err := orgActor(ctx, tx, installerID); err != nil {
+				return err
+			}
+			var saved string
+			err := tx.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key='x_run_as_user_id'`).Scan(&saved)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			if saved == "" {
+				saved = models.BootstrapUserID
+			}
+			if saved != installerID {
+				return persistence.ErrOrgDenied
+			}
+			role, err := projectRole(ctx, tx, actor.UserID, projectID)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
 		}
 		if status == "completed" {
 			alreadyHandedOff = true
@@ -221,6 +313,9 @@ func (r *XInboundReceiptRepo) CompleteWithHandoff(ctx context.Context, tweetID, 
 		changed, _ := res.RowsAffected()
 		if changed != 1 {
 			return ErrXReceiptLeaseLost
+		}
+		if identified {
+			return projectAudit(ctx, tx, projectID, actor.UserID, "x.message_handed_off", tweetID, "{}")
 		}
 		return nil
 	})

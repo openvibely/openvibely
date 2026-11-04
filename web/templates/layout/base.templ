@@ -6049,7 +6049,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				}
 
 				function applySystemUpdateFromToast(toast) {
-					if (!toast || toast.dataset.systemUpdateApplying === 'true') return;
+					if (window.openVibelyCanManageUpdates !== true || !toast || toast.dataset.systemUpdateApplying === 'true') return;
 					toast.dataset.systemUpdateApplying = 'true';
 					fetch('/api/system/update/apply', { method: 'POST', headers: { 'Accept': 'application/json' } })
 						.then(function(response) {
@@ -6120,7 +6120,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						'</button>';
 					toast.addEventListener('click', function(event) {
 						if (event.target && event.target.closest && event.target.closest('button')) return;
-						applySystemUpdateFromToast(toast);
+						if (window.openVibelyCanManageUpdates === true) applySystemUpdateFromToast(toast);
+						else navigateSystemUpdateToAlerts();
 					});
 					var dismissButton = toast.querySelector('[data-system-update-dismiss]');
 					if (dismissButton) {
@@ -6157,6 +6158,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					refreshPageBuildVersion();
 					try {
 						var response = await fetch('/api/system/update', { cache: 'no-store', headers: { 'Accept': 'application/json' } });
+						window.openVibelyCanManageUpdates = response.headers.get('X-OpenVibely-Can-Manage-Updates') === 'true';
 						if (response.status === 204) {
 							handleGlobalSystemUpdateSnapshot(null);
 							return;

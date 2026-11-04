@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -30,6 +31,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -501,6 +503,10 @@ func (s *EmailService) ReloadFromSettings(ctx context.Context) error {
 }
 
 func (s *EmailService) TestConnection(ctx context.Context) error {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return accessErr
+	}
 	cfg, err := s.loadConfig(ctx)
 	if err != nil {
 		return err
@@ -614,6 +620,9 @@ func (s *EmailService) pollLoop(run *emailPollRun, cfg EmailRuntimeConfig) {
 }
 
 func (s *EmailService) markUnreadSeenForRun(ctx context.Context, cfg EmailRuntimeConfig, run *emailPollRun) error {
+	if s.requiresVerifiedEmailIdentity() {
+		return authz.ErrDenied
+	}
 	if !s.pollRunCanContinue(ctx, run) {
 		return ctx.Err()
 	}
@@ -662,6 +671,9 @@ func emailPollCanContinue(ctx context.Context, run *emailPollRun) bool {
 }
 
 func (s *EmailService) pollRunCanContinue(ctx context.Context, run *emailPollRun) bool {
+	if s.requiresVerifiedEmailIdentity() {
+		return false
+	}
 	if !emailPollCanContinue(ctx, run) {
 		return false
 	}
@@ -675,6 +687,9 @@ func (s *EmailService) pollRunCanContinue(ctx context.Context, run *emailPollRun
 }
 
 func (s *EmailService) acquirePollSideEffects(ctx context.Context, run *emailPollRun) bool {
+	if s.requiresVerifiedEmailIdentity() {
+		return false
+	}
 	if run == nil {
 		return emailPollCanContinue(ctx, nil)
 	}
@@ -1238,6 +1253,9 @@ type emailIncomingProcessResult struct {
 }
 
 func (s *EmailService) ProcessIncoming(ctx context.Context, msg EmailInboundMessage) bool {
+	if s.requiresVerifiedEmailIdentity() {
+		return false
+	}
 	if s.processIncomingMessageFn != nil {
 		return s.processIncomingMessageFn(ctx, msg)
 	}
@@ -1245,6 +1263,9 @@ func (s *EmailService) ProcessIncoming(ctx context.Context, msg EmailInboundMess
 }
 
 func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey string) emailIncomingProcessResult {
+	if s.requiresVerifiedEmailIdentity() {
+		return emailIncomingProcessResult{}
+	}
 	return s.processIncomingMessageWithSelfAddress(ctx, msg, mailboxIdentity, messageKey, s.getConfiguredAddress(ctx))
 }
 
@@ -1253,6 +1274,9 @@ func (s *EmailService) processIncomingMessageWithSelfAddress(ctx context.Context
 }
 
 func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey, selfAddress string) emailIncomingProcessResult {
+	if s.requiresVerifiedEmailIdentity() {
+		return emailIncomingProcessResult{}
+	}
 	if isIgnoredEmailWithNormalizedSelfAddress(msg, selfAddress) ||
 		(strings.TrimSpace(msg.Body) == "" && len(msg.Attachments) == 0) {
 		return emailIncomingProcessResult{handled: true}
@@ -1471,6 +1495,9 @@ func (s *EmailService) resolveAuthorizedProject(ctx context.Context, sender stri
 }
 
 func (s *EmailService) resolveAuthorizedProjectForInbound(ctx context.Context, sender string) (string, bool, error) {
+	if s.requiresVerifiedEmailIdentity() {
+		return "", false, authz.ErrDenied
+	}
 	if s.emailAuthRepo == nil || sender == "" || s.projectRepo == nil {
 		return "", false, fmt.Errorf("email authorization dependencies are not configured")
 	}
@@ -1560,6 +1587,14 @@ func (s *EmailService) emailActionHandlers(projectID, sender string) map[string]
 		ProjectID:          projectID,
 		ProjectRepo:        s.projectRepo,
 	}))
+	for name, handler := range handlers {
+		handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
+			if s.requiresVerifiedEmailIdentity() {
+				return "", authz.ErrDenied
+			}
+			return handler(ctx, input)
+		}
+	}
 	return handlers
 }
 
@@ -1999,4 +2034,9 @@ func redactEmail(email string) string {
 		return "[redacted]"
 	}
 	return email[:1] + "***" + email[at:]
+}
+
+// An external sender allowlist does not establish an application identity.
+func (s *EmailService) requiresVerifiedEmailIdentity() bool {
+	return s.workerSvc != nil && s.workerSvc.runOrganizations != nil && !s.workerSvc.runAuthOff
 }

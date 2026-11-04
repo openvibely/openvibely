@@ -22,6 +22,7 @@ type GitHubPRFeedbackForwarder struct {
 	prRepo       persistence.TaskPullRequestStore
 	feedbackRepo persistence.GitHubPRFeedbackStore
 	authRepo     persistence.GitHubAuthStore
+	authorize    func(context.Context) error
 }
 
 type GitHubPRFeedbackForwardResult struct {
@@ -68,6 +69,11 @@ func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Contex
 	if projectID == "" {
 		return nil, fmt.Errorf("project id is required")
 	}
+	if f.authorize != nil {
+		if err := f.authorize(ctx); err != nil {
+			return nil, err
+		}
+	}
 	authenticatedUser, err := f.github.GetAuthenticatedUserForRepo(ctx, repo)
 	if err != nil {
 		return nil, err
@@ -88,6 +94,11 @@ func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Contex
 		prRepo, err := parsePersistedGitHubPullRequestURL(pr.PRURL, pr.PRNumber, repo)
 		if err != nil {
 			continue
+		}
+		if f.authorize != nil {
+			if err := f.authorize(ctx); err != nil {
+				return nil, err
+			}
 		}
 		items, err := f.github.ListPullRequestFeedback(ctx, prRepo, pr.PRNumber)
 		if err != nil {
@@ -144,7 +155,13 @@ func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Contex
 			if createdAt.IsZero() {
 				createdAt = time.Now().UTC()
 			}
+			host, err := githubRepositoryWebHost(prRepo)
+			if err != nil {
+				return nil, err
+			}
 			feedbackRecord := &models.GitHubPRFeedbackForwarded{
+				AuthorUserID:      item.AuthorUserID,
+				ProviderHost:      host,
 				TaskPullRequestID: pr.ID,
 				TaskID:            pr.TaskID,
 				RepoFullName:      prRepo.FullName,
@@ -156,6 +173,13 @@ func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Contex
 				HTMLURL:           item.URL,
 				Body:              item.Body,
 				CreatedAt:         createdAt,
+			}
+			// Revalidate the saved execution after provider reads and immediately
+			// before each durable handoff; a previous item's check is insufficient.
+			if f.authorize != nil {
+				if err := f.authorize(ctx); err != nil {
+					return nil, err
+				}
 			}
 			recorded, err := f.feedbackRepo.RecordForwardedAndQueue(ctx, feedbackRecord, queued)
 			if err != nil {

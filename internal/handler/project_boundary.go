@@ -9,7 +9,7 @@ import (
 )
 
 // taskProjectBoundary checks task ownership before any task route runs. This is
-// a project-consistency check, not user authorization (auth is instance-wide).
+// a project-consistency check, additional to projectAccessBoundary authorization.
 // Unscoped deep links retain their existing behavior; an explicit or selected
 // project must never be ignored in favor of the task's own project.
 func (h *Handler) taskProjectBoundary(next echo.HandlerFunc) echo.HandlerFunc {

@@ -57,7 +57,7 @@ func xCursorForConfiguration(existing map[string]string, credentials service.XCr
 func (h *Handler) handleXConfigure(c echo.Context) error {
 	h.xConfigMu.Lock()
 	defer h.xConfigMu.Unlock()
-	ctx := c.Request().Context()
+	ctx := h.projectRuntimePrincipalContext(c.Request().Context())
 	creds, err := h.xCredentials(ctx, c)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load X settings")
@@ -71,6 +71,7 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 	}
 	api := newXAPIClientForSettings(creds)
 	svc := service.NewXService(creds, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetCredentialAuthorization(h.workerSvc)
 	svc.SetAPI(api)
 	svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
 	svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
@@ -97,6 +98,9 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 		service.XSettingPaginationState:     "",
 		service.XSettingAccountID:           me.ID,
 		service.XSettingConfigurationID:     configurationID,
+	}
+	if actor, ok := models.PrincipalFromContext(ctx); ok {
+		values[service.XSettingRunAsUserID] = actor.UserID
 	}
 	if err := h.settingsRepo.SetMany(ctx, values); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save X settings")
@@ -139,7 +143,7 @@ func (h *Handler) handleXRemove(c echo.Context) error {
 	}
 	values := map[string]string{
 		service.XSettingConsumerKey: "", service.XSettingConsumerSecret: "", service.XSettingAccessToken: "",
-		service.XSettingAccessTokenSecret: "", service.XSettingPollIntervalSeconds: "", service.XSettingSendResponses: "", service.XSettingSinceID: "", service.XSettingPaginationState: "", service.XSettingAccountID: "", service.XSettingConfigurationID: "",
+		service.XSettingAccessTokenSecret: "", service.XSettingPollIntervalSeconds: "", service.XSettingSendResponses: "", service.XSettingSinceID: "", service.XSettingPaginationState: "", service.XSettingAccountID: "", service.XSettingConfigurationID: "", service.XSettingRunAsUserID: "",
 	}
 	if err := h.settingsRepo.SetMany(c.Request().Context(), values); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove X channel settings")
@@ -182,8 +186,8 @@ func (h *Handler) AddXAuthorizedUser(c echo.Context) error {
 	if _, err := strconv.ParseUint(userID, 10, 64); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "X user ID must be numeric")
 	}
-	u := &models.XAuthorizedUser{ProjectID: projectID, XUserID: userID, Username: strings.TrimPrefix(strings.TrimSpace(c.FormValue("x_username")), "@")}
-	if err := h.xAuthRepo.Create(c.Request().Context(), u); err != nil {
+	u := &models.XAuthorizedUser{ProjectID: projectID, XUserID: userID, Username: strings.TrimPrefix(strings.TrimSpace(c.FormValue("x_username")), "@"), ApplicationUserID: strings.TrimSpace(c.FormValue("application_user_id"))}
+	if err := h.xAuthRepo.Create(h.projectRuntimePrincipalContext(c.Request().Context()), u); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return returnToChannels(c)
@@ -196,7 +200,7 @@ func (h *Handler) RemoveXAuthorizedUser(c echo.Context) error {
 	if err != nil || projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project is required")
 	}
-	if err := h.xAuthRepo.Delete(c.Request().Context(), projectID, c.Param("id")); err != nil {
+	if err := h.xAuthRepo.Delete(h.projectRuntimePrincipalContext(c.Request().Context()), projectID, c.Param("id")); err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "X authorized user not found")
 	}
 	return returnToChannels(c)

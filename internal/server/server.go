@@ -35,6 +35,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/pkg/agenttools"
 
@@ -528,7 +529,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		closeDatabase()
 		return nil, fmt.Errorf("initialize organization: %w", err)
 	}
-	projectRepo := stores.Projects
+	projectAccessSvc := service.NewProjectAccessService(stores.ProjectAccess)
+	projectRepo := authz.NewProjectStore(stores.Projects, &authz.Authorizer{Store: stores.ProjectAccess})
 	taskRepo := stores.Tasks
 	taskGoalRepo := stores.TaskGoals
 	llmConfigRepo := stores.LLMConfigs
@@ -557,6 +559,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 
 	maxWorkers, _ := workerRepo.GetMaxWorkers(context.Background())
 	workerSvc := service.NewWorkerService(llmSvc, maxWorkers, projectRepo)
+	workerSvc.SetRunAuthorization(stores.RunIdentities, stores.Organizations, stores.ProjectAccess, cfg.AuthMode == auth.AuthModeDisabled)
 	workerSvc.SetTaskRepo(taskRepo)
 	workerSvc.SetLLMConfigRepo(llmConfigRepo)
 	workerSvc.SetExecutionRepo(execRepo)
@@ -667,6 +670,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 
 	projectSvc := service.NewProjectService(projectRepo)
 	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
+	taskGoalSvc.SetProjectAuthorization(projectAccessSvc, cfg.AuthMode == auth.AuthModeDisabled)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	projectSvc.SetTaskService(taskSvc)
 	taskSvc.SetDeletionUploadsDir(filepath.Join(cfg.AppDataDir, "uploads"))
@@ -688,8 +692,10 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	llmSvc.SetAutomationRegistrationService(automationRegistrationSvc)
 	llmSvc.SetAutomationRepo(automationRepo)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
+	upcomingSvc.SetProjectAuthorization(projectAccessSvc, cfg.AuthMode == auth.AuthModeDisabled)
 	insightsRepo := stores.Insights
 	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	insightsSvc.SetProjectAuthorization(projectAccessSvc, cfg.AuthMode == auth.AuthModeDisabled)
 	insightsSvc.SetLLMService(llmSvc)
 	upcomingSvc.SetProjectRepo(projectRepo)
 	upcomingSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
@@ -702,6 +708,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	llmSvc.SetThreadInputRepo(stores.ThreadInputs)
 	llmSvc.SetOpenAIAsyncToolCallStore(stores.OpenAIAsyncToolCalls)
 	usageAnalyticsSvc := service.NewUsageAnalyticsService(stores.Usage, llmConfigRepo)
+	usageAnalyticsSvc.SetProjectAuthorization(projectAccessSvc, stores.Organizations, cfg.AuthMode == auth.AuthModeDisabled)
 	llmSvc.SetBroadcaster(broadcaster)
 
 	// Code review comments
@@ -789,6 +796,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		cfg.GitHubAppPrivateKey,
 		cfg.ProjectRepoRoot,
 	)
+	githubSvc.SetCredentialAuthorization(stores.Organizations, cfg.AuthMode == auth.AuthModeDisabled)
 	projectSvc.SetManagedProjectRepoResolver(githubSvc)
 	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
 	automationLiveViewTracker := service.NewAutomationLiveViewTracker()
@@ -831,6 +839,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
 	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
 	xSvc := service.NewXService(xCredentials, settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc)
+	xSvc.SetCredentialAuthorization(workerSvc)
 	xSvc.SetRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo, stores.ThreadInputs)
 	if seconds, err := strconv.Atoi(strings.TrimSpace(xSettingValues[service.XSettingPollIntervalSeconds])); err == nil {
 		xSvc.SetPollInterval(time.Duration(seconds) * time.Second)
@@ -1254,6 +1263,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		h.SetHostedSSO(hostedSSOClient, hostedPendingStore, cfg.HostedSSOKey, cfg.HostedSSOInstanceID, cfg.AppBaseURL)
 	}
 	h.SetOrganizationService(organizationSvc)
+	h.SetProjectAccessService(projectAccessSvc)
+	h.SetRunIdentityStore(stores.RunIdentities)
 	e.Use(h.AuthMiddleware())
 	llmSvc.SetAgentRepo(agentRepo)
 	llmSvc.SetFileChangeBroadcaster(fileChangeBroadcaster)

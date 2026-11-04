@@ -151,6 +151,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					<p id="system-update-digest" class="text-xs font-mono break-all hidden"></p>
 					<a id="system-update-notes" class="link link-primary text-sm hidden" target="_blank" rel="noopener noreferrer">Release notes</a>
 					<p id="system-update-error" class="text-error text-sm hidden"></p>
+					<p id="system-update-permission" class="text-sm hidden">Only organization admins and owners can manage updates.</p>
 					<div class="card-actions justify-end">
 						<button id="system-update-accept" class="btn btn-sm btn-primary" onclick="systemUpdateAction('apply')">Update OpenVibely</button>
 						<button id="system-update-cancel" class="btn btn-sm btn-ghost" onclick="systemUpdateAction('cancel')">Cancel</button>
@@ -206,15 +207,20 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				var error = document.getElementById('system-update-error'); error.textContent = view.errorText; error.classList.toggle('hidden', !view.errorText);
 				var accept = document.getElementById('system-update-accept');
 				accept.textContent = view.acceptText;
-				accept.classList.toggle('hidden', !view.actionable);
+				var canManage = window.openVibelyCanManageUpdates === true;
+				accept.disabled = !canManage;
+				accept.classList.toggle('hidden', !view.actionable || !canManage);
+				document.getElementById('system-update-permission').classList.toggle('hidden', canManage);
 				document.getElementById('system-update-acceptance').classList.toggle('hidden', !view.showAcceptance);
-				document.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel);
+				document.getElementById('system-update-cancel').disabled = !canManage;
+				document.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel || !canManage);
 			}
 		async function refreshSystemUpdateCard() {
 				var card = document.getElementById('system-update-card');
 				if (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;
 				try {
 					var response = await fetch('/api/system/update', {headers: {'Accept': 'application/json'}});
+					window.openVibelyCanManageUpdates = response.headers.get('X-OpenVibely-Can-Manage-Updates') === 'true';
 					if (response.status === 204) {
 						if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(null);
 						else renderSystemUpdateCard(null);
@@ -227,6 +233,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				} catch (_) {}
 			}
 			async function systemUpdateAction(action) {
+				if (window.openVibelyCanManageUpdates !== true) return;
 				var response = await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});
 				if (action === 'cancel' && response.ok && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();
 				await refreshSystemUpdateCard();

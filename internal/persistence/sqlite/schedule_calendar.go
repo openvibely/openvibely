@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -70,6 +71,23 @@ func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string
 func applyCalendarAction(ctx context.Context, exec sqlExecutor, projectID string, action models.ScheduleCalendarAction, now time.Time) (models.ScheduleCalendarAction, error) {
 	inverse := models.ScheduleCalendarAction{}
 	err := func() error {
+		if actor, ok := models.PrincipalFromContext(ctx); ok {
+			role, err := projectRole(ctx, exec, actor.UserID, projectID)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+			details, err := json.Marshal(action)
+			if err != nil {
+				return err
+			}
+			if err := projectAudit(ctx, exec, projectID, actor.UserID, "schedule.calendar."+action.Action, projectID, string(details)); err != nil {
+				return err
+			}
+		}
+
 		var exists bool
 		if err := exec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)`, projectID).Scan(&exists); err != nil {
 			return err
@@ -338,6 +356,37 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
 	}
 	claimed := false
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		actor, _ := models.PrincipalFromContext(ctx)
+		savedContext, err := slackScheduleContext(ctx, exec, schedule.ID, actor.UserID)
+		if err != nil {
+			return err
+		}
+		savedContext, err = discordScheduleContext(savedContext, exec, schedule.ID, actor.UserID)
+		if err != nil {
+			return err
+		}
+		ctx = savedContext
+		runAsUserID := ""
+		if p, ok := models.PrincipalFromContext(ctx); ok {
+			var savedUser, projectID, createdVia string
+			var mergeRequired bool
+			if err := exec.QueryRowContext(ctx, `SELECT COALESCE(r.user_id,''),t.project_id,(t.auto_merge OR t.auto_merge_on_goal_achieved),t.created_via FROM schedules s JOIN tasks t ON t.id=s.task_id LEFT JOIN schedule_run_identities r ON r.schedule_id=s.id WHERE s.id=? AND s.task_id=?`, schedule.ID, schedule.TaskID).Scan(&savedUser, &projectID, &mergeRequired, &createdVia); err != nil {
+				return err
+			}
+			mergeRequired = mergeRequired || createdVia == models.TaskOriginWebhook || persistence.IsAutomationTaskCreatedVia(createdVia)
+			if (savedUser != "" && savedUser != p.UserID) || (savedUser == "" && p.UserID != models.BootstrapUserID) {
+				return persistence.ErrProjectDenied
+			}
+			role, err := projectRole(ctx, exec, p.UserID, projectID)
+			if err != nil {
+				return err
+			}
+			if role != "owner" && role != "maintainer" && (role != "editor" || mergeRequired) {
+				return persistence.ErrProjectDenied
+			}
+			runAsUserID = p.UserID
+		}
+
 		suppressed, _, err := suppressedScheduleOccurrence(ctx, exec, schedule.ID, *schedule.NextRun)
 		if err != nil || suppressed {
 			return err
@@ -389,10 +438,24 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
 			if err := createExecutionWithExecutor(ctx, exec, &execution); err != nil {
 				return err
 			}
+			if err := snapshotSlackExecution(ctx, exec, execution.ID); err != nil {
+				return err
+			}
+			if err := snapshotDiscordExecution(ctx, exec, execution.ID); err != nil {
+				return err
+			}
 			executionID = &execution.ID
+			if _, err := exec.ExecContext(ctx, `INSERT INTO execution_run_identities(execution_id,user_id) VALUES(?,?)`, execution.ID, runAsUserID); err != nil {
+				return err
+			}
 		}
-		if _, err := exec.ExecContext(ctx, `INSERT INTO schedule_dispatch_admissions(task_id,schedule_id,execution_id,starts_new_context) VALUES(?,?,?,?)`, task.ID, schedule.ID, executionID, schedule.ClearContextOnStart); err != nil {
+		if _, err := exec.ExecContext(ctx, `INSERT INTO schedule_dispatch_admissions(task_id,schedule_id,execution_id,starts_new_context,run_as_user_id) VALUES(?,?,?,?,?)`, task.ID, schedule.ID, executionID, schedule.ClearContextOnStart, runAsUserID); err != nil {
 			return err
+		}
+		if runAsUserID != "" {
+			if err := projectAudit(ctx, exec, task.ProjectID, runAsUserID, "schedule.dispatch", schedule.ID, `{}`); err != nil {
+				return err
+			}
 		}
 		claimed = true
 		return nil
@@ -442,20 +505,20 @@ func (r *ScheduleRepo) AdvanceSuppressedOccurrence(ctx context.Context, schedule
 }
 
 func (r *ScheduleRepo) ListCalendarAdmissions(ctx context.Context) ([]persistence.ActiveLaneTaskAdmission, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT task_id, COALESCE(execution_id,''), starts_new_context FROM schedule_dispatch_admissions`)
+	rows, err := r.db.QueryContext(ctx, `SELECT task_id, COALESCE(execution_id,''), starts_new_context, run_as_user_id FROM schedule_dispatch_admissions`)
 	if err != nil {
 		return nil, err
 	}
 	var refs []struct {
-		taskID, executionID string
-		clear               bool
+		taskID, executionID, runAsUserID string
+		clear                            bool
 	}
 	for rows.Next() {
 		var ref struct {
-			taskID, executionID string
-			clear               bool
+			taskID, executionID, runAsUserID string
+			clear                            bool
 		}
-		if err := rows.Scan(&ref.taskID, &ref.executionID, &ref.clear); err != nil {
+		if err := rows.Scan(&ref.taskID, &ref.executionID, &ref.clear, &ref.runAsUserID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -474,7 +537,7 @@ func (r *ScheduleRepo) ListCalendarAdmissions(ctx context.Context) ([]persistenc
 		}
 		if task != nil {
 			task.StartsNewContext = ref.clear
-			result = append(result, persistence.ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
+			result = append(result, persistence.ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID, RunAsUserID: ref.runAsUserID})
 		}
 	}
 	return result, nil

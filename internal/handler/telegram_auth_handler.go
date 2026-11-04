@@ -50,6 +50,7 @@ func (h *Handler) RemoveTelegramAuthorizedUser(c echo.Context) error {
 
 func (h *Handler) telegramAuthorizedUserCRUD() authorizedUserCRUD[models.TelegramAuthorizedUser] {
 	crud := authorizedUserCRUD[models.TelegramAuthorizedUser]{
+		authorize:            h.authorizeChannelTrustOperation,
 		render:               components.TelegramAuthorizedUsersList,
 		notConfiguredMessage: "Telegram auth not configured",
 		configured:           h.telegramAuthRepo != nil,

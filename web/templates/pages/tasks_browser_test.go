@@ -291,7 +291,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			    var originalKanbanAjax = htmx.ajax.bind(htmx);
 			    htmx.ajax = function(method, path, options) {
 			      if (currentMovePhase === 'concurrent' && String(path).indexOf('refresh_source=move') >= 0) {
-			        var xhr = {status:200};
+			        var xhr = {status:200, getResponseHeader:function() { return null; }};
 			        document.dispatchEvent(new CustomEvent('htmx:beforeRequest', {detail:{elt:options.source, target:document.getElementById('kanban-board'), xhr:xhr, requestConfig:{path:String(path)}}}));
 			        concurrentReconciliations.push({source:options.source, xhr:xhr, path:String(path)});
 			        window.__concurrentReconciliationStarts++;

@@ -2805,6 +2805,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 			wsPayload = buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
 		}
 		openStream := func(useWebsocket bool) (*responsesEventIterator, error) {
+			if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+				return nil, err
+			}
 			if useWebsocket {
 				wsOptions := responsesWebsocketStreamOptions{Model: opts.Model}
 				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth, wsOptions)
@@ -2862,6 +2865,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 	}
 
 	buildReq := func() (*http.Request, error) {
+		if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+			return nil, err
+		}
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, err

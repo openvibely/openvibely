@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -294,10 +296,23 @@ func (s *TelegramService) SetTaskGoalService(svc *TaskGoalService) {
 	s.taskGoalSvc = svc
 }
 
+// Telegram currently has only a transport allowlist, not a verified binding to
+// an application user. Do not borrow a connection or request principal in
+// authenticated deployments. Embedded/unconfigured and auth-off behavior remain
+// compatible until durable sender mappings can be enforced end to end.
+func (s *TelegramService) requiresVerifiedSender() bool {
+	return s.workerSvc != nil && s.workerSvc.runOrganizations != nil && !s.workerSvc.runAuthOff
+}
+
+const telegramIdentityUnavailable = "Telegram sender identity is not linked to an application user. Use the web interface while authenticated Telegram access is unavailable."
+
 // checkAuthorization verifies that a Telegram user is authorized for the given project.
 // Deny-by-default: if the auth repo is configured, the user must be explicitly listed.
 // If projectID is empty, checks authorization across all projects.
 func (s *TelegramService) checkAuthorization(userID int64, username string, projectID string) bool {
+	if s.requiresVerifiedSender() {
+		return false
+	}
 	if s.telegramAuthRepo == nil {
 		applog.Infof("[telegram] auth check: no auth repo configured, allowing user %d (%s)", userID, username)
 		return true // No auth repo configured, allow all
@@ -513,7 +528,11 @@ func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbot
 	if !s.checkAuthorization(userID, username, projectID) {
 		applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
 			userID, username, projectID)
-		s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
+		if s.requiresVerifiedSender() {
+			s.sendMessage(s.ctx, chatID, telegramIdentityUnavailable)
+		} else {
+			s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
+		}
 		return true
 	}
 
@@ -553,6 +572,9 @@ func isTelegramConflictError(err error) bool {
 
 // handleStart welcomes the user and sets the default project
 func (s *TelegramService) handleStart(userID int64) string {
+	if s.requiresVerifiedSender() {
+		return telegramIdentityUnavailable
+	}
 	projects, err := s.projectRepo.List(context.Background())
 	if err != nil {
 		return fmt.Sprintf("Error loading projects: %v", err)
@@ -585,6 +607,9 @@ func (s *TelegramService) handleStart(userID int64) string {
 
 // handleProject shows the current project or switches to a new one
 func (s *TelegramService) handleProject(userID int64, args string) string {
+	if s.requiresVerifiedSender() {
+		return telegramIdentityUnavailable
+	}
 	ctx := context.Background()
 	targetName := strings.TrimSpace(args)
 	currentProjectID := ""
@@ -659,6 +684,10 @@ func (s *TelegramService) handleChatMessageUntilDurable(ctx context.Context, mes
 }
 
 func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.Context, message *tgbotapi.Message, onDurableHandoff func()) bool {
+	if s.requiresVerifiedSender() {
+		// Acknowledge rejected transport input without persisting work.
+		return true
+	}
 	userID := message.From.ID
 	chatID := message.Chat.ID
 
@@ -1444,6 +1473,14 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		ProjectID:          projectID,
 		ProjectRepo:        s.projectRepo,
 	}))
+	for name, handler := range handlers {
+		handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
+			if s.requiresVerifiedSender() {
+				return "", authz.ErrDenied
+			}
+			return handler(ctx, input)
+		}
+	}
 	return handlers
 }
 
@@ -1455,6 +1492,9 @@ func telegramSendToTaskActionResult(result string) (string, error) {
 }
 
 func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID int64, projectID string) error {
+	if s.requiresVerifiedSender() {
+		return authz.ErrDenied
+	}
 	// Serialize explicit switches so an older persistence operation cannot finish
 	// after and overwrite a newer successful switch. Cache locks remain short-held.
 	s.userProjectSwitchMu.Lock()

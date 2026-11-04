@@ -652,6 +652,21 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 	      if (c.acceptText && document.getElementById('system-update-accept').textContent !== c.acceptText) fail(c.name + ' accept copy was not rendered from normalized state');
 	      if (c.cancel !== undefined && !hidden('system-update-cancel') !== c.cancel) fail(c.name + ' cancel visibility mismatch');
 	    }
+        window.openVibelyCanManageUpdates = false;
+        window.openVibelyHandleSystemUpdateSnapshot(snapshot);
+        if (!hidden('system-update-accept') || !hidden('system-update-cancel')) fail('member sees update actions');
+        if (hidden('system-update-permission')) fail('member missing permission explanation');
+        var originalFetch = window.fetch, mutationCalls = 0;
+        window.fetch = function(url, options) {
+          if (String(url).indexOf('/api/system/update/') === 0 && options && options.method === 'POST') mutationCalls++;
+          return originalFetch.apply(this, arguments);
+        };
+        await systemUpdateAction('apply');
+        await systemUpdateAction('cancel');
+        await wait(40);
+        window.fetch = originalFetch;
+        if (mutationCalls !== 0) fail('member triggered update mutation');
+
 	    await report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
@@ -668,6 +683,7 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-OpenVibely-Can-Manage-Updates", "true")
 			_, _ = w.Write([]byte(getSnapshot()))
 		case r.URL.Path == "/browser-scenario" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")

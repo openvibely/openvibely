@@ -5,6 +5,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/stretchr/testify/require"
 	"net/http"
@@ -15,9 +16,19 @@ import (
 )
 
 func TestTaskThreadResponseShowsSendingAccount(t *testing.T) {
-	h, e, configs := setupTestHandler(t)
+	tc := NewStoreTestContext(t)
+	h, e := tc.handler, tc.echo
 	h.SetAuthConfig(auth.Config{Enabled: true})
-	agent := createAgent(t, configs)
+	agent := createAgent(t, tc.llmConfigRepo)
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	principals := map[string]models.Principal{}
+	for _, username := range []string{"alice", "testuser1"} {
+		invite, err := org.Invite(t.Context(), models.BootstrapUserID, "member")
+		require.NoError(t, err)
+		member, err := org.Accept(t.Context(), invite, username, "long-test-password", "")
+		require.NoError(t, err)
+		principals[username] = member.Principal
+	}
 	project := createProject(t, h, "Author labels")
 	task := createTask(t, h, project.ID, "Shared thread", func(task *models.Task) {
 		task.Category = models.CategoryCompleted
@@ -29,7 +40,7 @@ func TestTaskThreadResponseShowsSendingAccount(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/thread", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("HX-Request", "true")
-		req = req.WithContext(models.WithPrincipal(req.Context(), models.Principal{UserID: username, Username: username, OrgID: models.DefaultOrgID, Role: "member"}))
+		req = req.WithContext(models.WithPrincipal(req.Context(), principals[username]))
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

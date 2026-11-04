@@ -563,7 +563,7 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 	if opts.RuntimeToolsForTask != nil {
 		runtimeTools = opts.RuntimeToolsForTask(task.ID)
 	}
-	opts.ChannelTaskRunner(context.Background(), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: opts.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: opts.Surface, ReplyContext: opts.ReplyContext, RuntimeTools: runtimeTools})
+	opts.ChannelTaskRunner(context.WithoutCancel(ctx), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: opts.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: opts.Surface, ReplyContext: opts.ReplyContext, RuntimeTools: runtimeTools})
 	if opts.StartedResult != nil {
 		return opts.StartedResult(task)
 	}
@@ -1107,7 +1107,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	if opts.RuntimeToolsForTask != nil {
 		runtimeTools = opts.RuntimeToolsForTask(opts.Task.ID)
 	}
-	opts.ChannelChatRunner(context.Background(), ChannelChatRunRequest{
+	opts.ChannelChatRunner(context.WithoutCancel(ctx), ChannelChatRunRequest{
 		ExecID:              exec.ID,
 		TaskID:              opts.Task.ID,
 		ProjectID:           opts.ProjectID,

@@ -87,7 +87,7 @@ func TestSwarmRoutesValidateMissingServiceAndTaskContracts(t *testing.T) {
 		wantStatus   int
 		wantResponse string
 	}{
-		{name: "start", method: http.MethodPost, path: "/api/tasks/" + task.ID + "/swarm/start", wantStatus: http.StatusOK, wantResponse: "planner_started"},
+		{name: "start", method: http.MethodPost, path: "/api/tasks/" + task.ID + "/swarm/start", wantStatus: http.StatusNotFound, wantResponse: "project not found"},
 		{name: "followup", method: http.MethodPost, path: "/api/tasks/" + task.ID + "/swarm/followup", form: url.Values{"message": {"continue"}}, wantStatus: http.StatusBadRequest, wantResponse: "not part of a swarm"},
 		{name: "cancel", method: http.MethodPost, path: "/api/tasks/" + task.ID + "/swarm/cancel", wantStatus: http.StatusOK, wantResponse: "cancelled"},
 		{name: "rerun reviewer", method: http.MethodPost, path: "/api/tasks/" + task.ID + "/swarm/rerun-reviewer", wantStatus: http.StatusNotFound, wantResponse: "swarm role task not found"},
@@ -106,6 +106,14 @@ func TestSwarmRoutesValidateMissingServiceAndTaskContracts(t *testing.T) {
 			tc.echo.ServeHTTP(rec, req)
 			require.Equal(t, tcse.wantStatus, rec.Code, rec.Body.String())
 			require.Contains(t, rec.Body.String(), tcse.wantResponse)
+			if tcse.name == "start" {
+				saved, err := tc.taskRepo.GetByID(t.Context(), task.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.CategoryBacklog, saved.Category)
+				planner, err := tc.taskRepo.FindSwarmChildByRole(t.Context(), task.ID, models.SwarmRolePlanner)
+				require.NoError(t, err)
+				require.Nil(t, planner)
+			}
 		})
 	}
 }

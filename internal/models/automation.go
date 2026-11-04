@@ -243,9 +243,10 @@ type AutomationContext struct {
 }
 
 type AutomationDispatchEnvelope struct {
-	DispatchID string            `json:"dispatch_id"`
-	Task       Task              `json:"task"`
-	Context    AutomationContext `json:"context"`
+	DispatchID  string            `json:"dispatch_id"`
+	RunAsUserID string            `json:"run_as_user_id,omitempty"`
+	Task        Task              `json:"task"`
+	Context     AutomationContext `json:"context"`
 }
 
 type AutomationInvocation struct {

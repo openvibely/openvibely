@@ -936,6 +936,7 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		ProjectID: opts.ProjectID, CallerTaskID: opts.CallerTaskID, Source: "agent", AlertSvc: opts.AlertSvc, TaskRepo: opts.TaskRepo,
 		PrepareImplementationTask: opts.PrepareImplementationTask,
 	}))
+	guardChannelGlobalActions(handlers, opts.WorkerSvc, opts.ProjectID)
 	return handlers
 }
 

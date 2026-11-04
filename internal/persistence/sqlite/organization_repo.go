@@ -128,6 +128,16 @@ func (r *OrganizationRepo) ChangeMember(ctx context.Context, actor, id, role str
 			}
 		}
 		if remove {
+			// Do not restore old project grants if this user later rejoins the org.
+			if _, err = tx.ExecContext(ctx, `INSERT INTO project_audit_events(project_id,actor_user_id,action,target_id,details)
+				SELECT pm.project_id,?,'project.member.removed_with_org',pm.user_id,pm.role
+				FROM project_members pm JOIN project_organizations po ON po.project_id=pm.project_id
+				WHERE pm.user_id=? AND po.org_id='default'`, actor, id); err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, `DELETE FROM project_members WHERE user_id=? AND project_id IN (SELECT project_id FROM project_organizations WHERE org_id='default')`, id); err != nil {
+				return err
+			}
 			_, err = tx.ExecContext(ctx, `DELETE FROM user_sessions WHERE user_id=?`, id)
 		}
 		return err

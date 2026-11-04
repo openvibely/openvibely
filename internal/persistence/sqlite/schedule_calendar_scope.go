@@ -28,6 +28,17 @@ func applyAllProjectsCalendarAction(ctx context.Context, exec sqlExecutor, actio
 	if err != nil {
 		return inverse, err
 	}
+	if actor, ok := models.PrincipalFromContext(ctx); ok {
+		for id := range projects {
+			role, err := projectRole(ctx, exec, actor.UserID, id)
+			if err != nil {
+				return inverse, err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				delete(projects, id)
+			}
+		}
+	}
 	owner := func(id string) (string, error) {
 		var project string
 		err := exec.QueryRowContext(ctx, "SELECT t.project_id FROM schedules s JOIN tasks t ON t.id=s.task_id WHERE s.id=?", id).Scan(&project)

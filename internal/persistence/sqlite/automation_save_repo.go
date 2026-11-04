@@ -152,6 +152,19 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in persistence.Au
 		return nil, nil, err
 	}
 	defer finishImmediate()
+	if err := authorizeDiscordTask(ctx, conn, models.Task{ProjectID: in.ProjectID, AutoMerge: true}); err != nil {
+		return nil, nil, err
+	}
+	actor, identified := models.PrincipalFromContext(ctx)
+	if identified {
+		role, err := projectRole(ctx, conn, actor.UserID, in.ProjectID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if role != "maintainer" && role != "owner" {
+			return nil, nil, persistence.ErrProjectDenied
+		}
+	}
 
 	if in.ConfirmationTokenID != "" {
 		candidateJSON, err := json.Marshal(in.Candidate)
@@ -404,7 +417,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in persistence.Au
 		if automation.LifecycleState == models.AutomationActive && storedCategory == models.CategoryActive && storedStatus == models.StatusPending && !storedParentID.Valid {
 			runnable = append(runnable, models.Task{ID: taskID, ProjectID: in.ProjectID, Title: write.Title, Prompt: write.Prompt,
 				Category: storedCategory, Priority: write.Priority, Status: storedStatus, AgentID: write.AgentID, AgentDefinitionID: write.AgentDefinitionID,
-				ChainConfig: chainConfig})
+				ChainConfig: chainConfig, CreatedVia: persistence.AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)})
 		}
 	}
 
@@ -428,6 +441,20 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in persistence.Au
 				VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
 				RETURNING id`, taskID, write.RunAt, write.RepeatType, write.RepeatInterval, enabled, write.ClearContextOnStart, nextRun).Scan(&scheduleID); err != nil {
 				return nil, nil, fmt.Errorf("creating schedule for node %q: %w", write.NodeKey, err)
+			}
+			if identified {
+				if _, err := conn.ExecContext(ctx, `INSERT INTO schedule_run_identities(schedule_id,user_id) VALUES(?,?)`, scheduleID, actor.UserID); err != nil {
+					return nil, nil, err
+				}
+				if err := authorizeSlackTaskMutation(ctx, conn, taskID); err != nil {
+					return nil, nil, err
+				}
+				if err := snapshotSlackSchedule(ctx, conn, scheduleID); err != nil {
+					return nil, nil, err
+				}
+				if err := snapshotDiscordSchedule(ctx, conn, scheduleID); err != nil {
+					return nil, nil, err
+				}
 			}
 		} else {
 			if write.PreserveTiming {
@@ -489,6 +516,9 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in persistence.Au
 		if err := backfillLegacyGitHubIssueTaskOrigins(ctx, conn, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID); err != nil {
 			return nil, nil, err
 		}
+		if err := archiveAutomationLaunchAuthority(ctx, conn, in.ProjectID, in.AutomationID, in.GraphID); err != nil {
+			return nil, nil, err
+		}
 		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE id <> ? AND automation_id = ? AND project_id = ?`,
 			in.GraphID, in.AutomationID, in.ProjectID); err != nil {
 			return nil, nil, err
@@ -506,6 +536,24 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in persistence.Au
 	}
 	definition, err := r.loadDefinition(ctx, conn, automation, in.GraphID)
 	if err != nil {
+		return nil, nil, err
+	}
+	if identified {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_version_publishers(version_id,user_id) VALUES(?,?)`, in.GraphID, actor.UserID); err != nil {
+			return nil, nil, err
+		}
+		details, err := json.Marshal(map[string]string{"graph_id": in.GraphID})
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := projectAudit(ctx, conn, in.ProjectID, actor.UserID, "automation.published", in.AutomationID, string(details)); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := snapshotSlackPublisher(ctx, conn, in.GraphID); err != nil {
+		return nil, nil, err
+	}
+	if err := snapshotDiscordPublisher(ctx, conn, in.GraphID); err != nil {
 		return nil, nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {

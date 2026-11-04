@@ -894,9 +894,13 @@ func defaultJSON(raw string) string {
 }
 
 func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
-	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		return r.createWithExecutor(ctx, exec, t)
 	})
+	if err == nil {
+		r.publishFirstPlannerParent(ctx)
+	}
+	return err
 }
 
 // CreateInTx persists a task using the caller's store transaction.
@@ -916,7 +920,12 @@ func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *mod
 // metadata callback in one transaction. The callback runs after the task ID is
 // assigned and before the transaction is committed.
 func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, goal *models.TaskGoal, callback func(persistence.Tx) error) error {
-	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var inheritedErr error
+		ctx, inheritedErr = discordSwarmChildContext(ctx, exec, *t)
+		if inheritedErr != nil {
+			return inheritedErr
+		}
 		if err := r.createWithExecutor(ctx, exec, t); err != nil {
 			return err
 		}
@@ -930,6 +939,10 @@ func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task
 		}
 		return nil
 	})
+	if err == nil {
+		r.publishFirstPlannerParent(ctx)
+	}
+	return err
 }
 
 func createTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID string, goal *models.TaskGoal) error {
@@ -940,15 +953,19 @@ func createTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID st
 	if goal.Status == "" {
 		goal.Status = models.TaskGoalStatusActive
 	}
+	goal.RunAsUserID = ""
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		goal.RunAsUserID = p.UserID
+	}
 	created, err := scanTaskGoal(exec.QueryRowContext(ctx, `
-		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
-		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
-		RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason))
+		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at, run_as_user_id)
+		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL, ?)
+		RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason, goal.RunAsUserID))
 	if err != nil {
 		return fmt.Errorf("creating task goal: %w", err)
 	}
 	*goal = *created
-	return nil
+	return auditTaskGoalIdentity(ctx, exec, goal)
 }
 
 func setTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID, objective, reason string) error {
@@ -965,20 +982,52 @@ func setTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID, obje
 	if err == sql.ErrNoRows {
 		return createTaskGoalWithExecutor(ctx, exec, taskID, goal)
 	}
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		goal.RunAsUserID = p.UserID
+	}
 	updated, err := scanTaskGoal(exec.QueryRowContext(ctx, `
 		UPDATE task_goals
-		SET goal_id = ?, objective = ?, status = 'active', reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '',
+		SET goal_id = ?, objective = ?, status = 'active', reason = ?, run_as_user_id = ?, blocker_key = '', blocker_count = 0, blocker_reason = '',
 			blocker_last_seen_at = NULL, last_checked_at = NULL, achieved_at = NULL, updated_at = datetime('now')
 		WHERE task_id = ?
-		RETURNING `+taskGoalSelectColumns, goal.GoalID, goal.Objective, goal.Reason, taskID))
+		RETURNING `+taskGoalSelectColumns, goal.GoalID, goal.Objective, goal.Reason, goal.RunAsUserID, taskID))
 	if err != nil {
 		return fmt.Errorf("updating task goal: %w", err)
 	}
 	*goal = *updated
-	return nil
+	return auditTaskGoalIdentity(ctx, exec, goal)
 }
 
 func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *models.Task) error {
+	if err := prepareFirstPlannerParent(ctx, exec, *t); err != nil {
+		return err
+	}
+	var inheritedErr error
+	ctx, inheritedErr = discordSwarmChildContext(ctx, exec, *t)
+	if inheritedErr != nil {
+		return inheritedErr
+	}
+	if err := authorizeDiscordTask(ctx, exec, *t); err != nil {
+		return err
+	}
+	if identity, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+		if identity.ProjectID != t.ProjectID {
+			return persistence.ErrProjectDenied
+		}
+		if err := authorizeSlackHandoff(ctx, exec, identity.EventKey); err != nil {
+			return err
+		}
+		if t.AutoMerge || t.AutoMergeOnGoalAchieved || t.CreatedVia == models.TaskOriginWebhook || persistence.IsAutomationTaskCreatedVia(t.CreatedVia) {
+			role, err := projectRole(ctx, exec, identity.UserID, t.ProjectID)
+			if err != nil {
+				return err
+			}
+			if role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+	}
+
 	// Get the max display_order for this project and category, then add 1
 	var maxOrder sql.NullInt64
 	err := exec.QueryRowContext(ctx,
@@ -1016,7 +1065,28 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 	t.DisplayOrder = displayOrder
 	if p, ok := models.PrincipalFromContext(ctx); ok {
 		_, err := exec.ExecContext(ctx, `UPDATE tasks SET author_user_id=?, author_name=? WHERE id=?`, p.UserID, p.Username, t.ID)
-		return err
+		if err != nil {
+			return err
+		}
+		_, err = exec.ExecContext(ctx, `INSERT INTO task_run_identities(task_id,user_id) VALUES(?,?)`, t.ID, p.UserID)
+		if err != nil {
+			return err
+		}
+		if _, ok := models.DiscordIngressIdentityFromContext(ctx); ok {
+			if err := saveDiscordTaskProvenance(ctx, exec, t.ID); err != nil {
+				return err
+			}
+			if err := projectAudit(ctx, exec, t.ProjectID, p.UserID, "discord.task_created", t.ID, `{}`); err != nil {
+				return err
+			}
+		}
+		if _, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+			if err := saveSlackTaskProvenance(ctx, exec, t.ID); err != nil {
+				return err
+			}
+			return projectAudit(ctx, exec, t.ProjectID, p.UserID, "slack.task_created", t.ID, `{}`)
+		}
+		return nil
 	}
 	return nil
 }
@@ -1057,29 +1127,58 @@ func (r *TaskRepo) UpdatePreservingTitle(ctx context.Context, t *models.Task) er
 }
 
 func (r *TaskRepo) updateTask(ctx context.Context, t *models.Task, updateTitle bool) error {
-	autoMerge := 0
-	if t.AutoMerge {
-		autoMerge = 1
-	}
-	autoMergeOnGoalAchieved := 0
-	if t.AutoMergeOnGoalAchieved {
-		autoMergeOnGoalAchieved = 1
-	}
-	swarmConfig := defaultJSON(t.SwarmConfig)
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET title = CASE WHEN ? THEN ? ELSE title END, title_explicitly_set = CASE WHEN ? THEN 1 ELSE title_explicitly_set END, category = ?, priority = ?, status = ?,
+	apply := func(exec func(context.Context, string, ...interface{}) (sql.Result, error)) error {
+		autoMerge := 0
+		if t.AutoMerge {
+			autoMerge = 1
+		}
+		autoMergeOnGoalAchieved := 0
+		if t.AutoMergeOnGoalAchieved {
+			autoMergeOnGoalAchieved = 1
+		}
+		swarmConfig := defaultJSON(t.SwarmConfig)
+		_, err := exec(ctx,
+			`UPDATE tasks SET title = CASE WHEN ? THEN ? ELSE title END, title_explicitly_set = CASE WHEN ? THEN 1 ELSE title_explicitly_set END, category = ?, priority = ?, status = ?,
 			 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
 			 swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
-		updateTitle, t.Title, updateTitle, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus,
-		t.SwarmRole, swarmConfig, swarmConfig, swarmConfig, t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
-	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
-			return persistence.ErrDuplicateTask
+			updateTitle, t.Title, updateTitle, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus,
+			t.SwarmRole, swarmConfig, swarmConfig, swarmConfig, t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
+		if err != nil {
+			if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
+				return persistence.ErrDuplicateTask
+			}
+			return fmt.Errorf("updating task: %w", err)
 		}
-		return fmt.Errorf("updating task: %w", err)
+		return nil
 	}
-	return nil
+	identity, slack := models.SlackIngressIdentityFromContext(ctx)
+	if !slack {
+		return apply(func(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+			return execBoundSQLite(ctx, r.db, query, args...)
+		})
+	}
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := authorizeSlackTaskMutation(ctx, tx, t.ID); err != nil {
+			return err
+		}
+		if t.ProjectID != identity.ProjectID {
+			return persistence.ErrProjectDenied
+		}
+		if t.AutoMerge || t.AutoMergeOnGoalAchieved {
+			role, err := projectRole(ctx, tx, identity.UserID, identity.ProjectID)
+			if err != nil {
+				return err
+			}
+			if role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+		if err := apply(tx.ExecContext); err != nil {
+			return err
+		}
+		return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, "slack.task_updated", t.ID, `{}`)
+	})
 }
 
 const activeBoardTailOrderQuery = `SELECT COALESCE(MAX(display_order), -1) + 1
@@ -1188,6 +1287,9 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
 	var task *models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		if err := authorizeSwarmWrite(ctx, exec, id); err != nil {
+			return err
+		}
 		var err error
 		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
 		if err != nil {
@@ -1221,7 +1323,7 @@ func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category model
 				return fmt.Errorf("cancelling reserved task execution: %w", err)
 			}
 		}
-		return nil
+		return auditSwarmWrite(ctx, exec, id, "swarm.category_updated")
 	})
 	if err != nil {
 		return err
@@ -1313,6 +1415,9 @@ func (r *TaskRepo) RestoreBoardState(ctx context.Context, task models.Task) erro
 func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.TaskStatus) error {
 	var task *models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		if err := authorizeSwarmWrite(ctx, exec, id); err != nil {
+			return err
+		}
 		var err error
 		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
 		if err != nil {
@@ -1343,7 +1448,7 @@ func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.Ta
 				return fmt.Errorf("cancelling reserved task execution: %w", err)
 			}
 		}
-		return nil
+		return auditSwarmWrite(ctx, exec, id, "swarm.status_updated")
 	})
 	if err != nil {
 		return err
@@ -2179,6 +2284,10 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 		return manifest, false, nil
 	}
 
+	if err = authorizeSlackTaskMutation(ctx, tx, id); err != nil {
+		return manifest, false, err
+	}
+
 	var deletedProjectID, deletedTitle string
 	if err = tx.QueryRowContext(ctx, `SELECT project_id, title FROM tasks WHERE id = ?`, id).Scan(&deletedProjectID, &deletedTitle); err != nil {
 		return manifest, false, fmt.Errorf("reading deleted task event metadata: %w", err)
@@ -2282,6 +2391,16 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 		}
 	}
 
+	if _, slack := models.SlackIngressIdentityFromContext(ctx); slack {
+		for _, childID := range manifest.SwarmChildTaskIDs {
+			if err = authorizeSlackTaskMutation(ctx, tx, childID); err != nil {
+				return manifest, false, err
+			}
+		}
+		if err = auditSlackTaskDeletion(ctx, tx, id); err != nil {
+			return manifest, false, err
+		}
+	}
 	if beforeDelete != nil {
 		if err = beforeDelete(manifest); err != nil {
 			return manifest, false, err
@@ -2338,6 +2457,22 @@ func isTaskDeletionUploadSessionID(sessionID string) bool {
 }
 
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
+	if _, slack := models.SlackIngressIdentityFromContext(ctx); slack {
+		err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+			if err := authorizeSlackTaskMutation(ctx, tx, id); err != nil {
+				return err
+			}
+			if err := auditSlackTaskDeletion(ctx, tx, id); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id=?`, id)
+			return err
+		})
+		if err == nil {
+			requestDeletionCleanup(r.db)
+		}
+		return err
+	}
 	_, err := execTaskDeletion(ctx, r.db, `DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting task: %w", err)
@@ -2459,9 +2594,18 @@ func scanSwarmChildTask(scan func(dest ...any) error) (models.Task, error) {
 
 func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status, config string, sequence int) error {
 	swarmConfig := defaultJSON(config)
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
-		role, status, role, swarmConfig, swarmConfig, swarmConfig, sequence, id)
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := authorizeSwarmWrite(ctx, tx, id); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
+			role, status, role, swarmConfig, swarmConfig, swarmConfig, sequence, id)
+		if err != nil {
+			return err
+		}
+		return auditSwarmWrite(ctx, tx, id, "swarm.fields_updated")
+	})
 	if err != nil {
 		return fmt.Errorf("updating swarm fields: %w", err)
 	}
@@ -3163,30 +3307,54 @@ func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge boo
 // UpdateAutoMergeSettings updates both independent automatic merge settings.
 // A nil goal setting preserves its current value for backward-compatible callers.
 func (r *TaskRepo) UpdateAutoMergeSettings(ctx context.Context, id string, autoMerge bool, autoMergeOnGoalAchieved *bool, targetBranch string) error {
-	am := 0
-	if autoMerge {
-		am = 1
-	}
-	if autoMergeOnGoalAchieved == nil {
-		_, err := execBoundSQLite(ctx, r.db,
-			`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
-			am, targetBranch, id)
+	apply := func(exec func(context.Context, string, ...interface{}) (sql.Result, error)) error {
+		am := 0
+		if autoMerge {
+			am = 1
+		}
+		if autoMergeOnGoalAchieved == nil {
+			_, err := exec(ctx,
+				`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
+				am, targetBranch, id)
+			if err != nil {
+				return fmt.Errorf("updating auto merge: %w", err)
+			}
+			return nil
+		}
+		goalAM := 0
+		if *autoMergeOnGoalAchieved {
+			goalAM = 1
+		}
+		_, err := exec(ctx,
+			`UPDATE tasks SET auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
+			am, goalAM, targetBranch, id)
 		if err != nil {
-			return fmt.Errorf("updating auto merge: %w", err)
+			return fmt.Errorf("updating auto merge settings: %w", err)
 		}
 		return nil
 	}
-	goalAM := 0
-	if *autoMergeOnGoalAchieved {
-		goalAM = 1
+	identity, slack := models.SlackIngressIdentityFromContext(ctx)
+	if !slack {
+		return apply(func(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+			return execBoundSQLite(ctx, r.db, query, args...)
+		})
 	}
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
-		am, goalAM, targetBranch, id)
-	if err != nil {
-		return fmt.Errorf("updating auto merge settings: %w", err)
-	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := authorizeSlackTaskMutation(ctx, tx, id); err != nil {
+			return err
+		}
+		role, err := projectRole(ctx, tx, identity.UserID, identity.ProjectID)
+		if err != nil {
+			return err
+		}
+		if role != "maintainer" && role != "owner" {
+			return persistence.ErrProjectDenied
+		}
+		if err := apply(tx.ExecContext); err != nil {
+			return err
+		}
+		return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, "slack.task_merge_settings_updated", id, `{}`)
+	})
 }
 
 // ClearWorktreeInfo removes worktree path/branch from a task (after cleanup).
@@ -3412,4 +3580,11 @@ func (r *TaskRepo) UpdateGeneratedTitle(ctx context.Context, id, expectedTitle, 
 	}
 	n, err := result.RowsAffected()
 	return n > 0, err
+}
+
+// Save the audit before runtime cleanup, so an audit failure cannot cancel work.
+// The record still commits or rolls back with the subsequent deletion.
+func auditSlackTaskDeletion(ctx context.Context, tx sqlExecutor, id string) error {
+	identity, _ := models.SlackIngressIdentityFromContext(ctx)
+	return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, "slack.task_deleted", id, `{}`)
 }

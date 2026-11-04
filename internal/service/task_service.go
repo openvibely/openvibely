@@ -99,8 +99,7 @@ func (s *TaskService) submitActivatedTask(ctx context.Context, task models.Task,
 	if s.workerSvc == nil {
 		return errors.New("worker service unavailable")
 	}
-	s.workerSvc.Submit(task)
-	return nil
+	return s.workerSvc.SubmitAs(ctx, task)
 }
 
 func (s *TaskService) SetQueuedTaskThreadFollowupHook(hook func(context.Context, string) (bool, error)) {
@@ -382,7 +381,9 @@ func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.T
 	// Auto-submit if created in Active category (blocked tasks wait for parent to activate them)
 	if t.Category == models.CategoryActive && t.Status != models.StatusBlocked && s.workerSvc != nil {
 		applog.Infof("[task-svc] Create auto-submitting active task id=%s to worker pool", t.ID)
-		s.workerSvc.Submit(*t)
+		if err := s.workerSvc.SubmitAs(ctx, *t); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -497,7 +498,9 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 		if status == models.StatusRunning {
 			s.workerSvc.SubmitReserved(task, admission.ExecutionID)
 		} else {
-			s.workerSvc.Submit(task)
+			if err := s.workerSvc.SubmitAs(ctx, task); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

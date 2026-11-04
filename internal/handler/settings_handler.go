@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -46,12 +47,11 @@ type channelSettingReset struct {
 }
 
 func applyChannelSettingResets(ctx context.Context, settingsRepo persistence.SettingsStore, resets []channelSettingReset) error {
+	values := make(map[string]string, len(resets))
 	for _, reset := range resets {
-		if err := settingsRepo.Set(ctx, reset.key, reset.value); err != nil {
-			return fmt.Errorf("reset channel setting %q: %w", reset.key, err)
-		}
+		values[reset.key] = reset.value
 	}
-	return nil
+	return settingsRepo.SetMany(ctx, values)
 }
 
 func channelBulkProviderResets(provider string) (map[string]string, bool) {
@@ -98,7 +98,7 @@ func channelBulkProviderResets(provider string) (map[string]string, bool) {
 		for _, key := range []string{
 			service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken,
 			service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds, service.XSettingSendResponses,
-			service.XSettingSinceID, service.XSettingAccountID, service.XSettingConfigurationID,
+			service.XSettingSinceID, service.XSettingAccountID, service.XSettingConfigurationID, service.XSettingRunAsUserID,
 		} {
 			add(key, "")
 		}
@@ -606,18 +606,22 @@ func (h *Handler) handleAppSettings(c echo.Context) error {
 func (h *Handler) handleTelegramSave(c echo.Context) error {
 	token := c.FormValue("token")
 
-	// Save token to database
-	if h.settingsRepo != nil {
-		if err := h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingBotToken, token); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save token")
-		}
-		richValue := "false"
-		if c.FormValue("telegram_rich_messages_v2") == "true" {
-			richValue = "true"
-		}
-		if err := h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingRichMessagesV2, richValue); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save rich message setting")
-		}
+	if h.settingsRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
+	}
+	richValue := "false"
+	if c.FormValue("telegram_rich_messages_v2") == "true" {
+		richValue = "true"
+	}
+	err := h.settingsRepo.SetMany(c.Request().Context(), map[string]string{
+		service.TelegramSettingBotToken:       token,
+		service.TelegramSettingRichMessagesV2: richValue,
+	})
+	if errors.Is(err, persistence.ErrOrgDenied) {
+		return echo.NewHTTPError(http.StatusForbidden, "organization access required")
+	}
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save Telegram configuration").SetInternal(err)
 	}
 
 	// Create or update telegram service
@@ -706,9 +710,6 @@ func (h *Handler) handleTelegramRemove(c echo.Context) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
-	if h.telegramService != nil && h.telegramService.IsRunning() {
-		h.telegramService.Stop()
-	}
 	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
 		{key: service.TelegramSettingBotToken, value: ""},
 		{key: service.TelegramSettingSendResponses, value: ""},
@@ -717,6 +718,9 @@ func (h *Handler) handleTelegramRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 
+	if h.telegramService != nil && h.telegramService.IsRunning() {
+		h.telegramService.Stop()
+	}
 	return returnToChannels(c)
 }
 
@@ -727,6 +731,10 @@ func (h *Handler) handleGitHubConnect(c echo.Context) error {
 	connectURL, err := h.githubSvc.ConnectURL(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	connectURL, err = h.bindChannelOAuth(c, "github", connectURL)
+	if err != nil {
+		return projectAccessHTTPError(err)
 	}
 	return c.Redirect(http.StatusTemporaryRedirect, connectURL)
 }
@@ -743,6 +751,15 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 	pat := strings.TrimSpace(c.FormValue("github_pat"))
 	apiEndpoint := strings.TrimSpace(c.FormValue("github_api_endpoint"))
 	ctx := c.Request().Context()
+	keys := []string{service.GitHubSettingAuthMode, service.GitHubSettingPAT, service.GitHubSettingPATUserLogin, service.GitHubSettingAppID, service.GitHubSettingAppSlug, service.GitHubSettingAppPrivateKey, service.GitHubSettingAPIEndpoint, "github_app_installation_id", "github_app_account_login", "github_app_account_type", "github_app_connected_at"}
+	snapshot, err := h.settingsRepo.GetMany(ctx, keys)
+	if err != nil {
+		return echo.NewHTTPError(500, "failed to read GitHub configuration").SetInternal(err)
+	}
+	expected := make(map[string]string, len(keys))
+	for _, key := range keys {
+		expected[key] = snapshot[key]
+	}
 
 	if strings.TrimSpace(c.FormValue("github_auth_mode")) == "" && (appID != "" || appSlug != "" || privateKey != "") {
 		authMode = service.GitHubAuthModeApp
@@ -750,7 +767,7 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 
 	if authMode == service.GitHubAuthModePAT {
 		if pat == "" {
-			existingPAT, _ := h.settingsRepo.Get(ctx, service.GitHubSettingPAT)
+			existingPAT := snapshot[service.GitHubSettingPAT]
 			if strings.TrimSpace(existingPAT) == "" {
 				return echo.NewHTTPError(http.StatusBadRequest, "GitHub personal access token is required")
 			}
@@ -761,7 +778,7 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "GitHub App ID and slug are required")
 		}
 		if privateKey == "" {
-			existingPrivateKey, _ := h.settingsRepo.Get(ctx, service.GitHubSettingAppPrivateKey)
+			existingPrivateKey := snapshot[service.GitHubSettingAppPrivateKey]
 			if strings.TrimSpace(existingPrivateKey) == "" {
 				return echo.NewHTTPError(http.StatusBadRequest, "GitHub App private key is required")
 			}
@@ -769,42 +786,37 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 		}
 	}
 
-	if err := h.settingsRepo.Set(ctx, service.GitHubSettingAPIEndpoint, apiEndpoint); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub API endpoint")
-	}
-
+	values := map[string]string{service.GitHubSettingAPIEndpoint: apiEndpoint, service.GitHubSettingAuthMode: authMode}
 	if authMode == service.GitHubAuthModePAT {
-		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAuthMode, service.GitHubAuthModePAT); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub auth mode")
-		}
-		if err := h.settingsRepo.Set(ctx, service.GitHubSettingPAT, pat); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub token")
-		}
-		if err := h.settingsRepo.Set(ctx, service.GitHubSettingPATUserLogin, ""); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update GitHub token metadata")
-		}
+		values[service.GitHubSettingPAT] = pat
+		values[service.GitHubSettingPATUserLogin] = ""
 	} else {
-		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAppID, appID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub App ID")
+		values[service.GitHubSettingAppID] = appID
+		values[service.GitHubSettingAppSlug] = appSlug
+		values[service.GitHubSettingAppPrivateKey] = privateKey
+		// Clear the previous App connection in the same commit as its replacement credentials.
+		for _, key := range []string{"github_app_installation_id", "github_app_account_login", "github_app_account_type", "github_app_connected_at"} {
+			values[key] = ""
 		}
-		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAppSlug, appSlug); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub App slug")
-		}
-		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAppPrivateKey, privateKey); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub App private key")
-		}
-		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAuthMode, service.GitHubAuthModeApp); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub auth mode")
-		}
-		if h.githubSvc != nil {
-			_ = h.githubSvc.Disconnect(ctx)
-		}
+	}
+	updated, err := h.settingsRepo.CompareAndSetMany(ctx, expected, values, nil)
+	if errors.Is(err, persistence.ErrOrgDenied) {
+		return echo.NewHTTPError(403, "organization access required")
+	}
+	if err != nil {
+		return echo.NewHTTPError(500, "failed to save GitHub configuration").SetInternal(err)
+	}
+	if !updated {
+		return echo.NewHTTPError(409, "GitHub configuration changed; refresh before saving")
 	}
 
 	return returnToChannels(c)
 }
 
 func (h *Handler) handleGitHubCallback(c echo.Context) error {
+	if err := h.consumeChannelOAuth(c, "github"); err != nil {
+		return projectAccessHTTPError(err)
+	}
 	if h.githubSvc == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "GitHub integration is not configured")
 	}
@@ -829,10 +841,11 @@ func (h *Handler) handleGitHubRemove(c echo.Context) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
-	if h.githubSvc != nil {
-		_ = h.githubSvc.Disconnect(c.Request().Context())
-	}
 	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
+		{key: "github_app_installation_id", value: ""},
+		{key: "github_app_account_login", value: ""},
+		{key: "github_app_account_type", value: ""},
+		{key: "github_app_connected_at", value: ""},
 		{key: service.GitHubSettingAppID, value: ""},
 		{key: service.GitHubSettingAppSlug, value: ""},
 		{key: service.GitHubSettingAppPrivateKey, value: ""},
@@ -851,67 +864,63 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
-
-	clientID := strings.TrimSpace(c.FormValue("slack_client_id"))
-	clientSecret := strings.TrimSpace(c.FormValue("slack_client_secret"))
-	appToken := strings.TrimSpace(c.FormValue("slack_app_token"))
-	botToken := strings.TrimSpace(c.FormValue("slack_bot_token"))
-	botTokenMode := strings.TrimSpace(strings.ToLower(c.FormValue("slack_bot_token_mode")))
-	sendResponses := strings.TrimSpace(strings.ToLower(c.FormValue("slack_send_responses")))
-
-	if clientID == "" {
-		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingClientID)
-		clientID = strings.TrimSpace(existing)
+	ctx := c.Request().Context()
+	keys := []string{service.SlackSettingClientID, service.SlackSettingClientSecret, service.SlackSettingAppToken, service.SlackSettingBotTokenOverride, service.SlackSettingBotTokenSource, service.SlackSettingSendResponses}
+	snapshot, err := h.settingsRepo.GetMany(ctx, keys)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read Slack configuration").SetInternal(err)
 	}
-	if clientSecret == "" {
-		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingClientSecret)
-		clientSecret = strings.TrimSpace(existing)
+	expected := make(map[string]string, len(keys))
+	for _, key := range keys {
+		expected[key] = snapshot[key]
 	}
-	if appToken == "" {
-		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingAppToken)
-		appToken = strings.TrimSpace(existing)
+	value := func(key string) string {
+		v := strings.TrimSpace(c.FormValue(key))
+		if v == "" {
+			v = strings.TrimSpace(snapshot[key])
+		}
+		return v
 	}
-	if botTokenMode != service.SlackBotTokenSourceManual {
-		botTokenMode = service.SlackBotTokenSourceOAuth
+	clientID := value(service.SlackSettingClientID)
+	clientSecret := value(service.SlackSettingClientSecret)
+	appToken := value(service.SlackSettingAppToken)
+	mode := strings.ToLower(strings.TrimSpace(c.FormValue("slack_bot_token_mode")))
+	if mode != service.SlackBotTokenSourceManual {
+		mode = service.SlackBotTokenSourceOAuth
 	}
-
-	existingOverrideToken, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingBotTokenOverride)
-	existingOverrideToken = strings.TrimSpace(existingOverrideToken)
-	if botTokenMode == service.SlackBotTokenSourceManual && botToken == "" {
-		botToken = existingOverrideToken
+	token := strings.TrimSpace(c.FormValue("slack_bot_token"))
+	if token == "" {
+		token = strings.TrimSpace(snapshot[service.SlackSettingBotTokenOverride])
 	}
-
 	if clientID == "" || clientSecret == "" || appToken == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Slack client ID, client secret, and app token are required")
 	}
-	if botTokenMode == service.SlackBotTokenSourceManual && botToken == "" {
+	if mode == service.SlackBotTokenSourceManual && token == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Slack bot token is required when manual override mode is selected")
 	}
-
-	if err := h.settingsRepo.Set(c.Request().Context(), service.SlackSettingClientID, clientID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Slack client ID")
+	values := map[string]string{service.SlackSettingClientID: clientID, service.SlackSettingClientSecret: clientSecret, service.SlackSettingAppToken: appToken, service.SlackSettingBotTokenSource: mode}
+	if mode == service.SlackBotTokenSourceManual {
+		values[service.SlackSettingBotTokenOverride] = token
 	}
-	if err := h.settingsRepo.Set(c.Request().Context(), service.SlackSettingClientSecret, clientSecret); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Slack client secret")
+	send := strings.ToLower(strings.TrimSpace(c.FormValue("slack_send_responses")))
+	if send == "true" || send == "false" {
+		values[service.SlackSettingSendResponses] = send
+	} else if send == "" && strings.TrimSpace(snapshot[service.SlackSettingSendResponses]) == "" {
+		values[service.SlackSettingSendResponses] = "true"
 	}
-	if err := h.settingsRepo.Set(c.Request().Context(), service.SlackSettingAppToken, appToken); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Slack app token")
+	updated, err := h.settingsRepo.CompareAndSetMany(ctx, expected, values, nil)
+	if errors.Is(err, persistence.ErrOrgDenied) {
+		return echo.NewHTTPError(http.StatusForbidden, "organization access required")
 	}
-	if err := h.settingsRepo.Set(c.Request().Context(), service.SlackSettingBotTokenSource, botTokenMode); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Slack bot token mode")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Slack configuration").SetInternal(err)
 	}
-	if botTokenMode == service.SlackBotTokenSourceManual {
-		if err := h.settingsRepo.Set(c.Request().Context(), service.SlackSettingBotTokenOverride, botToken); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Slack bot token override")
-		}
+	if !updated {
+		return echo.NewHTTPError(http.StatusConflict, "Slack configuration changed; refresh before saving")
 	}
-
-	_ = saveOptionalBoolSetting(c.Request().Context(), h.settingsRepo, service.SlackSettingSendResponses, sendResponses, true)
-
 	if h.slackSvc != nil {
-		_ = h.slackSvc.ReloadFromSettings(c.Request().Context())
+		_ = h.slackSvc.ReloadFromSettings(ctx)
 	}
-
 	return returnToChannels(c)
 }
 
@@ -924,10 +933,17 @@ func (h *Handler) handleSlackConnect(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	connectURL, err = h.bindChannelOAuth(c, "slack", connectURL)
+	if err != nil {
+		return projectAccessHTTPError(err)
+	}
 	return c.Redirect(http.StatusTemporaryRedirect, connectURL)
 }
 
 func (h *Handler) handleSlackCallback(c echo.Context) error {
+	if err := h.consumeChannelOAuth(c, "slack"); err != nil {
+		return projectAccessHTTPError(err)
+	}
 	if h.slackSvc == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Slack integration is not configured")
 	}
@@ -954,9 +970,6 @@ func (h *Handler) handleSlackRemove(c echo.Context) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
-	if h.slackSvc != nil {
-		_ = h.slackSvc.Disconnect(c.Request().Context())
-	}
 	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
 		{key: service.SlackSettingClientID, value: ""},
 		{key: service.SlackSettingClientSecret, value: ""},
@@ -974,6 +987,9 @@ func (h *Handler) handleSlackRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 
+	if h.slackSvc != nil {
+		_ = h.slackSvc.Disconnect(c.Request().Context())
+	}
 	return returnToChannels(c)
 }
 
@@ -988,23 +1004,36 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
+	snapshot, err := h.settingsRepo.GetMany(c.Request().Context(), []string{service.DiscordSettingBotToken, service.DiscordSettingSendResponses})
+	if err != nil {
+		return echo.NewHTTPError(500, "failed to read Discord settings").SetInternal(err)
+	}
 	botToken := strings.TrimSpace(c.FormValue("discord_bot_token"))
 	sendResponses := strings.TrimSpace(strings.ToLower(c.FormValue("discord_send_responses")))
 	if botToken == "" {
-		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingBotToken)
-		botToken = strings.TrimSpace(existing)
+		botToken = strings.TrimSpace(snapshot[service.DiscordSettingBotToken])
 	}
 	if botToken == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Discord bot token is required")
 	}
-	if err := h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingBotToken, botToken); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Discord bot token")
+	values := map[string]string{service.DiscordSettingBotToken: botToken}
+	if sendResponses == "true" || sendResponses == "false" {
+		values[service.DiscordSettingSendResponses] = sendResponses
+	} else if strings.TrimSpace(snapshot[service.DiscordSettingSendResponses]) == "" {
+		values[service.DiscordSettingSendResponses] = "true"
 	}
-	// Discord historically treats any non-boolean submission as an omitted preference.
-	if sendResponses != "true" && sendResponses != "false" {
-		sendResponses = ""
+	expected := map[string]string{service.DiscordSettingBotToken: snapshot[service.DiscordSettingBotToken], service.DiscordSettingSendResponses: snapshot[service.DiscordSettingSendResponses]}
+	updated, err := h.settingsRepo.CompareAndSetMany(c.Request().Context(), expected, values, nil)
+	if errors.Is(err, persistence.ErrOrgDenied) {
+		return echo.NewHTTPError(403, "organization access required")
 	}
-	_ = saveOptionalBoolSetting(c.Request().Context(), h.settingsRepo, service.DiscordSettingSendResponses, sendResponses, true)
+	if err != nil {
+		return echo.NewHTTPError(500, "failed to save Discord settings").SetInternal(err)
+	}
+	if !updated {
+		return echo.NewHTTPError(409, "Discord configuration changed; refresh before saving")
+	}
+
 	if h.discordSvc != nil {
 		if err := h.discordSvc.ReloadFromSettings(c.Request().Context()); err != nil {
 			applog.Infof("warning: failed to reload discord gateway after settings save: %v", err)
@@ -1018,19 +1047,14 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 	projectID, _ := h.getCurrentProjectID(c)
+	resets, _ := channelBulkProviderResets("discord")
+	if err := h.settingsRepo.RemoveDiscordChannel(c.Request().Context(), projectID, resets); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
+	}
 	if h.discordSvc != nil {
-		_ = h.discordSvc.Disconnect(c.Request().Context())
-	}
-	resetErr := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
-		{key: service.DiscordSettingBotToken, value: ""},
-		{key: service.DiscordSettingBotUserID, value: ""},
-		{key: service.DiscordSettingSendResponses, value: ""},
-	})
-	if h.discordAuthRepo != nil && projectID != "" {
-		_ = h.discordAuthRepo.DeleteByProject(c.Request().Context(), projectID)
-	}
-	if resetErr != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(resetErr)
+		if err := h.discordSvc.Disconnect(c.Request().Context()); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "settings removed but Discord disconnect failed").SetInternal(err)
+		}
 	}
 	return returnToChannels(c)
 }
@@ -1058,10 +1082,14 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 	}
 	emailAddress := persistence.NormalizeEmailAddress(c.FormValue("email_address"))
 	password := service.NormalizeEmailPasswordForProvider(provider, c.FormValue("email_password"))
-	if password == "" {
-		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
-		password = strings.TrimSpace(existing)
+	existingPassword, err := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
+	if err != nil {
+		return echo.NewHTTPError(500, "failed to read email settings").SetInternal(err)
 	}
+	if password == "" {
+		password = strings.TrimSpace(existingPassword)
+	}
+
 	if emailAddress == "" || password == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Email address and app password are required")
 	}
@@ -1078,11 +1106,17 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 		service.EmailSettingSkipAttachments:         boolFormValue(c.FormValue("email_skip_attachments"), false),
 		service.EmailSettingMarkExistingSeenOnStart: boolFormValue(c.FormValue("email_mark_existing_seen_on_start"), true),
 	}
-	for key, value := range settings {
-		if err := h.settingsRepo.Set(c.Request().Context(), key, value); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save email settings")
-		}
+	updated, err := h.settingsRepo.CompareAndSetMany(c.Request().Context(), map[string]string{service.EmailSettingPassword: existingPassword}, settings, nil)
+	if errors.Is(err, persistence.ErrOrgDenied) {
+		return echo.NewHTTPError(403, "organization access required")
 	}
+	if err != nil {
+		return echo.NewHTTPError(500, "failed to save email settings").SetInternal(err)
+	}
+	if !updated {
+		return echo.NewHTTPError(409, "Email credentials changed; refresh before saving")
+	}
+
 	if h.emailService != nil {
 		_ = h.emailService.ReloadFromSettings(c.Request().Context())
 	}
@@ -1092,9 +1126,6 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 func (h *Handler) handleEmailRemove(c echo.Context) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
-	}
-	if h.emailService != nil {
-		h.emailService.Stop()
 	}
 	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
 		{key: service.EmailSettingProvider, value: ""},
@@ -1110,6 +1141,9 @@ func (h *Handler) handleEmailRemove(c echo.Context) error {
 		{key: service.EmailSettingMarkExistingSeenOnStart, value: ""},
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
+	}
+	if h.emailService != nil {
+		h.emailService.Stop()
 	}
 	return returnToChannels(c)
 }

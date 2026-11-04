@@ -214,6 +214,44 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 		return nil, persistence.ErrAutomationTaskBusy
 	}
 
+	if err := requireSlackInvocation(ctx, conn, invocationID); err != nil {
+		return nil, err
+	}
+	if err := requireDiscordInvocation(ctx, conn, invocationID); err != nil {
+		return nil, err
+	}
+	if err := requireAutomationPublisher(ctx, conn, projectID, versionID); err != nil {
+		return nil, err
+	}
+
+	actor, identified := models.PrincipalFromContext(ctx)
+	if identified {
+		role, err := projectRole(ctx, conn, actor.UserID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if role != "maintainer" && role != "owner" {
+			return nil, persistence.ErrProjectDenied
+		}
+	}
+
+	var initiatingUser string
+	err = conn.QueryRowContext(ctx, `SELECT user_id FROM automation_invocation_users WHERE invocation_id=?`, invocationID).Scan(&initiatingUser)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if initiatingUser != "" {
+		role, err := projectRole(ctx, conn, initiatingUser, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if role != "owner" && role != "maintainer" {
+			return nil, persistence.ErrProjectDenied
+		}
+		actor = models.Principal{UserID: initiatingUser}
+		identified = true
+	}
+
 	var executionID string
 	var executionStatus models.ExecutionStatus
 	err = conn.QueryRowContext(ctx, `SELECT id, status FROM executions WHERE dispatch_id = ?`, dispatchID).Scan(&executionID, &executionStatus)
@@ -253,6 +291,14 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 				), 0)) RETURNING id`, taskID, agentConfigID, prompt, dispatchID, invocationID).Scan(&executionID); err != nil {
 			return nil, fmt.Errorf("creating automation execution: %w", err)
 		}
+		if identified {
+			if _, err := conn.ExecContext(ctx, `INSERT INTO execution_run_identities(execution_id,user_id) VALUES(?,?)`, executionID, actor.UserID); err != nil {
+				return nil, err
+			}
+			if err := projectAudit(ctx, conn, projectID, actor.UserID, "execution.run_as", executionID, `{}`); err != nil {
+				return nil, err
+			}
+		}
 	} else {
 		var existingTaskID string
 		if err := conn.QueryRowContext(ctx, `SELECT task_id FROM executions WHERE id = ?`, executionID).Scan(&existingTaskID); err != nil || existingTaskID != taskID {
@@ -268,6 +314,22 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 				(taskCategory != models.CategoryActive && taskCategory != models.CategoryScheduled) {
 				return nil, persistence.ErrAutomationTaskBusy
 			}
+		}
+	}
+	var savedUser string
+	if err := conn.QueryRowContext(ctx, `SELECT user_id FROM execution_run_identities WHERE execution_id=?`, executionID).Scan(&savedUser); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if savedUser != "" {
+		if identified && savedUser != actor.UserID {
+			return nil, persistence.ErrProjectDenied
+		}
+		role, err := projectRole(ctx, conn, savedUser, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if role != "maintainer" && role != "owner" {
+			return nil, persistence.ErrProjectDenied
 		}
 	}
 	outboxPredicate := `status = 'processing' AND claimed_by = ?`

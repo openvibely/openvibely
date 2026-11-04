@@ -534,7 +534,7 @@ func TestChannelRemovalPreservesServiceLifecycleBehavior(t *testing.T) {
 		setup func(h *Handler) func() bool
 	}{
 		{
-			name: "github disconnect",
+			name: "github uses atomic reset without a second disconnect",
 			path: "/channels/github/remove",
 			setup: func(h *Handler) func() bool {
 				called := false
@@ -542,7 +542,7 @@ func TestChannelRemovalPreservesServiceLifecycleBehavior(t *testing.T) {
 					called = true
 					return nil
 				}})
-				return func() bool { return called }
+				return func() bool { return !called }
 			},
 		},
 		{
@@ -655,7 +655,7 @@ func TestChannelRemovalSettingFailureDoesNotReportSuccess(t *testing.T) {
 					assert.Empty(t, rec.Header().Get("Location"))
 					firstValue, err := h.settingsRepo.Get(context.Background(), tc.firstKey)
 					require.NoError(t, err)
-					assert.Empty(t, firstValue, "the injected failure should happen after a partial cleanup")
+					assert.Equal(t, "configured", firstValue, "a failed reset must roll back all credential changes")
 					failedValue, err := h.settingsRepo.Get(context.Background(), tc.failKey)
 					require.NoError(t, err)
 					assert.Equal(t, "configured", failedValue)

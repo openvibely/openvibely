@@ -13,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -24,6 +25,8 @@ var (
 )
 
 type InsightsService struct {
+	projectAccess *ProjectAccessService
+	authOff       bool
 	insightsRepo  persistence.InsightsStore
 	taskRepo      persistence.TaskStore
 	projectRepo   persistence.ProjectStore
@@ -55,6 +58,10 @@ func (s *InsightsService) SetLLMService(llmSvc *LLMService) {
 
 // GetDashboard returns aggregated insight data for the dashboard
 func (s *InsightsService) GetDashboard(ctx context.Context, projectID string) (*models.InsightDashboardData, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	var (
 		newInsights      []models.Insight
 		recentInsights   []models.Insight
@@ -234,6 +241,10 @@ func (s *InsightsService) computeStats(ctx context.Context, projectID string) (m
 
 // RunAnalysis performs a full analysis of the project and generates insights
 func (s *InsightsService) RunAnalysis(ctx context.Context, projectID string) (*models.InsightReport, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return nil, authErr
+	}
 	applog.Infof("[insights-svc] starting analysis for project %s", projectID)
 
 	project, err := s.projectRepo.GetByID(ctx, projectID)
@@ -680,6 +691,10 @@ func (s *InsightsService) resolveDirectAnalysisContext(ctx context.Context, proj
 
 // ExtractKnowledge analyzes task completions and extracts knowledge entries
 func (s *InsightsService) ExtractKnowledge(ctx context.Context, projectID string) ([]models.KnowledgeEntry, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return nil, authErr
+	}
 	if s.llmSvc == nil {
 		return nil, nil
 	}
@@ -753,11 +768,19 @@ Respond with ONLY the JSON array, no markdown fences.`, project.Name, strings.Jo
 
 // UpdateInsightStatus updates the status of an insight within a project.
 func (s *InsightsService) UpdateInsightStatus(ctx context.Context, projectID, id string, status models.InsightStatus) error {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return authErr
+	}
 	return s.insightsRepo.UpdateStatus(ctx, projectID, id, status)
 }
 
 // AcceptInsight marks an insight as accepted within a project and optionally links a task.
 func (s *InsightsService) AcceptInsight(ctx context.Context, projectID, insightID string, taskID *string) error {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return authErr
+	}
 	if taskID != nil && *taskID != "" {
 		return s.insightsRepo.LinkTask(ctx, projectID, insightID, *taskID)
 	}
@@ -766,31 +789,55 @@ func (s *InsightsService) AcceptInsight(ctx context.Context, projectID, insightI
 
 // GetInsight returns a single insight within a project.
 func (s *InsightsService) GetInsight(ctx context.Context, projectID, id string) (*models.Insight, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	return s.insightsRepo.GetInsight(ctx, projectID, id)
 }
 
 // ListByType returns insights filtered by type
 func (s *InsightsService) ListByType(ctx context.Context, projectID string, insightType models.InsightType) ([]models.Insight, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	return s.insightsRepo.ListByType(ctx, projectID, insightType, 50)
 }
 
 // DeleteInsight removes an insight from a project.
 func (s *InsightsService) DeleteInsight(ctx context.Context, projectID, id string) error {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return authErr
+	}
 	return s.insightsRepo.DeleteInsight(ctx, projectID, id)
 }
 
 // DeleteKnowledge removes a knowledge entry from a project.
 func (s *InsightsService) DeleteKnowledge(ctx context.Context, projectID, id string) error {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return authErr
+	}
 	return s.insightsRepo.DeleteKnowledge(ctx, projectID, id)
 }
 
 // ListReports returns recent insight reports
 func (s *InsightsService) ListReports(ctx context.Context, projectID string, limit int) ([]models.InsightReport, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	return s.insightsRepo.ListReports(ctx, projectID, limit)
 }
 
 // RunHealthCheck generates a comprehensive project health evaluation using AI
 func (s *InsightsService) RunHealthCheck(ctx context.Context, projectID string) (*models.HealthCheck, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return nil, authErr
+	}
 	if s.llmSvc == nil {
 		return nil, fmt.Errorf("LLM service not available")
 	}
@@ -967,16 +1014,28 @@ Respond with ONLY the JSON object, no markdown fences or extra text.`,
 
 // GetLatestHealthCheck returns the most recent health check for a project
 func (s *InsightsService) GetLatestHealthCheck(ctx context.Context, projectID string) (*models.HealthCheck, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	return s.insightsRepo.GetLatestHealthCheck(ctx, projectID)
 }
 
 // ListHealthChecks returns recent health checks for trend display
 func (s *InsightsService) ListHealthChecks(ctx context.Context, projectID string, limit int) ([]models.HealthCheck, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	return s.insightsRepo.ListHealthChecks(ctx, projectID, limit)
 }
 
 // GradeIdeas evaluates the quality of a user's ideas and tasks using AI
 func (s *InsightsService) GradeIdeas(ctx context.Context, projectID string) (*models.IdeaGrade, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return nil, authErr
+	}
 	if s.llmSvc == nil {
 		return nil, fmt.Errorf("LLM service not available")
 	}
@@ -1116,11 +1175,19 @@ Respond with ONLY the JSON object, no markdown fences or extra text.`,
 
 // GetLatestIdeaGrade returns the most recent idea grade for a project
 func (s *InsightsService) GetLatestIdeaGrade(ctx context.Context, projectID string) (*models.IdeaGrade, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	return s.insightsRepo.GetLatestIdeaGrade(ctx, projectID)
 }
 
 // ListIdeaGrades returns recent idea grades for trend display
 func (s *InsightsService) ListIdeaGrades(ctx context.Context, projectID string, limit int) ([]models.IdeaGrade, error) {
+	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	return s.insightsRepo.ListIdeaGrades(ctx, projectID, limit)
 }
 
@@ -1224,4 +1291,22 @@ func insightsScopePrompt(projectID, prompt string) string {
 		return "This is one combined analysis of all projects. The metrics and tasks below span all projects. Produce one overall assessment, not separate reports per project. Do not treat this scope as a single repository.\n\n" + prompt
 	}
 	return prompt
+}
+
+func (s *InsightsService) SetProjectAuthorization(access *ProjectAccessService, authOff bool) {
+	s.projectAccess, s.authOff = access, authOff
+}
+
+func (s *InsightsService) authorizeInsights(ctx context.Context, projectID string, permission authz.Permission) (context.Context, error) {
+	if s.projectAccess == nil {
+		return ctx, nil
+	}
+	principal, ok := models.PrincipalFromContext(ctx)
+	if !ok || principal.UserID == "" {
+		if !s.authOff {
+			return ctx, authz.ErrDenied
+		}
+		ctx = models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID, OrgID: models.DefaultOrgID})
+	}
+	return ctx, s.projectAccess.Require(ctx, projectID, permission)
 }

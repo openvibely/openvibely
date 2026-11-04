@@ -118,6 +118,13 @@ func (d *AutomationDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 		}
 		return fail(err)
 	}
+	// Recheck before claiming an execution or marking durable work queued. The
+	// worker repeats this check after capacity becomes available.
+	ctx = WithAutomationContext(ctx, envelope.Context)
+	ctx, err = d.workerSvc.automationPrincipalContext(ctx, *envelope, dispatch.ExecutionID)
+	if err != nil {
+		return fail(fmt.Errorf("automation dispatch authorization: %w", err))
+	}
 	if dispatch.ExecutionID != "" {
 		execution, err := d.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, d.claimant)
 		if err != nil {

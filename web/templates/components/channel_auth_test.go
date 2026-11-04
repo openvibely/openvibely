@@ -101,7 +101,11 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 				fmt.Sprintf(`hx-delete="%s"`, tc.deleteRoute),
 				fmt.Sprintf(`hx-confirm="%s"`, tc.confirmation),
 			)
-			assertChannelAuthorizationMutationScope(t, populatedHTML, tc.containerID, 2)
+			mutationCount := 2
+			if tc.name == "Slack" || tc.name == "Discord" {
+				mutationCount++
+			} // Sender-binding action.
+			assertChannelAuthorizationMutationScope(t, populatedHTML, tc.containerID, mutationCount)
 			if got := strings.Count(populatedHTML, fmt.Sprintf(`hx-delete="%s"`, tc.deleteRoute)); got != 1 {
 				t.Fatalf("expected exactly one Remove endpoint %s, got %d", tc.deleteRoute, got)
 			}
@@ -155,4 +159,24 @@ func assertChannelAuthorizationContains(t *testing.T, html string, snippets ...s
 			t.Errorf("rendered authorization component missing %q", snippet)
 		}
 	}
+}
+
+func TestSlackIdentityBindingControls(t *testing.T) {
+	var output bytes.Buffer
+	err := SlackAuthorizedUsersList([]models.SlackAuthorizedUser{{ID: "binding-row", ProjectID: "project-27", SlackUserID: "U123"}}, "project-27").Render(context.Background(), &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`hx-post="/channels/slack/authorized-users/binding-row/identity"`, `name="team_id"`, `name="application_user_id"`, `hx-include="#slack-identity-binding-row"`, `name="project_id" value="project-27"`, `Confirm you verified`, `Unbound users cannot submit work`} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("missing binding control %q", want)
+		}
+	}
+}
+
+func TestDiscordIdentityBindingControls(t *testing.T) {
+	html := renderChannelAuthorizationComponent(t, DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "row", ProjectID: "project", DiscordUserID: "123"}}, "project"))
+	assertChannelAuthorizationContains(t, html, "Application identity: unbound", `name="attested"`, "I verified this Discord numeric ID", `hx-post="/channels/discord/authorized-users/row/identity"`, "Authenticated Discord ingress is currently unavailable")
+	html = renderChannelAuthorizationComponent(t, DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "row", ProjectID: "project", DiscordUserID: "123", ApplicationUserID: "user-1"}}, "project"))
+	assertChannelAuthorizationContains(t, html, "Application user: user-1", `value="user-1"`)
 }

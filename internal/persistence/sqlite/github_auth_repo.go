@@ -88,53 +88,64 @@ func (r *GitHubAuthRepo) UpsertAuthorizedActor(ctx context.Context, actor *model
 		actor.AddedBy = "web"
 	}
 
-	var githubUserID any
-	if actor.GitHubUserID != nil {
-		githubUserID = *actor.GitHubUserID
-	}
-	var existingID string
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id FROM github_authorized_actors WHERE lower(github_login) = ?`, actor.GitHubLogin).Scan(&existingID)
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("find github authorized actor: %w", err)
-	}
-	if err == sql.ErrNoRows {
-		err = queryRowBoundSQLite(ctx, r.db,
-			`INSERT INTO github_authorized_actors (github_user_id, github_login, display_name, permission, added_by)
-			 VALUES (?, ?, ?, ?, ?)
-			 RETURNING id, github_user_id, added_at`,
-			githubUserID, actor.GitHubLogin, actor.DisplayName, actor.Permission, actor.AddedBy).
-			Scan(&actor.ID, &githubUserID, &actor.AddedAt)
-	} else {
-		err = queryRowBoundSQLite(ctx, r.db,
-			`UPDATE github_authorized_actors
-			 SET github_user_id = COALESCE(?, github_user_id),
-				display_name = CASE WHEN ? != '' THEN ? ELSE display_name END,
-				permission = ?,
-				added_by = ?
-			 WHERE id = ?
-			 RETURNING id, github_user_id, added_at`,
-			githubUserID, actor.DisplayName, actor.DisplayName, actor.Permission, actor.AddedBy, existingID).
-			Scan(&actor.ID, &githubUserID, &actor.AddedAt)
-	}
-	if err != nil {
-		return fmt.Errorf("upsert github authorized actor: %w", err)
-	}
-	actor.GitHubUserID = nullableInt64Ptr(githubUserID)
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		principal, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if _, err := orgActor(ctx, tx, principal.UserID); err != nil {
+				return err
+			}
+			actor.AddedBy = principal.UserID
+		}
+		var githubUserID any
+		if actor.GitHubUserID != nil {
+			githubUserID = *actor.GitHubUserID
+		}
+		var existingID string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM github_authorized_actors WHERE lower(github_login)=?`, actor.GitHubLogin).Scan(&existingID)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == sql.ErrNoRows {
+			err = tx.QueryRowContext(ctx, `INSERT INTO github_authorized_actors(github_user_id,github_login,display_name,permission,added_by) VALUES(?,?,?,?,?) RETURNING id,github_user_id,added_at`, githubUserID, actor.GitHubLogin, actor.DisplayName, actor.Permission, actor.AddedBy).Scan(&actor.ID, &githubUserID, &actor.AddedAt)
+		} else {
+			err = tx.QueryRowContext(ctx, `UPDATE github_authorized_actors SET github_user_id=COALESCE(?,github_user_id),display_name=CASE WHEN ?!='' THEN ? ELSE display_name END,permission=?,added_by=? WHERE id=? RETURNING id,github_user_id,added_at`, githubUserID, actor.DisplayName, actor.DisplayName, actor.Permission, actor.AddedBy, existingID).Scan(&actor.ID, &githubUserID, &actor.AddedAt)
+		}
+		if err != nil {
+			return fmt.Errorf("upsert github authorized actor: %w", err)
+		}
+		actor.GitHubUserID = nullableInt64Ptr(githubUserID)
+		if identified {
+			return projectAudit(ctx, tx, "default", principal.UserID, "github.reviewer_saved", actor.ID, `{}`)
+		}
+		return nil
+	})
 }
 
-// DeleteAuthorizedActor removes an authorized GitHub actor by ID.
+// DeleteAuthorizedActor removes installation-wide reviewer trust atomically.
 func (r *GitHubAuthRepo) DeleteAuthorizedActor(ctx context.Context, id string) error {
-	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM github_authorized_actors WHERE id = ?`, strings.TrimSpace(id))
-	if err != nil {
-		return fmt.Errorf("delete github authorized actor: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("github authorized actor not found")
-	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		principal, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if _, err := orgActor(ctx, tx, principal.UserID); err != nil {
+				return err
+			}
+		}
+		result, err := tx.ExecContext(ctx, `DELETE FROM github_authorized_actors WHERE id=?`, strings.TrimSpace(id))
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return fmt.Errorf("github authorized actor not found")
+		}
+		if identified {
+			return projectAudit(ctx, tx, "default", principal.UserID, "github.reviewer_removed", strings.TrimSpace(id), `{}`)
+		}
+		return nil
+	})
 }
 
 // UpsertProjectInbox configures the authorized GitHub inbox assignee whose assigned issues a project's scheduled tasks inspect.
@@ -165,8 +176,19 @@ func (r *GitHubAuthRepo) UpsertProjectInbox(ctx context.Context, inbox *models.G
 	if inbox.Enabled {
 		enabled = 1
 	}
-	err := queryRowBoundSQLite(ctx, r.db,
-		`INSERT INTO github_project_inboxes (project_id, github_user_id, github_login, agent_id, enabled)
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			role, err := projectRole(ctx, tx, actor.UserID, inbox.ProjectID)
+			if err != nil {
+				return err
+			}
+			if role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+		err := tx.QueryRowContext(ctx,
+			`INSERT INTO github_project_inboxes (project_id, github_user_id, github_login, agent_id, enabled)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(project_id) DO UPDATE SET
 			github_user_id = excluded.github_user_id,
@@ -175,11 +197,20 @@ func (r *GitHubAuthRepo) UpsertProjectInbox(ctx context.Context, inbox *models.G
 			enabled = excluded.enabled,
 			updated_at = datetime('now')
 		 RETURNING github_user_id, created_at, updated_at`,
-		inbox.ProjectID, githubUserID, inbox.GitHubLogin, agentID, enabled).
-		Scan(&githubUserID, &inbox.CreatedAt, &inbox.UpdatedAt)
+			inbox.ProjectID, githubUserID, inbox.GitHubLogin, agentID, enabled).
+			Scan(&githubUserID, &inbox.CreatedAt, &inbox.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		if identified {
+			return projectAudit(ctx, tx, inbox.ProjectID, actor.UserID, "github.inbox_updated", inbox.ProjectID, `{}`)
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("upsert github project inbox: %w", err)
 	}
+
 	inbox.GitHubUserID = nullableInt64Ptr(githubUserID)
 	return nil
 }

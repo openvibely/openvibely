@@ -50,6 +50,7 @@ func (h *Handler) RemoveDiscordAuthorizedUser(c echo.Context) error {
 
 func (h *Handler) discordAuthorizedUserCRUD() authorizedUserCRUD[models.DiscordAuthorizedUser] {
 	crud := authorizedUserCRUD[models.DiscordAuthorizedUser]{
+		authorize:            h.authorizeChannelTrustOperation,
 		render:               components.DiscordAuthorizedUsersList,
 		notConfiguredMessage: "Discord auth not configured",
 		configured:           h.discordAuthRepo != nil,
@@ -61,4 +62,23 @@ func (h *Handler) discordAuthorizedUserCRUD() authorizedUserCRUD[models.DiscordA
 		crud.projectID = func(user *models.DiscordAuthorizedUser) string { return user.ProjectID }
 	}
 	return crud
+}
+
+// BindDiscordApplicationUser records explicit administrator attestation.
+func (h *Handler) BindDiscordApplicationUser(c echo.Context) error {
+	projectID := c.FormValue("project_id")
+	if err := h.authorizeChannelTrustOperation(c, projectID, true); err != nil {
+		return err
+	}
+	if h.discordAuthRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Discord auth not configured")
+	}
+	userID := strings.TrimSpace(c.FormValue("application_user_id"))
+	if c.FormValue("attested") != "true" || userID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Verify both identities and provide an application user ID")
+	}
+	if err := h.discordAuthRepo.BindApplicationUser(c.Request().Context(), projectID, c.Param("id"), userID); err != nil {
+		return err
+	}
+	return h.discordAuthorizedUserCRUD().reload(c, projectID)
 }

@@ -228,16 +228,44 @@ func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
 		t := s.RunAt
 		s.NextRun = &t
 	}
-	err := queryRowBoundSQLite(ctx, r.db,
-		`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run)
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		if err := authorizeSlackTaskMutation(ctx, exec, s.TaskID); err != nil {
+			return err
+		}
+		err := exec.QueryRowContext(ctx,
+			`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run)
 		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
-		s.TaskID, s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.ClearContextOnStart, s.NextRun).
-		Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("creating schedule: %w", err)
-	}
-	return nil
+			s.TaskID, s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.ClearContextOnStart, s.NextRun).
+			Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("creating schedule: %w", err)
+		}
+		if err := snapshotDiscordSchedule(ctx, exec, s.ID); err != nil {
+			return err
+		}
+		if p, ok := models.PrincipalFromContext(ctx); ok {
+			if _, err := exec.ExecContext(ctx, `INSERT INTO schedule_run_identities(schedule_id,user_id) VALUES(?,?)`, s.ID, p.UserID); err != nil {
+				return err
+			}
+			var projectID string
+			if err := exec.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id=?`, s.TaskID).Scan(&projectID); err != nil {
+				return err
+			}
+			role, err := projectRole(ctx, exec, p.UserID, projectID)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+			if err := snapshotSlackSchedule(ctx, exec, s.ID); err != nil {
+				return err
+			}
+			return projectAudit(ctx, exec, projectID, p.UserID, "schedule.run_as", s.ID, `{}`)
+		}
+		return nil
+	})
 }
 
 func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
@@ -311,37 +339,41 @@ func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID stri
 // still owned by the supplied task. It deliberately leaves enabled unchanged:
 // stale timing snapshots must not restore a pause that won the race.
 func (r *ScheduleRepo) UpdateForTask(ctx context.Context, s *models.Schedule, taskID string) error {
-	if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
-		return fmt.Errorf("updating schedule: %w", err)
-	}
-	s.RunAt = normalizeScheduleTime(s.RunAt)
-	s.NextRun = normalizeScheduleNextRun(s.NextRun)
-	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
+	return r.withScheduleAction(ctx, s.ID, taskID, "slack.schedule_updated", func(exec sqlExecutor) error {
+		if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
+			return fmt.Errorf("updating schedule: %w", err)
+		}
+		s.RunAt = normalizeScheduleTime(s.RunAt)
+		s.NextRun = normalizeScheduleNextRun(s.NextRun)
+		result, err := exec.ExecContext(ctx,
+			`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
 			clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
 		 WHERE id = ? AND task_id = ?`,
-		s.RunAt, s.RepeatType, s.RepeatInterval, s.ClearContextOnStart, s.NextRun, s.ID, taskID)
-	if err != nil {
-		return fmt.Errorf("updating schedule: %w", err)
-	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking schedule update: %w", err)
-	}
-	if rowsAffected == 0 {
-		return persistence.ErrNotFound
-	}
-	return nil
+			s.RunAt, s.RepeatType, s.RepeatInterval, s.ClearContextOnStart, s.NextRun, s.ID, taskID)
+		if err != nil {
+			return fmt.Errorf("updating schedule: %w", err)
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("checking schedule update: %w", err)
+		}
+		if rowsAffected == 0 {
+			return persistence.ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *ScheduleRepo) UpdateClearContextOnStart(ctx context.Context, id, taskID string, clearContextOnStart bool) error {
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE schedules SET clear_context_on_start = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
-		clearContextOnStart, id, taskID)
-	if err != nil {
-		return fmt.Errorf("updating schedule clear context on start: %w", err)
-	}
-	return nil
+	return r.withScheduleAction(ctx, id, taskID, "slack.schedule_updated", func(exec sqlExecutor) error {
+		_, err := exec.ExecContext(ctx,
+			`UPDATE schedules SET clear_context_on_start = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
+			clearContextOnStart, id, taskID)
+		if err != nil {
+			return fmt.Errorf("updating schedule clear context on start: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *ScheduleRepo) MarkRan(ctx context.Context, id string, lastRun time.Time, nextRun *time.Time) error {
@@ -389,11 +421,13 @@ func (r *ScheduleRepo) UpdateNextRunIfCurrent(ctx context.Context, id, taskID st
 }
 
 func (r *ScheduleRepo) Delete(ctx context.Context, id string) error {
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM schedules WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("deleting schedule: %w", err)
-	}
-	return nil
+	return r.withScheduleAction(ctx, id, "", "slack.schedule_deleted", func(exec sqlExecutor) error {
+		_, err := exec.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("deleting schedule: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *ScheduleRepo) ToggleEnabled(ctx context.Context, id string, enabled bool) error {
@@ -417,12 +451,14 @@ func (r *ScheduleRepo) SetEnabledForTask(ctx context.Context, id, taskID string,
 		args = append(args, models.RepeatOnce)
 	}
 	var s models.Schedule
-	err := queryRowBoundSQLite(ctx, r.db,
-		`UPDATE schedules SET enabled = ?, updated_at = datetime('now') WHERE `+where+`
+	err := r.withScheduleAction(ctx, id, taskID, "slack.schedule_enabled", func(exec sqlExecutor) error {
+		return exec.QueryRowContext(ctx,
+			`UPDATE schedules SET enabled = ?, updated_at = datetime('now') WHERE `+where+`
 		 RETURNING id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start,
 		           next_run, last_run, created_at, updated_at`,
-		args...).Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval, &s.Enabled,
-		&s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt)
+			args...).Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval, &s.Enabled,
+			&s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt)
+	})
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

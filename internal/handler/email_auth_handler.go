@@ -44,6 +44,7 @@ func (h *Handler) RemoveEmailAuthorizedSender(c echo.Context) error {
 
 func (h *Handler) emailAuthorizedUserCRUD() authorizedUserCRUD[models.EmailAuthorizedSender] {
 	crud := authorizedUserCRUD[models.EmailAuthorizedSender]{
+		authorize:            h.authorizeChannelTrustOperation,
 		render:               components.EmailAuthorizedSendersList,
 		notConfiguredMessage: "Email auth not configured",
 		configured:           h.emailAuthRepo != nil,

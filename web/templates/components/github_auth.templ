@@ -54,6 +54,22 @@ templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models
 								</svg>
 							</button>
 						</div>
+                        <details class="text-sm bg-base-200 rounded-lg p-3">
+                            <summary>Reviewer identity for this project</summary>
+                            if actor.ReviewerIdentity != nil {
+                                <p class="my-2">Attested: { actor.ReviewerIdentity.Host } user { fmt.Sprint(actor.ReviewerIdentity.ExternalUserID) } → { actor.ReviewerIdentity.ApplicationUserID }</p>
+                            } else {
+                                <p class="my-2">No application user binding. A GitHub login alone does not establish application identity.</p>
+                            }
+                            <div id={ "github-reviewer-binding-" + actor.ID } class="space-y-2 mt-2">
+                                <input type="hidden" name="project_id" value={ projectID }/>
+                                <input aria-label="GitHub host" type="text" name="host" placeholder="github.com or enterprise host" class="input input-bordered input-sm"/>
+                                <input aria-label="Numeric GitHub user ID" type="number" min="1" name="external_user_id" class="input input-bordered input-sm"/>
+                                <input aria-label="Application user ID" type="text" name="application_user_id" class="input input-bordered input-sm"/>
+                                <label class="flex gap-2"><input type="checkbox" name="attested" value="true" class="checkbox checkbox-sm"/>I verified that this GitHub account belongs to this application user.</label>
+                                <button type="button" class="btn btn-sm" hx-post={ fmt.Sprintf("/channels/github/authorized-actors/%s/identity", actor.ID) } hx-include={ "#github-reviewer-binding-" + actor.ID } hx-target="#github-runtime-settings" hx-swap="outerHTML">Save verified binding</button>
+                            </div>
+                        </details>
 					}
 				</div>
 			}

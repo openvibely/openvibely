@@ -296,7 +296,7 @@ func (h *Handler) buildAPIChatActionToolRuntime(params streamingResponseParams, 
 // chatcontrol execution engine with a surface-aware action handler map.
 func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) llmcontracts.RuntimeToolExecutor {
 	handlers := h.projectSelectedChatHandlers(params, collector, mode, surface)
-	return chatcontrol.BuildRuntimeToolExecutor(mode, surface, handlers)
+	return h.authorizeSelectedProjectRuntimeExecutor(params, surface, chatcontrol.BuildRuntimeToolExecutor(mode, surface, handlers))
 }
 
 func (h *Handler) runtimeAgentMaterializationProjectRoot(ctx context.Context, projectID string, agent *models.Agent) string {
@@ -749,6 +749,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 	for name, handler := range goalHandlers {
 		handlers[name] = handler
 	}
+	h.authorizeProjectRuntimeHandlers(params.ProjectID, handlers)
 	return handlers
 }
 
@@ -1127,7 +1128,7 @@ func (h *Handler) buildLifecycleChatActionToolRuntimeFromDefs(params streamingRe
 	handlers := h.chatActionHandlers(params, collector, mode, surface)
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor:    chatcontrol.BuildLifecycleRuntimeToolExecutor(mode, surface, handlers),
+		Executor:    h.authorizeProjectRuntimeExecutor(params.ProjectID, chatcontrol.BuildLifecycleRuntimeToolExecutor(mode, surface, handlers)),
 	}
 }
 
@@ -1548,5 +1549,5 @@ func (h *Handler) initialTaskRuntimeTools(ctx context.Context, task models.Task,
 	}
 	params := streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, Task: &task, ExecID: executionID, IsTaskFollowup: true, ChatMode: models.ChatModeOrchestrate}
 	defs := filterRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), missing)
-	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), missing)}
+	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: h.authorizeProjectRuntimeExecutor(params.ProjectID, chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), missing))}
 }

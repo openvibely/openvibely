@@ -146,6 +146,7 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	}
 
 	for _, sched := range schedules {
+		ctx := ctx
 		task, err := s.taskRepo.GetByID(ctx, sched.TaskID)
 		if err != nil {
 			applog.Infof("[scheduler] checkDueTasks error getting task %s: %v", sched.TaskID, err)
@@ -157,6 +158,15 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 				applog.Infof("[scheduler] checkDueTasks error deleting orphaned schedule %s: %v", sched.ID, err)
 			}
 			continue
+		}
+
+		if s.workerSvc != nil {
+			authorizedCtx, authErr := s.workerSvc.schedulePrincipalContext(ctx, *task, sched.ID)
+			if authErr != nil {
+				applog.Infof("[scheduler] schedule=%s authorization denied: %v", sched.ID, authErr)
+				continue
+			}
+			ctx = authorizedCtx
 		}
 
 		suppressed, err := s.scheduleRepo.AdvanceSuppressedOccurrence(ctx, sched, now)
@@ -245,8 +255,17 @@ func (s *SchedulerService) dispatchCalendarAdmissions(ctx context.Context) {
 		return
 	}
 	for _, admission := range admissions {
+		ctx := ctx
 		task := admission.Task
 		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
+			if s.workerSvc != nil {
+				authorizedCtx, authErr := s.workerSvc.userRunPrincipalContext(ctx, task, admission.RunAsUserID)
+				if authErr != nil {
+					applog.Infof("[scheduler] admitted planner=%s authorization denied: %v", task.ID, authErr)
+					continue
+				}
+				ctx = authorizedCtx
+			}
 			if err := s.swarmStarter.StartPlannerForScheduledRun(ctx, task.ID, task.StartsNewContext); err != nil {
 				applog.Infof("[scheduler] starting admitted planner task=%s: %v", task.ID, err)
 				continue

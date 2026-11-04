@@ -99,44 +99,61 @@ func (r *TelegramAuthRepo) IsAuthorizedAnywhere(ctx context.Context, telegramUse
 
 // Create adds an authorized Telegram user for one project.
 func (r *TelegramAuthRepo) Create(ctx context.Context, u *models.TelegramAuthorizedUser) error {
-	u.TelegramUsername = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(u.TelegramUsername, "@")))
-	err := queryRowBoundSQLite(ctx, r.db,
-		`INSERT INTO telegram_authorized_users (project_id, telegram_user_id, telegram_username, display_name, added_by)
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+				return err
+			}
+			u.AddedBy = actor.UserID
+		}
+		if err := func() error {
+			u.TelegramUsername = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(u.TelegramUsername, "@")))
+			err := tx.QueryRowContext(ctx,
+				`INSERT INTO telegram_authorized_users (project_id, telegram_user_id, telegram_username, display_name, added_by)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT DO NOTHING
 		 RETURNING id, added_at`,
-		u.ProjectID, u.TelegramUserID, u.TelegramUsername, u.DisplayName, u.AddedBy).
-		Scan(&u.ID, &u.AddedAt)
-	if err == nil {
-		return nil
-	}
-	if err != sql.ErrNoRows {
-		return err
-	}
-	where := `project_id = ? AND telegram_user_id = ?`
-	args := []any{u.ProjectID, u.TelegramUserID}
-	if u.TelegramUserID == 0 && u.TelegramUsername != "" {
-		where = `project_id = ? AND LOWER(telegram_username) = LOWER(?)`
-		args = []any{u.ProjectID, u.TelegramUsername}
-	}
-	if u.DisplayName != "" {
-		if _, updateErr := execBoundSQLite(ctx, r.db, `UPDATE telegram_authorized_users SET display_name = ?, added_by = ? WHERE `+where, append([]any{u.DisplayName, u.AddedBy}, args...)...); updateErr != nil {
-			return updateErr
+				u.ProjectID, u.TelegramUserID, u.TelegramUsername, u.DisplayName, u.AddedBy).
+				Scan(&u.ID, &u.AddedAt)
+			if err == nil {
+				return nil
+			}
+			if err != sql.ErrNoRows {
+				return err
+			}
+			where := `project_id = ? AND telegram_user_id = ?`
+			args := []any{u.ProjectID, u.TelegramUserID}
+			if u.TelegramUserID == 0 && u.TelegramUsername != "" {
+				where = `project_id = ? AND LOWER(telegram_username) = LOWER(?)`
+				args = []any{u.ProjectID, u.TelegramUsername}
+			}
+			if u.DisplayName != "" {
+				if _, updateErr := tx.ExecContext(ctx, `UPDATE telegram_authorized_users SET display_name = ?, added_by = ? WHERE `+where, append([]any{u.DisplayName, u.AddedBy}, args...)...); updateErr != nil {
+					return updateErr
+				}
+			}
+			return tx.QueryRowContext(ctx,
+				`SELECT id, added_at FROM telegram_authorized_users WHERE `+where,
+				args...).Scan(&u.ID, &u.AddedAt)
+		}(); err != nil {
+			return err
 		}
-	}
-	return queryRowBoundSQLite(ctx, r.db,
-		`SELECT id, added_at FROM telegram_authorized_users WHERE `+where,
-		args...).Scan(&u.ID, &u.AddedAt)
+		if identified {
+			return projectAudit(ctx, tx, u.ProjectID, actor.UserID, "channel.allowlist_saved", u.ID, `{"table":"telegram_authorized_users"}`)
+		}
+		return nil
+	})
 }
 
 // Delete removes an authorized Telegram user by ID.
 func (r *TelegramAuthRepo) Delete(ctx context.Context, id string) error {
-	return deleteByID(ctx, r.db, "telegram_authorized_users", "telegram auth user", id)
+	return deleteChannelAllowlist(ctx, r.db, "telegram_authorized_users", "", id)
 }
 
 // DeleteForProject removes an authorized Telegram user only from its owning project.
 func (r *TelegramAuthRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
-	return deleteByIDForProject(ctx, r.db, "telegram_authorized_users", "telegram auth user", projectID, id)
+	return deleteChannelAllowlist(ctx, r.db, "telegram_authorized_users", projectID, id)
 }
 
 // GetByID returns a single authorized user by ID.

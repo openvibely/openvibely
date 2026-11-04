@@ -216,6 +216,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
  </button>
 				</div>
 			</form>
+ <div hx-get={ "/projects/"+project.ID+"/sharing" } hx-trigger="load" hx-swap="outerHTML"></div>
 		</div>
 		<form method="dialog" class="modal-backdrop">
 			<button>close</button>

@@ -259,6 +259,29 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 	if err != nil || parent == nil {
 		return fmt.Errorf("loading swarm parent: %w", err)
 	}
+	if s.workerSvc != nil {
+		ctx, err = s.workerSvc.runPrincipalContext(ctx, *parent)
+		if err != nil {
+			return err
+		}
+	}
+	existing, err := s.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		if ctx, err = s.swarmChildRunContext(ctx, parent, existing); err != nil {
+			return err
+		}
+	}
+	_, laneGuarded := persistence.ActiveLaneExpectedState(ctx, parentTaskID)
+	atomicCreation := existing == nil && !laneGuarded
+	if atomicCreation {
+		ctx = persistence.WithPlannerCreationParent(ctx, *parent)
+		if actor, ok := models.PrincipalFromContext(ctx); ok && s.workerSvc != nil && s.workerSvc.runIdentities != nil {
+			ctx = persistence.WithSwarmWriteIdentities(ctx, []persistence.SwarmWriteIdentity{{TaskID: parent.ID, ProjectID: parent.ProjectID, UserID: actor.UserID, AllowLegacyOwner: s.workerSvc.runAuthOff}})
+		}
+	}
 	if _, guarded := persistence.ActiveLaneExpectedState(ctx, parentTaskID); guarded {
 		if err := s.taskRepo.PrepareSwarmParentForActiveLane(ctx, parentTaskID); err != nil {
 			return err
@@ -271,24 +294,22 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 	if selection != nil && selection.ModelID != "" {
 		parent.AgentID = &selection.ModelID
 	}
-	if s.workerSvc != nil {
+	if s.workerSvc != nil && !atomicCreation {
 		s.workerSvc.ClearCancellationRequested(parent.ID)
 	}
-	if parent.Category != models.CategoryActive {
+	if !atomicCreation && parent.Category != models.CategoryActive {
 		if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
 			return err
 		}
 		parent.Category = models.CategoryActive
 	}
-	if parent.Status != models.StatusBlocked {
+	if !atomicCreation && parent.Status != models.StatusBlocked {
 		if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusBlocked); err != nil {
 			return err
 		}
 		parent.Status = models.StatusBlocked
 	}
-	if existing, err := s.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner); err != nil {
-		return err
-	} else if existing != nil {
+	if existing != nil {
 		existing.StartsNewContext = startsNewContext
 		return s.submitIfRunnable(ctx, existing)
 	}
@@ -322,6 +343,9 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 	}
 	if err := s.createSwarmChild(ctx, parent, child); err != nil {
 		return err
+	}
+	if atomicCreation && s.workerSvc != nil {
+		s.workerSvc.ClearCancellationRequested(parent.ID)
 	}
 	return nil
 }
@@ -633,12 +657,19 @@ func hasExecutionChildren(children []models.Task) bool {
 }
 
 func (s *SwarmService) StartReadyWorkers(ctx context.Context, parentTaskID string) error {
+	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
+	if err != nil {
+		return err
+	}
 	children, err := s.taskRepo.ListSwarmChildren(ctx, parentTaskID)
 	if err != nil {
 		return err
 	}
 	for i := range children {
 		if children[i].SwarmRole == models.SwarmRoleWorker && children[i].Status == models.StatusPending && s.workerSvc != nil {
+			if _, err := s.swarmChildRunContext(ctx, parent, &children[i]); err != nil {
+				return err
+			}
 			s.workerSvc.Submit(children[i])
 		}
 	}
@@ -717,13 +748,8 @@ func (s *SwarmService) onChildCompletedLocked(ctx context.Context, childTaskID s
 			if revCfg.ReviewedGeneration < parentCfg.Generation && reviewer.Status != models.StatusRunning && reviewer.Status != models.StatusPending && (reviewer.Status != models.StatusCompleted || revCfg.RerunGeneration < parentCfg.Generation) && child.Status != models.StatusFailed {
 				revCfg.RerunGeneration = parentCfg.Generation
 				reviewer.SwarmConfig, _ = revCfg.JSON()
-				_ = s.taskRepo.UpdateSwarmFields(ctx, reviewer.ID, reviewer.SwarmRole, "ready", reviewer.SwarmConfig, reviewer.SwarmSequence)
-				_ = s.taskRepo.UpdateCategory(ctx, reviewer.ID, models.CategoryActive)
-				_ = s.taskRepo.UpdateStatus(ctx, reviewer.ID, models.StatusPending)
-				reviewer.Category = models.CategoryActive
-				reviewer.Status = models.StatusPending
-				if s.workerSvc != nil {
-					s.workerSvc.Submit(*reviewer)
+				if err := s.dispatchCompletedChildSuccessor(ctx, parent, child, reviewer); err != nil {
+					return err
 				}
 			}
 		}
@@ -762,13 +788,8 @@ func (s *SwarmService) onChildCompletedLocked(ctx context.Context, childTaskID s
 			if merger.Status != models.StatusRunning && merger.Status != models.StatusPending && (merger.Status != models.StatusCompleted || intCfg.RerunGeneration < integrationTargetGeneration || intCfg.MergedGeneration >= integrationTargetGeneration) {
 				intCfg.RerunGeneration = integrationTargetGeneration
 				merger.SwarmConfig, _ = intCfg.JSON()
-				_ = s.taskRepo.UpdateSwarmFields(ctx, merger.ID, merger.SwarmRole, "ready", merger.SwarmConfig, merger.SwarmSequence)
-				_ = s.taskRepo.UpdateCategory(ctx, merger.ID, models.CategoryActive)
-				_ = s.taskRepo.UpdateStatus(ctx, merger.ID, models.StatusPending)
-				merger.Category = models.CategoryActive
-				merger.Status = models.StatusPending
-				if s.workerSvc != nil {
-					s.workerSvc.Submit(*merger)
+				if err := s.dispatchCompletedChildSuccessor(ctx, parent, child, merger); err != nil {
+					return err
 				}
 			}
 		}
@@ -810,6 +831,37 @@ func (s *SwarmService) onChildCompletedLocked(ctx context.Context, childTaskID s
 		_ = s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted)
 	}
 	return s.recomputeParentStatusLocked(ctx, parent.ID)
+}
+
+// Completion may record an outcome after revocation, but authorizing the next
+// task requires current source, parent and destination identities.
+func (s *SwarmService) dispatchCompletedChildSuccessor(ctx context.Context, parent, source, target *models.Task) error {
+	sourceCtx, err := s.swarmChildRunContext(ctx, parent, source)
+	if err != nil {
+		return err
+	}
+	targetCtx, err := s.swarmChildRunContext(ctx, parent, target)
+	if err != nil {
+		return err
+	}
+	identities := persistence.SwarmWriteIdentities(sourceCtx)
+	identities = append(identities, persistence.SwarmWriteIdentities(targetCtx)...)
+	guarded := persistence.WithSwarmWriteIdentities(targetCtx, identities)
+	if err := s.taskRepo.PrepareSwarmSuccessor(guarded, parent.ID, source.ID, target); err != nil {
+		return err
+	}
+	target.Category = models.CategoryActive
+	target.Status = models.StatusPending
+	if s.workerSvc != nil {
+		if _, err := s.swarmChildRunContext(guarded, parent, source); err != nil {
+			return err
+		}
+		if _, err := s.swarmChildRunContext(guarded, parent, target); err != nil {
+			return err
+		}
+		s.workerSvc.Submit(*target)
+	}
+	return nil
 }
 
 func hasActiveSwarmWorkBeforeIntegration(children []models.Task) bool {
@@ -871,6 +923,13 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	if err != nil || parent == nil {
 		return err
 	}
+	if s.workerSvc != nil {
+		ctx, err = s.workerSvc.runPrincipalContext(ctx, *parent)
+		if err != nil {
+			return err
+		}
+	}
+	beforeParent := *parent
 	cfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	cfg.Generation++
 	cfg.StopRevision++
@@ -879,20 +938,21 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	}
 	cfg.MergedGeneration = 0
 	parent.SwarmConfig, _ = cfg.JSON()
-	if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_coordination", parent.SwarmConfig, parent.SwarmSequence); err != nil {
-		return err
-	}
-	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
-		return err
-	}
-	if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
-		return err
-	}
+
 	planner, err := s.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	if err != nil {
 		return err
 	}
 	if planner == nil {
+		if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_coordination", parent.SwarmConfig, parent.SwarmSequence); err != nil {
+			return err
+		}
+		if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
+			return err
+		}
+		if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
+			return err
+		}
 		return s.startPlannerWithFollowup(ctx, parent.ID, false, message, selection)
 	}
 	planner, err = s.taskRepo.GetByID(ctx, planner.ID)
@@ -902,6 +962,11 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	if planner == nil {
 		return fmt.Errorf("loading planner task for parent %s: task not found", parent.ID)
 	}
+	ctx, err = s.swarmChildRunContext(ctx, &beforeParent, planner)
+	if err != nil {
+		return err
+	}
+	beforePlanner := *planner
 	planner.AgentID = parent.AgentID
 	if selection != nil && selection.ModelID != "" {
 		planner.AgentID = &selection.ModelID
@@ -914,10 +979,13 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	plannerCfg.RerunGeneration = cfg.Generation
 	setPlannerFollowupEffort(&plannerCfg, selection)
 	planner.SwarmConfig, _ = plannerCfg.JSON()
-	if err := s.taskRepo.UpdatePreservingTitle(ctx, planner); err != nil {
+	if err := s.taskRepo.PreparePlannerFollowup(ctx, &beforeParent, &beforePlanner, planner, parent.SwarmConfig); err != nil {
 		return err
 	}
 	if s.workerSvc != nil {
+		if _, err := s.swarmChildRunContext(ctx, parent, planner); err != nil {
+			return err
+		}
 		s.workerSvc.ClearCancellationRequested(parent.ID)
 		s.workerSvc.ClearCancellationRequested(planner.ID)
 		s.workerSvc.Submit(*planner)
@@ -1084,6 +1152,10 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 	if err != nil || child == nil {
 		return child, err
 	}
+	ctx, err = s.swarmChildRunContext(ctx, parent, child)
+	if err != nil {
+		return nil, err
+	}
 	if child.Status == models.StatusRunning || child.Status == models.StatusQueued || child.Status == models.StatusPending {
 		return nil, ErrSwarmRoleActive
 	}
@@ -1096,6 +1168,7 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 			return nil, ErrSwarmRoleActive
 		}
 	}
+	beforeParent, beforeChild := *parent, *child
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	parentCfg.StopRevision++
 	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
@@ -1109,9 +1182,7 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 			}
 		}
 		parent.SwarmConfig, _ = parentCfg.JSON()
-		if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence); err != nil {
-			return nil, err
-		}
+		parent.SwarmStatus = "needs_review"
 		swarmStatus = "rerun_review"
 	} else {
 		if parentCfg.ReviewedGeneration > 0 && childCfg.RerunGeneration < parentCfg.ReviewedGeneration {
@@ -1124,31 +1195,21 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 			}
 		}
 		parent.SwarmConfig, _ = parentCfg.JSON()
-		if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_integration", parent.SwarmConfig, parent.SwarmSequence); err != nil {
-			return nil, err
-		}
+		parent.SwarmStatus = "needs_integration"
 		swarmStatus = "rerun_integration"
 	}
-	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
-		return nil, err
-	}
-	if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
-		return nil, err
-	}
+
 	child.SwarmStatus = swarmStatus
 	child.SwarmConfig, _ = childCfg.JSON()
-	if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
-		return nil, err
-	}
-	if err := s.taskRepo.UpdateCategory(ctx, child.ID, models.CategoryActive); err != nil {
-		return nil, err
-	}
-	if err := s.taskRepo.UpdateStatus(ctx, child.ID, models.StatusPending); err != nil {
+	if err := s.taskRepo.PrepareSwarmRerun(ctx, &beforeParent, &beforeChild, parent.SwarmConfig, child.SwarmConfig); err != nil {
 		return nil, err
 	}
 	child.Category = models.CategoryActive
 	child.Status = models.StatusPending
 	if s.workerSvc != nil {
+		if _, err := s.swarmChildRunContext(ctx, parent, child); err != nil {
+			return nil, err
+		}
 		s.workerSvc.ClearCancellationRequested(parent.ID)
 		s.workerSvc.ClearCancellationRequested(child.ID)
 		s.workerSvc.Submit(*child)
@@ -1487,9 +1548,42 @@ func (s *SwarmService) markPlannerOutputInvalid(ctx context.Context, planner *mo
 	return errors.New(message)
 }
 
+func (s *SwarmService) swarmChildRunContext(ctx context.Context, parent, child *models.Task) (context.Context, error) {
+	if parent == nil || child == nil || child.ParentTaskID == nil || *child.ParentTaskID != parent.ID || child.ProjectID != parent.ProjectID {
+		return ctx, persistence.ErrProjectDenied
+	}
+	if s.workerSvc == nil {
+		return ctx, nil
+	}
+	parentCtx, err := s.workerSvc.runPrincipalContext(ctx, *parent)
+	if err != nil {
+		return ctx, err
+	}
+	childCtx, err := s.workerSvc.runPrincipalContext(ctx, *child)
+	if err != nil {
+		return ctx, err
+	}
+	parentUser, parentOK := models.PrincipalFromContext(parentCtx)
+	childUser, childOK := models.PrincipalFromContext(childCtx)
+	if s.workerSvc.runIdentities != nil && parentOK && childOK {
+		childCtx = persistence.WithSwarmWriteIdentities(childCtx, []persistence.SwarmWriteIdentity{
+			{TaskID: parent.ID, ProjectID: parent.ProjectID, UserID: parentUser.UserID, AllowLegacyOwner: s.workerSvc.runAuthOff},
+			{TaskID: child.ID, ProjectID: child.ProjectID, UserID: childUser.UserID, AllowLegacyOwner: s.workerSvc.runAuthOff},
+		})
+	}
+	return childCtx, nil
+}
+
 func (s *SwarmService) submitIfRunnable(ctx context.Context, task *models.Task) error {
 	if task.Status == models.StatusBlocked || task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 		return nil
+	}
+	if s.workerSvc != nil {
+		var err error
+		ctx, err = s.workerSvc.runPrincipalContext(ctx, *task)
+		if err != nil {
+			return err
+		}
 	}
 	if task.Category != models.CategoryActive && task.Category != models.CategoryScheduled {
 		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {

@@ -755,6 +755,9 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 		return nil, err
 	}
 	buildReq := func() (*http.Request, error) {
+		if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+			return nil, err
+		}
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -773,6 +776,9 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 			if err := opts.FinalizeRequest(httpReq, body); err != nil {
 				return nil, err
 			}
+		}
+		if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+			return nil, err
 		}
 		return httpReq, nil
 	}

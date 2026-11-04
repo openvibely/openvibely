@@ -7,6 +7,7 @@ const TaskOriginWebhook = "webhook"
 
 // WebhookEndpoint represents a configured inbound webhook for a project.
 type WebhookEndpoint struct {
+	RunAsUserID        string    `json:"run_as_user_id"`
 	ID                 string    `json:"id"`
 	ProjectID          string    `json:"project_id"`
 	Name               string    `json:"name"`
