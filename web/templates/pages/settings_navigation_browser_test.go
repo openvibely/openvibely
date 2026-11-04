@@ -334,6 +334,25 @@ func TestBrowserFunctional_ChatProjectPickerConsumesOutsideClick(t *testing.T) {
 		b.click(`[data-project-search]`)
 		b.click(`[data-project-choice="project"]`)
 		b.waitFor("project selection still works", `document.querySelector('[data-project-choice="project"]').getAttribute('aria-pressed')`, "true")
+		for _, target := range []string{"[data-project-search]", "[data-project-choice]", "[data-project-remove]"} {
+			b.click(`[data-project-search]`)
+			b.evaluate(`document.querySelector('` + target + `').focus();'focused'`)
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+			b.waitFor("Escape releases picker and preserves selection from "+target, `String(!document.querySelector('[data-project-results]').checkVisibility() && !document.querySelector('#ov-menu-backdrop:popover-open') && document.activeElement.matches('[data-project-search]') && document.querySelector('[data-project-choice="project"]').getAttribute('aria-pressed')==='true')`, "true")
+		}
+		// Real Tab navigation must reach Submit after Escape, without reopening
+		// the results or requiring an outside pointer click.
+		for i := 0; i < 5; i++ {
+			if b.evaluate(`String(document.activeElement.matches('[data-chat-input-nav="submit"]'))`) == "true" {
+				break
+			}
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9}, nil)
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9}, nil)
+		}
+		b.waitFor("keyboard reaches Submit after dismissal", `String(document.activeElement.matches('[data-chat-input-nav="submit"]') && !document.activeElement.disabled && !document.querySelector('[data-project-results]').checkVisibility())`, "true")
+		b.click(`[data-project-search]`)
+		b.waitFor("project search reopens after Escape", `String(document.querySelector('[data-project-results]').checkVisibility())`, "true")
 	})
 }
 

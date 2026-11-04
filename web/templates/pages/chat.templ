@@ -1934,6 +1934,19 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
                             }
                             window.addEventListener('pointerdown', dismissOutsideProjectPicker, true);
                             window.addEventListener('click', dismissOutsideProjectPicker, true);
+                            document.addEventListener('keydown', function(event) {
+                                if (event.key !== 'Escape' || event.isComposing) return;
+                                var picker = event.target.closest('[data-project-picker]');
+                                if (!picker || picker.closest('[hidden],[inert]')) return;
+                                var results = picker.querySelector('[data-project-results]');
+                                if (!results.getClientRects().length || getComputedStyle(results).visibility !== 'visible') return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                // Focus first: focusin opens results, so hiding afterward
+                                // keeps Escape from immediately reopening the picker.
+                                picker.querySelector('[data-project-search]').focus({preventScroll: true});
+                                results.classList.add('hidden');
+                            }, true);
                             document.body.addEventListener('input', function(event) {
                                 if (!event.target.matches('[data-project-search]')) return;
                                 var picker = event.target.closest('[data-project-picker]'), query = event.target.value.toLowerCase().trim(), count = 0;
