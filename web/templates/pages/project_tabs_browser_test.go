@@ -668,7 +668,7 @@ func TestBrowserFunctional_AllProjectsTabCanCloseAndReopen(t *testing.T) {
 					}
 				}
 				waitSaved("a")
-				b.call("Page.reload", map[string]any{}, nil)
+				b.reload()
 				b.waitFor("stays closed after reload", `String(typeof window.openVibelyProjectTabsSync==='function' && document.querySelectorAll('[data-project-tab]').length===1 && !document.querySelector('[data-project-tab="__all_projects__"]'))`, "true")
 				b.click("#project-selector-trigger")
 				b.click(`[data-project-selector-option][data-project-id="__all_projects__"]`)

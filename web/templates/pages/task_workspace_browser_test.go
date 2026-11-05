@@ -160,7 +160,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		}
 		assertTabGutters()
 		b.evaluate(`window.beforeGutterReload=true; 'marked'`)
-		b.call("Page.reload", map[string]any{}, nil)
+		b.reload()
 		b.waitFor("saved details after reload", `String(!window.beforeGutterReload && Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
 		assertTabGutters()
 		assertFooter()
