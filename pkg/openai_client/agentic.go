@@ -47,7 +47,7 @@ Return only the summary text.`
 	openAIOriginalImagePatchSize                       = 32
 	openAIOriginalImageMaxPatches                      = 10000
 	// Mirrors Codex truncation policy defaults in models_cache.json.
-	openAIToolOutputTokenLimitDefault = 10000
+	openAIToolOutputTokenLimitDefault = tokenestimate.DefaultToolOutputTokenLimit
 	// OpenAI native web search tool type for the Responses API.
 	openAIWebSearchToolType = "web_search"
 )
@@ -1703,22 +1703,7 @@ func normalizedToolOutputTokenLimit(limit int) int {
 }
 
 func truncateToolOutputForModelInput(output string, tokenLimit int) string {
-	if output == "" {
-		return output
-	}
-
-	limit := normalizedToolOutputTokenLimit(tokenLimit)
-	if limit <= 0 {
-		return output
-	}
-
-	maxBytes := tokenestimate.ByteBudget(limit)
-	if len(output) <= maxBytes {
-		return output
-	}
-
-	const truncationNote = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	return tokenestimate.TruncateMiddle(output, maxBytes, truncationNote)
+	return tokenestimate.ToolOutputForModelInput(output, tokenLimit)
 }
 
 func openAIAutoCompactionTokenLimit(model string) int {

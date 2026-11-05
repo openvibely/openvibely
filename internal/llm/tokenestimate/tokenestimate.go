@@ -4,6 +4,24 @@ import "unicode/utf8"
 
 const approxBytesPerToken = 4
 
+// DefaultToolOutputTokenLimit is the model-facing tool output budget when no
+// positive limit is configured.
+const DefaultToolOutputTokenLimit = 10000
+
+// ToolOutputForModelInput bounds a model-facing copy of tool output, retaining
+// both ends where possible. Callers should retain the full output separately.
+func ToolOutputForModelInput(output string, tokenLimit int) string {
+	if tokenLimit <= 0 {
+		tokenLimit = DefaultToolOutputTokenLimit
+	}
+	byteLimit := ByteBudget(tokenLimit)
+	if output == "" || len(output) <= byteLimit {
+		return output
+	}
+	const marker = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
+	return TruncateMiddle(output, byteLimit, marker)
+}
+
 // FromText returns a tokenizer-free estimate based on UTF-8 byte length.
 func FromText(text string) int {
 	return FromByteCount(len(text))

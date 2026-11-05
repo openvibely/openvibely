@@ -42,3 +42,50 @@ func TestTruncateMiddleWithMarkerReportsRemoval(t *testing.T) {
 		t.Fatalf("unexpected bounded text: %q", got)
 	}
 }
+
+func TestToolOutputForModelInput(t *testing.T) {
+	const marker = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
+	for _, tc := range []struct {
+		name          string
+		limit, budget int
+	}{
+		{"negative", -1, 40000},
+		{"zero", 0, 40000},
+		{"default", 10000, 40000},
+		{"explicit", 100, 400},
+		{"tiny", 1, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, input := range []string{"", "é", strings.Repeat("a", tc.budget)} {
+				if got := ToolOutputForModelInput(input, tc.limit); got != input {
+					t.Fatalf("changed fitting output of %d bytes", len(input))
+				}
+			}
+			for _, unit := range []string{"a", "é界😀"} {
+				input := strings.Repeat(unit, tc.budget+1)
+				got := ToolOutputForModelInput(input, tc.limit)
+				if len(got) > tc.budget || !utf8.ValidString(got) {
+					t.Fatalf("invalid bounded output: bytes=%d valid=%v", len(got), utf8.ValidString(got))
+				}
+				if tc.budget <= len(marker) {
+					if got == "" || !strings.HasPrefix(input, got) {
+						t.Fatal("tiny budget should retain a UTF-8-safe prefix")
+					}
+					continue
+				}
+				parts := strings.Split(got, marker)
+				if len(parts) != 2 || parts[0] == "" || parts[1] == "" || !strings.HasPrefix(input, parts[0]) || !strings.HasSuffix(input, parts[1]) {
+					t.Fatal("output must retain both ends and the exact omission note")
+				}
+				// Each retained end fills its half of the remaining byte budget
+				// except for space needed to avoid splitting a UTF-8 rune.
+				remaining := tc.budget - len(marker)
+				for i, budget := range []int{remaining / 2, remaining - remaining/2} {
+					if len(parts[i]) > budget || budget-len(parts[i]) >= utf8.UTFMax {
+						t.Fatalf("end %d uses %d bytes of %d", i, len(parts[i]), budget)
+					}
+				}
+			}
+		})
+	}
+}
