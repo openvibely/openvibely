@@ -3199,3 +3199,78 @@ func TestIntermediateTranscriptSaveFailureRecovers(t *testing.T) {
 		t.Fatalf("err=%v failed=%v recovered=%v tools=%d requests=%d", err, failed, recovered, executed, requests)
 	}
 }
+
+func TestSendAgentic_ToolOutputTruncatedOnlyForModelInput(t *testing.T) {
+	full := strings.Repeat("é界😀", 6000)
+	var modelOutput, callbackOutput string
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			for _, event := range []string{
+				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"lookup","input":{}}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}`,
+				`{"type":"message_stop"}`,
+			} {
+				fmt.Fprintf(w, "data: %s\n\n", event)
+			}
+			return
+		}
+		for _, message := range body.Messages {
+			if message.Role != "user" {
+				continue
+			}
+			var blocks []agenticBlock
+			if json.Unmarshal(message.Content, &blocks) != nil {
+				continue
+			}
+			for _, block := range blocks {
+				if block.Type == "tool_result" && block.ToolUseID == "toolu_1" {
+					if err := json.Unmarshal(block.Content, &modelOutput); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+		}
+		for _, event := range []string{
+			`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":30}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"done"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":6}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", event)
+		}
+	}))
+	defer server.Close()
+	oldHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = oldHost }()
+	response, err := NewWithAPIKey("test-key").SendAgentic(context.Background(), "lookup", &AgenticOptions{
+		Model:                "claude-sonnet-4-20250514",
+		ToolOutputTokenLimit: 512,
+		ToolExecutor:         func(context.Context, string, json.RawMessage) (string, bool, error) { return full, false, nil },
+		OnToolResult:         func(_ string, output string, _ bool) { callbackOutput = output },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || modelOutput != tokenestimate.ToolOutputForModelInput(full, 512) {
+		t.Fatal("model request did not contain the bounded, paired tool result")
+	}
+	if callbackOutput != full || len(response.ToolCalls) != 1 || response.ToolCalls[0].Output != full {
+		t.Fatal("callback and returned tool results must retain full output")
+	}
+}
