@@ -195,7 +195,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 	<div id="plugin-settings" class="space-y-6 max-w-4xl">
 		<div data-page-header>
 			<h2 class="text-2xl font-bold">Plugin pages</h2>
-			<p class="text-sm opacity-70">Installed packages are shared by the server; each project enables its own page instances with separate configuration, state, and side chat.</p>
+			<p class="text-sm opacity-70">To create a page, ask an agent in a task thread to build it for this project. It publishes the page here automatically. Manage enabled pages and review backend approvals below.</p>
 		</div>
 		if v.Error != "" {
 			<div class="alert alert-error text-sm" role="alert">{ v.Error }</div>
@@ -204,7 +204,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 			<div class="alert alert-success text-sm" role="status">{ v.Notice }</div>
 		}
 		<section class="card bg-base-100 border border-base-300"><div class="card-body gap-3">
-			<h3 class="font-semibold">Install a package</h3>
+			<h3 class="font-semibold">Advanced: install an existing package</h3>
 			<form class="flex gap-2" hx-post={ pluginSettingsURL(v.ProjectID, "/install") } hx-target="#plugin-settings" hx-swap="outerHTML">
 				<input name="path" class="input input-bordered input-sm flex-1" placeholder="/path/to/prebuilt/plugin (directory containing plugin.json)" required/>
 				<button class="btn btn-sm btn-primary" type="submit">Install</button>

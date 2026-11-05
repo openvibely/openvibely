@@ -982,6 +982,23 @@ var automationLifecycleParams = &toolschema.Schema{
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
 var registry = []ActionDef{
+	{
+		Name:        "get_custom_page_guide",
+		Description: "Read the bundled custom-page authoring guide before building an OV project page. Explains plugin.json, the sandbox bridge, explicit context, shared operations, native Go backends, and publishing directly from a coding task without asking the user to import files.",
+		Domain:      DomainProjects, Access: AccessRead, Sensitivity: SensitivityNormal,
+		AllowedModes: bothModes(), Surfaces: webAPISurfaces(), IncludeThreadTools: true,
+		Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{}, AdditionalProperties: toolschema.Pointer(false)},
+	},
+	{
+		Name:        "publish_custom_page",
+		Description: "Install a custom page authored in the current coding task's workspace and register it in that task's owning project. Call get_custom_page_guide first, build/validate the bundle, then publish it; do not ask the user to manually import it. Frontend-only pages are enabled and appear in the left rail. Native backends remain disabled pending administrator approval; this tool NEVER approves or executes native code. Identical retries reuse the instance; changed content needs a new version. Requires a persisted task, not project chat.",
+		Domain:      DomainProjects, Access: AccessWrite, Sensitivity: SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate}, Surfaces: webAPISurfaces(), IncludeThreadTools: true,
+		Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{
+			"package_path": {Type: "string", Description: "Directory containing plugin.json and the prebuilt page bundle, relative to this task's workspace. No absolute paths or traversal."},
+			"page_id":      {Type: "string", Description: "Optional stable page ID declared in plugin.json. Defaults to the first page."},
+		}, Required: []string{"package_path"}, AdditionalProperties: toolschema.Pointer(false)},
+	},
 	// --- Chat domain (RW in orchestrate) ---
 	{
 		Name:               "request_user_input",

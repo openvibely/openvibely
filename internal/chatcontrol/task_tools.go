@@ -6,6 +6,8 @@ import "strings"
 // Return a fresh map so per-request restrictions cannot mutate the defaults.
 func TaskToolNames(createdVia string) map[string]bool {
 	allowed := map[string]bool{
+		"get_custom_page_guide":                  true,
+		"publish_custom_page":                    true,
 		"list_tasks":                             true,
 		"view_swarm":                             true,
 		"view_task_thread":                       true,
@@ -55,7 +57,7 @@ func TaskToolNames(createdVia string) map[string]bool {
 		"list_capabilities":                   true,
 	}
 	if strings.HasPrefix(createdVia, "automation:") && strings.HasSuffix(createdVia, ":auditor") {
-		for _, name := range []string{"create_task", "edit_task", "create_swarm_task", "execute_tasks", "send_to_task", "create_alert_implementation_task", "link_alert_implementation_task"} {
+		for _, name := range []string{"publish_custom_page", "create_task", "edit_task", "create_swarm_task", "execute_tasks", "send_to_task", "create_alert_implementation_task", "link_alert_implementation_task"} {
 			delete(allowed, name)
 		}
 	}

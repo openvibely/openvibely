@@ -2,7 +2,22 @@
 
 Plugin pages let a project add its own page to the OpenVibely left rail. A page runs as a sandboxed iframe inside the main content area. It can optionally have a local backend process, operations that the page buttons and the side-chat agent both use, live refresh events, and a side chat that knows which page it is on.
 
-This is not a marketplace and not a dashboard builder. Packages are prebuilt bundles that you install from a local directory. OpenVibely does not need Node at runtime.
+The primary workflow is to ask an agent in a task thread to create a page. The agent writes and validates the bundle and publishes it into that task's project; users do not need to author packages or manually import them. OpenVibely does not need Node at runtime. There is no marketplace.
+
+## Create a page through a task
+
+Ask, for example: **“Create a sales report page for this project with filters and a page-aware chat.”**
+
+Task agents have two tools, on initial runs and task-thread follow-ups:
+
+- `get_custom_page_guide` returns the bundled manifest, bridge, context, operation, and Go backend authoring instructions. It works even when the user's repository contains no OV source.
+- `publish_custom_page` takes `package_path` relative to the task workspace and an optional `page_id`. The server resolves the owning project from the persisted task, validates paths and package contents, copies the package outside the worktree, and registers the project instance. The response includes a page URL and enabled/approval status. Successful publication emits a live navigation refresh event.
+
+Frontend-only pages are enabled automatically. Packages with native backends are installed without execution and remain disabled until an administrator approves and enables them; the task returns an approval link. The agent cannot grant itself backend approval. Existing agent/model selection and task tool policies apply. Publication is unavailable to project chat and automation auditor tasks; project chat can delegate page creation to a coding task.
+
+Identical retries reuse the same package and project instance. Changed content requires a version bump; a new version currently creates a separate instance rather than replacing an existing page's state or conversation. Task publication requires a configured task workspace. The source bundle remains in the task's changes for review; the installed copy survives worktree deletion.
+
+Local import in settings is an advanced fallback for existing bundles, not the normal creation workflow.
 
 ## Concepts
 

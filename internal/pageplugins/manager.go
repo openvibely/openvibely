@@ -90,6 +90,8 @@ type Manager struct {
 	Approvals *pageintegration.Approvals
 	builtins  map[string]Builtin
 
+	publishMu sync.Mutex
+	installMu sync.Mutex
 	mu        sync.Mutex
 	procs     map[string]*procEntry
 	handles   map[string]Handle
@@ -141,6 +143,8 @@ func (m *Manager) InstallExample(ctx context.Context, installedBy string) (*mode
 }
 
 func (m *Manager) install(ctx context.Context, src fs.FS, installedBy string) (*models.PagePluginPackage, error) {
+	m.installMu.Lock()
+	defer m.installMu.Unlock()
 	man, hash, err := validatePackageFS(src)
 	if err != nil {
 		return nil, err

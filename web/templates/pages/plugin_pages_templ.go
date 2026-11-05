@@ -729,7 +729,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<div id=\"plugin-settings\" class=\"space-y-6 max-w-4xl\"><div data-page-header><h2 class=\"text-2xl font-bold\">Plugin pages</h2><p class=\"text-sm opacity-70\">Installed packages are shared by the server; each project enables its own page instances with separate configuration, state, and side chat.</p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<div id=\"plugin-settings\" class=\"space-y-6 max-w-4xl\"><div data-page-header><h2 class=\"text-2xl font-bold\">Plugin pages</h2><p class=\"text-sm opacity-70\">To create a page, ask an agent in a task thread to build it for this project. It publishes the page here automatically. Manage enabled pages and review backend approvals below.</p></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -771,7 +771,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<section class=\"card bg-base-100 border border-base-300\"><div class=\"card-body gap-3\"><h3 class=\"font-semibold\">Install a package</h3><form class=\"flex gap-2\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<section class=\"card bg-base-100 border border-base-300\"><div class=\"card-body gap-3\"><h3 class=\"font-semibold\">Advanced: install an existing package</h3><form class=\"flex gap-2\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
