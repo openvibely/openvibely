@@ -53,13 +53,6 @@ func AttachmentAbsPath(att models.Attachment) string {
 	return absPath
 }
 
-// BuildTaskPromptHeader returns the standard task execution directives that are
-// prepended to every task prompt. Managed project instructions from lifecycle
-// skills and memory are injected via the system prompt, not here.
-func BuildTaskPromptHeader() string {
-	return "IMPORTANT: Do not use plan mode. Take direct action immediately. Do not ask for approval or create plans — execute the task directly.\n\n"
-}
-
 // BuildTaskStatusInstructions returns the provider-neutral task outcome contract.
 // Tool and command errors are evidence available to the agent, not task outcomes:
 // an agent may recover from them and still complete the requested work.

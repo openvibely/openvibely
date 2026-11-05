@@ -27,6 +27,7 @@ import (
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -378,6 +379,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						require.NoError(t, f.Close())
 					}
 					calls, native, nextCalls, summaries := 0, 0, 0, 0
+					preturnCalls, reloadNativeCalls, initialSummaries := 0, 0, 0
 					checkpointStep := 1
 					if phase != "preturn" {
 						checkpointStep = 2
@@ -386,6 +388,50 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						raw, _ := io.ReadAll(r.Body)
 						text := string(raw)
+						var wire struct {
+							ContextManagement *struct {
+								Edits []struct {
+									Pause bool `json:"pause_after_compaction"`
+								} `json:"edits"`
+							} `json:"context_management"`
+						}
+						assert.NoError(t, json.Unmarshal(raw, &wire))
+						paused := wire.ContextManagement != nil && len(wire.ContextManagement.Edits) > 0 && wire.ContextManagement.Edits[0].Pause
+						if paused {
+							assert.Contains(t, text, `"tool_choice":{"type":"none"}`)
+							assert.NotContains(t, text, "NEXT_NATIVE")
+							if restarted {
+								reloadNativeCalls++
+								assert.True(t, summaryAfterNative)
+								assert.Contains(t, text, "SAVED_NATIVE_ANTHROPIC")
+								assert.Contains(t, text, "tool_result")
+								if media == "tool_image" {
+									assert.Contains(t, text, "image/png")
+								}
+								compactionServerError(w, 400, "invalid_request_error", "native compaction failed")
+							} else {
+								assert.NotContains(t, text, "CURRENT_NATIVE")
+								preturnCalls++
+								assert.Equal(t, "preturn", phase)
+								assert.Contains(t, text, "OLD_NATIVE")
+								assert.Contains(t, text, "OLD_RESULT")
+								if media == "image" {
+									assert.NotContains(t, text, "image/png")
+								}
+								native++
+								connectedAnthropicPausedReply(w, outcome == "null")
+							}
+							return
+						}
+						if !restarted && phase == "preturn" && outcome == "null" && strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION") {
+							initialSummaries++
+							assert.Contains(t, text, "OLD_NATIVE")
+							assert.Contains(t, text, "OLD_RESULT")
+							assert.NotContains(t, text, "CURRENT_NATIVE")
+							assert.NotContains(t, text, `"type":"compaction"`)
+							compactionServerReply(w, models.ProviderAnthropic, "OLD_NATIVE OLD_RESULT", "")
+							return
+						}
 						if restarted {
 							isSummary := strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION")
 							if isSummary {
@@ -465,20 +511,24 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 							t.Error("steer missing from request before compaction")
 						}
 						if calls == checkpointStep {
-							if !strings.Contains(text, "compact_20260112") {
+							if !(phase == "preturn" && compact) && !strings.Contains(text, "compact_20260112") {
 								t.Error("native compaction not enabled on wire")
 							}
 							if phase == "inturn" && !strings.Contains(text, "TOOL_NATIVE") {
 								t.Error("tool result missing")
 							}
-							if compact {
+							if compact && phase != "preturn" {
 								native++
 							}
 							tool, path := "read_file", file
 							if media == "tool_image" {
 								tool, path = "view_image", imagePath
 							}
-							connectedAnthropicLifecycleReply(w, outcome, strings.Contains(text, "STEER_NATIVE"), tool, path)
+							replyOutcome := outcome
+							if phase == "preturn" && compact {
+								replyOutcome = "none"
+							}
+							connectedAnthropicLifecycleReply(w, replyOutcome, strings.Contains(text, "STEER_NATIVE"), tool, path)
 							return
 						}
 						if !successful && (!strings.Contains(text, "CURRENT_NATIVE") || !strings.Contains(text, "OLD_NATIVE")) {
@@ -517,6 +567,16 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[agent.Provider], req)
 					require.NoError(t, err)
+					if phase == "preturn" && compact {
+						require.Equal(t, 1, preturnCalls)
+					} else {
+						require.Zero(t, preturnCalls)
+					}
+					if phase == "preturn" && outcome == "null" {
+						require.Equal(t, 1, initialSummaries)
+					} else {
+						require.Zero(t, initialSummaries)
+					}
 					if compact {
 						want := 1
 						if outcome == "success_then_null" {
@@ -568,6 +628,11 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 					}
 					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[agent.Provider], req)
+					if summaryAfterNative {
+						require.Equal(t, 1, reloadNativeCalls)
+					} else {
+						require.Zero(t, reloadNativeCalls)
+					}
 					if summaryFails {
 						require.Error(t, err)
 						require.Equal(t, 1, summaries)
@@ -1259,4 +1324,21 @@ func connectedAnthropicLifecycleReply(w http.ResponseWriter, outcome string, ste
 	}
 	emit(map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop}, "usage": map[string]int{"output_tokens": 10}})
 	emit(map[string]any{"type": "message_stop"})
+}
+
+func connectedAnthropicPausedReply(w http.ResponseWriter, null bool) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	summary := `"SAVED_NATIVE_ANTHROPIC"`
+	if null {
+		summary = "null"
+	}
+	for _, event := range []string{
+		`{"type":"message_start","message":{"id":"native","usage":{"input_tokens":30}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"compaction","content":` + summary + `}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"compaction"},"usage":{"output_tokens":10}}`,
+		`{"type":"message_stop"}`,
+	} {
+		fmt.Fprintf(w, "data: %s\n\n", event)
+	}
 }

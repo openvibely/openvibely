@@ -17,6 +17,7 @@ func TestProviderPromptBudgetUsesProviderBase(t *testing.T) {
 			if provider == models.ProviderAnthropic {
 				want = llmprompt.BuildAnthropicAgentSystemPrompt(req.Agent.Model, req.ProjectInstructions, req.WorkDir)
 			}
+			want += llmprompt.BuildTaskStatusInstructions()
 			if followup {
 				req.Operation = llmcontracts.OperationStreaming
 				want = llmprompt.BuildCodexChatSystemPrompt(req.Agent.Model, true, req.ChatMode, req.ChatSystemContext, false)

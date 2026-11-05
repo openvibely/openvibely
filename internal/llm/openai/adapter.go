@@ -558,10 +558,8 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	defer releaseTransport()
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	fullPrompt := llmprompt.BuildTaskPromptHeader() +
-		llmprompt.BuildAttachmentInstructions(attachments) +
+	fullPrompt := llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
@@ -601,7 +599,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
 		MaxOutputTokens:           openAIAgenticOutputBudget,
-		System:                    llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
+		System:                    llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir) + llmprompt.BuildTaskStatusInstructions(),
 		ReasoningEffort:           reasoningEffort(agent.Model, agent.ReasoningEffort),
 		ServiceTier:               agent.EffectiveServiceTier(),
 		ReasoningSummary:          "auto",
@@ -849,10 +847,8 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	defer releaseTransport()
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	fullPrompt := llmprompt.BuildTaskPromptHeader() +
-		llmprompt.BuildAttachmentInstructions(attachments) +
+	fullPrompt := llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
@@ -882,7 +878,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 		Temperature:         agent.Temperature,
 		ContextWindow:       agent.ContextWindow,
 		MaxOutputTokens:     openAIAgenticOutputBudget,
-		System:              llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
+		System:              llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir) + llmprompt.BuildTaskStatusInstructions(),
 		WorkDir:             effectiveWorkDir,
 		Attachments:         oaAttachments,
 		ExtraTools:          extraTools,

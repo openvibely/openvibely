@@ -806,7 +806,10 @@ func TestCallStreamingSonnet55PreservesEffortAndThinkingToolHistory(t *testing.T
 	if !strings.Contains(fmt.Sprint(gotBodies[0]["system"]), llmprompt.AnthropicAgentSystemPrompt) {
 		t.Fatal("task request omitted Anthropic base prompt")
 	}
-	if !strings.Contains(firstPayload, "If you recovered and completed the requested outcome, report success") ||
+	if strings.Contains(fmt.Sprint(gotBodies[0]["messages"]), "TASK OUTCOME STATUS") {
+		t.Fatal("task status instructions leaked into user history")
+	}
+	if !strings.Contains(fmt.Sprint(gotBodies[0]["system"]), "If you recovered and completed the requested outcome, report success") ||
 		!strings.Contains(firstPayload, "[STATUS: FAILED | <describe what prevented completion>]") {
 		t.Fatalf("task request missing provider-neutral outcome status contract: %#v", gotBodies[0]["messages"])
 	}
@@ -1000,5 +1003,28 @@ func TestCompactionActivityInTaskAndChatResponses(t *testing.T) {
 				t.Fatalf("output=%q", result.Output)
 			}
 		})
+	}
+}
+
+func TestSummaryHistoryNativeSummariesUseUserContext(t *testing.T) {
+	const transcript = `{"messages":[{"role":"assistant","content_blocks":[{"type":"text","text":"before"},{"type":"compaction","content":"saved facts","encrypted_content":"opaque"},{"type":"text","text":"after"},{"type":"compaction","content":null},{"type":"compaction","content":" "}]}]}`
+	history := []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
+	got := SummaryHistory(history)
+	if len(got) != 3 {
+		t.Fatalf("expected assistant/user/assistant, got %+v", got)
+	}
+	if got[0].Role != "assistant" || !strings.Contains(string(got[0].ContentBlocks), "before") || got[2].Role != "assistant" || !strings.Contains(string(got[2].ContentBlocks), "after") {
+		t.Fatalf("ordinary content changed roles or order: %+v", got)
+	}
+	if got[1].Role != "user" || got[1].Content != llmprompt.CompactionSummaryPrefix+"\n\nsaved facts" {
+		t.Fatalf("summary must use user compaction context: %+v", got[1])
+	}
+	encoded, _ := json.Marshal(got)
+	if strings.Contains(string(encoded), "opaque") || strings.Contains(string(encoded), `\"type\":\"compaction\"`) {
+		t.Fatalf("native metadata leaked: %s", encoded)
+	}
+	original := buildRecoveryHistory(history)
+	if len(original) != 1 || !strings.Contains(string(original[0].ContentBlocks), `"type":"compaction"`) || history[0].ReplayMessages[0].TranscriptJSON != transcript {
+		t.Fatal("normal continuation history changed")
 	}
 }

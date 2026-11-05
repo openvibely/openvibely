@@ -111,6 +111,11 @@ type AgenticOptions struct {
 	// summarizes older messages into a compaction block. The compaction block is
 	// round-tripped in subsequent requests to maintain compressed context.
 	AutoCompaction bool
+	// ForceNativeCompaction compacts prior history in a separate native request
+	// before submitting the pending user message. Ordinary in-turn compaction
+	// remains enabled on the subsequent requests.
+	ForceNativeCompaction bool
+	compactOnly           bool
 	// CompactionTokenThreshold is the input token count that triggers compaction.
 	// Defaults to a Claude Code-compatible value derived from ContextWindow
 	// (167,000 for the normal 200,000-token window) when zero.
@@ -490,6 +495,7 @@ type agenticRequest struct {
 	Thinking          *thinkingConfig          `json:"thinking,omitempty"`
 	OutputConfig      *outputConfig            `json:"output_config,omitempty"`
 	ContextManagement *contextManagementConfig `json:"context_management,omitempty"`
+	ToolChoice        map[string]string        `json:"tool_choice,omitempty"`
 	// rawTools overrides Tools when set. Used when the tools array contains
 	// mixed types (e.g. client tools + server tools for web search).
 	rawTools json.RawMessage
@@ -575,6 +581,20 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 	}
+	var preturn *turnResult
+	if opts.ForceNativeCompaction && opts.AutoCompaction && len(messages) > 0 && opts.RecoveryMessages == nil {
+		var err error
+		messages, preturn, err = c.compactHistoryBeforeTurn(ctx, messages, tools, opts)
+		if err != nil {
+			if preturn != nil {
+				return &AgenticResponse{Model: opts.Model,
+					InputTokens: preturn.billedInputTokens, OutputTokens: preturn.billedOutputTokens,
+					CacheCreationInputTokens: preturn.billedCacheCreationInputTokens,
+					CacheReadInputTokens:     preturn.billedCacheReadInputTokens}, err
+			}
+			return nil, err
+		}
+	}
 	replayPrompt := Message{Role: "user", Content: prompt}
 	// If attachments are present, preserve the same multimodal prompt for replay.
 	if len(opts.Attachments) > 0 {
@@ -592,6 +612,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	var exchange transcript.ExchangeTracker[Message]
+	if preturn != nil {
+		blocks, err := json.Marshal(messages[0].Content)
+		if err != nil {
+			return nil, err
+		}
+		exchange.Append(Message{Role: "assistant", ContentBlocks: blocks})
+	}
 	exchange.Append(replayPrompt)
 	saveReplay := func(saveCtx context.Context) error {
 		var err error
@@ -611,6 +638,19 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 	}()
 	result := &AgenticResponse{Model: opts.Model}
+	if preturn != nil {
+		result.Compacted = true
+		result.InputTokens = preturn.billedInputTokens
+		result.OutputTokens = preturn.billedOutputTokens
+		result.CacheCreationInputTokens = preturn.billedCacheCreationInputTokens
+		result.CacheReadInputTokens = preturn.billedCacheReadInputTokens
+		if opts.OnCompaction != nil {
+			opts.OnCompaction(*preturn.compaction.content)
+		}
+		if err := saveReplay(ctx); err != nil {
+			return result, err
+		}
+	}
 	if opts.RecoveryMessages != nil {
 		messages = nil
 		for _, msg := range opts.RecoveryMessages {
@@ -621,7 +661,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	messages = repairInterruptedToolCalls(messages)
 
 	var allText strings.Builder
-	hasDurableCompactionState := false
+	hasDurableCompactionState := preturn != nil
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		readContext := func(m agenticMessage) (string, string) {
@@ -665,7 +705,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			if text := partialText.String(); text != "" {
 				exchange.Append(Message{Role: "assistant", Content: text})
 			}
-			return nil, conversationError(categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err)), messages)
+			// Preserve charges from pre-turn compaction and completed tool rounds
+			// alongside the recovery history carried by the error.
+			failure := categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
+			return result, conversationError(failure, messages)
 		}
 
 		result.InputTokens += resp.billedInputTokens
@@ -735,7 +778,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		exchange.Append(Message{Role: "assistant", ContentBlocks: replayBlocks})
 		if opts.OnReplaySave != nil || opts.OnReplayChanged != nil {
 			if err := saveReplay(ctx); err != nil {
-				return nil, err
+				return result, err
 			}
 		}
 		// Collect text blocks for this turn.
@@ -862,7 +905,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if opts.OnToolBoundarySteering != nil {
 			steering, err := opts.OnToolBoundarySteering(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("tool-boundary steering: %w", err)
+				return result, fmt.Errorf("tool-boundary steering: %w", err)
 			}
 			if steering = strings.TrimSpace(steering); steering != "" {
 				userBlocks = append(userBlocks, agenticBlock{Type: "text", Text: steering})
@@ -881,13 +924,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if hasDurableCompactionState {
 		preparedState, err := prepareAgenticMessages(messages)
 		if err != nil {
-			return nil, fmt.Errorf("encode Anthropic native compaction state: %w", err)
+			return result, fmt.Errorf("encode Anthropic native compaction state: %w", err)
 		}
 		encodedState, err := preparedState.Marshal(struct {
 			Version int `json:"version"`
 		}{nativeCompactionStateVersion})
 		if err != nil {
-			return nil, fmt.Errorf("encode Anthropic native compaction state: %w", err)
+			return result, fmt.Errorf("encode Anthropic native compaction state: %w", err)
 		}
 		result.NativeCompactionStateJSON = string(encodedState)
 	}
@@ -1434,9 +1477,10 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 	}
 	opts = &preparedOpts
 
-	// Summary compaction sends first and trims only after provider overflow.
+	// Both summary and native pre-turn compaction let the provider decide
+	// whether the history fits. Textual fallback trims only after overflow.
 	_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
-	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil && !summarizing {
+	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil && !summarizing && !opts.compactOnly {
 		return nil, err
 	}
 	policy := httpretry.DefaultPolicy()
@@ -1519,6 +1563,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		Stream:    true,
 		System:    sysBlocks,
 	}
+	if opts.compactOnly {
+		req.ToolChoice = map[string]string{"type": "none"}
+	}
 	if effort := NormalizeEffort(opts.Model, opts.Effort); effort != "" {
 		req.OutputConfig = &outputConfig{Effort: effort}
 	}
@@ -1592,7 +1639,8 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 					Type:  "input_tokens",
 					Value: threshold,
 				},
-				Instructions: opts.CompactionInstructions,
+				Instructions:         opts.CompactionInstructions,
+				PauseAfterCompaction: opts.compactOnly,
 			}},
 		}
 	}

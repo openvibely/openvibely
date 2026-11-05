@@ -8,13 +8,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestBuildTaskPromptHeader(t *testing.T) {
-	header := BuildTaskPromptHeader()
-	if !strings.Contains(header, "Do not use plan mode") {
-		t.Error("header should contain plan mode directive")
-	}
-}
-
 func TestBuildTaskStatusInstructionsClassifiesOutcomeNotIntermediateErrors(t *testing.T) {
 	instructions := BuildTaskStatusInstructions()
 	for _, want := range []string{

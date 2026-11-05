@@ -810,9 +810,9 @@ func providerSystemPrompt(req llmcontracts.AgentRequest) string {
 			}
 			return base
 		}
-		return agentPrompt()
+		return agentPrompt() + llmprompt.BuildTaskStatusInstructions()
 	case llmcontracts.OperationTask:
-		return agentPrompt()
+		return agentPrompt() + llmprompt.BuildTaskStatusInstructions()
 	case llmcontracts.OperationDirect:
 		if req.RawDirectPrompt {
 			return ""
@@ -1077,7 +1077,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req.Agent.ForceNativeCompaction = true
 		compactionStrategy = "provider_native"
 	}
-	if triggered && shouldUseLocalSummaryBeforeProviderWithBudget(req, budget) {
+	if triggered && shouldUseLocalSummaryBeforeProvider(req) {
 		originalReq := req
 		if req.HasNativeState() {
 			if req.Agent.Provider == models.ProviderAnthropic {
@@ -1128,8 +1128,8 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	if externalized {
 		budget = calculateRequestBudget(req)
 	}
-	openAIHistoryOnlyCompaction := req.Agent.Provider == models.ProviderOpenAI && (req.ForceNativeCompaction || req.Agent.ForceNativeCompaction)
-	if !openAIHistoryOnlyCompaction {
+	nativeHistoryOnlyCompaction := providerSupportsNativeCompaction(req.Agent) && (req.ForceNativeCompaction || req.Agent.ForceNativeCompaction)
+	if !nativeHistoryOnlyCompaction {
 		if err := ensureRequestFitsWithBudget(req, budget, "provider request"); err != nil {
 			logContextFailureWithBudget(req, err, budget)
 			return llmcontracts.AgentResult{}, err
@@ -1150,13 +1150,21 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		s.persistNativeCompactionCheckpoint(req, res)
 		return res, nil
 	}
-	// A text summarizer cannot decode native encrypted state. Recover the
-	// original transcript before switching strategies, including when the
-	// checkpoint consumed every prior execution.
+	// Preserve Anthropic's readable checkpoint when switching to a text
+	// summary. OpenAI's opaque state instead requires the original transcript,
+	// including when the checkpoint consumed every prior execution.
 	if req.HasNativeState() && (nativeCompactionFailure(err) || recognizedContextLengthError(err)) {
-		req.ChatHistory, replayErr = loadUncompactedHistory()
-		if replayErr != nil {
-			return llmcontracts.AgentResult{}, replayErr
+		if req.Agent.Provider == models.ProviderAnthropic {
+			checkpoint, err := portableAnthropicReplayCheckpoint(req.NativeState())
+			if err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			req.ChatHistory = append(checkpoint, req.ChatHistory...)
+		} else {
+			req.ChatHistory, replayErr = loadUncompactedHistory()
+			if replayErr != nil {
+				return llmcontracts.AgentResult{}, replayErr
+			}
 		}
 		req.NativeCompactionStateJSON = ""
 		req.NativeCompactionStateRows = nil
@@ -1167,7 +1175,12 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return res, err
 	}
 	if providerSupportsNativeCompaction(req.Agent) && (nativeCompactionFailure(err) || recognizedContextLengthError(err)) && len(req.ChatHistory) > 0 {
-		return s.callNativeCompactionFallback(adapter, req, err)
+		fallback, fallbackErr := s.callNativeCompactionFallback(adapter, req, err)
+		// A completed native attempt may be billed even when it produced no
+		// usable checkpoint. Keep those charges without replacing the retry's
+		// current-context size or native state.
+		fallback.Usage = llmusage.AddBilled(fallback.Usage, res.Usage)
+		return fallback, fallbackErr
 	}
 	if recognizedContextLengthError(err) && len(req.ChatHistory) > 0 {
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req, err)
@@ -1594,17 +1607,11 @@ func parseCompactionTransportScope(scope string) (compactionScope, bool) {
 	return compactionScope{}, false
 }
 
-func shouldUseLocalSummaryBeforeProviderWithBudget(req llmcontracts.AgentRequest, budget requestBudget) bool {
+func shouldUseLocalSummaryBeforeProvider(req llmcontracts.AgentRequest) bool {
 	if len(req.ChatHistory) == 0 && !req.HasNativeState() {
 		return false
 	}
 	if !providerSupportsNativeCompaction(req.Agent) {
-		return true
-	}
-	if req.Agent.Provider == models.ProviderAnthropic && budget.TotalInputTokens() > budget.SafeInputLimit {
-		// Anthropic context_management is part of the ordinary complete request,
-		// not a separate history-only compaction request. Reduce history locally
-		// before dispatch when that complete request is already unsafe.
 		return true
 	}
 	return req.DisableNativeCompaction || req.Agent.DisableNativeCompaction || knownNativeCompactionUnsupported(req.Agent)

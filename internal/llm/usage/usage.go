@@ -52,3 +52,24 @@ func FromAnthropic(inputTokens, outputTokens, cacheCreationInputTokens, cacheRea
 func FromTotal(totalTokens int) contracts.Usage {
 	return contracts.Usage{TotalTokens: totalTokens}
 }
+
+// AddBilled adds a prior attempt's charges, preserving the current response's
+// context size, identifiers, and continuation state.
+func AddBilled(current, prior contracts.Usage) contracts.Usage {
+	current.InputTokens += prior.InputTokens
+	current.OutputTokens += prior.OutputTokens
+	current.TotalTokens += prior.TotalTokens
+	current.CachedInputTokens += prior.CachedInputTokens
+	current.ReasoningTokens += prior.ReasoningTokens
+	if len(prior.ProviderRaw) > 0 {
+		raw := make(map[string]int, len(current.ProviderRaw)+len(prior.ProviderRaw))
+		for k, v := range current.ProviderRaw {
+			raw[k] = v
+		}
+		for k, v := range prior.ProviderRaw {
+			raw[k] += v
+		}
+		current.ProviderRaw = raw
+	}
+	return current
+}

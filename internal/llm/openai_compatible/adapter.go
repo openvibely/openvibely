@@ -376,10 +376,8 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
-	fullPrompt := llmprompt.BuildTaskPromptHeader() +
-		llmprompt.BuildAttachmentInstructions(req.Attachments) +
+	fullPrompt := llmprompt.BuildAttachmentInstructions(req.Attachments) +
 		req.Message
-	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	attachments, err := convertAttachmentsContext(ctx, req.Attachments)
 	if err != nil {
@@ -398,7 +396,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		ContextWindow:            contextWindow,
 		MaxOutputTokens:          maxOutput,
 		Temperature:              compatibleTemperature(req.Agent),
-		System:                   llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
+		System:                   llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)) + llmprompt.BuildTaskStatusInstructions(),
 		WorkDir:                  effectiveWorkDir(workDir),
 		OmitExecutionEnvironment: req.RawDirectPrompt || req.LifecycleHookCall,
 		DisableTools:             req.DisableTools,

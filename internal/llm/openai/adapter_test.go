@@ -970,11 +970,12 @@ func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
 		t.Fatalf("request missing expected agentic fields: %#v", gotBody)
 	}
 	encodedInput, _ := json.Marshal(gotBody["input"])
-	if !strings.Contains(string(encodedInput), "Finish this") || !strings.Contains(string(encodedInput), "STATUS: SUCCESS") {
-		t.Fatalf("input missing task/status prompt: %s", encodedInput)
+	if !strings.Contains(string(encodedInput), "Finish this") || strings.Contains(string(encodedInput), "TASK OUTCOME STATUS") {
+		t.Fatalf("input must contain task text without status instructions: %s", encodedInput)
 	}
-	if !strings.Contains(string(encodedInput), "If you recovered and completed the requested outcome, report success") ||
-		strings.Contains(string(encodedInput), "If a command failed, a script returned non-zero") {
+	instructions, _ := gotBody["instructions"].(string)
+	if !strings.Contains(instructions, "If you recovered and completed the requested outcome, report success") ||
+		strings.Contains(instructions, "If a command failed, a script returned non-zero") {
 		t.Fatalf("input has incorrect task outcome contract: %s", encodedInput)
 	}
 }

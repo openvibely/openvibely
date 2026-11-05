@@ -503,11 +503,10 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	case lifecycleHookCall:
 		// Lifecycle hooks return structured JSON; they do not edit files, run
 		// builds, or browse. Keep the hook agent's own prompt so its identity
-		// and rules survive, but drop the shared coding-agent system prompt,
-		// the take-direct-action header, and provider web tools.
+		// and rules survive, but drop the shared coding-agent system prompt
+		// and provider web tools.
 		systemPrompt = projectInstructions
 	default:
-		fullPrompt = llmprompt.BuildTaskPromptHeader() + prompt
 		systemPrompt = llmprompt.BuildAnthropicAgentSystemPrompt(agent.Model, projectInstructions, workDir)
 		webSearchEnabled = anthropicModelSupportsWebSearch(agent.Model)
 	}
@@ -529,6 +528,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		DisableTools:              disableTools,
 		SkipDefaultTools:          skipDefaultTools,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
+		ForceNativeCompaction:     agent.ForceNativeCompaction,
 		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateFromContext(ctx).TranscriptJSON,
 		NativeCompactionStateRows: llmcontracts.NativeCompactionStateFromContext(ctx).Rows,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
@@ -548,7 +548,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	resp, err := client.SendAgentic(ctx, fullPrompt, opts)
 	if err != nil {
 		applog.Infof("[anthropic] callDirect error: %v", err)
-		return "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic call: %w", err)
+		return "", anthropicContextUsage(resp), fmt.Errorf("anthropicclient agentic call: %w", err)
 	}
 
 	usage := anthropicContextUsage(resp)
@@ -611,6 +611,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
+		ForceNativeCompaction:     agent.ForceNativeCompaction,
 		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateFromContext(ctx).TranscriptJSON,
 		NativeCompactionStateRows: llmcontracts.NativeCompactionStateFromContext(ctx).Rows,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
@@ -656,7 +657,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	if err != nil {
 		sw.Flush()
 		applog.Infof("[anthropic] callChatStreaming error: %v", err)
-		return "", "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic chat streaming call: %w", err)
+		return "", "", anthropicContextUsage(resp), fmt.Errorf("anthropicclient agentic chat streaming call: %w", err)
 	}
 
 	sw.Flush()
@@ -691,8 +692,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	}
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
-	fullPrompt += llmprompt.BuildTaskStatusInstructions()
+	fullPrompt := prompt
 	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
@@ -716,10 +716,11 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		ServiceTier:               agent.EffectiveServiceTier(),
 		EnableThinking:            true,
 		SkipDefaultTools:          skipDefaultTools,
-		System:                    llmprompt.BuildAnthropicAgentSystemPrompt(agent.Model, projectInstructions, workDir),
+		System:                    llmprompt.BuildAnthropicAgentSystemPrompt(agent.Model, projectInstructions, workDir) + llmprompt.BuildTaskStatusInstructions(),
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
+		ForceNativeCompaction:     agent.ForceNativeCompaction,
 		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateFromContext(ctx).TranscriptJSON,
 		NativeCompactionStateRows: llmcontracts.NativeCompactionStateFromContext(ctx).Rows,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
@@ -766,7 +767,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	if err != nil {
 		sw.Flush()
 		applog.Infof("[anthropic] callStreaming error: %v", err)
-		return "", "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic streaming call: %w", err)
+		return "", "", anthropicContextUsage(resp), fmt.Errorf("anthropicclient agentic streaming call: %w", err)
 	}
 
 	sw.Flush()
@@ -837,6 +838,9 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*anthr
 }
 
 func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.Usage {
+	if resp == nil {
+		return llmcontracts.Usage{}
+	}
 	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
 	usage.LastContextTokens = resp.LastContextTokens
 	usage.NativeCompactionStateJSON = resp.NativeCompactionStateJSON
@@ -928,9 +932,50 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 	return messages
 }
 
-// SummaryHistory uses the same structured replay as a continuing conversation.
+// SummaryHistory converts native summaries to user compaction context for the
+// textual summarizer. Normal continuation replay stays untouched.
 func SummaryHistory(history []models.Execution) []anthropicclient.Message {
-	return buildRecoveryHistory(history)
+	return PortableSummaryMessages(buildRecoveryHistory(history))
+}
+
+// PortableSummaryMessages preserves ordinary message roles while moving readable
+// native summaries into user messages with the shared historical-context marker.
+func PortableSummaryMessages(messages []anthropicclient.Message) []anthropicclient.Message {
+	var result []anthropicclient.Message
+	for _, message := range messages {
+		var blocks []json.RawMessage
+		if len(message.ContentBlocks) == 0 || json.Unmarshal(message.ContentBlocks, &blocks) != nil {
+			result = append(result, message)
+			continue
+		}
+		var ordinary []json.RawMessage
+		flush := func() {
+			if len(ordinary) == 0 {
+				return
+			}
+			part := message
+			part.Content = ""
+			part.ContentBlocks, _ = json.Marshal(ordinary)
+			result = append(result, part)
+			ordinary = nil
+		}
+		for _, raw := range blocks {
+			var block struct {
+				Type    string  `json:"type"`
+				Content *string `json:"content"`
+			}
+			if json.Unmarshal(raw, &block) != nil || block.Type != "compaction" {
+				ordinary = append(ordinary, raw)
+				continue
+			}
+			flush()
+			if block.Content != nil && strings.TrimSpace(*block.Content) != "" {
+				result = append(result, anthropicclient.Message{Role: "user", Content: llmprompt.CompactionSummaryPrefix + "\n\n" + strings.TrimSpace(*block.Content)})
+			}
+		}
+		flush()
+	}
+	return result
 }
 
 // EstimateHistoryTokens counts the messages actually reconstructed for Anthropic,

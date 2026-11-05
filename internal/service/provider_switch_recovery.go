@@ -7,6 +7,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"strings"
 
+	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
@@ -355,11 +356,7 @@ func portableAnthropicReplayCheckpoint(replay models.ExecutionReplayMessage) ([]
 				var summary string
 				if json.Unmarshal(fields["content"], &summary) == nil && strings.TrimSpace(summary) != "" {
 					foundSummary = true
-					encoded, err := json.Marshal(map[string]string{"type": "text", "text": "Conversation summary:\n" + summary})
-					if err != nil {
-						return nil, err
-					}
-					portable = append(portable, encoded)
+					portable = append(portable, block)
 				}
 			default:
 				portable = append(portable, block)
@@ -380,7 +377,7 @@ func portableAnthropicReplayCheckpoint(replay models.ExecutionReplayMessage) ([]
 	if !foundSummary {
 		return nil, fmt.Errorf("Anthropic checkpoint has no readable summary")
 	}
-	snapshot, err := models.EncodeReplayRows("messages", messages)
+	snapshot, err := models.EncodeReplayRows("messages", llmanthropic.PortableSummaryMessages(messages))
 	if err != nil {
 		return nil, err
 	}

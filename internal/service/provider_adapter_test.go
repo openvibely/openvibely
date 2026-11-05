@@ -945,7 +945,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 		wantSummary    bool
 	}{
 		{name: "reported usage includes native state", reportedTokens: 139302},
-		{name: "oversized checkpoint preserves native summary", reportedTokens: 190000, wantSummary: true},
+		{name: "oversized checkpoint tries native before preserving summary", reportedTokens: 190000, wantSummary: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := teststores.New(t).Executions
@@ -975,10 +975,16 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 			adapter := providerAdapterFunc(func(got llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 				calls++
 				if tc.wantSummary {
+					if calls == 1 {
+						if !got.ForceNativeCompaction || !got.HasNativeState() || got.Operation == llmcontracts.OperationDirect {
+							t.Fatal("oversized checkpoint must attempt native pre-turn compaction first")
+						}
+						return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionFailed, "test", fmt.Errorf("native failed"))
+					}
 					if got.NativeState().FullTranscriptJSON() != "" {
 						t.Fatal("local summary or continuation retained native state")
 					}
-					if calls == 1 {
+					if calls == 2 {
 						input := summaryInputText(got.SummaryInput)
 						if got.Operation != llmcontracts.OperationDirect || !strings.Contains(input, "NATIVE_ONLY_FACT") || !strings.Contains(input, "NATIVE_CONTINUATION") {
 							t.Fatal("must summarize native summary and continuation")
@@ -987,7 +993,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 							t.Fatal("must not replace checkpoint with covered execution text")
 						}
 					}
-					if calls == 2 && (got.Message != req.Message || !strings.Contains(historyCompactionSummary(got.ChatHistory), "text summary")) {
+					if calls == 3 && (got.Message != req.Message || !strings.Contains(historyCompactionSummary(got.ChatHistory), "text summary")) {
 						t.Fatal("continuation lost pending message or summary")
 					}
 				} else {
@@ -1018,7 +1024,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 			}
 			wantCalls := 1
 			if tc.wantSummary {
-				wantCalls = 2
+				wantCalls = 3
 			}
 			if calls != wantCalls {
 				t.Fatalf("calls=%d, want %d", calls, wantCalls)
