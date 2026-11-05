@@ -117,13 +117,13 @@ func TestSteeringAttachmentCommitRetriesAfterFailure(t *testing.T) {
 				require.NoError(t, os.MkdirAll(dir, 0o755))
 				require.NoError(t, os.WriteFile(filepath.Join(dir, "doc.pdf"), []byte(session), 0o644))
 			}
-			for _, session := range []string{"first", "second"} {
+			for _, session := range []string{"0000000000000000000000000000001e", "0000000000000000000000000000001f"} {
 				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: session, AttachmentSessionID: session}
 				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
 			}
-			writeUpload("first")
+			writeUpload("0000000000000000000000000000001e")
 			if failure == "delivery" {
-				writeUpload("second")
+				writeUpload("0000000000000000000000000000001f")
 			}
 			params := streamingResponseParams{ExecID: exec.ID}
 			batch, err := h.claimPendingSteeringInputs(ctx, &params)
@@ -132,7 +132,7 @@ func TestSteeringAttachmentCommitRetriesAfterFailure(t *testing.T) {
 			commit := h.preparedSteeringCommit(params, batch)
 			// An unserializable checkpoint fails delivery after attachments are staged.
 			require.Error(t, commit(ctx, []any{make(chan int)}))
-			require.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", "first", "doc.pdf"))
+			require.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", "0000000000000000000000000000001e", "doc.pdf"))
 			rows, err := h.attachmentRepo.ListByTask(ctx, task.ID)
 			require.NoError(t, err)
 			require.Empty(t, rows)
@@ -141,14 +141,14 @@ func TestSteeringAttachmentCommitRetriesAfterFailure(t *testing.T) {
 				require.True(t, entry.IsDir(), "rollback left a file: %s", path)
 				return nil
 			}))
-			writeUpload("second")
+			writeUpload("0000000000000000000000000000001f")
 			require.NoError(t, commit(ctx, nil))
 			require.NoError(t, commit(ctx, nil), "successful commits may be called again")
 			rows, err = h.attachmentRepo.ListByTask(ctx, task.ID)
 			require.NoError(t, err)
 			require.Len(t, rows, 2)
 			require.NotEqual(t, rows[0].FilePath, rows[1].FilePath)
-			for _, session := range []string{"first", "second"} {
+			for _, session := range []string{"0000000000000000000000000000001e", "0000000000000000000000000000001f"} {
 				require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", session))
 			}
 		})
@@ -173,7 +173,7 @@ func TestSteeringDuplicateFilenamesKeepPreviewPaths(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Dir(original), 0o755))
 			require.NoError(t, os.WriteFile(original, []byte("original"), 0o644))
 			paths := make(map[string]string)
-			for _, session := range []string{"first", "second"} {
+			for _, session := range []string{"0000000000000000000000000000001e", "0000000000000000000000000000001f"} {
 				source := filepath.Join(uploadsDir, "chat", "pending", session, "report.pdf")
 				require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
 				require.NoError(t, os.WriteFile(source, []byte(session), 0o644))
@@ -189,7 +189,7 @@ func TestSteeringDuplicateFilenamesKeepPreviewPaths(t *testing.T) {
 				}
 				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
 			}
-			require.NotEqual(t, paths["first"], paths["second"])
+			require.NotEqual(t, paths["0000000000000000000000000000001e"], paths["0000000000000000000000000000001f"])
 			params := streamingResponseParams{ExecID: exec.ID, Agent: *agent}
 			batch, err := h.claimPendingSteeringInputs(ctx, &params)
 			require.NoError(t, err)
@@ -229,7 +229,7 @@ func TestSteeringDuplicateFilenamesKeepPreviewPaths(t *testing.T) {
 					savedPaths = append(savedPaths, row.FilePath)
 				}
 			}
-			require.ElementsMatch(t, []string{paths["first"], paths["second"]}, savedPaths)
+			require.ElementsMatch(t, []string{paths["0000000000000000000000000000001e"], paths["0000000000000000000000000000001f"]}, savedPaths)
 		})
 	}
 }
@@ -249,10 +249,10 @@ func TestSteeringAttachmentRefreshFailureKeepsUploadForRetry(t *testing.T) {
 				project := createProject(t, h, "Refresh failure")
 				task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Category = category; task.Status = models.StatusRunning })
 				exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
-				pending := filepath.Join(uploadsDir, "chat", "pending", "refresh-test")
+				pending := filepath.Join(uploadsDir, "chat", "pending", "00000000000000000000000000000020")
 				require.NoError(t, os.MkdirAll(pending, 0755))
 				require.NoError(t, os.WriteFile(filepath.Join(pending, "report.pdf"), []byte("report"), 0600))
-				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "refresh-test"}
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "00000000000000000000000000000020"}
 				if category == models.CategoryChat {
 					input.Scope = models.ThreadInputScopeChat
 				}
@@ -334,10 +334,10 @@ func TestSteeringAttachmentRefreshFailurePreventsModelCall(t *testing.T) {
 	project := createProject(t, h, "Before send")
 	task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Status = models.StatusRunning })
 	exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
-	pending := filepath.Join(uploadsDir, "chat", "pending", "before-send")
+	pending := filepath.Join(uploadsDir, "chat", "pending", "00000000000000000000000000000021")
 	require.NoError(t, os.MkdirAll(pending, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pending, "report.pdf"), []byte("report"), 0600))
-	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "before-send"}
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "00000000000000000000000000000021"}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
 	originalStore := h.attachmentRepo
 	h.attachmentRepo = failSteeringAttachmentRefreshStore{originalStore}
@@ -371,10 +371,10 @@ func TestOpenAISteeringAttachmentsRefreshBeforeProviderBuildsContext(t *testing.
 	project := createProject(t, h, "OpenAI steering context")
 	task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Status = models.StatusRunning })
 	exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
-	pending := filepath.Join(uploadsDir, "chat", "pending", "before-context")
+	pending := filepath.Join(uploadsDir, "chat", "pending", "00000000000000000000000000000022")
 	require.NoError(t, os.MkdirAll(pending, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pending, "new.pdf"), []byte("new report"), 0600))
-	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "before-context"}
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "00000000000000000000000000000022"}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
 	params := streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, Task: task, ProjectID: project.ID, Agent: *agent, Message: "go", IsTaskFollowup: true}
 	_, err := h.prepareChatAttachmentContext(ctx, &params)
