@@ -3,7 +3,7 @@
 When the user asks you to create a custom OV page, build it in this task's workspace and call publish_custom_page. Do not ask the user to create files or manually import your output. No marketplace or Node.js runtime is needed. The tool copies the validated bundle into OV's persistent package store and registers it in the task's owning project. Return its URL to the user.
 
 1. Create a dedicated directory, e.g. custom-pages/sales, containing plugin.json and prebuilt HTML/CSS/JavaScript. Keep source/build files separate from the published directory. Use relative asset URLs.
-2. Implement and validate the page. Prefer frontend-only pages when they meet the request. For persistent server operations use a packaged Go/native backend. Do not falsely present browser-only calculations as server operations.
+2. Implement and validate the page. Prefer frontend-only pages when they meet the request. For server operations use a packaged backend executable, written in any language that supports the protocol below. Do not falsely present browser-only calculations as server operations.
 3. Call publish_custom_page with package_path="custom-pages/sales" and optionally page_id="sales". Paths are relative to the current task workspace; absolute paths, traversal, and symlink escapes are rejected. The owning project is resolved from the task; never pass a project ID.
 4. Frontend-only pages are enabled immediately. Native backend packages are installed DISABLED without running their code. Return the supplied settings_url for administrator approval and enablement. Never approve your own backend, edit the live database, or execute an installed backend to circumvent this gate. Test authored backends only with disposable state in the task workspace.
 5. Identical retries reuse the instance. Changed contents require a new manifest version. Publishing a different version currently creates a separate instance; it does not replace existing state/conversations. Tell the user when this applies.
@@ -61,11 +61,11 @@ Bridge message size is limited to 64 KiB. Supported calls:
 - events.subscribe {} -> subscribed (requires events permission); handle subsequent event payloads {type,operation,data,at} by reloading through a read operation. The host also sends `{type:"page.refresh"}` after subscription and reconnection: refetch current data then, and ignore out-of-order responses from older requests/filters. Never replay a mutating operation just to redraw the page
 - analyze.request {prompt} -> exec_id (requires agent permission, max 4000-character prompt)
 
-## Shared server operations and native backends
+## Shared server operations and backends
 
-Add a backend declaration: `"backend":{"executables":{"darwin-arm64":"bin/backend-darwin-arm64","linux-amd64":"bin/backend-linux-amd64"},"args":["--stdio"]}`. Exact GOOS-GOARCH is preferred, then optional "any" fallback. Supply compiled executables with executable permissions; no shell interpolation and no required Node runtime. Package only the platforms you can build/test and report limitations.
+Add a backend declaration: `"backend":{"executables":{"darwin-arm64":"bin/backend-darwin-arm64","linux-amd64":"bin/backend-linux-amd64"},"args":["--stdio"]}`. Exact GOOS-GOARCH is preferred, then optional "any" fallback. Supply executable files: compiled programs or executable scripts with an appropriate shebang. OV launches the selected file directly, without shell interpolation. Scripts require their interpreter and dependencies to be available on the server; OV does not install them. OV itself does not require Node.js, but an individual plugin may require Node.js or another runtime. Package only the platforms you can build/test and report limitations.
 
-Declare permissions backend.exec, storage (state), events (notifications), and agent (analysis). Define operations ONCE in plugin.json; both page buttons and agents call them through the same server-side validation:
+Declare backend.exec for an external backend. Add storage only if using OV saved state, events for notifications, and agent for analysis. Define operations ONCE in plugin.json; both page buttons and agents call them through the same server-side validation:
 ```json
 {"name":"refresh_data","description":"Refresh and return this instance's sales report","kind":"read","expose_as_tool":true,"permissions":["storage","events"],"emits":["data.changed"],"input_schema":{"type":"object","properties":{},"additionalProperties":false},"output_schema":{"type":"object"}}
 ```
@@ -79,4 +79,12 @@ The process speaks newline-delimited JSON-RPC 2.0 over stdin/stdout (stdout is p
 - state/set notification params={state}: persist this instance's bounded state (storage permission)
 - events/publish notification params={type:"data.changed",data:{...}}: notify this instance (events permission)
 
-Restore state from initialize, not shared files in the package directory. Separate instances must not share mutable state. Native executables are trusted installed code with the server OS user's privileges, not OS-sandboxed code. Administrator approval is tied to package contents. Do not embed API keys in bundles; configuration/secret provisioning is not yet exposed in the authoring flow.
+## Choosing storage
+
+Follow the user's database preference. OV storage is optional; do not move an existing application's data into OV or introduce a database unless the feature needs it.
+
+- **Small saved values:** declare `storage`, restore the JSON `state` from `initialize`, and send `state/set` with the full replacement value when an operation needs to save a change. For example, an explicitly requested target update can send `{"jsonrpc":"2.0","method":"state/set","params":{"state":{"target":20000}}}`. The value is limited to 1 MiB and is stored separately for each project-page instance. This replaces the previous value; it is not a merge or a SQL API. It is a notification, not an acknowledged transaction: do not promise confirmed persistence merely because the message was sent. Every process launch, including crash recovery, receives the latest successfully persisted state and configuration; a failed read blocks startup rather than supplying an old snapshot.
+- **Your own database:** the backend may use PostgreSQL, MySQL, its own SQLite database, or another store the user chooses. Implement its connection, schema, reads/writes, and lifecycle in the backend. This does not require OV's `storage` permission unless also using OV saved state. OV does not provision, back up, migrate, or delete that external data. Keep project instances isolated using the server-provided identity. Do not open or modify OV's internal database directly.
+- Keep credentials and database connections in the backend, never in the iframe or published bundle. Use a durable location for local database files, not the immutable installed package or a disposable task worktree. Do not assume OV allocates a database or data directory for the plugin.
+
+The model authors the save/load code; the running page does not need an LLM call for each save. A page button invokes a declared operation, and that backend operation uses the chosen storage. Native executables are trusted installed code with the server OS user's privileges, not OS-sandboxed code. Administrator approval is tied to package contents. Do not embed API keys in bundles; configuration/secret provisioning is not yet exposed in the authoring flow.

@@ -570,3 +570,87 @@ func TestHandleLifetimeRetireExpireAndDisable(t *testing.T) {
 		t.Fatal("disable did not retire handle")
 	}
 }
+
+func TestCrashRecoveryLoadsLatestSavedStatePerInstance(t *testing.T) {
+	m, _, projectA, projectB := newTestManager(t)
+	pkg, err := m.InstallFromDir(t.Context(), writeProcessPackage(t), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := func(project, state string) (*models.PagePluginInstance, *Process) {
+		t.Helper()
+		in, err := m.CreateInstance(t.Context(), project, pkg.ID, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Store().UpdateInstanceState(t.Context(), in.ID, state); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Approve(t.Context(), in.ID, "admin"); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Enable(t.Context(), in.ID); err != nil {
+			t.Fatal(err)
+		}
+		m.mu.Lock()
+		proc := m.procs[in.ID].proc
+		m.mu.Unlock()
+		return in, proc
+	}
+	a, pa := start(projectA, `{"n":1}`)
+	b, pb := start(projectB, `{"n":20}`)
+	assertState := func(p *Process, in *models.PagePluginInstance, want string) {
+		t.Helper()
+		raw, err := p.Call(t.Context(), "operation/invoke", map[string]any{"operation": "echo"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			State    json.RawMessage `json:"initialized_state"`
+			Instance struct {
+				ID        string `json:"id"`
+				ProjectID string `json:"project_id"`
+			} `json:"initialized_instance"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		if string(out.State) != want || out.Instance.ID != in.ID || out.Instance.ProjectID != in.ProjectID {
+			t.Fatalf("wrong restart snapshot: %s", raw)
+		}
+	}
+	crash := func(p *Process) {
+		t.Helper()
+		p.mu.Lock()
+		exited := p.exited
+		p.mu.Unlock()
+		if _, err := p.Call(t.Context(), "operation/invoke", map[string]any{"operation": "crash"}); err == nil {
+			t.Fatal("backend did not crash")
+		}
+		select {
+		case <-exited:
+		case <-time.After(3 * time.Second):
+			t.Fatal("backend did not exit")
+		}
+	}
+	assertState(pa, a, `{"n":1}`)
+	// Exercise the real backend notification and persisted store, not an in-memory update.
+	if _, err := pa.Call(t.Context(), "operation/invoke", map[string]any{"operation": "notify"}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := m.Store().GetInstance(t.Context(), a.ID)
+	if err != nil || saved.StateJSON != `{"n":7}` {
+		t.Fatalf("state not saved: %+v %v", saved, err)
+	}
+	crash(pa)
+	// The cached Process restarts directly: ensureProcess is not involved.
+	assertState(pa, a, `{"n":7}`)
+	crash(pb)
+	assertState(pb, b, `{"n":20}`)
+	// Clearing state is a valid update; do not fall back to an older nonempty value.
+	if err := m.Store().UpdateInstanceState(t.Context(), a.ID, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	crash(pa)
+	assertState(pa, a, `{}`)
+}

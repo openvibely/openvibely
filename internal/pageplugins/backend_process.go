@@ -58,10 +58,12 @@ type ProcessSpec struct {
 	Dir        string
 	Env        map[string]string
 	InitParams any
-	// BeforeStart authorizes every actual launch, including automatic restarts.
+	// PrepareStart authorizes every actual launch and loads its initialization
+	// snapshot, including automatic restarts. Errors prevent execution entirely.
 	// It runs under the process lock and must not call back into this Process.
-	BeforeStart func(context.Context) error
-	OnNotify    func(method string, params json.RawMessage)
+	// When absent, InitParams is used (for stateless standalone processes).
+	PrepareStart func(context.Context) (any, error)
+	OnNotify     func(method string, params json.RawMessage)
 }
 
 // MinimalEnv builds the environment for plugin processes: no inherited secrets.
@@ -128,8 +130,11 @@ func (p *Process) startLocked(ctx context.Context) error {
 	if p.cmd != nil {
 		return nil
 	}
-	if p.spec.BeforeStart != nil {
-		if err := p.spec.BeforeStart(ctx); err != nil {
+	initParams := p.spec.InitParams
+	if p.spec.PrepareStart != nil {
+		var err error
+		initParams, err = p.spec.PrepareStart(ctx)
+		if err != nil {
 			return err
 		}
 	}
@@ -176,7 +181,7 @@ func (p *Process) startLocked(ctx context.Context) error {
 	hctx, cancel := context.WithTimeout(ctx, HandshakeTimeout)
 	defer cancel()
 	p.mu.Unlock()
-	raw, err := p.call(hctx, "initialize", map[string]any{"protocol": ProtocolVersion, "params": p.spec.InitParams})
+	raw, err := p.call(hctx, "initialize", map[string]any{"protocol": ProtocolVersion, "params": initParams})
 	p.mu.Lock()
 	if err == nil {
 		var res struct {

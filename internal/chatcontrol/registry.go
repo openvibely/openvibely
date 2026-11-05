@@ -984,7 +984,7 @@ var automationLifecycleParams = &toolschema.Schema{
 var registry = []ActionDef{
 	{
 		Name:        "get_custom_page_guide",
-		Description: "Read the bundled custom-page authoring guide before building an OV project page. Explains plugin.json, the sandbox bridge, explicit context, shared operations, native Go backends, and publishing directly from a coding task without asking the user to import files.",
+		Description: "Read the bundled custom-page authoring guide before building an OV project page. Explains plugin.json, the sandbox bridge, explicit context, shared operations, language-independent backends, optional OV storage or a user-chosen database, and publishing directly from a coding task without asking the user to import files.",
 		Domain:      DomainProjects, Access: AccessRead, Sensitivity: SensitivityNormal,
 		AllowedModes: bothModes(), Surfaces: webAPISurfaces(), IncludeThreadTools: true,
 		Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{}, AdditionalProperties: toolschema.Pointer(false)},

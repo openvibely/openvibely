@@ -570,37 +570,37 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 	instanceID, projectID := in.ID, in.ProjectID
 	packageID, approvedHash, installPath := pkg.ID, pkg.ContentHash, pkg.InstallPath
 	proc := NewProcess(ProcessSpec{
-		// A cached Process can restart itself without going through ensureProcess.
-		// Keep approval/content validation at the actual launch boundary instead.
-		BeforeStart: func(ctx context.Context) error {
+		// Cached processes also pass through this hook on every actual launch.
+		// Load state/config from the same fresh record used for authorization;
+		// never retain the first startup snapshot for later crash recovery.
+		PrepareStart: func(ctx context.Context) (any, error) {
 			fresh, err := m.store.GetInstance(ctx, instanceID)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if fresh == nil || !fresh.Enabled || fresh.ProjectID != projectID {
-				return ErrDisabled
+				return nil, ErrDisabled
 			}
 			if fresh.PackageID != packageID || fresh.ApprovedHash != approvedHash || fresh.ContentHash != approvedHash {
-				return ErrApprovalRequired
+				return nil, ErrApprovalRequired
 			}
 			onDisk, err := HashTree(os.DirFS(installPath))
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if onDisk != approvedHash {
-				return ErrContentChanged
+				return nil, ErrContentChanged
 			}
-			return nil
+			return map[string]any{
+				"protocol": ProtocolVersion,
+				"instance": map[string]string{"id": fresh.ID, "project_id": fresh.ProjectID, "page_id": fresh.PageID},
+				"config":   json.RawMessage(nonEmptyJSON(fresh.ConfigJSON)),
+				"state":    json.RawMessage(nonEmptyJSON(fresh.StateJSON)),
+			}, nil
 		},
-		Path: exePath,
-		Args: man.Backend.Args,
-		Dir:  pkg.InstallPath,
-		InitParams: map[string]any{
-			"protocol": ProtocolVersion,
-			"instance": map[string]string{"id": in.ID, "project_id": in.ProjectID, "page_id": in.PageID},
-			"config":   json.RawMessage(nonEmptyJSON(in.ConfigJSON)),
-			"state":    json.RawMessage(nonEmptyJSON(in.StateJSON)),
-		},
+		Path:     exePath,
+		Args:     man.Backend.Args,
+		Dir:      pkg.InstallPath,
 		OnNotify: func(method string, params json.RawMessage) { m.handleNotify(instanceID, man, method, params) },
 	})
 	stopAbort := context.AfterFunc(ctx, proc.Abort)

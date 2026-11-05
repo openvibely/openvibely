@@ -208,3 +208,45 @@ func TestMinimalEnvDropsSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessPreparationFailureDoesNotLaunchOrReuseSnapshot(t *testing.T) {
+	spec := helperSpec(t)
+	blocked := false
+	calls := 0
+	unavailable := errors.New("saved state unavailable")
+	spec.PrepareStart = func(context.Context) (any, error) {
+		calls++
+		if blocked {
+			return nil, unavailable
+		}
+		return map[string]any{"state": map[string]int{"revision": calls}}, nil
+	}
+	p := NewProcess(spec)
+	defer p.Stop()
+	if err := p.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	exited := p.exited
+	p.mu.Unlock()
+	if _, err := p.Call(t.Context(), "operation/invoke", map[string]any{"operation": "crash"}); err == nil {
+		t.Fatal("expected crash")
+	}
+	select {
+	case <-exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("backend did not exit")
+	}
+	blocked = true
+	if _, err := p.Call(t.Context(), "operation/invoke", map[string]any{"operation": "echo"}); !errors.Is(err, unavailable) {
+		t.Fatalf("state read error: %v", err)
+	}
+	if p.PID() != 0 || p.Running() || calls != 2 {
+		t.Fatal("process launched despite failed state read")
+	}
+	blocked = false
+	raw, err := p.Call(t.Context(), "operation/invoke", map[string]any{"operation": "echo"})
+	if err != nil || !strings.Contains(string(raw), `"revision":3`) {
+		t.Fatalf("recovery reused snapshot: %s %v", raw, err)
+	}
+}

@@ -10,7 +10,7 @@ Ask, for example: **“Create a sales report page for this project with filters 
 
 Task agents have two tools, on initial runs and task-thread follow-ups:
 
-- `get_custom_page_guide` returns the bundled manifest, bridge, context, operation, and Go backend authoring instructions. It works even when the user's repository contains no OV source.
+- `get_custom_page_guide` returns the bundled manifest, bridge, context, operation, language-independent backend, and optional storage authoring instructions. It works even when the user's repository contains no OV source.
 - `publish_custom_page` takes `package_path` relative to the task workspace and an optional `page_id`. The server resolves the owning project from the persisted task, validates paths and package contents, copies the package outside the worktree, and registers the project instance. The response includes a page URL and enabled/approval status. Successful publication emits a live navigation refresh event.
 
 Frontend-only pages are enabled automatically. Packages with native backends are installed without execution and remain disabled until an administrator approves and enables them; the task returns an approval link. The agent cannot grant itself backend approval. Existing agent/model selection and task tool policies apply. Publication is unavailable to project chat and automation auditor tasks; project chat can delegate page creation to a coding task.
@@ -117,7 +117,7 @@ Host → page messages use the envelope `{"v":1,"type":"…","replyTo":<id or nu
 - **Launch:** started with `os/exec` and never through a shell. The working directory is the package directory. The environment is minimal (PATH, LANG, TMPDIR; or SystemRoot, PATH, TEMP, TMP on Windows), so no OpenVibely secrets are inherited.
 - **One process per enabled instance.** It is started on enable or first use. It is stopped on disable, instance removal, project deletion, and server shutdown.
 - **Framing:** one JSON object per line on stdin and stdout. Messages are limited to 1 MiB each; a larger message makes the host stop the process. stderr is captured as sanitized log lines, keeping the last 200.
-- **Handshake:** the host sends `initialize {protocol:"openvibely.page/1", params:{protocol, instance{id,project_id,page_id}, config, state}}`. The backend must answer `{"protocol":"openvibely.page/1"}` within 10 s.
+- **Handshake:** the host sends `initialize {protocol:"openvibely.page/1", params:{protocol, instance{id,project_id,page_id}, config, state}}`. The backend must answer `{"protocol":"openvibely.page/1"}` within 10 s. Every actual launch, including automatic crash recovery, reloads persisted instance state/configuration after checking enabled status and approval. A failed read prevents launch; an old startup snapshot is never used as a fallback.
 - **Calls:** `operation/invoke {operation, input, caller{via}}`. Every request has an integer `id`. The default timeout is 30 s, including waiting for and writing to stdin. Cancellation while awaiting a response attempts `$/cancelRequest {id}` with a separate 100 ms bound. If a write is interrupted, OV terminates that process and closes its pipe: a partially written JSON-RPC frame cannot safely be reused. Restart backoff also respects cancellation.
 - **Notifications from the backend:** `state/set {state}` (requires `storage`) and `events/publish {type, data}` (requires `events`).
 - **Shutdown:** the host attempts `shutdown` (request), then `exit` (notification), and closes stdin. These steps share one 3 s grace period. An independent timer kills the process tree at that deadline even if stdin is blocked. Waiting for the killed process to exit is bounded to one additional second.
@@ -134,6 +134,12 @@ Use **Settings → Plugin pages** (`/settings/plugin-pages?project_id=<project>`
 4. **Enable**: the page appears in the left rail. **Disable** closes admission to new operations, cancels that instance's running side-chat and inline analysis through OV's existing cancellation machinery, interrupts backend startup and active calls, and releases its handles, subscriptions, and approvals. Backend termination does not depend on the process reading stdin. Saved state and conversation history remain intact. Re-enabling creates a new runtime lifetime; cancelled work from the previous lifetime stays cancelled. Other instances are unaffected.
 5. **Remove instance**: deletes only that instance, together with its state, side-chat conversation, and turn-context snapshots. Other projects' instances of the same package are unaffected.
 6. **Remove package**: only allowed once no instance uses it. Its files are deleted from the managed root.
+
+### Optional storage
+
+OV saved state is a convenience for small JSON data (up to 1 MiB per instance), not a required database for custom apps. A backend declares `storage` and sends `state/set` to replace that instance's saved JSON. This notification has no persistence acknowledgment. Each launch receives the latest successfully saved state in `initialize`, including after a crash.
+
+A backend can instead use any user-chosen database and manage its schema and data itself. OV does not provision or manage that database; credentials and database access stay in the backend, not in the iframe. Do not use OV's internal database or store mutable data in installed package files. The authoring tool explains both choices. No new database directories or per-plugin tables are introduced by this feature.
 
 ### Data lifecycle policy
 

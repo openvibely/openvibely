@@ -25,6 +25,13 @@ func runHelperBackend() {
 		out.Write(append(raw, '\n'))
 		out.Flush()
 	}
+	var initialized struct {
+		Params struct {
+			State    json.RawMessage `json:"state"`
+			Config   json.RawMessage `json:"config"`
+			Instance json.RawMessage `json:"instance"`
+		} `json:"params"`
+	}
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 64<<10), 2<<20)
 	for sc.Scan() {
@@ -39,6 +46,7 @@ func runHelperBackend() {
 		reply := func(result any) { send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result}) }
 		switch msg.Method {
 		case "initialize":
+			_ = json.Unmarshal(msg.Params, &initialized)
 			if len(os.Args) > 3 && os.Args[2] == "--block-init" {
 				_ = os.WriteFile(os.Args[3], []byte("started"), 0600)
 				time.Sleep(30 * time.Second)
@@ -56,7 +64,7 @@ func runHelperBackend() {
 				reply(map[string]bool{"ok": true})
 				time.Sleep(30 * time.Second)
 			case "echo":
-				reply(map[string]any{"echo": p.Input, "pid": os.Getpid()})
+				reply(map[string]any{"echo": p.Input, "pid": os.Getpid(), "initialized_state": initialized.Params.State, "initialized_config": initialized.Params.Config, "initialized_instance": initialized.Params.Instance})
 			case "slow":
 				send(map[string]any{"jsonrpc": "2.0", "method": "events/publish", "params": map[string]any{"type": "operation.started"}})
 				go func(id *int64) {
