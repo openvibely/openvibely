@@ -986,8 +986,8 @@
             : i <= 0
               ? rows.length - 1
               : i - 1;
-      rows[next].focus();
-      rows[next].scrollIntoView({ block: "nearest" });
+      rows[next].focus({ preventScroll: true });
+      window.openVibelyScrollIntoPanel(rows[next]);
     },
     true,
   );

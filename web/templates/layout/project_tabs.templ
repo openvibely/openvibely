@@ -297,7 +297,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
     });
     var activeTab = list.querySelector('[aria-selected="true"]');
-    if (activeTab) activeTab.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    if (activeTab) window.openVibelyScrollIntoPanel(activeTab, {container: list});
    }
    function render() {
     list.replaceChildren();
@@ -492,7 +492,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     else return;
     event.preventDefault();
     tabs.forEach(function(item) { item.tabIndex = -1; });
-    tabs[index].tabIndex = 0; tabs[index].focus(); tabs[index].scrollIntoView({block: 'nearest', inline: 'nearest'});
+    tabs[index].tabIndex = 0; tabs[index].focus({preventScroll: true}); window.openVibelyScrollIntoPanel(tabs[index], {container: list});
    });
    document.addEventListener('keydown', function(event) {
     if (event.defaultPrevented || event.isComposing || event.repeat || event.metaKey === event.ctrlKey || !event.shiftKey || event.altKey) return;

@@ -648,7 +648,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     await window.openVibelyNavigate(rows[next].href);
                     syncActiveRow();
                     var selected = groups.querySelector('[aria-current="page"]');
-                    if (selected) selected.scrollIntoView({block:'nearest'});
+                    if (selected) window.openVibelyScrollIntoPanel(selected);
                 } catch (_) {
                     if (window.showToast) window.showToast('Could not open task', 'error');
                 } finally { taskListNavigating = false; }

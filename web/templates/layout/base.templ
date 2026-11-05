@@ -255,6 +255,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			</script>
 			<link href={ static.URL("app.css") } rel="stylesheet" type="text/css"/>
 			<script src={ static.URL("vendor/htmx.min.js") }></script>
+			<script src={ static.URL("panel-scroll.js") }></script>
 			<script src={ static.URL("live-transport.js") }></script>
 			<script src={ static.URL("thread-snapshots.js") }></script>
 			<script defer src={ static.URL("kanban.js") }></script>

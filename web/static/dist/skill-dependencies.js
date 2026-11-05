@@ -133,7 +133,7 @@
    const fragment=document.createElement('template');fragment.innerHTML=html;
    root.querySelectorAll('[data-chat-input-request-id]').forEach(card=>card.remove());
    root.append(fragment.content);initDetails();
-   if(location.hash.startsWith('#chat-input-request-'))document.getElementById(location.hash.slice(1))?.scrollIntoView({block:'center'});
+   if(location.hash.startsWith('#chat-input-request-'))window.openVibelyScrollIntoPanel(document.getElementById(location.hash.slice(1)), {block:'center'});
   } catch(_){delete root.dataset.skillApprovalsLoaded;}
  }
  const scan=()=>{initDetails();document.querySelectorAll('[data-execution-pair][data-exec-id]').forEach(root=>load(root,false));};

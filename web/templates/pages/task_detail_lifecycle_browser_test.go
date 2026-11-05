@@ -317,17 +317,18 @@ window.addEventListener('DOMContentLoaded', function() {
     entry.style.width = oldWidth;
     entry.querySelector('summary').click();
     if (entry.open) fail('selecting entry again should collapse');
-    var originalWorkspace = window.taskWorkspace, openedThread = false, scrolled = false;
+    var originalWorkspace = window.taskWorkspace, originalScroll = window.openVibelyScrollIntoPanel, openedThread = false, scrolled = false;
     window.taskWorkspace = {openThread:function() { openedThread = true; }};
     var message = document.createElement('div');
     message.dataset.execId = 'thread-parent';
-    message.scrollIntoView = function() { scrolled = true; };
+    window.openVibelyScrollIntoPanel = function(target) { scrolled = target === message; };
     document.getElementById('task-detail-content').appendChild(message);
     entry.querySelector('summary').click();
     if (openedThread || scrolled) fail('expansion must not navigate');
     entry.querySelector('[data-lifecycle-thread]').click();
     if (!openedThread || !scrolled) fail('explicit thread action must reveal the linked execution');
     window.taskWorkspace = originalWorkspace;
+    window.openVibelyScrollIntoPanel = originalScroll;
     message.remove();
     entry.open = false;
 

@@ -2995,7 +2995,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					if (!errorBox || !errorMessage) return;
 					errorMessage.textContent = message || 'Could not save model.';
 					errorBox.classList.remove('hidden');
-					errorBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+					window.openVibelyScrollIntoPanel(errorBox, {behavior: 'smooth'});
 					errorBox.focus({preventScroll: true});
 				}
 

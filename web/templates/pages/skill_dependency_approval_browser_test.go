@@ -3,6 +3,7 @@ package pages
 import (
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/web/static"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +22,9 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 	state := "pending"
 	decisions := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/approval.js" {
 			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 			w.Write(script)
@@ -63,7 +67,7 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`<html><body><main id="task-thread" data-project-id="project"><div data-execution-pair data-exec-id="execution"></div></main><script>window.showToast=function(a,b,c,options){window.approvalToast=options;};</script><script src="/approval.js"></script></body></html>`))
+		w.Write([]byte(`<html><head><script src="/static/panel-scroll.js"></script></head><body><main id="task-thread" data-project-id="project"><div data-execution-pair data-exec-id="execution"></div></main><script>window.showToast=function(a,b,c,options){window.approvalToast=options;};</script><script src="/approval.js"></script></body></html>`))
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/?project_id=project#chat-input-request-request", "dependency-approval", func(browser *composerFocusCDP) {

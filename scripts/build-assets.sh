@@ -93,6 +93,7 @@ daisyui=$(fetch "$DAISYUI_URL" "$DAISYUI_SHA256")
 
 rm -rf "$dist"
 mkdir -p "$dist/vendor"
+cp "$assets/panel-scroll.js" "$dist/panel-scroll.js"
 cp "$assets/kanban.js" "$dist/kanban.js"
 cp "$assets/thread-navigation.js" "$dist/thread-navigation.js"
 cp "$assets/thread-output-window.js" "$dist/thread-output-window.js"
