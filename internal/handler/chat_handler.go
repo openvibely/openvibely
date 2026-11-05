@@ -295,7 +295,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	}
 	// Create a task record for the chat message (required for execution tracking)
 	selectedAgentID := agent.ID
-	chatTitle := fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), message[:min(50, len(message))])
+	chatTitle := fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), chatTitlePreview(message))
 	task := &models.Task{
 		ProjectID: projectID,
 		Title:     chatTitle,
