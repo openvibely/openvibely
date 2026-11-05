@@ -26,9 +26,9 @@ func ValidateArguments(schema *Schema, raw, input json.RawMessage) (json.RawMess
 }
 
 func normalizeValidate(schema, input json.RawMessage, external bool) (json.RawMessage, error) {
-	var s map[string]any
-	if err := json.Unmarshal(schema, &s); err != nil {
-		return nil, fmt.Errorf("invalid tool schema: %w", err)
+	entry, compileErr := cachedValidation(schema, compileValidator)
+	if entry.parseErr != nil {
+		return nil, fmt.Errorf("invalid tool schema: %w", entry.parseErr)
 	}
 	var value any
 	dec := json.NewDecoder(bytes.NewReader(input))
@@ -42,58 +42,27 @@ func normalizeValidate(schema, input json.RawMessage, external bool) (json.RawMe
 	if _, ok := value.(map[string]any); !ok {
 		return nil, fmt.Errorf("tool arguments must be an object")
 	}
-	compiled, err := cachedValidator(schema)
-	if err != nil {
+	compiled := entry.schema
+	if compileErr != nil {
 		if external {
 			return input, nil
 		}
-		return nil, fmt.Errorf("invalid tool schema: %w", err)
+		return nil, fmt.Errorf("invalid tool schema: %w", compileErr)
 	}
 	if external {
 		// Valid external arguments belong to the tool server. In particular,
 		// a draft-07 $ref can override a sibling type and allow explicit null.
 		if validationErr := compiled.Validate(value); validationErr == nil {
 			return input, nil
-		} else if _, conversionErr := MarshalOpenAI(nil, schema); conversionErr != nil {
+		} else if !entry.supportsNormalization(schema) {
 			// Only schemas supported by strict conversion can contain our
 			// nullable placeholders. Do not rewrite other schema dialects.
 			return nil, fmt.Errorf("invalid tool arguments: %w", validationErr)
 		}
 	}
-	normalize(s, value)
-	if err = compiled.Validate(value); err != nil {
+	entry.normalization.normalize(value)
+	if err := compiled.Validate(value); err != nil {
 		return nil, fmt.Errorf("invalid tool arguments: %w", err)
 	}
 	return json.Marshal(value)
-}
-
-func normalize(s map[string]any, value any) {
-	switch v := value.(type) {
-	case map[string]any:
-		props, _ := s["properties"].(map[string]any)
-		required := requiredFields(s)
-		for name, raw := range props {
-			child, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			val, present := v[name]
-			if !present {
-				continue
-			}
-			// Only simple non-nullable types are converted; union/ref semantics remain intact.
-			kind, _ := child["type"].(string)
-			if val == nil && !required[name] && kind != "" && kind != "null" {
-				delete(v, name)
-				continue
-			}
-			normalize(child, val)
-		}
-	case []any:
-		if child, ok := s["items"].(map[string]any); ok {
-			for _, item := range v {
-				normalize(child, item)
-			}
-		}
-	}
 }

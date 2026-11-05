@@ -3,6 +3,7 @@ package toolschema
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
@@ -16,18 +17,18 @@ const maxCachedValidators = 128
 const maxCachedSchemaBytes = 120000
 
 type validatorCompilation struct {
-	done   chan struct{}
-	schema *jsonschema.Schema
-	err    error
+	done  chan struct{}
+	entry *validatorEntry
+	err   error
 }
 
 var validators = struct {
 	sync.Mutex
-	entries map[[32]byte]*jsonschema.Schema
+	entries map[[32]byte]*validatorEntry
 	order   [][32]byte
 	pending map[[32]byte]*validatorCompilation
 }{
-	entries: make(map[[32]byte]*jsonschema.Schema),
+	entries: make(map[[32]byte]*validatorEntry),
 	pending: make(map[[32]byte]*validatorCompilation),
 }
 
@@ -35,44 +36,79 @@ func cachedValidator(raw []byte) (*jsonschema.Schema, error) {
 	return cachedValidatorWithCompiler(raw, compileValidator)
 }
 
-func cachedValidatorWithCompiler(raw []byte, compile func([]byte) (*jsonschema.Schema, error)) (*jsonschema.Schema, error) {
-	if len(raw) > maxCachedSchemaBytes {
-		return compile(raw)
-	}
+// validatorEntry owns immutable normalization metadata alongside its validator.
+// Metadata is capped per entry as well as by the entry count.
+type validatorEntry struct {
+	schema               *jsonschema.Schema
+	normalization        *normalizationNode
+	metadataBytes        int
+	parseErr             error
+	conversionOnce       sync.Once
+	canNormalizeExternal bool
+}
 
+// Check strict-conversion support only when external validation needs null
+// normalization. The once result is published safely without retaining raw JSON.
+func (entry *validatorEntry) supportsNormalization(raw []byte) bool {
+	entry.conversionOnce.Do(func() {
+		_, err := MarshalOpenAI(nil, raw)
+		entry.canNormalizeExternal = err == nil
+	})
+	return entry.canNormalizeExternal
+}
+
+func cachedValidatorWithCompiler(raw []byte, compile func([]byte) (*jsonschema.Schema, error)) (*jsonschema.Schema, error) {
+	entry, err := cachedValidation(raw, compile)
+	return entry.schema, err
+}
+
+func prepareValidation(raw []byte, compile func([]byte) (*jsonschema.Schema, error)) (*validatorEntry, error) {
+	entry := &validatorEntry{}
+	var parsed map[string]any
+	entry.parseErr = json.Unmarshal(raw, &parsed)
+	if entry.parseErr != nil {
+		return entry, entry.parseErr
+	}
+	entry.normalization, entry.metadataBytes = prepareNormalization(parsed)
+	var err error
+	entry.schema, err = compile(raw)
+	return entry, err
+}
+
+func cachedValidation(raw []byte, compile func([]byte) (*jsonschema.Schema, error)) (*validatorEntry, error) {
+	if len(raw) > maxCachedSchemaBytes {
+		return prepareValidation(raw, compile)
+	}
 	key := sha256.Sum256(raw)
 	validators.Lock()
-	if schema := validators.entries[key]; schema != nil {
+	if entry := validators.entries[key]; entry != nil {
 		validators.Unlock()
-		return schema, nil
+		return entry, nil
 	}
 	if pending := validators.pending[key]; pending != nil {
 		validators.Unlock()
 		<-pending.done
-		return pending.schema, pending.err
+		return pending.entry, pending.err
 	}
-
 	pending := &validatorCompilation{done: make(chan struct{})}
 	validators.pending[key] = pending
 	validators.Unlock()
-
-	schema, err := compile(raw)
-
+	entry, err := prepareValidation(raw, compile)
 	validators.Lock()
-	if err == nil {
+	if err == nil && entry.metadataBytes <= maxCachedSchemaBytes {
 		if len(validators.order) == maxCachedValidators {
 			delete(validators.entries, validators.order[0])
 			validators.order = validators.order[1:]
 		}
-		validators.entries[key] = schema
+		validators.entries[key] = entry
 		validators.order = append(validators.order, key)
 	}
-	pending.schema = schema
+	pending.entry = entry
 	pending.err = err
 	delete(validators.pending, key)
 	close(pending.done)
 	validators.Unlock()
-	return schema, err
+	return entry, err
 }
 
 func compileValidator(raw []byte) (*jsonschema.Schema, error) {
