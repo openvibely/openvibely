@@ -1757,7 +1757,7 @@ func TestExecuteTaskExecutions_InvalidTag(t *testing.T) {
 
 	// Invalid tag
 	requests := []TaskExecutionRequest{
-		{Tags: []string{"invalid_tag"}, MinPriority: 0},
+		{Tags: []string{"invalid\ntag"}, MinPriority: 0},
 	}
 
 	summary := ExecuteTaskExecutions(context.Background(), requests, project.ID, taskSvc)
@@ -1765,7 +1765,7 @@ func TestExecuteTaskExecutions_InvalidTag(t *testing.T) {
 	if !strings.Contains(summary, "Failed") {
 		t.Errorf("expected failure section, got %q", summary)
 	}
-	if !strings.Contains(summary, "No valid tags") {
+	if !strings.Contains(summary, models.ErrInvalidTaskTag.Error()) {
 		t.Errorf("expected 'No valid tags' message, got %q", summary)
 	}
 }

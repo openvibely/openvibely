@@ -346,6 +346,11 @@ func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.T
 	if err := normalizeTaskTitleAndPrompt(t); err != nil {
 		return err
 	}
+	var tagErr error
+	t.Tag, tagErr = models.NormalizeTaskTag(string(t.Tag))
+	if tagErr != nil {
+		return tagErr
+	}
 	normalizeTaskCreatePriority(t)
 	if t.Status == "" {
 		t.Status = models.StatusPending
@@ -409,6 +414,16 @@ func (s *TaskService) updateTask(ctx context.Context, t *models.Task, preserveTi
 	}
 	if err := validateTaskPriority(t.Priority); err != nil {
 		return err
+	}
+	stored, err := s.repo.GetByID(ctx, t.ID)
+	if err != nil {
+		return err
+	}
+	if stored != nil && stored.Tag != t.Tag {
+		t.Tag, err = models.NormalizeTaskTag(string(t.Tag))
+		if err != nil {
+			return err
+		}
 	}
 	applog.Infof("[task-svc] Update id=%s title=%q category=%s", t.ID, t.Title, t.Category)
 	save := s.repo.Update
@@ -1260,6 +1275,15 @@ func (s *TaskService) CountBacklogByPriority(ctx context.Context, projectID stri
 // Completed tasks are excluded by default unless includeCompleted is true.
 // Returns the list of tasks that were activated and the count of tasks submitted.
 func (s *TaskService) ExecuteTasksByTags(ctx context.Context, tags []models.TaskTag, projectID string, minPriority int, includeCompleted bool) ([]models.Task, int, error) {
+	normalized := make([]models.TaskTag, len(tags))
+	for i, tag := range tags {
+		var err error
+		normalized[i], err = models.NormalizeTaskTag(string(tag))
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	tags = normalized
 	applog.Infof("[task-svc] ExecuteTasksByTags tags=%v project=%s minPriority=%d includeCompleted=%v", tags, projectID, minPriority, includeCompleted)
 
 	// Find matching tasks in backlog/active by default.

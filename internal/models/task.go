@@ -60,6 +60,7 @@ const (
 	TagBug     TaskTag = "bug"
 )
 
+// AllTags contains the default suggestions, not the set of allowed values.
 var AllTags = []TaskTag{
 	TagNone,
 	TagFeature,

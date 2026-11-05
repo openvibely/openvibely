@@ -427,7 +427,15 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Priority</span></label> <select name=\"priority\" class=\"select select-bordered\"><option value=\"1\">Low</option> <option value=\"2\" selected>Normal</option> <option value=\"3\">High</option> <option value=\"4\">Urgent</option></select></div></div><div class=\"form-control mt-3\"><label class=\"label\"><span class=\"label-text\">Tag</span></label> <select name=\"tag\" class=\"select select-bordered\"><option value=\"\">None</option> <option value=\"feature\">Feature</option> <option value=\"bug\">Bug</option></select></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Priority</span></label> <select name=\"priority\" class=\"select select-bordered\"><option value=\"1\">Low</option> <option value=\"2\" selected>Normal</option> <option value=\"3\">High</option> <option value=\"4\">Urgent</option></select></div></div><div class=\"form-control mt-3\"><label class=\"label\"><span class=\"label-text\">Tag</span></label>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = components.TaskTagInput(models.TagNone).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -460,7 +468,7 @@ func NewTaskAdvancedOptions() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"mt-3\"><div class=\"space-y-3\"><label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_mode\" id=\"create-task-swarm-mode-toggle\" onchange=\"document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text font-medium\">Swarm mode</span></label><div id=\"create-task-swarm-options\" class=\"hidden space-y-3\"><p class=\"text-xs opacity-70\">Swarm planning starts when the parent task becomes Active. Choose Backlog to defer the planner until you run the task or move it to Active.</p><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max workers</span></label> <input type=\"number\" name=\"swarm_max_workers\" class=\"input input-bordered\" min=\"1\" max=\"8\" value=\"3\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Worker isolation</span></label> <select name=\"swarm_worker_isolation\" class=\"select select-bordered\"><option value=\"worktree\" selected>Worktree</option> <option value=\"read_only\">Read only</option> <option value=\"shared\">Shared</option></select></div></div><div class=\"flex flex-wrap gap-4\"><input type=\"hidden\" name=\"swarm_reviewer_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_reviewer_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Reviewer enabled</span></label> <input type=\"hidden\" name=\"swarm_merger_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_merger_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Merger enabled</span></label></div></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<div class=\"mt-3\"><div class=\"space-y-3\"><label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_mode\" id=\"create-task-swarm-mode-toggle\" onchange=\"document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text font-medium\">Swarm mode</span></label><div id=\"create-task-swarm-options\" class=\"hidden space-y-3\"><p class=\"text-xs opacity-70\">Swarm planning starts when the parent task becomes Active. Choose Backlog to defer the planner until you run the task or move it to Active.</p><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max workers</span></label> <input type=\"number\" name=\"swarm_max_workers\" class=\"input input-bordered\" min=\"1\" max=\"8\" value=\"3\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Worker isolation</span></label> <select name=\"swarm_worker_isolation\" class=\"select select-bordered\"><option value=\"worktree\" selected>Worktree</option> <option value=\"read_only\">Read only</option> <option value=\"shared\">Shared</option></select></div></div><div class=\"flex flex-wrap gap-4\"><input type=\"hidden\" name=\"swarm_reviewer_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_reviewer_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Reviewer enabled</span></label> <input type=\"hidden\" name=\"swarm_merger_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_merger_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Merger enabled</span></label></div></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -485,7 +493,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<div class=\"min-w-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<div class=\"min-w-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -494,46 +502,46 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 			return templ_7745c5c3_Err
 		}
 		for _, field := range []struct{ Name, Value string }{{"agent_definition_id", ""}, {"category", "active"}, {"priority", "2"}, {"tag", ""}, {"goal", ""}} {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<input type=\"hidden\" name=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<input type=\"hidden\" name=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 390, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 386, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Value).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 390, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 386, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" data-draft-property=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" data-draft-property=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 390, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 386, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" form=\"task-thread-form\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" form=\"task-thread-form\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -546,7 +554,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<p class=\"text-xs opacity-60 mb-4\">Settings apply when you send your first message. Active tasks start immediately; Backlog tasks are saved without running.</p><details><summary class=\"text-sm cursor-pointer\">Advanced options</summary>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<p class=\"text-xs opacity-60 mb-4\">Settings apply when you send your first message. Active tasks start immediately; Backlog tasks are saved without running.</p><details><summary class=\"text-sm cursor-pointer\">Advanced options</summary>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -554,7 +562,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</details></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</details></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -590,20 +598,20 @@ func NewTaskProjectRow(project *models.Project, projects []models.Project) templ
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if layout.WorkspaceProjectID(ctx, project.ID) == models.AllProjectsID {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<button type=\"button\" class=\"task-property-row inspector-property-row\" data-detail-property=\"destination_project\" data-value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<button type=\"button\" class=\"task-property-row inspector-property-row\" data-detail-property=\"destination_project\" data-value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(newTaskDestinationValue(project)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 411, Col: 161}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 407, Col: 161}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" aria-haspopup=\"dialog\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" aria-haspopup=\"dialog\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -611,20 +619,20 @@ func NewTaskProjectRow(project *models.Project, projects []models.Project) templ
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<input type=\"hidden\" id=\"new-task-project\" name=\"destination_project\" form=\"task-thread-form\" data-draft-property=\"destination_project\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<input type=\"hidden\" id=\"new-task-project\" name=\"destination_project\" form=\"task-thread-form\" data-draft-property=\"destination_project\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var25 string
 			templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(newTaskDestinationValue(project)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 413, Col: 179}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 409, Col: 179}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\"></button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\"></button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

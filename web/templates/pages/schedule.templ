@@ -789,11 +789,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						</div>
 						<div class="form-control min-w-0">
 							<label class="label"><span class="label-text">Tag</span></label>
-							<select name="tag" class="select select-bordered w-full max-w-full">
-								<option value="">None</option>
-								<option value="feature">Feature</option>
-								<option value="bug">Bug</option>
-							</select>
+							@components.TaskTagInput(models.TagNone)
 						</div>
 					</div>
 					<!-- Git Worktree: Automatic merge triggers -->
