@@ -93,7 +93,7 @@ type Process struct {
 	mu        sync.Mutex
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
-	writeMu   sync.Mutex
+	writeGate chan struct{}
 	nextID    int64
 	pending   map[int64]chan rpcMessage
 	exited    chan struct{}
@@ -105,7 +105,7 @@ type Process struct {
 }
 
 func NewProcess(spec ProcessSpec) *Process {
-	return &Process{spec: spec, pending: map[int64]chan rpcMessage{}}
+	return &Process{spec: spec, pending: map[int64]chan rpcMessage{}, writeGate: make(chan struct{}, 1)}
 }
 
 // Start launches the process and completes the handshake.
@@ -251,7 +251,13 @@ func (p *Process) Logs() []string {
 	return append([]string(nil), p.stderr...)
 }
 
-func (p *Process) write(msg rpcMessage) error {
+// write serializes frames without making waiting for the writer uncancellable.
+// A timed-out partial frame cannot safely be followed by another JSON-RPC frame:
+// terminate that process and close its pipe to unblock and reap the writer.
+func (p *Process) write(ctx context.Context, msg rpcMessage) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -259,16 +265,41 @@ func (p *Process) write(msg rpcMessage) error {
 	if len(raw) > MaxRPCMessageBytes {
 		return fmt.Errorf("request exceeds %d bytes", MaxRPCMessageBytes)
 	}
+	select {
+	case p.writeGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-p.writeGate }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	p.mu.Lock()
-	stdin := p.stdin
+	stdin, cmd := p.stdin, p.cmd
 	p.mu.Unlock()
-	if stdin == nil {
+	if stdin == nil || cmd == nil {
 		return ErrBackendStopped
 	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	_, err = stdin.Write(append(raw, '\n'))
-	return err
+	done := make(chan error, 1)
+	go func() { _, err := stdin.Write(append(raw, '\n')); done <- err }()
+	select {
+	case err := <-done:
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	case <-ctx.Done():
+		p.mu.Lock()
+		if p.cmd == cmd {
+			p.killLocked()
+		}
+		p.mu.Unlock()
+		// Close the captured pipe even if this process exited and was replaced.
+		// Closing an os/exec pipe interrupts a blocked Write on supported platforms.
+		_ = stdin.Close()
+		<-done
+		return ctx.Err()
+	}
 }
 
 func (p *Process) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -291,7 +322,7 @@ func (p *Process) call(ctx context.Context, method string, params any) (json.Raw
 		delete(p.pending, id)
 		p.mu.Unlock()
 	}
-	if err := p.write(rpcMessage{JSONRPC: "2.0", ID: &id, Method: method, Params: rawParams}); err != nil {
+	if err := p.write(ctx, rpcMessage{JSONRPC: "2.0", ID: &id, Method: method, Params: rawParams}); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -309,8 +340,14 @@ func (p *Process) call(ctx context.Context, method string, params any) (json.Raw
 		return msg.Result, nil
 	case <-ctx.Done():
 		cleanup()
-		cancelParams, _ := json.Marshal(map[string]int64{"id": id})
-		_ = p.write(rpcMessage{JSONRPC: "2.0", Method: "$/cancelRequest", Params: cancelParams})
+		// Cancellation is best effort and must never wait indefinitely behind
+		// another request's blocked writer. Shutdown already has a kill timer.
+		if method != "shutdown" {
+			notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 100*time.Millisecond)
+			cancelParams, _ := json.Marshal(map[string]int64{"id": id})
+			_ = p.write(notifyCtx, rpcMessage{JSONRPC: "2.0", Method: "$/cancelRequest", Params: cancelParams})
+			cancel()
+		}
 		return nil, ctx.Err()
 	}
 }
@@ -324,7 +361,7 @@ func (p *Process) Call(ctx context.Context, method string, params any) (json.Raw
 	}
 	p.mu.Lock()
 	if p.cmd == nil && !p.stopped && !p.failed {
-		if err := p.allowRestartLocked(); err != nil {
+		if err := p.allowRestartLocked(ctx); err != nil {
 			p.mu.Unlock()
 			return nil, err
 		}
@@ -344,7 +381,7 @@ func (p *Process) Call(ctx context.Context, method string, params any) (json.Raw
 	return p.call(ctx, method, params)
 }
 
-func (p *Process) allowRestartLocked() error {
+func (p *Process) allowRestartLocked(ctx context.Context) error {
 	if p.startedAt.IsZero() {
 		return nil
 	}
@@ -363,9 +400,14 @@ func (p *Process) allowRestartLocked() error {
 	p.restarts = append(recent, now)
 	backoff := time.Duration(len(recent)) * 200 * time.Millisecond
 	p.mu.Unlock()
-	time.Sleep(backoff)
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 	p.mu.Lock()
-	return nil
+	return ctx.Err()
 }
 
 func (p *Process) killLocked() {
@@ -403,28 +445,38 @@ func (p *Process) Status() string {
 func (p *Process) Stop() {
 	p.mu.Lock()
 	p.stopped = true
-	exited := p.exited
-	running := p.cmd != nil
+	exited, cmd, stdin := p.exited, p.cmd, p.stdin
 	p.mu.Unlock()
-	if !running {
+	if cmd == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), ShutdownGrace)
 	defer cancel()
-	_, _ = p.call(ctx, "shutdown", map[string]any{})
-	_ = p.write(rpcMessage{JSONRPC: "2.0", Method: "exit"})
-	p.mu.Lock()
-	if p.stdin != nil {
-		_ = p.stdin.Close()
+	kill := func() {
+		p.mu.Lock()
+		if p.cmd == cmd {
+			p.killLocked()
+		}
+		p.mu.Unlock()
 	}
-	p.mu.Unlock()
+	// The deadline's kill path does not depend on acquiring the writer or on
+	// successfully sending shutdown/exit. All graceful steps share one deadline.
+	stopKill := context.AfterFunc(ctx, kill)
+	defer stopKill()
+	_, _ = p.call(ctx, "shutdown", map[string]any{})
+	_ = p.write(ctx, rpcMessage{JSONRPC: "2.0", Method: "exit"})
+	if stdin != nil {
+		_ = stdin.Close()
+	}
 	select {
 	case <-exited:
-	case <-time.After(ShutdownGrace):
-		p.mu.Lock()
-		p.killLocked()
-		p.mu.Unlock()
-		<-exited
+	case <-ctx.Done():
+		kill()
+		// Bound reaping as well; a malfunctioning backend cannot hold OV shutdown.
+		select {
+		case <-exited:
+		case <-time.After(time.Second):
+		}
 	}
 }
 

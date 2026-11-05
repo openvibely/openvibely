@@ -118,9 +118,9 @@ Host → page messages use the envelope `{"v":1,"type":"…","replyTo":<id or nu
 - **One process per enabled instance.** It is started on enable or first use. It is stopped on disable, instance removal, project deletion, and server shutdown.
 - **Framing:** one JSON object per line on stdin and stdout. Messages are limited to 1 MiB each; a larger message makes the host stop the process. stderr is captured as sanitized log lines, keeping the last 200.
 - **Handshake:** the host sends `initialize {protocol:"openvibely.page/1", params:{protocol, instance{id,project_id,page_id}, config, state}}`. The backend must answer `{"protocol":"openvibely.page/1"}` within 10 s.
-- **Calls:** `operation/invoke {operation, input, caller{via}}`. Every request has an integer `id`. The default timeout is 30 s. When a call is cancelled or times out, the host sends the notification `$/cancelRequest {id}`.
+- **Calls:** `operation/invoke {operation, input, caller{via}}`. Every request has an integer `id`. The default timeout is 30 s, including waiting for and writing to stdin. Cancellation while awaiting a response attempts `$/cancelRequest {id}` with a separate 100 ms bound. If a write is interrupted, OV terminates that process and closes its pipe: a partially written JSON-RPC frame cannot safely be reused. Restart backoff also respects cancellation.
 - **Notifications from the backend:** `state/set {state}` (requires `storage`) and `events/publish {type, data}` (requires `events`).
-- **Shutdown:** the host sends `shutdown` (request) and then `exit` (notification), and closes stdin. If the process is still running after 3 s, its process tree is killed.
+- **Shutdown:** the host attempts `shutdown` (request), then `exit` (notification), and closes stdin. These steps share one 3 s grace period. An independent timer kills the process tree at that deadline even if stdin is blocked. Waiting for the killed process to exit is bounded to one additional second.
 - **Restarts:** a crashed backend is restarted on the next call, with backoff, at most 3 times per 5 minutes. After that the instance reports `failed` until it is re-enabled.
 - **Limits:** backends run with your OpenVibely OS user's permissions and are **not** sandboxed at the OS level. That is why `backend.exec` requires administrator approval.
 

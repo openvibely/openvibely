@@ -52,6 +52,9 @@ func runHelperBackend() {
 			}
 			_ = json.Unmarshal(msg.Params, &p)
 			switch p.Operation {
+			case "stop_reading":
+				reply(map[string]bool{"ok": true})
+				time.Sleep(30 * time.Second)
 			case "echo":
 				reply(map[string]any{"echo": p.Input, "pid": os.Getpid()})
 			case "slow":
