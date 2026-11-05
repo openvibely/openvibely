@@ -316,22 +316,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								<label class="label">
 									<span class="label-text">Tag</span>
 								</label>
-								<select name="tag" class="select select-bordered">
-									for _, tag := range models.AllTags {
-										<option
-											value={ string(tag) }
-											if tag == task.Tag {
-												selected
-											}
-										>
-											if tag == "" {
-												None
-											} else {
-												{ components.TagLabel(tag) }
-											}
-										</option>
-									}
-								</select>
+								@components.TaskTagInput(task.Tag)
 							</div>
 							<div class="form-control mb-4">
 								<label class="label">

@@ -95,7 +95,8 @@ func TagBadgeClass(tag models.TaskTag) string {
 	case models.TagBug:
 		return "badge-error"
 	default:
-		return ""
+        if tag == "" { return "" }
+		return "badge-neutral"
 	}
 }
 
@@ -106,7 +107,7 @@ func TagLabel(tag models.TaskTag) string {
 	case models.TagBug:
 		return "Bug"
 	default:
-		return ""
+		return string(tag)
 	}
 }
 

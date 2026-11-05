@@ -21,6 +21,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "details-project", Name: "Details"}
 	agents := []models.LLMConfig{{ID: "model-1", Name: "Example model"}}
+	var tag atomic.Value
+	tag.Store("")
 	var autoMerge atomic.Bool
 	var priority atomic.Int32
 	priority.Store(2)
@@ -33,7 +35,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		task := &models.Task{ID: "details-task", ProjectID: project.ID, Title: "Task", Prompt: "Original prompt", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: int(priority.Load()), AutoMerge: autoMerge.Load()}
+		task := &models.Task{ID: "details-task", ProjectID: project.ID, Title: "Task", Prompt: "Original prompt", Status: models.StatusCompleted, Category: models.CategoryCompleted, Tag: models.TaskTag(tag.Load().(string)), Priority: int(priority.Load()), AutoMerge: autoMerge.Load()}
 		var component templ.Component
 		switch r.URL.Path {
 		case "/tasks/new":
@@ -47,7 +49,16 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		case "/tasks/details-task/detail-status":
 			component = TaskDetailMetrics(task, models.TaskExecutionMetrics{}, agents, "")
 		case "/tasks/details-task/details/property":
-			if r.FormValue("field") == "priority" {
+			if r.FormValue("field") == "tag" {
+				normalized, err := models.NormalizeTaskTag(r.FormValue("value"))
+				if err != nil {
+					http.Error(w, err.Error(), 400)
+					return
+				}
+				tag.Store(string(normalized))
+				task.Tag = normalized
+				component = TaskDetailMetrics(task, models.TaskExecutionMetrics{}, agents, "")
+			} else if r.FormValue("field") == "priority" {
 				priority.Store(4)
 				task.Priority = 4
 				component = TaskDetailMetrics(task, models.TaskExecutionMetrics{}, agents, "")
@@ -100,6 +111,14 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			}
 		}
 		assertTabGutters()
+		b.click(`[data-detail-property="tag"]`)
+		b.typeText("Docs/Security")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
+		b.waitFor("draft custom tag", `document.querySelector('[data-draft-property="tag"]').value`, "Docs/Security")
+		b.click(`[data-detail-property="tag"]`)
+		b.waitFor("custom tag retained on reopen", `document.getElementById('detail-custom-tag').value`, "Docs/Security")
+		b.click(`[data-options="tag"] [data-value=""]`)
+		b.waitFor("draft tag cleared", `document.querySelector('[data-draft-property="tag"]').value`, "")
 		b.waitFor("default model label matches composer", `String(document.querySelector('[data-detail-property="agent_id"] [data-property-label]').textContent.trim()==='Default' && document.getElementById('task-thread-form-agent-select').textContent.includes('Default') && document.getElementById('task-thread-form-agent-id').value==='default')`, "true")
 		b.waitFor("property highlight clears panel edges", `(function(){var row=document.querySelector('[data-detail-property="priority"]').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(row.left-panel.left>=12 && panel.right-row.right>=12)})()`, "true")
 		b.waitFor("property highlight inset", `(function(){var row=document.querySelector('[data-detail-property="priority"]'),text=row.firstElementChild;return String(Math.abs(text.getBoundingClientRect().left-row.getBoundingClientRect().left-12)<1 && getComputedStyle(row).paddingRight==='12px')})()`, "true")
@@ -185,6 +204,17 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.click(`[data-detail-property="priority"]`)
 		b.click(`[data-options="priority"] [data-value="4"]`)
 		b.waitFor("saved priority", `document.querySelector('[data-detail-property="priority"]').dataset.value`, "4")
+		b.click(`[data-detail-property="tag"]`)
+		b.typeText(" Docs/Security ")
+		b.click(`[data-custom-tag]`)
+		b.waitFor("saved custom tag", `document.querySelector('[data-detail-property="tag"]').dataset.value`, "docs/security")
+		b.waitFor("neutral custom badge", `document.querySelector('[data-detail-property="tag"] .badge-neutral').textContent`, "docs/security")
+		b.click(`[data-detail-property="tag"]`)
+		b.evaluate(`document.getElementById('detail-custom-tag').value='x'.repeat(65); 'oversized'`)
+		b.click(`[data-custom-tag]`)
+		b.waitFor("tag validation visible", `String(document.querySelector('#task-property-picker [data-property-error]').textContent.includes('64 characters'))`, "true")
+		b.click(`[data-options="tag"] [data-value=""]`)
+		b.waitFor("saved tag cleared", `document.querySelector('[data-detail-property="tag"]').dataset.value`, "")
 		b.waitFor("mounted thread preserved", `String(window.retainedThread===document.getElementById('task-thread-form'))`, "true")
 		b.click(`[data-detail-editor="prompt"]`)
 		b.evaluate(`document.querySelector('#task-detail-text-editor textarea').value='Updated prompt'; 'edited'`)
