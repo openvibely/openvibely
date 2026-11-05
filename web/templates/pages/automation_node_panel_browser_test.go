@@ -93,7 +93,8 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/edit?project_id="+project.ID, "automation-node-panel", func(b *composerFocusCDP) {
-		b.waitFor("builder ready", `String(typeof document.getElementById('automation-builder')?.hasUnsavedAutomationChanges==='function')`, "true")
+		// htmx binds forms on DOMContentLoaded; earlier Graph clicks fall back to a native navigating POST.
+		b.waitFor("builder ready", `String(document.readyState==='complete'&&typeof document.getElementById('automation-builder')?.hasUnsavedAutomationChanges==='function')`, "true")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("footer layout", `String((function(){var f=document.querySelector('[data-automation-footer]').getBoundingClientRect(),add=document.querySelector('[data-automation-add-node-open]').getBoundingClientRect(),zoom=document.querySelector('[data-automation-graph-tool]').getBoundingClientRect(),save=document.querySelector('[data-automation-builder-save]').getBoundingClientRect();return Math.abs((add.left+add.right)/2-(f.left+f.right)/2)<2&&zoom.right<add.left&&save.left>add.right&&Math.abs((zoom.top+zoom.bottom)/2-(save.top+save.bottom)/2)<2&&!document.querySelector('[data-automation-builder-toolbar]');})())`, "true")
 
