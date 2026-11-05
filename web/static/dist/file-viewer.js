@@ -1,5 +1,34 @@
 (()=>{
  if(window.OVFileViewer)return;
+ // Custom-element registration covers initial markup and later fragment insertion
+ // without observing Chat, task fragments, or even the gallery's rendered cells.
+ const sheetsSource=document.currentScript.dataset.sheetsSrc;
+ let sheetsLoading;
+ function loadSheets(){
+  if(window.OVFileSheets)return Promise.resolve(window.OVFileSheets);
+  if(!sheetsLoading)sheetsLoading=new Promise((resolve,reject)=>{
+   const script=document.createElement('script');script.src=sheetsSource;
+   script.onload=()=>resolve(window.OVFileSheets);
+   script.onerror=()=>{script.remove();sheetsLoading=null;reject(Error('Could not load spreadsheet preview'))};
+   document.head.append(script);
+  });
+  return sheetsLoading;
+ }
+ customElements.define('ov-spreadsheet',class extends HTMLElement{
+  connectedCallback(){
+   // Defer until the HTML parser has supplied the element's children.
+   if(!this.ready){this.ready=true;setTimeout(()=>this.renderSheet(),0)}
+  }
+  async renderSheet(){
+   if(!this.isConnected){this.ready=false;return}
+   try{const sheets=await loadSheets();if(this.isConnected)await sheets.render(this)}
+   catch(error){
+    const status=this.querySelector('[data-sheet-status]');if(!status)return;
+    const retry=document.createElement('button');retry.type='button';retry.className='v-button';retry.textContent='Try again';retry.dataset.sheetRetry='';
+    retry.onclick=()=>this.renderSheet();status.replaceChildren(error.message+' ',retry);
+   }finally{this.ready=false}
+  }
+ });
  let savingDownload=false;
  document.addEventListener('click',async event=>{
   if(document.documentElement.dataset.runtime!=='desktop')return;

@@ -25,7 +25,7 @@ templ FilePreview(name, kind, text, base string) {
  <form data-pdf-password hidden><label>PDF password<input type="password" data-pdf-password-input required/></label><button type="submit">Unlock</button><button type="button" data-pdf-password-cancel>Cancel</button><p data-pdf-password-status role="status"></p></form>
  <div class="result-pdf" data-pdf-viewer data-pdf-source={FileURLMode(base,"raw")}><div data-pdf-pages></div></div>
  } else if kind=="table" {
- <div data-file-viewer="table" data-spreadsheet-url={FileURLMode(base,"raw")}><p data-sheet-status role="status"></p><nav data-sheet-tabs aria-label="Sheets"></nav><div data-sheet-grid tabindex="0" role="region" aria-label="Spreadsheet cells"></div></div>
+ <ov-spreadsheet data-file-viewer="table" data-spreadsheet-url={FileURLMode(base,"raw")}><p data-sheet-status role="status"></p><nav data-sheet-tabs aria-label="Sheets"></nav><div data-sheet-grid tabindex="0" role="region" aria-label="Spreadsheet cells"></div></ov-spreadsheet>
  } else if kind=="image" {
  <img src={templ.SafeURL(FileURLMode(base,"thumbnail"))} alt={name}/>
  } else if kind=="audio" {
