@@ -89,7 +89,7 @@ func NewHostedSSOClient(controlURL, clientID, callbackURL string) *HostedSSOClie
 		ClientID:    clientID,
 		CallbackURL: callbackURL,
 		HTTPClient:  client,
-		Sleep:       sleepContext,
+		Sleep:       httpretry.Wait,
 		Now:         time.Now,
 	}
 }
@@ -657,7 +657,7 @@ func (c *HostedSSOClient) Exchange(parent context.Context, code, verifier string
 	client := &clientCopy
 	sleeper := c.Sleep
 	if sleeper == nil {
-		sleeper = sleepContext
+		sleeper = httpretry.Wait
 	}
 	for attempt := 1; attempt <= 3; attempt++ {
 		form := url.Values{}
@@ -953,15 +953,4 @@ func retryDelay(value string) time.Duration {
 		return 3 * time.Second
 	}
 	return time.Duration(value[firstNonzero]-'0') * time.Second
-}
-
-func sleepContext(ctx context.Context, duration time.Duration) error {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
