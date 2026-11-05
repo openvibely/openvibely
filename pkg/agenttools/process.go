@@ -60,7 +60,8 @@ type processSession struct {
 	changed     chan struct{}
 	interaction sync.Mutex
 	mu          sync.Mutex
-	output      []byte
+	output      []byte // ring storage; len is the number of retained bytes
+	outputStart int    // oldest byte in output
 	dropped     int
 	finished    bool
 	exitCode    int
@@ -72,17 +73,26 @@ func (s *processSession) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := len(p)
-	if len(p) >= processBufferLimit {
-		s.dropped += len(s.output) + len(p) - processBufferLimit
-		s.output = append(s.output[:0], p[len(p)-processBufferLimit:]...)
-	} else {
-		overflow := len(s.output) + len(p) - processBufferLimit
-		if overflow > 0 {
-			s.dropped += overflow
-			copy(s.output, s.output[overflow:])
-			s.output = s.output[:len(s.output)-overflow]
+	if n > 0 {
+		// Allocate once per drain cycle. Writes only copy incoming bytes, even
+		// when the ring is full, and the backing allocation never exceeds the cap.
+		if s.output == nil {
+			s.output = make([]byte, 0, processBufferLimit)
 		}
-		s.output = append(s.output, p...)
+		if n >= processBufferLimit {
+			s.dropped += len(s.output) + n - processBufferLimit
+			s.output = s.output[:processBufferLimit]
+			copy(s.output, p[n-processBufferLimit:])
+			s.outputStart = 0
+		} else {
+			end := (s.outputStart + len(s.output)) % processBufferLimit
+			overflow := max(0, len(s.output)+n-processBufferLimit)
+			s.output = s.output[:min(processBufferLimit, len(s.output)+n)]
+			copied := copy(s.output[end:], p)
+			copy(s.output, p[copied:])
+			s.outputStart = (s.outputStart + overflow) % processBufferLimit
+			s.dropped += overflow
+		}
 	}
 	select {
 	case s.changed <- struct{}{}:
@@ -265,12 +275,19 @@ func (s *processSession) readResult(note string) (string, bool, bool) {
 	defer s.mu.Unlock()
 	// Return a bounded tail. Explicitly report discarded output, never accumulate
 	// unread output without a cap while the model is doing something else.
-	if len(s.output) > processOutputLimit {
-		s.dropped += len(s.output) - processOutputLimit
-		s.output = s.output[len(s.output)-processOutputLimit:]
+	skip := max(0, len(s.output)-processOutputLimit)
+	s.dropped += skip
+	var tail strings.Builder
+	if size := len(s.output) - skip; size > 0 {
+		start := (s.outputStart + skip) % processBufferLimit
+		first := min(size, len(s.output)-start)
+		tail.Grow(size)
+		tail.Write(s.output[start : start+first])
+		tail.Write(s.output[:size-first])
 	}
-	output := string(s.output)
+	output := tail.String()
 	s.output = nil
+	s.outputStart = 0
 	if s.dropped > 0 {
 		output = fmt.Sprintf("[output truncated: %d earlier bytes omitted]\n", s.dropped) + output
 		s.dropped = 0
