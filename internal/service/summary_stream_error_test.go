@@ -14,6 +14,7 @@ import (
 )
 
 func TestSummaryRetriesLiteLLMStreamOverflowWithLessHistory(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	const captured = ": ping\n\ndata: {\"error\":{\"message\":\"litellm.ContextWindowExceededError: litellm.BadRequestError: litellm._pre_call_checks: Context Window exceeded for given call. No models have context window large enough for this call.\\nModel=bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0, Max Input Tokens=200000, Got=200805\\n\\nLiteLLM: model group 'premium' failed with the error above. No fallback was attempted.\",\"type\":\"invalid_request_error\"}}\n\ndata: [DONE]\n\n"
 	for _, tt := range []struct {
 		name, message string
