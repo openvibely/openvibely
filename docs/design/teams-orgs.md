@@ -1,6 +1,6 @@
 # Design: Teams, Organizations, and Shared Projects
 
-The unreleased Phase 2 database changes are consolidated in `222_project_authorization.sql`, upgrading directly from version 221. Tests cover upgrade, rollback, and re-upgrade from that released boundary. Rollback removes the Phase 2 schema while preserving existing source records; no external-user bindings are inferred. Earlier incremental Phase 2 migrations are consolidated; main’s migrations through 221 are preserved.
+The unreleased Phase 2 database changes are consolidated in `224_project_authorization.sql`, upgrading directly from version 223. Tests cover upgrade, rollback, and re-upgrade from that released boundary. Rollback removes the Phase 2 schema while preserving existing source records; no external-user bindings are inferred. Checkpoints below that cite migrations 218–225 predate the consolidation and all refer to this one migration.
 
 Status: Proposal (investigation only — no code changed)
 Scope: Multi-user support in a GitHub-like model: Organization → Members → Projects (private or shared) → per-project roles.
@@ -661,6 +661,12 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 - Milestone: two local users can log in with separate preferences. Everyone still sees every project. Resource-wide roles, durable run attribution, password management UI, and hosted multi-member onboarding are not delivered by this milestone.
 
 ### Phase 2: Sharing and app policy (in progress)
+
+**Status:** every entry point in the [Phase 2 checklist](phase-2-authorization-checklist.md) is now wired to the shared permission service, with the evidence listed per row. Delivered: role checks on HTTP/JSON routes (with a whole-router sweep test), runtime tools in every runtime, project lists/selectors, WebSocket subscription/replay/revocation, a sharing/member/ownership panel in project settings (handler and headless-Chrome tests), durable run-as identity rechecked by workers, schedules, automations, goals and webhooks, and atomic audit records. Migration keeps existing projects org-visible with editor access; auth-off runs as the bootstrap owner.
+
+Not delivered in Phase 2: author attribution in the chat/task UI; Telegram and email identity mapping (both fail closed when authentication is on); private projects, which stay disabled until Phase 3. The permission tables are application authorization only — they do not stop an agent process from reading another project's files.
+
+The paragraphs below are the chronological implementation log.
 
 The policy foundation is implemented, but Phase 2 is **not shipped**. Migration 218 extends `project_organizations` with visibility and the org-wide role, adds explicit project members and a project audit log, and preserves org-wide editor access for existing projects. Project creation assigns the authenticated creator as owner in the same transaction. `ProjectAccessStore`, `service/authz.Authorizer`, and `ProjectAccessService` resolve current database membership rather than trusting role claims. Policy/member mutations recheck authorization and write their audit event atomically. Private visibility is rejected by the application service until sandboxing is available.
 

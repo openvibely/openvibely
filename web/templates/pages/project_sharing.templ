@@ -13,7 +13,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 		<p class="text-sm opacity-70">All organization members can access this project. Private projects require sandboxing and are not available yet.</p>
 		<form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" class="flex flex-wrap items-end gap-2">
 			<input type="hidden" name="action" value="policy"/>
-			<label class="form-control"><span class="label-text">Organization access</span><select name="org_role" class="select select-bordered select-sm"><option value="viewer" selected={ policy.OrgRole == "viewer" }>Viewer</option><option value="editor" selected={ policy.OrgRole == "editor" }>Editor</option></select></label>
+			<label class="form-control"><span class="label-text">Organization access</span><select name="org_role" class="select select-bordered select-sm"><option value="viewer" selected?={ policy.OrgRole == "viewer" }>Viewer</option><option value="editor" selected?={ policy.OrgRole == "editor" }>Editor</option></select></label>
 			<button class="btn btn-primary btn-sm" type="submit">Save access</button>
 		</form>
 		<p class="text-xs opacity-60">Individual grants add access; removing a grant keeps organization access. Maintainers can manage settings and sharing. Owners can transfer or delete the project.</p>

@@ -1,0 +1,136 @@
+package handler
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/stretchr/testify/require"
+)
+
+func TestProjectSharingPanelInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	ctx := t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(stores.ProjectAccess))
+	org := service.NewOrganizationService(stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	project := createProject(t, h, "Browser Sharing")
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := org.Accept(ctx, token, "browser-member", "long-password-value", "")
+	require.NoError(t, err)
+
+	result := make(chan string, 1)
+	runner := `<script>(async function(){
+ const wait=(p,label)=>new Promise((resolve,reject)=>{const end=Date.now()+15000;(function poll(){let v=null;try{v=p()}catch(e){}if(v&&!document.querySelector('.htmx-request,.htmx-settling,.htmx-swapping'))return resolve(v);if(Date.now()>end)return reject(Error('timeout: '+label));setTimeout(poll,30)})();});
+ const assert=(ok,msg)=>{if(!ok)throw Error(msg)};
+ const panel=()=>document.getElementById('project-sharing');
+ const rows=()=>Array.from(panel().querySelectorAll('tbody tr')).filter(r=>r.closest('details')===null);
+ let confirmQuestion='';
+ try {
+  window.openVibelyConfirm=q=>{confirmQuestion=q;return Promise.resolve(true)};
+  document.getElementById('project-settings-btn').click();
+  await wait(()=>panel()&&panel().querySelector('select[name=org_role]'),'sharing panel load');
+  assert(!panel().querySelector('option[value=private]'),'private visibility must not be offered');
+  assert(panel().textContent.includes('sandboxing'),'sandbox limitation not shown');
+  let roleSelect=panel().querySelector('select[name=org_role]');
+  roleSelect.value='viewer';
+  roleSelect.form.requestSubmit();
+  await wait(()=>panel()&&panel().querySelector('select[name=org_role]').value==='viewer'&&panel().querySelector('select[name=org_role]')!==roleSelect,'policy save');
+  const add=panel().querySelector('select[aria-label="Project role"]').form;
+  add.querySelector('select[name=user_id]').value='` + member.UserID + `';
+  add.querySelector('select[name=role]').value='maintainer';
+  add.requestSubmit();
+  await wait(()=>rows().some(r=>r.textContent.includes('browser-member')&&r.textContent.includes('maintainer')),'grant row');
+  rows().find(r=>r.textContent.includes('browser-member')).querySelector('button').click();
+  await wait(()=>panel()&&panel().querySelector('select[name=org_role]')&&!rows().some(r=>r.textContent.includes('browser-member')),'grant removal');
+  const audit=panel().querySelector('details');
+  assert(audit&&audit.querySelectorAll('tbody tr').length>=3,'audit rows missing');
+  const transfer=Array.from(panel().querySelectorAll('button')).find(b=>b.textContent.includes('Transfer ownership'));
+  assert(transfer&&!transfer.disabled,'owner transfer unavailable');
+  transfer.form.querySelector('select[name=user_id]').value='` + member.UserID + `';
+  transfer.click();
+  await wait(()=>panel()&&Array.from(panel().querySelectorAll('p strong')).some(n=>n.textContent.trim()==='browser-member'),'transfer completes');
+  assert(!panel().querySelector('select[aria-label="New owner"] option[value="` + member.UserID + `"]'),'new owner still offered as transfer target');
+  assert(confirmQuestion.includes('Transfer ownership'),'transfer was not confirmed');
+  await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'pass'},body:'ok',keepalive:true});
+ } catch(e) {
+  await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'fail'},body:String(e&&e.stack||e)+'\n'+'confirm='+confirmQuestion+' '+(panel()?panel().outerHTML.slice(-1800):'no panel'),keepalive:true});
+ }
+})();</script>`
+
+	owner := models.Principal{UserID: models.BootstrapUserID}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ":" + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, r.WithContext(models.WithPrincipal(r.Context(), owner)))
+		for key, values := range recorder.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorder.Code)
+		body := recorder.Body.String()
+		if r.Header.Get("HX-Request") == "" {
+			body = strings.Replace(body, "</body>", runner+"</body>", 1)
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
+		"--window-size=1280,900", server.URL+"/tasks?project_id="+project.ID,
+	)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(t, cmd)
+		}
+	}()
+	select {
+	case outcome := <-result:
+		stopHandlerBrowserProcess(t, cmd)
+		stopped = true
+		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
+	case <-time.After(60 * time.Second):
+		t.Fatal("project sharing browser test timed out")
+	}
+	policy, err := stores.ProjectAccess.Get(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "org", policy.Visibility)
+	require.Equal(t, "viewer", policy.OrgRole)
+	require.Equal(t, member.UserID, policy.OwnerUserID)
+	members, err := stores.ProjectAccess.Members(ctx, project.ID)
+	require.NoError(t, err)
+	for _, m := range members {
+		require.NotEqual(t, member.UserID, m.UserID, "removed grant persisted")
+	}
+}

@@ -48,6 +48,8 @@ func TestProjectSharingControlsAndOwnership(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "org", policy.Visibility)
 	require.Equal(t, "viewer", policy.OrgRole)
+	require.Contains(t, rec.Body.String(), `<option value="viewer" selected>`)
+	require.NotContains(t, rec.Body.String(), `selected="false"`)
 	rec = request("POST", owner, url.Values{"action": {"member"}, "user_id": {user.UserID}, "role": {"maintainer"}})
 	require.Equal(t, 200, rec.Code)
 	rec = request("GET", user.Principal, nil)
