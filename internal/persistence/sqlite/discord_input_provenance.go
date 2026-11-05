@@ -14,10 +14,10 @@ func snapshotDiscordInput(ctx context.Context, tx sqlExecutor, input *models.Thr
 	if !ok {
 		return nil
 	}
-	if identity.ProjectID != input.ProjectID || identity.UserID != input.AuthorUserID || input.TaskID == "" {
+	if identity.ProjectID != input.ProjectID || identity.UserID != input.AuthorUserID || (input.TaskID == "" && input.Scope != models.ThreadInputScopeChat) {
 		return persistence.ErrProjectDenied
 	}
-	if err := authorizeDiscordExecutionTask(ctx, tx, input.TaskID); err != nil {
+	if err := authorizeDiscordInputTarget(ctx, tx, input.ProjectID, input.TaskID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO discord_input_provenance(input_id,project_id,external_user_id,user_id) VALUES(?,?,?,?)`, input.ID, identity.ProjectID, identity.ExternalUserID, identity.UserID); err != nil {
@@ -40,10 +40,18 @@ func discordInputContext(ctx context.Context, tx sqlExecutor, inputID string) (c
 		return ctx, false, persistence.ErrProjectDenied
 	}
 	saved := models.WithDiscordIngressIdentity(models.WithPrincipal(ctx, models.Principal{UserID: identity.UserID}), identity)
-	if err := authorizeDiscordExecutionTask(saved, tx, taskID); err != nil {
+	if err := authorizeDiscordInputTarget(saved, tx, project, taskID); err != nil {
 		return ctx, false, err
 	}
 	return saved, true, nil
+}
+
+// Chat-scope inputs have no task until promotion; authorize the project then.
+func authorizeDiscordInputTarget(ctx context.Context, tx sqlExecutor, projectID, taskID string) error {
+	if taskID == "" {
+		return authorizeDiscordTask(ctx, tx, models.Task{ProjectID: projectID})
+	}
+	return authorizeDiscordExecutionTask(ctx, tx, taskID)
 }
 func promoteDiscordInput(ctx context.Context, tx sqlExecutor, input models.ThreadInput, executionID string) error {
 	saved, found, err := discordInputContext(ctx, tx, input.ID)
@@ -55,8 +63,16 @@ func promoteDiscordInput(ctx context.Context, tx sqlExecutor, input models.Threa
 		return err
 	}
 	identity, _ := models.DiscordIngressIdentityFromContext(saved)
-	if taskID != input.TaskID || userID != identity.UserID {
+	if (input.TaskID != "" && taskID != input.TaskID) || userID != identity.UserID {
 		return persistence.ErrProjectDenied
+	}
+	if input.TaskID == "" {
+		if err := authorizeDiscordExecutionTask(saved, tx, taskID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO discord_task_provenance(task_id,project_id,external_user_id,user_id) VALUES(?,?,?,?) ON CONFLICT(task_id) DO NOTHING`, taskID, identity.ProjectID, identity.ExternalUserID, identity.UserID); err != nil {
+			return err
+		}
 	}
 	return snapshotDiscordExecution(saved, tx, executionID)
 }

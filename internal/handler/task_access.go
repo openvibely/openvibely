@@ -49,6 +49,25 @@ func (h *Handler) authorizeTaskResource(c echo.Context) error {
 		if taskID == "" {
 			return authz.ErrDenied
 		}
+	case path == "/api/chat/message/:id":
+		var err error
+		taskID, err = h.execRepo.GetExecutionTaskID(ctx, c.Param("id"))
+		if err != nil {
+			return err
+		}
+		if taskID == "" {
+			if h.threadInputRepo == nil {
+				return authz.ErrDenied
+			}
+			input, err := h.threadInputRepo.GetByID(ctx, c.Param("id"))
+			if err != nil {
+				return err
+			}
+			if input == nil {
+				return authz.ErrDenied
+			}
+			return h.projectAccessSvc.Require(ctx, input.ProjectID, authz.View)
+		}
 	case strings.HasPrefix(path, "/attachments/:id"):
 		attachment, err := h.attachmentRepo.GetByID(ctx, c.Param("id"))
 		if err != nil {

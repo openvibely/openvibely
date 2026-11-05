@@ -54,6 +54,14 @@ func (w *WorkerService) checkRunPermission(ctx context.Context, task models.Task
 	if w.runOrganizations != nil && !w.runAuthOff && authz.UnmappedChannelOrigin(task.CreatedVia) {
 		return authz.ErrDenied
 	}
+	if w.runOrganizations != nil && !w.runAuthOff && authz.VerifiedChannelOrigin(task.CreatedVia) {
+		if w.runIdentities == nil {
+			return authz.ErrDenied
+		}
+		if err := w.runIdentities.RequireChannelTaskProvenance(ctx, task.ID); err != nil {
+			return err
+		}
+	}
 	ctx = w.reviewerRecoveryContext(ctx)
 	if executionID, _ := ctx.Value(runExecutionKey{}).(string); executionID != "" && w.runIdentities != nil {
 		if err := w.runIdentities.CheckExecutionGoal(ctx, executionID, task.ID); err != nil {

@@ -38,6 +38,19 @@ func (h *Handler) requireFollowupAccess(ctx context.Context, params streamingRes
 	if h.projectAccessSvc == nil {
 		return nil
 	}
+	if isDiscordChannelRun(params) && h.authMode != auth.AuthModeDisabled {
+		principal, ok := models.PrincipalFromContext(ctx)
+		if !ok || principal.UserID == "" || h.discordAuthRepo == nil || params.ChannelReply.DiscordUserID == "" {
+			return authz.ErrDenied
+		}
+		mapped, err := h.discordAuthRepo.ResolveApplicationUser(ctx, params.ProjectID, params.ChannelReply.DiscordUserID)
+		if err != nil {
+			return err
+		}
+		if mapped != principal.UserID {
+			return authz.ErrDenied
+		}
+	}
 	if isSlackChannelRun(params) && h.authMode != auth.AuthModeDisabled {
 		principal, ok := models.PrincipalFromContext(ctx)
 		if !ok || principal.UserID == "" || h.slackAuthRepo == nil || params.ChannelReply.SlackTeamID == "" || params.ChannelReply.SlackUserID == "" {
@@ -63,6 +76,14 @@ func (h *Handler) requireFollowupAccess(ctx context.Context, params streamingRes
 	}
 	if h.authMode != auth.AuthModeDisabled && (authz.UnmappedChannelOrigin(task.CreatedVia) || authz.UnmappedChannelOrigin(params.ChannelReply.Source)) {
 		return authz.ErrDenied
+	}
+	if h.authMode != auth.AuthModeDisabled && authz.VerifiedChannelOrigin(task.CreatedVia) {
+		if h.runIdentities == nil {
+			return authz.ErrDenied
+		}
+		if err := h.runIdentities.RequireChannelTaskProvenance(ctx, task.ID); err != nil {
+			return err
+		}
 	}
 	if params.ExecID != "" {
 		if h.runIdentities == nil {
@@ -142,6 +163,14 @@ func (h *Handler) rejectUnauthorizedQueuedFollowup(ctx context.Context, input mo
 	}
 	go h.PromoteQueuedTaskThreadInput(input.TaskID)
 	return cause
+}
+
+func isDiscordChannelRun(params streamingResponseParams) bool {
+	return params.ChannelReply.Source == models.TaskOriginDiscord || params.Surface == chatcontrol.SurfaceDiscord
+}
+
+func isVerifiedChannelRun(params streamingResponseParams) bool {
+	return isSlackChannelRun(params) || isDiscordChannelRun(params)
 }
 
 func isSlackChannelRun(params streamingResponseParams) bool {

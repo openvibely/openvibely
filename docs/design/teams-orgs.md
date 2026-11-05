@@ -2873,3 +2873,12 @@ Tests cover binding removal before admission, child-insert failure after parent 
 This closes ordinary first-planner creation only. Active-lane guarded startup, follow-ups that advance a generation before creating their first planner, multi-child plan application and remaining Phase 2 surfaces remain open. Authenticated Discord ingress stays disabled. Production private-project creation stays disabled pending Phase 3 sandboxing; application policy does not establish process/filesystem isolation.
 
 Validation: first-planner persistence/manual-planner race tests, ordinary-task rejection route race tests, swarm/Discord/schedule/goal persistence/service/handler regressions, and server tests pass. The prior route contract allowing an ordinary task to start a planner was corrected: rejection preserves backlog state and creates no planner.
+
+## Phase 2 checkpoint: route sweep, chat, outbound messaging and Discord ingress
+
+- Atomic swarm startup, follow-up first planners and `ApplySwarmPlan` (see the checklist).
+- Discord ingress in authenticated modes accepts only senders bound to an enabled application user with editor access or higher; tasks, inputs and executions carry verified channel provenance and are rechecked on follow-up, steering and recovery. This supersedes the earlier "Authenticated Discord ingress stays disabled" notes.
+- A registered-route sweep test covers every HTTP route for non-member and viewer access. Gaps it found in chat, API chat status, conversation model settings and outbound targets are closed.
+- `ChannelMessageRouter` enforces current project role (view to list, editor to send) for every caller.
+
+Remaining limitations: Telegram and email stay fail-closed in authenticated modes because neither offers a spoof-resistant application-user binding. Production private-project creation remains disabled until Phase 3 provides process/filesystem sandboxing; policy tables alone do not isolate projects. Browser-level UI testing was not performed for this checkpoint.

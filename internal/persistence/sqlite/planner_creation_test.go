@@ -72,3 +72,39 @@ func TestFirstPlannerCreationAtomicIdentityAndParent(t *testing.T) {
 	_, err = NewRunIdentityRepo(db).TaskUser(ctx, planner.ID)
 	require.Error(t, err)
 }
+
+func TestFirstPlannerFollowupCommitsGenerationWithPlanner(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+	tasks := NewTaskRepo(db, nil)
+	parent := models.Task{ProjectID: "default", Title: "Parent", Priority: 2, Category: models.CategoryCompleted, Status: models.StatusCompleted, SwarmRole: models.SwarmRoleParent, SwarmStatus: "completed", SwarmConfig: `{"generation":1,"stop_revision":3}`}
+	require.NoError(t, tasks.Create(owner, &parent))
+	before, err := tasks.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	next := `{"generation":2,"stop_revision":1}`
+	guarded := persistence.WithPlannerCreationFollowup(persistence.WithSwarmWriteIdentities(owner, []persistence.SwarmWriteIdentity{{TaskID: parent.ID, ProjectID: "default", UserID: models.BootstrapUserID}}), *before, "needs_coordination", next)
+	child := func() *models.Task {
+		return &models.Task{ProjectID: "default", Title: "Planner", Priority: 2, Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRolePlanner, ParentTaskID: &parent.ID}
+	}
+	_, err = db.Exec(`CREATE TRIGGER fail_followup_audit BEFORE INSERT ON project_audit_events WHEN NEW.action='swarm.first_planner_followup_prepared' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	require.NoError(t, err)
+	require.ErrorContains(t, tasks.Create(guarded, child()), "audit unavailable")
+	saved, err := tasks.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, saved, "failed creation must not advance the generation")
+	_, err = db.Exec(`DROP TRIGGER fail_followup_audit`)
+	require.NoError(t, err)
+	unbound := persistence.WithPlannerCreationFollowup(persistence.WithSwarmWriteIdentities(owner, []persistence.SwarmWriteIdentity{{TaskID: parent.ID, ProjectID: "default", UserID: "someone-else"}}), *before, "needs_coordination", next)
+	require.Error(t, tasks.Create(unbound, child()))
+	require.NoError(t, tasks.Create(guarded, child()))
+	saved, err = tasks.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, saved.Category)
+	require.Equal(t, models.StatusBlocked, saved.Status)
+	require.Equal(t, "needs_coordination", saved.SwarmStatus)
+	cfg, err := models.ParseSwarmConfig(saved.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 2, cfg.Generation)
+	require.Equal(t, 3, cfg.StopRevision, "stop revision never moves backwards")
+}

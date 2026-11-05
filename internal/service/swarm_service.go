@@ -274,15 +274,14 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 			return err
 		}
 	}
-	_, laneGuarded := persistence.ActiveLaneExpectedState(ctx, parentTaskID)
-	atomicCreation := existing == nil && !laneGuarded
+	atomicCreation := existing == nil
 	if atomicCreation {
 		ctx = persistence.WithPlannerCreationParent(ctx, *parent)
 		if actor, ok := models.PrincipalFromContext(ctx); ok && s.workerSvc != nil && s.workerSvc.runIdentities != nil {
 			ctx = persistence.WithSwarmWriteIdentities(ctx, []persistence.SwarmWriteIdentity{{TaskID: parent.ID, ProjectID: parent.ProjectID, UserID: actor.UserID, AllowLegacyOwner: s.workerSvc.runAuthOff}})
 		}
 	}
-	if _, guarded := persistence.ActiveLaneExpectedState(ctx, parentTaskID); guarded {
+	if _, guarded := persistence.ActiveLaneExpectedState(ctx, parentTaskID); guarded && !atomicCreation {
 		if err := s.taskRepo.PrepareSwarmParentForActiveLane(ctx, parentTaskID); err != nil {
 			return err
 		}
@@ -313,22 +312,59 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 		existing.StartsNewContext = startsNewContext
 		return s.submitIfRunnable(ctx, existing)
 	}
+	child := s.firstPlannerTask(parent, startsNewContext, followup, selection)
+	if err := s.createSwarmChild(ctx, parent, child); err != nil {
+		return err
+	}
+	if atomicCreation && s.workerSvc != nil {
+		s.workerSvc.ClearCancellationRequested(parent.ID)
+	}
+	return nil
+}
+
+// startFirstPlannerForFollowup advances the parent generation in the same
+// transaction that creates its first planner.
+func (s *SwarmService) startFirstPlannerForFollowup(ctx context.Context, observed *models.Task, parentConfig, followup string, selection *SwarmFollowupModelSelection) error {
+	s.orchestration.Lock()
+	defer s.orchestration.Unlock()
+	existing, err := s.taskRepo.FindSwarmChildByRole(ctx, observed.ID, models.SwarmRolePlanner)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return persistence.ErrProjectDenied
+	}
+	ctx = persistence.WithPlannerCreationFollowup(ctx, *observed, "needs_coordination", parentConfig)
+	if actor, ok := models.PrincipalFromContext(ctx); ok && s.workerSvc != nil && s.workerSvc.runIdentities != nil {
+		ctx = persistence.WithSwarmWriteIdentities(ctx, []persistence.SwarmWriteIdentity{{TaskID: observed.ID, ProjectID: observed.ProjectID, UserID: actor.UserID, AllowLegacyOwner: s.workerSvc.runAuthOff}})
+	}
+	parent := *observed
+	parent.SwarmConfig = parentConfig
+	if selection != nil && selection.ModelID != "" {
+		parent.AgentID = &selection.ModelID
+	}
+	if err := s.createSwarmChild(ctx, &parent, s.firstPlannerTask(&parent, false, followup, selection)); err != nil {
+		return err
+	}
+	if s.workerSvc != nil {
+		s.workerSvc.ClearCancellationRequested(parent.ID)
+	}
+	return nil
+}
+
+func (s *SwarmService) firstPlannerTask(parent *models.Task, startsNewContext bool, followup string, selection *SwarmFollowupModelSelection) *models.Task {
 	goal := parent.Prompt
 	if followup != "" {
 		goal += "\n\nFollow-up request:\n" + followup
 	}
-	prompt := plannerPrompt(goal, maxWorkers(parent))
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	plannerCfg := models.SwarmConfig{Isolation: "read_only", RerunGeneration: max(1, parentCfg.Generation), Required: true}
 	setPlannerFollowupEffort(&plannerCfg, selection)
-	plannerConfigJSON, err := plannerCfg.JSON()
-	if err != nil {
-		return err
-	}
-	child := &models.Task{
+	plannerConfigJSON, _ := plannerCfg.JSON()
+	return &models.Task{
 		ProjectID:         parent.ProjectID,
 		Title:             parent.Title + " · Planner",
-		Prompt:            prompt,
+		Prompt:            plannerPrompt(goal, maxWorkers(parent)),
 		Category:          models.CategoryActive,
 		Priority:          parent.Priority,
 		Status:            models.StatusPending,
@@ -341,13 +377,6 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 		SwarmSequence:     0,
 		StartsNewContext:  startsNewContext,
 	}
-	if err := s.createSwarmChild(ctx, parent, child); err != nil {
-		return err
-	}
-	if atomicCreation && s.workerSvc != nil {
-		s.workerSvc.ClearCancellationRequested(parent.ID)
-	}
-	return nil
 }
 
 func swarmChildTitle(baseTitle, parentID string, sequence, attempt int) string {
@@ -381,23 +410,6 @@ func (s *SwarmService) createSwarmChild(ctx context.Context, parent *models.Task
 	}
 }
 
-func (s *SwarmService) updateSwarmChild(ctx context.Context, parent *models.Task, child *models.Task) error {
-	baseTitle := child.Title
-	for attempt := 0; ; attempt++ {
-		child.Title = swarmChildTitle(baseTitle, parent.ID, child.SwarmSequence, attempt)
-		if err := s.taskSvc.Update(ctx, child); err != nil {
-			if !errors.Is(err, ErrDuplicateTask) {
-				return err
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			continue
-		}
-		return nil
-	}
-}
-
 func (s *SwarmService) ApplyPlannerOutput(ctx context.Context, plannerTaskID string, output PlannerOutput) error {
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
@@ -416,19 +428,16 @@ func (s *SwarmService) ApplyPlannerOutput(ctx context.Context, plannerTaskID str
 	if parent.Status == models.StatusCancelled {
 		return nil
 	}
+	// Plan children run as the planner's saved identity, never the caller's.
+	ctx, err = s.swarmChildRunContext(ctx, parent, planner)
+	if err != nil {
+		return err
+	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	if err := validatePlannerOutput(output, parentCfg); err != nil {
-		planner.SwarmStatus = "invalid_plan"
-		cfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
-		cfg.LastError = err.Error()
-		planner.SwarmConfig, _ = cfg.JSON()
-		_ = s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, planner.SwarmStatus, planner.SwarmConfig, planner.SwarmSequence)
-		_ = s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusFailed)
-		parent.SwarmStatus = "blocked"
-		parentCfg.LastError = err.Error()
-		parent.SwarmConfig, _ = parentCfg.JSON()
-		_ = s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, parent.SwarmStatus, parent.SwarmConfig, parent.SwarmSequence)
-		_ = s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusBlocked)
+		if commitErr := s.commitPlannerFailure(ctx, parent, planner, "invalid_plan", models.StatusFailed, "blocked", err.Error()); commitErr != nil {
+			return errors.Join(err, commitErr)
+		}
 		return err
 	}
 	existing, err := s.taskRepo.ListSwarmChildren(ctx, parent.ID)
@@ -446,68 +455,87 @@ func (s *SwarmService) ApplyPlannerOutput(ctx context.Context, plannerTaskID str
 	parentCfg.PlannerNotes = output.Notes
 	parentCfg.LastError = ""
 	parentCfgJSON, _ := parentCfg.JSON()
-	if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "workers_running", parentCfgJSON, parent.SwarmSequence); err != nil {
-		return err
-	}
+	commit := s.planCommit(parent, planner, "swarm.plan_applied")
+	commit.Writes = append(commit.Writes, persistence.SwarmTaskWrite{ID: parent.ID, SwarmStatus: "workers_running", SwarmConfig: parentCfgJSON})
 	for i, worker := range output.Workers {
 		sequence := 10 + i
 		if findWorkerBySequence(existing, sequence) != nil {
 			continue
 		}
-		created, err := s.createWorkerFromPlan(ctx, parent, worker, parentCfg, sequence)
-		if err != nil {
-			return err
-		}
-		existing = append(existing, *created)
+		commit.Creates = append(commit.Creates, planWorkerTask(parent, worker, parentCfg, sequence))
 	}
 	if parentCfg.ReviewerEnabled && findChild(existing, models.SwarmRoleReviewer) == nil {
 		cfg := models.SwarmConfig{Isolation: "read_only", DependsOnRoles: []string{"worker"}, RerunGeneration: parentCfg.Generation, Required: true}
 		cfgJSON, _ := cfg.JSON()
-		child := &models.Task{ProjectID: parent.ProjectID, Title: parent.Title + " · Reviewer", Prompt: reviewerPrompt(parent.Prompt, output.ReviewerPrompt), Category: models.CategoryActive, Priority: parent.Priority, Status: models.StatusBlocked, AgentID: parent.AgentID, AgentDefinitionID: parent.AgentDefinitionID, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleReviewer, SwarmStatus: "pending", SwarmConfig: cfgJSON, SwarmSequence: 900}
-		if err := s.createSwarmChild(ctx, parent, child); err != nil {
-			return err
-		}
-		existing = append(existing, *child)
+		commit.Creates = append(commit.Creates, &models.Task{ProjectID: parent.ProjectID, Title: parent.Title + " · Reviewer", Prompt: reviewerPrompt(parent.Prompt, output.ReviewerPrompt), Category: models.CategoryActive, Priority: parent.Priority, Status: models.StatusBlocked, AgentID: parent.AgentID, AgentDefinitionID: parent.AgentDefinitionID, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleReviewer, SwarmStatus: "pending", SwarmConfig: cfgJSON, SwarmSequence: 900})
 	}
 	if parentCfg.MergerEnabled && findMergerChild(existing) == nil {
 		cfg := models.SwarmConfig{Isolation: "worktree", DependsOnRoles: []string{"reviewer"}, RerunGeneration: parentCfg.Generation, Required: true}
 		cfgJSON, _ := cfg.JSON()
-		child := &models.Task{ProjectID: parent.ProjectID, Title: parent.Title + " · Merger", Prompt: mergerPrompt(parent.Prompt, output.MergerPrompt, parent.WorktreePath), Category: models.CategoryActive, Priority: parent.Priority, Status: models.StatusBlocked, AgentID: parent.AgentID, AgentDefinitionID: parent.AgentDefinitionID, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleMerger, SwarmStatus: "pending", SwarmConfig: cfgJSON, SwarmSequence: 1000, WorktreePath: parent.WorktreePath, WorktreeBranch: parent.WorktreeBranch}
-		if err := s.createSwarmChild(ctx, parent, child); err != nil {
-			return err
-		}
+		commit.Creates = append(commit.Creates, &models.Task{ProjectID: parent.ProjectID, Title: parent.Title + " · Merger", Prompt: mergerPrompt(parent.Prompt, output.MergerPrompt, parent.WorktreePath), Category: models.CategoryActive, Priority: parent.Priority, Status: models.StatusBlocked, AgentID: parent.AgentID, AgentDefinitionID: parent.AgentDefinitionID, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleMerger, SwarmStatus: "pending", SwarmConfig: cfgJSON, SwarmSequence: 1000, WorktreePath: parent.WorktreePath, WorktreeBranch: parent.WorktreeBranch})
 	}
-	plannerCfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
-	plannerCfg.LastError = ""
-	planner.SwarmConfig, _ = plannerCfg.JSON()
-	if err := s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, "planned", planner.SwarmConfig, planner.SwarmSequence); err != nil {
-		return err
-	}
-	if err := s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusCompleted); err != nil {
+	commit.Writes = append(commit.Writes, plannedWrite(planner))
+	if err := s.taskRepo.ApplySwarmPlan(ctx, commit); err != nil {
 		return err
 	}
 	return s.StartReadyWorkers(ctx, parent.ID)
 }
 
-func (s *SwarmService) createWorkerFromPlan(ctx context.Context, parent *models.Task, worker PlannerWorker, parentCfg models.SwarmConfig, sequence int) (*models.Task, error) {
+func (s *SwarmService) planCommit(parent, planner *models.Task, action string) persistence.SwarmPlanCommit {
+	return persistence.SwarmPlanCommit{
+		Parent:  *parent,
+		Planner: *planner,
+		Action:  action,
+		Title: func(sequence int, base string, attempt int) string {
+			return swarmChildTitle(base, parent.ID, sequence, attempt)
+		},
+		Worktree: func(child *models.Task) (string, string) {
+			if child.SwarmRole != models.SwarmRoleWorker {
+				return child.WorktreePath, child.WorktreeBranch
+			}
+			cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
+			branch := swarmBranch(parent.Title, cfg.WorkerKind, child.ID)
+			return filepath.Join(".worktrees", branch), branch
+		},
+	}
+}
+
+// commitPlannerFailure records a rejected plan on the planner and parent together.
+func (s *SwarmService) commitPlannerFailure(ctx context.Context, parent, planner *models.Task, plannerStatus string, plannerTaskStatus models.TaskStatus, parentStatus, message string) error {
+	plannerCfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
+	plannerCfg.LastError = message
+	plannerJSON, _ := plannerCfg.JSON()
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	parentCfg.LastError = message
+	parentJSON, _ := parentCfg.JSON()
+	commit := s.planCommit(parent, planner, "swarm.plan_failed")
+	commit.Writes = []persistence.SwarmTaskWrite{
+		{ID: planner.ID, SwarmStatus: plannerStatus, SwarmConfig: plannerJSON, Status: plannerTaskStatus},
+		{ID: parent.ID, SwarmStatus: parentStatus, SwarmConfig: parentJSON, Status: models.StatusBlocked},
+	}
+	if err := s.taskRepo.ApplySwarmPlan(ctx, commit); err != nil {
+		return err
+	}
+	planner.SwarmStatus, planner.SwarmConfig = plannerStatus, plannerJSON
+	return nil
+}
+
+func plannedWrite(planner *models.Task) persistence.SwarmTaskWrite {
+	cfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
+	cfg.LastError = ""
+	cfgJSON, _ := cfg.JSON()
+	return persistence.SwarmTaskWrite{ID: planner.ID, SwarmStatus: "planned", SwarmConfig: cfgJSON, Status: models.StatusCompleted}
+}
+
+func planWorkerTask(parent *models.Task, worker PlannerWorker, parentCfg models.SwarmConfig, sequence int) *models.Task {
 	cfg := models.SwarmConfig{WorkerKind: worker.WorkerKind, Ownership: worker.Ownership, Isolation: workerIsolation(worker, parentCfg), DependsOnRoles: []string{"planner"}, RerunGeneration: parentCfg.Generation, Required: worker.Required || !worker.ReadOnly, WriteScope: worker.WriteScope, ReadScope: worker.ReadScope}
 	cfgJSON, _ := cfg.JSON()
-	child := &models.Task{ProjectID: parent.ProjectID, Title: worker.Title, Prompt: workerPrompt(parent.Prompt, worker, ""), Category: models.CategoryActive, Priority: parent.Priority, Status: models.StatusPending, AgentID: parent.AgentID, AgentDefinitionID: parent.AgentDefinitionID, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running", SwarmConfig: cfgJSON, SwarmSequence: sequence}
+	child := &models.Task{ProjectID: parent.ProjectID, Title: strings.TrimSpace(worker.Title), Prompt: workerPrompt(parent.Prompt, worker, ""), Category: models.CategoryActive, Priority: parent.Priority, Status: models.StatusPending, AgentID: parent.AgentID, AgentDefinitionID: parent.AgentDefinitionID, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running", SwarmConfig: cfgJSON, SwarmSequence: sequence}
 	if cfg.Isolation == "worktree" {
 		child.WorktreeBranch = swarmBranch(parent.Title, worker.WorkerKind, "pending")
 		child.WorktreePath = filepath.Join(".worktrees", child.WorktreeBranch)
 	}
-	if err := s.createSwarmChild(ctx, parent, child); err != nil {
-		return nil, err
-	}
-	if cfg.Isolation == "worktree" {
-		branch := swarmBranch(parent.Title, worker.WorkerKind, child.ID)
-		path := filepath.Join(".worktrees", branch)
-		_ = s.taskRepo.UpdateWorktreeInfo(ctx, child.ID, path, branch)
-		child.WorktreeBranch = branch
-		child.WorktreePath = path
-	}
-	return child, nil
+	return child
 }
 
 func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *models.Task, planner *models.Task, output PlannerOutput, existing []models.Task, parentCfg models.SwarmConfig) error {
@@ -520,10 +548,9 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 	parentCfg.LastError = ""
 	parentCfg.ReviewedGeneration = 0
 	parentCfg.MergedGeneration = 0
-	parent.SwarmConfig, _ = parentCfg.JSON()
-	if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "workers_running", parent.SwarmConfig, parent.SwarmSequence); err != nil {
-		return err
-	}
+	parentJSON, _ := parentCfg.JSON()
+	commit := s.planCommit(parent, planner, "swarm.followup_plan_applied")
+	commit.Writes = append(commit.Writes, persistence.SwarmTaskWrite{ID: parent.ID, SwarmStatus: "workers_running", SwarmConfig: parentJSON})
 	workersByID := map[string]models.Task{}
 	affected := map[string]bool{}
 	maxSeq := 9
@@ -545,26 +572,14 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 				continue
 			}
 			maxSeq++
-			created, err := s.createWorkerFromPlan(ctx, parent, worker, parentCfg, maxSeq)
-			if err != nil {
-				return err
-			}
-			affected[created.ID] = true
+			commit.Creates = append(commit.Creates, planWorkerTask(parent, worker, parentCfg, maxSeq))
 			newWorkerIndex++
 			continue
 		}
-		compactChild, ok := workersByID[worker.TaskID]
+		child, ok := workersByID[worker.TaskID]
 		if !ok {
 			return fmt.Errorf("coordinator referenced unknown worker task %s", worker.TaskID)
 		}
-		fullChild, err := s.taskRepo.GetByID(ctx, compactChild.ID)
-		if err != nil {
-			return err
-		}
-		if fullChild == nil {
-			return fmt.Errorf("loading worker task %s: task not found", compactChild.ID)
-		}
-		child := *fullChild
 		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 		cfg.WorkerKind = worker.WorkerKind
 		cfg.Ownership = worker.Ownership
@@ -573,19 +588,9 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 		cfg.Required = worker.Required || !worker.ReadOnly
 		cfg.WriteScope = worker.WriteScope
 		cfg.ReadScope = worker.ReadScope
-		child.Title = worker.Title
-		child.Prompt = workerPrompt(parent.Prompt, worker, child.WorktreePath)
-		child.Status = models.StatusPending
-		child.Category = models.CategoryActive
-		child.SwarmStatus = "rerun_pending"
-		child.SwarmConfig, _ = cfg.JSON()
-		if err := s.updateSwarmChild(ctx, parent, &child); err != nil {
-			return err
-		}
+		cfgJSON, _ := cfg.JSON()
+		commit.Writes = append(commit.Writes, persistence.SwarmTaskWrite{ID: child.ID, SwarmStatus: "rerun_pending", SwarmConfig: cfgJSON, Status: models.StatusPending, Category: models.CategoryActive, Title: strings.TrimSpace(worker.Title), Prompt: workerPrompt(parent.Prompt, worker, child.WorktreePath)})
 		affected[child.ID] = true
-		if s.workerSvc != nil {
-			s.workerSvc.Submit(child)
-		}
 	}
 	for _, child := range existing {
 		if child.SwarmRole != models.SwarmRoleWorker || affected[child.ID] || child.Status != models.StatusCompleted {
@@ -594,10 +599,8 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 		if cfg.CompletedGeneration < parentCfg.Generation {
 			cfg.CompletedGeneration = parentCfg.Generation
-			child.SwarmConfig, _ = cfg.JSON()
-			if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
-				return err
-			}
+			cfgJSON, _ := cfg.JSON()
+			commit.Writes = append(commit.Writes, persistence.SwarmTaskWrite{ID: child.ID, SwarmStatus: child.SwarmStatus, SwarmConfig: cfgJSON})
 		}
 	}
 	for _, child := range existing {
@@ -605,22 +608,12 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 		case models.SwarmRoleReviewer, models.SwarmRoleMerger, models.SwarmRoleLegacyIntegrator:
 			cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 			cfg.RerunGeneration = parentCfg.Generation
-			child.SwarmConfig, _ = cfg.JSON()
-			if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, "pending", child.SwarmConfig, child.SwarmSequence); err != nil {
-				return err
-			}
-			if err := s.taskRepo.UpdateStatus(ctx, child.ID, models.StatusBlocked); err != nil {
-				return err
-			}
+			cfgJSON, _ := cfg.JSON()
+			commit.Writes = append(commit.Writes, persistence.SwarmTaskWrite{ID: child.ID, SwarmStatus: "pending", SwarmConfig: cfgJSON, Status: models.StatusBlocked})
 		}
 	}
-	plannerCfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
-	plannerCfg.LastError = ""
-	planner.SwarmConfig, _ = plannerCfg.JSON()
-	if err := s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, "planned", planner.SwarmConfig, planner.SwarmSequence); err != nil {
-		return err
-	}
-	if err := s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusCompleted); err != nil {
+	commit.Writes = append(commit.Writes, plannedWrite(planner))
+	if err := s.taskRepo.ApplySwarmPlan(ctx, commit); err != nil {
 		return err
 	}
 	return s.StartReadyWorkers(ctx, parent.ID)
@@ -944,16 +937,7 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 		return err
 	}
 	if planner == nil {
-		if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_coordination", parent.SwarmConfig, parent.SwarmSequence); err != nil {
-			return err
-		}
-		if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
-			return err
-		}
-		if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
-			return err
-		}
-		return s.startPlannerWithFollowup(ctx, parent.ID, false, message, selection)
+		return s.startFirstPlannerForFollowup(ctx, &beforeParent, parent.SwarmConfig, message, selection)
 	}
 	planner, err = s.taskRepo.GetByID(ctx, planner.ID)
 	if err != nil {
@@ -1479,26 +1463,15 @@ func (s *SwarmService) recordPlannerApplicationError(planner *models.Task, cause
 	if parent.Status == models.StatusCancelled {
 		return
 	}
-	followup := isFollowupPlannerApplication(storedPlanner, parent)
-
-	plannerCfg, _ := models.ParseSwarmConfig(storedPlanner.SwarmConfig)
-	plannerCfg.LastError = message
-	storedPlanner.SwarmConfig, _ = plannerCfg.JSON()
-	storedPlanner.SwarmStatus = "plan_apply_failed"
-	if followup {
-		storedPlanner.SwarmStatus = "coordinating"
+	plannerStatus, parentStatus := "plan_apply_failed", "blocked"
+	if isFollowupPlannerApplication(storedPlanner, parent) {
+		plannerStatus, parentStatus = "coordinating", "needs_coordination"
 	}
-	_ = s.taskRepo.UpdateSwarmFields(ctx, storedPlanner.ID, storedPlanner.SwarmRole, storedPlanner.SwarmStatus, storedPlanner.SwarmConfig, storedPlanner.SwarmSequence)
-
-	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
-	parentCfg.LastError = message
-	parent.SwarmConfig, _ = parentCfg.JSON()
-	parent.SwarmStatus = "blocked"
-	if followup {
-		parent.SwarmStatus = "needs_coordination"
+	// Failure state is recorded as a system write so a revoked run identity
+	// cannot hide its own failure; it never admits work.
+	if err := s.commitPlannerFailure(ctx, parent, storedPlanner, plannerStatus, "", parentStatus, message); err != nil {
+		applog.Infof("[swarm] recording planner application error planner=%s: %v", storedPlanner.ID, err)
 	}
-	_ = s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, parent.SwarmStatus, parent.SwarmConfig, parent.SwarmSequence)
-	_ = s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusBlocked)
 }
 
 func (s *SwarmService) persistMergerResultToParent(ctx context.Context, parentTaskID, mergerTaskID string) error {
@@ -1534,17 +1507,14 @@ func (s *SwarmService) markPlannerOutputInvalid(ctx context.Context, planner *mo
 	if parent.Status == models.StatusCancelled {
 		return nil
 	}
-	cfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
-	cfg.LastError = message
-	planner.SwarmConfig, _ = cfg.JSON()
-	planner.SwarmStatus = "invalid_plan"
-	_ = s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, planner.SwarmStatus, planner.SwarmConfig, planner.SwarmSequence)
-	_ = s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusFailed)
-	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
-	parentCfg.LastError = message
-	parent.SwarmConfig, _ = parentCfg.JSON()
-	_ = s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "blocked", parent.SwarmConfig, parent.SwarmSequence)
-	_ = s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusBlocked)
+	stored, err := s.taskRepo.GetByID(ctx, planner.ID)
+	if err != nil || stored == nil {
+		return errors.New(message)
+	}
+	if err := s.commitPlannerFailure(ctx, parent, stored, "invalid_plan", models.StatusFailed, "blocked", message); err != nil {
+		return errors.Join(errors.New(message), err)
+	}
+	*planner = *stored
 	return errors.New(message)
 }
 

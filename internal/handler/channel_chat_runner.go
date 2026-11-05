@@ -41,9 +41,9 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 	if req.ExecID == "" || req.TaskID == "" || req.ProjectID == "" {
 		return
 	}
-	// Reject revoked Slack identities before worktree or goal side effects.
+	// Reject revoked channel identities before worktree or goal side effects.
 	accessParams := streamingResponseParams{ExecID: req.ExecID, TaskID: req.TaskID, ProjectID: req.ProjectID, ChannelReply: req.ReplyContext, Surface: req.Surface}
-	if h.projectAccessSvc != nil && isSlackChannelRun(accessParams) {
+	if h.projectAccessSvc != nil && isVerifiedChannelRun(accessParams) {
 		authorized, err := h.followupUserContext(ctx, strings.TrimPrefix(channelRunPrincipalID(ctx), "user:"))
 		if err == nil {
 			err = h.requireFollowupAccess(authorized, accessParams)

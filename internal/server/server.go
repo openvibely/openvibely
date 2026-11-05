@@ -836,6 +836,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	slackSvc.SetAgentRepo(agentRepo)
 	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
+	channelMessageRouter.SetProjectAuthorization(projectAccessSvc, cfg.AuthMode == auth.AuthModeDisabled)
 	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
 	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
 	xSvc := service.NewXService(xCredentials, settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc)

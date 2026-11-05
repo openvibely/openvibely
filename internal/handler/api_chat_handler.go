@@ -3,8 +3,6 @@ package handler
 import (
 	"crypto/rand"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/pkg/filecontent"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -13,12 +11,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/filecontent"
+
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -187,6 +189,12 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	}
 
 	applog.Debugf("[handler] APIChatMessage message=%q project_id=%s", message, projectID)
+
+	if h.projectAccessSvc != nil {
+		if err := h.projectAccessSvc.Require(c.Request().Context(), projectID, authz.Edit); err != nil {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
+		}
+	}
 
 	// Validate project exists
 	project, err := h.projectSvc.GetByID(c.Request().Context(), projectID)

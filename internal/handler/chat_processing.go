@@ -329,7 +329,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		baseCtx = authorizedCtx
 	}
 
-	if (params.IsTaskFollowup || isSlackChannelRun(params)) && h.projectAccessSvc != nil {
+	if (params.IsTaskFollowup || isVerifiedChannelRun(params)) && h.projectAccessSvc != nil {
 		authorizedCtx, err := h.followupUserContext(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))
 		if err == nil {
 			err = h.requireFollowupAccess(authorizedCtx, params)
@@ -1766,8 +1766,13 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		})
 	}
 
+	queuedPrincipalID := ""
+	if input.AuthorUserID != "" {
+		queuedPrincipalID = "user:" + input.AuthorUserID
+	}
 	h.startStreamingResponse(streamingResponseParams{
 		ExecID:      exec.ID,
+		PrincipalID: queuedPrincipalID,
 		TaskID:      task.ID,
 		Message:     input.Content,
 		Agent:       *agent,

@@ -755,6 +755,7 @@ type TaskStore interface {
 	UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status string, config string, sequence int) error
 	PrepareSwarmSuccessor(ctx context.Context, parentID, sourceID string, target *models.Task) error
 	PrepareSwarmRerun(ctx context.Context, parent, child *models.Task, parentConfig, childConfig string) error
+	ApplySwarmPlan(ctx context.Context, commit SwarmPlanCommit) error
 	PreparePlannerFollowup(ctx context.Context, parent, planner, nextPlanner *models.Task, parentConfig string) error
 	UpdateTelegramOrigin(ctx context.Context, id string, chatID int64) error
 	UpdateWorktreeInfo(ctx context.Context, id string, worktreePath string, branch string) error

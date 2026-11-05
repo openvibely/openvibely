@@ -171,3 +171,46 @@ func TestFollowupUnmappedChannelRecoveryDenied(t *testing.T) {
 		})
 	}
 }
+
+func TestFollowupDiscordRequiresCurrentSenderBinding(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	h := tc.handler
+	ctx := t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+	h.SetAuthMode(auth.AuthModeLocal)
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	h.SetDiscordAuthRepo(tc.stores.DiscordAuth)
+	h.SetRunIdentityStore(tc.stores.RunIdentities)
+	invite, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	user, err := org.Accept(ctx, invite, "discord-followup", "long-password-value", "")
+	require.NoError(t, err)
+	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+	entry := &models.DiscordAuthorizedUser{ProjectID: "default", DiscordUserID: "323456789"}
+	require.NoError(t, tc.stores.DiscordAuth.Create(owner, entry))
+	require.NoError(t, tc.stores.DiscordAuth.BindApplicationUser(owner, "default", entry.ID, user.UserID))
+	admitted := models.WithDiscordIngressIdentity(models.WithPrincipal(ctx, models.Principal{UserID: user.UserID}), models.DiscordIngressIdentity{ProjectID: "default", ExternalUserID: entry.DiscordUserID, UserID: user.UserID})
+	task := &models.Task{ProjectID: "default", Title: "Discord bound followup", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, CreatedVia: models.TaskOriginDiscord}
+	require.NoError(t, tc.stores.Tasks.Create(admitted, task))
+	params := streamingResponseParams{TaskID: task.ID, ProjectID: "default", IsTaskFollowup: true, ChannelReply: service.ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordUserID: entry.DiscordUserID}}
+	restored, err := h.followupUserContext(ctx, user.UserID)
+	require.NoError(t, err)
+	require.NoError(t, h.requireFollowupAccess(restored, params))
+	ownerCtx, err := h.followupUserContext(ctx, models.BootstrapUserID)
+	require.NoError(t, err)
+	require.ErrorIs(t, h.requireFollowupAccess(ownerCtx, params), authz.ErrDenied, "owner cannot replace the bound sender")
+	foreign := params
+	foreign.ChannelReply.DiscordUserID = "999999999"
+	require.Error(t, h.requireFollowupAccess(restored, foreign))
+	running, cancel := context.WithCancel(restored)
+	defer cancel()
+	h.watchFollowupAccess(running, cancel, params)
+	require.NoError(t, tc.stores.DiscordAuth.DeleteForProject(owner, "default", entry.ID))
+	select {
+	case <-running.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("revoked Discord follow-up remained active")
+	}
+	require.Error(t, h.requireFollowupAccess(restored, params))
+}

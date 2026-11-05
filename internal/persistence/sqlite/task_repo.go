@@ -3073,6 +3073,9 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 		if task == nil || task.Category != expected.ExpectedCategory || task.Status != expected.ExpectedStatus || task.SwarmRole != models.SwarmRoleParent {
 			return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 		}
+		if err := authorizeSwarmWrite(ctx, exec, id); err != nil {
+			return err
+		}
 		var displayOrder int
 		if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, task.ProjectID).Scan(&displayOrder); err != nil {
 			return err
@@ -3083,7 +3086,7 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 		task.Category = models.CategoryActive
 		task.Status = models.StatusBlocked
 		task.DisplayOrder = displayOrder
-		return nil
+		return auditSwarmWrite(ctx, exec, id, "swarm.active_lane_prepared")
 	})
 	if err != nil {
 		return err

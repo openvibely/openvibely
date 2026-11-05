@@ -12,4 +12,7 @@ type RunIdentityStore interface {
 	ExecutionUser(context.Context, string) (string, bool, error)
 	// CheckExecutionGoal rejects a continuation whose saved goal was replaced or stopped.
 	CheckExecutionGoal(context.Context, string, string) error
+	// RequireChannelTaskProvenance rejects verified-channel tasks lacking a
+	// current sender binding snapshot; other origins pass.
+	RequireChannelTaskProvenance(context.Context, string) error
 }

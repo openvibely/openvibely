@@ -38,6 +38,9 @@ func (h *Handler) projectAccessBoundary(next echo.HandlerFunc) echo.HandlerFunc 
 			if err := h.authorizeActivityResource(c); err != nil {
 				return projectAccessHTTPError(err)
 			}
+			if err := h.authorizeChatResource(c); err != nil {
+				return projectAccessHTTPError(err)
+			}
 			if err := h.authorizeAlertResource(c); err != nil {
 				return projectAccessHTTPError(err)
 			}

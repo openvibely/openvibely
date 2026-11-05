@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -262,7 +263,12 @@ func (h *Handler) executeRequestUserInputTool(ctx context.Context, params stream
 	return string(out), err
 }
 
-func (h *Handler) requireChatInputProject(ctx context.Context, projectID string) error {
+func (h *Handler) requireChatInputProject(ctx context.Context, projectID string, permission authz.Permission) error {
+	if h.projectAccessSvc != nil {
+		if err := h.projectAccessSvc.Require(ctx, projectID, permission); err != nil {
+			return projectAccessHTTPError(err)
+		}
+	}
 	if h.projectRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "project repository unavailable")
 	}
@@ -291,7 +297,7 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 		payload.Answers = []chatInputRequestAnswer{{QuestionID: c.FormValue("question_id"), Label: c.FormValue("label"), CustomAnswer: c.FormValue("custom_answer")}}
 	}
 	projectID := strings.TrimSpace(payload.ProjectID)
-	if err := h.requireChatInputProject(c.Request().Context(), projectID); err != nil {
+	if err := h.requireChatInputProject(c.Request().Context(), projectID, authz.Edit); err != nil {
 		return err
 	}
 	if h.chatInputRequestRepo != nil {
@@ -342,7 +348,7 @@ func (h *Handler) ChatInputRequests(c echo.Context) error {
 	if projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
-	if err := h.requireChatInputProject(c.Request().Context(), projectID); err != nil {
+	if err := h.requireChatInputProject(c.Request().Context(), projectID, authz.View); err != nil {
 		return err
 	}
 	if executionID := strings.TrimSpace(c.QueryParam("execution_id")); executionID != "" {

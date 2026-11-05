@@ -78,6 +78,11 @@ func authorizeGitHubRuntime(ctx context.Context, opts githubIssueRuntimeOptions,
 		if !worker.runAuthOff && authz.UnmappedChannelOrigin(task.CreatedVia) {
 			return ctx, authz.ErrDenied
 		}
+		if !worker.runAuthOff && authz.VerifiedChannelOrigin(task.CreatedVia) {
+			if err := worker.runIdentities.RequireChannelTaskProvenance(ctx, task.ID); err != nil {
+				return ctx, err
+			}
+		}
 		savedUser, found, err := worker.runIdentities.ExecutionUser(ctx, executionID)
 		if err != nil {
 			return ctx, err

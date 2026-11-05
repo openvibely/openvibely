@@ -760,8 +760,11 @@ func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *te
 	if err != nil {
 		t.Fatalf("list partially created children: %v", err)
 	}
-	if got := countSwarmWorkers(children); got != 2 {
-		t.Fatalf("workers after partial failure = %d, want existing plus first new worker", got)
+	if got := countSwarmWorkers(children); got != 1 {
+		t.Fatalf("workers after failed application = %d, want only the existing worker (plan rolls back)", got)
+	}
+	if rolledBack := requireFullSwarmTestTask(t, repo, parent.ID); rolledBack.SwarmStatus == "workers_running" {
+		t.Fatalf("parent advanced despite failed plan application: %q", rolledBack.SwarmStatus)
 	}
 	if err := db.Fixtures.SetTaskCreationFailure(ctx, "New worker two", false); err != nil {
 		t.Fatalf("drop failure trigger: %v", err)

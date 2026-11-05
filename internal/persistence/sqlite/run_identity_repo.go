@@ -97,6 +97,25 @@ func (r *RunIdentityRepo) ExecutionUser(ctx context.Context, executionID string)
 	return userID, err == nil, err
 }
 
+func (r *RunIdentityRepo) RequireChannelTaskProvenance(ctx context.Context, taskID string) error {
+	var origin, userID string
+	err := r.db.QueryRowContext(ctx, `SELECT t.created_via,COALESCE(d.user_id,'') FROM tasks t LEFT JOIN discord_task_provenance d ON d.task_id=t.id WHERE t.id=?`, taskID).Scan(&origin, &userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return persistence.ErrProjectDenied
+	}
+	if err != nil {
+		return err
+	}
+	if origin != models.TaskOriginDiscord {
+		return nil
+	}
+	actor, ok := models.PrincipalFromContext(ctx)
+	if userID == "" || !ok || actor.UserID != userID {
+		return persistence.ErrProjectDenied
+	}
+	return requireDiscordTaskProvenance(ctx, r.db, taskID, userID)
+}
+
 func (r *RunIdentityRepo) CheckExecutionGoal(ctx context.Context, executionID, taskID string) error {
 	return checkExecutionGoal(ctx, r.db, executionID, taskID)
 }

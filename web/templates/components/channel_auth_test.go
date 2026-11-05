@@ -176,7 +176,7 @@ func TestSlackIdentityBindingControls(t *testing.T) {
 
 func TestDiscordIdentityBindingControls(t *testing.T) {
 	html := renderChannelAuthorizationComponent(t, DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "row", ProjectID: "project", DiscordUserID: "123"}}, "project"))
-	assertChannelAuthorizationContains(t, html, "Application identity: unbound", `name="attested"`, "I verified this Discord numeric ID", `hx-post="/channels/discord/authorized-users/row/identity"`, "Authenticated Discord ingress is currently unavailable")
+	assertChannelAuthorizationContains(t, html, "Application identity: unbound", `name="attested"`, "I verified this Discord numeric ID", `hx-post="/channels/discord/authorized-users/row/identity"`, "senders bound to an enabled application user with editor access")
 	html = renderChannelAuthorizationComponent(t, DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "row", ProjectID: "project", DiscordUserID: "123", ApplicationUserID: "user-1"}}, "project"))
 	assertChannelAuthorizationContains(t, html, "Application user: user-1", `value="user-1"`)
 }

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -22,6 +23,9 @@ func prepareFirstPlannerParent(ctx context.Context, tx sqlExecutor, child models
 	if err != nil {
 		return err
 	}
+	if expected, guarded := persistence.ActiveLaneExpectedState(ctx, observed.ID); guarded && (current == nil || current.Category != expected.ExpectedCategory || current.Status != expected.ExpectedStatus) {
+		return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, observed.ID)
+	}
 	if !sameSwarmObservation(current, &observed) {
 		return persistence.ErrProjectDenied
 	}
@@ -35,6 +39,16 @@ func prepareFirstPlannerParent(ctx context.Context, tx sqlExecutor, child models
 	var order int
 	if err := tx.QueryRowContext(ctx, activeBoardTailOrderQuery, observed.ProjectID).Scan(&order); err != nil {
 		return err
+	}
+	if swarmStatus, swarmConfig, followup := persistence.PlannerCreationFollowup(ctx); followup {
+		if _, err := models.ParseSwarmConfig(swarmConfig); err != nil {
+			return err
+		}
+		config := defaultJSON(swarmConfig)
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET swarm_status=?,swarm_config=`+monotonicParentStopRevisionSQL+`,category='active',status='blocked',display_order=?,completed_at=NULL,updated_at=datetime('now') WHERE id=?`, swarmStatus, observed.SwarmRole, config, config, config, order, observed.ID); err != nil {
+			return err
+		}
+		return auditSwarmWrite(ctx, tx, observed.ID, "swarm.first_planner_followup_prepared")
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET category='active',status='blocked',display_order=?,completed_at=NULL,updated_at=datetime('now') WHERE id=?`, order, observed.ID); err != nil {
 		return err

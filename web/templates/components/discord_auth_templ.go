@@ -36,7 +36,7 @@ func DiscordAuthorizedUsersList(users []models.DiscordAuthorizedUser, projectID 
 		templ_7745c5c3_Err = channelAuthorizationList(
 			channelAuthorizationListConfig{
 				ContainerID:        "discord-authorized-users",
-				Description:        "Organization administrators manage this trust list. Application identity bindings are project-specific. Authenticated Discord ingress is currently unavailable while execution identity support is being completed.",
+				Description:        "Organization administrators manage this trust list. Application identity bindings are project-specific. When authentication is enabled, Discord messages are accepted only from senders bound to an enabled application user with editor access or higher on this project.",
 				EmptyState:         "No authorized users configured. Access is denied until authorized users are added.",
 				RemoveConfirmation: "Remove this authorized user?",
 				AddHelp:            "Use the numeric Discord user ID from Developer Mode, not the username or display name.",
