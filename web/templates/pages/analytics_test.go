@@ -1864,3 +1864,53 @@ func TestBrowserFunctional_AnalyticsAccountAlerts(t *testing.T) {
  </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
+
+// A usage-alert deep link must reveal the account without scrolling hidden shell
+// ancestors. In the desktop app those ancestors also contain the native title bar.
+func TestBrowserFunctional_AnalyticsAccountLinkPreservesShellPosition(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	content := rendered.String()
+	start := strings.Index(content, "async function loadUsageAccounts(refreshUsage)")
+	end := strings.Index(content, "// Load Success/Failure Rates")
+	if start < 0 || end <= start {
+		t.Fatal("account loading script missing")
+	}
+	fixture := `<!doctype html><html><head><style>
+html,body { margin:0; height:100%; overflow:hidden; }
+#shell { height:400px; overflow:hidden; }
+#titlebar { height:54px; }
+#main-content { height:400px; overflow:auto; border-top:2px solid transparent; }
+.card { height:220px; }
+</style></head><body><div id="shell"><header id="titlebar">Project tabs</header><main id="main-content"><div style="height:300px">Analytics</div><div id="accountUsageCards"></div><div style="height:500px"></div></main></div><div id="reconnect-result"></div><script>
+history.replaceState({},'',location.pathname+'?account_key=anthropic');
+const dataGeneration=1;
+function usageEvidenceParams(){return new URLSearchParams();}
+function escapeHTML(s){return s;}
+async function fetchJSON(url){return {accounts:[{key:'first',provider:'openai'},{key:'second',provider:'openai'},{key:'anthropic',provider:'anthropic'}]};}
+function renderAccountUsageCards(){}
+` + content[start:end] + `
+(async()=>{
+ const result=document.getElementById('reconnect-result');
+ try {
+  const panel=document.getElementById('main-content');
+  const title=document.getElementById('titlebar');
+  const originalTop=title.getBoundingClientRect().top;
+  for(let attempt=0;attempt<2;attempt++) {
+   panel.scrollTop=0;
+   await loadUsageAccounts(false);
+   const card=document.getElementById('usage-account-anthropic');
+   if(!card.classList.contains('ring-primary'))throw Error('linked account not highlighted');
+   if(panel.scrollTop<=0)throw Error('account was not revealed');
+   if(title.getBoundingClientRect().top!==originalTop)throw Error('title bar moved');
+   if(document.getElementById('shell').scrollTop||document.documentElement.scrollTop||document.body.scrollTop)throw Error('outer shell scrolled');
+   const bounds=card.getBoundingClientRect(), viewport=panel.getBoundingClientRect();
+   if(bounds.top<viewport.top+panel.clientTop||bounds.bottom>viewport.bottom)throw Error('linked account outside content viewport');
+  }
+  result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+})();</script></body></html>`
+	runReconnectChromeFixture(t, fixture)
+}

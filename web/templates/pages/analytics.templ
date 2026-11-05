@@ -1917,7 +1917,15 @@ templ analyticsContent(currentProject *models.Project) {
                                                 target.appendChild(card);
                                                 if (new URLSearchParams(window.location.search).get('account_key') === account.key) {
                                                     card.classList.add('ring-2', 'ring-primary');
-                                                    card.scrollIntoView({block: 'center'});
+                                                    // scrollIntoView also scrolls overflow-hidden shell ancestors,
+                                                    // moving the title bar away from native window controls.
+                                                    const panel = card.closest('#main-content');
+                                                    if (panel) {
+                                                        const cardBounds = card.getBoundingClientRect();
+                                                        const panelBounds = panel.getBoundingClientRect();
+                                                        panel.scrollTop += cardBounds.top - panelBounds.top - panel.clientTop
+                                                            - Math.max(0, (panel.clientHeight - cardBounds.height) / 2);
+                                                    }
                                                 }
                                                 return card;
 											});
