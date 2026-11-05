@@ -256,7 +256,8 @@ func TestAllProjectsDesktopRestoresSavedLocationInChrome(t *testing.T) {
 	runner := `<script>
  (async()=>{try{
  const deadline=Date.now()+12000;
- while(!document.querySelector('#analytics-data') || document.querySelector('.htmx-request,.htmx-settling')){if(Date.now()>deadline)throw Error('restore timeout: '+location.href);await new Promise(r=>setTimeout(r,30));}
+ // Analytics restores URL filters after Chart.js loads; the active view button marks that.
+ while(!document.querySelector('#analytics-data') || !document.querySelector('[data-analytics-view].btn-primary') || document.querySelector('.htmx-request,.htmx-settling')){if(Date.now()>deadline)throw Error('restore timeout: '+location.href);await new Promise(r=>setTimeout(r,30));}
  if(location.pathname+location.search+location.hash!=='/analytics?project_id=__all_projects__&range=7d#usage')throw Error('wrong location '+location.href);
  if(document.getElementById('project-selector').value!=='__all_projects__')throw Error('wrong project');
  if(document.getElementById('dateRange').value!=='7')throw Error('lost range');

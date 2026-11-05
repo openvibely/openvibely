@@ -320,7 +320,7 @@ func TestBrowserFunctional_ChatProjectPickerConsumesOutsideClick(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/chat", "chat-project-dismissal", func(b *composerFocusCDP) {
-		b.waitFor("chat initialized", `String(!!window._chatInputRequestClickBound && !!document.querySelector('[data-project-picker]'))`, "true")
+		b.waitFor("chat initialized", `String(!!window._chatInputRequestClickBound && !!document.querySelector('[data-project-picker]') && !document.querySelector('#chat-messages[data-transcript-hydrating]'))`, "true")
 		b.click(`[data-option-label="Specific projects"]`)
 		b.click(`[data-project-search]`)
 		b.waitFor("project results visible", `String(document.querySelector('[data-project-results]').checkVisibility())`, "true")

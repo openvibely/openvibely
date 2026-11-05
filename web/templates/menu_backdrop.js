@@ -21,13 +21,16 @@
     backdrop.style.display = 'none';
     backdrop.style.zIndex = '2147483647';
   }
+  function backdropOpen() {
+    return nativePopover ? backdrop.matches(':popover-open') : backdrop.style.display === 'block';
+  }
   function setBackdropOpen(open) {
     if (!nativePopover) { backdrop.style.display = open ? 'block' : 'none'; return; }
-    if (open && !backdrop.matches(':popover-open')) backdrop.showPopover();
-    else if (!open && backdrop.matches(':popover-open')) backdrop.hidePopover();
+    if (open && !backdropOpen()) backdrop.showPopover();
+    else if (!open && backdropOpen()) backdrop.hidePopover();
   }
   backdrop.setAttribute('aria-hidden', 'true');
-  let frame = 0, lastGeometry = '', panels = [], dirty = true;
+  let frame = 0, lastGeometry = '', panels = [], dirty = true, pressHeld = false;
   function schedule() {
     dirty = true;
     if (!frame) frame = requestAnimationFrame(sync);
@@ -50,6 +53,9 @@
       lastGeometry = '';
       return;
     }
+    // A press that focuses a trigger opens its menu before release. Raising the
+    // surface mid-press would retarget the release and dismiss the new menu.
+    if (pressHeld && !backdropOpen()) return;
     const parent = modal || document.body;
     if (backdrop.parentElement !== parent) parent.append(backdrop);
     // The project search input is part of its menu, not a dismissal target.
@@ -72,7 +78,9 @@
         corners:corners.map(pair => pair.map(n => n * scale))};
     }).filter(r => r.right > r.left && r.bottom > r.top);
     const geometry = JSON.stringify([width, height, shapes]);
-    if (geometry !== lastGeometry) {
+    // Panels animate open, so geometry can change every frame. Replacing the
+    // pressed hit element would retarget the release and suppress its click.
+    if (geometry !== lastGeometry && !backdrop.querySelector('[data-menu-backdrop-hit]:active')) {
       lastGeometry = geometry;
       // Each clip removes one rounded panel from the viewport. Nesting clips
       // intersects their outside regions, so overlapping panels remain usable.
@@ -139,6 +147,15 @@
   // Dismissal remains owned by each menu. Its outside-click listener receives
   // this surface as the target, so no underlying control can activate.
   backdrop.addEventListener('pointerdown', event => event.preventDefault());
+  window.addEventListener('pointerdown', event => {
+    if (event.button === 0 && !backdrop.contains(event.target)) pressHeld = true;
+  }, true);
+  const releasePress = event => {
+    if (!pressHeld || (event.type === 'blur' && event.target !== window)) return;
+    pressHeld = false;
+    schedule();
+  };
+  ['pointerup', 'pointercancel', 'blur'].forEach(name => window.addEventListener(name, releasePress, true));
   const observer = new MutationObserver(records => {
     if (records.some(record => record.target !== backdrop && !backdrop.contains(record.target))) schedule();
   });
