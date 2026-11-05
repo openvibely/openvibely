@@ -2636,7 +2636,7 @@ func TestBuildChatAttachmentModelContextMatchesPendingPreviewAndAPISavedFiles(t 
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "equivalent-context-session"
+	sessionID := "00000000000000000000000000000001"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	apiDir := filepath.Join(tmpDir, "chat", "api-exec")
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
@@ -2722,7 +2722,7 @@ func TestProcessAttachments_ImageFilesReturnedAsSeparateAttachments(t *testing.T
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "test-session-123"
+	sessionID := "00000000000000000000000000000002"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 
@@ -2782,7 +2782,7 @@ func TestProcessAttachments_LargeTextFileNotIncludedInline(t *testing.T) {
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "test-session-large"
+	sessionID := "00000000000000000000000000000003"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 
@@ -2815,7 +2815,7 @@ func TestProcessAttachments_NoSession(t *testing.T) {
 	defer func() { uploadsDir = oldUploadsDir }()
 
 	ctx := context.Background()
-	textContext, imageAttachments, _, err := h.processAttachmentsWithReturn(ctx, "nonexistent-session", "exec-id")
+	textContext, imageAttachments, _, err := h.processAttachmentsWithReturn(ctx, "00000000000000000000000000000008", "exec-id")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stage=session-source")
 	assert.Empty(t, textContext)
@@ -2853,7 +2853,7 @@ func TestProcessAttachments_MultipleImageTypes(t *testing.T) {
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "test-session-multi"
+	sessionID := "00000000000000000000000000000004"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 
@@ -3203,7 +3203,7 @@ func TestProcessAttachmentsWithReturn_MetadataFailurePreservesPendingSession(t *
 	oldUploadsDir := uploadsDir
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
-	sessionID := "unicode-session"
+	sessionID := "00000000000000000000000000000005"
 	name := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
 	pendingPath := filepath.Join(tmpDir, "chat", "pending", sessionID, name)
 	require.NoError(t, os.MkdirAll(filepath.Dir(pendingPath), 0o755))
@@ -3401,7 +3401,7 @@ func TestHandler_ChatSend_WithImageAttachment_AnthropicAgent(t *testing.T) {
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "test-session-123"
+	sessionID := "00000000000000000000000000000002"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screenshot.png"), []byte("fake-png-data"), 0644))
@@ -3455,7 +3455,7 @@ func TestHandler_ChatSend_WithImageAttachment_TextOnlyAgent(t *testing.T) {
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "test-session-456"
+	sessionID := "00000000000000000000000000000006"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "photo.jpg"), []byte("fake-jpg-data"), 0644))
@@ -3503,7 +3503,7 @@ func TestHandler_ChatSend_WithTextAttachment(t *testing.T) {
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "test-session-789"
+	sessionID := "00000000000000000000000000000007"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("Some text content"), 0644))

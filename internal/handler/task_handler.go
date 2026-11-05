@@ -2924,6 +2924,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	message := strings.TrimSpace(c.FormValue("message"))
 	agentID := c.FormValue("agent_id")
 	sessionID := c.FormValue("attachment_session_id")
+	if sessionID != "" && !isValidPendingAttachmentSessionID(sessionID) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
+	}
 	// The picker persists the current task selection separately. A delayed send
 	// can carry an older model for this message without changing that selection.
 	managedModelSelection := c.FormValue("model_selection_managed") == "1"
