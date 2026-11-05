@@ -100,6 +100,7 @@ type Manager struct {
 	mu        sync.Mutex
 	procs     map[string]*procEntry
 	handles   map[string]Handle
+	startups  map[string]StartupStatus
 	manifests map[string]*Manifest
 	instMu    map[string]*sync.Mutex
 	lifetimes map[string]*instanceLifetime
@@ -119,6 +120,7 @@ func NewManager(store persistence.PagePluginStore, root string) *Manager {
 		builtins:  map[string]Builtin{},
 		procs:     map[string]*procEntry{},
 		handles:   map[string]Handle{},
+		startups:  map[string]StartupStatus{},
 		manifests: map[string]*Manifest{},
 		instMu:    map[string]*sync.Mutex{},
 		lifetimes: map[string]*instanceLifetime{},
@@ -328,6 +330,11 @@ func (m *Manager) Enable(ctx context.Context, instanceID string) error {
 		cancel()
 	}
 	ctx = startupCtx
+	m.mu.Lock()
+	if entry := m.procs[instanceID]; entry != nil && entry.proc.Status() == "failed" {
+		delete(m.procs, instanceID)
+	}
+	m.mu.Unlock()
 	if man.RunsProcess() {
 		if _, err := m.ensureProcess(ctx, in, pkg, man); err != nil {
 			applog.Infof("[pageplugins] backend for instance %s failed to start: %v", instanceID, err)
@@ -492,6 +499,7 @@ func (m *Manager) IssueHandle(r *Resolved, principalID string) (Handle, error) {
 	}
 	h.timer = time.AfterFunc(HandleTTL, func() { m.RetireHandle(h.Token) })
 	m.handles[h.Token] = h
+	m.startups[h.InstanceID] = StartupStatus{State: "loading", ContentHash: r.Package.ContentHash, ObservedAt: m.now().UTC(), handle: h.Token}
 	m.mu.Unlock()
 	return h, nil
 }
@@ -553,7 +561,7 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 		return nil, ErrApprovalRequired
 	}
 	m.mu.Lock()
-	if e := m.procs[in.ID]; e != nil && e.hash == in.ApprovedHash && e.proc.Status() != "failed" && e.proc.Status() != "stopped" {
+	if e := m.procs[in.ID]; e != nil && e.hash == in.ApprovedHash && e.proc.Status() != "stopped" {
 		m.mu.Unlock()
 		return e.proc, nil
 	}

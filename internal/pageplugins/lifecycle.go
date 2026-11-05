@@ -81,6 +81,9 @@ func (m *Manager) deactivate(ctx context.Context, id string, remove bool) error 
 		return cancelErr
 	}
 	if remove {
+		m.mu.Lock()
+		delete(m.startups, id)
+		m.mu.Unlock()
 		return m.store.DeleteInstance(ctx, id)
 	}
 	return nil

@@ -17,13 +17,15 @@ const MaxBridgeMessageBytes = 64 << 10
 // Bridge message types a plugin page may send.
 const (
 	BridgeReady           = "ready"
+	BridgePageLoaded      = "page.loaded"
+	BridgePageFailed      = "page.failed"
 	BridgeOpInvoke        = "op.invoke"
 	BridgeContextSet      = "context.set"
 	BridgeAnalyzeRequest  = "analyze.request"
 	BridgeEventsSubscribe = "events.subscribe"
 )
 
-var bridgeTypes = map[string]bool{BridgeReady: true, BridgeOpInvoke: true, BridgeContextSet: true, BridgeAnalyzeRequest: true, BridgeEventsSubscribe: true}
+var bridgeTypes = map[string]bool{BridgePageLoaded: true, BridgePageFailed: true, BridgeReady: true, BridgeOpInvoke: true, BridgeContextSet: true, BridgeAnalyzeRequest: true, BridgeEventsSubscribe: true}
 
 var bridgeIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}$`)
 

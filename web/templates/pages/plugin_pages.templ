@@ -63,6 +63,7 @@ templ PluginPageContent(v PluginPageView) {
 				<button type="button" class="btn btn-sm btn-outline" data-plugin-chat-toggle aria-controls="page-side-chat" aria-expanded="false">Chat about this page</button>
 			}
 		</div>
+		<div id="plugin-startup" class="text-xs mb-2" role="status">Loading page…</div>
 		<div id="plugin-approvals" class="space-y-2 mb-2" aria-live="polite"></div>
 		<div class="flex flex-1 min-h-0 gap-3">
 			<iframe
@@ -286,10 +287,13 @@ templ pluginHostBridgeScript() {
 		var approvalsURL = root.getAttribute('data-approvals-url');
 		var projectID = root.getAttribute('data-project-id');
 		var MAX = 65536;
-		var ALLOWED = ['ready', 'op.invoke', 'context.set', 'analyze.request', 'events.subscribe'];
+		var ALLOWED = ['ready', 'op.invoke', 'context.set', 'analyze.request', 'events.subscribe', 'page.loaded', 'page.failed'];
 		var dead = false, loads = 0, events = null, subscribed = false, streams = [];
 		var requests = new AbortController();
 		var approvalRevision = 0;
+		var startupTimer = setTimeout(function () {
+			onMessage({source: frame.contentWindow, data: {v: 1, handle: handle, id: 'startup-timeout', type: 'page.failed', payload: {error: 'Page did not confirm startup within 30 seconds.'}}});
+		}, 30000);
 
 		function post(type, replyTo, payload) {
 			if (dead || !frame.contentWindow) return;
@@ -332,6 +336,7 @@ templ pluginHostBridgeScript() {
 		function cleanup() {
 			if (dead) return;
 			dead = true;
+			clearTimeout(startupTimer);
 			requests.abort();
 			if (events) { events.close(); events = null; }
 			streams.forEach(function (s) { try { s.close(); } catch (_) {} });
@@ -364,6 +369,11 @@ templ pluginHostBridgeScript() {
 				.then(function (res) {
 				if (dead) return;
 					if (!res || !res.ok) { post('error', msg.id, {message: (res && res.error) || 'request failed'}); return; }
+					if (msg.type === 'page.loaded' || msg.type === 'page.failed') {
+                        clearTimeout(startupTimer);
+                        var status = root.querySelector('#plugin-startup');
+                        if (status && res.result) status.textContent = res.result.state === 'loaded' ? 'Page loaded' : 'Page failed: ' + (res.result.error || 'Reload to retry.');
+                    }
 					if (msg.type === 'events.subscribe') { subscribed = true; startEvents(); post('event', null, {type: 'page.refresh'}); }
 					if (msg.type === 'analyze.request' && res.result && res.result.exec_id) streamAnalysis(res.result.exec_id);
 					post('result', msg.id, res.result);

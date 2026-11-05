@@ -270,14 +270,14 @@ func PluginPageContent(v PluginPageView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div><div id=\"plugin-approvals\" class=\"space-y-2 mb-2\" aria-live=\"polite\"></div><div class=\"flex flex-1 min-h-0 gap-3\"><iframe id=\"plugin-frame\" title=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div><div id=\"plugin-startup\" class=\"text-xs mb-2\" role=\"status\">Loading page…</div><div id=\"plugin-approvals\" class=\"space-y-2 mb-2\" aria-live=\"polite\"></div><div class=\"flex flex-1 min-h-0 gap-3\"><iframe id=\"plugin-frame\" title=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(v.Title).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 70, Col: 19}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 71, Col: 19}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
@@ -290,7 +290,7 @@ func PluginPageContent(v PluginPageView) templ.Component {
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression(v.AssetURL).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 74, Col: 20}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 75, Col: 20}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -351,7 +351,7 @@ func PluginApprovalCard(v PluginPageView, id, operation, input string) templ.Com
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 92, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 93, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
@@ -364,7 +364,7 @@ func PluginApprovalCard(v PluginPageView, id, operation, input string) templ.Com
 		var templ_7745c5c3_Var20 string
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(operation)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 94, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 95, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 		if templ_7745c5c3_Err != nil {
@@ -377,7 +377,7 @@ func PluginApprovalCard(v PluginPageView, id, operation, input string) templ.Com
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(input)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 95, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 96, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
@@ -390,7 +390,7 @@ func PluginApprovalCard(v PluginPageView, id, operation, input string) templ.Com
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginAPI(v, "/approvals/"+url.PathEscape(id)+"/approve")).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 97, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 98, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -403,7 +403,7 @@ func PluginApprovalCard(v PluginPageView, id, operation, input string) templ.Com
 		var templ_7745c5c3_Var23 string
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginAPI(v, "/approvals/"+url.PathEscape(id)+"/deny")).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 98, Col: 93}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 99, Col: 93}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
@@ -450,7 +450,7 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 			var templ_7745c5c3_Var25 string
 			templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(e.InstanceID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 112, Col: 42}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 113, Col: 42}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 			if templ_7745c5c3_Err != nil {
@@ -463,7 +463,7 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 			var templ_7745c5c3_Var26 string
 			templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID))).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 114, Col: 110}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 115, Col: 110}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 			if templ_7745c5c3_Err != nil {
@@ -476,7 +476,7 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 115, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 116, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 			if templ_7745c5c3_Err != nil {
@@ -489,7 +489,7 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 			var templ_7745c5c3_Var28 string
 			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(e.Title)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 121, Col: 14}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 122, Col: 14}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 			if templ_7745c5c3_Err != nil {
@@ -507,7 +507,7 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 				var templ_7745c5c3_Var29 string
 				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(e.ProjectLabel)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 123, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 124, Col: 58}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
@@ -637,7 +637,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(v.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 179, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 180, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -656,7 +656,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(v.Notice)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 182, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 183, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -674,7 +674,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 		var templ_7745c5c3_Var35 string
 		templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginSettingsURL(v.ProjectID, "/install")).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 186, Col: 80}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 187, Col: 80}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 		if templ_7745c5c3_Err != nil {
@@ -687,7 +687,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 		var templ_7745c5c3_Var36 string
 		templ_7745c5c3_Var36, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginSettingsURL(v.ProjectID, "/install-example")).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 190, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 191, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 		if templ_7745c5c3_Err != nil {
@@ -711,7 +711,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.Package.PluginID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 198, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 199, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 			if templ_7745c5c3_Err != nil {
@@ -724,7 +724,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(p.Package.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 201, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 202, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 			if templ_7745c5c3_Err != nil {
@@ -737,7 +737,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(p.Package.PluginID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 201, Col: 104}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 202, Col: 104}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
@@ -750,7 +750,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(p.Package.Version)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 201, Col: 126}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 202, Col: 126}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -763,7 +763,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(p.Package.ContentHash)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 202, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 203, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -781,7 +781,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				var templ_7745c5c3_Var42 string
 				templ_7745c5c3_Var42, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginSettingsURL(v.ProjectID, "/packages/"+url.PathEscape(p.Package.ID)+"/remove")).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 205, Col: 148}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 206, Col: 148}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 				if templ_7745c5c3_Err != nil {
@@ -812,7 +812,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				var templ_7745c5c3_Var43 string
 				templ_7745c5c3_Var43, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginSettingsURL(v.ProjectID, "/instances")).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 211, Col: 100}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 212, Col: 100}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 				if templ_7745c5c3_Err != nil {
@@ -825,7 +825,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				var templ_7745c5c3_Var44 string
 				templ_7745c5c3_Var44, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf(`{"package_id":%q,"page_id":%q}`, p.Package.ID, page)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 211, Col: 178}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 212, Col: 178}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 				if templ_7745c5c3_Err != nil {
@@ -838,7 +838,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				var templ_7745c5c3_Var45 string
 				templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(page)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 211, Col: 241}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 212, Col: 241}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 				if templ_7745c5c3_Err != nil {
@@ -872,7 +872,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var46 string
 			templ_7745c5c3_Var46, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.Instance.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 223, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 224, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 			if templ_7745c5c3_Err != nil {
@@ -885,7 +885,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var47 string
 			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(r.Instance.Title)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 226, Col: 50}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 227, Col: 50}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 			if templ_7745c5c3_Err != nil {
@@ -898,7 +898,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var48 string
 			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(r.Instance.PluginID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 226, Col: 107}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 227, Col: 107}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 			if templ_7745c5c3_Err != nil {
@@ -911,7 +911,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var49 string
 			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(r.Instance.Version)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 226, Col: 130}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 227, Col: 130}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 			if templ_7745c5c3_Err != nil {
@@ -940,7 +940,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				var templ_7745c5c3_Var50 string
 				templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(r.ProcessStatus)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 234, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 235, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 				if templ_7745c5c3_Err != nil {
@@ -959,7 +959,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				var templ_7745c5c3_Var51 string
 				templ_7745c5c3_Var51, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/approve")).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 240, Col: 143}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 241, Col: 143}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 				if templ_7745c5c3_Err != nil {
@@ -978,7 +978,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				var templ_7745c5c3_Var52 string
 				templ_7745c5c3_Var52, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/disable")).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 243, Col: 131}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 244, Col: 131}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 				if templ_7745c5c3_Err != nil {
@@ -996,7 +996,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				var templ_7745c5c3_Var53 string
 				templ_7745c5c3_Var53, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/enable")).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 245, Col: 142}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 246, Col: 142}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 				if templ_7745c5c3_Err != nil {
@@ -1014,7 +1014,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			var templ_7745c5c3_Var54 string
 			templ_7745c5c3_Var54, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/remove")).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 247, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 248, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 			if templ_7745c5c3_Err != nil {
@@ -1077,7 +1077,7 @@ func pluginPermissionList(perms []PluginPermission, runsProcess bool) templ.Comp
 				var templ_7745c5c3_Var56 string
 				templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 264, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 265, Col: 22}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 				if templ_7745c5c3_Err != nil {
@@ -1090,7 +1090,7 @@ func pluginPermissionList(perms []PluginPermission, runsProcess bool) templ.Comp
 				var templ_7745c5c3_Var57 string
 				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(p.Description)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 264, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 265, Col: 51}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 				if templ_7745c5c3_Err != nil {
@@ -1136,7 +1136,7 @@ func pluginHostBridgeScript() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "<script>\n\t(function () {\n\t\tvar root = document.currentScript.closest('#plugin-page-root');\n\t\tif (!root) return;\n\t\tvar frame = root.querySelector('#plugin-frame');\n\t\tvar handle = root.getAttribute('data-plugin-handle');\n\t\tvar bridgeURL = root.getAttribute('data-bridge-url');\n\t\tvar eventsURL = root.getAttribute('data-events-url');\n\t\tvar retireURL = root.getAttribute('data-retire-url');\n\t\tvar approvalsURL = root.getAttribute('data-approvals-url');\n\t\tvar projectID = root.getAttribute('data-project-id');\n\t\tvar MAX = 65536;\n\t\tvar ALLOWED = ['ready', 'op.invoke', 'context.set', 'analyze.request', 'events.subscribe'];\n\t\tvar dead = false, loads = 0, events = null, subscribed = false, streams = [];\n\t\tvar requests = new AbortController();\n\t\tvar approvalRevision = 0;\n\n\t\tfunction post(type, replyTo, payload) {\n\t\t\tif (dead || !frame.contentWindow) return;\n\t\t\t// Sandboxed frames have an opaque origin, so \"*\" is required; the\n\t\t\t// recipient is pinned to this iframe's window object.\n\t\t\tframe.contentWindow.postMessage({v: 1, type: type, replyTo: replyTo, handle: handle, payload: payload || {}}, '*');\n\t\t}\n\t\tfunction refreshApprovals() {\n\t\t\tvar revision = ++approvalRevision;\n\t\t\tfetch(approvalsURL, {credentials: 'same-origin', signal: requests.signal})\n\t\t\t\t.then(function (r) { if (!r.ok) throw new Error('approvals unavailable'); return r.text(); })\n\t\t\t\t.then(function (html) {\n\t\t\t\t\tif (dead || revision !== approvalRevision) return;\n\t\t\t\t\tvar target = root.querySelector('#plugin-approvals');\n\t\t\t\t\ttarget.innerHTML = html;\n\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(target);\n\t\t\t\t}).catch(function () {});\n\t\t}\n\t\tfunction startEvents() {\n\t\t\tif (events || dead) return;\n\t\t\tevents = new EventSource(eventsURL + '&handle=' + encodeURIComponent(handle));\n\t\t\tevents.onopen = function () { if (subscribed) post('event', null, {type: 'page.refresh'}); refreshApprovals(); };\n\t\t\tevents.onmessage = function (e) {\n\t\t\t\tif (dead) return;\n\t\t\t\tvar ev; try { ev = JSON.parse(e.data); } catch (_) { return; }\n\t\t\t\tif (ev.type === 'approval.pending') refreshApprovals();\n\t\t\t\tif (subscribed) post('event', null, ev);\n\t\t\t};\n\t\t\tevents.addEventListener('closed', function () { events.close(); events = null; });\n\t\t}\n\t\tfunction streamAnalysis(execID) {\n\t\t\tif (dead) return;\n\t\t\tif (!window.openVibelyLive) { post('analysis.done', null, {exec_id: execID, error: 'live transport unavailable'}); return; }\n\t\t\tvar s = window.openVibelyLive.execution(execID, 0, projectID);\n\t\t\tstreams.push(s);\n\t\t\ts.addEventListener('message', function (e) { post('analysis.delta', null, {exec_id: execID, text: e.data}); });\n\t\t\ts.addEventListener('done', function () { post('analysis.done', null, {exec_id: execID}); });\n\t\t\ts.addEventListener('error', function (e) { post('analysis.done', null, {exec_id: execID, error: e.data || 'analysis failed'}); });\n\t\t}\n\t\tfunction cleanup() {\n\t\t\tif (dead) return;\n\t\t\tdead = true;\n\t\t\trequests.abort();\n\t\t\tif (events) { events.close(); events = null; }\n\t\t\tstreams.forEach(function (s) { try { s.close(); } catch (_) {} });\n\t\t\ttry { fetch(retireURL + '&handle=' + encodeURIComponent(handle), {method: 'POST', keepalive: true, credentials: 'same-origin', headers: {'X-OpenVibely-Plugin-Bridge': '1'}}).catch(function () {}); } catch (_) {}\n\t\t\twindow.removeEventListener('message', onMessage);\n\t\t\tdocument.removeEventListener('htmx:beforeSwap', onSwap);\n\t\t\twindow.removeEventListener('pagehide', onPageHide);\n\t\t}\n\t\tfunction onPageHide(e) {\n\t\t\tcleanup();\n\t\t\t// A bfcache document contains a retired capability. Obtain a new page load\n\t\t\t// rather than reviving old subscriptions or replaying unfinished requests.\n\t\t\tif (e && e.persisted) window.addEventListener('pageshow', function (event) {\n\t\t\t\tif (event.persisted) window.location.reload();\n\t\t\t}, {once: true});\n\t\t}\n\t\tfunction onSwap(e) {\n\t\t\tvar t = e.detail && e.detail.target;\n\t\t\tif (t && (t.id === 'main-content' || t.contains(root))) cleanup();\n\t\t}\n\t\tfunction onMessage(ev) {\n\t\t\tif (dead || ev.source !== frame.contentWindow) return;\n\t\t\tvar msg = ev.data;\n\t\t\tif (!msg || typeof msg !== 'object' || msg.v !== 1 || msg.handle !== handle || typeof msg.id !== 'string' || ALLOWED.indexOf(msg.type) < 0) return;\n\t\t\tvar body;\n\t\t\ttry { body = JSON.stringify({v: 1, type: msg.type, id: msg.id, handle: msg.handle, payload: msg.payload || {}}); } catch (_) { return; }\n\t\t\tif (body.length > MAX) { post('error', msg.id, {message: 'bridge message too large'}); return; }\n\t\t\tfetch(bridgeURL, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OpenVibely-Plugin-Bridge': '1'}, body: body, signal: requests.signal})\n\t\t\t\t.then(function (r) { return r.json(); })\n\t\t\t\t.then(function (res) {\n\t\t\t\tif (dead) return;\n\t\t\t\t\tif (!res || !res.ok) { post('error', msg.id, {message: (res && res.error) || 'request failed'}); return; }\n\t\t\t\t\tif (msg.type === 'events.subscribe') { subscribed = true; startEvents(); post('event', null, {type: 'page.refresh'}); }\n\t\t\t\t\tif (msg.type === 'analyze.request' && res.result && res.result.exec_id) streamAnalysis(res.result.exec_id);\n\t\t\t\t\tpost('result', msg.id, res.result);\n\t\t\t\t})\n\t\t\t\t.catch(function () { post('error', msg.id, {message: 'network error'}); });\n\t\t}\n\t\tframe.addEventListener('load', function () {\n\t\t\tloads++;\n\t\t\t// The bridge is bound to the entry document; a navigated frame loses it.\n\t\t\tif (loads > 1) { cleanup(); root.querySelector('#plugin-approvals').textContent = 'The plugin page navigated away; reload to reconnect.'; }\n\t\t});\n\t\twindow.addEventListener('message', onMessage);\n\t\tdocument.addEventListener('htmx:beforeSwap', onSwap);\n\t\twindow.addEventListener('pagehide', onPageHide, {once: true});\n\t\tstartEvents();\n\t\trefreshApprovals();\n\t\tvar toggle = root.querySelector('[data-plugin-chat-toggle]');\n\t\tvar chat = root.querySelector('#page-side-chat');\n\t\tif (toggle && chat) toggle.addEventListener('click', function () {\n\t\t\tvar open = chat.classList.toggle('hidden') === false;\n\t\t\tchat.classList.toggle('flex', open);\n\t\t\ttoggle.setAttribute('aria-expanded', open ? 'true' : 'false');\n\t\t\tif (open) { var m = chat.querySelector('#page-chat-messages'); if (m) m.scrollTop = m.scrollHeight; }\n\t\t});\n\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "<script>\n\t(function () {\n\t\tvar root = document.currentScript.closest('#plugin-page-root');\n\t\tif (!root) return;\n\t\tvar frame = root.querySelector('#plugin-frame');\n\t\tvar handle = root.getAttribute('data-plugin-handle');\n\t\tvar bridgeURL = root.getAttribute('data-bridge-url');\n\t\tvar eventsURL = root.getAttribute('data-events-url');\n\t\tvar retireURL = root.getAttribute('data-retire-url');\n\t\tvar approvalsURL = root.getAttribute('data-approvals-url');\n\t\tvar projectID = root.getAttribute('data-project-id');\n\t\tvar MAX = 65536;\n\t\tvar ALLOWED = ['ready', 'op.invoke', 'context.set', 'analyze.request', 'events.subscribe', 'page.loaded', 'page.failed'];\n\t\tvar dead = false, loads = 0, events = null, subscribed = false, streams = [];\n\t\tvar requests = new AbortController();\n\t\tvar approvalRevision = 0;\n\t\tvar startupTimer = setTimeout(function () {\n\t\t\tonMessage({source: frame.contentWindow, data: {v: 1, handle: handle, id: 'startup-timeout', type: 'page.failed', payload: {error: 'Page did not confirm startup within 30 seconds.'}}});\n\t\t}, 30000);\n\n\t\tfunction post(type, replyTo, payload) {\n\t\t\tif (dead || !frame.contentWindow) return;\n\t\t\t// Sandboxed frames have an opaque origin, so \"*\" is required; the\n\t\t\t// recipient is pinned to this iframe's window object.\n\t\t\tframe.contentWindow.postMessage({v: 1, type: type, replyTo: replyTo, handle: handle, payload: payload || {}}, '*');\n\t\t}\n\t\tfunction refreshApprovals() {\n\t\t\tvar revision = ++approvalRevision;\n\t\t\tfetch(approvalsURL, {credentials: 'same-origin', signal: requests.signal})\n\t\t\t\t.then(function (r) { if (!r.ok) throw new Error('approvals unavailable'); return r.text(); })\n\t\t\t\t.then(function (html) {\n\t\t\t\t\tif (dead || revision !== approvalRevision) return;\n\t\t\t\t\tvar target = root.querySelector('#plugin-approvals');\n\t\t\t\t\ttarget.innerHTML = html;\n\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(target);\n\t\t\t\t}).catch(function () {});\n\t\t}\n\t\tfunction startEvents() {\n\t\t\tif (events || dead) return;\n\t\t\tevents = new EventSource(eventsURL + '&handle=' + encodeURIComponent(handle));\n\t\t\tevents.onopen = function () { if (subscribed) post('event', null, {type: 'page.refresh'}); refreshApprovals(); };\n\t\t\tevents.onmessage = function (e) {\n\t\t\t\tif (dead) return;\n\t\t\t\tvar ev; try { ev = JSON.parse(e.data); } catch (_) { return; }\n\t\t\t\tif (ev.type === 'approval.pending') refreshApprovals();\n\t\t\t\tif (subscribed) post('event', null, ev);\n\t\t\t};\n\t\t\tevents.addEventListener('closed', function () { events.close(); events = null; });\n\t\t}\n\t\tfunction streamAnalysis(execID) {\n\t\t\tif (dead) return;\n\t\t\tif (!window.openVibelyLive) { post('analysis.done', null, {exec_id: execID, error: 'live transport unavailable'}); return; }\n\t\t\tvar s = window.openVibelyLive.execution(execID, 0, projectID);\n\t\t\tstreams.push(s);\n\t\t\ts.addEventListener('message', function (e) { post('analysis.delta', null, {exec_id: execID, text: e.data}); });\n\t\t\ts.addEventListener('done', function () { post('analysis.done', null, {exec_id: execID}); });\n\t\t\ts.addEventListener('error', function (e) { post('analysis.done', null, {exec_id: execID, error: e.data || 'analysis failed'}); });\n\t\t}\n\t\tfunction cleanup() {\n\t\t\tif (dead) return;\n\t\t\tdead = true;\n\t\t\tclearTimeout(startupTimer);\n\t\t\trequests.abort();\n\t\t\tif (events) { events.close(); events = null; }\n\t\t\tstreams.forEach(function (s) { try { s.close(); } catch (_) {} });\n\t\t\ttry { fetch(retireURL + '&handle=' + encodeURIComponent(handle), {method: 'POST', keepalive: true, credentials: 'same-origin', headers: {'X-OpenVibely-Plugin-Bridge': '1'}}).catch(function () {}); } catch (_) {}\n\t\t\twindow.removeEventListener('message', onMessage);\n\t\t\tdocument.removeEventListener('htmx:beforeSwap', onSwap);\n\t\t\twindow.removeEventListener('pagehide', onPageHide);\n\t\t}\n\t\tfunction onPageHide(e) {\n\t\t\tcleanup();\n\t\t\t// A bfcache document contains a retired capability. Obtain a new page load\n\t\t\t// rather than reviving old subscriptions or replaying unfinished requests.\n\t\t\tif (e && e.persisted) window.addEventListener('pageshow', function (event) {\n\t\t\t\tif (event.persisted) window.location.reload();\n\t\t\t}, {once: true});\n\t\t}\n\t\tfunction onSwap(e) {\n\t\t\tvar t = e.detail && e.detail.target;\n\t\t\tif (t && (t.id === 'main-content' || t.contains(root))) cleanup();\n\t\t}\n\t\tfunction onMessage(ev) {\n\t\t\tif (dead || ev.source !== frame.contentWindow) return;\n\t\t\tvar msg = ev.data;\n\t\t\tif (!msg || typeof msg !== 'object' || msg.v !== 1 || msg.handle !== handle || typeof msg.id !== 'string' || ALLOWED.indexOf(msg.type) < 0) return;\n\t\t\tvar body;\n\t\t\ttry { body = JSON.stringify({v: 1, type: msg.type, id: msg.id, handle: msg.handle, payload: msg.payload || {}}); } catch (_) { return; }\n\t\t\tif (body.length > MAX) { post('error', msg.id, {message: 'bridge message too large'}); return; }\n\t\t\tfetch(bridgeURL, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OpenVibely-Plugin-Bridge': '1'}, body: body, signal: requests.signal})\n\t\t\t\t.then(function (r) { return r.json(); })\n\t\t\t\t.then(function (res) {\n\t\t\t\tif (dead) return;\n\t\t\t\t\tif (!res || !res.ok) { post('error', msg.id, {message: (res && res.error) || 'request failed'}); return; }\n\t\t\t\t\tif (msg.type === 'page.loaded' || msg.type === 'page.failed') {\n                        clearTimeout(startupTimer);\n                        var status = root.querySelector('#plugin-startup');\n                        if (status && res.result) status.textContent = res.result.state === 'loaded' ? 'Page loaded' : 'Page failed: ' + (res.result.error || 'Reload to retry.');\n                    }\n\t\t\t\t\tif (msg.type === 'events.subscribe') { subscribed = true; startEvents(); post('event', null, {type: 'page.refresh'}); }\n\t\t\t\t\tif (msg.type === 'analyze.request' && res.result && res.result.exec_id) streamAnalysis(res.result.exec_id);\n\t\t\t\t\tpost('result', msg.id, res.result);\n\t\t\t\t})\n\t\t\t\t.catch(function () { post('error', msg.id, {message: 'network error'}); });\n\t\t}\n\t\tframe.addEventListener('load', function () {\n\t\t\tloads++;\n\t\t\t// The bridge is bound to the entry document; a navigated frame loses it.\n\t\t\tif (loads > 1) { cleanup(); root.querySelector('#plugin-approvals').textContent = 'The plugin page navigated away; reload to reconnect.'; }\n\t\t});\n\t\twindow.addEventListener('message', onMessage);\n\t\tdocument.addEventListener('htmx:beforeSwap', onSwap);\n\t\twindow.addEventListener('pagehide', onPageHide, {once: true});\n\t\tstartEvents();\n\t\trefreshApprovals();\n\t\tvar toggle = root.querySelector('[data-plugin-chat-toggle]');\n\t\tvar chat = root.querySelector('#page-side-chat');\n\t\tif (toggle && chat) toggle.addEventListener('click', function () {\n\t\t\tvar open = chat.classList.toggle('hidden') === false;\n\t\t\tchat.classList.toggle('flex', open);\n\t\t\ttoggle.setAttribute('aria-expanded', open ? 'true' : 'false');\n\t\t\tif (open) { var m = chat.querySelector('#page-chat-messages'); if (m) m.scrollTop = m.scrollHeight; }\n\t\t});\n\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

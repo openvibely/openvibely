@@ -100,9 +100,9 @@
     setStatus(op === "refresh_data" ? "Refreshing…" : "Loading…");
     return send("op.invoke", { operation: op, input: { region: filters().region } }).then(function (out) {
       if (revision !== loadRevision) return;
-      report = out; render(); shareContext().catch(function (e) { setStatus(e.message); });
+      report = out; render(); send("page.loaded", {}).catch(function () {}); shareContext().catch(function (e) { setStatus(e.message); });
       setStatus("Updated " + new Date(out.generated_at).toLocaleTimeString());
-    }).catch(function (e) { setStatus("Error: " + e.message); });
+    }).catch(function (e) { setStatus("Error: " + e.message); send("page.failed", {error: String(e.message).slice(0, 500)}).catch(function () {}); });
   }
 
   document.getElementById("refresh").addEventListener("click", function () { load("refresh_data"); });

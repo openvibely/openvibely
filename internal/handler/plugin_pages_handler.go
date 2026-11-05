@@ -303,6 +303,13 @@ func (h *Handler) PluginAsset(c echo.Context) error {
 	hdr.Set("Cache-Control", "no-store")
 	hdr.Set("Content-Type", ctype)
 	hdr.Set("X-Frame-Options", "SAMEORIGIN")
+	if rel == r.Page.Entry {
+		data, err := io.ReadAll(io.LimitReader(f, 64<<20))
+		if err != nil {
+			return err
+		}
+		return c.HTML(http.StatusOK, instrumentPluginHTML(string(data), hd.Token))
+	}
 	return c.Stream(http.StatusOK, ctype, f)
 }
 
@@ -362,6 +369,21 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 	integration := h.pagePlugins.Integration(r)
 	principal := h.authPrincipalID(c)
 	switch msg.Type {
+	case pageplugins.BridgePageLoaded, pageplugins.BridgePageFailed:
+		var report struct {
+			Error string `json:"error,omitempty"`
+		}
+		if err := pageplugins.DecodeStrict(msg.Payload, &report); err != nil {
+			return bridgeError(c, http.StatusBadRequest, "invalid startup report")
+		}
+		state := "loaded"
+		if msg.Type == pageplugins.BridgePageFailed {
+			state = "failed"
+		}
+		if err := h.pagePlugins.ReportStartup(hd.Token, state, report.Error); err != nil {
+			return bridgeError(c, http.StatusBadRequest, err.Error())
+		}
+		return bridgeResult(c, h.pagePlugins.StartupStatus(r.Instance.ID, r.Package.ContentHash))
 	case pageplugins.BridgeReady:
 		type opInfo struct {
 			Name        string `json:"name"`

@@ -6,6 +6,7 @@ import "strings"
 // Return a fresh map so per-request restrictions cannot mutate the defaults.
 func TaskToolNames(createdVia string) map[string]bool {
 	allowed := map[string]bool{
+		"get_custom_page_status":                 true,
 		"get_custom_page_guide":                  true,
 		"publish_custom_page":                    true,
 		"list_tasks":                             true,

@@ -169,3 +169,49 @@ func TestCustomPageNativePublicationNeverExecutes(t *testing.T) {
 		t.Fatalf("native backend started: %s", status)
 	}
 }
+
+func TestCustomPageStartupStatusTool(t *testing.T) {
+	env := setupPluginPages(t)
+	task, _ := customPageTask(t, env)
+	rt := env.h.initialTaskRuntimeTools(t.Context(), *task, "exec", map[string]bool{"get_custom_page_status": true})
+	instances, err := env.h.pagePlugins.ListEnabled(t.Context(), task.ProjectID)
+	if err != nil || len(instances) == 0 {
+		t.Fatal(err)
+	}
+	id := instances[0].ID
+	call := func(id string) (string, bool) {
+		t.Helper()
+		raw, handled, bad, err := rt.Executor(t.Context(), "get_custom_page_status", json.RawMessage(`{"instance_id":"`+id+`"}`))
+		if !handled || err != nil {
+			t.Fatalf("status unavailable: %s %v", raw, err)
+		}
+		return raw, bad
+	}
+	raw, bad := call(id)
+	if bad || !strings.Contains(raw, "not_opened") {
+		t.Fatal(raw)
+	}
+	r, err := env.h.pagePlugins.Resolve(t.Context(), id, task.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hd, err := env.h.pagePlugins.IssueHandle(r, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = env.h.pagePlugins.ReportStartup(hd.Token, "loaded", ""); err != nil {
+		t.Fatal(err)
+	}
+	raw, bad = call(id)
+	if bad || !strings.Contains(raw, `"state":"loaded"`) {
+		t.Fatal(raw)
+	}
+	other, err := env.h.pagePlugins.ListEnabled(t.Context(), env.projB.ID)
+	if err != nil || len(other) == 0 {
+		t.Fatal(err)
+	}
+	_, _, bad, err = rt.Executor(t.Context(), "get_custom_page_status", json.RawMessage(`{"instance_id":"`+other[0].ID+`"}`))
+	if !bad && err == nil {
+		t.Fatal("cross-project status exposed")
+	}
+}

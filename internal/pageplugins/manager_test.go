@@ -654,3 +654,110 @@ func TestCrashRecoveryLoadsLatestSavedStatePerInstance(t *testing.T) {
 	crash(pa)
 	assertState(pa, a, `{}`)
 }
+
+func TestStartupObservations(t *testing.T) {
+	m, _, project, _ := newTestManager(t)
+	in := enabledSales(t, m, project)
+	r, err := m.Resolve(t.Context(), in.ID, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := func() StartupStatus { return m.StartupStatus(in.ID, r.Package.ContentHash) }
+	if status().State != "not_opened" {
+		t.Fatal(status())
+	}
+	now := time.Now()
+	m.now = func() time.Time { return now }
+	first, _ := m.IssueHandle(r, "local")
+	if status().State != "loading" {
+		t.Fatal(status())
+	}
+	if err := m.ReportStartup(first.Token, "loaded", ""); err != nil {
+		t.Fatal(err)
+	}
+	if status().State != "loaded" {
+		t.Fatal(status())
+	}
+	second, _ := m.IssueHandle(r, "local")
+	_ = m.ReportStartup(first.Token, "failed", "old tab")
+	if status().State != "loading" {
+		t.Fatal("old tab overwrote latest load")
+	}
+	_ = m.ReportStartup(second.Token, "failed", "syntax error")
+	_ = m.ReportStartup(second.Token, "loaded", "")
+	if status().State != "failed" || status().Error != "syntax error" {
+		t.Fatal(status())
+	}
+	third, _ := m.IssueHandle(r, "local")
+	now = now.Add(StartupTimeout)
+	if status().State != "failed" {
+		t.Fatal("timeout missing")
+	}
+	if m.StartupStatus(in.ID, "changed").State != "not_opened" {
+		t.Fatal("wrong package observation")
+	}
+	m.RetireHandle(third.Token)
+	if m.ReportStartup(third.Token, "loaded", "") == nil {
+		t.Fatal("retired token accepted")
+	}
+	if m.ReportStartup(second.Token, "failed", strings.Repeat("x", 2049)) == nil {
+		t.Fatal("unbounded error")
+	}
+}
+
+func TestManagerPreservesExhaustedRestartBudget(t *testing.T) {
+	m, _, project, _ := newTestManager(t)
+	pkg, err := m.InstallFromDir(t.Context(), writeProcessPackage(t), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := m.CreateInstance(t.Context(), project, pkg.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.Approve(t.Context(), in.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.Enable(t.Context(), in.ID); err != nil {
+		t.Fatal(err)
+	}
+	r, err := m.Resolve(t.Context(), in.ID, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	integration := m.Integration(r)
+	original := m.procs[in.ID].proc
+	for i := 0; i <= MaxRestarts; i++ {
+		original.mu.Lock()
+		exited := original.exited
+		original.mu.Unlock()
+		_, _ = original.Call(t.Context(), "operation/invoke", map[string]any{"operation": "crash"})
+		select {
+		case <-exited:
+		case <-time.After(3 * time.Second):
+			t.Fatal("did not crash")
+		}
+		_, err = integration.Invoke(t.Context(), pageintegration.Caller{}, "echo", json.RawMessage(`{}`))
+		if i < MaxRestarts && err != nil {
+			t.Fatal(err)
+		}
+		if i == MaxRestarts && !errors.Is(err, ErrBackendFailed) {
+			t.Fatalf("budget not enforced: %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		_, err = integration.Invoke(t.Context(), pageintegration.Caller{}, "echo", json.RawMessage(`{}`))
+		if !errors.Is(err, ErrBackendFailed) {
+			t.Fatalf("budget reset: %v", err)
+		}
+		if m.procs[in.ID].proc != original {
+			t.Fatal("replaced failed supervisor")
+		}
+	}
+	if err = m.Enable(t.Context(), in.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = integration.Invoke(t.Context(), pageintegration.Caller{}, "echo", json.RawMessage(`{}`)); err != nil {
+		t.Fatal("explicit retry failed", err)
+	}
+}

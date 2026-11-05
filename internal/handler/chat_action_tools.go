@@ -281,6 +281,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 	})
 	goalHandlers := h.taskGoalActionHandlers(params)
 	handlers := map[string]chatcontrol.RuntimeActionHandler{
+		"get_custom_page_status": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.customPageStatusTool(ctx, params, input)
+		},
 		"get_custom_page_guide": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return pageplugins.AuthoringGuide, nil
 		},

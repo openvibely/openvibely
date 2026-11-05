@@ -198,3 +198,13 @@ The plugin adapter is `internal/pageplugins/conversation.go`. Shared persistence
 - Backends are not OS-sandboxed (see above). Frontend-only plugins and builtins never execute code on the host.
 - Approvals for agent actions and page contexts are kept in memory and are lost on restart; the agent is told the action was declined.
 - The side chat uses the project's default agent selection and runs one turn at a time per instance.
+
+## Browser startup reports
+
+Task agents can query `get_custom_page_status(instance_id)` for instances in their task's project. Publishing alone never proves browser activation. The response contains separate browser and backend states; the tool does not open a browser, launch code, or reset retry counters.
+
+A page must send `page.loaded` with `{}` after initialization and required initial reads. It can send `page.failed` with `{error:"reason"}` (maximum 2048 bytes). The host injects an error observer before page scripts to capture uncaught errors, failed resources, and unhandled rejections without weakening the iframe sandbox or modifying installed files. Missing readiness becomes failure after 30 seconds. Successful startup is not a functional test.
+
+Reports are in memory, tied to package content and the latest page-load handle. States are `not_opened`, `loading`, `loaded`, and `failed`. No browser load means `not_opened`; OV restart clears observations. Old tabs cannot overwrite newer reports; a failed load requires reload to retry. Error text is untrusted plugin data. Page navigation still detaches the UI without cancelling saved AI work.
+
+A backend that exhausts its crash-restart budget stays failed: ordinary calls cannot replace the supervisor to reset the counter. Explicitly disable and enable the instance to retry after correcting the problem. Startup reports do not affect agent tool permissions or database storage.

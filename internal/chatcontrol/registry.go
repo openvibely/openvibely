@@ -990,6 +990,15 @@ var registry = []ActionDef{
 		Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{}, AdditionalProperties: toolschema.Pointer(false)},
 	},
 	{
+		Name:        "get_custom_page_status",
+		Description: "Check startup observations for a published page in the current coding task's project. Returns not_opened, loading, loaded or failed, bounded untrusted browser error text, the package content hash, and backend status. Does not open a browser, test every feature, execute code or reset retries. Browser observations reset when OV restarts. Requires a persisted coding task. Use the instance_id returned by publish_custom_page.",
+		Domain:      DomainProjects, Access: AccessRead, Sensitivity: SensitivityNormal,
+		AllowedModes: bothModes(), Surfaces: webAPISurfaces(), IncludeThreadTools: true,
+		Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{
+			"instance_id": {Type: "string", Description: "Page instance ID returned by publish_custom_page."},
+		}, Required: []string{"instance_id"}, AdditionalProperties: toolschema.Pointer(false)},
+	},
+	{
 		Name:        "publish_custom_page",
 		Description: "Install a custom page authored in the current coding task's workspace and register it in that task's owning project. Call get_custom_page_guide first, build/validate the bundle, then publish it; do not ask the user to manually import it. Frontend-only pages are enabled and appear in the left rail. Native backends remain disabled pending administrator approval; this tool NEVER approves or executes native code. Identical retries reuse the instance; changed content needs a new version. Requires a persisted task, not project chat.",
 		Domain:      DomainProjects, Access: AccessWrite, Sensitivity: SensitivityNormal,

@@ -11,7 +11,7 @@ function emitter() {
  return {addEventListener(k,f){listeners.set(k,f)},removeEventListener(k,f){if(listeners.get(k)===f)listeners.delete(k)},emit(k,e){listeners.get(k)?.(e)}};
 }
 function setup() {
- const posts=[],requests=[],events=[],streams=[];
+ const posts=[],requests=[],events=[],streams=[],timers=[];
  const frame={...emitter(),contentWindow:{postMessage(m){posts.push(m)}}};
  const approvals={innerHTML:''};
  const attrs={'data-plugin-handle':'handle','data-bridge-url':'/bridge','data-events-url':'/events?project_id=p','data-retire-url':'/retire?project_id=p','data-approvals-url':'/approvals','data-project-id':'p'};
@@ -20,10 +20,10 @@ function setup() {
  const document={...emitter(),currentScript:{closest(){return root}}};
  const fetch=(url,opts)=>new Promise(resolve=>requests.push({url,opts,resolve}));
  function EventSource(){const s={...emitter(),close(){s.closed=true}};events.push(s);return s;}
- vm.runInNewContext(source,{window,document,fetch,EventSource,AbortController,console});
+ vm.runInNewContext(source,{window,document,fetch,EventSource,AbortController,console,setTimeout:(fn)=>{timers.push(fn);return timers.length-1},clearTimeout:(id)=>{timers[id]=null}});
  const send=(type,id='m')=>window.emit('message',{source:frame.contentWindow,data:{v:1,handle:'handle',id,type,payload:{}}});
  const respond=(req,result)=>req.resolve({ok:true,json:async()=>({ok:true,result}),text:async()=>result});
- return {posts,requests,events,streams,frame,window,document,root,approvals,send,respond};
+ return {posts,requests,events,streams,timers,frame,window,document,root,approvals,send,respond};
 }
 
 test('reconnect requests fresh page data; navigation closes streams and ignores late analysis',async()=>{
@@ -82,3 +82,13 @@ test('Sales ignores old report responses and publishes context before Analyze',a
  assert.equal(outgoing.some(m=>m.type==='analyze.request'),false);
  reply(context,{});await flush();assert.equal(outgoing.at(-1).type,'analyze.request');
 });
+
+ test('startup timeout reports failure; confirmed startup clears the timeout', async()=>{
+  const h=setup();h.timers[0]();
+  const request=h.requests.find(r=>r.url==='/bridge');
+  assert.equal(JSON.parse(request.opts.body).type,'page.failed');
+  const loaded=setup();loaded.send('page.loaded');
+  loaded.respond(loaded.requests.find(r=>r.url==='/bridge'),{state:'loaded'});await flush();
+  assert.equal(loaded.timers[0],null);
+  const closed=setup();closed.window.emit('pagehide');assert.equal(closed.timers[0],null);
+ });
