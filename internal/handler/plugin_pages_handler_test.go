@@ -383,3 +383,71 @@ func TestPluginChat_ConversationScopeSurvivesReopen(t *testing.T) {
 		t.Fatal("reopened page did not resume its persisted conversation scope")
 	}
 }
+
+func TestPluginDisableCancelsOnlyOwningConversation(t *testing.T) {
+	for _, inline := range []bool{false, true} {
+		name := "side-chat"
+		if inline {
+			name = "inline-analysis"
+		}
+		t.Run(name, func(t *testing.T) {
+			env := setupPluginPages(t)
+			handle := env.openPage(t, env.inA)
+			send := func(in *models.PagePluginInstance) {
+				t.Helper()
+				rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+in.ID+"/chat?project_id="+in.ProjectID, "message=hello", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
+				if rec.Code != http.StatusOK {
+					t.Fatalf("chat: %d %s", rec.Code, rec.Body.String())
+				}
+			}
+			if inline {
+				rec, _ := env.bridge(t, env.inA, env.projA.ID, handle, "analyze.request", `{"prompt":"analyze this report"}`)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("analyze: %d %s", rec.Code, rec.Body.String())
+				}
+			} else {
+				send(env.inA)
+			}
+			a := env.starts[0]
+			send(env.inB)
+			b := env.starts[1]
+			cancelled := make(chan struct{}, 1)
+			env.h.workerSvc.RegisterCancel(a.TaskID, func() { cancelled <- struct{}{} })
+			rec := env.do(t, http.MethodPost, "/settings/plugin-pages/instances/"+env.inA.ID+"/disable?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("disable: %d %s", rec.Code, rec.Body.String())
+			}
+			select {
+			case <-cancelled:
+			default:
+				t.Fatal("existing Stop mechanism was not invoked")
+			}
+			if a.CancellationContext == nil || a.CancellationContext.Err() == nil {
+				t.Fatal("late-starting AI work not cancelled")
+			}
+			if b.CancellationContext == nil || b.CancellationContext.Err() != nil {
+				t.Fatal("other page cancelled")
+			}
+			exec, err := env.h.execRepo.GetByID(t.Context(), a.ExecID)
+			if err != nil || exec.Status != models.ExecCancelled {
+				t.Fatalf("execution not cancelled: %+v %v", exec, err)
+			}
+			other, err := env.h.execRepo.GetByID(t.Context(), b.ExecID)
+			if err != nil || other.Status != models.ExecRunning {
+				t.Fatalf("other execution affected: %+v %v", other, err)
+			}
+			taskID, err := env.mgr.Store().GetConversationTask(t.Context(), env.inA.ID)
+			if err != nil || taskID != a.TaskID {
+				t.Fatal("disable removed saved conversation")
+			}
+			if err := env.mgr.Enable(t.Context(), env.inA.ID); err != nil {
+				t.Fatal(err)
+			}
+			send(env.inA)
+			fresh := env.starts[len(env.starts)-1]
+			if fresh.TaskID != a.TaskID || fresh.CancellationContext.Err() != nil || a.CancellationContext.Err() == nil {
+				t.Fatal("enable did not create a new lifetime for the existing conversation")
+			}
+		})
+	}
+}

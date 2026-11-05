@@ -57,6 +57,8 @@ var (
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
+	// CancellationContext binds work to the owning surface lifetime.
+	CancellationContext context.Context
 	ExecID                      string
 	RetrySourceExecutionID      string
 	TaskID                      string
@@ -322,7 +324,11 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.updateWorkDone != nil {
 		defer params.updateWorkDone()
 	}
-	baseCtx := h.followupAuthorizationContext(context.Background())
+	baseCtx := context.Background()
+	if params.CancellationContext != nil {
+		baseCtx = params.CancellationContext
+	}
+	baseCtx = h.followupAuthorizationContext(baseCtx)
 	if h.organizationSvc != nil && strings.HasPrefix(params.PrincipalID, "user:") {
 		user, err := h.organizationSvc.Store.UserByID(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))
 		if err != nil || user == nil || user.Disabled || user.Role == "" {

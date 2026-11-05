@@ -39,6 +39,10 @@ func runHelperBackend() {
 		reply := func(result any) { send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result}) }
 		switch msg.Method {
 		case "initialize":
+			if len(os.Args) > 3 && os.Args[2] == "--block-init" {
+				_ = os.WriteFile(os.Args[3], []byte("started"), 0600)
+				time.Sleep(30 * time.Second)
+			}
 			fmt.Fprintln(os.Stderr, "helper backend initialized\x1b[0m")
 			reply(map[string]string{"protocol": ProtocolVersion})
 		case "operation/invoke":
@@ -51,6 +55,7 @@ func runHelperBackend() {
 			case "echo":
 				reply(map[string]any{"echo": p.Input, "pid": os.Getpid()})
 			case "slow":
+				send(map[string]any{"jsonrpc": "2.0", "method": "events/publish", "params": map[string]any{"type": "operation.started"}})
 				go func(id *int64) {
 					time.Sleep(10 * time.Second)
 					send(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{}})

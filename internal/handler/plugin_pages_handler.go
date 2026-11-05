@@ -44,6 +44,9 @@ var errPluginChatBusy = errors.New("a response is already in progress for this p
 func (h *Handler) SetPagePlugins(m *pageplugins.Manager) {
 	h.pagePlugins = m
 	if m != nil {
+		m.OnDisable = func(ctx context.Context, instanceID string) error {
+			return h.cancelPluginConversation(ctx, instanceID)
+		}
 		m.Approvals.OnPending = func(a pageintegration.Approval) {
 			m.Hub.Publish(a.InstanceID, pageintegration.Event{Type: "approval.pending", Operation: a.Operation, At: time.Now().UTC()})
 		}
@@ -557,7 +560,11 @@ func (h *Handler) pluginConversationTask(ctx context.Context, r *pageplugins.Res
 // startPluginChatTurn runs one side-chat turn through the shared streaming
 // pipeline with a per-turn page context snapshot and server-resolved page tools.
 func (h *Handler) startPluginChatTurn(c echo.Context, r *pageplugins.Resolved, message string) (*models.Execution, error) {
-	ctx := c.Request().Context()
+	ctx, done, err := h.pagePlugins.BeginInstance(c.Request().Context(), r.Instance.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	hasModels, err := h.hasConfiguredModels(c)
 	if err != nil {
 		return nil, err
@@ -619,20 +626,21 @@ func (h *Handler) startPluginChatTurn(c echo.Context, r *pageplugins.Resolved, m
 		history = nil
 	}
 	if err := h.startStreamingResponse(streamingResponseParams{
-		ExecID:         exec.ID,
-		TaskID:         task.ID,
-		Message:        message,
-		Agent:          *agent,
-		ChatHistory:    filterChatHistory(history, exec.ID),
-		ProjectID:      projectID,
-		PrincipalID:    principal,
-		SystemContext:  combineContexts(h.getPersonalityContext(ctx, projectID), pageContext),
-		WorkDir:        h.resolveWorkDir(ctx, projectID),
-		IsTaskFollowup: false,
-		TaskScopedChat: true,
-		ChatMode:       models.ChatModeOrchestrate,
-		Surface:        chatcontrol.SurfaceWeb,
-		RuntimeTools:   tools,
+		CancellationContext: h.pagePlugins.LifetimeContext(r.Instance.ID),
+		ExecID:              exec.ID,
+		TaskID:              task.ID,
+		Message:             message,
+		Agent:               *agent,
+		ChatHistory:         filterChatHistory(history, exec.ID),
+		ProjectID:           projectID,
+		PrincipalID:         principal,
+		SystemContext:       combineContexts(h.getPersonalityContext(ctx, projectID), pageContext),
+		WorkDir:             h.resolveWorkDir(ctx, projectID),
+		IsTaskFollowup:      false,
+		TaskScopedChat:      true,
+		ChatMode:            models.ChatModeOrchestrate,
+		Surface:             chatcontrol.SurfaceWeb,
+		RuntimeTools:        tools,
 	}); err != nil {
 		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
@@ -648,29 +656,42 @@ func (h *Handler) PluginChatStop(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	taskID, err := h.pagePlugins.Store().GetConversationTask(ctx, r.Instance.ID)
+	if err := h.cancelPluginConversation(c.Request().Context(), r.Instance.ID); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// Shared by the Stop button and disable/remove. Inline analysis uses the same
+// conversation task, so it is cancelled through the same execution machinery.
+func (h *Handler) cancelPluginConversation(ctx context.Context, instanceID string) error {
+	lock := persistence.LockTaskLifecycle("page-chat:" + instanceID)
+	defer lock()
+	taskID, err := h.pagePlugins.Store().GetConversationTask(ctx, instanceID)
 	if err != nil {
 		return err
 	}
 	if taskID == "" {
-		return c.NoContent(http.StatusNoContent)
+		return nil
 	}
 	observed, cutoff, err := h.taskSvc.ObserveTaskCancellation(ctx, taskID)
-	if err != nil || observed == nil || observed.ProjectID != r.Instance.ProjectID {
-		return c.NoContent(http.StatusNoContent)
+	if err != nil {
+		return err
+	}
+	if observed == nil {
+		return nil
 	}
 	if observed.Status != models.StatusRunning && observed.Status != models.StatusQueued {
-		return c.NoContent(http.StatusNoContent)
+		return nil
 	}
 	if err := h.taskSvc.CancelTaskObserved(ctx, observed, cutoff); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if err := h.taskRepo.UpdateCategory(ctx, taskID, pagePluginChatCategory); err != nil {
 		return err
 	}
 	h.cancelActiveExecutionsAndPublish(ctx, taskID, "PluginChatStop", cutoff)
-	return c.NoContent(http.StatusNoContent)
+	return nil
 }
 
 // PluginApprovals lists pending agent actions awaiting confirmation on this page.

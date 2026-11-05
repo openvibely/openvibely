@@ -113,6 +113,9 @@ func (p *Process) Start(ctx context.Context) error {
 }
 
 func (p *Process) startLocked(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if p.stopped {
 		return ErrBackendStopped
 	}
@@ -412,6 +415,15 @@ func (p *Process) Stop() {
 		p.mu.Unlock()
 		<-exited
 	}
+}
+
+// Abort revokes a process without writing to its protocol pipe. This allows
+// disabling an instance to interrupt a blocked write or startup handshake.
+func (p *Process) Abort() {
+	p.mu.Lock()
+	p.stopped = true
+	p.killLocked()
+	p.mu.Unlock()
 }
 
 // PID is exposed for tests and diagnostics.

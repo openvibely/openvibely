@@ -97,6 +97,9 @@ type Manager struct {
 	handles   map[string]Handle
 	manifests map[string]*Manifest
 	instMu    map[string]*sync.Mutex
+	lifetimes map[string]*instanceLifetime
+	// OnDisable cancels host-owned work after admission is closed.
+	OnDisable func(context.Context, string) error
 	now       func() time.Time
 }
 
@@ -113,6 +116,7 @@ func NewManager(store persistence.PagePluginStore, root string) *Manager {
 		handles:   map[string]Handle{},
 		manifests: map[string]*Manifest{},
 		instMu:    map[string]*sync.Mutex{},
+		lifetimes: map[string]*instanceLifetime{},
 		now:       time.Now,
 	}
 	m.builtins[SalesBuiltinName] = salesBuiltin{}
@@ -287,6 +291,12 @@ func (m *Manager) Approve(ctx context.Context, instanceID, approvedBy string) er
 
 // Enable turns an instance on, starting its backend process when it has one.
 func (m *Manager) Enable(ctx context.Context, instanceID string) error {
+	lifecycle := m.instanceLock("lifecycle:" + instanceID)
+	lifecycle.Lock()
+	defer lifecycle.Unlock()
+	lock := m.instanceLock(instanceID)
+	lock.Lock()
+	defer lock.Unlock()
 	in, pkg, man, err := m.load(ctx, instanceID)
 	if err != nil {
 		return err
@@ -298,6 +308,21 @@ func (m *Manager) Enable(ctx context.Context, instanceID string) error {
 		return err
 	}
 	in.Enabled = true
+	m.mu.Lock()
+	life := m.lifetimes[instanceID]
+	if life == nil || life.ctx.Err() != nil {
+		lifetimeCtx, cancel := context.WithCancel(context.Background())
+		m.lifetimes[instanceID] = &instanceLifetime{ctx: lifetimeCtx, cancel: cancel}
+	}
+	life = m.lifetimes[instanceID]
+	m.mu.Unlock()
+	startupCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(life.ctx, cancel)
+	defer func() { stop(); cancel() }()
+	if life.ctx.Err() != nil {
+		cancel()
+	}
+	ctx = startupCtx
 	if man.RunsProcess() {
 		if _, err := m.ensureProcess(ctx, in, pkg, man); err != nil {
 			applog.Infof("[pageplugins] backend for instance %s failed to start: %v", instanceID, err)
@@ -310,17 +335,12 @@ func (m *Manager) Enable(ctx context.Context, instanceID string) error {
 
 // Disable turns an instance off and releases every runtime resource bound to it.
 func (m *Manager) Disable(ctx context.Context, instanceID string) error {
-	if err := m.store.SetInstanceEnabled(ctx, instanceID, false); err != nil {
-		return err
-	}
-	m.releaseInstance(instanceID)
-	return nil
+	return m.deactivate(ctx, instanceID, false)
 }
 
-// RemoveInstance deletes one project instance (and its state and side-chat) without touching others.
+// RemoveInstance first shuts down the instance, then deletes its saved data.
 func (m *Manager) RemoveInstance(ctx context.Context, instanceID string) error {
-	m.releaseInstance(instanceID)
-	return m.store.DeleteInstance(ctx, instanceID)
+	return m.deactivate(ctx, instanceID, true)
 }
 
 // ReleaseProject stops runtime resources for instances of a deleted project.
@@ -346,6 +366,9 @@ func (m *Manager) ReleaseProject(projectID string) {
 
 func (m *Manager) releaseInstance(instanceID string) {
 	m.mu.Lock()
+	if life := m.lifetimes[instanceID]; life != nil {
+		life.cancel()
+	}
 	entry := m.procs[instanceID]
 	delete(m.procs, instanceID)
 	for tok, h := range m.handles {
@@ -355,6 +378,7 @@ func (m *Manager) releaseInstance(instanceID string) {
 	}
 	m.mu.Unlock()
 	if entry != nil {
+		entry.proc.Abort()
 		entry.proc.Stop()
 	}
 	m.Hub.CloseInstance(instanceID)
@@ -365,6 +389,9 @@ func (m *Manager) releaseInstance(instanceID string) {
 // StopAll stops every backend process (server shutdown).
 func (m *Manager) StopAll() {
 	m.mu.Lock()
+	for _, life := range m.lifetimes {
+		life.cancel()
+	}
 	entries := m.procs
 	m.procs = map[string]*procEntry{}
 	m.handles = map[string]Handle{}
@@ -539,7 +566,10 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 		},
 		OnNotify: func(method string, params json.RawMessage) { m.handleNotify(instanceID, man, method, params) },
 	})
+	stopAbort := context.AfterFunc(ctx, proc.Abort)
+	defer stopAbort()
 	if err := proc.Start(ctx); err != nil {
+		proc.Abort()
 		return nil, err
 	}
 	m.mu.Lock()
@@ -617,6 +647,11 @@ func (p *pluginIntegration) Ref() pageintegration.PageRef { return p.r.Ref() }
 func (p *pluginIntegration) Operations() []pageintegration.Operation { return p.r.Manifest.Operations }
 
 func (p *pluginIntegration) Invoke(ctx context.Context, caller pageintegration.Caller, op string, input json.RawMessage) (json.RawMessage, error) {
+	ctx, done, err := p.m.BeginInstance(ctx, p.r.Instance.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	opDef, ok := pageintegration.FindOperation(p, op)
 	if !ok {
 		return nil, pageintegration.ErrOperationNotFound
@@ -631,9 +666,6 @@ func (p *pluginIntegration) Invoke(ctx context.Context, caller pageintegration.C
 		if b == nil {
 			return nil, fmt.Errorf("builtin backend %q unavailable", man.Backend.Builtin)
 		}
-		lock := p.m.instanceLock(p.r.Instance.ID)
-		lock.Lock()
-		defer lock.Unlock()
 		fresh, err := p.m.store.GetInstance(ctx, p.r.Instance.ID)
 		if err != nil {
 			return nil, err
@@ -655,11 +687,19 @@ func (p *pluginIntegration) Invoke(ctx context.Context, caller pageintegration.C
 		}
 		out = res.Output
 	} else {
-		in := p.r.Instance
-		proc, err := p.m.ensureProcess(ctx, &in, &p.r.Package, man)
+		in, err := p.m.store.GetInstance(ctx, p.r.Instance.ID)
 		if err != nil {
 			return nil, err
 		}
+		if in == nil || !in.Enabled || in.ProjectID != p.r.Instance.ProjectID {
+			return nil, ErrDisabled
+		}
+		proc, err := p.m.ensureProcess(ctx, in, &p.r.Package, man)
+		if err != nil {
+			return nil, err
+		}
+		stopAbort := context.AfterFunc(ctx, proc.Abort)
+		defer stopAbort()
 		out, err = proc.Call(ctx, "operation/invoke", map[string]any{
 			"operation": op,
 			"input":     input,

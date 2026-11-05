@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
@@ -271,5 +272,145 @@ func TestProcessBackendRequiresHashBoundApproval(t *testing.T) {
 	}
 	if after, _ := env.PagePlugins.GetInstance(ctx, inA.ID); after.Enabled {
 		t.Fatal("instance left enabled after backend refused to start")
+	}
+}
+
+func TestDisableCancelsNativeOperationAndRejectsStaleIntegration(t *testing.T) {
+	m, _, project, _ := newTestManager(t)
+	defer m.StopAll()
+	ctx := context.Background()
+	dir := writeProcessPackage(t)
+	raw, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), `"operations":[`, `"operations":[{"name":"slow","description":"Wait","kind":"read"},`, 1))
+	if err := os.WriteFile(filepath.Join(dir, ManifestFile), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := m.InstallFromDir(ctx, dir, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := m.CreateInstance(ctx, project, pkg.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Approve(ctx, in.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Enable(ctx, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	r, err := m.Resolve(ctx, in.ID, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	integration := m.Integration(r)
+	events, unsub, _ := m.Hub.Subscribe(in.ID)
+	defer unsub()
+	result := make(chan error, 1)
+	go func() { _, err := integration.Invoke(ctx, pageintegration.Caller{}, "slow", nil); result <- err }()
+	select {
+	case <-events:
+	case <-time.After(3 * time.Second):
+		t.Fatal("operation did not start")
+	}
+	disabled := make(chan error, 1)
+	go func() { disabled <- m.Disable(ctx, in.ID) }()
+	select {
+	case err := <-disabled:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("disable blocked on backend")
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("operation survived disable")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("operation not cancelled")
+	}
+	if _, err := integration.Invoke(ctx, pageintegration.Caller{}, "echo", nil); err == nil {
+		t.Fatal("stale integration restarted disabled backend")
+	}
+	if state, _ := m.ProcessStatus(in.ID); state != "none" {
+		t.Fatalf("backend remains: %s", state)
+	}
+	if err := m.Enable(ctx, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := m.Resolve(ctx, in.ID, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Integration(fresh).Invoke(ctx, pageintegration.Caller{}, "echo", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDisableInterruptsNativeStartup(t *testing.T) {
+	m, _, project, _ := newTestManager(t)
+	defer m.StopAll()
+	ctx := context.Background()
+	dir := writeProcessPackage(t)
+	marker := filepath.Join(t.TempDir(), "starting")
+	raw, _ := os.ReadFile(filepath.Join(dir, ManifestFile))
+	var manifest Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Backend.Args = append(manifest.Backend.Args, "--block-init", marker)
+	raw, _ = json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(dir, ManifestFile), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := m.InstallFromDir(ctx, dir, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := m.CreateInstance(ctx, project, pkg.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Approve(ctx, in.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	enabled := make(chan error, 1)
+	go func() { enabled <- m.Enable(ctx, in.ID) }()
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline:
+			t.Fatal("startup did not begin")
+		}
+	}
+	disabled := make(chan error, 1)
+	go func() { disabled <- m.Disable(ctx, in.ID) }()
+	select {
+	case err := <-disabled:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("disable did not interrupt handshake")
+	}
+	if err := <-enabled; err == nil {
+		t.Fatal("startup survived disable")
+	}
+	if state, _ := m.ProcessStatus(in.ID); state != "none" {
+		t.Fatalf("backend remains: %s", state)
+	}
+	if _, err := m.Resolve(ctx, in.ID, project); err == nil {
+		t.Fatal("instance still enabled")
 	}
 }
