@@ -164,6 +164,7 @@ func (r *ChannelMessageRouter) SetEmailAuthStore(store outboundAuthorizedUserSto
 func (r *ChannelMessageRouter) SetDiscordAuthStore(store outboundAuthorizedUserStore) {
 	r.discordAuth = store
 }
+
 // SetProjectAuthorization makes every list/send re-check the caller's current
 // project role, so HTTP, chat and background task runtimes share one gate.
 func (r *ChannelMessageRouter) SetProjectAuthorization(access *ProjectAccessService, authOff bool) {

@@ -11,6 +11,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
@@ -186,26 +187,5 @@ func (h *Handler) projectRuntimePrincipalContext(ctx context.Context) context.Co
 }
 
 func projectRuntimePermission(name string) (authz.Permission, bool) {
-	def := chatcontrol.Get(name)
-	if def == nil {
-		return "", false
-	}
-	switch def.Domain {
-	case chatcontrol.DomainTasks, chatcontrol.DomainSchedules, chatcontrol.DomainAlerts:
-		if def.Access == chatcontrol.AccessRead {
-			return authz.View, true
-		}
-		return authz.Edit, true
-	case chatcontrol.DomainAnalytics, chatcontrol.DomainPulse, chatcontrol.DomainMemory, chatcontrol.DomainSettings, chatcontrol.DomainModels, chatcontrol.DomainPersonality, chatcontrol.DomainAgents:
-		return authz.View, true
-	case chatcontrol.DomainAutomations:
-		// Description preview invokes a model even though the registry labels its
-		// draft output read-only. Treat it as builder access, not a passive read.
-		if def.Access == chatcontrol.AccessRead && name != "preview_automation_description" {
-			return authz.View, true
-		}
-		return authz.Manage, true
-	default:
-		return "", false
-	}
+	return service.RuntimeToolPermission(name)
 }

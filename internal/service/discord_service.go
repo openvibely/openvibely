@@ -890,6 +890,11 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 			if err != nil {
 				return "", err
 			}
+			if s.workerSvc != nil && s.workerSvc.runOrganizations != nil {
+				if err := requireRuntimeToolRole(authorized, s.workerSvc.runAccess, s.workerSvc.runOrganizations, projectID, name, input); err != nil {
+					return "", err
+				}
+			}
 			return handler(authorized, input)
 		}
 	}

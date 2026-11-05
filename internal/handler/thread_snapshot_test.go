@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,4 +41,31 @@ func TestRunningExecutionsDiscovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, queued.ID, items[0].ID)
+}
+
+func TestRunningExecutionsHidesInaccessibleProjects(t *testing.T) {
+	h, e, configs, stores := setupTestHandlerWithStores(t)
+	h.SetProjectAccessService(service.NewProjectAccessService(stores.ProjectAccess))
+	agent := createAgent(t, configs)
+	open := createProject(t, h, "Open")
+	private := createProject(t, h, "Private")
+	ctx := t.Context()
+	policy, err := stores.ProjectAccess.Get(ctx, private.ID)
+	require.NoError(t, err)
+	policy.Visibility = "private"
+	require.NoError(t, stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	visible := createExec(t, h, createTask(t, h, open.ID, "Open").ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning })
+	createExec(t, h, createTask(t, h, private.ID, "Hidden").ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning })
+	org := service.NewOrganizationService(stores.Organizations, "secret")
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	bob, err := org.Accept(ctx, token, "running-bob", "bob-password-long", "")
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/events/running-executions", nil).WithContext(models.WithPrincipal(ctx, bob.Principal)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var items []models.LiveExecution
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &items))
+	require.Len(t, items, 1)
+	require.Equal(t, visible.ID, items[0].ID)
 }

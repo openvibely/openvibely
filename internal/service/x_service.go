@@ -882,6 +882,11 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 		if !ok {
 			return "", false, false, nil
 		}
+		if s.workerSvc != nil && s.workerSvc.runOrganizations != nil && !s.workerSvc.runAuthOff {
+			if err := requireRuntimeToolRole(ctx, s.workerSvc.runAccess, s.workerSvc.runOrganizations, projectID, name, input); err != nil {
+				return "", true, true, err
+			}
+		}
 		out, err := handler(ctx, input)
 		return out, true, err != nil, err
 	}}

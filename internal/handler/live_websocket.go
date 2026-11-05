@@ -79,7 +79,10 @@ func (h *Handler) liveFrameProjectAllowed(ctx context.Context, frame liveFrame) 
 	if h.projectAccessSvc == nil {
 		return true
 	}
-	if event, ok := frame.Data.(events.TaskEvent); ok {
+	switch event := frame.Data.(type) {
+	case events.TaskEvent:
+		return event.ProjectID != "" && h.projectAccessSvc.Require(ctx, event.ProjectID, authz.View) == nil
+	case events.ChatEvent:
 		return event.ProjectID != "" && h.projectAccessSvc.Require(ctx, event.ProjectID, authz.View) == nil
 	}
 	return true
@@ -581,9 +584,25 @@ func clampOffsetToUTF8Boundary(offset int, s string) int {
 // RunningExecutions uses the same instance-wide session authentication as the
 // WebSocket. Subscription authorization still checks each execution's project.
 func (h *Handler) RunningExecutions(c echo.Context) error {
-	items, err := h.execRepo.ListLiveExecutions(c.Request().Context())
+	ctx := c.Request().Context()
+	items, err := h.execRepo.ListLiveExecutions(ctx)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Could not list running executions")
+	}
+	if h.projectAccessSvc != nil {
+		visible := items[:0]
+		allowed := map[string]bool{}
+		for _, item := range items {
+			ok, checked := allowed[item.ProjectID]
+			if !checked {
+				ok = h.projectAccessSvc.Require(ctx, item.ProjectID, authz.View) == nil
+				allowed[item.ProjectID] = ok
+			}
+			if ok {
+				visible = append(visible, item)
+			}
+		}
+		items = visible
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, items)

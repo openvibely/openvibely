@@ -147,3 +147,61 @@ func TestAutomationRuntimePermissionClassification(t *testing.T) {
 		require.Equal(t, authz.View, permission, name)
 	}
 }
+
+func TestProjectRuntimeToolsEnforceRoleBoundaries(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	h := tc.handler
+	ctx := t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+	guarded := authz.NewProjectStore(tc.stores.Projects, &authz.Authorizer{Store: tc.stores.ProjectAccess})
+	h.projectRepo = guarded
+	h.projectSvc = service.NewProjectService(guarded)
+	project := createProject(t, h, "zq-runtime-private")
+	policy, err := tc.stores.ProjectAccess.Get(ctx, project.ID)
+	require.NoError(t, err)
+	policy.Visibility = "private"
+	require.NoError(t, tc.stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	bob, err := org.Accept(ctx, token, "runtime-bob", "bob-password-long", "")
+	require.NoError(t, err)
+	bobCtx := models.WithPrincipal(ctx, bob.Principal)
+
+	minimum := map[string]authz.Permission{
+		"project_info": authz.View, "get_current_project": authz.View,
+		"request_user_input": authz.Edit, "send_message": authz.Edit,
+		"update_project_settings": authz.Manage, "github_close_issue": authz.Manage, "github_open_pull_request": authz.Manage,
+	}
+	inputs := map[string]string{"send_message": `{"message":"hi"}`, "request_user_input": `{"question":"q"}`, "github_close_issue": `{"issue_number":1}`, "update_project_settings": `{"description":"changed"}`}
+	executor := h.chatActionExecutor(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceAPI)
+	for _, role := range []string{"", "viewer", "editor", "maintainer"} {
+		require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, bob.UserID, role))
+		for name, permission := range minimum {
+			input := inputs[name]
+			if input == "" {
+				input = `{}`
+			}
+			_, _, _, err := executor(bobCtx, name, json.RawMessage(input))
+			if authz.Rank(role) >= authz.Minimum(permission) {
+				require.NotErrorIs(t, err, authz.ErrDenied, role+" "+name)
+			} else {
+				require.ErrorIs(t, err, authz.ErrDenied, role+" "+name)
+			}
+		}
+	}
+	stored, err := tc.stores.Projects.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "changed", stored.Description, "the maintainer run must reach the settings handler")
+
+	// Listing from an accessible project must not reveal private projects.
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, bob.UserID, ""))
+	other := h.chatActionExecutor(streamingResponseParams{ProjectID: "default"}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceAPI)
+	out, _, isError, err := other(bobCtx, "list_projects", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.False(t, isError)
+	require.NotContains(t, out, "zq-runtime-private")
+	ownerOut, _, _, err := other(models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID}), "list_projects", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Contains(t, ownerOut, "zq-runtime-private")
+}

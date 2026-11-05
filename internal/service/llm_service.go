@@ -580,6 +580,19 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		}
 	}
 
+	if worker := workerFromTaskService(s.taskSvc); worker != nil && worker.runOrganizations != nil {
+		for name, handler := range handlers {
+			handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
+				if _, ok := models.PrincipalFromContext(ctx); !ok && worker.runAuthOff {
+					ctx = models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+				}
+				if err := requireRuntimeToolRole(ctx, worker.runAccess, worker.runOrganizations, task.ProjectID, name, input); err != nil {
+					return "", err
+				}
+				return handler(ctx, input)
+			}
+		}
+	}
 	return &llmcontracts.RuntimeTools{
 		Definitions: filtered,
 		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, allowed),

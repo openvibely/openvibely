@@ -77,3 +77,71 @@ func TestProjectSharingControlsAndOwnership(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "viewer", policy.OrgRole)
 }
+
+func TestProjectSharingRoleMatrixRemovalAndAudit(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	h, ctx := tc.handler, t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	project := createProject(t, h, "Sharing matrix")
+	newUser := func(name string) models.Principal {
+		token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+		require.NoError(t, err)
+		user, err := org.Accept(ctx, token, name, "long-password-value", "")
+		require.NoError(t, err)
+		return user.Principal
+	}
+	actor, target := newUser("matrix-actor"), newUser("matrix-target")
+	e := echo.New()
+	e.Use(h.projectAccessBoundary)
+	e.GET("/projects/:id/sharing", h.ProjectSharing)
+	e.POST("/projects/:id/sharing", h.UpdateProjectSharing)
+	path := "/projects/" + project.ID + "/sharing"
+	request := func(method string, p models.Principal, values url.Values) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(values.Encode())).WithContext(models.WithPrincipal(ctx, p))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://example.com")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+	grant := url.Values{"action": {"member"}, "user_id": {target.UserID}, "role": {"editor"}}
+	for _, role := range []string{"viewer", "editor", "maintainer"} {
+		require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, actor.UserID, role))
+		require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, target.UserID, ""))
+		page := request("GET", actor, nil)
+		rec := request("POST", actor, grant)
+		targetRole, err := tc.stores.ProjectAccess.Role(ctx, target.UserID, project.ID)
+		require.NoError(t, err)
+		if role == "maintainer" {
+			require.Equal(t, 200, page.Code)
+			require.Contains(t, page.Body.String(), "project.member", "maintainers see the audit trail")
+			require.NotContains(t, page.Body.String(), "Transfer ownership")
+			require.Equal(t, 200, rec.Code)
+			require.Equal(t, "editor", targetRole)
+		} else {
+			require.Equal(t, 404, page.Code, role)
+			require.Equal(t, 404, rec.Code, role)
+			// Org-wide editor access still applies; no individual grant was saved.
+			members, err := tc.stores.ProjectAccess.Members(ctx, project.ID)
+			require.NoError(t, err)
+			for _, member := range members {
+				require.NotEqual(t, target.UserID, member.UserID, role)
+			}
+		}
+	}
+	// Removing a grant drops back to organization access, never below it.
+	rec := request("POST", actor, url.Values{"action": {"member"}, "user_id": {target.UserID}, "role": {""}})
+	require.Equal(t, 200, rec.Code)
+	targetRole, err := tc.stores.ProjectAccess.Role(ctx, target.UserID, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "editor", targetRole)
+	// A stale form submitted after the actor's own downgrade is refused.
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, actor.UserID, ""))
+	rec = request("POST", actor, url.Values{"action": {"member"}, "user_id": {target.UserID}, "role": {"maintainer"}})
+	require.Equal(t, 404, rec.Code)
+	targetRole, err = tc.stores.ProjectAccess.Role(ctx, target.UserID, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "editor", targetRole)
+}
