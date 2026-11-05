@@ -252,6 +252,17 @@ func (h *Handler) PluginAsset(c echo.Context) error {
 	if !ok {
 		return pluginNotFound()
 	}
+	// The capability replaces cookie authentication only for static assets.
+	// Recheck its issuing user so disabling an account revokes asset access too.
+	if h.organizationSvc != nil {
+		if !strings.HasPrefix(hd.PrincipalID, "user:") {
+			return pluginNotFound()
+		}
+		user, err := h.organizationSvc.Store.UserByID(c.Request().Context(), strings.TrimPrefix(hd.PrincipalID, "user:"))
+		if err != nil || user == nil || user.Disabled || user.Role == "" {
+			return pluginNotFound()
+		}
+	}
 	r, err := h.pagePlugins.Resolve(c.Request().Context(), hd.InstanceID, hd.ProjectID)
 	if err != nil {
 		return pluginNotFound()

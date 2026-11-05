@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/pageplugins"
@@ -270,5 +271,77 @@ func TestPluginSettings_DisableRemovesFromNavAndBlocksAPI(t *testing.T) {
 	rec = env.do(t, http.MethodGet, "/plugin-pages/nav?project_id="+env.projA.ID, "", nil)
 	if strings.Contains(rec.Body.String(), env.inA.ID) {
 		t.Fatal("disabled page still in nav")
+	}
+}
+
+// Match browser requests: only the parent page carries the login cookie;
+// sandboxed subresources authenticate with the page-load capability.
+func TestPluginAsset_CookieFreeCapabilityWithAuthentication(t *testing.T) {
+	for _, organization := range []bool{false, true} {
+		name := "local"
+		if organization {
+			name = "organization"
+		}
+		t.Run(name, func(t *testing.T) {
+			env := setupPluginPages(t)
+			username, password := "admin", "secret"
+			env.h.SetAuthConfig(auth.Config{Enabled: true, Username: username, Password: password, SessionSecret: "plugin-test-secret"})
+			if organization {
+				tc, _ := organizationTestApp(t, true)
+				env.h.SetAuthConfig(*tc.handler.authCfg)
+				env.h.SetOrganizationService(tc.handler.organizationSvc)
+				username, password = "alice", "alice-password-long"
+			}
+			env.e = echo.New()
+			env.e.Use(env.h.AuthMiddleware())
+			env.h.RegisterRoutes(env.e)
+			login := orgRequest(env.e, http.MethodPost, "/login", url.Values{"username": {username}, "password": {password}}, nil)
+			cookie := orgCookie(t, login)
+			pageURL := "/p/" + env.inA.ID + "?project_id=" + env.inA.ProjectID
+			page := env.do(t, http.MethodGet, pageURL, "", map[string]string{"Cookie": cookie.String()})
+			match := handlePattern.FindStringSubmatch(page.Body.String())
+			if page.Code != http.StatusOK || match == nil {
+				t.Fatalf("authenticated page: %d %s", page.Code, page.Body.String())
+			}
+			handle := match[1]
+			for _, file := range []string{"index.html", "app.js"} {
+				rec := env.do(t, http.MethodGet, "/plugin-assets/"+handle+"/"+file, "", map[string]string{"Origin": "null"})
+				if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" {
+					t.Fatalf("cookie-free %s: %d %s", file, rec.Code, rec.Body.String())
+				}
+				if rec.Header().Get("Content-Security-Policy") != pluginAssetCSP {
+					t.Fatal("asset lost sandbox CSP")
+				}
+			}
+			for _, asset := range []string{"invalid/app.js", handle + "/plugin.json"} {
+				if rec := env.do(t, http.MethodGet, "/plugin-assets/"+asset, "", nil); rec.Code != http.StatusNotFound {
+					t.Fatalf("restricted asset %s: %d", asset, rec.Code)
+				}
+			}
+			// A valid asset capability must not bypass authentication for page/API access.
+			for _, target := range []string{pageURL, "/api/plugin-pages/" + env.inA.ID + "/events?project_id=" + env.inA.ProjectID + "&handle=" + handle} {
+				rec := env.do(t, http.MethodGet, target, "", nil)
+				if rec.Code != http.StatusFound {
+					t.Fatalf("protected route %s: %d", target, rec.Code)
+				}
+			}
+			resolved, err := env.mgr.Resolve(t.Context(), env.inA.ID, env.inA.ProjectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if organization {
+				orphan, err := env.mgr.IssueHandle(resolved, "user:removed-user")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if rec := env.do(t, http.MethodGet, "/plugin-assets/"+orphan.Token+"/app.js", "", nil); rec.Code != http.StatusNotFound {
+					t.Fatalf("removed account asset: %d", rec.Code)
+				}
+			}
+			env.mgr.RetireHandle(handle)
+			if rec := env.do(t, http.MethodGet, "/plugin-assets/"+handle+"/app.js", "", nil); rec.Code != http.StatusNotFound {
+				t.Fatalf("retired asset: %d", rec.Code)
+			}
+		})
 	}
 }
