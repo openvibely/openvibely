@@ -148,7 +148,7 @@ In All Projects the left rail lists every enabled page, labelled with its owning
 ## Side chat
 
 The "Chat about this page" panel reuses the standard chat message components and streaming pipeline (`startStreamingResponse`, live execution streams, Stop and cancellation).
-- **Persistence:** each instance has one persisted conversation task, stored in the hidden `freezer` category. The conversation resumes when you reopen the page.
+- **Persistence:** each instance has one persisted conversation task, stored in the hidden `freezer` category. The conversation resumes when you reopen the page. Provider transport sessions, saved provider state, and compaction summaries use `task:<conversation-task-id>`, separate from every other page and from normal `chat:project:<project-id>` chat. This scope survives restarts without switching the page chat to coding-agent prompts. Previously shared project checkpoints are not copied into page conversations; existing page message history remains available.
 - **Context:** each turn stores a snapshot of the page's explicitly shared context (`page_plugin_turn_contexts`). That snapshot is injected into the system context with provenance, fenced as `<untrusted_page_context>` data. OpenVibely never reads or scrapes the iframe's DOM.
 - **Tools:** page tools (`page_<operation>`) are built server-side from the manifest. Each tool call re-resolves and re-authorizes the instance. Agent calls to actions wait for Approve or Deny in the page.
 - **In-page analysis:** `analyze.request` runs the same kind of turn and streams `analysis.delta` messages into the page.

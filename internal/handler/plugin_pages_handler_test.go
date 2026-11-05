@@ -345,3 +345,41 @@ func TestPluginAsset_CookieFreeCapabilityWithAuthentication(t *testing.T) {
 		})
 	}
 }
+
+func TestPluginChat_ConversationScopeSurvivesReopen(t *testing.T) {
+	env := setupPluginPages(t)
+	send := func(in *models.PagePluginInstance) streamingResponseParams {
+		t.Helper()
+		rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+in.ID+"/chat?project_id="+in.ProjectID, "message=hello", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("chat: %d %s", rec.Code, rec.Body.String())
+		}
+		p := env.starts[len(env.starts)-1]
+		if p.IsTaskFollowup || !p.TaskScopedChat {
+			t.Fatal("page chat must isolate state without selecting coding-agent behavior")
+		}
+		if streamingTransportScope(p) != "task:"+p.TaskID {
+			t.Fatal("page scope must use persisted conversation task")
+		}
+		return p
+	}
+	a := send(env.inA)
+	b := send(env.inB)
+	if streamingTransportScope(a) == streamingTransportScope(b) {
+		t.Fatal("pages share a scope")
+	}
+	if streamingTransportScope(a) == streamingTransportScope(streamingResponseParams{ProjectID: env.projA.ID}) {
+		t.Fatal("page shares project-chat scope")
+	}
+	rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat/stop?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("stop: %d", rec.Code)
+	}
+	// Recreate the manager to discard all in-memory page state, as on restart.
+	env.h.SetPagePlugins(pageplugins.NewManager(env.mgr.Store(), t.TempDir()))
+	env.openPage(t, env.inA)
+	reopened := send(env.inA)
+	if reopened.ExecID == a.ExecID || reopened.TaskID != a.TaskID || streamingTransportScope(reopened) != streamingTransportScope(a) {
+		t.Fatal("reopened page did not resume its persisted conversation scope")
+	}
+}

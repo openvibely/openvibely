@@ -629,6 +629,7 @@ func (h *Handler) startPluginChatTurn(c echo.Context, r *pageplugins.Resolved, m
 		SystemContext:  combineContexts(h.getPersonalityContext(ctx, projectID), pageContext),
 		WorkDir:        h.resolveWorkDir(ctx, projectID),
 		IsTaskFollowup: false,
+		TaskScopedChat: true,
 		ChatMode:       models.ChatModeOrchestrate,
 		Surface:        chatcontrol.SurfaceWeb,
 		RuntimeTools:   tools,

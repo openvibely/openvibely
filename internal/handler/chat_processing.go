@@ -71,6 +71,10 @@ type streamingResponseParams struct {
 	WorkDir                     string
 	ImageAttachments            []models.Attachment
 	IsTaskFollowup              bool // true = coding agent prompt; false = orchestration prompt
+	// TaskScopedChat isolates an orchestration conversation's transport, provider
+	// state, and compaction checkpoints using its persisted conversation task.
+	// It does not select the coding-agent prompt used by task follow-ups.
+	TaskScopedChat              bool
 	ChatMode                    models.ChatMode
 	Surface                     chatcontrol.Surface // chat entry point (web/api/telegram/slack)
 	TelegramInitialAckMessageID int
@@ -119,7 +123,7 @@ type streamingResponseParams struct {
 }
 
 func streamingTransportScope(params streamingResponseParams) string {
-	if params.IsTaskFollowup {
+	if params.IsTaskFollowup || params.TaskScopedChat {
 		if strings.TrimSpace(params.TaskID) != "" {
 			return "task:" + strings.TrimSpace(params.TaskID)
 		}
