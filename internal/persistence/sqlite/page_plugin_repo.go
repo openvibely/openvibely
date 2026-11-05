@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/pageintegration"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -158,7 +159,7 @@ func (r *PagePluginRepo) UpdateInstanceState(ctx context.Context, id, stateJSON 
 // DeleteInstance also deletes the side-chat backing task, which cascades its executions.
 func (r *PagePluginRepo) DeleteInstance(ctx context.Context, id string) error {
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id IN (SELECT task_id FROM page_plugin_conversations WHERE instance_id = ?)`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id IN (SELECT task_id FROM page_conversations WHERE kind = 'plugin' AND instance_id = ?)`, id); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `DELETE FROM page_plugin_instances WHERE id = ?`, id)
@@ -168,28 +169,41 @@ func (r *PagePluginRepo) DeleteInstance(ctx context.Context, id string) error {
 
 func (r *PagePluginRepo) GetConversationTask(ctx context.Context, instanceID string) (string, error) {
 	var taskID string
-	err := r.db.QueryRowContext(ctx, `SELECT task_id FROM page_plugin_conversations WHERE instance_id = ?`, instanceID).Scan(&taskID)
+	err := r.db.QueryRowContext(ctx, `SELECT task_id FROM page_conversations WHERE kind = 'plugin' AND instance_id = ?`, instanceID).Scan(&taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	return taskID, err
 }
 
-func (r *PagePluginRepo) SetConversationTask(ctx context.Context, instanceID, taskID string) error {
-	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO page_plugin_conversations (instance_id, task_id) VALUES (?, ?)
-		ON CONFLICT(instance_id) DO UPDATE SET task_id = excluded.task_id`, instanceID, taskID)
-	return err
+func (r *PagePluginRepo) conversationStore(ctx context.Context, instanceID string) (pageintegration.ConversationStore, error) {
+	in, err := r.GetInstance(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil {
+		return nil, errors.New("page instance not found")
+	}
+	return NewPageConversationRepo(r.db).ForPage(pageintegration.PageRef{Kind: "plugin", InstanceID: in.ID, PageID: in.PageID, ProjectID: in.ProjectID}), nil
 }
-
-func (r *PagePluginRepo) SaveTurnContext(ctx context.Context, executionID, instanceID, snapshotJSON string) error {
-	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO page_plugin_turn_contexts (execution_id, instance_id, snapshot_json) VALUES (?, ?, ?)
-		ON CONFLICT(execution_id) DO UPDATE SET snapshot_json = excluded.snapshot_json`, executionID, instanceID, snapshotJSON)
-	return err
+func (r *PagePluginRepo) SetConversationTask(ctx context.Context, instanceID, taskID string) error {
+	store, err := r.conversationStore(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	return store.BindTask(ctx, taskID)
+}
+func (r *PagePluginRepo) SaveTurnContext(ctx context.Context, executionID, instanceID, raw string) error {
+	store, err := r.conversationStore(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	return store.SaveSnapshot(ctx, executionID, raw)
 }
 
 func (r *PagePluginRepo) GetTurnContext(ctx context.Context, executionID string) (string, error) {
 	var raw string
-	err := r.db.QueryRowContext(ctx, `SELECT snapshot_json FROM page_plugin_turn_contexts WHERE execution_id = ?`, executionID).Scan(&raw)
+	err := r.db.QueryRowContext(ctx, `SELECT snapshot_json FROM page_turn_contexts WHERE execution_id = ?`, executionID).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

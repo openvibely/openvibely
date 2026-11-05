@@ -29,7 +29,9 @@ func newTestManager(t *testing.T) (*Manager, *teststores.Env, string, string) {
 	if err := env.Projects.Create(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	return NewManager(env.PagePlugins, t.TempDir()), env, a.ID, b.ID
+	m := NewManager(env.PagePlugins, t.TempDir())
+	t.Cleanup(m.StopAll)
+	return m, env, a.ID, b.ID
 }
 
 func enabledSales(t *testing.T, m *Manager, projectID string) *models.PagePluginInstance {
@@ -503,5 +505,68 @@ func TestCrashRecoveryVerifiesApprovedPackageBeforeEveryLaunch(t *testing.T) {
 				t.Fatal("manager launched unapproved backend")
 			}
 		})
+	}
+}
+
+func TestHandleLifetimeRetireExpireAndDisable(t *testing.T) {
+	m, _, project, _ := newTestManager(t)
+	defer m.StopAll()
+	pkg, err := m.InstallExample(t.Context(), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := m.CreateInstance(t.Context(), project, pkg.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Enable(t.Context(), in.ID); err != nil {
+		t.Fatal(err)
+	}
+	r, err := m.Resolve(t.Context(), in.ID, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := m.IssueHandle(r, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := m.IssueHandle(r, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.RetireHandle(first.Token)
+	m.RetireHandle(first.Token)
+	select {
+	case <-first.Done():
+	default:
+		t.Fatal("retirement did not close handle")
+	}
+	select {
+	case <-second.Done():
+		t.Fatal("retirement affected another tab")
+	default:
+	}
+	now := time.Now()
+	m.now = func() time.Time { return now.Add(HandleTTL + time.Second) }
+	if _, ok := m.LookupHandle(second.Token); ok {
+		t.Fatal("expired handle accepted")
+	}
+	select {
+	case <-second.Done():
+	default:
+		t.Fatal("expiration did not close handle")
+	}
+	m.now = time.Now
+	third, err := m.IssueHandle(r, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Disable(t.Context(), in.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-third.Done():
+	default:
+		t.Fatal("disable did not retire handle")
 	}
 }

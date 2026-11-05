@@ -41,6 +41,7 @@ templ PluginPageContent(v PluginPageView) {
 	@layout.PageTitle(v.Title)
 	<div
 		id="plugin-page-root"
+		hx-history="false"
 		class="flex flex-col h-[calc(100vh-6rem)] min-h-0"
 		data-plugin-instance={ v.InstanceID }
 		data-plugin-handle={ v.Handle }
@@ -59,7 +60,7 @@ templ PluginPageContent(v PluginPageView) {
 				</div>
 			</div>
 			if v.ChatEnabled {
-				<button type="button" class="btn btn-sm btn-outline" data-plugin-chat-toggle aria-controls="plugin-side-chat" aria-expanded="false">Chat about this page</button>
+				<button type="button" class="btn btn-sm btn-outline" data-plugin-chat-toggle aria-controls="page-side-chat" aria-expanded="false">Chat about this page</button>
 			}
 		</div>
 		<div id="plugin-approvals" class="space-y-2 mb-2" aria-live="polite"></div>
@@ -73,41 +74,18 @@ templ PluginPageContent(v PluginPageView) {
 				src={ v.AssetURL }
 			></iframe>
 			if v.ChatEnabled {
-				@pluginSideChat(v)
+				@components.PageSideChat(components.PageChatView{
+ Title: v.Title, ProjectID: v.OwningProjectID,
+ SendURL: pluginAPI(v, "/chat"), StopURL: pluginAPI(v, "/chat/stop"),
+ ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask,
+})
 			}
 		</div>
 		@pluginHostBridgeScript()
 	</div>
 }
 
-templ pluginSideChat(v PluginPageView) {
-	<aside id="plugin-side-chat" class="hidden w-96 max-w-[45%] flex-col min-h-0 border border-base-300 rounded-lg bg-base-100" data-project-id={ v.OwningProjectID }>
-		<div class="px-3 py-2 border-b border-base-300 text-sm font-semibold flex items-center justify-between">
-			<span>Chat · { v.Title }</span>
-			<span class="text-xs opacity-60">uses page context + tools</span>
-		</div>
-		<div id="plugin-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.OwningProjectID }>
-			if len(v.ChatExecutions) > 0 {
-				@components.ChatMessages(v.ChatExecutions, v.ChatTask, nil, "plugin-chat-messages", "", false, v.OwningProjectID)
-			}
-		</div>
-		<form
-			id="plugin-chat-form"
-			class="p-2 border-t border-base-300 flex gap-2 items-end"
-			hx-post={ pluginAPI(v, "/chat") }
-			hx-target="#plugin-chat-messages"
-			hx-swap="beforeend"
-			hx-on::after-request="if(event.detail.successful){this.reset();}"
-		>
-			<textarea name="message" rows="2" class="textarea textarea-bordered textarea-sm flex-1" placeholder="Ask about this page…" required></textarea>
-			<div class="flex flex-col gap-1">
-				<button type="submit" class="btn btn-sm btn-primary">Send</button>
-				<button type="button" class="btn btn-sm btn-ghost" hx-post={ pluginAPI(v, "/chat/stop") } hx-swap="none">Stop</button>
-			</div>
-		</form>
-		@components.ChatAutoScrollScript()
-	</aside>
-}
+
 
 // PluginApprovalCard renders a pending agent action that needs user confirmation.
 templ PluginApprovalCard(v PluginPageView, id, operation, input string) {
@@ -310,6 +288,8 @@ templ pluginHostBridgeScript() {
 		var MAX = 65536;
 		var ALLOWED = ['ready', 'op.invoke', 'context.set', 'analyze.request', 'events.subscribe'];
 		var dead = false, loads = 0, events = null, subscribed = false, streams = [];
+		var requests = new AbortController();
+		var approvalRevision = 0;
 
 		function post(type, replyTo, payload) {
 			if (dead || !frame.contentWindow) return;
@@ -318,12 +298,22 @@ templ pluginHostBridgeScript() {
 			frame.contentWindow.postMessage({v: 1, type: type, replyTo: replyTo, handle: handle, payload: payload || {}}, '*');
 		}
 		function refreshApprovals() {
-			if (typeof htmx !== 'undefined') htmx.ajax('GET', approvalsURL, {target: '#plugin-approvals', swap: 'innerHTML'});
+			var revision = ++approvalRevision;
+			fetch(approvalsURL, {credentials: 'same-origin', signal: requests.signal})
+				.then(function (r) { if (!r.ok) throw new Error('approvals unavailable'); return r.text(); })
+				.then(function (html) {
+					if (dead || revision !== approvalRevision) return;
+					var target = root.querySelector('#plugin-approvals');
+					target.innerHTML = html;
+					if (typeof htmx !== 'undefined') htmx.process(target);
+				}).catch(function () {});
 		}
 		function startEvents() {
 			if (events || dead) return;
 			events = new EventSource(eventsURL + '&handle=' + encodeURIComponent(handle));
+			events.onopen = function () { if (subscribed) post('event', null, {type: 'page.refresh'}); refreshApprovals(); };
 			events.onmessage = function (e) {
+				if (dead) return;
 				var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
 				if (ev.type === 'approval.pending') refreshApprovals();
 				if (subscribed) post('event', null, ev);
@@ -331,6 +321,7 @@ templ pluginHostBridgeScript() {
 			events.addEventListener('closed', function () { events.close(); events = null; });
 		}
 		function streamAnalysis(execID) {
+			if (dead) return;
 			if (!window.openVibelyLive) { post('analysis.done', null, {exec_id: execID, error: 'live transport unavailable'}); return; }
 			var s = window.openVibelyLive.execution(execID, 0, projectID);
 			streams.push(s);
@@ -341,11 +332,21 @@ templ pluginHostBridgeScript() {
 		function cleanup() {
 			if (dead) return;
 			dead = true;
+			requests.abort();
 			if (events) { events.close(); events = null; }
 			streams.forEach(function (s) { try { s.close(); } catch (_) {} });
-			try { fetch(retireURL + '&handle=' + encodeURIComponent(handle), {method: 'POST', keepalive: true, credentials: 'same-origin', headers: {'X-OpenVibely-Plugin-Bridge': '1'}}); } catch (_) {}
+			try { fetch(retireURL + '&handle=' + encodeURIComponent(handle), {method: 'POST', keepalive: true, credentials: 'same-origin', headers: {'X-OpenVibely-Plugin-Bridge': '1'}}).catch(function () {}); } catch (_) {}
 			window.removeEventListener('message', onMessage);
 			document.removeEventListener('htmx:beforeSwap', onSwap);
+			window.removeEventListener('pagehide', onPageHide);
+		}
+		function onPageHide(e) {
+			cleanup();
+			// A bfcache document contains a retired capability. Obtain a new page load
+			// rather than reviving old subscriptions or replaying unfinished requests.
+			if (e && e.persisted) window.addEventListener('pageshow', function (event) {
+				if (event.persisted) window.location.reload();
+			}, {once: true});
 		}
 		function onSwap(e) {
 			var t = e.detail && e.detail.target;
@@ -358,11 +359,12 @@ templ pluginHostBridgeScript() {
 			var body;
 			try { body = JSON.stringify({v: 1, type: msg.type, id: msg.id, handle: msg.handle, payload: msg.payload || {}}); } catch (_) { return; }
 			if (body.length > MAX) { post('error', msg.id, {message: 'bridge message too large'}); return; }
-			fetch(bridgeURL, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OpenVibely-Plugin-Bridge': '1'}, body: body})
+			fetch(bridgeURL, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OpenVibely-Plugin-Bridge': '1'}, body: body, signal: requests.signal})
 				.then(function (r) { return r.json(); })
 				.then(function (res) {
+				if (dead) return;
 					if (!res || !res.ok) { post('error', msg.id, {message: (res && res.error) || 'request failed'}); return; }
-					if (msg.type === 'events.subscribe') { subscribed = true; startEvents(); }
+					if (msg.type === 'events.subscribe') { subscribed = true; startEvents(); post('event', null, {type: 'page.refresh'}); }
 					if (msg.type === 'analyze.request' && res.result && res.result.exec_id) streamAnalysis(res.result.exec_id);
 					post('result', msg.id, res.result);
 				})
@@ -375,16 +377,16 @@ templ pluginHostBridgeScript() {
 		});
 		window.addEventListener('message', onMessage);
 		document.addEventListener('htmx:beforeSwap', onSwap);
-		window.addEventListener('pagehide', cleanup, {once: true});
+		window.addEventListener('pagehide', onPageHide, {once: true});
 		startEvents();
 		refreshApprovals();
 		var toggle = root.querySelector('[data-plugin-chat-toggle]');
-		var chat = root.querySelector('#plugin-side-chat');
+		var chat = root.querySelector('#page-side-chat');
 		if (toggle && chat) toggle.addEventListener('click', function () {
 			var open = chat.classList.toggle('hidden') === false;
 			chat.classList.toggle('flex', open);
 			toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-			if (open) { var m = chat.querySelector('#plugin-chat-messages'); if (m) m.scrollTop = m.scrollHeight; }
+			if (open) { var m = chat.querySelector('#page-chat-messages'); if (m) m.scrollTop = m.scrollHeight; }
 		});
 	})();
 	</script>

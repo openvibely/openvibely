@@ -19,18 +19,16 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/openvibely/openvibely/internal/applog"
-	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/pageplugins"
-	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 // pagePluginChatCategory hides page side-chat tasks from boards and from the
 // main project chat history (which is keyed by category=chat).
-const pagePluginChatCategory = models.TaskCategory("freezer")
+const pagePluginChatCategory = pageConversationCategory
 
 const (
 	maxPluginChatMessage   = 8000
@@ -38,7 +36,7 @@ const (
 	pluginEventHeartbeat   = 25 * time.Second
 )
 
-var errPluginChatBusy = errors.New("a response is already in progress for this page")
+var errPluginChatBusy = errPageChatBusy
 
 // SetPagePlugins wires the plugin page manager.
 func (h *Handler) SetPagePlugins(m *pageplugins.Manager) {
@@ -196,19 +194,18 @@ func (h *Handler) PluginPage(c echo.Context) error {
 }
 
 func (h *Handler) loadPluginChatHistory(ctx context.Context, v *pages.PluginPageView) error {
-	taskID, err := h.pagePlugins.Store().GetConversationTask(ctx, v.InstanceID)
-	if err != nil || taskID == "" {
+	in, err := h.pagePlugins.Store().GetInstance(ctx, v.InstanceID)
+	if err != nil || in == nil {
 		return err
 	}
-	task, err := h.taskRepo.GetByID(ctx, taskID)
-	if err != nil || task == nil || task.ProjectID != v.OwningProjectID {
-		return err
-	}
-	execs, err := h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, 50)
+	ref := pageintegration.PageRef{Kind: pageplugins.Kind, InstanceID: in.ID, ProjectID: in.ProjectID, PageID: in.PageID, Title: in.Title}
+	task, execs, err := h.loadPageChatHistory(ctx, h.pagePlugins.Conversation(ref))
 	if err != nil {
 		return err
 	}
-	v.ChatTaskID, v.ChatTask, v.ChatExecutions = taskID, task, execs
+	if task != nil {
+		v.ChatTaskID, v.ChatTask, v.ChatExecutions = task.ID, task, execs
+	}
 	return nil
 }
 
@@ -444,7 +441,8 @@ func (h *Handler) PluginEvents(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := h.pluginHandleFor(c, r, c.QueryParam("handle")); err != nil {
+	hd, err := h.pluginHandleFor(c, r, c.QueryParam("handle"))
+	if err != nil {
 		return err
 	}
 	ch, unsubscribe, ok := h.pagePlugins.Hub.Subscribe(r.Instance.ID)
@@ -466,7 +464,14 @@ func (h *Handler) PluginEvents(c echo.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-hd.Done():
+			_, _ = io.WriteString(w, "event: closed\ndata: {}\n\n")
+			w.Flush()
+			return nil
 		case <-ticker.C:
+			if !h.pluginSubscriptionAuthorized(c, r, hd) {
+				return nil
+			}
 			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
 				return nil
 			}
@@ -477,6 +482,9 @@ func (h *Handler) PluginEvents(c echo.Context) error {
 				w.Flush()
 				return nil
 			}
+			if !h.pluginSubscriptionAuthorized(c, r, hd) {
+				return nil
+			}
 			raw, _ := json.Marshal(ev)
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
 				return nil
@@ -484,6 +492,27 @@ func (h *Handler) PluginEvents(c echo.Context) error {
 			w.Flush()
 		}
 	}
+}
+
+// Recheck the capability and current account/instance on heartbeat and before
+// delivery. Disable/retire additionally close the handle immediately.
+func (h *Handler) pluginSubscriptionAuthorized(c echo.Context, r *pageplugins.Resolved, hd pageplugins.Handle) bool {
+	if _, err := h.pluginHandleFor(c, r, hd.Token); err != nil {
+		return false
+	}
+	if _, err := h.pagePlugins.Resolve(c.Request().Context(), r.Instance.ID, r.Instance.ProjectID); err != nil {
+		return false
+	}
+	if h.organizationSvc != nil {
+		if !strings.HasPrefix(hd.PrincipalID, "user:") {
+			return false
+		}
+		user, err := h.organizationSvc.Store.UserByID(c.Request().Context(), strings.TrimPrefix(hd.PrincipalID, "user:"))
+		if err != nil || user == nil || user.Disabled || user.Role == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // PluginRetireHandle invalidates a page-load handle (unload or navigation).
@@ -520,131 +549,13 @@ func (h *Handler) PluginChatSend(c echo.Context) error {
 		}
 		return err
 	}
-	return render(c, http.StatusOK, components.ChatFollowupResponse(message, exec.ID, "plugin-chat-messages", "", false, nil, r.Instance.ProjectID, *exec))
+	return render(c, http.StatusOK, components.ChatFollowupResponse(message, exec.ID, "page-chat-messages", "", false, nil, r.Instance.ProjectID, *exec))
 }
 
-// pluginConversationTask returns the instance's persisted side-chat task, creating it on first use.
-func (h *Handler) pluginConversationTask(ctx context.Context, r *pageplugins.Resolved, message, agentID string) (*models.Task, error) {
-	store := h.pagePlugins.Store()
-	taskID, err := store.GetConversationTask(ctx, r.Instance.ID)
-	if err != nil {
-		return nil, err
-	}
-	if taskID != "" {
-		task, err := h.taskRepo.GetByID(ctx, taskID)
-		if err != nil {
-			return nil, err
-		}
-		if task != nil && task.ProjectID == r.Instance.ProjectID {
-			return task, nil
-		}
-	}
-	task := &models.Task{
-		ProjectID: r.Instance.ProjectID,
-		Title:     "Page chat: " + r.Instance.Title,
-		Prompt:    message,
-		Status:    models.StatusPending,
-		Category:  pagePluginChatCategory,
-		AgentID:   &agentID,
-	}
-	if err := h.taskRepo.Create(ctx, task); err != nil {
-		return nil, err
-	}
-	if err := store.SetConversationTask(ctx, r.Instance.ID, task.ID); err != nil {
-		_ = h.taskRepo.Delete(ctx, task.ID)
-		return nil, err
-	}
-	return task, nil
-}
-
-// startPluginChatTurn runs one side-chat turn through the shared streaming
-// pipeline with a per-turn page context snapshot and server-resolved page tools.
+// The plugin adapter supplies identity, authorization, storage and lifetime;
+// conversation execution itself is independent of plugins and iframes.
 func (h *Handler) startPluginChatTurn(c echo.Context, r *pageplugins.Resolved, message string) (*models.Execution, error) {
-	ctx, done, err := h.pagePlugins.BeginInstance(c.Request().Context(), r.Instance.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	hasModels, err := h.hasConfiguredModels(c)
-	if err != nil {
-		return nil, err
-	}
-	if !hasModels {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "configure a model before chatting")
-	}
-	projectID := r.Instance.ProjectID
-	agent, err := h.selectTaskAgent(ctx, projectID, "", message, false)
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	lock := persistence.LockTaskLifecycle("page-chat:" + r.Instance.ID)
-	defer lock()
-	task, err := h.pluginConversationTask(ctx, r, message, agent.ID)
-	if err != nil {
-		return nil, err
-	}
-	active, err := h.execRepo.HasActiveTaskThreadExecution(ctx, task.ID, "")
-	if err != nil {
-		return nil, err
-	}
-	if active || task.Status == models.StatusRunning || task.Status == models.StatusQueued {
-		return nil, errPluginChatBusy
-	}
-	if task.Status != models.StatusPending {
-		if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-			return nil, err
-		}
-	}
-	claimed, err := h.taskRepo.ClaimTask(ctx, task.ID)
-	if err != nil {
-		return nil, err
-	}
-	if !claimed {
-		return nil, errPluginChatBusy
-	}
-	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: message, IsFollowup: true}
-	if err := h.execRepo.Create(ctx, exec); err != nil {
-		_ = h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed)
-		return nil, err
-	}
-	principal := h.authPrincipalID(c)
-	ref := r.Ref()
-	var snap *pageintegration.Snapshot
-	if s, ok := h.pagePlugins.Contexts.Get(principal, ref); ok {
-		snap = &s
-		raw, _ := json.Marshal(s)
-		if err := h.pagePlugins.Store().SaveTurnContext(ctx, exec.ID, r.Instance.ID, string(raw)); err != nil {
-			applog.Infof("[plugin-pages] save turn context exec=%s: %v", exec.ID, err)
-		}
-	}
-	integration := h.pagePlugins.Integration(r)
-	pageContext := pageintegration.RenderContextForPrompt(ref, snap, integration.Operations())
-	tools := pageintegration.BuildRuntimeTools(integration, h.pagePlugins.Resolver(r.Instance.ID, projectID), h.pagePlugins.Approvals, pageintegration.Caller{PrincipalID: principal})
-
-	history, err := h.execRepo.ListByTaskChronologicalLimit(persistence.WithModelHistory(ctx, agent.Provider), task.ID, taskThreadHistoryLimit)
-	if err != nil {
-		history = nil
-	}
-	if err := h.startStreamingResponse(streamingResponseParams{
-		CancellationContext: h.pagePlugins.LifetimeContext(r.Instance.ID),
-		ExecID:              exec.ID,
-		TaskID:              task.ID,
-		Message:             message,
-		Agent:               *agent,
-		ChatHistory:         filterChatHistory(history, exec.ID),
-		ProjectID:           projectID,
-		PrincipalID:         principal,
-		SystemContext:       combineContexts(h.getPersonalityContext(ctx, projectID), pageContext),
-		WorkDir:             h.resolveWorkDir(ctx, projectID),
-		IsTaskFollowup:      false,
-		TaskScopedChat:      true,
-		ChatMode:            models.ChatModeOrchestrate,
-		Surface:             chatcontrol.SurfaceWeb,
-		RuntimeTools:        tools,
-	}); err != nil {
-		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
-	}
-	return exec, nil
+	return h.startPageChatTurn(c, h.pagePlugins.Conversation(r.Ref()), message)
 }
 
 // PluginChatStop cancels the running side-chat turn for this page.
@@ -665,33 +576,12 @@ func (h *Handler) PluginChatStop(c echo.Context) error {
 // Shared by the Stop button and disable/remove. Inline analysis uses the same
 // conversation task, so it is cancelled through the same execution machinery.
 func (h *Handler) cancelPluginConversation(ctx context.Context, instanceID string) error {
-	lock := persistence.LockTaskLifecycle("page-chat:" + instanceID)
-	defer lock()
-	taskID, err := h.pagePlugins.Store().GetConversationTask(ctx, instanceID)
-	if err != nil {
+	in, err := h.pagePlugins.Store().GetInstance(ctx, instanceID)
+	if err != nil || in == nil {
 		return err
 	}
-	if taskID == "" {
-		return nil
-	}
-	observed, cutoff, err := h.taskSvc.ObserveTaskCancellation(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	if observed == nil {
-		return nil
-	}
-	if observed.Status != models.StatusRunning && observed.Status != models.StatusQueued {
-		return nil
-	}
-	if err := h.taskSvc.CancelTaskObserved(ctx, observed, cutoff); err != nil {
-		return err
-	}
-	if err := h.taskRepo.UpdateCategory(ctx, taskID, pagePluginChatCategory); err != nil {
-		return err
-	}
-	h.cancelActiveExecutionsAndPublish(ctx, taskID, "PluginChatStop", cutoff)
-	return nil
+	ref := pageintegration.PageRef{Kind: pageplugins.Kind, PageID: in.PageID, InstanceID: in.ID, ProjectID: in.ProjectID, Title: in.Title}
+	return h.cancelPageConversation(ctx, h.pagePlugins.Conversation(ref))
 }
 
 // PluginApprovals lists pending agent actions awaiting confirmation on this page.

@@ -6,6 +6,7 @@
   var pending = {};
   var report = null;
   var selected = {};
+  var loadRevision = 0;
 
   function send(type, payload) {
     var id = "m" + (++seq);
@@ -23,7 +24,7 @@
       delete pending[msg.replyTo];
       if (msg.type === "result") p.resolve(msg.payload); else p.reject(new Error((msg.payload && msg.payload.message) || "error"));
     } else if (msg.type === "event") {
-      if (msg.payload && msg.payload.type === "data.changed") load("get_report");
+      if (msg.payload && (msg.payload.type === "data.changed" || msg.payload.type === "page.refresh")) load("get_report");
     } else if (msg.type === "analysis.delta") {
       var box = document.getElementById("analysis");
       box.style.display = "block";
@@ -69,7 +70,7 @@
       });
       tr.addEventListener("click", function () {
         if (selected[key]) delete selected[key]; else selected[key] = true;
-        render(); shareContext();
+        render(); shareContext().catch(function (e) { setStatus(e.message); });
       });
       tbody.appendChild(tr);
     });
@@ -80,24 +81,26 @@
   }
 
   function shareContext() {
-    if (!report) return;
+    if (!report) return Promise.resolve();
     var f = filters();
     var rows = visibleRows();
     var totals = rows.reduce(function (a, r) { a.revenue += r.revenue; a.units += r.units; return a; }, { revenue: 0, units: 0 });
     var sel = rows.filter(function (r) { return selected[r.date + "|" + r.region + "|" + r.product]; });
-    send("context.set", {
+    return send("context.set", {
       summary: "Sales report revision " + report.revision + " (" + rows.length + " rows shown, region " + f.region + ")",
       filters: { region: f.region },
       date_range: f.from || f.to ? { from: f.from, to: f.to } : undefined,
-      selection: sel.slice(0, 50),
+      selection: sel.slice(0, 50).map(function (r) { return r.date + "|" + r.region + "|" + r.product; }),
       data: { totals: totals, target: report.target, rows: rows.slice(0, 60), generated_at: report.generated_at }
-    }).catch(function (e) { setStatus("Context not shared: " + e.message); });
+    });
   }
 
   function load(op) {
+    var revision = ++loadRevision;
     setStatus(op === "refresh_data" ? "Refreshing…" : "Loading…");
     return send("op.invoke", { operation: op, input: { region: filters().region } }).then(function (out) {
-      report = out; render(); shareContext();
+      if (revision !== loadRevision) return;
+      report = out; render(); shareContext().catch(function (e) { setStatus(e.message); });
       setStatus("Updated " + new Date(out.generated_at).toLocaleTimeString());
     }).catch(function (e) { setStatus("Error: " + e.message); });
   }
@@ -105,15 +108,14 @@
   document.getElementById("refresh").addEventListener("click", function () { load("refresh_data"); });
   document.getElementById("region").addEventListener("change", function () { selected = {}; load("get_report"); });
   ["from", "to"].forEach(function (id) {
-    document.getElementById(id).addEventListener("change", function () { render(); shareContext(); });
+    document.getElementById(id).addEventListener("change", function () { render(); shareContext().catch(function (e) { setStatus(e.message); }); });
   });
   document.getElementById("analyze").addEventListener("click", function () {
     var box = document.getElementById("analysis");
     box.textContent = ""; box.style.display = "block";
     document.getElementById("analyze").disabled = true;
     setStatus("Analyzing…");
-    shareContext();
-    send("analyze.request", { prompt: "Analyze the sales report currently shown (respect the filters and selection). Highlight trends, best/worst regions and products, and target attainment in a few bullets." })
+    shareContext().then(function () { return send("analyze.request", { prompt: "Analyze the sales report currently shown (respect the filters and selection). Highlight trends, best/worst regions and products, and target attainment in a few bullets." }); })
       .catch(function (e) { setStatus("Analyze failed: " + e.message); document.getElementById("analyze").disabled = false; });
   });
 

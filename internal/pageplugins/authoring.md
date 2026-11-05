@@ -58,7 +58,7 @@ Bridge message size is limited to 64 KiB. Supported calls:
 - ready {} -> instance/permissions/operations metadata
 - context.set {summary,selection,filters,date_range,data} -> revision
 - op.invoke {operation,input} -> validated operation output
-- events.subscribe {} -> subscribed (requires events permission); handle subsequent event payloads {type,operation,data,at} by reloading through an operation
+- events.subscribe {} -> subscribed (requires events permission); handle subsequent event payloads {type,operation,data,at} by reloading through a read operation. The host also sends `{type:"page.refresh"}` after subscription and reconnection: refetch current data then, and ignore out-of-order responses from older requests/filters. Never replay a mutating operation just to redraw the page
 - analyze.request {prompt} -> exec_id (requires agent permission, max 4000-character prompt)
 
 ## Shared server operations and native backends

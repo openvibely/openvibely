@@ -3,12 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/auth"
@@ -33,6 +35,7 @@ func setupPluginPages(t *testing.T) *pluginTestEnv {
 	t.Helper()
 	h, e, llmRepo, stores := setupTestHandlerWithStores(t)
 	mgr := pageplugins.NewManager(stores.PagePlugins, t.TempDir())
+	t.Cleanup(mgr.StopAll)
 	h.SetPagePlugins(mgr)
 	env := &pluginTestEnv{h: h, e: e, mgr: mgr, projA: createProject(t, h, "Alpha"), projB: createProject(t, h, "Beta")}
 	env.agent = createAgent(t, llmRepo)
@@ -449,5 +452,52 @@ func TestPluginDisableCancelsOnlyOwningConversation(t *testing.T) {
 				t.Fatal("enable did not create a new lifetime for the existing conversation")
 			}
 		})
+	}
+}
+
+// Navigation revokes existing subscriptions but must not act as Stop.
+func TestPluginNavigationRetiresSubscriptionNotConversation(t *testing.T) {
+	env := setupPluginPages(t)
+	handle := env.openPage(t, env.inA)
+	rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat?project_id="+env.inA.ProjectID, "message=hello", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
+	if rec.Code != http.StatusOK {
+		t.Fatal(rec.Body.String())
+	}
+	started := env.starts[0]
+	server := httptest.NewServer(env.e)
+	defer server.Close()
+	response, err := http.Get(server.URL + "/api/plugin-pages/" + env.inA.ID + "/events?project_id=" + env.inA.ProjectID + "&handle=" + handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("events: %d", response.StatusCode)
+	}
+	finished := make(chan string, 1)
+	go func() { raw, _ := io.ReadAll(response.Body); finished <- string(raw) }()
+	env.mgr.RetireHandle(handle)
+	select {
+	case body := <-finished:
+		if !strings.Contains(body, "event: closed") {
+			t.Fatal(body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("retired subscription stayed open")
+	}
+	if started.CancellationContext.Err() != nil {
+		t.Fatal("navigation cancelled response")
+	}
+	exec, err := env.h.execRepo.GetByID(t.Context(), started.ExecID)
+	if err != nil || exec.Status != models.ExecRunning {
+		t.Fatal("navigation stopped persisted execution")
+	}
+	if n := env.mgr.Hub.SubscriberCount(env.inA.ID); n != 0 {
+		t.Fatalf("leaked %d subscriptions", n)
+	}
+	env.openPage(t, env.inA)
+	taskID, err := env.mgr.Store().GetConversationTask(t.Context(), env.inA.ID)
+	if err != nil || taskID != started.TaskID {
+		t.Fatal("navigation lost conversation")
 	}
 }

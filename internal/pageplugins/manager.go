@@ -60,7 +60,12 @@ type Handle struct {
 	ProjectID   string
 	PrincipalID string
 	ExpiresAt   time.Time
+	done        chan struct{}
+	timer       *time.Timer
 }
+
+// Done closes when this page load expires or is retired. It does not cancel chat.
+func (h Handle) Done() <-chan struct{} { return h.done }
 
 // Resolved is an authorized, enabled plugin page instance.
 type Resolved struct {
@@ -355,7 +360,7 @@ func (m *Manager) ReleaseProject(projectID string) {
 	for tok, h := range m.handles {
 		if h.ProjectID == projectID {
 			ids = append(ids, h.InstanceID)
-			delete(m.handles, tok)
+			m.retireHandleLocked(tok)
 		}
 	}
 	m.mu.Unlock()
@@ -373,7 +378,7 @@ func (m *Manager) releaseInstance(instanceID string) {
 	delete(m.procs, instanceID)
 	for tok, h := range m.handles {
 		if h.InstanceID == instanceID {
-			delete(m.handles, tok)
+			m.retireHandleLocked(tok)
 		}
 	}
 	m.mu.Unlock()
@@ -394,7 +399,9 @@ func (m *Manager) StopAll() {
 	}
 	entries := m.procs
 	m.procs = map[string]*procEntry{}
-	m.handles = map[string]Handle{}
+	for token := range m.handles {
+		m.retireHandleLocked(token)
+	}
 	m.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, e := range entries {
@@ -475,14 +482,15 @@ func (m *Manager) IssueHandle(r *Resolved, principalID string) (Handle, error) {
 	if _, err := rand.Read(buf); err != nil {
 		return Handle{}, err
 	}
-	h := Handle{Token: hex.EncodeToString(buf), InstanceID: r.Instance.ID, ProjectID: r.Instance.ProjectID, PrincipalID: principalID, ExpiresAt: m.now().Add(HandleTTL)}
+	h := Handle{Token: hex.EncodeToString(buf), InstanceID: r.Instance.ID, ProjectID: r.Instance.ProjectID, PrincipalID: principalID, ExpiresAt: m.now().Add(HandleTTL), done: make(chan struct{})}
 	m.mu.Lock()
 	now := m.now()
 	for tok, old := range m.handles {
 		if now.After(old.ExpiresAt) {
-			delete(m.handles, tok)
+			m.retireHandleLocked(tok)
 		}
 	}
+	h.timer = time.AfterFunc(HandleTTL, func() { m.RetireHandle(h.Token) })
 	m.handles[h.Token] = h
 	m.mu.Unlock()
 	return h, nil
@@ -494,7 +502,7 @@ func (m *Manager) LookupHandle(token string) (Handle, bool) {
 	defer m.mu.Unlock()
 	h, ok := m.handles[token]
 	if !ok || m.now().After(h.ExpiresAt) {
-		delete(m.handles, token)
+		m.retireHandleLocked(token)
 		return Handle{}, false
 	}
 	return h, true
@@ -503,8 +511,21 @@ func (m *Manager) LookupHandle(token string) (Handle, bool) {
 // RetireHandle invalidates a handle (page unload or project switch).
 func (m *Manager) RetireHandle(token string) {
 	m.mu.Lock()
-	delete(m.handles, token)
+	m.retireHandleLocked(token)
 	m.mu.Unlock()
+}
+
+// retireHandleLocked also revokes already-open subscriptions, not just future requests.
+func (m *Manager) retireHandleLocked(token string) {
+	if h, ok := m.handles[token]; ok {
+		delete(m.handles, token)
+		if h.timer != nil {
+			h.timer.Stop()
+		}
+		if h.done != nil {
+			close(h.done)
+		}
+	}
 }
 
 // AssetPath resolves a file inside the instance's package directory.

@@ -149,7 +149,7 @@ In All Projects the left rail lists every enabled page, labelled with its owning
 
 The "Chat about this page" panel reuses the standard chat message components and streaming pipeline (`startStreamingResponse`, live execution streams, Stop and cancellation).
 - **Persistence:** each instance has one persisted conversation task, stored in the hidden `freezer` category. The conversation resumes when you reopen the page. Provider transport sessions, saved provider state, and compaction summaries use `task:<conversation-task-id>`, separate from every other page and from normal `chat:project:<project-id>` chat. This scope survives restarts without switching the page chat to coding-agent prompts. Previously shared project checkpoints are not copied into page conversations; existing page message history remains available.
-- **Context:** each turn stores a snapshot of the page's explicitly shared context (`page_plugin_turn_contexts`). That snapshot is injected into the system context with provenance, fenced as `<untrusted_page_context>` data. OpenVibely never reads or scrapes the iframe's DOM.
+- **Context:** each turn stores a snapshot of the page's explicitly shared context (`page_turn_contexts`). That snapshot is injected into the system context with provenance, fenced as `<untrusted_page_context>` data. OpenVibely never reads or scrapes the iframe's DOM.
 - **Tools:** page tools (`page_<operation>`) are built server-side from the manifest. Each tool call re-resolves and re-authorizes the instance. Agent calls to actions wait for Approve or Deny in the page.
 - **In-page analysis:** `analyze.request` runs the same kind of turn and streams `analysis.delta` messages into the page.
 
@@ -172,10 +172,19 @@ These pages are not retrofitted yet. To adopt the interface, a built-in page wou
 
 1. Implement `pageintegration.Integration` (`Ref()`, `Operations()`, `Invoke()`). Use a distinct `PageRef.Kind` such as `"analytics"`, the owning project ID, and handlers that call existing services.
 2. When the page's selection, filters, or date range change, post them to a small endpoint that calls `ContextStore.Set(principal, ref, ctx, source)`. Never read them from the DOM.
-3. For a side-chat turn, call `RenderContextForPrompt(ref, snapshot, ops)` and add the result to `SystemContext`. Pass `BuildRuntimeTools(integration, resolver, approvals, caller)` as `RuntimeTools`, where `resolver` re-authorizes the project on every call.
-4. Publish `pageintegration.Event`s on a `Hub` after mutations so the page can refresh.
+3. Build a `pageintegration.Conversation` binding with the server-resolved `PageRef`, `stores.PageConversations.ForPage(ref)`, a `ContextStore`, an approval broker, and an authorized `Resolver`. Its `Begin` callback rechecks access and admits work against the page's enabled lifetime. Its `Lifetime` callback returns a context cancelled on disable/removal, independent of the request or browser lifetime. The page adapter owns authorization and enabled-state admission; frontend IDs never grant access.
+4. Use the shared handler methods `startPageChatTurn`, `loadPageChatHistory`, and `cancelPageConversation`. They create/resume the backing task, snapshot context, construct authorized page tools, reuse OV streaming/cancellation, and isolate provider sessions. Render `components.PageSideChat` with the owning project, history, and your authorized Send/Stop endpoints. No plugin manager or iframe is needed. Do not duplicate the conversation runtime in the page's handler.
+5. Publish `pageintegration.Event`s on a `Hub` after mutations. Close subscriptions on view disposal and refetch data when reconnecting. Use a request generation counter to ignore responses belonging to previous filters/views; do not replay mutating operations to refresh the view.
 
-The side chat itself depends only on `pageintegration`, not on plugins or iframes.
+The plugin adapter is `internal/pageplugins/conversation.go`. Shared persistence lives in `page_conversations` (project + kind + instance + page identity) and `page_turn_contexts`; migration 225 retains existing plugin conversation tasks and snapshots. `TestPageConversationWithoutPlugin` exercises the shared runtime with a non-plugin page and no plugin manager. Analytics and Automations have not been integrated.
+
+### Navigation and reconnect behavior
+
+- Leaving a page aborts its browser requests, closes its event and execution-stream subscriptions, and retires its handle. Late responses cannot update another page. This detaches the UI; it does **not** send Stop or cancel an admitted AI turn. The turn can finish and remains in saved conversation history.
+- Reopening resumes the same conversation. Disabling/removing the page explicitly cancels its AI work and stops its backend through the existing enabled-lifetime mechanism.
+- A retired or expired handle closes existing server subscriptions immediately. Organization access is rechecked before each event and on the 25-second heartbeat.
+- Bridge subscribers receive `event` with `{type:"page.refresh"}` after subscribing and whenever the event connection opens/reconnects. Reload relevant data with a read operation. The Sales example handles this event and ignores out-of-order report responses. It also awaits context publication before Analyze.
+- Browser lifecycle regression checks can be run with `node --test web/tests/page_lifecycle.test.cjs` using a development-only JavaScript runner. Node is not an application or plugin runtime dependency.
 
 ## Known limitations
 

@@ -933,7 +933,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 			AND (t.status NOT IN ('queued', 'running')
 			     OR (t.category NOT IN ('active', 'scheduled')
 			         AND NOT EXISTS (
-			             SELECT 1 FROM page_plugin_conversations pc WHERE pc.task_id = t.id
+			             SELECT 1 FROM page_conversations pc WHERE pc.task_id = t.id
 			         )))`
 	if _, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs

@@ -1,0 +1,43 @@
+package components
+
+import "github.com/openvibely/openvibely/internal/models"
+
+// PageChatView uses server-authorized endpoints and saved conversation records.
+// It has no dependency on a plugin, iframe, or a particular page type.
+type PageChatView struct {
+ Title string
+ ProjectID string
+ SendURL string
+ StopURL string
+ ChatExecutions []models.Execution
+ ChatTask *models.Task
+}
+
+templ PageSideChat(v PageChatView) {
+	<aside id="page-side-chat" class="hidden w-96 max-w-[45%] flex-col min-h-0 border border-base-300 rounded-lg bg-base-100" data-project-id={ v.ProjectID }>
+		<div class="px-3 py-2 border-b border-base-300 text-sm font-semibold flex items-center justify-between">
+			<span>Chat · { v.Title }</span>
+			<span class="text-xs opacity-60">uses page context + tools</span>
+		</div>
+		<div id="page-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
+			if len(v.ChatExecutions) > 0 {
+				@ChatMessages(v.ChatExecutions, v.ChatTask, nil, "page-chat-messages", "", false, v.ProjectID)
+			}
+		</div>
+		<form
+			id="page-chat-form"
+			class="p-2 border-t border-base-300 flex gap-2 items-end"
+			hx-post={ v.SendURL }
+			hx-target="#page-chat-messages"
+			hx-swap="beforeend"
+			hx-on::after-request="if(event.detail.successful){this.reset();}"
+		>
+			<textarea name="message" rows="2" class="textarea textarea-bordered textarea-sm flex-1" placeholder="Ask about this page…" required></textarea>
+			<div class="flex flex-col gap-1">
+				<button type="submit" class="btn btn-sm btn-primary">Send</button>
+				<button type="button" class="btn btn-sm btn-ghost" hx-post={ v.StopURL } hx-swap="none">Stop</button>
+			</div>
+		</form>
+		@ChatAutoScrollScript()
+	</aside>
+}

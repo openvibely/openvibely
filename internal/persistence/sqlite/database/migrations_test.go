@@ -4240,3 +4240,45 @@ func TestMigration212PreservesExistingGeneratedFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestMigration225PreservesPageConversations(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "pages.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 224); err != nil {
+		t.Fatal(err)
+	}
+	_, err := db.Exec(`
+ INSERT INTO projects(id,name) VALUES('page-project','Pages');
+ INSERT INTO tasks(id,project_id,title,category,status) VALUES('page-task','page-project','Page chat','freezer','pending');
+ INSERT INTO executions(id,task_id,task_project_id,status) VALUES('page-exec','page-task','page-project','completed');
+ INSERT INTO page_plugin_packages(id,plugin_id,version,name,content_hash,manifest_json,install_path) VALUES('pkg','example','1.0.0','Example','hash','{}','/unused');
+ INSERT INTO page_plugin_instances(id,project_id,package_id,page_id,title) VALUES('instance','page-project','pkg','sales','Sales');
+ INSERT INTO page_plugin_conversations(instance_id,task_id) VALUES('instance','page-task');
+ INSERT INTO page_plugin_turn_contexts(execution_id,instance_id,snapshot_json) VALUES('page-exec','instance','{"summary":"saved context"}');
+ `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 225); err != nil {
+		t.Fatal(err)
+	}
+	var task, raw string
+	if err := db.QueryRow(`SELECT task_id FROM page_conversations WHERE project_id='page-project' AND kind='plugin' AND instance_id='instance' AND page_id='sales'`).Scan(&task); err != nil || task != "page-task" {
+		t.Fatalf("binding: %q %v", task, err)
+	}
+	if err := db.QueryRow(`SELECT snapshot_json FROM page_turn_contexts WHERE execution_id='page-exec'`).Scan(&raw); err != nil || raw != `{"summary":"saved context"}` {
+		t.Fatalf("snapshot: %q %v", raw, err)
+	}
+	if err := goose.DownTo(db, ".", 224); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT task_id FROM page_plugin_conversations WHERE instance_id='instance'`).Scan(&task); err != nil || task != "page-task" {
+		t.Fatalf("rollback binding: %q %v", task, err)
+	}
+	if err := goose.UpTo(db, ".", 225); err != nil {
+		t.Fatal(err)
+	}
+}
