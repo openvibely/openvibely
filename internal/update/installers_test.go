@@ -1505,7 +1505,10 @@ func TestPackagedUpdateHelperResumesDurablePostAuthorizationPhases(t *testing.T)
 			err = RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 				ParentPID: 99999999, Current: current, Staged: stagedPath, Backup: backup, HealthURL: health.URL,
 				ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
-				WaitTimeout: 50 * time.Millisecond, ValidationTimeout: 25 * time.Millisecond,
+				WaitTimeout: 50 * time.Millisecond,
+				// This tests phase recovery, not timeout behavior. Allow the real
+				// HTTP health check time to complete on a busy CI runner.
+				ValidationTimeout: 5 * time.Second,
 				StartCommand: func(string, string) (func(context.Context) error, error) {
 					return func(context.Context) error { return nil }, nil
 				},
