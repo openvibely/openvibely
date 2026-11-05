@@ -58,7 +58,10 @@ type ProcessSpec struct {
 	Dir        string
 	Env        map[string]string
 	InitParams any
-	OnNotify   func(method string, params json.RawMessage)
+	// BeforeStart authorizes every actual launch, including automatic restarts.
+	// It runs under the process lock and must not call back into this Process.
+	BeforeStart func(context.Context) error
+	OnNotify    func(method string, params json.RawMessage)
 }
 
 // MinimalEnv builds the environment for plugin processes: no inherited secrets.
@@ -124,6 +127,14 @@ func (p *Process) startLocked(ctx context.Context) error {
 	}
 	if p.cmd != nil {
 		return nil
+	}
+	if p.spec.BeforeStart != nil {
+		if err := p.spec.BeforeStart(ctx); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	cmd := exec.Command(p.spec.Path, p.spec.Args...)
 	cmd.Dir = p.spec.Dir

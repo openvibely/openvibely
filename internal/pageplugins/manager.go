@@ -538,13 +538,6 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 	}
 	m.mu.Unlock()
 
-	onDisk, err := HashTree(os.DirFS(pkg.InstallPath))
-	if err != nil {
-		return nil, err
-	}
-	if onDisk != in.ApprovedHash {
-		return nil, ErrContentChanged
-	}
 	exe, err := man.Backend.SelectHostExecutable()
 	if err != nil {
 		return nil, err
@@ -553,8 +546,31 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 	if err != nil {
 		return nil, err
 	}
-	instanceID := in.ID
+	instanceID, projectID := in.ID, in.ProjectID
+	packageID, approvedHash, installPath := pkg.ID, pkg.ContentHash, pkg.InstallPath
 	proc := NewProcess(ProcessSpec{
+		// A cached Process can restart itself without going through ensureProcess.
+		// Keep approval/content validation at the actual launch boundary instead.
+		BeforeStart: func(ctx context.Context) error {
+			fresh, err := m.store.GetInstance(ctx, instanceID)
+			if err != nil {
+				return err
+			}
+			if fresh == nil || !fresh.Enabled || fresh.ProjectID != projectID {
+				return ErrDisabled
+			}
+			if fresh.PackageID != packageID || fresh.ApprovedHash != approvedHash || fresh.ContentHash != approvedHash {
+				return ErrApprovalRequired
+			}
+			onDisk, err := HashTree(os.DirFS(installPath))
+			if err != nil {
+				return err
+			}
+			if onDisk != approvedHash {
+				return ErrContentChanged
+			}
+			return nil
+		},
 		Path: exePath,
 		Args: man.Backend.Args,
 		Dir:  pkg.InstallPath,

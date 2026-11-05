@@ -414,3 +414,94 @@ func TestDisableInterruptsNativeStartup(t *testing.T) {
 		t.Fatal("instance still enabled")
 	}
 }
+
+func TestCrashRecoveryVerifiesApprovedPackageBeforeEveryLaunch(t *testing.T) {
+	for _, changed := range []string{"index.html", "bin/backend", "approval"} {
+		t.Run(changed, func(t *testing.T) {
+			m, _, project, _ := newTestManager(t)
+			defer m.StopAll()
+			ctx := context.Background()
+			pkg, err := m.InstallFromDir(ctx, writeProcessPackage(t), "admin")
+			if err != nil {
+				t.Fatal(err)
+			}
+			in, err := m.CreateInstance(ctx, project, pkg.ID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Approve(ctx, in.ID, "admin"); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Enable(ctx, in.ID); err != nil {
+				t.Fatal(err)
+			}
+			r, err := m.Resolve(ctx, in.ID, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			integration := m.Integration(r)
+			m.mu.Lock()
+			proc := m.procs[in.ID].proc
+			m.mu.Unlock()
+			crash := func() {
+				t.Helper()
+				proc.mu.Lock()
+				exited := proc.exited
+				proc.mu.Unlock()
+				if _, err := proc.Call(ctx, "operation/invoke", map[string]any{"operation": "crash"}); err == nil {
+					t.Fatal("backend did not crash")
+				}
+				select {
+				case <-exited:
+				case <-time.After(3 * time.Second):
+					t.Fatal("backend did not exit")
+				}
+			}
+			crash()
+			// An unchanged approved package must still recover automatically.
+			if _, err := integration.Invoke(ctx, pageintegration.Caller{}, "echo", nil); err != nil {
+				t.Fatalf("unchanged recovery: %v", err)
+			}
+			m.mu.Lock()
+			if m.procs[in.ID].proc != proc {
+				t.Error("test must exercise the cached process restart path")
+			}
+			m.mu.Unlock()
+			crash()
+			want := ErrContentChanged
+			if changed == "approval" {
+				if err := m.Store().ApproveInstance(ctx, in.ID, "revoked", "admin"); err != nil {
+					t.Fatal(err)
+				}
+				want = ErrApprovalRequired
+			} else {
+				f, err := os.OpenFile(filepath.Join(pkg.InstallPath, changed), os.O_APPEND|os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, writeErr := f.WriteString("changed after approval")
+				closeErr := f.Close()
+				if writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				if closeErr != nil {
+					t.Fatal(closeErr)
+				}
+			}
+			// Call the cached process directly as well as through the manager. Neither
+			// path may spawn anything after files or the persisted approval change.
+			if _, err := proc.Call(ctx, "operation/invoke", map[string]any{"operation": "echo"}); !errors.Is(err, want) {
+				t.Fatalf("cached restart: got %v, want %v", err, want)
+			}
+			if proc.Running() || proc.PID() != 0 {
+				t.Fatal("unapproved backend was launched")
+			}
+			if _, err := integration.Invoke(ctx, pageintegration.Caller{}, "echo", nil); !errors.Is(err, want) {
+				t.Fatalf("manager restart: got %v, want %v", err, want)
+			}
+			if proc.Running() || proc.PID() != 0 {
+				t.Fatal("manager launched unapproved backend")
+			}
+		})
+	}
+}
