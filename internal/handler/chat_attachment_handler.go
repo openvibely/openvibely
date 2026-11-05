@@ -112,6 +112,21 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "maximum 3 files per message")
 	}
 
+	// Roll back only files created by this request, while still holding the
+	// session lock. Existing attachments must survive a failed later upload.
+	var createdPaths []string
+	filesSaved := false
+	defer func() {
+		if filesSaved {
+			return
+		}
+		for _, path := range createdPaths {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				applog.Infof("[handler] UploadChatAttachment error rolling back file %s: %v", path, err)
+			}
+		}
+	}()
+
 	// Process each file
 	var attachmentInfos []map[string]interface{}
 	for _, file := range files {
@@ -137,11 +152,12 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 			applog.Infof("[handler] UploadChatAttachment error creating file %s: %v", filename, err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
 		}
-		defer dest.Close()
+		createdPaths = append(createdPaths, destPath)
 
-		if _, err := io.Copy(dest, src); err != nil {
+		_, copyErr := io.Copy(dest, src)
+		closeErr := dest.Close()
+		if err := errors.Join(copyErr, closeErr); err != nil {
 			applog.Infof("[handler] UploadChatAttachment error copying file %s: %v", filename, err)
-			os.Remove(destPath)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
 		}
 
@@ -163,6 +179,8 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 			"session_id": sessionID,
 		})
 	}
+
+	filesSaved = true
 
 	// Return attachment info as JSON
 	return c.JSON(http.StatusOK, map[string]interface{}{
