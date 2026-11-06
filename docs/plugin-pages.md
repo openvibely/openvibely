@@ -15,7 +15,7 @@ Task agents have two tools, on initial runs and task-thread follow-ups:
 
 Frontend-only pages are enabled automatically. Packages with native backends are installed without execution and remain disabled until an administrator approves and enables them; the task returns an approval link. The agent cannot grant itself backend approval. Existing agent/model selection and task tool policies apply. Publication is unavailable to project chat and automation auditor tasks; project chat can delegate page creation to a coding task.
 
-Identical retries reuse the same package and project instance. Changed content requires a version bump; a new version currently creates a separate instance rather than replacing an existing page's state or conversation. Task publication requires a configured task workspace. The source bundle remains in the task's changes for review; the installed copy survives worktree deletion.
+Identical retries reuse the same package and project instance. Changed content requires a version bump; the matching page instance is updated while preserving its state and conversation. Supply `instance_id` when known. Task publication requires a configured task workspace. The source bundle remains in the task's changes for review; the installed copy survives worktree deletion.
 
 Local import in settings is an advanced fallback for existing bundles, not the normal creation workflow.
 
@@ -208,3 +208,11 @@ A page must send `page.loaded` with `{}` after initialization and required initi
 Reports are in memory, tied to package content and the latest page-load handle. States are `not_opened`, `loading`, `loaded`, and `failed`. No browser load means `not_opened`; OV restart clears observations. Old tabs cannot overwrite newer reports; a failed load requires reload to retry. Error text is untrusted plugin data. Page navigation still detaches the UI without cancelling saved AI work.
 
 A backend that exhausts its crash-restart budget stays failed: ordinary calls cannot replace the supervisor to reset the counter. Explicitly disable and enable the instance to retry after correcting the problem. Startup reports do not affect agent tool permissions or database storage.
+
+## Updating an existing page
+
+`publish_custom_page` accepts an optional `instance_id`. By default it matches the task project's stable plugin ID and page ID. A new manifest version replaces that instance, preserving its URL, configuration, state and conversation. Explicit IDs are checked against the task project and the same plugin/page identity; ambiguous existing duplicates require an explicit ID. Use a different stable identity only when intentionally creating another page.
+
+Installation validates and copies the new bundle before changing the live instance. Replacement closes old handles/subscriptions and cancels active page work. Native replacements remain disabled until administrator approval; publishing never executes native code. The previous package and approval are temporarily retained in a recovery record that survives server restart. Successful backend startup (or frontend activation) finalizes the replacement. Failed backend startup restores the previous package and approval, and starts the previous backend if it had been enabled. If restoring the old backend also fails, the error is reported and the page stays disabled.
+
+After finalization, unused old code is removed. Packages still used by another project/page or pending recovery are protected. Cleanup failures are logged and leave removable unused packages rather than undoing a successful update. There is no permanent version history. Code rollback does not undo writes to saved state or external databases. Browser startup is reported separately when a browser opens the page; it is not an installation commit gate.

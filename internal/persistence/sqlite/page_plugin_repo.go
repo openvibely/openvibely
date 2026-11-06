@@ -72,7 +72,7 @@ func (r *PagePluginRepo) DeletePackage(ctx context.Context, id string) error {
 
 func (r *PagePluginRepo) CountInstancesForPackage(ctx context.Context, packageID string) (int, error) {
 	var n int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_plugin_instances WHERE package_id = ?`, packageID).Scan(&n)
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_plugin_instances WHERE package_id = ? OR id IN (SELECT instance_id FROM page_plugin_replacements WHERE package_id = ?)`, packageID, packageID).Scan(&n)
 	return n, err
 }
 
@@ -208,4 +208,45 @@ func (r *PagePluginRepo) GetTurnContext(ctx context.Context, executionID string)
 		return "", nil
 	}
 	return raw, err
+}
+
+// StageReplacement retains only the information required to undo an unfinished
+// update. Instance identity, data and conversation associations never change.
+func (r *PagePluginRepo) StageReplacement(ctx context.Context, id, oldID, newID string) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		res, err := tx.ExecContext(ctx, `INSERT INTO page_plugin_replacements (instance_id,package_id,approved_hash,approved_by,approved_at,was_enabled)
+   SELECT id,package_id,approved_hash,approved_by,approved_at,enabled FROM page_plugin_instances WHERE id=? AND package_id=?`, id, oldID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errors.New("page changed during update")
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE page_plugin_instances SET package_id=?,enabled=0,approved_hash='',approved_by='',approved_at=NULL,updated_at=datetime('now') WHERE id=?`, newID, id)
+		return err
+	})
+}
+func (r *PagePluginRepo) GetReplacement(ctx context.Context, id string) (*models.PagePluginInstance, error) {
+	var in models.PagePluginInstance
+	err := r.db.QueryRowContext(ctx, `SELECT instance_id,package_id,was_enabled FROM page_plugin_replacements WHERE instance_id=?`, id).Scan(&in.ID, &in.PackageID, &in.Enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &in, err
+}
+func (r *PagePluginRepo) FinishReplacement(ctx context.Context, id string, restore bool) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if restore {
+			_, err := tx.ExecContext(ctx, `UPDATE page_plugin_instances SET package_id=b.package_id, approved_hash=b.approved_hash,approved_by=b.approved_by,approved_at=b.approved_at,enabled=0,updated_at=datetime('now') FROM page_plugin_replacements b WHERE page_plugin_instances.id=b.instance_id AND b.instance_id=?`, id)
+			if err != nil {
+				return err
+			}
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM page_plugin_replacements WHERE instance_id=?`, id)
+		return err
+	})
 }

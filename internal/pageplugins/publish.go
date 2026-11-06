@@ -20,6 +20,13 @@ func (m *Manager) Publish(ctx context.Context, source, projectID, pageID, by str
 	if projectID == "" || projectID == models.AllProjectsID {
 		return nil, errors.New("a real owning project is required")
 	}
+	return m.PublishToInstance(ctx, source, projectID, pageID, by, "")
+}
+
+func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, pageID, by, instanceID string) (*PublishResult, error) {
+	if projectID == "" || projectID == models.AllProjectsID {
+		return nil, errors.New("a real owning project is required")
+	}
 	m.publishMu.Lock()
 	defer m.publishMu.Unlock()
 	// Validate the page choice before creating any installed package records.
@@ -27,11 +34,56 @@ func (m *Manager) Publish(ctx context.Context, source, projectID, pageID, by str
 	if err != nil {
 		return nil, err
 	}
+	if instanceID != "" {
+		target, err := m.store.GetInstance(ctx, instanceID)
+		if err != nil {
+			return nil, err
+		}
+		if target == nil || target.ProjectID != projectID {
+			return nil, ErrNotFound
+		}
+		if pageID == "" {
+			pageID = target.PageID
+		}
+	}
 	if pageID == "" {
 		pageID = man.Pages[0].ID
 	}
 	if _, ok := man.Page(pageID); !ok {
 		return nil, errors.New("page_id is not declared in plugin.json")
+	}
+	instances, err := m.store.ListInstances(ctx, projectID, false)
+	if err != nil {
+		return nil, err
+	}
+	var instance *models.PagePluginInstance
+	for i := range instances {
+		in := &instances[i]
+		if instanceID != "" && in.ID == instanceID {
+			if in.PluginID != man.ID || in.PageID != pageID {
+				return nil, errors.New("replacement must retain plugin ID and page ID")
+			}
+			instance = in
+			break
+		}
+		if instanceID == "" && in.PluginID == man.ID && in.PageID == pageID {
+			if instance != nil {
+				return nil, errors.New("multiple matching pages; supply instance_id")
+			}
+			instance = in
+		}
+	}
+	if instanceID != "" && instance == nil {
+		return nil, ErrNotFound
+	}
+	if instance != nil {
+		pending, err := m.store.GetReplacement(ctx, instance.ID)
+		if err != nil {
+			return nil, err
+		}
+		if pending != nil && instance.Version != man.Version {
+			return nil, errors.New("finish the pending page update before publishing another version")
+		}
 	}
 	pkg, err := m.InstallFromDir(ctx, source, by)
 	if err != nil {
@@ -41,20 +93,14 @@ func (m *Manager) Publish(ctx context.Context, source, projectID, pageID, by str
 	if err != nil {
 		return nil, err
 	}
-	instances, err := m.store.ListInstances(ctx, projectID, false)
-	if err != nil {
-		return nil, err
-	}
-	var instance *models.PagePluginInstance
-	for i := range instances {
-		if instances[i].PackageID == pkg.ID && instances[i].PageID == pageID {
-			instance = &instances[i]
-			break
-		}
-	}
 	if instance == nil {
 		instance, err = m.CreateInstance(ctx, projectID, pkg.ID, pageID)
 		if err != nil {
+			return nil, err
+		}
+	}
+	if instance.PackageID != pkg.ID {
+		if err = m.stageReplacement(ctx, instance, pkg); err != nil {
 			return nil, err
 		}
 	}

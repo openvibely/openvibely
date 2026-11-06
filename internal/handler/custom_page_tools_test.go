@@ -90,6 +90,23 @@ func TestCustomPagePublishFromInitialTaskAndFollowup(t *testing.T) {
 	if err != nil || bad || !handled || !strings.Contains(retry, first.InstanceID) {
 		t.Fatalf("retry failed/duplicated: %s %v", retry, err)
 	}
+	manifestPath := filepath.Join(root, "custom-pages", "report", "plugin.json")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest = []byte(strings.Replace(string(manifest), `"version":"1.0.0"`, `"version":"1.1.0"`, 1))
+	if err = os.WriteFile(manifestPath, manifest, 0600); err != nil {
+		t.Fatal(err)
+	}
+	updated, handled, bad, err := followup.Executor(ctx, "publish_custom_page", json.RawMessage(`{"package_path":"custom-pages/report","instance_id":"`+first.InstanceID+`"}`))
+	if err != nil || bad || !handled || !strings.Contains(updated, first.InstanceID) {
+		t.Fatalf("update duplicated page: %s %v", updated, err)
+	}
+	instance, err := env.mgr.Store().GetInstance(ctx, first.InstanceID)
+	if err != nil || instance.Version != "1.1.0" {
+		t.Fatal("wrong updated version", err)
+	}
 	if err := os.RemoveAll(root); err != nil {
 		t.Fatal(err)
 	}

@@ -1000,10 +1000,11 @@ var registry = []ActionDef{
 	},
 	{
 		Name:        "publish_custom_page",
-		Description: "Install a custom page authored in the current coding task's workspace and register it in that task's owning project. Call get_custom_page_guide first, build/validate the bundle, then publish it; do not ask the user to manually import it. Frontend-only pages are enabled and appear in the left rail. Native backends remain disabled pending administrator approval; this tool NEVER approves or executes native code. Identical retries reuse the instance; changed content needs a new version. Requires a persisted task, not project chat.",
+		Description: "Install a custom page authored in the current coding task's workspace and register it in that task's owning project. Call get_custom_page_guide first, build/validate the bundle, then publish it; do not ask the user to manually import it. Frontend-only pages are enabled and appear in the left rail. Native backends remain disabled pending administrator approval; this tool NEVER approves or executes native code. Identical retries reuse the instance; changed content needs a new version and replaces the matching project page while preserving its URL, data and conversation. Supply instance_id when known. Native replacements remain disabled pending administrator approval; failed startup restores the previous package. Requires a persisted task, not project chat.",
 		Domain:      DomainProjects, Access: AccessWrite, Sensitivity: SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate}, Surfaces: webAPISurfaces(), IncludeThreadTools: true,
 		Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{
+			"instance_id":  {Type: "string", Description: "Existing page to update, in this task project. Omit to match the stable plugin/page IDs automatically or create when none exists."},
 			"package_path": {Type: "string", Description: "Directory containing plugin.json and the prebuilt page bundle, relative to this task's workspace. No absolute paths or traversal."},
 			"page_id":      {Type: "string", Description: "Optional stable page ID declared in plugin.json. Defaults to the first page."},
 		}, Required: []string{"package_path"}, AdditionalProperties: toolschema.Pointer(false)},

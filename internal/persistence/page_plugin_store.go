@@ -15,6 +15,9 @@ type PagePluginStore interface {
 	DeletePackage(ctx context.Context, id string) error
 	CountInstancesForPackage(ctx context.Context, packageID string) (int, error)
 
+	StageReplacement(ctx context.Context, instanceID, oldPackageID, newPackageID string) error
+	GetReplacement(ctx context.Context, instanceID string) (*models.PagePluginInstance, error)
+	FinishReplacement(ctx context.Context, instanceID string, restore bool) error
 	CreateInstance(ctx context.Context, in *models.PagePluginInstance) error
 	GetInstance(ctx context.Context, id string) (*models.PagePluginInstance, error)
 	ListInstances(ctx context.Context, projectID string, enabledOnly bool) ([]models.PagePluginInstance, error)

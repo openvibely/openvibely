@@ -32,6 +32,7 @@ func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingRes
 	}
 	var req struct {
 		PackagePath string `json:"package_path"`
+		InstanceID  string `json:"instance_id,omitempty"`
 		PageID      string `json:"page_id,omitempty"`
 	}
 	if !json.Valid(input) || len(input) > 65536 {
@@ -72,7 +73,7 @@ func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingRes
 	if rel, err := filepath.Rel(workspace, managed); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", errors.New("configure the plugin package store outside the task workspace")
 	}
-	result, err := h.pagePlugins.Publish(ctx, source, task.ProjectID, req.PageID, "task:"+task.ID)
+	result, err := h.pagePlugins.PublishToInstance(ctx, source, task.ProjectID, req.PageID, "task:"+task.ID, req.InstanceID)
 	if err != nil {
 		return "", err
 	}

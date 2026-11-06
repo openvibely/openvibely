@@ -304,6 +304,11 @@ func (m *Manager) Enable(ctx context.Context, instanceID string) error {
 	lock := m.instanceLock(instanceID)
 	lock.Lock()
 	defer lock.Unlock()
+	return m.enableReplacementLocked(ctx, instanceID)
+}
+
+// The caller owns both instance lifecycle and operation locks.
+func (m *Manager) enableLocked(ctx context.Context, instanceID string) error {
 	in, pkg, man, err := m.load(ctx, instanceID)
 	if err != nil {
 		return err
