@@ -97,3 +97,51 @@ func TestProjectCreateRejectsRemovedPrincipalAtomically(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM projects WHERE name='Rejected'`).Scan(&count))
 	require.Zero(t, count)
 }
+
+func TestOrgAdminProjectOverrideIsAudited(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('alice','alice'),('admin','admin'); INSERT INTO org_memberships VALUES('default','alice','member'),('default','admin','admin')`)
+	require.NoError(t, err)
+	alice := models.WithPrincipal(ctx, models.Principal{UserID: "alice", OrgID: models.DefaultOrgID})
+	admin := models.WithPrincipal(ctx, models.Principal{UserID: "admin", OrgID: models.DefaultOrgID})
+	projects, access := NewProjectRepo(db), NewProjectAccessRepo(db)
+
+	owned := &models.Project{Name: "Owner transfer"}
+	require.NoError(t, projects.Create(alice, owned))
+	policy, err := access.Get(ctx, owned.ID)
+	require.NoError(t, err)
+	policy.OwnerUserID = "admin"
+	require.NoError(t, access.Update(ctx, "alice", *policy))
+	events, err := access.Audit(ctx, owned.ID)
+	require.NoError(t, err)
+	require.NotContains(t, events[0].Details, "org_admin_override")
+
+	other := &models.Project{Name: "Admin transfer"}
+	require.NoError(t, projects.Create(alice, other))
+	policy, err = access.Get(ctx, other.ID)
+	require.NoError(t, err)
+	policy.OwnerUserID = "admin"
+	require.NoError(t, access.Update(ctx, "admin", *policy))
+	events, err = access.Audit(ctx, other.ID)
+	require.NoError(t, err)
+	require.Equal(t, "project.policy", events[0].Action)
+	require.Contains(t, events[0].Details, `"org_admin_override":true`)
+
+	deleted := &models.Project{Name: "Admin delete"}
+	require.NoError(t, projects.Create(alice, deleted))
+	_, ok, err := projects.DeleteWithCleanupManifest(admin, deleted.ID, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	var details string
+	require.NoError(t, db.QueryRow(`SELECT details FROM project_audit_events WHERE project_id=? AND action='project.deleted'`, deleted.ID).Scan(&details))
+	require.Equal(t, `{"org_admin_override":true}`, details)
+
+	ownDelete := &models.Project{Name: "Owner delete"}
+	require.NoError(t, projects.Create(alice, ownDelete))
+	_, ok, err = projects.DeleteWithCleanupManifest(alice, ownDelete.ID, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, db.QueryRow(`SELECT details FROM project_audit_events WHERE project_id=? AND action='project.deleted'`, ownDelete.ID).Scan(&details))
+	require.Empty(t, details)
+}

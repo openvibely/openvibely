@@ -204,11 +204,11 @@ CREATE INDEX idx_project_members_user ON project_members(user_id, project_id);
 
 Visibility semantics:
 
-- `private`: only `owner_user_id`, org owners and admins (break-glass, audited), and explicit `project_members`. Default.
+- `private`: only `owner_user_id`, org owners and admins, and explicit `project_members`. Default.
 - `shared`: same as private, plus the UI shows a "Shared" badge. This is a **derived/UX state**, effectively `private` with members ≥1. **Recommendation:** store only `private`/`org` and derive "shared" from membership count, to avoid two sources of truth. The CHECK above lists all three for discussion; the final migration should pick one.
 - `org`: every org member gets an implicit `viewer` role (configurable to `editor` via `organizations.default_project_visibility`). Explicit `project_members` rows can raise a role. Org-wide visibility never *lowers* an explicit role.
 
-**Effective project role** = max(explicit membership, owner → `owner`, org admin/owner → `maintainer`, org-visible → org default role).
+**Effective project role** = max(explicit membership, owner → `owner`, org admin/owner → `owner`, org-visible → org default role).
 
 The owner is also stored in `project_members` with role `owner`. This makes listing a single join, and `owner_user_id` is denormalized for transfers.
 
@@ -325,7 +325,7 @@ This completes the persistence refactor portion of Phase 0, not the route-owners
 | Share project / manage members / change visibility | – | – | ✓ (≤ own role) | ✓ | ✓ |
 | Transfer ownership, delete project | – | – | – | ✓ | ✓ |
 
-\* Org owners and admins get maintainer-level break-glass access to *private* projects. **Open question:** GitHub lets org owners see all repos, but some teams want true privacy. Recommend a per-org setting, `admins_can_access_private_projects`, default `true`, with every break-glass access written to the audit log.
+\* Org owners and admins hold owner rank on every project in the org, including private projects, as GitHub org owners do for private repositories. Project owners cannot restrict them. When an org admin who is not the recorded owner deletes a project or transfers its ownership, the audit event is marked `org_admin_override`. Reads are not audited.
 
 Org-level permissions:
 
@@ -554,7 +554,7 @@ Today: global `worker_settings.max_workers`, `projects.max_workers`, and `agent_
 | **Merge conflicts on shared worktrees** | `project_merge_conflict_owners` already exists. Add `merge_requested_by_user_id`. Merge requires `task.merge` |
 | **Realtime fan-out** | `events.Broadcaster` already supports project-scoped subscription. Add per-user notification subscriptions over the same WebSocket (a proposed internal `SubscribeUser(userID)` broadcaster API), and include `actor_user_id` in `TaskEvent`/`ChatEvent` so UIs can show "Alice moved X". Enforce authorization at subscribe time (§3.2) and on membership changes |
 | **Notifications per user** | Alerts are project-scoped broadcasts today. Add `alert_recipients(alert_id, user_id, read_at)`, or simpler per-user read state, `alert_reads(alert_id, user_id)`, replacing the global `alerts.is_read`. Add notification types: mentioned in chat (`@username`), task assigned, review requested, run failed (your run), share invite. Delivery: in-app, plus optional email or linked Slack DM via existing `send_message` channels |
-| **Audit log** | `audit_events(id, org_id, project_id, actor_user_id, actor_kind, action, target_type, target_id, metadata_json, ip, created_at)`. Write on: membership/role changes, visibility changes, shares, invites, credential changes, merges, PR opens, alert decisions, automation publish, break-glass access, project delete/transfer, and login success/failure. Read view for org admins and project maintainers |
+| **Audit log** | `audit_events(id, org_id, project_id, actor_user_id, actor_kind, action, target_type, target_id, metadata_json, ip, created_at)`. Write on: membership/role changes, visibility changes, shares, invites, credential changes, merges, PR opens, alert decisions, automation publish, project delete/transfer (marked when an org admin acts on a project they do not own), and login success/failure. Read view for org admins and project maintainers |
 | **Presence** | Later nice-to-have: in-memory presence per project or conversation via the existing WebSocket (`presence` frames with a heartbeat). It does not need persistence |
 | **Mentions** | `@user` in chat creates notifications and puts the participant into the conversation |
 | **Assignment** | Optional `tasks.assignee_user_id` plus a board filter ("My tasks") |

@@ -335,6 +335,16 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 	if err := requireProjectMutation(ctx, tx, id, true); err != nil {
 		return manifest, false, err
 	}
+	auditDetails := ""
+	if principal, ok := models.PrincipalFromContext(ctx); ok {
+		override, err := orgAdminOverride(ctx, tx, principal.UserID, id)
+		if err != nil {
+			return manifest, false, err
+		}
+		if override {
+			auditDetails = `{"org_admin_override":true}`
+		}
+	}
 
 	var isDefault bool
 	if err = tx.QueryRowContext(ctx, `SELECT is_default FROM projects WHERE id = ?`, id).Scan(&isDefault); err != nil {
@@ -468,7 +478,7 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 		return manifest, false, fmt.Errorf("project not found or is the default project")
 	}
 	if principal, ok := models.PrincipalFromContext(ctx); ok {
-		if err = projectAudit(ctx, tx, id, principal.UserID, "project.deleted", id, ""); err != nil {
+		if err = projectAudit(ctx, tx, id, principal.UserID, "project.deleted", id, auditDetails); err != nil {
 			return manifest, false, err
 		}
 	}

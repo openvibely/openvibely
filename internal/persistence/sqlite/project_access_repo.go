@@ -45,6 +45,16 @@ func projectRole(ctx context.Context, db sqlExecutor, userID, projectID string) 
 	}
 	return []string{"", "viewer", "editor", "maintainer", "owner"}[rank], nil
 }
+// orgAdminOverride reports whether the user acts on the project only through
+// org owner/admin rank, not as its recorded owner.
+func orgAdminOverride(ctx context.Context, db sqlExecutor, userID, projectID string) (bool, error) {
+	var owner string
+	err := db.QueryRowContext(ctx, `SELECT owner_user_id FROM project_organizations WHERE project_id=?`, projectID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && owner != userID, err
+}
 func (r *ProjectAccessRepo) Role(ctx context.Context, userID, projectID string) (string, error) {
 	return projectRole(ctx, r.db, userID, projectID)
 }
@@ -103,7 +113,11 @@ func (r *ProjectAccessRepo) Update(ctx context.Context, actor string, p models.P
 			return err
 		}
 		p.OrgID = old.OrgID
-		details, _ := json.Marshal(map[string]any{"before": old, "after": p})
+		audit := map[string]any{"before": old, "after": p}
+		if p.OwnerUserID != old.OwnerUserID && actor != old.OwnerUserID {
+			audit["org_admin_override"] = true
+		}
+		details, _ := json.Marshal(audit)
 		return projectAudit(ctx, tx, p.ProjectID, actor, "project.policy", p.ProjectID, string(details))
 	})
 }
