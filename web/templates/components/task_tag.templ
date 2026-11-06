@@ -1,0 +1,10 @@
+package components
+
+import "github.com/openvibely/openvibely/internal/models"
+
+// TaskTagInput offers defaults without requiring a catalog.
+templ TaskTagInput(tag models.TaskTag) {
+ <input type="text" name="tag" aria-label="Tag" value={ string(tag) } list="task-tag-defaults" placeholder="None" class="input input-bordered w-full"/>
+ <datalist id="task-tag-defaults"><option value="feature">Feature</option><option value="bug">Bug</option></datalist>
+ <p class="text-xs opacity-60">One tag, up to 64 characters. Trimmed and lowercased. Leave empty for none.</p>
+}

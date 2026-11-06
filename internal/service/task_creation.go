@@ -19,6 +19,7 @@ import (
 
 // TaskCreationRequest represents a typed task creation action request.
 type TaskCreationRequest struct {
+	Tag                     string                     `json:"tag,omitempty"`
 	Title                   string                     `json:"title"`
 	Prompt                  string                     `json:"prompt"`
 	Goal                    string                     `json:"goal"`                // Optional persisted task goal
@@ -159,6 +160,7 @@ func ExecuteTaskCreationsWithIndexedReturnAndPersistence(ctx context.Context, re
 
 		task := &models.Task{
 			ProjectID:               projectID,
+			Tag:                     models.TaskTag(req.Tag),
 			Title:                   req.Title,
 			Prompt:                  req.Prompt,
 			Status:                  models.StatusPending,
@@ -294,13 +296,14 @@ func resolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationReq
 
 // TaskEditRequest represents a typed task edit action request.
 type TaskEditRequest struct {
-	ID                      string                     `json:"id"`                                    // Required: task ID to edit
-	Title                   string                     `json:"title,omitempty"`                       // Optional: new title
-	Prompt                  string                     `json:"prompt,omitempty"`                      // Optional: new prompt
-	Category                string                     `json:"category,omitempty"`                    // Optional: new category
-	Priority                int                        `json:"priority,omitempty"`                    // Optional: new priority (1-4)
-	PrioritySet             bool                       `json:"-"`                                     // Internal: true when JSON explicitly supplied priority
-	Tag                     string                     `json:"tag,omitempty"`                         // Optional: new tag ("feature", "bug", "")
+	ID                      string                     `json:"id"`                 // Required: task ID to edit
+	Title                   string                     `json:"title,omitempty"`    // Optional: new title
+	Prompt                  string                     `json:"prompt,omitempty"`   // Optional: new prompt
+	Category                string                     `json:"category,omitempty"` // Optional: new category
+	Priority                int                        `json:"priority,omitempty"` // Optional: new priority (1-4)
+	PrioritySet             bool                       `json:"-"`                  // Internal: true when JSON explicitly supplied priority
+	Tag                     string                     `json:"tag,omitempty"`      // Optional: new tag; empty clears when explicitly supplied
+	TagSet                  bool                       `json:"-"`
 	AgentID                 string                     `json:"agent_id,omitempty"`                    // Optional: new model config ID (empty = leave unchanged)
 	AgentConfigID           string                     `json:"agent_config_id,omitempty"`             // Optional: alias for agent_id (for compatibility)
 	AgentDefinitionID       string                     `json:"agent_definition_id,omitempty"`         // Optional: known primary Agent definition ID
@@ -324,6 +327,7 @@ func (r *TaskEditRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	decoded.PrioritySet = raw["priority"] != nil
+	decoded.TagSet = raw["tag"] != nil
 	*r = TaskEditRequest(decoded)
 	return nil
 }
@@ -394,8 +398,16 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			task.Priority = req.Priority
 			changes = append(changes, "priority")
 		}
-		if req.Tag != "" {
+		if req.TagSet || req.Tag != "" {
 			newTag := models.TaskTag(req.Tag)
+			if newTag != task.Tag {
+				var tagErr error
+				newTag, tagErr = models.NormalizeTaskTag(req.Tag)
+				if tagErr != nil {
+					failed = append(failed, fmt.Sprintf("- %q: %v", task.Title, tagErr))
+					continue
+				}
+			}
 			if newTag != task.Tag {
 				task.Tag = newTag
 				changes = append(changes, "tag")
@@ -946,27 +958,18 @@ func ExecuteTaskExecutions(ctx context.Context, requests []TaskExecutionRequest,
 	var failed []string
 
 	for _, req := range requests {
-		// Convert string tags to TaskTag type
 		var tags []models.TaskTag
-		for _, tagStr := range req.Tags {
-			tag := models.TaskTag(tagStr)
-			// Validate tag
-			validTag := false
-			for _, validTagEnum := range models.AllTags {
-				if tag == validTagEnum {
-					validTag = true
-					break
-				}
+		var tagErr error
+		for _, value := range req.Tags {
+			var tag models.TaskTag
+			tag, tagErr = models.NormalizeTaskTag(value)
+			if tagErr != nil {
+				break
 			}
-			if validTag && tag != models.TagNone {
-				tags = append(tags, tag)
-			}
+			tags = append(tags, tag)
 		}
-
-		// If tags were specified but none were valid, report an error
-		if len(req.Tags) > 0 && len(tags) == 0 {
-			applog.Infof("[task-execution] no valid tags found in request")
-			failed = append(failed, "- No valid tags specified")
+		if tagErr != nil {
+			failed = append(failed, "- "+tagErr.Error())
 			continue
 		}
 

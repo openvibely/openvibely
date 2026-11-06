@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -544,6 +545,61 @@ func TestExecuteChatTaskEditRequestsCopiesChatAttachmentsAndAppliesEdits(t *test
 	require.NoError(t, err)
 	require.Len(t, attachments, 1)
 	require.Equal(t, "notes.txt", attachments[0].FileName)
+}
+
+func TestExecuteChatTaskEditRequestsTagClearingWithChatAttachments(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tagJSON string
+		wantTag models.TaskTag
+	}{
+		{name: "explicit empty clears", tagJSON: `,"tag":""`, wantTag: models.TagNone},
+		{name: "omitted preserves", wantTag: models.TaskTag("docs/security")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
+			ctx := context.Background()
+			project := createProject(t, h, "Tag edit project")
+			agent := createAgent(t, llmConfigRepo)
+			chatHost := createTask(t, h, project.ID, "Chat host", func(task *models.Task) {
+				task.Category = models.CategoryChat
+			})
+			exec := createExec(t, h, chatHost.ID, agent.ID)
+			target := createTask(t, h, project.ID, "Tagged target", func(task *models.Task) {
+				task.Category = models.CategoryBacklog
+				task.Tag = "docs/security"
+			})
+
+			origUploadsDir := uploadsDir
+			uploadsDir = t.TempDir()
+			defer func() { uploadsDir = origUploadsDir }()
+			chatDir := filepath.Join(uploadsDir, "chat", exec.ID)
+			require.NoError(t, os.MkdirAll(chatDir, 0o755))
+			filePath := filepath.Join(chatDir, "notes.txt")
+			content := []byte("attachment notes")
+			require.NoError(t, os.WriteFile(filePath, content, 0o644))
+			require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{ExecutionID: exec.ID, FileName: "notes.txt", FilePath: filePath, MediaType: "text/plain", FileSize: int64(len(content))}))
+
+			var req service.TaskEditRequest
+			require.NoError(t, json.Unmarshal([]byte(`{"id":"`+target.ID+`","attachments":["chat"]`+tc.tagJSON+`}`), &req))
+			out := h.executeChatTaskEditRequests(ctx, exec.ID, project.ID, []service.TaskEditRequest{req})
+			require.Contains(t, out, "1 chat attachment(s) copied")
+			updated, err := h.taskRepo.GetByID(ctx, target.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantTag, updated.Tag)
+			require.Equal(t, target.Title, updated.Title)
+			require.Contains(t, updated.Prompt, "notes.txt")
+			if tc.tagJSON != "" {
+				require.Contains(t, out, "Edited 1 task(s)")
+			}
+			attachments, err := h.attachmentRepo.ListByTask(ctx, target.ID)
+			require.NoError(t, err)
+			require.Len(t, attachments, 1)
+			copied, err := os.ReadFile(attachments[0].FilePath)
+			require.NoError(t, err)
+			require.Equal(t, content, copied)
+		})
+	}
 }
 
 func TestExecuteChatTaskExecutionRequestsReportsMissingTask(t *testing.T) {

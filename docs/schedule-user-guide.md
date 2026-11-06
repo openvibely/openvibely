@@ -29,7 +29,7 @@ Use this to plan load across days/hours instead of crowding everything into one 
 ## Create a Scheduled Task
 
 1. Click `+ New Scheduled Task`.
-2. Fill task fields (`Title`, `Prompt`, optional model, priority, tag).
+2. Fill task fields (`Title`, `Prompt`, optional model, priority, tag). Tags accept custom text such as `docs/security` without registration. Each task has one tag, trimmed and lowercased, with a limit of 64 Unicode characters and no control or formatting characters. Leave it empty for no tag. Feature and Bug remain default choices. The same rules apply to task editing, API and Chat actions, and bulk execution filters.
 3. Optional: configure either independent, default-off worktree merge trigger:
    - `Auto-merge to target branch on successful completion` merges after a task run completes successfully.
    - `Auto-merge to target branch when goal is achieved` merges after the task's stored goal reaches the achieved state, including when the Goal Agent marks it achieved after lifecycle review.
