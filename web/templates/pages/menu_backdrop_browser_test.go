@@ -91,3 +91,47 @@ func TestBrowserFunctional_MenuBackdropCornersAndKeyboard(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_AutomationMenuOpeningClickSurvivesReleasePaint(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path != "/automations" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				cards := []models.AutomationCard{{Automation: models.Automation{ID: "menu-card", Name: "Menu automation", LifecycleState: models.AutomationActive}}}
+				var page bytes.Buffer
+				if err := AutomationsPage(nil, "project", cards, false).Render(r.Context(), &page); err != nil {
+					t.Error(err)
+				}
+				html := page.String()
+				if legacy {
+					html = strings.Replace(html, "<head>", `<head><script>delete HTMLElement.prototype.showPopover; delete HTMLElement.prototype.hidePopover;</script>`, 1)
+				}
+				fmt.Fprint(w, html)
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL+"/automations", "automation-menu-release", func(b *composerFocusCDP) {
+				b.waitFor("ready", `String(!!window.ovMenuBackdrop && document.readyState==='complete')`, "true")
+				// Split release and click across paints, as can happen in a desktop
+				// WebView. Hit-test the eventual click instead of dispatching directly
+				// to the trigger, which would hide backdrop interception.
+				b.evaluate(`window.menuTrigger=document.querySelector('[data-automation-card-action] label'); menuTrigger.scrollIntoView(); menuTrigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1})); menuTrigger.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,buttons:1})); menuTrigger.focus(); menuTrigger.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0})); 'released'`)
+				b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('painted'))))`)
+				b.waitFor("opening click still hits trigger", `String((()=>{const r=menuTrigger.getBoundingClientRect();return menuTrigger.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})())`, "true")
+				b.evaluate(`(()=>{const r=menuTrigger.getBoundingClientRect();document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));return 'clicked';})()`)
+				b.waitFor("menu remains open with backdrop", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='visible' && !!document.querySelector('#ov-menu-backdrop')?.getClientRects().length)`, "true")
+				b.clickMenuBackdrop(`[data-automation-card-action] label`)
+				b.waitFor("outside click dismisses menu", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='hidden')`, "true")
+				b.click(`[data-automation-card-action] label`)
+				b.click(`[data-automation-card-delete="menu-card"]`)
+				b.waitFor("menu action works", `String(document.getElementById('delete-automation-card-modal').open)`, "true")
+			})
+		})
+	}
+}

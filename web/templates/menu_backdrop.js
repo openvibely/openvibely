@@ -155,7 +155,14 @@
     pressHeld = false;
     schedule();
   };
-  ['pointerup', 'pointercancel', 'blur'].forEach(name => window.addEventListener(name, releasePress, true));
+  // Keep the opening press protected through click, not just pointerup. WebViews
+  // can paint between release and click; exposing the backdrop in that gap
+  // retargets the opening click to the dismissal surface and closes the menu.
+  ['click', 'pointercancel', 'blur'].forEach(name => window.addEventListener(name, releasePress, true));
+  // A cancelled/dragged press may not produce a click. Recover on the next hover.
+  window.addEventListener('pointermove', event => {
+    if (event.buttons === 0) releasePress(event);
+  }, true);
   const observer = new MutationObserver(records => {
     if (records.some(record => record.target !== backdrop && !backdrop.contains(record.target))) schedule();
   });
