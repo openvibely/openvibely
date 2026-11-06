@@ -390,16 +390,28 @@ func TestBrowserFunctional_UnmarkedDropdownsConsumeOutsideClick(t *testing.T) {
 		{"chat", "chat", "", `[aria-controls="chat-actions-menu"]`, `#chat-actions-menu`},
 		{"filters", "skills", "", `[data-card-filters-button]`, `[data-card-filters-popover]`},
 		{"merge", "merge", `document.querySelector('#worktree-info-panel details').open=true`, `#merge-dropdown > [role="button"]`, `#merge-dropdown > ul`},
-		{"user", "skills", `document.getElementById('sidebar-auth-user').style.setProperty('display','flex','important')`, `#sidebar-user-menu-trigger`, `#sidebar-user-menu`},
+		{"user", "skills", `document.getElementById('sidebar-auth-user').classList.remove('hidden');document.getElementById('sidebar-toggle').checked=true`, `#sidebar-user-menu-trigger`, `#sidebar-user-menu`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runComposerFocusCDP(t, chrome, server.URL+"/fixture/"+tc.route, "dropdown-"+tc.name, func(b *composerFocusCDP) {
 				b.waitFor("page ready", `String(document.readyState==='complete' && typeof handleDropdownToggle==='function')`, "true")
+				if tc.name == "user" {
+					// The user menu belongs to the expanded sidebar, not the icon rail.
+					b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 900, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+					b.waitFor("expanded sidebar layout", `String(!document.documentElement.hasAttribute('data-shell-frame'))`, "true")
+				}
 				if tc.setup != "" {
 					b.evaluate(tc.setup + `;'setup'`)
 				}
+				b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('ready'))))`)
+
 				visible := `(()=>{const panel=document.querySelector('` + tc.panel + `');return panel.getClientRects().length>0 && getComputedStyle(panel).visibility==='visible' && getComputedStyle(panel).opacity!=='0'})()`
-				b.click(tc.trigger)
+				// Allow a paint between release and click. Focus-driven header/user
+				// menus must not raise the outside-click layer over the opening click.
+				b.evaluate(`window.openingMenuTrigger=document.querySelector('` + tc.trigger + `'); openingMenuTrigger.scrollIntoView(); openingMenuTrigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1})); openingMenuTrigger.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,buttons:1})); openingMenuTrigger.focus(); openingMenuTrigger.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0})); 'released'`)
+				b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('painted'))))`)
+				b.waitFor("opening click is not intercepted", `String((()=>{const r=openingMenuTrigger.getBoundingClientRect();const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return openingMenuTrigger.contains(hit) || JSON.stringify({rect:r,hit:hit&&hit.outerHTML.slice(0,400),backdrop:!!document.querySelector('#ov-menu-backdrop')?.getClientRects().length});})())`, "true")
+				b.evaluate(`(()=>{const r=openingMenuTrigger.getBoundingClientRect();document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));return 'clicked';})()`)
 				b.waitFor("menu open", `String(`+visible+`)`, "true")
 				assertMenuConsumesOutsideClick(b, `!`+visible)
 				b.click(tc.trigger)

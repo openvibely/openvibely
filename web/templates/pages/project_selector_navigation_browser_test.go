@@ -192,7 +192,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var rootRect = root.getBoundingClientRect();
     var unconstrainedTriggerRect = trigger.getBoundingClientRect();
     var triggerOffset = unconstrainedTriggerRect.top - rootRect.top;
-    var desiredTriggerTop = window.innerHeight - 80 - unconstrainedTriggerRect.height;
+    var desiredTriggerTop = window.innerHeight - 24 - unconstrainedTriggerRect.height;
     root.style.top = Math.max(8, desiredTriggerTop - triggerOffset) + 'px';
     window.dispatchEvent(new Event('resize'));
     await wait(0);
@@ -200,7 +200,7 @@ window.addEventListener('DOMContentLoaded', function() {
     dialogRect = dialog.getBoundingClientRect();
     var panel = dialog.firstElementChild;
     var results = document.querySelector('[data-project-selector-results]');
-    if (dialogRect.bottom > triggerRect.top - 2) fail('constrained selector did not open upward above its trigger');
+    if (dialogRect.bottom > triggerRect.top - 2) fail('constrained selector did not open upward above its trigger: '+JSON.stringify({trigger:triggerRect,dialog:dialogRect,style:dialog.getAttribute('style'),viewport:[innerWidth,innerHeight]}));
     if (dialogRect.top < 7 || dialogRect.height > triggerRect.top - 10) fail('upward selector escaped its available viewport height');
     if (!panel || !results) fail('constrained selector sizing fixture is incomplete');
     if (panel.getBoundingClientRect().height > dialogRect.height + 1) fail('shared selector panel exceeded the dialog dynamic max height');

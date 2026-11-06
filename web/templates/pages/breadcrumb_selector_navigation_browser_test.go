@@ -229,10 +229,12 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function(){ return editButton.classList.contains('w-7') && editButton.classList.contains('h-8'); }, 'Automation Edit caret class settling');
     var selectorBox=editSelector.getBoundingClientRect();
     if(selectorBox.width > 0.5) fail('Automation Edit selector wrapper changed the name input layout width: '+JSON.stringify(selectorBox));
+    editButton.scrollIntoView({block:'center',inline:'center'});
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     var caretButtonBox=editButton.getBoundingClientRect();
     if(caretButtonBox.width < 27 || caretButtonBox.height < 31) fail('Automation Edit selector caret has a collapsed hit area: '+JSON.stringify({rect:caretButtonBox,className:editButton.className,width:getComputedStyle(editButton).width,minWidth:getComputedStyle(editButton).minWidth,maxWidth:getComputedStyle(editButton).maxWidth,height:getComputedStyle(editButton).height}));
     var caretHit=document.elementFromPoint(caretButtonBox.left+caretButtonBox.width/2, caretButtonBox.top+caretButtonBox.height/2);
-    if(!caretHit || (caretHit!==editButton && !editButton.contains(caretHit))) fail('Automation Edit selector caret does not own its pointer hit area');
+    if(!caretHit || (caretHit!==editButton && !editButton.contains(caretHit))) fail('Automation Edit selector caret does not own its pointer hit area: '+JSON.stringify({rect:caretButtonBox,hit:caretHit&&caretHit.outerHTML.slice(0,400),viewport:[innerWidth,innerHeight],dialogs:Array.from(document.querySelectorAll('dialog[open]')).map(el=>el.id)}));
     editButton.focus();
     if(document.activeElement!==editButton) fail('Automation Edit selector caret cannot receive focus');
     htmx.process(editSelector);
@@ -258,6 +260,7 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	style := `<style>
+        .dropdown:not(.dropdown-open):not(:focus-within) > .dropdown-content { display:none; }
 		.hidden{display:none!important} .flex{display:flex}.items-center{align-items:center}.gap-2{gap:.5rem}.px-1{padding-left:.25rem;padding-right:.25rem}.ml-1{margin-left:.25rem}.ml-2{margin-left:.5rem}.-ml-1{margin-left:-.25rem}.px-\[3px\]{padding-left:3px;padding-right:3px}.input-bordered{border:1px solid transparent}.relative{position:relative}.z-10{z-index:10}button{border:0} dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.modal-backdrop{position:fixed;inset:0}.modal-backdrop button{width:100%;height:100%}		.w-0{width:0}.w-7{width:1.75rem}.h-8{height:2rem}.max-w-full{max-width:100%}.overflow-visible{overflow:visible}
 		[data-breadcrumb-selector-dialog][open]{display:grid}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}</style>`
 

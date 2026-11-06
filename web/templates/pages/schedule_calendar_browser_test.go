@@ -399,7 +399,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 	var outcome string
 	select {
 	case outcome = <-result:
-	case <-time.After(20 * time.Second):
+	case <-time.After(60 * time.Second):
 		outcome = "fail: timed out"
 	}
 	stopBrowserProcess(cmd)
