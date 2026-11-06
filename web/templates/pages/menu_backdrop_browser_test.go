@@ -135,3 +135,62 @@ func TestBrowserFunctional_AutomationMenuOpeningClickSurvivesReleasePaint(t *tes
 		})
 	}
 }
+
+func TestBrowserFunctional_CardMenuOpeningClickSurvivesReleasePaint(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	channels := defaultChannelsSettingsView("project")
+	channels.HasGitHubChannel = true
+	cases := []struct {
+		name    string
+		content templ.Component
+	}{
+		{"agents", AgentsContent([]models.Agent{{ID: "agent", Name: "Planner", Enabled: true}}, nil)},
+		{"models", ModelsContent([]models.LLMConfig{{ID: "model", Name: "Model", Provider: models.ProviderOpenAI, Model: "test"}}, nil, false)},
+		{"skills", SkillsContent([]SkillCard{{Handle: "skill", Name: "Skill", Scope: "project", Enabled: true}}, true)},
+		{"alerts", AlertsContent([]models.AlertSummary{{ID: "alert", Title: "Alert"}}, "project", 1)},
+		{"personality", AppSettingsContent("base", "project", nil)},
+		{"channels", SettingsContent(channels)},
+	}
+	for _, tc := range cases {
+		for _, legacy := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/legacy=%t", tc.name, legacy), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if static.ServeAsset(w, r) {
+						return
+					}
+					if r.URL.Path != "/automations" {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					var page bytes.Buffer
+					if err := layout.Base("Menus", nil, "project").Render(templ.WithChildren(r.Context(), tc.content), &page); err != nil {
+						t.Error(err)
+					}
+					html := page.String()
+					if legacy {
+						html = strings.Replace(html, "<head>", `<head><script>delete HTMLElement.prototype.showPopover; delete HTMLElement.prototype.hidePopover;</script>`, 1)
+					}
+					fmt.Fprint(w, html)
+				}))
+				defer server.Close()
+				runComposerFocusCDP(t, chrome, server.URL+"/automations", "automation-menu-release", func(b *composerFocusCDP) {
+					b.waitFor("ready", `String(!!window.ovMenuBackdrop && document.readyState==='complete')`, "true")
+					// Split release and click across paints, as can happen in a desktop
+					// WebView. Hit-test the eventual click instead of dispatching directly
+					// to the trigger, which would hide backdrop interception.
+					b.evaluate(`window.menuTrigger=document.querySelector('[data-menu-dropdown] > label'); menuTrigger.scrollIntoView(); menuTrigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1})); menuTrigger.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,buttons:1})); menuTrigger.focus(); menuTrigger.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0})); 'released'`)
+					b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('painted'))))`)
+					b.waitFor("opening click still hits trigger", `String((()=>{const r=menuTrigger.getBoundingClientRect();return menuTrigger.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})())`, "true")
+					b.evaluate(`(()=>{const r=menuTrigger.getBoundingClientRect();document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));return 'clicked';})()`)
+					b.waitFor("menu remains open with backdrop", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='visible' && !!document.querySelector('#ov-menu-backdrop')?.getClientRects().length)`, "true")
+					b.clickMenuBackdrop(`[data-menu-dropdown] > label`)
+					b.waitFor("outside click dismisses menu", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='hidden')`, "true")
+					b.click(`[data-menu-dropdown] > label`)
+					b.evaluate(`window.menuAction=menuTrigger.parentElement.querySelector('[data-menu-content] button:not([disabled]), [data-menu-content] a'); menuAction.id='tested-menu-action'; menuAction.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();window.menuActionClicked=true;},true); 'armed'`)
+					b.click(`#tested-menu-action`)
+					b.waitFor("menu action receives click", `String(window.menuActionClicked===true)`, "true")
+				})
+			})
+		}
+	}
+}
