@@ -3870,7 +3870,7 @@ func TestSendAgentic_ToolOutputTruncatedOnlyForModelInput(t *testing.T) {
 	largeOutput := strings.Repeat("abcdefghijklmnopqrstuvwxyz", 1200)
 
 	requestCount := 0
-	var modelInputOutput string
+	var modelInputOutput, callbackOutput string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 
@@ -3923,6 +3923,7 @@ func TestSendAgentic_ToolOutputTruncatedOnlyForModelInput(t *testing.T) {
 	resp, err := client.SendAgentic(context.Background(), "run command", &AgenticOptions{
 		Model:                "gpt-5.3-codex",
 		ToolOutputTokenLimit: tokenLimit,
+		OnToolResult:         func(_ string, output string, _ bool) { callbackOutput = output },
 		ToolExecutor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
 			if name != "bash" {
 				t.Fatalf("unexpected tool call %q", name)
@@ -3939,6 +3940,12 @@ func TestSendAgentic_ToolOutputTruncatedOnlyForModelInput(t *testing.T) {
 	}
 	if len(resp.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %d, want 1", len(resp.ToolCalls))
+	}
+	if callbackOutput != largeOutput {
+		t.Fatal("callback should retain full tool output")
+	}
+	if modelInputOutput != tokenestimate.ToolOutputForModelInput(largeOutput, tokenLimit) {
+		t.Fatal("model output does not match shared truncation policy")
 	}
 	if resp.ToolCalls[0].Output != largeOutput {
 		t.Fatalf("stored tool output should remain full length: got=%d want=%d", len(resp.ToolCalls[0].Output), len(largeOutput))

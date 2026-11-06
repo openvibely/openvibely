@@ -146,14 +146,9 @@ and retry without allowing late responses to open another socket. Tickets never
 grant additional project access. The ticket store is bounded to 256 outstanding
 entries.
 
-Admission budgets are configurable at startup in both server and desktop modes:
-
-| Environment variable | Default | Scope |
-| --- | ---: | --- |
-| `OPENVIBELY_LIVE_MAX_CONNECTIONS` | 500 | WebSockets per backend instance |
-| `OPENVIBELY_LIVE_MAX_SUBSCRIPTIONS_PER_CONNECTION` | 200 | Live + execution subscriptions on one connection |
-| `OPENVIBELY_LIVE_MAX_PROJECT_SUBSCRIPTIONS` | 5,000 | Live subscriptions across all projects and connections |
-| `OPENVIBELY_LIVE_MAX_EXECUTION_SUBSCRIPTIONS` | 25,000 | Execution-output subscriptions across all executions and connections |
+Admission budgets are configurable at startup in both server and desktop modes.
+See [Live WebSocket Limits in the environment guide](environment.md#live-websocket-limits)
+for the environment variables, defaults, and scopes.
 
 Values must be positive integers; unset, malformed, nonpositive, or overflowing
 values fall back to the defaults. Changes require restarting the backend. Built-in
@@ -165,7 +160,7 @@ limit the number of agents that can run.
 Keep `OPENVIBELY_LIVE_MAX_SUBSCRIPTIONS_PER_CONNECTION` above the background
 cache's allowance of 20 threads × five executions (100 execution subscriptions),
 with additional room for the displayed thread and live notifications. The default
-of 200 provides that headroom for normal use. Displayed threads are exempt from
+provides that headroom for normal use. Displayed threads are exempt from
 cache limits, so 100 is not a hard cap on all execution subscriptions.
 
 The client does not reserve slots for the displayed thread or preempt background

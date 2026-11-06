@@ -1642,7 +1642,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 	selectedAgentID := agent.ID
 	task := &models.Task{
 		ProjectID: input.ProjectID,
-		Title:     fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), input.Content[:min(50, len(input.Content))]),
+		Title:     fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), chatTitlePreview(input.Content)),
 		Prompt:    input.Content,
 		Status:    models.StatusRunning,
 		Category:  models.CategoryChat,

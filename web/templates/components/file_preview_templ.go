@@ -154,20 +154,20 @@ func FilePreview(name, kind, text, base string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else if kind == "table" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div data-file-viewer=\"table\" data-spreadsheet-url=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<ov-spreadsheet data-file-viewer=\"table\" data-spreadsheet-url=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression(FileURLMode(base, "raw")).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/file_preview.templ`, Line: 28, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/file_preview.templ`, Line: 28, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"><p data-sheet-status role=\"status\"></p><nav data-sheet-tabs aria-label=\"Sheets\"></nav><div data-sheet-grid tabindex=\"0\" role=\"region\" aria-label=\"Spreadsheet cells\"></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"><p data-sheet-status role=\"status\"></p><nav data-sheet-tabs aria-label=\"Sheets\"></nav><div data-sheet-grid tabindex=\"0\" role=\"region\" aria-label=\"Spreadsheet cells\"></div></ov-spreadsheet>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

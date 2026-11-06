@@ -1,8 +1,11 @@
 package agenttools
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,5 +273,136 @@ func TestProcessExecutionCancellation(t *testing.T) {
 	}
 	if _, err := m.start(context.WithoutCancel(request), dir, command, 30, time.Millisecond); err == nil {
 		t.Fatal("started process for cancelled execution")
+	}
+}
+
+// Each operation captures one uninterrupted stream, including initial allocation.
+func BenchmarkProcessSessionWrite(b *testing.B) {
+	chunk := make([]byte, 32*1024)
+	for _, size := range []int{10, 100} {
+		b.Run(fmt.Sprintf("%dMiB", size), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(size * 1024 * 1024))
+			for i := 0; i < b.N; i++ {
+				s := &processSession{}
+				for written := 0; written < size*1024*1024; written += len(chunk) {
+					s.Write(chunk)
+				}
+			}
+		})
+	}
+	b.Run("FullBuffer32KiB", func(b *testing.B) {
+		s := &processSession{}
+		s.Write(make([]byte, processBufferLimit))
+		b.ReportAllocs()
+		b.SetBytes(int64(len(chunk)))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			s.Write(chunk)
+		}
+	})
+}
+
+func TestProcessBufferTail(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		sizes []int
+	}{
+		{"empty", []int{0}},
+		{"small", []int{17, 101, 0, 300}},
+		{"exact cap", []int{processBufferLimit}},
+		{"large", []int{123, 2*processBufferLimit + 7}},
+		{"wrapped then large", []int{processBufferLimit, 79, processBufferLimit + 13}},
+		{"wrapped read tail", []int{processBufferLimit, 12345}},
+		{"repeated wraps", func() []int {
+			sizes := make([]int, 400)
+			for i := range sizes {
+				sizes[i] = 32767
+			}
+			return sizes
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &processSession{finished: true}
+			var all []byte
+			for _, size := range tc.sizes {
+				p := make([]byte, size)
+				for i := range p {
+					p[i] = byte((len(all) + i) % 251)
+				}
+				n, err := s.Write(p)
+				if n != len(p) || err != nil {
+					t.Fatalf("Write = %d, %v", n, err)
+				}
+				all = append(all, p...)
+				want := all[max(0, len(all)-processBufferLimit):]
+				got := append([]byte(nil), s.output[s.outputStart:]...)
+				got = append(got, s.output[:s.outputStart]...)
+				if !bytes.Equal(got, want) {
+					t.Fatal("retained tail differs")
+				}
+				if cap(s.output) > processBufferLimit {
+					t.Fatal("backing allocation exceeds limit")
+				}
+				if s.dropped != len(all)-len(want) {
+					t.Fatalf("dropped = %d", s.dropped)
+				}
+			}
+			want := string(all[max(0, len(all)-processOutputLimit):])
+			if dropped := len(all) - len(want); dropped > 0 {
+				want = fmt.Sprintf("[output truncated: %d earlier bytes omitted]\n", dropped) + want
+			}
+			status := "\n[process]\nstatus: completed\nexit_code: 0\n[/process]"
+			out, finished, timedOut := s.readResult("note")
+			if out != want+"\nnote"+status || !finished || timedOut {
+				t.Fatal("read result differs")
+			}
+			out, _, _ = s.readResult("")
+			if out != status {
+				t.Fatal("drained output returned twice")
+			}
+			s.Write([]byte("fresh"))
+			out, _, _ = s.readResult("")
+			if out != "fresh"+status {
+				t.Fatal("write after drain differs")
+			}
+		})
+	}
+}
+
+func TestProcessBufferConcurrentStreams(t *testing.T) {
+	s := &processSession{}
+	var wg sync.WaitGroup
+	// Stdout and stderr share this writer. Each write must remain intact even
+	// when both streams repeatedly overwrite the full buffer.
+	for _, value := range []byte{'o', 'e'} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			chunk := bytes.Repeat([]byte{value}, 1024)
+			for i := 0; i < 2048; i++ {
+				s.Write(chunk)
+			}
+		}()
+	}
+	wg.Wait()
+	if len(s.output) != processBufferLimit || cap(s.output) > processBufferLimit || s.dropped != 3*processBufferLimit {
+		t.Fatal("concurrent stream retention/count differs")
+	}
+	for offset := 0; offset < len(s.output); offset += 1024 {
+		chunk := s.output[offset : offset+1024]
+		if (chunk[0] != 'o' && chunk[0] != 'e') || !bytes.Equal(chunk, bytes.Repeat(chunk[:1], 1024)) {
+			t.Fatal("concurrent write corrupted")
+		}
+	}
+	out, _, _ := s.readResult("")
+	prefix := fmt.Sprintf("[output truncated: %d earlier bytes omitted]\n", 4*processBufferLimit-processOutputLimit)
+	payload, _, _ := strings.Cut(strings.TrimPrefix(out, prefix), "\n[process]")
+	if !strings.HasPrefix(out, prefix) || len(payload) != processOutputLimit {
+		t.Fatal("concurrent read limit/count differs")
+	}
+	out, _, _ = s.readResult("")
+	if !strings.HasPrefix(out, "\n[process]") {
+		t.Fatal("concurrent output returned twice")
 	}
 }

@@ -71,9 +71,8 @@ const (
 	// Prefer the direct-call web tool versions for URL retrieval flows.
 	// Newer web tool versions can route through provider code_execution,
 	// which may hit per-turn tool budgets and cause fetch failures.
-	anthropicWebSearchToolType    = "web_search_20250305"
-	anthropicWebFetchToolType     = "web_fetch_20250910"
-	anthropicToolOutputTokenLimit = 10000
+	anthropicWebSearchToolType = "web_search_20250305"
+	anthropicWebFetchToolType  = "web_fetch_20250910"
 )
 
 // AgenticOptions configures an agentic send with tool use.
@@ -997,18 +996,7 @@ func anthropicProviderToolResultName(block agenticBlock) string {
 }
 
 func truncateAnthropicToolOutputForModelInput(output string, tokenLimit int) string {
-	if output == "" {
-		return output
-	}
-	if tokenLimit <= 0 {
-		tokenLimit = anthropicToolOutputTokenLimit
-	}
-	byteLimit := tokenestimate.ByteBudget(tokenLimit)
-	if len(output) <= byteLimit {
-		return output
-	}
-	const marker = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	return tokenestimate.TruncateMiddle(output, byteLimit, marker)
+	return tokenestimate.ToolOutputForModelInput(output, tokenLimit)
 }
 
 func anthropicStringContentRaw(s string) json.RawMessage {

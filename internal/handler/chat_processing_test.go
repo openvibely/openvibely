@@ -2747,7 +2747,7 @@ func TestStartQueuedChatInputProcessesSavedAttachmentSession(t *testing.T) {
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "queued-chat-attachments"
+	sessionID := "00000000000000000000000000000014"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("queued text attachment"), 0644))
@@ -4063,7 +4063,7 @@ func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T)
 	uploadsDir = tmpDir
 	defer func() { uploadsDir = oldUploadsDir }()
 
-	sessionID := "queued-task-attachments"
+	sessionID := "00000000000000000000000000000015"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "instructions.txt"), []byte("queued task attachment"), 0644))
@@ -4842,7 +4842,7 @@ func TestProcessStreamingResponse_InterruptsForLateAttachmentSteeringAndCommitsI
 	uploadsDir = tmpDir
 	t.Cleanup(func() { uploadsDir = originalUploadsDir })
 	project := createProject(t, h, "Late Chat Steering Attachment Project")
-	sessionID := "late-chat-steering-session"
+	sessionID := "00000000000000000000000000000016"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	var exec *models.Execution
 	var steeringID string
@@ -4948,7 +4948,7 @@ func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfte
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-	sessionID := "steering-success-session"
+	sessionID := "00000000000000000000000000000017"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
@@ -5036,7 +5036,7 @@ func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProv
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-	sessionID := "steering-session"
+	sessionID := "00000000000000000000000000000018"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
@@ -5103,7 +5103,7 @@ func TestProcessStreamingResponse_RequeuesPreparedSteeringWhenPublicationFailsBe
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-	sessionID := "steering-commit-fails"
+	sessionID := "00000000000000000000000000000019"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
@@ -5177,7 +5177,7 @@ func TestProcessStreamingResponse_RequeuesEntireSteeringBatchWhenPublicationFail
 		Content:        "first steering commits",
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, first, exec.ID))
-	sessionID := "mixed-steering-commit-fails"
+	sessionID := "0000000000000000000000000000001a"
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("second notes"), 0644))

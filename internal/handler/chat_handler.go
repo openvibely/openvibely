@@ -203,6 +203,10 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	message := c.FormValue("message")
 	agentID := c.FormValue("agent_id")
 	chatMode := models.NormalizeChatMode(c.FormValue("chat_mode"))
+	sessionID := c.FormValue("attachment_session_id")
+	if sessionID != "" && !isValidPendingAttachmentSessionID(sessionID) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
+	}
 
 	if message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
@@ -221,7 +225,6 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	}
 
 	// Check for pending image attachments (for vision-aware auto-selection)
-	sessionID := c.FormValue("attachment_session_id")
 	hasImages := hasPendingImages(sessionID)
 
 	// Resolve the chat's project before interpreting the Default model choice.
@@ -292,7 +295,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	}
 	// Create a task record for the chat message (required for execution tracking)
 	selectedAgentID := agent.ID
-	chatTitle := fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), message[:min(50, len(message))])
+	chatTitle := fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), chatTitlePreview(message))
 	task := &models.Task{
 		ProjectID: projectID,
 		Title:     chatTitle,
@@ -691,6 +694,10 @@ func steeringAttachmentDirectory(sessionID, execID string) string {
 }
 
 func (h *Handler) stageMessageAttachmentsForDelivery(ctx context.Context, sessionID, execID string, steering bool) (string, []models.Attachment, []models.ChatAttachment, func(bool), error) {
+	// Validate before resolving ownership or constructing any filesystem paths.
+	if !isValidPendingAttachmentSessionID(sessionID) {
+		return "", nil, nil, nil, fmt.Errorf("invalid attachment session ID")
+	}
 	taskThreadID, err := h.messageAttachmentOwner(ctx, execID)
 	if err != nil {
 		return "", nil, nil, nil, err

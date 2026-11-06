@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	"github.com/openvibely/openvibely/pkg/internal/contextmessages"
 )
 
 type key struct{}
@@ -51,39 +53,14 @@ func updateText[T any](ctx context.Context, items []T, read func(T) (string, str
 	if ctx == nil || ctx.Value(key{}) == nil {
 		return ""
 	}
-	text := Text(ctx)
-	for i := len(items) - 1; i >= 0; i-- {
-		if role, content := read(items[i]); isContext(role, content) {
-			if text == "" {
-				text = emptyText
-			}
-			if content == text {
-				return ""
-			}
-			break
-		}
-	}
-	return text
+	return contextmessages.UpdateText(items, read, isContext, Text(ctx), emptyText)
 }
 
 // SeedReplay saves a newly injected file list in this turn's durable replay.
 // visible must be the assembled conversation before Ensure. Lists already in
 // earlier history are not copied into each turn. Placement matches Ensure.
 func SeedReplay[T, R any](ctx context.Context, visible []T, replay []R, read func(T) (string, string), makeMessage func(string) R) []R {
-	text := updateText(ctx, visible, read)
-	if text == "" {
-		return replay
-	}
-	at := len(replay)
-	if len(visible) > 0 && at > 0 {
-		role, content := read(visible[len(visible)-1])
-		if role == "user" && content != "" && !isContext(role, content) {
-			at--
-		}
-	}
-	out := append([]R(nil), replay[:at]...)
-	out = append(out, makeMessage(text))
-	return append(out, replay[at:]...)
+	return contextmessages.InsertUpdate(visible, replay, read, isContext, updateText(ctx, visible, read), makeMessage)
 }
 
 // Ensure appends the current attachment list only when it differs from the
@@ -92,21 +69,7 @@ func SeedReplay[T, R any](ctx context.Context, visible []T, replay []R, read fun
 // between a tool call and its results). An empty list supersedes an earlier
 // list with a notice; without an earlier list or a configured source, add nothing.
 func Ensure[T any](ctx context.Context, items []T, read func(T) (string, string), makeMessage func(string) T) []T {
-	text := updateText(ctx, items, read)
-	if text == "" {
-		return items
-	}
-	at := len(items)
-	if at > 0 {
-		role, content := read(items[at-1])
-		if role == "user" && content != "" && !isContext(role, content) {
-			at--
-		}
-	}
-	result := make([]T, 0, len(items)+1)
-	result = append(result, items[:at]...)
-	result = append(result, makeMessage(text))
-	return append(result, items[at:]...)
+	return contextmessages.InsertUpdate(items, items, read, isContext, updateText(ctx, items, read), makeMessage)
 }
 
 var generations = struct {

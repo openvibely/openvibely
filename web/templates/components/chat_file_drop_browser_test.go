@@ -68,8 +68,29 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
   input.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:transfer}));
   await new Promise(resolve => setTimeout(resolve, 100));
   assert(uploads.length === 1 && uploads[0].length === 1, 'file was not uploaded exactly once');
-  assert(await uploads[0][0].text() === 'hello', 'file content was lost');
+  // Async Blob reads do not hold --virtual-time-budget, which can expire mid-read.
+  var read = new XMLHttpRequest();
+  read.open('GET', URL.createObjectURL(uploads[0][0]), false);
+  read.send();
+  assert(read.responseText === 'hello', 'file content was lost');
   assert(document.querySelector('input[name="attachment_session_id"]').value === 'drop-session', 'attachment session missing');
+  var beforeRows = Array.from(document.querySelectorAll('[data-pending-attachment]')).map(row => row.outerHTML);
+  assert(beforeRows.length === 1, 'successful upload preview missing');
+  var alerts = [];
+  window.alert = message => alerts.push(message);
+  window.fetch = async function(url, options) {
+   assert(options.body.getAll('files').length === 2, 'failed upload should contain two files');
+   return {ok:false, text:async function() { return 'failed to process file'; }};
+  };
+  var failingTransfer = new DataTransfer();
+  failingTransfer.items.add(new File(['first'], 'first.txt', {type:'text/plain'}));
+  failingTransfer.items.add(new File(['second'], 'second.txt', {type:'text/plain'}));
+  input.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:failingTransfer}));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert(alerts.length === 1 && alerts[0].includes('Upload failed'), 'upload failure was not displayed');
+  assert(JSON.stringify(beforeRows) === JSON.stringify(Array.from(document.querySelectorAll('[data-pending-attachment]')).map(row => row.outerHTML)), 'failed upload changed composer previews');
+  assert(document.querySelector('input[name="attachment_session_id"]').value === 'drop-session', 'failed upload changed session');
+
   document.body.setAttribute('data-test-result', 'pass');
  } catch(error) {
   document.body.setAttribute('data-test-result', 'fail');

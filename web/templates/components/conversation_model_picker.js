@@ -80,6 +80,7 @@
     const token = ++favoritesLoadToken;
     favoritesLoading = true;
     favoritesError = "";
+    panel.setAttribute("aria-busy", "true");
     render();
     try {
       await favoriteWrites.catch(() => {});
@@ -101,6 +102,7 @@
     } finally {
       if (token === favoritesLoadToken) {
         favoritesLoading = false;
+        panel.removeAttribute("aria-busy");
         render();
         renderSub();
       }
