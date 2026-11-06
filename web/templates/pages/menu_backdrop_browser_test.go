@@ -57,6 +57,8 @@ func TestBrowserFunctional_MenuBackdropCornersAndKeyboard(t *testing.T) {
 				b.waitFor("overlapping surfaces stay exposed", `String(!!document.elementFromPoint(101,101).closest('#overlap-menu'))`, "true")
 				b.evaluate(`document.getElementById('overlap-menu').remove();document.getElementById('corner-menu').remove();document.getElementById('corner-under').remove();window.ovModelPicker.open(document.querySelector('.chat-model-select'));'model'`)
 				b.waitFor("model open", `String(!document.getElementById('conversation-model-picker').hidden)`, "true")
+				// Finishing the favorites load re-renders the rows captured below.
+				b.waitFor("favorites loaded", `String(!document.getElementById('conversation-model-picker').hasAttribute('aria-busy'))`, "true")
 				b.evaluate(`document.getElementById('conversation-model-picker').insertAdjacentHTML('afterend','<button id="keyboard-background">Background action</button>');'background'`)
 				tab := func(reverse bool) {
 					modifiers := 0

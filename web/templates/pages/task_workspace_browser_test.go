@@ -343,7 +343,8 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id="+project.ID, "new-task-workspace", func(b *composerFocusCDP) {
-		b.waitFor("board ready", `String(Boolean(document.querySelector('a[hx-get^="/tasks/new"]')))`, "true")
+		// The new-task link is parsed before the sidebar and before htmx initializes.
+		b.waitFor("board ready", `String(document.readyState==='complete' && Boolean(document.querySelector('a[hx-get^="/tasks/new"]')))`, "true")
 		b.evaluate(`window.originalSidebar=document.getElementById('sidebar'); 'saved'`)
 		b.click(`a[hx-get^="/tasks/new"]`)
 		b.waitFor("new workspace navigation", `location.pathname+':'+String(Boolean(document.querySelector('#task-detail-content textarea[name="message"]')))`, "/tasks/new:true")
