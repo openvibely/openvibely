@@ -250,7 +250,8 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
 		b.waitFor("legacy theme migrated", `(()=>{if(!window.openVibelyThemes || !window.openVibelyDisplay)return 'loading';const state=[location.search,document.readyState,typeof window.selectOpenVibelyDisplay,openVibelyThemes.currentID(),openVibelyDisplay.get('surfaces'),localStorage.getItem('openvibely.colorTheme'),localStorage.getItem('openvibely.surfaceStyle')];return new URLSearchParams(state[0]).get('migration')==='1' && state[1]==='complete' && state[2]==='function' && state[3]==='openvibely-dark' && state[4]==='layered' && state[5]==='openvibely-dark' ? 'true' : JSON.stringify(state);})()`, "true")
 		b.evaluate(`selectOpenVibelyDisplay('surfaces','default'); 'saved default'`)
 		b.call("Page.navigate", map[string]any{"url": server.URL + "/?migration=2"}, nil)
-		b.waitFor("surface preference persists", `String(new URLSearchParams(location.search).get('migration')==='2' && !!window.openVibelyDisplay && openVibelyDisplay.get('surfaces')==='default')`, "true")
+		// Ending the test mid-response makes the handler's write fail with a broken pipe.
+		b.waitFor("surface preference persists", `String(new URLSearchParams(location.search).get('migration')==='2' && document.readyState==='complete' && !!window.openVibelyDisplay && openVibelyDisplay.get('surfaces')==='default')`, "true")
 	})
 }
 

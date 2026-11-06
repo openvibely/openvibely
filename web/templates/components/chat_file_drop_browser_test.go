@@ -68,7 +68,11 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
   input.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:transfer}));
   await new Promise(resolve => setTimeout(resolve, 100));
   assert(uploads.length === 1 && uploads[0].length === 1, 'file was not uploaded exactly once');
-  assert(await uploads[0][0].text() === 'hello', 'file content was lost');
+  // Async Blob reads do not hold --virtual-time-budget, which can expire mid-read.
+  var read = new XMLHttpRequest();
+  read.open('GET', URL.createObjectURL(uploads[0][0]), false);
+  read.send();
+  assert(read.responseText === 'hello', 'file content was lost');
   assert(document.querySelector('input[name="attachment_session_id"]').value === 'drop-session', 'attachment session missing');
   var beforeRows = Array.from(document.querySelectorAll('[data-pending-attachment]')).map(row => row.outerHTML);
   assert(beforeRows.length === 1, 'successful upload preview missing');
