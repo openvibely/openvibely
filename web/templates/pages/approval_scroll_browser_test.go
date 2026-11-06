@@ -36,6 +36,10 @@ func TestBrowserFunctional_ApprovalLinkKeepsTitlebarVisible(t *testing.T) {
 				case "/tasks/audit":
 					ctx := layout.WithDesktopMode(r.Context(), desktop)
 					thread := components.TaskThreadView(task, executions, nil, nil, nil, nil, false, 30)
+					if r.Header.Get("HX-Request") == "true" {
+						_ = TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil, thread).Render(ctx, w)
+						return
+					}
 					_ = TaskDetailPage([]models.Project{{ID: "project", Name: "Project"}}, task, nil, nil, nil, nil, nil, nil, "chat", nil, thread).Render(ctx, w)
 				default:
 					w.WriteHeader(http.StatusNoContent)
@@ -44,9 +48,11 @@ func TestBrowserFunctional_ApprovalLinkKeepsTitlebarVisible(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL+"/tasks/audit?project_id=project&approval_execution_id=exec#chat-input-request-request", "approval-scroll", func(b *composerFocusCDP) {
 				b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
-				for attempt := 0; attempt < 2; attempt++ {
-					if attempt > 0 {
+				for attempt := 0; attempt < 3; attempt++ {
+					if attempt == 1 {
 						b.reload()
+					} else if attempt == 2 {
+						b.evaluateAwait(`(async()=>{await window.openVibelyNavigate('/tasks/audit?project_id=project&approval_execution_id=exec#chat-input-request-request');return 'navigated';})()`)
 					}
 					b.waitFor("approval card", `String(!!document.getElementById('chat-input-request-request'))`, "true")
 					result := b.evaluateAwait(`(async()=>{
@@ -54,6 +60,7 @@ func TestBrowserFunctional_ApprovalLinkKeepsTitlebarVisible(t *testing.T) {
  const card=document.getElementById('chat-input-request-request'),panel=document.getElementById('task-thread-messages');
  const box=card.getBoundingClientRect(),view=panel.getBoundingClientRect();
  if(document.getElementById('desktop-project-titlebar').getBoundingClientRect().top!==0||document.body.scrollTop||document.documentElement.scrollTop) return 'titlebar displaced';
+ if(location.hash!=='#chat-input-request-request')return 'anchor lost from URL';
  if(panel.scrollTop<=0||box.bottom<=view.top||box.top>=view.bottom)return 'approval not visible';
  return 'pass';
  })()`)

@@ -1,7 +1,9 @@
 package pages
 
 import (
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -114,5 +116,49 @@ func TestBrowserFunctional_PanelScrollNestedBoundaries(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "nested-panel-scroll", func(b *composerFocusCDP) {
 		b.waitFor("nested scrolling result", `document.getElementById('reconnect-result')?.dataset.testResult || ''`, "pass")
+	})
+}
+
+func TestBrowserFunctional_HTMXAnchorsStayInsidePanels(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		switch r.URL.Path {
+		case "/":
+			_ = layout.Base("Anchor navigation", []models.Project{{ID: "project", Name: "Project"}}, "project").Render(r.Context(), w)
+		case "/anchor":
+			_, _ = w.Write([]byte(`<div style="height:1200px"></div><div id="detail target" style="height:60px">Target</div><div style="height:1200px"></div>`))
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "htmx-panel-anchors", func(b *composerFocusCDP) {
+		b.waitFor("navigation ready", `String(document.readyState==='complete' && typeof window.openVibelyNavigate==='function')`, "true")
+		result := b.evaluateAwait(`(async()=>{
+ let nativeCalls=0;const native=Element.prototype.scrollIntoView;
+ Element.prototype.scrollIntoView=function(){nativeCalls++;return native.apply(this,arguments)};
+ const check=(ok,message)=>{if(!ok)throw Error(message)};
+ for(const hash of ['#detail%20target','#missing','']) {
+ await window.openVibelyNavigate('/anchor'+hash);
+ // HTMX settles after its navigation promise resolves.
+ await new Promise(r=>setTimeout(r,100));
+ check(location.hash===hash,'URL fragment changed');
+ check(document.getElementById('desktop-project-titlebar').getBoundingClientRect().top===0&&!document.body.scrollTop&&!document.documentElement.scrollTop,'shell moved');
+ if(hash==='#detail%20target') {
+ const panel=document.getElementById('main-content'),target=document.getElementById('detail target');
+ check(panel.scrollTop>0,'anchor not revealed');
+ check(Math.abs(target.getBoundingClientRect().top-panel.getBoundingClientRect().top-panel.clientTop)<2,'anchor not aligned inside panel');
+ }
+ }
+ check(nativeCalls===0,'HTMX bypassed panel scrolling');
+ return 'pass';
+ })()`)
+		if result != "pass" {
+			t.Fatal(result)
+		}
 	})
 }

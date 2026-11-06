@@ -48,4 +48,25 @@
     });
     return panels.length > 0;
   };
+
+  // HTMX also reveals URL fragments with native scrolling after a swap. Take
+  // ownership before it captures the anchor, preserving the URL/history while
+  // revealing the new content through the same shell-safe path as app code.
+  var anchors = new WeakMap();
+  document.addEventListener('htmx:beforeSwap', function (event) {
+    var detail = event.detail;
+    var path = detail && detail.pathInfo;
+    if (event.defaultPrevented || !detail.shouldSwap || !path || !path.anchor) return;
+    anchors.set(path, path.anchor);
+    path.anchor = null;
+  });
+  document.addEventListener('htmx:afterSettle', function (event) {
+    var path = event.detail && event.detail.pathInfo;
+    if (!path || !anchors.has(path)) return;
+    var id = anchors.get(path);
+    anchors.delete(path);
+    try { id = decodeURIComponent(id); } catch (_) {}
+    // Asynchronously loaded approval cards reveal themselves when they arrive.
+    window.openVibelyScrollIntoPanel(document.getElementById(id), {block: 'start'});
+  });
 })();
