@@ -19,6 +19,24 @@ Run on a graphical desktop (macOS, Windows, or Linux):
 OPENVIBELY_RUN_NATIVE_UI=1 go test ./internal/handler -run '^TestTaskNativeWheelPagingInWails$' -count=1 -timeout 300s
 ```
 
+The same host also checks automatic scrolling and desktop shell isolation:
+
+```
+OPENVIBELY_RUN_NATIVE_UI=1 go test ./internal/handler -run '^TestNativePanelScrollIsolationInWails$' -count=1 -v -timeout 300s
+```
+
+This scenario renders the production desktop layout, Analytics, approval thread,
+and task sidebar against isolated HTTP data. It clicks the real usage toast,
+opens an approval link, switches away and restores the saved project tab, and
+uses sidebar keyboard navigation to reveal a row through nested panels. It
+samples titlebar/tab positions and shell scroll offsets throughout navigation,
+and checks that each target becomes visible. Clicks and key events are dispatched
+by the fixture JavaScript; layout and scrolling run in the native Wails engine
+(WKWebView, WebKitGTK, or WebView2), not Chrome. It does not validate physical
+pointer delivery or the packaged application's custom native titlebar controls.
+The short-sidebar case constrains the sidebar height without resizing the native
+window. CI runs this test in the existing OS/architecture matrix.
+
 PowerShell: set `$env:OPENVIBELY_RUN_NATIVE_UI='1'` before the `go test` command.
 Linux needs GTK3/WebKitGTK 4.1 development packages and a display/window manager
 (Xvfb and Openbox work in CI). The test builds its helper with `gtk3` on Linux.

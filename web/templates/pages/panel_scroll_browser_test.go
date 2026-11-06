@@ -142,6 +142,10 @@ func TestBrowserFunctional_HTMXAnchorsStayInsidePanels(t *testing.T) {
  let nativeCalls=0;const native=Element.prototype.scrollIntoView;
  Element.prototype.scrollIntoView=function(){nativeCalls++;return native.apply(this,arguments)};
  const check=(ok,message)=>{if(!ok)throw Error(message)};
+ // Cached previews run before the network response computes its history URL.
+ const previewPath={anchor:'detail%20target'};
+ document.dispatchEvent(new CustomEvent('htmx:beforeSwap',{detail:{shouldSwap:true,_ovCachedPreview:true,pathInfo:previewPath}}));
+ check(previewPath.anchor==='detail%20target','cached preview consumed the pending request anchor');
  for(const hash of ['#detail%20target','#missing','']) {
  await window.openVibelyNavigate('/anchor'+hash);
  // HTMX settles after its navigation promise resolves.

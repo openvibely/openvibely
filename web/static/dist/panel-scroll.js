@@ -56,7 +56,10 @@
   document.addEventListener('htmx:beforeSwap', function (event) {
     var detail = event.detail;
     var path = detail && detail.pathInfo;
-    if (event.defaultPrevented || !detail.shouldSwap || !path || !path.anchor) return;
+    // Cached thread previews share the pending request's pathInfo, but do not
+    // perform HTMX anchor scrolling. Leave that request intact until its real
+    // response: HTMX has not computed the history URL yet during the preview.
+    if (event.defaultPrevented || detail._ovCachedPreview || !detail.shouldSwap || !path || !path.anchor) return;
     anchors.set(path, path.anchor);
     path.anchor = null;
   });
