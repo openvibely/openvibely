@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -163,4 +164,37 @@ func TestOrgAdminProjectOverrideIsAudited(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, db.QueryRow(`SELECT details FROM project_audit_events WHERE project_id=? AND action='project.deleted'`, ownDelete.ID).Scan(&details))
 	require.Empty(t, details)
+}
+
+func TestProjectMembershipAuditBeforeAndAfter(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('audit-member','audit-member'); INSERT INTO org_memberships VALUES('default','audit-member','member')`)
+	require.NoError(t, err)
+	repo := NewProjectAccessRepo(db)
+	previous := ""
+	for _, role := range []string{"maintainer", "viewer", "", ""} {
+		require.NoError(t, repo.SetMember(ctx, models.BootstrapUserID, "default", "audit-member", role))
+		entries, err := repo.Audit(ctx, "default")
+		require.NoError(t, err)
+		require.Equal(t, "project.member", entries[0].Action)
+		require.Equal(t, models.BootstrapUserID, entries[0].ActorUserID)
+		require.Equal(t, "audit-member", entries[0].TargetID)
+		var details map[string]string
+		require.NoError(t, json.Unmarshal([]byte(entries[0].Details), &details))
+		require.Equal(t, map[string]string{"before": previous, "after": role}, details)
+		previous = role
+	}
+	// Audit failure must roll back the membership mutation too.
+	before, err := repo.Audit(ctx, "default")
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TRIGGER reject_member_audit BEFORE INSERT ON project_audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	require.NoError(t, err)
+	require.Error(t, repo.SetMember(ctx, models.BootstrapUserID, "default", "audit-member", "maintainer"))
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM project_members WHERE project_id='default' AND user_id='audit-member'`).Scan(&count))
+	require.Zero(t, count)
+	after, err := repo.Audit(ctx, "default")
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 }

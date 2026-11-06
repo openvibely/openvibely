@@ -142,6 +142,13 @@ func (r *ProjectAccessRepo) SetMember(ctx context.Context, actorID, projectID, u
 		if enabled != 1 {
 			return persistence.ErrProjectDenied
 		}
+		// Capture the explicit grant in the same transaction as its replacement.
+		// An empty role means no individual grant, not no effective access.
+		previous := ""
+		err = tx.QueryRowContext(ctx, `SELECT role FROM project_members WHERE project_id=? AND user_id=?`, projectID, userID).Scan(&previous)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		if role == "" {
 			_, err = tx.ExecContext(ctx, `DELETE FROM project_members WHERE project_id=? AND user_id=?`, projectID, userID)
 		} else {
@@ -150,7 +157,11 @@ func (r *ProjectAccessRepo) SetMember(ctx context.Context, actorID, projectID, u
 		if err != nil {
 			return err
 		}
-		return projectAudit(ctx, tx, projectID, actorID, "project.member", userID, role)
+		details, err := json.Marshal(map[string]string{"before": previous, "after": role})
+		if err != nil {
+			return err
+		}
+		return projectAudit(ctx, tx, projectID, actorID, "project.member", userID, string(details))
 	})
 }
 func (r *ProjectAccessRepo) Audit(ctx context.Context, id string) ([]models.ProjectAuditEvent, error) {

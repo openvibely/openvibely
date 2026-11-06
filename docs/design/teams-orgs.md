@@ -2917,3 +2917,10 @@ manage project work, but cannot grant, demote, or remove any member's access,
 including another maintainer's. Both service checks and transactional repository
 checks enforce this rule; maintainer settings show no sharing mutation controls.
 This supersedes earlier checkpoints allowing maintainers to manage sharing.
+
+
+Membership audit details now record JSON `before` and `after` explicit roles,
+including grant creation, changes, removal, and removal with organization
+membership. An empty role means no individual grant; organization access may
+still apply. The old role is read in the mutation transaction. Existing audit
+entries remain unchanged because their prior roles cannot be reconstructed.

@@ -81,6 +81,7 @@ func TestProjectAccessServiceGatesPrivateAndNotifiesChanges(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events, 3)
 	require.Equal(t, "project.member.removed_with_org", events[0].Action)
+	require.JSONEq(t, `{"before":"editor","after":""}`, events[0].Details)
 }
 
 func TestProjectSharingRequiresOwner(t *testing.T) {
