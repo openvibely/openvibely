@@ -375,7 +375,7 @@ func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.T
 	}
 	applog.Infof("[task-svc] Create success id=%s", t.ID)
 	if goal != nil && s.goalSvc != nil {
-		s.goalSvc.publishGoalEvent(events.TaskGoalUpdated, goal)
+		s.goalSvc.publishGoalEvent(ctx, events.TaskGoalUpdated, goal)
 	}
 
 	// Auto-submit if created in Active category (blocked tasks wait for parent to activate them)

@@ -1,16 +1,14 @@
 package service
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDiscordExecutionBindingRemovalCancelsWorker(t *testing.T) {
+func TestDiscordExecutionBindingRemovalDeniesNextStart(t *testing.T) {
 	env := teststores.New(t)
 	ctx := t.Context()
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
@@ -28,15 +26,9 @@ func TestDiscordExecutionBindingRemovalCancelsWorker(t *testing.T) {
 	restored, err := worker.executionPrincipalContext(ctx, task, execution.ID)
 	require.NoError(t, err)
 	require.NoError(t, env.Executions.MarkRunning(restored, execution.ID))
-	running, cancel := context.WithCancel(restored)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, task)
+	running := restored
 	require.NoError(t, env.DiscordAuth.DeleteForProject(owner, "default", entry.ID))
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("revoked Discord execution remained active")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 	_, err = worker.executionPrincipalContext(owner, task, execution.ID)
 	require.Error(t, err, "owner session cannot replace saved binding")
 }

@@ -165,8 +165,13 @@ func TestChatProjectSelectionRechecksSelectedProjectBeforeCache(t *testing.T) {
 		require.NoError(t, tc.stores.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, project.ID, bob.UserID, "viewer"))
 	}
 	frame := liveFrame{Data: events.TaskEvent{ProjectID: project.ID, TaskName: "private event"}}
-	require.True(t, h.liveFrameProjectAllowed(ctx, frame))
+	visible := liveProjectVisibility{}
+	require.NoError(t, h.refreshLiveVisibility(ctx, visible))
+	require.True(t, h.liveEventVisible(ctx, visible, frame))
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, project.ID, bob.UserID, ""))
-	require.False(t, h.liveFrameProjectAllowed(ctx, frame), "buffered all-project frames must recheck membership")
-	require.True(t, h.liveFrameProjectAllowed(ctx, liveFrame{Event: "ready"}))
+	require.True(t, h.liveEventVisible(ctx, visible, frame), "per-frame delivery uses the cached decision")
+	require.NoError(t, h.refreshLiveVisibility(ctx, visible))
+	require.False(t, h.liveEventVisible(ctx, visible, frame), "an access change clears the cached decision")
+	require.False(t, h.liveEventVisible(ctx, visible, liveFrame{Data: events.TaskEvent{TaskName: "no project"}}))
+	require.True(t, h.liveEventVisible(ctx, visible, liveFrame{Event: "ready"}))
 }

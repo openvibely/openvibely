@@ -2,13 +2,13 @@ package handler
 
 import (
 	"context"
+	"testing"
+
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestGoalContinuationRestoresCreatorAndRechecks(t *testing.T) {
@@ -63,16 +63,11 @@ func TestGoalContinuationRestoresCreatorAndRechecks(t *testing.T) {
 	defer cancel()
 	params := streamingResponseParams{TaskID: task.ID, ProjectID: "default", GoalID: input.GoalID, InputOrigin: input.Source, InputOriginAgent: input.OriginAgent}
 	require.NoError(t, h.requireFollowupAccess(active, params))
-	h.watchFollowupAccess(active, cancel, params)
 	_, err = goals.SetGoal(caller, task.ID, "Same user replacement", service.GoalOptions{})
 	require.NoError(t, err)
 	_, err = h.queuedGoalContinuationContext(caller, input)
 	require.ErrorIs(t, err, authz.ErrDenied)
-	select {
-	case <-active.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("replaced goal continuation stayed active")
-	}
+	require.NoError(t, active.Err(), "revocation does not stop a run already started")
 	// Even a replacement owner's goal cannot retag an already queued message.
 	_, err = goals.SetGoal(owner, task.ID, "Replacement", service.GoalOptions{})
 	require.NoError(t, err)

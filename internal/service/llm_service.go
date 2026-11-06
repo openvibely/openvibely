@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/skilldeps"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/skilldeps"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/applog"
@@ -923,7 +924,7 @@ func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID
 	}
 	if created {
 		if goal != nil && s.taskSvc.goalSvc != nil {
-			s.taskSvc.goalSvc.publishGoalEvent(events.TaskGoalUpdated, goal)
+			s.taskSvc.goalSvc.publishGoalEvent(ctx, events.TaskGoalUpdated, goal)
 		}
 		s.taskSvc.SubmitSavedAutomationTask(*canonical)
 	}

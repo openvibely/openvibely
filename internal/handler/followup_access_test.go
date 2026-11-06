@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFollowupRevocationCancelsWaitingAndRunningContexts(t *testing.T) {
+func TestFollowupRevocationDeniesNextStartOnly(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	h := tc.handler
 	ctx := t.Context()
@@ -35,17 +35,12 @@ func TestFollowupRevocationCancelsWaitingAndRunningContexts(t *testing.T) {
 	defer waitCancel()
 	running, runCancel := context.WithCancel(parent)
 	defer runCancel()
-	h.watchFollowupAccess(parent, cancel, params)
 	policy, err := tc.stores.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
 	policy.OrgRole = "viewer"
 	require.NoError(t, tc.stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
 	for _, child := range []context.Context{waiting, running} {
-		select {
-		case <-child.Done():
-		case <-time.After(3 * time.Second):
-			t.Fatal("revoked followup context remained active")
-		}
+		require.NoError(t, child.Err(), "revocation does not stop a run already started")
 	}
 	require.ErrorIs(t, h.requireFollowupAccess(restored, params), authz.ErrDenied)
 	input := models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID, Content: "Queued before revocation", Source: models.TaskOriginWeb}
@@ -113,12 +108,7 @@ func TestStandaloneFollowupHistoricalReviewerPolicy(t *testing.T) {
 	require.ErrorIs(t, tc.stores.ThreadInputs.CheckSteeringDelivery(strict, execution.ID, nil), authz.ErrDenied)
 	running, cancel := context.WithCancel(owner)
 	defer cancel()
-	h.watchFollowupAccess(running, cancel, params)
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("historical standalone followup was not cancelled")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 }
 
 func TestStandaloneFollowupValidatesLegacyExecutionScope(t *testing.T) {
@@ -158,12 +148,7 @@ func TestFollowupUnmappedChannelRecoveryDenied(t *testing.T) {
 			h.SetAuthMode(auth.AuthModeLocal)
 			running, cancel := context.WithCancel(ctx)
 			defer cancel()
-			h.watchFollowupAccess(running, cancel, params)
-			select {
-			case <-running.Done():
-			case <-time.After(3 * time.Second):
-				t.Fatal("unmapped followup remained active")
-			}
+			require.NoError(t, running.Err(), "revocation does not stop a run already started")
 			browser := createTask(t, h, "default", origin+" browser task")
 			params.TaskID = browser.ID
 			params.ChannelReply.Source = origin
@@ -205,12 +190,7 @@ func TestFollowupDiscordRequiresCurrentSenderBinding(t *testing.T) {
 	require.Error(t, h.requireFollowupAccess(restored, foreign))
 	running, cancel := context.WithCancel(restored)
 	defer cancel()
-	h.watchFollowupAccess(running, cancel, params)
 	require.NoError(t, tc.stores.DiscordAuth.DeleteForProject(owner, "default", entry.ID))
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("revoked Discord follow-up remained active")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 	require.Error(t, h.requireFollowupAccess(restored, params))
 }

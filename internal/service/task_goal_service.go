@@ -84,7 +84,7 @@ func (s *TaskGoalService) SetGoal(ctx context.Context, taskID string, objective 
 	if err := s.repo.CreateOrReplace(ctx, goal); err != nil {
 		return nil, err
 	}
-	s.publishGoalEvent(events.TaskGoalUpdated, goal)
+	s.publishGoalEvent(ctx, events.TaskGoalUpdated, goal)
 	return goal, nil
 }
 
@@ -103,7 +103,7 @@ func (s *TaskGoalService) PublishEvaluatedGoal(ctx context.Context, taskID strin
 	if err != nil || goal == nil || goal.Status == models.TaskGoalStatusCleared {
 		return goal, err
 	}
-	s.publishGoalEvent(events.TaskGoalEvaluated, goal)
+	s.publishGoalEvent(ctx, events.TaskGoalEvaluated, goal)
 	return goal, nil
 }
 
@@ -120,7 +120,7 @@ func (s *TaskGoalService) ClearGoal(ctx context.Context, taskID string, actor st
 	}
 	goal, _ := s.repo.GetByTaskID(ctx, taskID)
 	if goal != nil {
-		s.publishGoalEvent(events.TaskGoalCleared, goal)
+		s.publishGoalEvent(ctx, events.TaskGoalCleared, goal)
 	}
 	return nil
 }
@@ -156,7 +156,7 @@ func (s *TaskGoalService) ResumeGoalStoppedByUser(ctx context.Context, taskID st
 	if updated == nil {
 		return nil, ErrTaskGoalStaleUpdate
 	}
-	s.publishGoalEvent(events.TaskGoalResumed, updated)
+	s.publishGoalEvent(ctx, events.TaskGoalResumed, updated)
 	return updated, nil
 }
 
@@ -184,7 +184,7 @@ func (s *TaskGoalService) pauseGoal(ctx context.Context, taskID string, reason s
 	if goal == nil {
 		return ErrTaskGoalStaleUpdate
 	}
-	s.publishGoalEvent(events.TaskGoalPaused, goal)
+	s.publishGoalEvent(ctx, events.TaskGoalPaused, goal)
 	return nil
 }
 
@@ -212,7 +212,7 @@ func (s *TaskGoalService) ResumeGoal(ctx context.Context, taskID string, actor s
 	if goal == nil {
 		return ErrTaskGoalStaleUpdate
 	}
-	s.publishGoalEvent(events.TaskGoalResumed, goal)
+	s.publishGoalEvent(ctx, events.TaskGoalResumed, goal)
 	return nil
 }
 
@@ -228,7 +228,7 @@ func (s *TaskGoalService) ReactivateAchievedGoal(ctx context.Context, taskID str
 		return nil, err
 	}
 	if goal != nil {
-		s.publishGoalEvent(events.TaskGoalUpdated, goal)
+		s.publishGoalEvent(ctx, events.TaskGoalUpdated, goal)
 	}
 	return goal, nil
 }
@@ -260,7 +260,7 @@ func (s *TaskGoalService) MarkAchieved(ctx context.Context, taskID string, goalI
 	if goal == nil {
 		return nil, ErrTaskGoalStaleUpdate
 	}
-	s.publishGoalEvent(events.TaskGoalEvaluated, goal)
+	s.publishGoalEvent(ctx, events.TaskGoalEvaluated, goal)
 	if s.goalAchievedHandler != nil {
 		s.goalAchievedHandler(ctx, taskID, goal.GoalID)
 	}
@@ -298,7 +298,7 @@ func (s *TaskGoalService) RecordBlockedReport(ctx context.Context, taskID string
 	if goal == nil {
 		return nil, ErrTaskGoalStaleUpdate
 	}
-	s.publishGoalEvent(events.TaskGoalEvaluated, goal)
+	s.publishGoalEvent(ctx, events.TaskGoalEvaluated, goal)
 	return goal, nil
 }
 
@@ -330,7 +330,7 @@ func (s *TaskGoalService) ClearBlockedReport(ctx context.Context, taskID string,
 	if err != nil || goal == nil {
 		return goal, err
 	}
-	s.publishGoalEvent(events.TaskGoalEvaluated, goal)
+	s.publishGoalEvent(ctx, events.TaskGoalEvaluated, goal)
 	return goal, nil
 }
 
@@ -360,12 +360,20 @@ func reasonForActor(actor, action string) string {
 	return fmt.Sprintf("%s by %s", action, actor)
 }
 
-func (s *TaskGoalService) publishGoalEvent(eventType events.TaskEventType, goal *models.TaskGoal) {
+func (s *TaskGoalService) publishGoalEvent(ctx context.Context, eventType events.TaskEventType, goal *models.TaskGoal) {
 	if s.broadcaster == nil || goal == nil {
 		return
 	}
+	// Scoped delivery and the all-projects filter both need the project.
+	projectID := ""
+	if s.taskRepo != nil {
+		if task, err := s.taskRepo.GetByID(context.WithoutCancel(ctx), goal.TaskID); err == nil && task != nil {
+			projectID = task.ProjectID
+		}
+	}
 	s.broadcaster.Publish(events.TaskEvent{
 		Type:          eventType,
+		ProjectID:     projectID,
 		TaskID:        goal.TaskID,
 		Status:        string(goal.Status),
 		GoalID:        goal.GoalID,

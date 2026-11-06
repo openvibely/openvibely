@@ -2888,3 +2888,22 @@ Validation: first-planner persistence/manual-planner race tests, ordinary-task r
 - `ChannelMessageRouter` enforces current project role (view to list, editor to send) for every caller.
 
 Remaining limitations: Telegram and email stay fail-closed in authenticated modes because neither offers a spoof-resistant application-user binding. Production private-project creation remains disabled until Phase 3 provides process/filesystem sandboxing; policy tables alone do not isolate projects. Browser-level UI testing was not performed for this checkpoint.
+
+
+### Live subscriptions and running work: event-driven revocation
+
+This supersedes earlier checkpoints describing per-frame permission checks and
+one-second worker/follow-up authorization watchers. Subscriptions check access
+at admission. Project-member changes notify only that user's sockets watching
+the affected project; project-policy changes notify watchers of that project.
+Organization membership changes notify that user's sockets. Denied subscriptions
+receive `access blocked` and are retired, including their queued frames. Logout
+closes that user's connections. All-projects events use a project visibility map
+loaded at subscription admission and refreshed on relevant access changes; frame
+delivery performs no database authorization queries. Goal events include ProjectID.
+
+The worker and follow-up authorization timers are removed. Admission and recovery
+checks remain, so revoked users cannot start new work; revocation alone does not
+cancel an already admitted run. Existing tool/action authorization boundaries
+remain enforced. The update banner, ping and reconciliation timers are unchanged;
+session expiration is checked at the existing 15-second ping interval.

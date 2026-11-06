@@ -2,13 +2,13 @@ package handler
 
 import (
 	"context"
+	"testing"
+
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestSlackRunBindingRevocation(t *testing.T) {
@@ -43,7 +43,6 @@ func TestSlackRunBindingRevocation(t *testing.T) {
 			require.Error(t, h.requireFollowupAccess(owner, params))
 			active, cancel := context.WithCancel(caller)
 			defer cancel()
-			h.watchFollowupAccess(active, cancel, params)
 			switch change {
 			case "delete":
 				require.NoError(t, tc.stores.SlackAuth.DeleteForProject(owner, "default", entry.ID))
@@ -55,11 +54,7 @@ func TestSlackRunBindingRevocation(t *testing.T) {
 				policy.OrgRole = "viewer"
 				require.NoError(t, tc.stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
 			}
-			select {
-			case <-active.Done():
-			case <-time.After(3 * time.Second):
-				t.Fatal("revoked Slack run remained active")
-			}
+			require.NoError(t, active.Err(), "revocation does not stop a run already started")
 			require.Error(t, h.requireFollowupAccess(caller, params))
 		})
 	}

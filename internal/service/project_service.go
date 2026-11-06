@@ -129,7 +129,11 @@ func (s *ProjectService) Create(ctx context.Context, p *models.Project) error {
 	if err := s.validateProjectWorkerLimit(ctx, p, false); err != nil {
 		return err
 	}
-	return s.repo.Create(ctx, p)
+	if err := s.repo.Create(ctx, p); err != nil {
+		return err
+	}
+	s.invalidateProjectSelectionCaches(p.ID)
+	return nil
 }
 
 func (s *ProjectService) Update(ctx context.Context, p *models.Project) error {

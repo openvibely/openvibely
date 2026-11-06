@@ -669,6 +669,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	}
 
 	projectSvc := service.NewProjectService(projectRepo)
+	projectSvc.RegisterProjectSelectionCacheInvalidator(projectAccessSvc)
 	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
 	taskGoalSvc.SetProjectAuthorization(projectAccessSvc, cfg.AuthMode == auth.AuthModeDisabled)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)

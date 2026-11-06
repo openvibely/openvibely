@@ -1,11 +1,11 @@
 package service
 
 import (
-	"context"
-	"github.com/openvibely/openvibely/internal/models"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDiscordAutomationBindingRevocationAtWorkerBoundaries(t *testing.T) {
@@ -49,15 +49,9 @@ func TestDiscordAutomationBindingRevocationAtWorkerBoundaries(t *testing.T) {
 	authorized, err := worker.automationPrincipalContext(ctx, *envelope, execution.ID)
 	require.NoError(t, err)
 	require.NoError(t, f.stores.Executions.MarkRunning(authorized, execution.ID))
-	running, cancel := context.WithCancel(authorized)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, envelope.Task)
+	running := authorized
 	require.NoError(t, f.stores.DiscordAuth.DeleteForProject(owner, f.project.ID, entry.ID))
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("running automation was not cancelled after sender binding removal")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 	_, err = worker.automationPrincipalContext(owner, *envelope, execution.ID)
 	require.Error(t, err, "recovered execution must not borrow owner identity")
 }

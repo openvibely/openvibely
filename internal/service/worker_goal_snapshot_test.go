@@ -1,9 +1,7 @@
 package service
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service/authz"
@@ -11,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRecoveredGoalExecutionKeepsCreatorAndStopsOnReplacement(t *testing.T) {
+func TestRecoveredGoalExecutionKeepsCreatorAndDeniesRestartAfterReplacement(t *testing.T) {
 	env := teststores.New(t)
 	ctx := t.Context()
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
@@ -39,18 +37,12 @@ func TestRecoveredGoalExecutionKeepsCreatorAndStopsOnReplacement(t *testing.T) {
 	principal, ok := models.PrincipalFromContext(recovered)
 	require.True(t, ok)
 	require.Equal(t, user.UserID, principal.UserID)
-	running, cancel := context.WithCancel(recovered)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, task)
+	running := recovered
 	replacement := models.TaskGoal{TaskID: task.ID, GoalID: "second-goal", Objective: "Different work"}
 	require.NoError(t, env.TaskGoals.CreateOrReplace(userCtx, &replacement))
 	_, err = worker.executionPrincipalContext(owner, task, execution.ID)
 	require.ErrorIs(t, err, authz.ErrDenied)
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("recovered continuation survived goal replacement")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 }
 
 func TestLegacyExecutionRecoveryRejectsMissingAndForeignExecutions(t *testing.T) {

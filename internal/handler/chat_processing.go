@@ -338,10 +338,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "follow-up authorization failed", 0, params.ChannelReply)
 			return
 		}
-		var authorizationCancel context.CancelFunc
-		baseCtx, authorizationCancel = context.WithCancel(authorizedCtx)
-		defer authorizationCancel()
-		h.watchFollowupAccess(baseCtx, authorizationCancel, params)
+		baseCtx = authorizedCtx
 	}
 
 	// Memory recall is injected for task-thread followups through the full task

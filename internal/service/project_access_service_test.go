@@ -22,7 +22,11 @@ func TestProjectAccessServiceGatesPrivateAndNotifiesChanges(t *testing.T) {
 	project := &models.Project{Name: "Policy"}
 	require.NoError(t, env.Projects.Create(ownerCtx, project))
 	s := NewProjectAccessService(env.ProjectAccess)
-	changes := s.Changes()
+	watch := s.Watch(bob.UserID)
+	defer watch.Close()
+	other := s.Watch("someone-else")
+	defer other.Close()
+	changes := watch.C()
 	policy, err := s.Policy(ownerCtx, project.ID)
 	require.NoError(t, err)
 	policy.Visibility = "private"
@@ -44,15 +48,18 @@ func TestProjectAccessServiceGatesPrivateAndNotifiesChanges(t *testing.T) {
 	default:
 		t.Fatal("policy change did not notify subscribers")
 	}
+	require.Equal(t, []AccessChange{{ProjectID: project.ID}}, watch.Drain())
+	require.Len(t, other.Drain(), 1, "policy changes reach every user of the project")
 	require.NoError(t, s.Require(bobCtx, project.ID, authz.View))
 	require.ErrorIs(t, s.Require(bobCtx, project.ID, authz.Edit), authz.ErrDenied)
-	changes = s.Changes()
 	require.NoError(t, s.SetMember(ownerCtx, project.ID, bob.UserID, "editor"))
 	select {
 	case <-changes:
 	default:
 		t.Fatal("member change did not notify subscribers")
 	}
+	require.Equal(t, []AccessChange{{UserID: bob.UserID, ProjectID: project.ID}}, watch.Drain())
+	require.Empty(t, other.Drain(), "member changes reach only that user")
 	require.NoError(t, s.Require(bobCtx, project.ID, authz.Edit))
 	_, err = s.Audit(bobCtx, project.ID)
 	require.ErrorIs(t, err, authz.ErrDenied)

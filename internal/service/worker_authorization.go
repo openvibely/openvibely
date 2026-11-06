@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -76,29 +75,6 @@ func (w *WorkerService) checkRunPermission(ctx context.Context, task models.Task
 		permission = authz.Manage
 	}
 	return (&authz.Authorizer{Store: w.runAccess}).Require(ctx, task.ProjectID, permission)
-}
-
-// watchRunAuthorization keeps the same principal throughout the run. It never
-// picks up a later submitter's identity when checking revoked access.
-func (w *WorkerService) watchRunAuthorization(ctx context.Context, cancel context.CancelFunc, task models.Task) {
-	if w.runIdentities == nil {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := w.checkRunPermission(ctx, task); err != nil {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
 }
 
 // SubmitAs saves the requesting principal before admitting ordinary queued work.

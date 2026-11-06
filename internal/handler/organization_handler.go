@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/a-h/templ"
-	"github.com/openvibely/openvibely/web/templates/pages"
 	"html/template"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/a-h/templ"
+	"github.com/openvibely/openvibely/web/templates/pages"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/auth"
@@ -395,7 +396,7 @@ func (h *Handler) ChangeOrgMember(c echo.Context) error {
 	if err := h.organizationSvc.Store.ChangeMember(c.Request().Context(), p.UserID, c.Param("id"), c.FormValue("role"), remove); err != nil {
 		return orgActionError(err)
 	}
-	h.organizationSvc.Notify()
+	h.organizationSvc.NotifyUser(c.Param("id"))
 	return c.Redirect(http.StatusSeeOther, "/organization")
 }
 func (h *Handler) OrgInvitePage(c echo.Context) error {

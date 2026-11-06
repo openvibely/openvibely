@@ -1,9 +1,7 @@
 package service
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -44,16 +42,11 @@ func TestWorkerDurableRunIdentityAndRevocation(t *testing.T) {
 	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, "editor"))
 	restored, err = worker.runPrincipalContext(ctx, task)
 	require.NoError(t, err)
-	// A running model receives cancellation when its current grant disappears.
-	running, cancel := context.WithCancel(restored)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, task)
+	// Revocation does not stop a run already started; the next start is denied.
 	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, ""))
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("revoked run was not cancelled")
-	}
+	require.NoError(t, restored.Err())
+	_, err = worker.runPrincipalContext(ctx, task)
+	require.ErrorIs(t, err, authz.ErrDenied)
 	// A failed bind must leave the previous run-as user untouched.
 	ownerCtx := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 	require.NoError(t, env.RunIdentities.BindTask(ownerCtx, task.ID))
@@ -124,17 +117,11 @@ func TestWebhookWorkerRequiresCurrentMaintainer(t *testing.T) {
 	_, err = worker.runPrincipalContext(ctx, task)
 	require.ErrorIs(t, err, authz.ErrDenied)
 	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "maintainer"))
-	authorized, err := worker.runPrincipalContext(ctx, task)
+	_, err = worker.runPrincipalContext(ctx, task)
 	require.NoError(t, err)
-	running, cancel := context.WithCancel(authorized)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, task)
 	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("revoked webhook run continued")
-	}
+	_, err = worker.runPrincipalContext(ctx, task)
+	require.ErrorIs(t, err, authz.ErrDenied)
 }
 
 func TestWorkerSubmissionDenialPreservesIdentityAndQueue(t *testing.T) {
@@ -188,20 +175,12 @@ func TestRecoveredAutomationRequiresMaintainerWithoutRuntimeContext(t *testing.T
 	require.NoError(t, env.Tasks.Create(actor, &task))
 	worker := NewWorkerService(nil, 1, env.Projects)
 	worker.SetRunAuthorization(env.RunIdentities, env.Organizations, env.ProjectAccess, false)
-	restored, err := worker.runPrincipalContext(ctx, task)
+	_, err = worker.runPrincipalContext(ctx, task)
 	require.NoError(t, err)
-	running, cancel := context.WithCancel(restored)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, task)
 	// Org-wide editor access remains, but is insufficient for automation execution.
 	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, ""))
 	_, err = worker.runPrincipalContext(ctx, task)
 	require.ErrorIs(t, err, authz.ErrDenied)
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("recovered automation retained editor-only access")
-	}
 }
 
 func TestWorkerUnmappedChannelRecoveryDenied(t *testing.T) {
@@ -220,7 +199,7 @@ func TestWorkerUnmappedChannelRecoveryDenied(t *testing.T) {
 			require.NoError(t, env.Executions.Create(ctx, &execution))
 			opts := githubIssueRuntimeOptions{WorkerSvc: worker, ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: execution.ID, TaskRepo: env.Tasks}
 			_, err = authorizeGitHubRuntime(ctx, opts, authz.View)
-			require.ErrorIs(t, err, authz.ErrDenied, "provider actions cannot wait for watcher cancellation")
+			require.ErrorIs(t, err, authz.ErrDenied, "provider actions check access when they run")
 
 			worker.runAuthOff = true
 			restored, err := worker.runPrincipalContext(ctx, task)
@@ -229,14 +208,7 @@ func TestWorkerUnmappedChannelRecoveryDenied(t *testing.T) {
 			_, err = authorizeGitHubRuntime(ctx, opts, authz.View)
 			require.NoError(t, err)
 			worker.runAuthOff = false
-			running, cancel := context.WithCancel(restored)
-			defer cancel()
-			worker.watchRunAuthorization(running, cancel, task)
-			select {
-			case <-running.Done():
-			case <-time.After(3 * time.Second):
-				t.Fatal("unmapped recovered run remained active")
-			}
+			require.ErrorIs(t, worker.checkRunPermission(restored, task), authz.ErrDenied)
 		})
 	}
 }

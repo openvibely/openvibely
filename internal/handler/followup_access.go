@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -126,27 +125,6 @@ func (h *Handler) requireFollowupAccess(ctx context.Context, params streamingRes
 		return err
 	}
 	return nil
-}
-
-func (h *Handler) watchFollowupAccess(ctx context.Context, cancel context.CancelFunc, params streamingResponseParams) {
-	if h.projectAccessSvc == nil {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if h.requireFollowupAccess(ctx, params) != nil {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
 }
 
 func (h *Handler) rejectUnauthorizedQueuedFollowup(ctx context.Context, input models.ThreadInput, cause error) error {

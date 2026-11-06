@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGitHubReviewerRemovalCancelsPromotedExecution(t *testing.T) {
+func TestGitHubReviewerRemovalDeniesNextStart(t *testing.T) {
 	env := teststores.New(t)
 	ctx := t.Context()
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
@@ -35,21 +35,15 @@ func TestGitHubReviewerRemovalCancelsPromotedExecution(t *testing.T) {
 	worker.SetRunAuthorization(env.RunIdentities, env.Organizations, env.ProjectAccess, true)
 	restored, err := worker.executionPrincipalContext(ctx, task, execution.ID)
 	require.NoError(t, err)
-	running, cancel := context.WithCancel(restored)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, task)
+	running := restored
 	require.NoError(t, env.GitHubAuth.DeleteAuthorizedActor(owner, reviewer.ID))
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("reviewer revocation did not cancel active execution")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 	_, err = worker.executionPrincipalContext(owner, task, execution.ID)
 	require.ErrorIs(t, err, authz.ErrDenied, "owner cannot lend permissions to removed reviewer")
 	require.ErrorIs(t, env.Executions.MarkRunning(owner, execution.ID), authz.ErrDenied)
 }
 
-func TestGitHubMappedReviewerRebindingCancelsPromotedExecution(t *testing.T) {
+func TestGitHubMappedReviewerRebindingDeniesNextStart(t *testing.T) {
 	env := teststores.New(t)
 	ctx := t.Context()
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
@@ -78,16 +72,10 @@ func TestGitHubMappedReviewerRebindingCancelsPromotedExecution(t *testing.T) {
 	worker.SetRunAuthorization(env.RunIdentities, env.Organizations, env.ProjectAccess, false)
 	restored, err := worker.executionPrincipalContext(ctx, task, execution.ID)
 	require.NoError(t, err)
-	running, cancel := context.WithCancel(restored)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, task)
+	running := restored
 	binding.ExternalUserID = 456
 	require.NoError(t, env.GitHubAuth.BindReviewerIdentity(owner, binding))
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("reviewer revocation did not cancel active execution")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 	_, err = worker.executionPrincipalContext(owner, task, execution.ID)
 	require.ErrorIs(t, err, authz.ErrDenied, "owner cannot lend permissions to removed reviewer")
 	require.ErrorIs(t, env.Executions.MarkRunning(owner, execution.ID), authz.ErrDenied)
@@ -139,13 +127,7 @@ func TestHistoricalReviewerRecoveryRequiresCapturedIdentityWhenAuthenticated(t *
 	require.ErrorIs(t, env.ThreadInputs.CheckSteeringDelivery(strict, execution.ID, nil), authz.ErrDenied, "history-only provider sends must not bypass historical reviewer policy")
 	_, err = authorizeGitHubRuntime(owner, githubIssueRuntimeOptions{WorkerSvc: worker, ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: execution.ID, TaskRepo: env.Tasks}, authz.Manage)
 	require.ErrorIs(t, err, authz.ErrDenied, "a fresh owner context cannot bypass policy at the runtime boundary")
-	// A running legacy execution must also be rejected at the next watcher tick.
-	running, cancel := context.WithCancel(context.WithValue(owner, runExecutionKey{}, execution.ID))
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, task)
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("historical reviewer execution was not cancelled")
-	}
+	// An already admitted context is not cancelled by a policy change.
+	running := context.WithValue(owner, runExecutionKey{}, execution.ID)
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 }

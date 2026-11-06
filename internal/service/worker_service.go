@@ -654,7 +654,6 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			return
 		}
 		taskCtx = authorizedCtx
-		w.watchRunAuthorization(taskCtx, taskCancel, task)
 	}
 
 	// Claim the task BEFORE running lifecycle hooks so the kanban board
@@ -694,7 +693,6 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 				return
 			}
 			taskCtx = authorizedCtx
-			w.watchRunAuthorization(taskCtx, taskCancel, claim.Task)
 		}
 
 		// Capacity was reserved from the queue refresh. If the Task assignment

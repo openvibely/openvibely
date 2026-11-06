@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -51,7 +50,7 @@ func TestAutomationDispatchAuthorizationBeforeAdmission(t *testing.T) {
 	}
 }
 
-func TestAutomationRunningMaintainerDowngradeCancels(t *testing.T) {
+func TestAutomationMaintainerDowngradeDeniesNextStart(t *testing.T) {
 	f := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := t.Context()
 	org := NewOrganizationService(f.stores.Organizations, "secret")
@@ -66,17 +65,11 @@ func TestAutomationRunningMaintainerDowngradeCancels(t *testing.T) {
 	automationCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: f.project.ID, OriginTask: true})
 	authorized, err := worker.runPrincipalContext(automationCtx, f.task)
 	require.NoError(t, err)
-	running, cancel := context.WithCancel(authorized)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, f.task)
+	running := authorized
 	require.NoError(t, f.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, f.project.ID, user.UserID, "editor"))
 	_, err = worker.runPrincipalContext(automationCtx, f.task)
 	require.ErrorIs(t, err, authz.ErrDenied, "waiting automation must recheck at worker admission")
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("automation continued after maintainer access was revoked")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 	// The same editor can still run ordinary tasks.
 	_, err = worker.runPrincipalContext(ctx, f.task)
 	require.NoError(t, err)
@@ -152,15 +145,9 @@ func TestSlackAutomationBindingRevocationAtWorkerBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	authorized, err := worker.automationPrincipalContext(ctx, *envelope, execution.ID)
 	require.NoError(t, err)
-	running, cancel := context.WithCancel(authorized)
-	defer cancel()
-	worker.watchRunAuthorization(running, cancel, envelope.Task)
+	running := authorized
 	require.NoError(t, f.stores.SlackAuth.DeleteForProject(owner, f.project.ID, entry.ID))
-	select {
-	case <-running.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("running automation was not cancelled after sender binding removal")
-	}
+	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 	_, err = worker.automationPrincipalContext(owner, *envelope, execution.ID)
 	require.Error(t, err, "recovered execution must not borrow owner identity")
 }

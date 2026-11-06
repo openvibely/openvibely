@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -10,31 +9,21 @@ import (
 )
 
 // ProjectAccessService owns policy mutations and permission checks. A change
-// wakes subscribers so they can reauthorize against current stored membership.
-// It does not treat a notification as permission to deliver buffered events.
+// wakes only the watchers it can affect so they reauthorize against stored membership.
 type ProjectAccessService struct {
 	store      persistence.ProjectAccessStore
 	authorizer authz.Authorizer
-	mu         sync.Mutex
-	changed    chan struct{}
+	changes    accessHub
 }
 
 func NewProjectAccessService(store persistence.ProjectAccessStore) *ProjectAccessService {
-	return &ProjectAccessService{store: store, authorizer: authz.Authorizer{Store: store}, changed: make(chan struct{})}
+	return &ProjectAccessService{store: store, authorizer: authz.Authorizer{Store: store}}
 }
 func (s *ProjectAccessService) Require(ctx context.Context, id string, p authz.Permission) error {
 	return s.authorizer.Require(ctx, id, p)
 }
-func (s *ProjectAccessService) Changes() <-chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.changed
-}
-func (s *ProjectAccessService) notify() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	close(s.changed)
-	s.changed = make(chan struct{})
+func (s *ProjectAccessService) Watch(userID string) *AccessWatch {
+	return s.changes.watch(userID)
 }
 func (s *ProjectAccessService) Policy(ctx context.Context, id string) (*models.ProjectAccess, error) {
 	if err := s.Require(ctx, id, authz.Manage); err != nil {
@@ -61,7 +50,7 @@ func (s *ProjectAccessService) Update(ctx context.Context, p models.ProjectAcces
 	if err := s.store.Update(ctx, actor.UserID, p); err != nil {
 		return err
 	}
-	s.notify()
+	s.changes.notify(AccessChange{ProjectID: p.ProjectID})
 	return nil
 }
 func (s *ProjectAccessService) SetMember(ctx context.Context, projectID, userID, role string) error {
@@ -72,7 +61,7 @@ func (s *ProjectAccessService) SetMember(ctx context.Context, projectID, userID,
 	if err := s.store.SetMember(ctx, actor.UserID, projectID, userID, role); err != nil {
 		return err
 	}
-	s.notify()
+	s.changes.notify(AccessChange{UserID: userID, ProjectID: projectID})
 	return nil
 }
 func (s *ProjectAccessService) Audit(ctx context.Context, id string) ([]models.ProjectAuditEvent, error) {
@@ -91,4 +80,10 @@ func (s *ProjectAccessService) RecordAction(ctx context.Context, projectID, acti
 	}
 	actor, _ := models.PrincipalFromContext(ctx)
 	return s.store.Record(ctx, projectID, actor.UserID, action, target, details)
+}
+
+// InvalidateProjectSelection updates live visibility when a project is created
+// or deleted, including all-project subscriptions that did not know its ID yet.
+func (s *ProjectAccessService) InvalidateProjectSelection(projectID string) {
+	s.changes.notify(AccessChange{ProjectID: projectID})
 }
