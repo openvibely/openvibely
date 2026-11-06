@@ -1,7 +1,10 @@
 package pages
 
 import (
+	"github.com/openvibely/openvibely/web/static"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -72,4 +75,44 @@ try {
 }catch(e){const r=document.getElementById('reconnect-result');r.dataset.testResult='fail';r.dataset.testError=e.message;}
 </script>`
 	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_PanelScrollNestedBoundaries(t *testing.T) {
+	fixture := `<style>
+ html,body{margin:0;height:100%;overflow:hidden}
+ .drawer{height:300px;overflow:auto}header{height:54px}
+ #outer{height:300px;width:300px;overflow:auto}
+ #inner{height:120px;overflow:auto;margin-top:400px}
+ #target{height:40px;margin-top:500px}
+ </style><main id="reconnect-result"></main><div class="drawer"><header>Tabs</header><div id="outer"><div id="inner"><div id="target">Target</div></div><div style="height:400px"></div></div></div>
+ <script>
+ (async()=>{const result=document.getElementById('reconnect-result');try{
+ const outer=document.getElementById('outer'),inner=document.getElementById('inner'),target=document.getElementById('target');
+ const assert=(ok,message)=>{if(!ok)throw Error(message)};
+ const stable=()=>assert(document.querySelector('header').getBoundingClientRect().top===0&&!document.body.scrollTop&&!document.documentElement.scrollTop&&!document.querySelector('.drawer').scrollTop,'shell moved');
+ openVibelyScrollIntoPanel(target,{container:inner});
+ assert(inner.scrollTop>0&&outer.scrollTop===0,'explicit boundary ignored');stable();
+ for(const behavior of ['instant','smooth']) {
+ outer.scrollTo({top:0,behavior:'instant'});inner.scrollTo({top:0,behavior:'instant'});
+ openVibelyScrollIntoPanel(target,{behavior});
+ for(let i=0;i<100;i++) {const t=target.getBoundingClientRect(),o=outer.getBoundingClientRect();if(inner.scrollTop>0&&outer.scrollTop>0&&t.top>=o.top&&t.bottom<=o.bottom)break;await new Promise(r=>setTimeout(r,20));}
+ const t=target.getBoundingClientRect(),o=outer.getBoundingClientRect();
+ assert(inner.scrollTop>0&&outer.scrollTop>0,'both content panels must scroll: '+behavior+' '+inner.scrollTop+' '+outer.scrollTop);
+ assert(t.top>=o.top&&t.bottom<=o.bottom,'target remains outside outer panel');stable();
+ }
+ result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}})();
+ </script>`
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><head><script src="/static/panel-scroll.js"></script></head><body>` + fixture + `</body></html>`))
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "nested-panel-scroll", func(b *composerFocusCDP) {
+		b.waitFor("nested scrolling result", `document.getElementById('reconnect-result')?.dataset.testResult || ''`, "pass")
+	})
 }

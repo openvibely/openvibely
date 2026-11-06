@@ -1,26 +1,26 @@
 (function () {
   'use strict';
 
-  // Reveal a target in ONE panel. Never scroll the document or hidden shell
-  // ancestors, as Element.scrollIntoView does (including in WKWebView).
-  // Pass {container: panel} when known; otherwise use the nearest auto/scroll
-  // ancestor. block/inline accept start, center, end, or nearest (the default).
+  // Reveal through nested content panels, never through the document or shell.
+  // An explicit container is an inclusive boundary; otherwise stop at the page,
+  // sidebar, tab strip, or a fixed overlay. Hidden/clip ancestors never scroll.
+  // block/inline accept start, center, end, or nearest (the default).
   // Call focus({preventScroll: true}) separately when revealing keyboard focus.
   window.openVibelyScrollIntoPanel = function (target, options) {
     options = options || {};
     if (!target || !target.isConnected) return false;
-    var panel = options.container;
+    var boundary = options.container;
+    if (boundary && (boundary === document.body || boundary === document.documentElement || boundary === target || !boundary.contains(target))) return false;
     var scrollable = function (value) { return value === 'auto' || value === 'scroll'; };
-    if (!panel) {
-      for (var parent = target.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
-        var style = getComputedStyle(parent);
-        if (scrollable(style.overflowY) || scrollable(style.overflowX)) { panel = parent; break; }
-      }
+    var panels = [];
+    for (var parent = target.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
+      if (parent.matches('.drawer, .drawer-content, #desktop-project-titlebar')) break;
+      var css = getComputedStyle(parent);
+      if (scrollable(css.overflowY) || scrollable(css.overflowX)) panels.push({element: parent, css: css});
+      if (parent === boundary || parent.matches('#main-content, #task-list-groups, #desktop-project-tabs') || css.position === 'fixed') break;
     }
-    if (!panel || panel === document.body || panel === document.documentElement || panel === target || !panel.contains(target)) return false;
-    var css = getComputedStyle(panel);
-    var box = panel.getBoundingClientRect();
-    var item = target.getBoundingClientRect();
+    var rect = target.getBoundingClientRect();
+    var item = {top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right};
     function delta(start, end, size, align) {
       if (align === 'start') return start;
       if (align === 'end') return end - size;
@@ -31,11 +31,21 @@
       if (end > size) return end - start > size ? start : end - size;
       return 0;
     }
-    var top = panel.scrollTop;
-    var left = panel.scrollLeft;
-    if (scrollable(css.overflowY)) top += delta(item.top - box.top - panel.clientTop, item.bottom - box.top - panel.clientTop, panel.clientHeight, options.block || 'nearest');
-    if (scrollable(css.overflowX)) left += delta(item.left - box.left - panel.clientLeft, item.right - box.left - panel.clientLeft, panel.clientWidth, options.inline || 'nearest');
-    panel.scrollTo({top: top, left: left, behavior: options.behavior || 'instant'});
-    return true;
+    panels.forEach(function (entry) {
+      var panel = entry.element, css = entry.css, box = panel.getBoundingClientRect();
+      var oldTop = panel.scrollTop, oldLeft = panel.scrollLeft;
+      var top = oldTop, left = oldLeft;
+      if (scrollable(css.overflowY)) top += delta(item.top - box.top - panel.clientTop, item.bottom - box.top - panel.clientTop, panel.clientHeight, options.block || 'nearest');
+      if (scrollable(css.overflowX)) left += delta(item.left - box.left - panel.clientLeft, item.right - box.left - panel.clientLeft, panel.clientWidth, options.inline || 'nearest');
+      top = Math.max(0, Math.min(top, panel.scrollHeight - panel.clientHeight));
+      var maxLeft = panel.scrollWidth - panel.clientWidth;
+      left = css.direction === 'rtl' ? Math.max(-maxLeft, Math.min(left, 0)) : Math.max(0, Math.min(left, maxLeft));
+      panel.scrollTo({top: top, left: left, behavior: options.behavior || 'instant'});
+      // Use the final position even while a smooth scroll is still animating,
+      // so outer panels reveal where the target will actually end up.
+      item.top -= top - oldTop; item.bottom -= top - oldTop;
+      item.left -= left - oldLeft; item.right -= left - oldLeft;
+    });
+    return panels.length > 0;
   };
 })();

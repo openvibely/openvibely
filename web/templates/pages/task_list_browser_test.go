@@ -822,3 +822,54 @@ func TestBrowserFunctional_SidebarContextSearch(t *testing.T) {
 		b.waitFor("return restores task scope", `String(search.getAttribute('aria-label')==='Search tasks' && toggle.getAttribute('aria-expanded')==='false')`, "true")
 	})
 }
+
+func TestBrowserFunctional_TaskListKeyboardRevealsNestedRow(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		switch r.URL.Path {
+		case "/tasks/sidebar":
+			tasks := []models.Task{}
+			for _, category := range []models.TaskCategory{models.CategoryActive, models.CategoryCompleted, models.CategoryBacklog, models.CategoryScheduled} {
+				for i := 0; i < 25; i++ {
+					tasks = append(tasks, models.Task{ID: fmt.Sprintf("%s-%d", category, i), ProjectID: "project", Title: fmt.Sprintf("Task %d", i), Category: category, Status: models.StatusCompleted})
+				}
+			}
+			_ = layout.TaskListPanelContent("project", layout.TaskListGroups(tasks)).Render(r.Context(), w)
+		case "/":
+			_ = layout.Base("Nested sidebar", []models.Project{{ID: "project", Name: "Project"}}, "project").Render(layout.WithDesktopMode(r.Context(), true), w)
+		case "/tasks/scheduled-24":
+			fmt.Fprint(w, `<div id="task-detail-content" data-task-id="scheduled-24">Selected scheduled task</div>`)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "task-list-nested-reveal", func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1440, "height": 500, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("sidebar rows", `String(!!document.querySelector('[data-task-list-row="scheduled-24"]'))`, "true")
+		result := b.evaluateAwait(`(async()=>{
+ const paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+ document.querySelectorAll('.task-list-group').forEach(g=>g.open=true);await paint();
+ document.querySelectorAll('.task-list-more').forEach(b=>b.click());await paint();
+ const outer=document.getElementById('task-list-groups'),target=document.querySelector('[data-task-list-row="scheduled-24"]');
+ outer.scrollTop=0;target.closest('.task-list-rows').scrollTop=0;await paint();
+ if(target.getBoundingClientRect().top<=outer.getBoundingClientRect().bottom)return 'fixture must start with target outside sidebar';
+ history.replaceState({},'', '/tasks/scheduled-23?project_id=project');
+ const apple=/Mac|iPhone|iPad/.test(navigator.platform);
+ document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',code:'ArrowDown',shiftKey:true,metaKey:apple,ctrlKey:!apple,bubbles:true}));
+ return 'navigated';
+ })()`)
+		if result != "navigated" {
+			t.Fatal(result)
+		}
+		b.waitFor("keyboard navigation", `String(location.pathname==='/tasks/scheduled-24' && !!document.querySelector('[data-task-list-row="scheduled-24"][aria-current="page"]'))`, "true")
+		b.waitFor("selected row inside sidebar", `(()=>{const row=document.querySelector('[data-task-list-row="scheduled-24"]'),outer=document.getElementById('task-list-groups');const r=row.getBoundingClientRect(),o=outer.getBoundingClientRect();return String(outer.scrollTop>0&&row.closest('.task-list-rows').scrollTop>0&&r.top>=o.top&&r.bottom<=o.bottom)})()`, "true")
+		if got := b.evaluate(`String(document.getElementById('desktop-project-titlebar').getBoundingClientRect().top===0&&!document.body.scrollTop&&!document.documentElement.scrollTop)`); got != "true" {
+			t.Fatal("keyboard navigation moved the app shell")
+		}
+	})
+}
