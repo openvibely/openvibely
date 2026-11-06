@@ -2873,17 +2873,27 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			}
 
 
+			// File drags may expose items before the FileList becomes available.
+			function isFileDrag(transfer) {
+				return transfer && (Array.from(transfer.types || []).indexOf('Files') !== -1 ||
+					Array.from(transfer.items || []).some(function(item) { return item.kind === 'file'; }) ||
+					(transfer.files && transfer.files.length > 0));
+			}
 			// Drag-and-drop
 			var dragCounter = 0;
 			form.addEventListener('dragenter', function(e) {
+				if (!isFileDrag(e.dataTransfer)) return;
 				e.preventDefault();
 				e.stopPropagation();
 				dragCounter++;
 				if (dropOverlay) dropOverlay.classList.remove('hidden');
 			});
 			form.addEventListener('dragover', function(e) {
+				if (!isFileDrag(e.dataTransfer)) return;
 				e.preventDefault();
 				e.stopPropagation();
+				// Negotiate a copy with native file managers, including Linux/WebKit.
+				e.dataTransfer.dropEffect = 'copy';
 			});
 			form.addEventListener('dragleave', function(e) {
 				e.preventDefault();
@@ -2899,7 +2909,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				e.stopPropagation();
 				dragCounter = 0;
 				if (dropOverlay) dropOverlay.classList.add('hidden');
-				var files = Array.from(e.dataTransfer.files);
+				var transfer = e.dataTransfer;
+				if (!transfer) return;
+				// Snapshot File objects synchronously: the drag data is protected after
+				// this event returns, while uploads run on an asynchronous queue.
+				var files = Array.from(transfer.files || []);
+				if (files.length === 0) {
+					files = Array.from(transfer.items || []).filter(function(item) {
+						return item.kind === 'file';
+					}).map(function(item) { return item.getAsFile(); }).filter(Boolean);
+				}
 				if (files.length > 0) handleFiles(files);
 			});
 

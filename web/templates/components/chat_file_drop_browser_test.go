@@ -65,6 +65,7 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
   var over = new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:transfer});
   input.dispatchEvent(over);
   assert(over.defaultPrevented, 'composer did not accept drop');
+  assert(transfer.dropEffect === 'copy', 'composer did not negotiate a copy');
   input.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:transfer}));
   await new Promise(resolve => setTimeout(resolve, 100));
   assert(uploads.length === 1 && uploads[0].length === 1, 'file was not uploaded exactly once');
@@ -91,6 +92,30 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
   assert(JSON.stringify(beforeRows) === JSON.stringify(Array.from(document.querySelectorAll('[data-pending-attachment]')).map(row => row.outerHTML)), 'failed upload changed composer previews');
   assert(document.querySelector('input[name="attachment_session_id"]').value === 'drop-session', 'failed upload changed session');
 
+  // Some drag sources expose file items with an empty FileList. Include a
+  // null item and URI metadata, and invalidate the store after dispatch to
+  // verify the queued upload retains the PNG File synchronously.
+  var png = new File([new Uint8Array([137,80,78,71])], 'picture.png', {type:'image/png'});
+  var itemTransfer = {types:['Files', 'text/uri-list'], files:[], items:[
+   {kind:'string'}, {kind:'file', getAsFile:() => null}, {kind:'file', getAsFile:() => png}
+  ]};
+  window.fetch = async function(url, options) {
+   var files = options.body.getAll('files');
+   assert(files.length === 1 && files[0].name === 'picture.png' && files[0].size === 4, 'PNG item was lost');
+   uploads.push(files);
+   return {ok:true, json:async function() { return {session_id:'drop-session', attachments:[{filename:'picture.png', size:4}]}; }};
+  };
+  var itemDrop = new Event('drop', {bubbles:true, cancelable:true});
+  Object.defineProperty(itemDrop, 'dataTransfer', {value:itemTransfer});
+  input.dispatchEvent(itemDrop);
+  png = null;
+  itemTransfer.items = [];
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert(uploads.length === 2, 'file item fallback did not upload');
+  assert(document.querySelectorAll('[data-pending-attachment]').length === 2, 'PNG preview missing');
+  var textOver = new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:text});
+  input.dispatchEvent(textOver);
+  assert(!textOver.defaultPrevented, 'text drag advertised as an attachment');
   document.body.setAttribute('data-test-result', 'pass');
  } catch(error) {
   document.body.setAttribute('data-test-result', 'fail');
