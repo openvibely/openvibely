@@ -45,6 +45,7 @@ func projectRole(ctx context.Context, db sqlExecutor, userID, projectID string) 
 	}
 	return []string{"", "viewer", "editor", "maintainer", "owner"}[rank], nil
 }
+
 // orgAdminOverride reports whether the user acts on the project only through
 // org owner/admin rank, not as its recorded owner.
 func orgAdminOverride(ctx context.Context, db sqlExecutor, userID, projectID string) (bool, error) {
@@ -90,7 +91,7 @@ func (r *ProjectAccessRepo) Update(ctx context.Context, actor string, p models.P
 		if err != nil {
 			return err
 		}
-		if role != "owner" && role != "maintainer" {
+		if role != "owner" {
 			return persistence.ErrProjectDenied
 		}
 		old := models.ProjectAccess{ProjectID: p.ProjectID}
@@ -130,7 +131,7 @@ func (r *ProjectAccessRepo) SetMember(ctx context.Context, actorID, projectID, u
 		if err != nil {
 			return err
 		}
-		if current != "owner" && current != "maintainer" {
+		if current != "owner" {
 			return persistence.ErrProjectDenied
 		}
 		var enabled int

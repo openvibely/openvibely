@@ -2,78 +2,82 @@ package pages
 
 import "github.com/openvibely/openvibely/internal/models"
 
-templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember, users []models.OrgUser, audit []models.ProjectAuditEvent, canTransfer bool, message string) {
+templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember, users []models.OrgUser, audit []models.ProjectAuditEvent, canManageSharing bool, message string) {
 	<section id="project-sharing" class="mt-6 border-t border-base-300 pt-4 space-y-4">
 		<h3 class="text-base font-semibold">Sharing and ownership</h3>
-		if message != "" {
-			<p class="text-sm text-error" role="alert">
-				{ message }
-			</p>
-		}
-		<p class="text-sm opacity-70">All organization members can access this project. Private projects require sandboxing and are not available yet.</p>
-		<form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" class="flex flex-wrap items-end gap-2">
-			<input type="hidden" name="action" value="policy"/>
-			<label class="form-control"><span class="label-text">Organization access</span><select name="org_role" class="select select-bordered select-sm"><option value="viewer" selected?={ policy.OrgRole == "viewer" }>Viewer</option><option value="editor" selected?={ policy.OrgRole == "editor" }>Editor</option></select></label>
-			<button class="btn btn-primary btn-sm" type="submit">Save access</button>
-		</form>
-		<p class="text-xs opacity-60">Individual grants add access; removing a grant keeps organization access. Maintainers can manage settings and sharing. Owners can transfer or delete the project.</p>
-		<table class="table table-sm">
-			<thead><tr><th>Member</th><th>Additional access</th><th></th></tr></thead>
-			<tbody>
-				for _, member := range members {
-					<tr>
-						<td>
-							{ member.Username }
-						</td>
-						<td>
-							{ member.Role }
-						</td>
-						<td><form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML"><input type="hidden" name="action" value="member"/><input type="hidden" name="user_id" value={ member.UserID }/><input type="hidden" name="role" value=""/><button type="submit" class="btn btn-ghost btn-xs">Remove grant</button></form></td>
-					</tr>
-				}
-			</tbody>
-		</table>
-		<form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" class="flex flex-wrap gap-2">
-			<input type="hidden" name="action" value="member"/>
-			<select name="user_id" class="select select-bordered select-sm" aria-label="Member">
-				for _, user := range users {
-					if !user.Disabled {
-						<option value={ user.UserID }>
-							{ user.Username }
-						</option>
-					}
-				}
-			</select>
-			<select name="role" class="select select-bordered select-sm" aria-label="Project role"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="maintainer">Maintainer</option></select>
-			<button type="submit" class="btn btn-primary btn-sm">Save member</button>
-		</form>
-		<p class="text-sm">
-			Owner: 
-			for _, user := range users {
-				if user.UserID == policy.OwnerUserID {
-					<strong>
-						{ user.Username }
-					</strong>
-				}
+		if !canManageSharing {
+			<p class="text-sm opacity-70">Only the project owner and organization admins can change sharing and membership.</p>
+		} else {
+			if message != "" {
+				<p class="text-sm text-error" role="alert">
+					{ message }
+				</p>
 			}
-		</p>
-		if canTransfer {
-			<form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" hx-confirm="Transfer ownership of this project?" class="flex flex-wrap gap-2">
-				<input type="hidden" name="action" value="transfer"/>
-				<select name="user_id" class="select select-bordered select-sm" aria-label="New owner" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>
+			<p class="text-sm opacity-70">All organization members can access this project. Private projects require sandboxing and are not available yet.</p>
+			<form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" class="flex flex-wrap items-end gap-2">
+				<input type="hidden" name="action" value="policy"/>
+				<label class="form-control"><span class="label-text">Organization access</span><select name="org_role" class="select select-bordered select-sm"><option value="viewer" selected?={ policy.OrgRole == "viewer" }>Viewer</option><option value="editor" selected?={ policy.OrgRole == "editor" }>Editor</option></select></label>
+				<button class="btn btn-primary btn-sm" type="submit">Save access</button>
+			</form>
+			<p class="text-xs opacity-60">Individual grants add access; removing a grant keeps organization access. Maintainers can manage settings and sharing. Owners can transfer or delete the project.</p>
+			<table class="table table-sm">
+				<thead><tr><th>Member</th><th>Additional access</th><th></th></tr></thead>
+				<tbody>
+					for _, member := range members {
+						<tr>
+							<td>
+								{ member.Username }
+							</td>
+							<td>
+								{ member.Role }
+							</td>
+							<td><form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML"><input type="hidden" name="action" value="member"/><input type="hidden" name="user_id" value={ member.UserID }/><input type="hidden" name="role" value=""/><button type="submit" class="btn btn-ghost btn-xs">Remove grant</button></form></td>
+						</tr>
+					}
+				</tbody>
+			</table>
+			<form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" class="flex flex-wrap gap-2">
+				<input type="hidden" name="action" value="member"/>
+				<select name="user_id" class="select select-bordered select-sm" aria-label="Member">
 					for _, user := range users {
-						if !user.Disabled && user.UserID != policy.OwnerUserID {
+						if !user.Disabled {
 							<option value={ user.UserID }>
 								{ user.Username }
 							</option>
 						}
 					}
 				</select>
-				<button type="submit" class="btn btn-outline btn-sm" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>Transfer ownership</button>
+				<select name="role" class="select select-bordered select-sm" aria-label="Project role"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="maintainer">Maintainer</option></select>
+				<button type="submit" class="btn btn-primary btn-sm">Save member</button>
 			</form>
-		}
-		if canTransfer && !projectSharingHasTransferCandidate(users, policy.OwnerUserID) {
-			<p class="text-sm opacity-70" role="status">Add another active organization member before transferring ownership.</p>
+			<p class="text-sm">
+				Owner:
+				for _, user := range users {
+					if user.UserID == policy.OwnerUserID {
+						<strong>
+							{ user.Username }
+						</strong>
+					}
+				}
+			</p>
+			if canManageSharing {
+				<form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" hx-confirm="Transfer ownership of this project?" class="flex flex-wrap gap-2">
+					<input type="hidden" name="action" value="transfer"/>
+					<select name="user_id" class="select select-bordered select-sm" aria-label="New owner" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>
+						for _, user := range users {
+							if !user.Disabled && user.UserID != policy.OwnerUserID {
+								<option value={ user.UserID }>
+									{ user.Username }
+								</option>
+							}
+						}
+					</select>
+					<button type="submit" class="btn btn-outline btn-sm" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>Transfer ownership</button>
+				</form>
+			}
+			if canManageSharing && !projectSharingHasTransferCandidate(users, policy.OwnerUserID) {
+				<p class="text-sm opacity-70" role="status">Add another active organization member before transferring ownership.</p>
+			}
 		}
 		<details>
 			<summary class="cursor-pointer text-sm font-medium">Recent access and execution audit</summary>

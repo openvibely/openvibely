@@ -38,7 +38,7 @@ func (s *ProjectAccessService) Members(ctx context.Context, id string) ([]models
 	return s.store.Members(ctx, id)
 }
 func (s *ProjectAccessService) Update(ctx context.Context, p models.ProjectAccess) error {
-	if err := s.Require(ctx, p.ProjectID, authz.Manage); err != nil {
+	if err := s.Require(ctx, p.ProjectID, authz.Own); err != nil {
 		return err
 	}
 	// There is deliberately no environment override. A private-project promise
@@ -54,7 +54,7 @@ func (s *ProjectAccessService) Update(ctx context.Context, p models.ProjectAcces
 	return nil
 }
 func (s *ProjectAccessService) SetMember(ctx context.Context, projectID, userID, role string) error {
-	if err := s.Require(ctx, projectID, authz.Manage); err != nil {
+	if err := s.Require(ctx, projectID, authz.Own); err != nil {
 		return err
 	}
 	actor, _ := models.PrincipalFromContext(ctx)

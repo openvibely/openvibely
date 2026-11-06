@@ -42,6 +42,9 @@ func (h *Handler) UpdateProjectSharing(c echo.Context) error {
 	if h.projectAccessSvc == nil || h.organizationSvc == nil {
 		return echo.NewHTTPError(404)
 	}
+	if err := h.projectAccessSvc.Require(c.Request().Context(), c.Param("id"), authz.Own); err != nil {
+		return projectAccessHTTPError(err)
+	}
 	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 16<<10)
 	ctx, id := c.Request().Context(), c.Param("id")
 	policy, err := h.projectAccessSvc.Policy(ctx, id)
@@ -71,7 +74,7 @@ func (h *Handler) UpdateProjectSharing(c echo.Context) error {
 		}
 		return err
 	}
-	if h.projectAccessSvc.Require(ctx, id, authz.Manage) != nil {
+	if h.projectAccessSvc.Require(ctx, id, authz.Own) != nil {
 		return c.HTML(http.StatusOK, `<section id="project-sharing" role="status">Sharing updated. You no longer have access to manage this project.</section>`)
 	}
 	return h.renderProjectSharing(c, "")

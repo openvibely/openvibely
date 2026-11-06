@@ -48,6 +48,24 @@ func TestProjectAccessRolesRevocationAndAudit(t *testing.T) {
 			}
 		}
 	}
+	_, err = db.Exec(`INSERT INTO users(id,username) VALUES('peer','peer'); INSERT INTO org_memberships VALUES('default','peer','member')`)
+	require.NoError(t, err)
+	require.NoError(t, repo.SetMember(ctx, "alice", project.ID, "peer", "maintainer"))
+	// Maintainers cannot change policy or any membership grant, including peers.
+	beforeAudit, err := repo.Audit(ctx, project.ID)
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.Update(ctx, "bob", *policy), persistence.ErrProjectDenied)
+	for _, role := range []string{"", "viewer", "editor", "maintainer"} {
+		require.ErrorIs(t, repo.SetMember(ctx, "bob", project.ID, "bob", role), persistence.ErrProjectDenied)
+		require.ErrorIs(t, repo.SetMember(ctx, "bob", project.ID, "peer", role), persistence.ErrProjectDenied)
+		require.ErrorIs(t, repo.SetMember(ctx, "bob", project.ID, "alice", role), persistence.ErrProjectDenied)
+	}
+	afterAudit, err := repo.Audit(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, beforeAudit, afterAudit)
+	peerRole, err := repo.Role(ctx, "peer", project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "maintainer", peerRole)
 	// A maintainer cannot transfer ownership, even to themselves.
 	transferred := *policy
 	transferred.OwnerUserID = "bob"
@@ -61,12 +79,13 @@ func TestProjectAccessRolesRevocationAndAudit(t *testing.T) {
 	require.ErrorIs(t, a.Require(bob, project.ID, authz.View), authz.ErrDenied)
 	members, err := repo.Members(ctx, project.ID)
 	require.NoError(t, err)
-	require.Empty(t, members)
+	require.Len(t, members, 1)
+	require.Equal(t, "peer", members[0].UserID)
 	events, err := repo.Audit(ctx, project.ID)
 	require.NoError(t, err)
-	require.Len(t, events, 6)
-	require.Equal(t, "project.policy", events[5].Action)
-	require.Contains(t, events[5].Details, `"org_id":"default"`)
+	require.Len(t, events, 7)
+	require.Equal(t, "project.policy", events[6].Action)
+	require.Contains(t, events[6].Details, `"org_id":"default"`)
 }
 
 func TestProjectAccessDisabledOwnerAndDeletedProject(t *testing.T) {

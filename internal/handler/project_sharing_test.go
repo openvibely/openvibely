@@ -56,7 +56,7 @@ func TestProjectSharingControlsAndOwnership(t *testing.T) {
 	require.Equal(t, 200, rec.Code)
 	require.NotContains(t, rec.Body.String(), "Transfer ownership")
 	rec = request("POST", user.Principal, url.Values{"action": {"transfer"}, "user_id": {user.UserID}})
-	require.Contains(t, rec.Body.String(), "This change is not allowed")
+	require.Equal(t, 404, rec.Code)
 	policy, err = tc.stores.ProjectAccess.Get(ctx, project.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.BootstrapUserID, policy.OwnerUserID)
@@ -118,9 +118,13 @@ func TestProjectSharingRoleMatrixRemovalAndAudit(t *testing.T) {
 		require.NoError(t, err)
 		if role == "maintainer" {
 			require.Equal(t, 200, page.Code)
-			require.Contains(t, page.Body.String(), "project.member", "maintainers see the audit trail")
+			require.Contains(t, page.Body.String(), "Only the project owner")
+			require.Contains(t, page.Body.String(), "project.member", "maintainers retain audit visibility")
 			require.NotContains(t, page.Body.String(), "Transfer ownership")
-			require.Equal(t, 200, rec.Code)
+			require.Equal(t, 404, rec.Code)
+			require.NotContains(t, page.Body.String(), "Save member")
+			require.NotContains(t, page.Body.String(), "Save access")
+			require.NotContains(t, page.Body.String(), "Remove grant")
 			require.Equal(t, "editor", targetRole)
 		} else {
 			require.Equal(t, 404, page.Code, role)
@@ -134,7 +138,7 @@ func TestProjectSharingRoleMatrixRemovalAndAudit(t *testing.T) {
 		}
 	}
 	// Removing a grant drops back to organization access, never below it.
-	rec := request("POST", actor, url.Values{"action": {"member"}, "user_id": {target.UserID}, "role": {""}})
+	rec := request("POST", models.Principal{UserID: models.BootstrapUserID}, url.Values{"action": {"member"}, "user_id": {target.UserID}, "role": {""}})
 	require.Equal(t, 200, rec.Code)
 	targetRole, err := tc.stores.ProjectAccess.Role(ctx, target.UserID, project.ID)
 	require.NoError(t, err)

@@ -322,7 +322,7 @@ This completes the persistence refactor portion of Phase 0, not the route-owners
 | Project agents/skills/memory curation, lifecycle hooks | – | – | ✓ | ✓ | ✓ |
 | Channel authorized users / GitHub inbox for project | – | – | ✓ | ✓ | ✓ |
 | Project settings (repo path, default model, worker cap) | – | – | ✓ | ✓ | ✓ |
-| Share project / manage members / change visibility | – | – | ✓ (≤ own role) | ✓ | ✓ |
+| Share project / manage members / change visibility | – | – | – | ✓ | ✓ |
 | Transfer ownership, delete project | – | – | – | ✓ | ✓ |
 
 \* Org owners and admins hold owner rank on every project in the org, including private projects, as GitHub org owners do for private repositories. Project owners cannot restrict them. When an org admin who is not the recorded owner deletes a project or transfers its ownership, the audit event is marked `org_admin_override`. Reads are not audited.
@@ -804,7 +804,7 @@ Estimates assume one engineer with agent assistance. Phase 3 depends on the one-
 
 ### Phase 2 sharing controls (implementation checkpoint)
 
-Project settings now load a Sharing and ownership section through `/projects/:id/sharing`. Current maintainers/owners can change the org-wide viewer/editor floor and add/update/remove explicit viewer/editor/maintainer grants. Removing a grant does not remove org-wide access. Current owners (including org administrators under the existing policy) can transfer ownership to an enabled org member; maintainers cannot. Both reads and writes recheck the actual project through the shared service, and writes require same-origin requests. Policy and grant mutations retain their transactional audit records and revocation notifications. The panel shows recent audit actions and inline validation errors, and handles successful transfer that removes the caller's management access.
+Project settings now load a Sharing and ownership section through `/projects/:id/sharing`. Only current project owners and org admins/owners can change the org-wide viewer/editor floor and add/update/remove explicit viewer/editor/maintainer grants. Maintainers retain audit access but see no sharing mutation controls. Removing a grant does not remove org-wide access. Current owners (including org administrators under the existing policy) can transfer ownership to an enabled org member; maintainers cannot. Both reads and writes recheck the actual project through the shared service, and writes require same-origin requests. Policy and grant mutations retain their transactional audit records and revocation notifications. The panel shows recent audit actions and inline validation errors, and handles successful transfer that removes the caller's management access.
 
 There is no private visibility control; injected visibility fields do not change policy. Production private creation remains blocked by the service. These controls do not establish isolation while remaining HTTP/tool/background authorization surfaces and Phase 3 sandboxing are unfinished. Account/run identity gaps and the comprehensive route/tool coverage audit still need completion. Tests exercise rendered owner/maintainer controls, rejected transfers, org access changes, grant creation, audit persistence, and cross-origin rejection.
 
@@ -2907,3 +2907,13 @@ checks remain, so revoked users cannot start new work; revocation alone does not
 cancel an already admitted run. Existing tool/action authorization boundaries
 remain enforced. The update banner, ping and reconciliation timers are unchanged;
 session expiration is checked at the existing 15-second ping interval.
+
+
+### Sharing authority
+
+Only the project owner and organization admins/owners may change project sharing,
+organization access, ownership, or individual membership grants. Maintainers may
+manage project work, but cannot grant, demote, or remove any member's access,
+including another maintainer's. Both service checks and transactional repository
+checks enforce this rule; maintainer settings show no sharing mutation controls.
+This supersedes earlier checkpoints allowing maintainers to manage sharing.

@@ -82,3 +82,32 @@ func TestProjectAccessServiceGatesPrivateAndNotifiesChanges(t *testing.T) {
 	require.Len(t, events, 3)
 	require.Equal(t, "project.member.removed_with_org", events[0].Action)
 }
+
+func TestProjectSharingRequiresOwner(t *testing.T) {
+	env := teststores.New(t)
+	ctx := t.Context()
+	org := NewOrganizationService(env.Organizations, "secret")
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	user, err := org.Accept(ctx, token, "maintainer-policy", "long-password-value", "")
+	require.NoError(t, err)
+	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+	actor := models.WithPrincipal(ctx, user.Principal)
+	svc := NewProjectAccessService(env.ProjectAccess)
+	require.NoError(t, svc.SetMember(owner, "default", user.UserID, "maintainer"))
+	policy, err := svc.Policy(actor, "default")
+	require.NoError(t, err)
+	watch := svc.Watch(user.UserID)
+	defer watch.Close()
+	policy.OrgRole = "viewer"
+	require.ErrorIs(t, svc.Update(actor, *policy), authz.ErrDenied)
+	for _, role := range []string{"", "viewer", "editor", "maintainer"} {
+		require.ErrorIs(t, svc.SetMember(actor, "default", user.UserID, role), authz.ErrDenied)
+	}
+	require.Empty(t, watch.Drain(), "denied changes must not notify subscribers")
+	require.NoError(t, svc.Require(actor, "default", authz.Manage), "maintainers still manage project work")
+	// Org admins retain sharing authority without owning the project.
+	require.NoError(t, env.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "admin", false))
+	require.NoError(t, svc.Update(actor, *policy))
+	require.NoError(t, svc.SetMember(actor, "default", user.UserID, ""))
+}
