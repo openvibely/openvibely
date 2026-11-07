@@ -211,7 +211,12 @@
       }
       if (window.showToast) window.showToast(message, "failed");
     }
-    return Error(message);
+    const error = Error(message);
+    error.toastOnly = response.status === 403;
+    return error;
+  }
+  function inlineSettingsError(s) {
+    return s.permissionError ? "" : s.error;
   }
 
   async function importLegacyPreferences(btn) {
@@ -259,6 +264,7 @@
     s.pending.then(
       () => {
         s.error = "";
+        s.permissionError = false;
         s.failedSave = false;
         if (s.selectionPending === body.get("agent_id"))
           s.selectionPending = null;
@@ -269,9 +275,10 @@
       },
       (err) => {
         s.error = err.message;
+        s.permissionError = !!err.toastOnly;
         s.failedSave = true;
         if (active === btn) {
-          status.textContent = s.error;
+          status.textContent = inlineSettingsError(s);
           renderEffort();
         }
       },
@@ -318,16 +325,20 @@
       s.efforts[key(m)] = effort;
       s.tiers[key(m)] = tier;
       s.error = "";
+      s.permissionError = false;
       return { effort, tier, modelID: m.id };
     } catch (e) {
-      if (token === s.loadToken) s.error = e.message;
+      if (token === s.loadToken) {
+        s.error = e.message;
+        s.permissionError = !!e.toastOnly;
+      }
     } finally {
       if (token === s.loadToken) {
         s.loading = false;
         sync(btn);
         if (active === btn) {
           renderEffort();
-          status.textContent = s.error;
+          status.textContent = inlineSettingsError(s);
         }
       }
     }
@@ -656,7 +667,7 @@
         (Number(slider.value) / Math.max(1, levels.length - 1)) * 100 + "%",
       );
     updateTrack();
-    slider.disabled = s.loading || !!s.error;
+    slider.disabled = s.loading || !!inlineSettingsError(s);
     slider.setAttribute("aria-label", "Reasoning effort");
     slider.setAttribute(
       "aria-valuetext",
@@ -707,7 +718,7 @@
     const reset = el("button", "ov-mp-reset", "Use default");
     reset.type = "button";
     reset.hidden = !override;
-    reset.disabled = s.loading || !!s.error;
+    reset.disabled = s.loading || !!inlineSettingsError(s);
     reset.onclick = () => {
       delete s.tiers[key(m)];
       save(active);
@@ -721,7 +732,7 @@
       "aria-checked",
       String((override || m.defaultTier) === "priority"),
     );
-    toggle.disabled = s.loading || !!s.error;
+    toggle.disabled = s.loading || !!inlineSettingsError(s);
     toggle.onclick = () => {
       s.tiers[key(m)] =
         (override || m.defaultTier) === "priority" ? "default" : "priority";
@@ -739,7 +750,7 @@
       list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
     renderList();
     renderEffort();
-    status.textContent = state(active).error || favoritesError || "";
+    status.textContent = inlineSettingsError(state(active)) || favoritesError || "";
     position();
     if (atEnd) list.scrollTop = list.scrollHeight;
   }
@@ -876,6 +887,7 @@
       s.initialLoad = false;
       s.loading = false;
       s.error = "";
+      s.permissionError = false;
       s.failedSave = false;
       sync(btn);
       // Fetch an existing task/model preference before persisting a newly selected model.
@@ -1061,8 +1073,11 @@
           return pending;
         })
         .then(() => {
-          if (btn.dataset.currentValue === payload.modelID && s.error)
-            throw Error(s.error);
+          if (btn.dataset.currentValue === payload.modelID && s.error) {
+            const error = Error(s.error);
+            error.toastOnly = s.permissionError;
+            throw error;
+          }
           if (!form.isConnected) return;
           const draft = message?.value;
           const draftAttachments = attachment?.value;
@@ -1114,8 +1129,10 @@
           }
         })
         .catch((err) => {
-          window.ovModelPicker.open(btn);
-          status.textContent = err.message;
+          if (!err.toastOnly) {
+            window.ovModelPicker.open(btn);
+            status.textContent = err.message;
+          }
           form._chatSubmissionFailed?.(payload);
         });
     },

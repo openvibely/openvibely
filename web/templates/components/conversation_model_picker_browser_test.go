@@ -361,7 +361,11 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  denyNextWrite=true;choose('b');await trigger._ovModelState.ready;
  assert(posts.length===writesBeforeDenial,'denied preference was not saved');
  assert(toasts.length===1&&toasts[0].message===permissionMessage&&toasts[0].status==='failed','permission explanation shown as one error toast');
- assert(trigger._ovModelState.error===permissionMessage&&panel.querySelector('.ov-mp-status').textContent===permissionMessage,'inline error preserves permission explanation');
+ assert(trigger._ovModelState.error===permissionMessage&&panel.querySelector('.ov-mp-status').textContent==='', 'permission error must be toast-only');
+ assert(!panel.textContent.includes(permissionMessage),'permission explanation must not appear in picker');
+ panel.querySelector('input').dispatchEvent(new Event('input'));
+ assert(!panel.textContent.includes(permissionMessage),'rerender must not restore inline permission error');
+ assert(!panel.querySelector('input[type=range]').disabled,'permission error must not disable picker controls');
  choose('a');await trigger._ovModelState.ready;
 
  const form=trigger.closest('form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]');
