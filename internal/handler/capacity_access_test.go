@@ -47,7 +47,7 @@ func TestCapacityHTTPAccessAndRevocation(t *testing.T) {
 	for _, role := range []string{"viewer", "editor", "maintainer"} {
 		require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, role))
 		require.Equal(t, 204, request("GET", "/api/capacity/projects/"+project.ID, principal))
-		want := 404
+		want := 403
 		if role == "maintainer" {
 			want = 204
 		}

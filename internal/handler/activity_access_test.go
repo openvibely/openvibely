@@ -61,11 +61,14 @@ func TestActivityHTTPPermissionsAndRevocation(t *testing.T) {
 		for _, route := range routes {
 			before := calls
 			want := 404
+			if role != "" {
+				want = 403
+			}
 			if authz.Rank(role) >= route.minimum {
 				want = 204
 			}
 			require.Equal(t, want, request(route.method, route.path+"?project_id="+project.ID, principal), role+" "+route.path)
-			if want == 404 {
+			if want != 204 {
 				require.Equal(t, before, calls, "denial must happen before model work")
 			}
 		}

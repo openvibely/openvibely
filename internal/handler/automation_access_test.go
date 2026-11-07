@@ -82,6 +82,9 @@ func TestAutomationHTTPAndRuntimePermissions(t *testing.T) {
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, req)
 			expected := 404
+			if role != "" {
+				expected = 403
+			}
 			if authz.Rank(role) >= authz.Minimum(route.minimum) {
 				expected = 204
 			}
@@ -120,7 +123,7 @@ func TestAutomationHTTPAndRuntimePermissions(t *testing.T) {
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, bob.UserID, "viewer"))
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest("POST", "/automations/"+id+"/pause?project_id="+project.ID, nil).WithContext(models.WithPrincipal(ctx, bob.Principal)))
-	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Equal(t, http.StatusForbidden, rec.Code)
 	stored, err := tc.stores.Automations.GetDefinition(ctx, project.ID, id)
 	require.NoError(t, err)
 	require.Equal(t, definition.Automation.LifecycleState, stored.Automation.LifecycleState)

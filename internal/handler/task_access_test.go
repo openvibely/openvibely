@@ -83,6 +83,9 @@ func TestTaskResourcePermissionMatrix(t *testing.T) {
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, req)
 			want := http.StatusNotFound
+			if role != "" {
+				want = http.StatusForbidden
+			}
 			if authz.Rank(role) >= authz.Minimum(c.minimum) {
 				want = http.StatusNoContent
 			}
@@ -108,15 +111,15 @@ func TestTaskHTTPViewerCannotDeleteOrEnableAutoMerge(t *testing.T) {
 	login := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"bob"}, "password": {"bob-password-long"}}, nil)
 	cookie := orgCookie(t, login)
 	create := orgRequest(e, http.MethodPost, "/tasks", url.Values{"title": {"Forbidden"}, "prompt": {"No"}, "category": {"backlog"}}, cookie)
-	require.Equal(t, http.StatusNotFound, create.Code, create.Body.String())
+	require.Equal(t, http.StatusForbidden, create.Code, create.Body.String())
 	bulk := orgRequest(e, http.MethodDelete, "/tasks/backlog?project_id=default", nil, cookie)
-	require.Equal(t, http.StatusNotFound, bulk.Code, bulk.Body.String())
+	require.Equal(t, http.StatusForbidden, bulk.Code, bulk.Body.String())
 
 	deletion := orgRequest(e, http.MethodDelete, "/tasks/"+task.ID, nil, cookie)
-	require.Equal(t, http.StatusNotFound, deletion.Code)
+	require.Equal(t, http.StatusForbidden, deletion.Code)
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, "editor"))
 	update := orgRequest(e, http.MethodPatch, "/tasks/"+task.ID+"/details/property?project_id=default", url.Values{"field": {"auto_merge"}, "value": {"true"}}, cookie)
-	require.Equal(t, http.StatusNotFound, update.Code)
+	require.Equal(t, http.StatusForbidden, update.Code)
 	saved, err := tc.stores.Tasks.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, saved)
@@ -197,17 +200,27 @@ func TestInvitedMemberNeedsExplicitProjectGrant(t *testing.T) {
 			require.Equal(t, http.StatusOK, board.Code, board.Body.String())
 			require.Contains(t, board.Body.String(), task.Title)
 		}
+		deniedStatus := http.StatusNotFound
+		if role == "viewer" {
+			deniedStatus = http.StatusForbidden
+		}
 		if role != "editor" {
 			created := orgRequest(app, http.MethodPost, "/tasks?project_id="+project.ID, url.Values{"title": {"Forbidden task"}, "prompt": {"No"}, "category": {"backlog"}}, cookie)
-			require.Equal(t, http.StatusNotFound, created.Code, created.Body.String())
+			require.Equal(t, deniedStatus, created.Code, created.Body.String())
 			followup := orgRequest(app, http.MethodPost, "/tasks/"+task.ID+"/thread?project_id="+project.ID, url.Values{"message": {"Forbidden followup"}}, cookie)
-			require.Equal(t, http.StatusNotFound, followup.Code, followup.Body.String())
+			require.Equal(t, deniedStatus, followup.Code, followup.Body.String())
+			if role == "viewer" {
+				for _, response := range []*httptest.ResponseRecorder{created, followup} {
+					require.Contains(t, response.Header().Get("HX-Trigger"), "You have viewer access")
+					require.Equal(t, "none", response.Header().Get("HX-Reswap"))
+				}
+			}
 		}
 		updated := orgRequest(app, http.MethodPatch, "/tasks/"+task.ID+"/details/property?project_id="+project.ID, url.Values{"field": {"priority"}, "value": {"4"}}, cookie)
 		if role == "editor" {
 			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
 		} else {
-			require.Equal(t, http.StatusNotFound, updated.Code, updated.Body.String())
+			require.Equal(t, deniedStatus, updated.Code, updated.Body.String())
 		}
 	}
 }

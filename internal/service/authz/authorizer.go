@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -47,6 +48,18 @@ func Minimum(p Permission) int {
 	return 100
 }
 
+// InsufficientRole describes a denial only for a project the user can view.
+// Unwrap preserves the authorization sentinel for all non-HTTP callers.
+type InsufficientRole struct {
+	Role       string
+	Permission Permission
+}
+
+func (e *InsufficientRole) Error() string {
+	return fmt.Sprintf("%s access does not allow %s", e.Role, e.Permission)
+}
+func (e *InsufficientRole) Unwrap() error { return ErrDenied }
+
 type Authorizer struct {
 	Store persistence.ProjectAccessStore
 }
@@ -61,6 +74,9 @@ func (a *Authorizer) Require(ctx context.Context, projectID string, permission P
 		return err
 	}
 	if Rank(role) < Minimum(permission) {
+		if Rank(role) >= Minimum(View) {
+			return &InsufficientRole{Role: role, Permission: permission}
+		}
 		return ErrDenied
 	}
 	return nil

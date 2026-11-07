@@ -44,7 +44,7 @@ func TestReviewIDPermissionsAndProjectScope(t *testing.T) {
 	}
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, "viewer"))
 	for _, method := range []string{"PATCH", "DELETE"} {
-		require.Equal(t, 404, call(method, project.ID, user.Principal))
+		require.Equal(t, 403, call(method, project.ID, user.Principal))
 	}
 	rows, err := tc.stores.ReviewComments.ListByTask(ctx, task.ID)
 	require.NoError(t, err)

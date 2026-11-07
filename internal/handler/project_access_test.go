@@ -42,23 +42,23 @@ func TestProjectManagementHTTPPermissions(t *testing.T) {
 
 	for _, role := range []string{"viewer", "editor", "maintainer"} {
 		require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, bob.UserID, role))
-		expected := http.StatusNotFound
+		expected := http.StatusForbidden
 		if role == "maintainer" {
 			expected = http.StatusOK
 		}
 		edit := orgRequest(e, http.MethodGet, "/projects/"+project.ID+"/edit", nil, cookie)
 		require.Equal(t, expected, edit.Code, edit.Body.String())
 		recovery := orgRequest(e, http.MethodPost, "/projects/"+project.ID+"/reclone", nil, cookie)
-		recoveryExpected := http.StatusNotFound
+		recoveryExpected := http.StatusForbidden
 		if role == "maintainer" {
 			recoveryExpected = http.StatusConflict
 		}
 		require.Equal(t, recoveryExpected, recovery.Code, recovery.Body.String())
 		deletion := orgRequest(e, http.MethodDelete, "/projects/"+project.ID, nil, cookie)
-		require.Equal(t, http.StatusNotFound, deletion.Code, deletion.Body.String())
+		require.Equal(t, http.StatusForbidden, deletion.Code, deletion.Body.String())
 		if role != "maintainer" {
 			update := orgRequest(e, http.MethodPut, "/projects/"+project.ID, url.Values{"name": {"unauthorized change"}}, cookie)
-			require.Equal(t, http.StatusNotFound, update.Code, update.Body.String())
+			require.Equal(t, http.StatusForbidden, update.Code, update.Body.String())
 		}
 	}
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, bob.UserID, ""))

@@ -63,6 +63,9 @@ func TestAlertHTTPPermissionsAndRevocation(t *testing.T) {
 				minimum = 1
 			}
 			want := 404
+			if role != "" {
+				want = 403
+			}
 			if authz.Rank(role) >= minimum {
 				want = 204
 			}
@@ -77,8 +80,8 @@ func TestAlertHTTPPermissionsAndRevocation(t *testing.T) {
 	e.DELETE("/alerts/:id", h.DeleteAlert)
 	e.DELETE("/alerts/bulk", h.DeleteAlertsBulk)
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, "viewer"))
-	require.Equal(t, 404, request("DELETE", "/alerts/"+alert.ID+"?project_id="+project.ID, user.Principal, ""))
-	require.Equal(t, 404, request("DELETE", "/alerts/bulk?project_id="+project.ID, user.Principal, `{"ids":["`+alert.ID+`"]}`))
+	require.Equal(t, 403, request("DELETE", "/alerts/"+alert.ID+"?project_id="+project.ID, user.Principal, ""))
+	require.Equal(t, 403, request("DELETE", "/alerts/bulk?project_id="+project.ID, user.Principal, `{"ids":["`+alert.ID+`"]}`))
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, "editor"))
 	require.Equal(t, http.StatusBadRequest, request("DELETE", "/alerts/bulk?project_id="+project.ID, user.Principal, `{"ids":["`+alert.ID+`","`+other.ID+`"]}`))
 	retained, err := h.alertSvc.GetByID(ctx, project.ID, alert.ID)

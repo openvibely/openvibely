@@ -130,9 +130,9 @@ func TestAllProjectsCannotDeleteViewerAlert(t *testing.T) {
 		app.ServeHTTP(rec, req)
 		return rec
 	}
-	require.Equal(t, 404, call(project.ID).Code)
+	require.Equal(t, 403, call(project.ID).Code)
 	rec := call(models.AllProjectsID)
-	require.Equal(t, 404, rec.Code)
+	require.Equal(t, 403, rec.Code)
 	_, err = h.alertSvc.GetByID(ctx, project.ID, alert.ID)
 	require.NoError(t, err)
 }

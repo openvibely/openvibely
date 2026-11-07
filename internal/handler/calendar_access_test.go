@@ -42,7 +42,7 @@ func TestCalendarPermissionsAndAudit(t *testing.T) {
 		require.Equal(t, 200, request("GET", "/schedule/calendar-state", "", user.Principal))
 		want := 200
 		if role == "viewer" {
-			want = 404
+			want = 403
 		}
 		require.Equal(t, want, request("POST", "/schedule/calendar-action", `{"action":"pause_all"}`, user.Principal))
 		state, err := tc.stores.Schedules.CalendarState(ctx, project.ID)

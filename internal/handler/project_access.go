@@ -20,38 +20,38 @@ func (h *Handler) projectAccessBoundary(next echo.HandlerFunc) echo.HandlerFunc 
 			switch c.Path() {
 			case "/api/system/update/apply", "/api/system/update/cancel":
 				if err := h.requireCurrentOrgAdmin(c); err != nil {
-					return projectAccessHTTPError(err)
+					return projectAccessResponse(c, err)
 				}
 			}
 			if err := h.authorizeChannelTrustResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeCapacityResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeSharedDefinitionResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeAnalyticsResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeActivityResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeChatResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeAlertResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeWebhookResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeAutomationResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			if err := h.authorizeTaskResource(c); err != nil {
-				return projectAccessHTTPError(err)
+				return projectAccessResponse(c, err)
 			}
 			permission := authz.Permission("")
 			switch c.Path() {
@@ -67,11 +67,11 @@ func (h *Handler) projectAccessBoundary(next echo.HandlerFunc) echo.HandlerFunc 
 			}
 			if permission != "" {
 				if err := h.projectAccessSvc.Require(c.Request().Context(), c.Param("id"), permission); err != nil {
-					return projectAccessHTTPError(err)
+					return projectAccessResponse(c, err)
 				}
 			}
 		}
-		return projectAccessHTTPError(next(c))
+		return projectAccessResponse(c, next(c))
 	}
 }
 func projectAccessHTTPError(err error) error {
@@ -79,4 +79,33 @@ func projectAccessHTTPError(err error) error {
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 	return err
+}
+
+// Report insufficient roles without disclosing projects the caller cannot view.
+func projectAccessResponse(c echo.Context, err error) error {
+	var denied *authz.InsufficientRole
+	if errors.As(err, &denied) {
+		requirement := "Editor access is required for this action."
+		switch c.Path() {
+		case "/tasks":
+			if c.Request().Method == http.MethodPost {
+				requirement = "Editor access is required to create tasks."
+			}
+		case "/tasks/:taskId/thread":
+			requirement = "Editor access is required to send follow-ups."
+		case "/tasks/:taskId/run":
+			requirement = "Editor access is required to run tasks."
+		}
+		if denied.Permission == authz.Manage {
+			requirement = "Maintainer access is required for this action."
+		}
+		if denied.Permission == authz.Own {
+			requirement = "Only the project owner or an organization admin can perform this action."
+		}
+		message := "You have " + denied.Role + " access to this project. " + requirement + " Ask the project owner or an organization admin for access."
+		setHTMXToast(c, message, "failed")
+		c.Response().Header().Set("HX-Reswap", "none")
+		return echo.NewHTTPError(http.StatusForbidden, message)
+	}
+	return projectAccessHTTPError(err)
 }
