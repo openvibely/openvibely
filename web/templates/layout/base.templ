@@ -6518,6 +6518,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								try {
 									var endpoint = new URL('/alerts/read-bulk', window.location.href); var project = new URL(window.location.href).searchParams.get('project_id'); if (project) endpoint.searchParams.set('project_id', project);
 									var response = await fetch(endpoint.toString(), {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify({ids: selected.map(function(card) { return card.getAttribute('data-card-select-id'); })})});
+									if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 									if (!response.ok) { var payload = await response.json().catch(function() { return {}; }); throw new Error(payload.message || 'Failed to mark selected alerts as read'); }
 									clearSelection(); await refreshCollection();
 								} catch (err) { if (actionError) { actionError.textContent = err.message || 'Failed to mark selected alerts as read'; actionError.classList.remove('hidden'); } } finally { buttons.forEach(function(button) { button.disabled = false; }); }

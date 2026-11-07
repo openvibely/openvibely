@@ -150,7 +150,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	unmanagedSkillsJSON, err := json.Marshal(unmanagedSkills.String())
 	require.NoError(t, err)
 	var rejectedAlerts bytes.Buffer
-	require.NoError(t, pages.AlertsContentPageWithState(nil, "project", 0, false, "", "", pages.CardListState{ProjectID: "project", Filters: map[string]string{}}).Render(t.Context(), &rejectedAlerts))
+	require.NoError(t, pages.AlertsContentPageWithState([]models.AlertSummary{{ID: "read-denied", ProjectID: "project", Title: "Unread alert"}}, "project", 1, false, "", "", pages.CardListState{ProjectID: "project", Filters: map[string]string{}}).Render(t.Context(), &rejectedAlerts))
 	rejectedAlertsJSON, err := json.Marshal(rejectedAlerts.String())
 	require.NoError(t, err)
 	var emptyChannels bytes.Buffer
@@ -294,6 +294,14 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    if (document.activeElement !== sourceInput || alertsFilters.getAttribute('aria-expanded') !== 'true') fail('Source Escape setup failed');
 	    sourceInput.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true}));
 	    if (alertsFilters.getAttribute('aria-expanded') !== 'false' || getComputedStyle(alertsRoot.querySelector('[data-card-filters-popover]')).visibility !== 'hidden' || document.activeElement !== alertsFilters) fail('Escape from Source did not close Filters and restore focus');
+
+    alertsRoot.querySelector('[data-card-select-loaded]').click();
+    var readButton=alertsRoot.querySelector('[data-card-mark-read-selected]'),readError=alertsRoot.querySelector('[data-card-action-error]');
+    var readFetch=window.fetch,readToast=window.showToast,readToasts=[];
+    window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});window.showToast=m=>readToasts.push(m);
+    readButton.click();for(var retry=0;retry<80&&readButton.disabled;retry++)await wait(25);
+    window.fetch=readFetch;window.showToast=readToast;
+    if(readToasts.length!==1||readToasts[0]!=='Editor access required'||!readError.classList.contains('hidden')||alertsRoot.querySelector('[data-card-selected-count]').textContent.trim()!=='1 selected')fail('mark read denial changed selection or added inline error');
 
 		    verifyMixedCollection('personality'); verifyMixedCollection('channels');
 		    var emptyChannelsParsed=new DOMParser().parseFromString(EMPTY_CHANNELS_HTML, 'text/html'), emptyChannelsRoot=emptyChannelsParsed.getElementById('channels-container');

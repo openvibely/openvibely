@@ -97,7 +97,18 @@
  }
  async function show(at){
   if(at<0||at>=items.length)return;
-  index=at;const item=items[index],id=++ticket;controller?.abort();controller=new AbortController();
+  const item=items[at],id=++ticket;controller?.abort();controller=new AbortController();
+  let response,loadError;
+  if(!item.kind){
+   try{
+    response=await fetch(mode(item.raw,'view'),{signal:controller.signal});
+    if(id!==ticket)return false;
+    if(await window.openVibelyPermissionErrors?.fetch(response))return false;
+   }catch(err){if(err.name==='AbortError'||id!==ticket)return false;loadError=err}
+  }
+  if(id!==ticket)return false;
+  index=at;
+  if(!dialog.open)dialog.showModal();
   if(dialog.contains(document.activeElement))dialog.focus({preventScroll:true});
   clear();
   svgPreview=window.createChatSVGPreview?.(item.svgSource);
@@ -110,7 +121,7 @@
   const loading=document.createElement('div');loading.className='file-preview-loading';loading.setAttribute('role','status');loading.setAttribute('aria-label','Loading preview');
   const spinner=document.createElement('span');spinner.className='loading loading-spinner loading-sm text-primary';spinner.setAttribute('aria-hidden','true');loading.append(spinner);content.replaceChildren(loading);
   try{
-   const response=await fetch(mode(item.raw,'view'),{signal:controller.signal});
+   if(loadError)throw loadError;
    if(!response.ok){let message='Preview unavailable';try{message=(await response.json()).message||message}catch{}throw Error(message)}
    const html=await response.text();if(id!==ticket||!dialog.open)return;
    // Parse off-document so the replacement iframe never starts a second load.
@@ -171,6 +182,7 @@
  }
  async function open(url,trigger,event){
   const request=++opening;
+  const previous={items,index,group,owner,opener,pointerOpened};
   if (!dialog.contains(trigger)) {
    const root=trigger?.closest('#task-detail-content,#chat-page-root');
    owner=root?{id:root.id,task:root.dataset.taskId||'',project:root.dataset.projectId||''}:null;
@@ -188,7 +200,7 @@
   if(!dialog.contains(trigger)){opener=trigger;pointerOpened=!!event && event.detail>0}else group=null;
   // Show the requested file immediately while offscreen links are collected.
   items=[itemFrom(trigger,url)];
-  if(!dialog.open)dialog.showModal();show(0);
+  if(await show(0)===false){if(request===opening)({items,index,group,owner,opener,pointerOpened}=previous);return;}
   dialog.focus({preventScroll:true});
   let links;try{links=await candidates}catch{return}
   if(request!==opening||!dialog.open)return;
@@ -210,7 +222,8 @@
   imageControls.hidden=false;
   ['minus','plus','fit'].forEach(name=>dialog.querySelector('[data-gallery-'+name+']').hidden=kind!=='image');
  }
- function close(){opening++;if(dialog.open)dialog.close()}
+ function close(){opening++;ticket++;controller?.abort();if(dialog.open){handledCloses++;dialog.close();cleanupClosedDialog()}}
+ let handledCloses=0;
  document.addEventListener('click',event=>{
   const link=event.target.closest(selector);
   if(!link||event.defaultPrevented||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
@@ -218,7 +231,8 @@
  });
  prev.onclick=()=>show(index-1);next.onclick=()=>show(index+1);
  dialog.querySelector('[data-gallery-close]').onclick=close;
- dialog.addEventListener('close',()=>{if(dialog.open)return;opening++;ticket++;controller?.abort();clear();title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected){if(pointerOpened)opener.blur();else opener.focus({preventScroll:true});}opener=null});
+ function cleanupClosedDialog(){opening++;ticket++;controller?.abort();clear();title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected){if(pointerOpened)opener.blur();else opener.focus({preventScroll:true});}opener=null}
+ dialog.addEventListener('close',()=>{if(handledCloses){handledCloses--;return}if(!dialog.open)cleanupClosedDialog()});
  dialog.addEventListener('keydown',event=>{
   if(event.defaultPrevented||event.isComposing||event.altKey||event.metaKey||event.ctrlKey||event.target.closest('input,textarea,select,[contenteditable],[data-sheet-grid]'))return;
   if(event.key==='Escape'){event.preventDefault();close();return}
@@ -426,7 +440,7 @@
  const files=event.target.closest('[data-files-panel]');if(files){open(files.dataset.filesPanel,files,event);return}
  const attach=event.target.closest('[data-file-attach]');if(!attach)return;
  const status=dialog.querySelector('[data-file-attach-status]');attach.disabled=true;
- try{const input=document.querySelector('form input[name=attachment_session_id]')?.closest('form')?.querySelector('input[type=file]');if(!input)throw Error('Open a conversation composer to attach this file.');const response=await fetch(mode(attach.dataset.fileAttach,'download'));if(!response.ok)throw Error('Could not read this file');const blob=await response.blob(),transfer=new DataTransfer();transfer.items.add(new File([blob],attach.dataset.fileName,{type:blob.type}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));dialog.close()}catch(err){if(status)status.textContent=err.message}finally{attach.disabled=false}
+ try{const input=document.querySelector('form input[name=attachment_session_id]')?.closest('form')?.querySelector('input[type=file]');if(!input)throw Error('Open a conversation composer to attach this file.');const response=await fetch(mode(attach.dataset.fileAttach,'download'));if(await window.openVibelyPermissionErrors?.fetch(response))return;if(!response.ok)throw Error('Could not read this file');const blob=await response.blob(),transfer=new DataTransfer();transfer.items.add(new File([blob],attach.dataset.fileName,{type:blob.type}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));dialog.close()}catch(err){if(status)status.textContent=err.message}finally{attach.disabled=false}
  });
  // Server-rendered preview links already own their thumbnail and gallery group.
  // Only enhance ordinary published links, such as links in model responses.
