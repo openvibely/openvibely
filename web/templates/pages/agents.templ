@@ -1139,6 +1139,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			setPluginCatalogLoading(true);
 			try {
 				const response = await fetch('/agents/plugins/state');
+                if (await window.openVibelyPermissionErrors?.fetch(response)) return false;
 				if (!response.ok) throw new Error('Failed to load plugin state');
 				const payload = await response.json();
 				if (requestToken !== pluginStateRequestToken) {
@@ -1197,7 +1198,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					throw new Error(msg);
 				}
 				input.value = '';
-				await loadPluginState(true, { throwOnError: true });
+				if (await loadPluginState(true, { throwOnError: true }) === false) return;
 				setMarketplaceActionStatus('Marketplace added', 'success');
 				if (window.showToast) window.showToast('Marketplace added', 'completed');
 			} catch (err) {
@@ -1223,7 +1224,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					const msg = await readErrorMessage(response, 'reset default marketplaces failed');
 					throw new Error(msg);
 				}
-				await loadPluginState(true, { throwOnError: true });
+				if (await loadPluginState(true, { throwOnError: true }) === false) return;
 				setMarketplaceActionStatus('Default marketplaces restored', 'success');
 				if (window.showToast) window.showToast('Default marketplaces restored', 'completed');
 			} catch (err) {
@@ -1251,7 +1252,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					const msg = await readErrorMessage(response, 'update marketplace failed');
 					throw new Error(msg);
 				}
-				await loadPluginState(true, { throwOnError: true });
+				if (await loadPluginState(true, { throwOnError: true }) === false) return;
 				setMarketplaceActionStatus('Marketplace synced', 'success');
 				if (window.showToast) window.showToast('Marketplace synced', 'completed');
 			} catch (err) {
@@ -1280,7 +1281,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					const msg = await readErrorMessage(response, 'remove marketplace failed');
 					throw new Error(msg);
 				}
-				await loadPluginState(true, { throwOnError: true });
+				if (await loadPluginState(true, { throwOnError: true }) === false) return;
 				setMarketplaceActionStatus('Marketplace removed', 'success');
 				if (window.showToast) window.showToast('Marketplace removed', 'completed');
 			} catch (err) {
@@ -1328,7 +1329,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					selectedPluginIDs = Array.from(new Set(selectedPluginIDs.concat([id]))).sort();
 				}
 				renderPluginCatalog();
-				await loadPluginState(true, { throwOnError: true, suppressDiscoveryWarningToast: true });
+				if (await loadPluginState(true, { throwOnError: true, suppressDiscoveryWarningToast: true }) === false) return;
 				if (window.showToast) {
 					if (currentAgentID) {
 						if (enabledForAgent) {
@@ -1389,7 +1390,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					? agentPluginState.available
 					: [];
 				renderPluginCatalog();
-				await loadPluginState(false, { throwOnError: true });
+				if (await loadPluginState(false, { throwOnError: true }) === false) return;
 				pendingUninstalledPluginIDs.delete(id);
 				setMarketplaceActionStatus('Plugin removed', 'success');
 				if (window.showToast) {

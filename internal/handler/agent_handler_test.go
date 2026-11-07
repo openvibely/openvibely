@@ -458,10 +458,10 @@ func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
 	if !strings.Contains(body, "agentPluginState.available = Array.isArray(agentPluginState.available)") {
 		t.Errorf("expected install/uninstall flows to mutate local available plugin state before refresh")
 	}
-	if !strings.Contains(body, "await loadPluginState(true, { throwOnError: true, suppressDiscoveryWarningToast: true });") {
+	if !strings.Contains(body, "if (await loadPluginState(true, { throwOnError: true, suppressDiscoveryWarningToast: true }) === false) return;") {
 		t.Errorf("expected install refresh to suppress unrelated discovery warning toasts")
 	}
-	if !strings.Contains(body, "await loadPluginState(false, { throwOnError: true });") {
+	if !strings.Contains(body, "if (await loadPluginState(false, { throwOnError: true }) === false) return;") {
 		t.Errorf("expected uninstall refresh to avoid global discovery warning toasts")
 	}
 	if !strings.Contains(body, "pendingUninstalledPluginIDs.add(id)") {

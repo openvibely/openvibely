@@ -241,11 +241,17 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				if (!container || container.dataset.alertDetailState === 'loaded' || container.dataset.alertDetailState === 'loading') return;
 				var url = details.dataset.alertDetailUrl || '';
 				if (!url) return;
+				var previousState = container.dataset.alertDetailState;
 				container.dataset.alertDetailState = 'loading';
-				fetch(url, {headers: {'Accept': 'text/html'}}).then(function(response) {
+				fetch(url, {headers: {'Accept': 'text/html'}}).then(async function(response) {
+                    if (await window.openVibelyPermissionErrors?.fetch(response)) {
+                        if (previousState === undefined) delete container.dataset.alertDetailState; else container.dataset.alertDetailState = previousState;
+                        return null;
+                    }
 					if (!response.ok) throw new Error('detail request failed');
 					return response.text();
 				}).then(function(html) {
+                    if (html === null) return;
 					container.innerHTML = html;
 					hydrateAlertMarkdown(container);
 					container.dataset.alertDetailState = 'loaded';

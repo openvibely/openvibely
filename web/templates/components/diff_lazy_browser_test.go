@@ -14,11 +14,14 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_DiffLazyFilesAndLayouts(t *testing.T) {
 	runDiffLazyBrowser(t, "")
 }
+
+func TestBrowserFunctional_DiffLazyPermissionToast(t *testing.T) { runDiffLazyBrowser(t, "denied") }
 
 func TestBrowserFunctional_DiffLazyScrollPreservation(t *testing.T) {
 	for _, kind := range []string{"added", "deleted", "mixed"} {
@@ -170,7 +173,23 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
   ` + runner[end:]
 	}
 
+	if scrollKind == "denied" {
+		runner = `<script>window.deniedToasts=[];window.showToast=m=>deniedToasts.push(m);
+ window.addEventListener('load',async()=>{
+ try{
+ for(let i=0;i<200&&deniedToasts.length===0;i++)await new Promise(r=>setTimeout(r,10));
+ const card=document.getElementById('diff-file-0');
+ const count=deniedToasts.length;await new Promise(r=>setTimeout(r,200));
+ if(count!==1||deniedToasts.length!==1||deniedToasts[0]!=='Access denied'||card.textContent.includes('Unable')||card.textContent.includes('Loading diff')||card.querySelector('[data-diff-retry]:not(.hidden)')||card.getAttribute('aria-busy'))throw Error('denial changed diff or retried');
+ fetch('/result?status=pass');
+ }catch(e){fetch('/result?status=fail&error='+encodeURIComponent(e.message));}
+ });</script>`
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/result":
 			select {
@@ -197,6 +216,10 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 				http.Error(w, "missing file identity", 400)
 				return
 			}
+			if scrollKind == "denied" {
+				http.Error(w, `{"message":"Access denied"}`, http.StatusForbidden)
+				return
+			}
 			if index == 1 && view == "inline" && attempt == 1 {
 				http.Error(w, "temporary failure", 500)
 				return
@@ -212,7 +235,7 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 				t.Error(err)
 			}
 		default:
-			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script>`+fmt.Sprintf(`<script>window._diffFileState={};window._diffFileState[%q]={1:false,2:false};</script>`, diffViewerStateKey(progressiveDiffMetas(ParseDiffOutput(diff.String()), nil), "lazy-task"))+runner+`<style>svg{width:16px;height:16px}.diff-file-header{display:flex;align-items:center}#main-content{height:600px;overflow:auto}.hidden{display:none}.diff-file-body{overflow:hidden}.diff-file-header{position:sticky;top:0}td{height:20px}</style></head><body><main id="fixture-root" data-test-result="pending"></main><div id="main-content">`+markup.String()+`</div></body></html>`)
+			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script><script src="`+static.URL("permission-errors.js")+`"></script>`+fmt.Sprintf(`<script>window._diffFileState={};window._diffFileState[%q]={1:false,2:false};</script>`, diffViewerStateKey(progressiveDiffMetas(ParseDiffOutput(diff.String()), nil), "lazy-task"))+runner+`<style>svg{width:16px;height:16px}.diff-file-header{display:flex;align-items:center}#main-content{height:600px;overflow:auto}.hidden{display:none}.diff-file-body{overflow:hidden}.diff-file-header{position:sticky;top:0}td{height:20px}</style></head><body><main id="fixture-root" data-test-result="pending"></main><div id="main-content">`+markup.String()+`</div></body></html>`)
 		}
 	}))
 	defer server.Close()

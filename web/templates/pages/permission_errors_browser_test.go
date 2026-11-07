@@ -16,10 +16,13 @@ import (
 
 func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	for _, kind := range []string{"organization", "agents", "models", "skills", "webhooks", "personality", "reviews", "yaml"} {
+	for _, kind := range []string{"organization", "agents", "models", "skills", "webhooks", "personality", "reviews", "yaml", "alerts"} {
 		t.Run(kind, func(t *testing.T) {
 			var page bytes.Buffer
 			var component templ.Component = AgentsContent(nil, nil)
+			if kind == "alerts" {
+				component = AlertsContentPageWithState(nil, "project", 0, false, "", "", CardListState{})
+			}
 			if kind == "reviews" {
 				component = components.DiffViewer("diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n", "task", nil, "inline")
 			}
@@ -54,6 +57,19 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "permission-"+kind, func(browser *composerFocusCDP) {
 				browser.waitFor("permission helper", `typeof window.openVibelyPermissionErrors`, "object")
+				if kind == "alerts" {
+					result := browser.evaluateAwait(`(async()=>{
+ window.fetch=async()=>new Response(JSON.stringify({message:'Access denied'}),{status:403});
+ const details=document.createElement('details');details.open=true;details.dataset.alertDetailUrl='/alerts/example/details';
+ details.innerHTML='<div data-alert-detail-container>Keep detail</div>';document.body.append(details);const before=details.innerHTML;
+ loadAlertDetail(details);for(let i=0;i<100&&permissionToasts.length===0;i++)await new Promise(r=>setTimeout(r,10));await new Promise(r=>setTimeout(r,20));
+ return permissionToasts.length===1&&permissionToasts[0].message==='Access denied'&&details.innerHTML===before?'ok':'alert changed';})()`)
+					if result != "ok" {
+						t.Fatal(result)
+					}
+					return
+				}
+
 				if kind == "reviews" {
 					result := browser.evaluateAwait(`(async()=>{
  window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
@@ -203,6 +219,9 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  if(permissionToasts.length!==7||hooks.textContent!=='Keep hooks'||status.outerHTML!==previous)return 'hooks changed';
  const skills=document.getElementById('agent_skills_list');skills.textContent='Keep skills';await loadAgentSkillsForAgent('denied');
  if(permissionToasts.length!==8||skills.textContent!=='Keep skills')return 'skills list changed';
+ agentPluginState={marketplaces:[],installed:[],available:[],runtime:[]};renderPluginCatalog();const pluginState=agentPluginState;
+ await loadPluginState(true);
+ if(permissionToasts.length!==9||agentPluginState!==pluginState||document.getElementById('plugin_marketplace_action_status').textContent)return 'plugin catalog changed';
  window.fetch=originalFetch;return 'ok';})()`)
 					if result != "ok" {
 						t.Fatal(result)
