@@ -26,7 +26,7 @@ const PageChatMessagesID = "page-chat-messages"
 
 
 templ PageChatMessages(v PageChatView) {
- <div id="page-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
+ <div id="page-chat-messages" data-chat-transcript data-transcript-hydrating="true" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
   @PageChatHistory(v)
  </div>
 }

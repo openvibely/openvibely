@@ -214,7 +214,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div id=\"tab-changes\" class=\"hidden\"></div><div id=\"tab-chat\" class=\"flex flex-col flex-1 min-h-0\"><div id=\"task-thread-messages\" class=\"flex-1 min-h-0 overflow-y-auto\"></div><div id=\"new-task-error\" role=\"alert\" class=\"text-error text-sm\"></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div id=\"tab-changes\" class=\"hidden\"></div><div id=\"tab-chat\" class=\"flex flex-col flex-1 min-h-0\"><div id=\"task-thread-messages\" data-chat-transcript class=\"flex-1 min-h-0 overflow-y-auto\"></div><div id=\"new-task-error\" role=\"alert\" class=\"text-error text-sm\"></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

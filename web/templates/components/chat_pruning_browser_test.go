@@ -36,13 +36,13 @@ func TestBrowserFunctional_PrunedChatEarlierLoaderUsesCurrentCursor(t *testing.T
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.URL.Path == "/chat" {
 			if r.URL.Query().Get("before") == "" {
-				fmt.Fprint(w, `<div id="chat-page-root"><div id="chat-messages"></div><button data-latest>Latest message</button><form id="chat-form"></form></div>`)
+				fmt.Fprint(w, `<div id="chat-page-root"><div id="chat-messages" data-chat-transcript></div><button data-latest>Latest message</button><form id="chat-form"></form></div>`)
 			} else {
 				fmt.Fprintf(w, `<div data-returned-cursor="%s">Earlier message</div>`, r.URL.Query().Get("before"))
 			}
 			return
 		}
-		fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending"><script src="/static/vendor/htmx.min.js"></script><div id="chat-page-root"><div id="chat-messages" data-window-limit="2" data-earlier-url-base="/chat?project_id=test&limit=2"><div data-execution-pair="true" data-exec-id="one"></div><div data-execution-pair="true" data-exec-id="two"></div><div data-execution-pair="true" data-exec-id="three"></div></div><button data-latest>Latest message</button><form id="chat-form"></form></div><script>%s
+		fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending"><script src="/static/vendor/htmx.min.js"></script><div id="chat-page-root"><div id="chat-messages" data-chat-transcript data-window-limit="2" data-earlier-url-base="/chat?project_id=test&limit=2"><div data-execution-pair="true" data-exec-id="one"></div><div data-execution-pair="true" data-exec-id="two"></div><div data-execution-pair="true" data-exec-id="three"></div></div><button data-latest>Latest message</button><form id="chat-form"></form></div><script>%s
 window.addEventListener('load', async function() {
  try {
   const messages = document.getElementById('chat-messages');

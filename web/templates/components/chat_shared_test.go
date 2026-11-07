@@ -308,7 +308,7 @@ func TestBrowserFunctional_LatestMessageButtonDynamicBehaviorInChrome(t *testing
 		.\\-translate-x-1\\/2 { transform: translateX(-50%); }
 	</style></head><body><main id="fixture-root" data-test-result="pending">
 		<section class="fixture"><div id="chat-messages" class="messages" data-scroll-intent-scope="project-1">` + rows + `</div>` + chatButton.String() + `</section>
-		<section class="fixture"><div id="task-thread-messages" class="messages" data-scroll-intent-scope="task-1">` + rows + `</div>` + threadButton.String() + `</section>
+		<section class="fixture"><div id="task-thread-messages" data-chat-transcript class="messages" data-scroll-intent-scope="task-1">` + rows + `</div>` + threadButton.String() + `</section>
 	</main>` + chatScript.String() + `<script>
 	(function() {
 		var root = document.getElementById('fixture-root');
@@ -4827,13 +4827,13 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if !strings.Contains(content, `class="relative flex-1 min-h-0 min-w-0"`) || !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0"`) {
+	if !strings.Contains(content, `class="relative flex-1 min-h-0 min-w-0"`) || !strings.Contains(content, `id="task-thread-messages" data-chat-transcript class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0"`) {
 		t.Fatal("task thread messages shell should anchor the latest control without stacking an outer bottom margin above the composer")
 	}
-	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 mb-4`) {
+	if strings.Contains(content, `id="task-thread-messages" data-chat-transcript class="flex-1 overflow-y-auto pt-4 pb-0 mb-4`) {
 		t.Fatal("task thread messages pane must not add a second vertical gap before the composer")
 	}
-	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto overflow-x-hidden`) {
+	if strings.Contains(content, `id="task-thread-messages" data-chat-transcript class="flex-1 overflow-y-auto overflow-x-hidden`) {
 		t.Fatal("task thread messages pane must not hard-clip chat bubble shadows")
 	}
 	if strings.Contains(content, `-mr-[29px]`) || strings.Contains(content, `-mr-[18px]`) {
@@ -5409,10 +5409,10 @@ func TestTaskThreadView_StartsTranscriptUnderScrollCoordinator(t *testing.T) {
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" data-chat-transcript class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
-	if !strings.Contains(content, "window.openVibelyThreadController.restore({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
+	if !strings.Contains(content, "window.openVibelyThreadController.hydrate({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
 		t.Fatal("task thread must reveal and position the transcript through the shared render barrier")
 	}
 	if !strings.Contains(content, "waitForImages: true,") {
@@ -5546,12 +5546,12 @@ func TestTaskThreadView_PinsAfterQueuedTranscriptRendering(t *testing.T) {
 	content := buf.String()
 
 	for _, required := range []string{
-		"cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;",
+		"cleanPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);",
 		"var renderPromise = c._activeLiveChatRender && c._activeLiveChatRender.promise;",
 		"resumeRenderPromises.push(Promise.resolve(renderPromise).catch(function()",
 		"initialRenderPromises = initialRenderPromises.concat(resumeRenderPromises);",
 		"_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));",
-		"return window.openVibelyThreadController.restore({",
+		"return window.openVibelyThreadController.hydrate({",
 		"var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;",
 		"defaultPinned: !userScrolledUp,",
 		"renderPromise: renderPromise",
@@ -6019,7 +6019,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 		var tracker = new window.ChatScrollTracker(messages);
 		var resolveHydration;
 		var hydration = new Promise(function(resolve) { resolveHydration = resolve; });
-		var restored = window.openVibelyThreadController.restore({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
+		var restored = window.openVibelyThreadController.hydrate({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
 		if (getComputedStyle(messages).visibility !== 'hidden') fail('cold transcript revealed partial history while hydration was pending');
 		pair(messages); pair(messages); pair(messages);
 		resolveHydration();
@@ -6034,7 +6034,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			for (var i = 0; i < 6; i++) pair(replacement);
 			root.appendChild(replacement);
 			var replacementTracker = new window.ChatScrollTracker(replacement);
-			await window.openVibelyThreadController.restore({messages: replacement, tracker: replacementTracker, stateKey: 'browser-chat', renderPromise: Promise.resolve()});
+			await window.openVibelyThreadController.hydrate({messages: replacement, tracker: replacementTracker, stateKey: 'browser-chat', renderPromise: Promise.resolve()});
 			if (bottomDistance(replacement) > 1) fail('pinned navigation restoration missed true bottom: ' + bottomDistance(replacement));
 
 			pair(replacement);
@@ -6055,7 +6055,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			for (var j = 0; j < 8; j++) pair(restoredReading);
 			root.appendChild(restoredReading);
 			var readingTracker = new window.ChatScrollTracker(restoredReading);
-			await window.openVibelyThreadController.restore({messages: restoredReading, tracker: readingTracker, stateKey: 'browser-chat', state: readingState, renderPromise: Promise.resolve()});
+			await window.openVibelyThreadController.hydrate({messages: restoredReading, tracker: readingTracker, stateKey: 'browser-chat', state: readingState, renderPromise: Promise.resolve()});
 			if (Math.abs(restoredReading.scrollTop - 75) > 1 || !readingTracker.userScrolledUp) fail('navigation restoration lost intentional reading position');
 
 			restoredReading.remove();
@@ -6067,7 +6067,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			interactiveHydration.scrollTop = interactiveHydration.scrollHeight;
 			var resolveInteractiveHydration;
 			var interactiveRender = new Promise(function(resolve) { resolveInteractiveHydration = resolve; });
-			var interactiveRestore = window.openVibelyThreadController.restore({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', defaultPinned: true, renderPromise: interactiveRender});
+			var interactiveRestore = window.openVibelyThreadController.hydrate({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', defaultPinned: true, renderPromise: interactiveRender});
 			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
 			interactiveHydration.scrollTop = 110;
 			// Do not dispatch scroll manually: the rendering promise can settle
@@ -6079,7 +6079,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			var resolveReadingHydration;
 			var readingHydrationRender = new Promise(function(resolve) { resolveReadingHydration = resolve; });
 			var continuedReadingState = window.saveChatTranscriptScrollState('interactive-chat', interactiveHydration, interactiveTracker);
-			var continuedReadingRestore = window.openVibelyThreadController.restore({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', state: continuedReadingState, renderPromise: readingHydrationRender});
+			var continuedReadingRestore = window.openVibelyThreadController.hydrate({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', state: continuedReadingState, renderPromise: readingHydrationRender});
 			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
 			interactiveHydration.scrollTop = 60;
 			// Do not dispatch scroll manually: the rendering promise can settle

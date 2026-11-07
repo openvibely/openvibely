@@ -3,12 +3,12 @@ package components
 import "testing"
 
 func TestBrowserFunctional_VirtualHistoryPrependKeepsReadingPosition(t *testing.T) {
-	for _, id := range []string{"chat-messages", "task-thread-messages"} {
+	for _, id := range []string{"chat-messages", "task-thread-messages", "page-chat-messages", "custom-conversation"} {
 		for _, anchoring := range []string{"auto", "none"} {
 			t.Run(id+"/"+anchoring, func(t *testing.T) {
 				runIncrementalChatBrowser(t, `const transcriptID="`+id+`", anchoring="`+anchoring+`";
 
- const messages=document.getElementById('messages'); messages.id=transcriptID;
+ const messages=document.getElementById('messages'); messages.id=transcriptID;messages.setAttribute('data-chat-transcript','');
  messages.style.width='640px'; messages.style.overflowAnchor=anchoring;
  document.getElementById('pair').dataset.execStatus='completed';
  const output=label=>Array.from({length:40},(_,i)=>label+' message '+i+' **formatted**.\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n').join('');
@@ -60,7 +60,7 @@ func TestBrowserFunctional_VirtualHistoryPrependKeepsReadingPosition(t *testing.
 
 func TestBrowserFunctional_HiddenPagingPreservesAnchorAndCleansUp(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';messages.style.overflowAnchor='none';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';messages.style.overflowAnchor='none';
  document.getElementById('pair').dataset.execStatus='completed';
  const output=label=>Array.from({length:40},(_,i)=>label+' message '+i+' **formatted**.\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n').join('');
  await window.renderStreamingContent(stream,output('latest'),false);

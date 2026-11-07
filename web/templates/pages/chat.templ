@@ -102,7 +102,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 		</div>
 		<!-- Chat Messages Container -->
 		<div class="relative flex-1 min-h-0 min-w-0">
-			<div id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
+			<div id="chat-messages" data-chat-transcript class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
 				if hasEarlier && len(chatHistory) > 0 {
 					@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 				}
@@ -209,7 +209,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
 						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
 						if (!window.openVibelyThreadController) return Promise.resolve(renderPromise);
-						return window.openVibelyThreadController.restore({
+						return window.openVibelyThreadController.hydrate({
 							messages: chatMessages,
 							tracker: window._chatPageTracker,
 							getTracker: function() { return window._chatPageTracker; },
@@ -419,23 +419,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					prompt.classList.remove('hidden');
 				};
 
-				window.applyChatBubbleTransforms = function(chatMessages) {
-					if (!chatMessages) return Promise.resolve([]);
-					// Re-hydrate assistant bubbles from raw content first (tool/thinking cards).
-					// This keeps hard-refresh behavior consistent with task-thread rendering
-					// and prevents transcript-control cleanup from stripping tool controls before
-					// tool-card rendering runs. Post-render transforms run after the shared
-					// hydration barrier so task metadata inside newly rendered DOM is handled once.
-					var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
-					return Promise.resolve(renderPromise).then(function() {
-						chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
-							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
-						});
-						return true;
-					});
-				};
+                window.applyChatBubbleTransforms = function(messages) {
+                    return window.openVibelyThreadController.prepareTranscript(messages);
+                };
 
 			// Explicit refresh helper: force assistant bubble hydration from raw content.
 			window.rehydrateChatAssistantBubbles = function() {

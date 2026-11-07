@@ -240,7 +240,7 @@ func TestBrowserFunctional_ToolGeometryStableAcrossLiveAndSavedRendering(t *test
 
 func TestBrowserFunctional_ActivitySpacingStableAcrossLiveAndVirtualRows(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='3000px';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.height='3000px';
  const text='Intro.\n\n[Using tool: read_file | a.go]\n[Tool read_file done]\n'+'line\n'.repeat(8)+'[/Tool]\n[Thinking]\nhmm\n[/Thinking]\n[Using tool: process | x]\n[Tool process done]\nstatus\n[/Tool]\n[Using tool: shell | rg x]\n[Tool shell done]\nout\n[/Tool]\nDone.\n';
  const offsets=()=>{const top=stream.getBoundingClientRect().top;return Array.from(stream.querySelectorAll('.stream-tool, details.stream-thinking, .chat-markdown')).filter(e=>!e.parentElement.closest('.stream-tool, details.stream-thinking, .chat-markdown')).map(e=>Math.round(e.getBoundingClientRect().top-top));};
  const results=[];

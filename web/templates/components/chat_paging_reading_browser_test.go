@@ -51,7 +51,7 @@ func TestBrowserFunctional_PagingWhileReadingKeepsCurrentExecution(t *testing.T)
 // virtualizer's deferred ResizeObserver snapshot on the following frame.
 func TestBrowserFunctional_PagingRebasesPendingVirtualLayout(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
  document.getElementById('pair').dataset.execStatus='completed';
  await renderStreamingContent(stream,('A paragraph of existing conversation.\n\n').repeat(60),false);
  const loader=document.createElement('div');loader.dataset.containerId=messages.id;loader.style.height='120px';messages.prepend(loader);

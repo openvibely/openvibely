@@ -6,7 +6,7 @@ import "testing"
 // resize after paging settles (for example an image or diagram finishing).
 func TestBrowserFunctional_VirtualHistoryLateLayoutKeepsReadingPosition(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.style.overflowAnchor='none'; messages.style.width='640px';
  document.getElementById('pair').dataset.execStatus='completed';
  const source=Array.from({length:60},(_,i)=>'Message '+i+' **formatted**.\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult\n[/Tool]\n').join('');

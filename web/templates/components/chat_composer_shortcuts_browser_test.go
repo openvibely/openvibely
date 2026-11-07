@@ -65,8 +65,8 @@ func TestBrowserFunctional_ChatComposerShortcutsInChrome(t *testing.T) {
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
 <script src="/htmx.js"></script>
-<div id="chat-messages"></div>%s
-<div id="task-thread-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="active-turn"></div></div>%s
+<div id="chat-messages" data-chat-transcript></div>%s
+<div id="task-thread-messages" data-chat-transcript><div data-execution-pair="true" data-exec-status="running" data-exec-id="active-turn"></div></div>%s
 <div id="browser-result">pending</div>
 <script>
 (async function() {
@@ -237,7 +237,7 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
 			_, _ = w.Write(htmx2011)
 		case "/direct-thread":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			body := `<!doctype html><html><body data-test-result="pending"><script src="/htmx.js"></script><div id="task-thread-view"><div id="task-thread-messages"></div>` + thread + `</div><div id="browser-result">pending</div><script>
+			body := `<!doctype html><html><body data-test-result="pending"><script src="/htmx.js"></script><div id="task-thread-view"><div id="task-thread-messages" data-chat-transcript></div>` + thread + `</div><div id="browser-result">pending</div><script>
 (function poll(started) {
   var input = document.getElementById('task-message-input');
   if (document.activeElement === input) {
@@ -263,9 +263,9 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
 <script src="/htmx.js"></script>
 <button id="meaningful-control" type="button">Other control</button>
 <dialog id="active-dialog"><button>Dialog action</button></dialog>
-<div id="main-content"><div id="chat-page-root"><div id="chat-messages"></div>` + chat + `</div></div>
-<template id="chat-fragment"><div id="chat-page-root"><div id="chat-messages"></div>` + chat + `</div></template>
-<template id="thread-fragment"><div id="task-detail-content"><button id="task-breadcrumb" data-breadcrumb-selector-button>Task</button><div id="task-thread-view"><div id="task-thread-messages"></div>` + thread + `</div></div></template>
+<div id="main-content"><div id="chat-page-root"><div id="chat-messages" data-chat-transcript></div>` + chat + `</div></div>
+<template id="chat-fragment"><div id="chat-page-root"><div id="chat-messages" data-chat-transcript></div>` + chat + `</div></template>
+<template id="thread-fragment"><div id="task-detail-content"><button id="task-breadcrumb" data-breadcrumb-selector-button>Task</button><div id="task-thread-view"><div id="task-thread-messages" data-chat-transcript></div>` + thread + `</div></div></template>
 <div id="browser-result">pending</div>
 <script>
 (async function() {
@@ -406,7 +406,7 @@ window.htmx = {
   }
 };
 </script>
-<div id="chat-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="ios-turn"></div></div>%s
+<div id="chat-messages" data-chat-transcript><div data-execution-pair="true" data-exec-status="running" data-exec-id="ios-turn"></div></div>%s
 <div id="browser-result">pending</div>
 <script>
 (function() {
@@ -632,7 +632,7 @@ func TestBrowserFunctional_ChatComposerStaleSteerConflictFallsBackToNormalSendIn
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
 <script src="/htmx.js"></script>
-<div id="chat-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="active-turn"></div></div>%s
+<div id="chat-messages" data-chat-transcript><div data-execution-pair="true" data-exec-status="running" data-exec-id="active-turn"></div></div>%s
 <div id="browser-result">pending</div>
 <script>
 (async function() {
@@ -734,7 +734,7 @@ func TestBrowserFunctional_ChatComposerImmediateModifierClickSteersInChrome(t *t
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
 <script src="/htmx.js"></script>
-<div id="chat-messages"></div>%s
+<div id="chat-messages" data-chat-transcript></div>%s
 <div id="browser-result">pending</div>
 <script>
 (async function() {
@@ -836,7 +836,7 @@ func TestBrowserFunctional_ChatComposerRunningActionModifierSteersInChrome(t *te
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
 <script src="/htmx.js"></script>
-<div id="chat-messages"></div>%s
+<div id="chat-messages" data-chat-transcript></div>%s
 <div id="browser-result">pending</div>
 <script>
 (async function() {
@@ -937,8 +937,8 @@ func TestBrowserFunctional_ChatComposerRunningPrimaryActionSwapsWithInputContent
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
 	<script src="/htmx.js"></script>
-	<div id="chat-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="chat-turn"></div></div>%s
-	<div id="task-thread-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="task-turn"></div></div>%s
+	<div id="chat-messages" data-chat-transcript><div data-execution-pair="true" data-exec-status="running" data-exec-id="chat-turn"></div></div>%s
+	<div id="task-thread-messages" data-chat-transcript><div data-execution-pair="true" data-exec-status="running" data-exec-id="task-turn"></div></div>%s
 	<div id="browser-result">pending</div>
 	<script>
 	(async function() {

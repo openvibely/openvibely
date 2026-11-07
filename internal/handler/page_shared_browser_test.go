@@ -30,6 +30,13 @@ func TestPageSharedHistoryAndSteeringBrowser(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		e := &models.Execution{TaskID: first.TaskID, AgentConfigID: env.agent.ID, Status: models.ExecCompleted, PromptSent: fmt.Sprintf("past-%d", i), IsFollowup: true}
 		require.NoError(t, env.h.execRepo.Create(t.Context(), e))
+		if i == 59 {
+			var output strings.Builder
+			for row := 0; row < 160; row++ {
+				fmt.Fprintf(&output, "[Using tool: bash | echo row-%d]\n[Tool bash done]\nresult-%d\n[/Tool]\n", row, row)
+			}
+			require.NoError(t, env.h.execRepo.Complete(t.Context(), e.ID, models.ExecCompleted, output.String(), "", 0, 0))
+		}
 	}
 	require.NoError(t, env.h.taskRepo.UpdateStatus(t.Context(), first.TaskID, models.StatusCompleted))
 	sendPageTest(t, env, env.inA, "active")
@@ -41,6 +48,11 @@ func TestPageSharedHistoryAndSteeringBrowser(t *testing.T) {
  document.querySelector('[data-page-chat-toggle]').click();
  const box=document.getElementById('page-chat-messages');
  await wait(()=>box.querySelector('[data-earlier-loader]'),'history loader missing');
+ await wait(()=>box.querySelector('[data-chat-virtual-owner]'),'shared virtualization missing');
+ if(box.querySelectorAll('.stream-tool').length>=160)throw Error('all tool rows mounted');
+ if(!sessionStorage.getItem('shared-conversation-reloaded')){
+  sessionStorage.setItem('shared-conversation-reloaded','true');location.reload();return;
+ }
  box.querySelector('[data-earlier-loader]').dispatchEvent(new CustomEvent('ov:load-earlier',{bubbles:true}));
  await wait(()=>document.getElementById('chat-execution-OLDEST'),'earlier history missing');
  await wait(()=>box.dataset.earlierRequestLoading!=='true','paging did not settle');
@@ -57,6 +69,9 @@ func TestPageSharedHistoryAndSteeringBrowser(t *testing.T) {
  form.querySelector('[aria-label="Convert queued follow-up to steering"]').click();
  await wait(()=>form.querySelector('[data-input-mode="steering"]'),'queued steer failed');
  if(!document.getElementById('chat-execution-OLDEST'))throw Error('steering refresh discarded history');
+ document.querySelector('[data-page-chat-toggle]').click();
+ document.querySelector('[data-page-chat-toggle]').click();
+ await wait(()=>box.querySelector('[data-chat-virtual-owner]'),'reopening lost virtual rows');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}
 })();</script>`

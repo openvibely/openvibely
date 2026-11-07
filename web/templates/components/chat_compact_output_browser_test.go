@@ -51,7 +51,7 @@ func TestBrowserFunctional_CompactToolOutput(t *testing.T) {
 
 func TestBrowserFunctional_CompactToolOutputRemount(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='160px';messages.style.overflowAnchor='none';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.height='160px';messages.style.overflowAnchor='none';
  document.getElementById('pair').dataset.execStatus='completed';
  messages.setAttribute('data-transcript-hydrating','true');
  const setMode=mode=>{document.documentElement.setAttribute('data-output-detail',mode);document.dispatchEvent(new CustomEvent('openvibely:display-change',{detail:{name:'output',value:mode}}));};
@@ -88,7 +88,7 @@ func TestBrowserFunctional_CompactToolOutputRemount(t *testing.T) {
 
 func TestBrowserFunctional_CompactActivityHistoryAndStreaming(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='chat-messages';
+ const messages=document.getElementById('messages');messages.id='chat-messages';messages.setAttribute('data-chat-transcript','');
  const pair=document.getElementById('pair');pair.dataset.execStatus='completed';
  const setMode=async mode=>{document.documentElement.setAttribute('data-output-detail',mode);document.dispatchEvent(new CustomEvent('openvibely:display-change',{detail:{name:'output',value:mode}}));await renderVisibleChatRows(messages);await paint();};
  let tools='';for(let i=0;i<12;i++)tools+='[Using tool: bash | echo '+i+']\n[Tool bash done]\n'+('result '+i+' ').repeat(150)+'\n[/Tool]\n';
@@ -141,7 +141,7 @@ func TestBrowserFunctional_CompactFoldFocus(t *testing.T) {
 }
 func TestBrowserFunctional_CompactFoldVirtualization(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- document.getElementById('messages').id='chat-messages';
+ document.getElementById('messages').setAttribute('data-chat-transcript','');document.getElementById('messages').id='chat-messages';
  document.getElementById('pair').dataset.execStatus='completed';
  document.documentElement.setAttribute('data-output-detail','compact');
  let text='';for(let i=0;i<160;i++)text+='[Using tool: bash | echo row-'+i+']\n[Tool bash done]\n'+('output-'+i+' ').repeat(500)+'\n[/Tool]\n';
@@ -168,7 +168,7 @@ func TestBrowserFunctional_CompactFoldVirtualization(t *testing.T) {
 
 func TestBrowserFunctional_CompactSnapshotExcludesExpandedLists(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='chat-messages';
+ const messages=document.getElementById('messages');messages.id='chat-messages';messages.setAttribute('data-chat-transcript','');
  document.getElementById('pair').dataset.execStatus='completed';
  document.documentElement.setAttribute('data-output-detail','compact');
  const source='[Using tool: bash | echo first]\n[Tool bash done]\nfirst output\n[/Tool]\n[Using tool: bash | echo second]\n[Tool bash done]\nsecond output\n[/Tool]\n';
@@ -196,7 +196,7 @@ func TestBrowserFunctional_CompactSnapshotExcludesExpandedLists(t *testing.T) {
 
 func TestBrowserFunctional_CompactDeferredToolRemount(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='chat-messages';messages.style.height='160px';
+ const messages=document.getElementById('messages');messages.id='chat-messages';messages.setAttribute('data-chat-transcript','');messages.style.height='160px';
  document.getElementById('pair').dataset.execStatus='completed';
  document.documentElement.setAttribute('data-output-detail','compact');
  const source='[Using tool: bash]\n[Tool bash done]\nimportant output\n[/Tool]\n'+Array.from({length:150},(_,i)=>'Paragraph '+i+'\n\n').join('');

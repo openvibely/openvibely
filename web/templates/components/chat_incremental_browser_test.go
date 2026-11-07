@@ -483,7 +483,7 @@ func TestIncrementalChatMetricsAcceptance(t *testing.T) {
 
 func TestBrowserFunctional_VirtualizedCompletedTranscript(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- document.getElementById('messages').id = 'chat-messages';
+ document.getElementById('messages').setAttribute('data-chat-transcript','');document.getElementById('messages').id = 'chat-messages';
  const messages = document.getElementById('chat-messages');
  document.getElementById('pair').setAttribute('data-exec-status', 'completed');
  let text = '';
@@ -547,7 +547,7 @@ func TestBrowserFunctional_CachedToolButtons(t *testing.T) {
 
 func TestBrowserFunctional_VirtualRowsAfterPanelResize(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='chat-messages';
+ const messages=document.getElementById('messages'); messages.id='chat-messages';messages.setAttribute('data-chat-transcript','');
  messages.style.cssText='height:300px;overflow:auto;width:800px;font:16px monospace;line-height:20px';
  const pair=document.getElementById('pair'); pair.dataset.execStatus='completed';
  pair.innerHTML=Array.from({length:200},()=>'<div class="chat-markdown" style="margin:0;padding:0">'+('word '.repeat(100))+'</div>').join('');
@@ -619,7 +619,7 @@ func TestBrowserFunctional_TranscriptHydrationRevealsTogether(t *testing.T) {
 
 func TestBrowserFunctional_RunningTranscriptRevealsAtFinalScrollPosition(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.setAttribute('data-transcript-hydrating','true');
  stream.innerHTML='<div style="height:3000px">Running output</div>';
  let controlsReady=false, reveal=null;
@@ -643,7 +643,7 @@ func TestBrowserFunctional_RunningTranscriptRevealsAtFinalScrollPosition(t *test
 
 func TestBrowserFunctional_LazyTranscriptFirstPaint(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.style.width='640px'; messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
  let markdownCalls=0, parseCalls=0;
@@ -700,7 +700,7 @@ func TestBrowserFunctional_LazyTranscriptFirstPaint(t *testing.T) {
 
 func TestBrowserFunctional_LazyTranscriptDefersLargeMarkdown(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
  let largeMarkdownCalls=0;
@@ -724,7 +724,7 @@ func TestBrowserFunctional_LazyTranscriptDefersLargeMarkdown(t *testing.T) {
 
 func TestBrowserFunctional_LazyTranscriptMatchesEagerRenderer(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
  const source='Intro **bold**.\n\n[Thinking]\nfirst thought\n[/Thinking]\nsmall interlude\n[Thinking]\nsecond thought\n[/Thinking]\n'+
@@ -748,7 +748,7 @@ func TestBrowserFunctional_LazyTranscriptMatchesEagerRenderer(t *testing.T) {
 
 func TestBrowserFunctional_LazyTranscriptUpdatesDuringFind(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  document.getElementById('pair').dataset.execStatus='completed';
  const main=document.createElement('main'); main.id='main-content';
  messages.before(main); main.append(messages);
@@ -780,7 +780,7 @@ func TestBrowserFunctional_LazyTranscriptUpdatesDuringFind(t *testing.T) {
 
 func TestBrowserFunctional_LazyTranscriptHiddenWorkspace(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
  const workspace=document.createElement('section'); messages.before(workspace); workspace.append(messages);
@@ -809,7 +809,7 @@ func TestBrowserFunctional_LazyTranscriptHiddenWorkspace(t *testing.T) {
 
 func TestBrowserFunctional_LazyTranscriptFindSkipsHiddenWorkspace(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
  const workspace=document.createElement('section'); messages.before(workspace); workspace.append(messages);
@@ -845,7 +845,7 @@ func TestBrowserFunctional_LazyTranscriptFindSkipsHiddenWorkspace(t *testing.T) 
 
 func TestBrowserFunctional_HiddenTranscriptHydrationWaitsForViewport(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  const workspace=document.createElement('section'); messages.before(workspace); workspace.append(messages);
  workspace.style.display='none';
  messages.setAttribute('data-transcript-hydrating','true');
@@ -876,7 +876,7 @@ func TestBrowserFunctional_HiddenTranscriptHydrationWaitsForViewport(t *testing.
 
 func TestBrowserFunctional_VirtualScrollFillsVisibleRowsBeforePaint(t *testing.T) {
 	report := runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.style.width='640px'; messages.style.overflowAnchor='none';
  messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
@@ -916,7 +916,7 @@ func TestBrowserFunctional_VirtualScrollFillsVisibleRowsBeforePaint(t *testing.T
 
 func TestBrowserFunctional_VirtualScrollOvertakesBackgroundPreparation(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.style.height='80px'; messages.style.overflowAnchor='none';
  messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
@@ -948,7 +948,7 @@ func TestBrowserFunctional_VirtualScrollOvertakesBackgroundPreparation(t *testin
 
 func TestBrowserFunctional_VirtualScrollSettlesEstimatedHeightsBeforePaint(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');
  messages.style.overflowAnchor='none';
  messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
@@ -972,7 +972,7 @@ func TestBrowserFunctional_VirtualScrollSettlesEstimatedHeightsBeforePaint(t *te
 
 func TestBrowserPerformance_VirtualScrollLargeRowYields(t *testing.T) {
 	report := runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';messages.style.overflowAnchor='none';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';messages.style.overflowAnchor='none';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  const paragraph='A large **message** with *formatting*, a [reference](https://example.com), and a little more prose.\n\n';
  const huge=paragraph.repeat(Math.ceil(1048576/paragraph.length));
@@ -1003,7 +1003,7 @@ func TestBrowserPerformance_VirtualScrollLargeRowYields(t *testing.T) {
 
 func TestBrowserFunctional_VirtualScrollKeepsLargePreparationPending(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='80px';messages.style.overflowAnchor='none';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.height='80px';messages.style.overflowAnchor='none';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  const models=Array.from({length:10},(_,index)=>({kind:'using',segments:[{resultOutput:index===0?'x'.repeat(65536):''}]}));
  let calls=0,finish;
@@ -1029,7 +1029,7 @@ func TestBrowserFunctional_VirtualScrollKeepsLargePreparationPending(t *testing.
 
 func TestBrowserFunctional_VirtualScrollLargeThinkingGroupYields(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  let source='';
  for(let i=0;i<80;i++)source+='[Thinking]\nThought '+i+' '+('**reasoning** text. '.repeat(100))+'\n[/Thinking]\n';
@@ -1052,7 +1052,7 @@ func TestBrowserFunctional_VirtualScrollLargeThinkingGroupYields(t *testing.T) {
 
 func TestBrowserFunctional_HiddenVirtualAnchorResizesAndExpires(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='80px';messages.style.width='640px';messages.style.overflowAnchor='none';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.height='80px';messages.style.width='640px';messages.style.overflowAnchor='none';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  const models=Array.from({length:10},(_,index)=>({kind:'using',segments:[{resultOutput:index===0?'x'.repeat(65536):''}]}));
  let finish;
@@ -1091,7 +1091,7 @@ func TestBrowserFunctional_HiddenVirtualAnchorResizesAndExpires(t *testing.T) {
 
 func TestBrowserFunctional_VirtualScrollDoesNotRepinSettledBottom(t *testing.T) {
 	report := runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  const tracker=window.resolveScrollTracker('scrollTracker_task-thread-messages',messages);
  let source='';
@@ -1140,7 +1140,7 @@ func TestBrowserFunctional_VirtualScrollDoesNotRepinSettledBottom(t *testing.T) 
 
 func TestBrowserFunctional_VirtualScrollDoesNotSnapNearBottom(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  const tracker=window.resolveScrollTracker('scrollTracker_task-thread-messages',messages);
  let source='';for(let i=0;i<80;i++)source+='Message '+i+'\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
@@ -1220,7 +1220,7 @@ func TestBrowserFunctional_TranscriptDisablesBoundaryBounce(t *testing.T) {
 	runIncrementalChatBrowser(t, `
  const messages=document.getElementById('messages');
  for(const id of ['chat-messages','task-thread-messages']){
-  messages.id=id;
+  messages.id=id;messages.setAttribute('data-chat-transcript','');
   assert(getComputedStyle(messages).overscrollBehaviorY==='none',id+' allows native boundary bounce');
   stream.innerHTML='<div style="height:3000px">history</div>';
   messages.scrollTop=messages.scrollHeight;await paint();
@@ -1244,7 +1244,7 @@ func TestBrowserFunctional_TranscriptDisablesBoundaryBounce(t *testing.T) {
 
 func TestBrowserFunctional_VirtualSmallScrollBatchesAnchorCorrections(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  const tracker=window.resolveScrollTracker('scrollTracker_task-thread-messages',messages);
  let source='';
@@ -1271,7 +1271,7 @@ func TestBrowserFunctional_VirtualSmallScrollBatchesAnchorCorrections(t *testing
 
 func TestBrowserFunctional_ColdThreadPreparesFirstUpwardScroll(t *testing.T) {
 	runIncrementalChatBrowser(t, `
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  const tracker=window.resolveScrollTracker('scrollTracker_task-thread-messages',messages);
  let source='';

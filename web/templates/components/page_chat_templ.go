@@ -50,14 +50,14 @@ func PageChatMessages(v PageChatView) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"page-chat-messages\" class=\"flex-1 min-h-0 overflow-y-auto p-3 space-y-4\" data-project-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"page-chat-messages\" data-chat-transcript data-transcript-hydrating=\"true\" class=\"flex-1 min-h-0 overflow-y-auto p-3 space-y-4\" data-project-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templruntime.NewAttributeExpression(v.ProjectID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/page_chat.templ`, Line: 29, Col: 112}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/page_chat.templ`, Line: 29, Col: 166}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {

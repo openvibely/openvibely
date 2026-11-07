@@ -341,7 +341,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
 		<div class="relative flex-1 min-h-0 min-w-0">
 			<div
-				id="task-thread-messages"
+				id="task-thread-messages" data-chat-transcript
 				class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0"
 				if preservedExecIDs == nil {
 					data-transcript-hydrating="true"
@@ -463,7 +463,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					var tracker = window._taskThreadPageTracker;
 					var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;
 					if (!window.openVibelyThreadController) return Promise.resolve(renderPromise);
-					return window.openVibelyThreadController.restore({
+					return window.openVibelyThreadController.hydrate({
 						messages: messages,
 						tracker: tracker,
 						getTracker: function() { return window._taskThreadPageTracker; },
@@ -625,7 +625,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					var cleanPromise = null;
 					var resumeRenderPromises = [];
 					if (chatMessages) {
-						cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;
+						cleanPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 							var taskId = _taskThreadTaskId();
@@ -718,7 +718,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 								window._taskThreadPageTracker.resetOnUserSend();
 							}
 						}
-						var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
+						var renderPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
@@ -837,7 +837,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 										_saveTaskThreadScrollState();
 									}
 								}
-									var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(target) : Promise.resolve([]);
+									var renderPromise = window.openVibelyThreadController.prepareTranscript(target);
 									if (window.initChatEarlierLoader) window.initChatEarlierLoader(target);
 									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(target);
 									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
@@ -860,7 +860,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 											_saveTaskThreadScrollState();
 										}
 									}
-										var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
+										var renderPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);
 										if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 										if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 										if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
@@ -882,7 +882,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 										_saveTaskThreadScrollState();
 									}
 								}
-									var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
+									var renderPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);
 									if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);

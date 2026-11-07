@@ -6,7 +6,7 @@
     let nextID = 0;
     let suspended = false;
     const rowSelector = '.stream-activity, .chat-markdown, .stream-tool, details.stream-thinking, .chat-bubble-user-msg';
-    const messagesSelector = '#chat-messages, #task-thread-messages';
+    const messagesSelector = '[data-chat-transcript]';
     const element = row => row.node?.isConnected ? row.node : row.placeholder;
     const hasVisibleArea = messages => messages.isConnected && messages.clientWidth > 0 &&
         messages.clientHeight > 0 && messages.getClientRects().length > 0;
