@@ -33,8 +33,8 @@ These are specific tested contracts, not a claim that every future feature has b
 
 ### Remaining work and product limits
 
-- Phase 3: process/filesystem sandboxing. Project roles do not isolate agent processes, worktrees, the database or secrets; production private-project creation remains disabled.
-- Phase 4: shared/private conversations, collaboration features and an org-wide audit view.
+- Phase 3: process/filesystem sandboxing and an org-wide audit view. Project roles do not isolate agent processes, worktrees, the database or secrets; production private-project creation remains disabled.
+- Phase 4: shared/private conversations and collaboration features.
 - Phase 5: user/org credential ownership, channel-specific tool restrictions and verified email sender identity.
 - Phase 6: hosted multi-user onboarding, organization isolation and billing.
 - Internal/embedded calls without principals retain their existing compatibility paths; the proposed explicit system-context migration was not completed.
@@ -700,7 +700,7 @@ context; the Phase 2 checklist records current authorization coverage.
 See [Current status](#current-status) for delivered behavior and remaining limits,
 and the [verification checklist](#authorization-verification-checklist) for evidence.
 
-### Phase 3: Kernel sandbox (3–4 weeks)
+### Phase 3: Kernel sandbox and org-wide audit (sandbox estimate: 3–4 weeks)
 - Start with the **one-day Landlock test** on a hosted server (§3.5). If Landlock is unavailable there, re-plan around container-per-run.
 - **Landlock launcher**: `openvibely --sandbox-exec`; each bash call is locked to its project's folders, and scripts and programs it starts inherit the lock.
 - **Git through the lock**: route the ~93 server git calls through `runGitLocked` (§3.6), plus a test that fails on direct `exec.Command("git", ...)`.
@@ -712,11 +712,12 @@ and the [verification checklist](#authorization-verification-checklist) for evid
 - Sandbox escape test suite in CI on Linux.
 - Milestone: an agent on project X can't read or edit project Y, the DB, or secrets using bash, a script, a program it wrote, a git hook, the file tools, or the localhost API.
 
+- Org-wide audit view for org admins/owners, combining existing audit records across projects. Deferred from Phase 2; audit recording and project-level audit access are already implemented.
+
 ### Phase 4: Shared chat (3–4 weeks)
 - `chat_conversations` + participants. Migrate the default per-project thread. Conversation list UI. Private vs project-visible conversations; share a conversation.
 - Per-conversation FIFO queue, compaction checkpoints, and context usage. Author-labeled history in model prompts. Exclude private conversations from memory extraction.
 - Per-user alert read state, `@mentions`, and notification subscriptions on the existing WebSocket. Derive the user ID from the authenticated principal; clients cannot subscribe as another user.
-- Org-wide audit view for org admins/owners, combining existing audit records across projects. Deferred from Phase 2; audit recording and project-level audit access are already implemented.
 - `tasks.version` optimistic concurrency: a second concurrent save is rejected instead of overwriting. `actor_user_id` on live events.
 - Milestone: two users in the same conversation see each other's messages live, with attribution. Private conversations are not visible to others.
 
@@ -766,7 +767,7 @@ Every surface below now has production wiring and tests; the last column lists k
 | Slack channel | Global workspace/user mapping, with self-only member assignments or org-admin assignments; task/input/execution/schedule/automation provenance; runtime tools recheck the sender binding and current role per call (`TestSlackRuntimeRechecksSenderBinding`, `TestSlackRunBindingRevocation`, `TestSlackAutomationBindingRevocationAtWorkerBoundaries`) | None known |
 | X channel | Installer and sender identity mappings; polling cancellation and receipt transaction checks; restart identity and per-call runtime role checks (`TestXRequestAndRestartIdentity`, `TestXPollRevocationDuringProviderWork`, `TestXIngressDoesNotInheritInstallerIdentity`) | None known |
 | Telegram/Discord/email channels | Global sender-to-OV-user mappings in the existing channel modal; members manage only self-mappings, org admins/owners can assign active org users; transactional before/after audit. Telegram numeric IDs and queued-reply identity survive recovery; Discord retains its provenance checks. Migration 224 deduplicates rows and flags legacy entries for review. Project permissions are checked at admission and actions. Member channel pages omit shared credentials in both full and fragment responses (`TestMemberChannelsOmitsCredentials`); org admins retain credential access. Tests: `TestGlobalChannelSenderAssignmentPermissions`, `TestGlobalSenderMappingHandlersLimitAssignments`, `TestTelegramMappedIngressPersistsSenderIdentity`, `TestTelegramQueuedInputPreservesSenderAcrossRecovery` | Authenticated email execution remains blocked: an address mapping is not spoof-resistant sender verification. Auth-off retains legacy allowlists |
-| Audit | Atomic audit records for policy, membership, ownership, project settings/deletion, run-as bindings (task, schedule, goal, webhook, execution, automation), channel bindings/allowlists/credentials (key names only, never values), GitHub reviewer/inbox/feedback, swarm transitions, steering, calendar, updates and usage reset. Audit failures roll back the mutation (tests per store). Membership entries record JSON before/after explicit roles, including org-removal cleanup. Audit reads require maintainer access | Org-wide audit presentation is deferred to Phase 4 |
+| Audit | Atomic audit records for policy, membership, ownership, project settings/deletion, run-as bindings (task, schedule, goal, webhook, execution, automation), channel bindings/allowlists/credentials (key names only, never values), GitHub reviewer/inbox/feedback, swarm transitions, steering, calendar, updates and usage reset. Audit failures roll back the mutation (tests per store). Membership entries record JSON before/after explicit roles, including org-removal cleanup. Audit reads require maintainer access | Org-wide audit presentation is scheduled for Phase 3 |
 | Compatibility and isolation | Private-project creation is refused by the service and not offered in the UI (handler and browser tests); auth-off owner compatibility retained; migration preserves org-wide editor access | Phase 3 process/filesystem sandboxing is required before private projects can be offered; these tables are application authorization only |
 
 ### Scope and limitations
