@@ -580,6 +580,12 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	prev := m.procs[in.ID]
+	m.mu.Unlock()
+	if prev != nil {
+		prev.proc.CloseNotifications()
+	}
 	instanceID, projectID := in.ID, in.ProjectID
 	packageID, approvedHash, installPath := pkg.ID, pkg.ContentHash, pkg.InstallPath
 	proc := NewProcess(ProcessSpec{

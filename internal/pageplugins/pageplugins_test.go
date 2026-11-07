@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -267,5 +268,43 @@ func TestProcessPreparationFailureDoesNotLaunchOrReuseSnapshot(t *testing.T) {
 	raw, err := p.Call(t.Context(), "operation/invoke", map[string]any{"operation": "echo"})
 	if err != nil || !strings.Contains(string(raw), `"revision":3`) {
 		t.Fatalf("recovery reused snapshot: %s %v", raw, err)
+	}
+}
+
+func TestStoppedProcessCannotDeliverLateNotifications(t *testing.T) {
+	var mu sync.Mutex
+	var applied []string
+	entered := make(chan struct{}, 4)
+	release := make(chan struct{})
+	spec := helperSpec(t)
+	spec.OnNotify = func(method string, _ json.RawMessage) {
+		entered <- struct{}{}
+		<-release
+		mu.Lock()
+		applied = append(applied, method)
+		mu.Unlock()
+	}
+	p := NewProcess(spec)
+	ctx := context.Background()
+	if err := p.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = p.Call(ctx, "operation/invoke", map[string]any{"operation": "notify"}) }()
+	<-entered
+
+	stopped := make(chan struct{})
+	go func() { p.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while a notification handler was still writing")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	<-stopped
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(applied) != 1 || applied[0] != "state/set" {
+		t.Fatalf("notifications after stop were delivered: %v", applied)
 	}
 }

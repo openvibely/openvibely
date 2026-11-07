@@ -104,6 +104,9 @@ type Process struct {
 	restarts  []time.Time
 	stderr    []string
 	startedAt time.Time
+
+	notifyMu     sync.Mutex
+	notifyClosed bool
 }
 
 func NewProcess(spec ProcessSpec) *Process {
@@ -218,7 +221,11 @@ func (p *Process) readStdout(cmd *exec.Cmd, r io.Reader) {
 			continue
 		}
 		if msg.Method != "" && msg.ID == nil && p.spec.OnNotify != nil {
-			p.spec.OnNotify(msg.Method, msg.Params)
+			p.notifyMu.Lock()
+			if !p.notifyClosed {
+				p.spec.OnNotify(msg.Method, msg.Params)
+			}
+			p.notifyMu.Unlock()
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -446,8 +453,17 @@ func (p *Process) Status() string {
 	}
 }
 
+// CloseNotifications waits for any running notification handler and drops all
+// later notifications, so a retired backend cannot write after its successor starts.
+func (p *Process) CloseNotifications() {
+	p.notifyMu.Lock()
+	p.notifyClosed = true
+	p.notifyMu.Unlock()
+}
+
 // Stop requests a clean shutdown, then kills after a grace period. Idempotent.
 func (p *Process) Stop() {
+	p.CloseNotifications()
 	p.mu.Lock()
 	p.stopped = true
 	exited, cmd, stdin := p.exited, p.cmd, p.stdin
@@ -488,6 +504,7 @@ func (p *Process) Stop() {
 // Abort revokes a process without writing to its protocol pipe. This allows
 // disabling an instance to interrupt a blocked write or startup handshake.
 func (p *Process) Abort() {
+	p.CloseNotifications()
 	p.mu.Lock()
 	p.stopped = true
 	p.killLocked()
