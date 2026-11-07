@@ -47,6 +47,22 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 					if result := browser.evaluate(`permissionAlerts.length===0 && document.getElementById('skills-container').innerHTML===skillBefore && permissionToasts.every(t=>t.message==='Editor access required') ? 'ok' : 'failed'`); result != "ok" {
 						t.Fatal(result)
 					}
+					result := browser.evaluateAwait(`(async()=>{
+ const form=document.getElementById('skill_form'),modal=document.getElementById('skill_modal');modal.showModal();
+ document.getElementById('skill_handle').value='example';document.getElementById('skill_body').value='Keep draft';
+ for(const mode of ['create','edit']){
+ form.dataset.mode=mode;form.dataset.originalHandle='example';submitSkillForm({preventDefault(){}});
+ for(let i=0;i<100&&document.getElementById('skill_submit_btn').disabled;i++)await new Promise(r=>setTimeout(r,10));
+ if(!modal.open||document.getElementById('skill_error').textContent||document.getElementById('skill_body').value!=='Keep draft')return 'skill form changed';
+ }
+ modal.close();const importer=document.getElementById('skill_import_modal');importer.showModal();
+ const files=new DataTransfer();files.items.add(new File(['sample'],'SKILL.md'));document.getElementById('skill_import_files').files=files.files;
+ submitSkillImportForm({preventDefault(){}});
+ for(let i=0;i<100&&document.getElementById('skill_import_submit_btn').disabled;i++)await new Promise(r=>setTimeout(r,10));
+ return permissionToasts.length===5&&importer.open&&!document.getElementById('skill_import_error').textContent&&document.getElementById('skill_import_files').files.length===1?'ok':'import changed';})()`)
+					if result != "ok" {
+						t.Fatal(result)
+					}
 					return
 				}
 				result := browser.evaluate(`(()=>{
@@ -68,6 +84,18 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  return 'ok';})()`)
 				if result != "ok" {
 					t.Fatal(result)
+				}
+				if kind == "models" {
+					result := browser.evaluateAwait(`(async()=>{
+ const originalFetch=window.fetch;window.fetch=async()=>new Response(JSON.stringify({message:'Admin access required'}),{status:403});permissionToasts.length=0;
+ const button=document.getElementById('model_oauth_connect_action');button.dataset.desktop='true';
+ document.getElementById('new_model_modal').showModal();document.getElementById('model_name').value='Keep model';
+ await connectModelOAuth(button);await startCustomModelOAuth(button);
+ const ok=permissionToasts.length===2&&permissionToasts.every(t=>t.message==='Admin access required')&&!document.getElementById('model_oauth_connection_status').textContent&&!document.getElementById('model_oauth_setup_status').textContent&&document.getElementById('model_form_error').classList.contains('hidden')&&document.getElementById('model_name').value==='Keep model'&&!button.disabled;
+ window.fetch=originalFetch;return ok?'ok':'OAuth changed form';})()`)
+					if result != "ok" {
+						t.Fatal(result)
+					}
 				}
 				if kind == "agents" {
 					result := browser.evaluateAwait(`(async()=>{

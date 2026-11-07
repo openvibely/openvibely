@@ -737,12 +737,14 @@ var action = enable ? 'Enable' : 'Disable';
 					method: 'POST',
 					headers: {'HX-Request': 'true'},
 					body: data
-				}).then(function(resp) {
+				}).then(async function(resp) {
+					if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 					if (!resp.ok) {
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to import skill package.'); });
 					}
 					return resp.text();
 				}).then(function(html) {
+					if (html === null) return null;
 					replaceSkillsContainer(html);
 					var modal = document.getElementById('skill_import_modal');
 					if (modal && modal.open) modal.close();
@@ -785,12 +787,14 @@ var action = enable ? 'Enable' : 'Disable';
 					method: method,
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify(payload)
-				}).then(function(resp) {
+				}).then(async function(resp) {
+					if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 					if (!resp.ok) {
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to save skill.'); });
 					}
 					return resp.text();
 				}).then(function(html) {
+					if (html === null) return null;
 					var alwaysUse = document.getElementById('skill_always_use').checked;
 					var originalAlwaysUse = form.dataset.originalAlwaysUse === 'true';
 					if (alwaysUse === originalAlwaysUse) return html;
@@ -800,13 +804,15 @@ var action = enable ? 'Enable' : 'Disable';
 						method: 'POST',
 						headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 						body: JSON.stringify({always_use: alwaysUse, scope: auScope})
-					}).then(function(resp2) {
+					}).then(async function(resp2) {
+						if (await window.openVibelyPermissionErrors?.fetch(resp2)) return null;
 						if (!resp2.ok) {
 							return resp2.text().then(function(t) { throw new Error(t || 'Saved but failed to update always use setting.'); });
 						}
 						return resp2.text();
 					});
 				}).then(function(html) {
+					if (html === null) return null;
 					replaceSkillsContainer(html);
 					var modal = document.getElementById('skill_modal');
 					if (modal && modal.open) modal.close();

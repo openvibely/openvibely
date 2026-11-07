@@ -1621,6 +1621,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 							status.textContent = 'Opening sign-in…';
 							try {
 								var response = await fetch(modelMutationURL('/models/oauth/setup'), {method:'POST',body:new FormData(document.getElementById('model_form'))});
+								if (await window.openVibelyPermissionErrors?.fetch(response)) { if(popup)popup.close();status.textContent='';return; }
 								var data = await response.json();
 								if (!response.ok) throw Error(data.message || data.error || 'Could not start sign-in.');
 								if (generation !== modelOAuthSetupGeneration) {
@@ -1639,6 +1640,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 									if (generation !== modelOAuthSetupGeneration || !modal || !modal.open) return;
 									try {
 										var result = await fetch('/models/oauth/setup/status', {headers:{'X-Model-OAuth-Setup':data.session_id}});
+										if (await window.openVibelyPermissionErrors?.fetch(result)) { if(generation===modelOAuthSetupGeneration){sessionInput.value='';status.textContent='';}return; }
 										var state = await result.json();
 										if (generation !== modelOAuthSetupGeneration) return;
 										if (!result.ok) throw Error(state.message || state.error || 'Sign-in expired. Connect OAuth again.');
@@ -2766,6 +2768,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                     updateModelOAuthBadge('Connecting');
                     async function request(url, options) {
                         var response = await fetch(modelMutationURL(url), options);
+                        if (await window.openVibelyPermissionErrors?.fetch(response)) { var error = new Error('Permission denied');error.toastOnly=true;throw error; }
                         var data = await response.json();
                         if (!response.ok) throw Error(data.message || data.error || 'Could not connect OAuth.');
                         return data;
@@ -2802,8 +2805,8 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                         if (popup) popup.close();
                         if (generation === modelOAuthSetupGeneration) {
                             updateModelOAuthBadge();
-                            status.textContent = error.message;
-                            showModelFormError(error.message);
+                            status.textContent = error.toastOnly ? '' : error.message;
+                            if (!error.toastOnly) showModelFormError(error.message);
                         }
                     } finally {
                         if (popup && !popupNavigated) popup.close();

@@ -143,6 +143,14 @@ func TestBrowserFunctional_ProjectRepoRecovery(t *testing.T) {
 		if result != "ok" {
 			t.Fatal(result)
 		}
+		result = b.evaluateAwait(`(async()=>{
+ const feedback=document.getElementById('edit-project-picker-feedback');const before=feedback.outerHTML;
+ const button=document.getElementById('edit-project-browse-btn');button.click();
+ for(let i=0;i<100&&button.disabled;i++)await new Promise(r=>setTimeout(r,10));
+ return deniedRecoveryToasts.length===2&&feedback.outerHTML===before&&!button.disabled?'ok':'folder denial changed UI';})()`)
+		if result != "ok" {
+			t.Fatal(result)
+		}
 		b.evaluate(`window.recoveryRequests=[]; window.fetch=(url,options)=>{recoveryRequests.push([url,options.method]);return new Promise(resolve=>window.finishRecovery=resolve)};document.querySelector('[data-recover-repo]').click();document.querySelector('[data-recover-repo]').click();'ok'`)
 		b.waitFor("single in-flight request", `String(recoveryRequests.length===1 && recoveryRequests[0][0]==='/projects/recover-test/reclone' && recoveryRequests[0][1]==='POST' && document.querySelector('[data-recover-repo]').disabled)`, "true")
 		b.evaluate(`finishRecovery({ok:false,json:async()=>({error:'Check GitHub access'})});'ok'`)

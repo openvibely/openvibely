@@ -75,10 +75,15 @@
   const submit=document.getElementById('skill_import_submit_btn');
   const root=document.getElementById('skill_import_dependency_details');
   const file=Array.from(input.files || []).find(file => file.name === 'SKILL.md');
+  const previousPreview={disabled:submit.disabled,hidden:root.hidden,nodes:Array.from(root.childNodes)};
   submit.disabled=true;root.hidden=false;root.textContent='Reading dependency declarations…';
   try {
    if (!file) throw new Error('Select a package containing SKILL.md.');
    const response=await fetch('/skills/dependency-preview',{method:'POST',headers:{'Content-Type':'text/plain'},body:await file.text()});
+   if (await window.openVibelyPermissionErrors?.fetch(response)) {
+    if(generation===importGeneration && root.isConnected){root.replaceChildren(...previousPreview.nodes);root.hidden=previousPreview.hidden;submit.disabled=previousPreview.disabled;}
+    return;
+   }
    if (!response.ok) throw new Error(await response.text());
    const manifest=await response.json();
    if (generation!==importGeneration || !root.isConnected) return;

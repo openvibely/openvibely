@@ -343,6 +343,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 							'HX-Request': 'true'
 						}
 					});
+					if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 					var payload = {};
 					try {
 						payload = await response.json();
@@ -353,10 +354,6 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					if (response.status === 501) {
 						var unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';
 						setPickerFeedback(unavailableMessage, true);
-						return;
-					}
-					if (response.status === 403) {
-						setPickerFeedback('Local repository path mode is disabled in this environment.', true);
 						return;
 					}
 					if (!response.ok) {
@@ -602,6 +599,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 							'HX-Request': 'true'
 						}
 					});
+					if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 					var payload = {};
 					try {
 						payload = await response.json();
@@ -612,10 +610,6 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					if (response.status === 501) {
 						var unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';
 						setPickerFeedback(unavailableMessage, true);
-						return;
-					}
-					if (response.status === 403) {
-						setPickerFeedback('Local repository path mode is disabled in this environment.', true);
 						return;
 					}
 					if (!response.ok) {
