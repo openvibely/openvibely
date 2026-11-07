@@ -4187,7 +4187,6 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
             window.syncOpenDropdownMenus = function() {
                 document.querySelectorAll('.dropdown[data-menu-open="true"], .dropdown.dropdown-open, [data-kanban-menu-open="true"]').forEach(dropdown => dropdownController(dropdown).sync());
             };
-            function closeGenericDropdown(dropdown) { dropdownController(dropdown)?.close(false); }
             function dropdownTrigger(target) {
                 const dropdown = target?.closest?.('.dropdown');
                 const trigger = dropdown?.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
@@ -5171,7 +5170,6 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				let savedScrollPositions = new Map();
 				let savedKanbanInteraction = null;
 				let openKanbanMenuKey = '';
-				let suppressKanbanMenuFocusOpen = false;
 
 				function kanbanMenuItemKey(element) {
 					if (!element) return '';
@@ -5246,9 +5244,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						if (restoreTriggerFocus && dropdown) {
 							const trigger = dropdown.__openVibelyMenuReturnFocus || dropdown.querySelector('[data-kanban-menu-trigger]');
 							if (trigger && document.contains(trigger)) {
-								suppressKanbanMenuFocusOpen = true;
 								trigger.focus({preventScroll: true});
-								suppressKanbanMenuFocusOpen = false;
 								setKanbanMenuExpanded(dropdown, false);
 							}
 						}
@@ -5303,9 +5299,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						openKanbanMenuKey = menuKey;
 						board.setAttribute('data-open-kanban-menu-key', menuKey);
 						setKanbanMenuExpanded(dropdown, true);
-						suppressKanbanMenuFocusOpen = true;
 						focusTarget.focus({preventScroll: true});
-						suppressKanbanMenuFocusOpen = false;
 						positionDropdownForViewport(trigger);
 					}
 				}
@@ -5502,9 +5496,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							if (openDropdown && (!document.activeElement || !liveBoard.contains(document.activeElement))) {
 								const fallbackTrigger = openDropdown.querySelector('[data-kanban-menu-trigger]');
 								if (fallbackTrigger) {
-									suppressKanbanMenuFocusOpen = true;
 									fallbackTrigger.focus({preventScroll: true});
-									suppressKanbanMenuFocusOpen = false;
 									setKanbanMenuExpanded(openDropdown, true);
 								}
 							}
