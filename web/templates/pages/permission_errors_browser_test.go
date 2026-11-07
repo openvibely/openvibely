@@ -9,15 +9,24 @@ import (
 	"testing"
 
 	"github.com/a-h/templ"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	for _, kind := range []string{"organization", "agents", "models", "skills", "webhooks", "personality"} {
+	for _, kind := range []string{"organization", "agents", "models", "skills", "webhooks", "personality", "reviews", "yaml"} {
 		t.Run(kind, func(t *testing.T) {
 			var page bytes.Buffer
 			var component templ.Component = AgentsContent(nil, nil)
+			if kind == "reviews" {
+				component = components.DiffViewer("diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n", "task", nil, "inline")
+			}
+			if kind == "yaml" {
+				component = AutomationBuilderContent(models.AutomationBuilderPage{Source: "blank", YAML: "name: Keep draft", Result: models.AutomationDraftResult{Candidate: models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Test", AutomationType: "custom", AdapterKey: "custom"}}}, "project")
+			}
+
 			if kind == "personality" {
 				component = AppSettingsContent("", "project", nil)
 			}
@@ -45,6 +54,35 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "permission-"+kind, func(browser *composerFocusCDP) {
 				browser.waitFor("permission helper", `typeof window.openVibelyPermissionErrors`, "object")
+				if kind == "reviews" {
+					result := browser.evaluateAwait(`(async()=>{
+ window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
+ const row=document.createElement('tr');row.className='review-comment-form';row.dataset.commentId='comment';row.innerHTML='<td><textarea>Keep draft</textarea></td>';document.body.append(row);const before=row.outerHTML;
+ updateReviewComment(row);for(let i=0;i<100&&permissionToasts.length<1;i++)await new Promise(r=>setTimeout(r,10));
+ deleteReviewComment({stopPropagation(){},target:row});for(let i=0;i<100&&permissionToasts.length<2;i++)await new Promise(r=>setTimeout(r,10));
+ submitReviewComment('task','file.go','1','new','Keep draft',row);for(let i=0;i<100&&permissionToasts.length<3;i++)await new Promise(r=>setTimeout(r,10));
+ await new Promise(r=>setTimeout(r,20));
+ return permissionToasts.length===3&&permissionToasts.every(t=>t.message==='Editor access required')&&row.isConnected&&row.outerHTML===before?'ok':'review changed';})()`)
+					if result != "ok" {
+						t.Fatal(result)
+					}
+					return
+				}
+				if kind == "yaml" {
+					result := browser.evaluateAwait(`(async()=>{
+ window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
+ const editor=document.querySelector('[data-automation-yaml-editor]'),diagnostic=document.querySelector('[data-automation-yaml-diagnostic]');
+ editor.value='name: Keep draft';const before=diagnostic.outerHTML;
+ editor.dispatchEvent(new Event('input',{bubbles:true}));
+ for(let i=0;i<100&&permissionToasts.length<1;i++)await new Promise(r=>setTimeout(r,10));
+ await new Promise(r=>setTimeout(r,20));
+ return permissionToasts.length===1&&permissionToasts[0].message==='Editor access required'&&diagnostic.outerHTML===before&&editor.value==='name: Keep draft'?'ok':'YAML changed';})()`)
+					if result != "ok" {
+						t.Fatal(result)
+					}
+					return
+				}
+
 				if kind == "personality" {
 					result := browser.evaluateAwait(`(async()=>{
  window.fetch=async()=>new Response(JSON.stringify({message:'Admin access required'}),{status:403});
@@ -163,6 +201,8 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  activeAgentID='denied';const hooks=document.getElementById('lifecycle_hooks_list');hooks.textContent='Keep hooks';const status=document.getElementById('lifecycle_hooks_status'),previous=status.outerHTML;
  await loadLifecycleHooksForAgent('denied',agentModalGeneration);
  if(permissionToasts.length!==7||hooks.textContent!=='Keep hooks'||status.outerHTML!==previous)return 'hooks changed';
+ const skills=document.getElementById('agent_skills_list');skills.textContent='Keep skills';await loadAgentSkillsForAgent('denied');
+ if(permissionToasts.length!==8||skills.textContent!=='Keep skills')return 'skills list changed';
  window.fetch=originalFetch;return 'ok';})()`)
 					if result != "ok" {
 						t.Fatal(result)

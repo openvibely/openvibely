@@ -1847,15 +1847,15 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					async function loadAgentSkillsForAgent(agentID) {
 					const list = document.getElementById('agent_skills_list');
 						if (!list) return;
-							agentOwnedSkillsState = { routed_skills: [], can_manage: false, protected: false };
-						renderAgentOwnedSkills();
 						if (!agentID) {
+                            agentOwnedSkillsState = { routed_skills: [], can_manage: false, protected: false };
+                            renderAgentOwnedSkills();
 							list.innerHTML = '<p class="text-sm opacity-50">Save this agent before creating skills.</p>';
 							return;
 						}
-						list.innerHTML = '<p class="text-sm opacity-50">Loading routed skills...</p>';
 						try {
 							const response = await fetch(agentSkillAPIURL('/agents/' + encodeURIComponent(agentID) + '/skills'), { headers: { 'Accept': 'application/json' } });
+							if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not load skills'));
 							agentOwnedSkillsState = await response.json();
 							renderAgentOwnedSkills();
