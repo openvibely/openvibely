@@ -164,6 +164,19 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("saved details after reload", `String(!window.beforeGutterReload && Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
 		assertTabGutters()
 		assertFooter()
+		result := b.evaluateAwait(`(async()=>{
+ const originalFetch=window.fetch,originalToast=window.showToast;const toasts=[];
+ window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});window.showToast=m=>toasts.push(m);
+ const toggle=document.querySelector('#task-auto-merge-panel input[name="auto_merge"]'),checked=toggle.checked;toggle.click();
+ for(let i=0;i<100&&toggle.disabled;i++)await new Promise(r=>setTimeout(r,10));
+ if(toggle.checked!==checked||document.querySelector('[data-auto-merge-error]').textContent)return 'toggle changed';
+ document.querySelector('[data-detail-editor="prompt"]').click();const dialog=document.getElementById('task-detail-text-editor');dialog.querySelector('textarea').value='Keep draft';dialog.querySelector('[type="submit"]').click();
+ for(let i=0;i<100&&dialog.querySelector('[type="submit"]').disabled;i++)await new Promise(r=>setTimeout(r,10));
+ const ok=toasts.length===2&&toasts.every(m=>m==='Editor access required')&&dialog.open&&dialog.querySelector('textarea').value==='Keep draft'&&!dialog.querySelector('[data-editor-error]').textContent;
+ dialog.close();window.fetch=originalFetch;window.showToast=originalToast;return ok?'ok':'editor changed';})()`)
+		if result != "ok" {
+			t.Fatal(result)
+		}
 		b.click(`#task-auto-merge-panel input[name="auto_merge"]`)
 		b.waitFor("auto merge saved and directly visible", `String(document.querySelector('#task-auto-merge-panel').tagName === 'SECTION' && document.querySelector('#task-auto-merge-panel input[name="auto_merge"]').hasAttribute("checked") && !document.querySelector('#task-auto-merge-panel input').disabled)`, "true")
 		if !autoMerge.Load() {

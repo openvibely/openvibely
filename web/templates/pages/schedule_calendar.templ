@@ -253,6 +253,7 @@ templ ScheduleCalendarScript() {
    root.querySelectorAll('[data-calendar-action]').forEach(function(button) { button.disabled = true; });
    try {
     var response = await fetch('/schedule/calendar-action?project_id=' + encodeURIComponent(project), {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(request)});
+    if (await window.openVibelyPermissionErrors?.fetch(response)) return;
     if (!response.ok) { var error = await response.json().catch(function() { return {}; }); throw new Error(error.message || 'Could not update schedules'); }
     var result = await response.json();
     var inverse = result.undo;

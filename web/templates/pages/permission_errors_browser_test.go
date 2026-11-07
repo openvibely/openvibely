@@ -14,10 +14,13 @@ import (
 
 func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	for _, kind := range []string{"organization", "agents", "models", "skills"} {
+	for _, kind := range []string{"organization", "agents", "models", "skills", "webhooks"} {
 		t.Run(kind, func(t *testing.T) {
 			var page bytes.Buffer
 			var component templ.Component = AgentsContent(nil, nil)
+			if kind == "webhooks" {
+				component = templ.Raw(renderSettingsContentForWebhookTest(t, nil))
+			}
 			if kind == "skills" {
 				component = SkillsContent(nil, true)
 			}
@@ -39,6 +42,17 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "permission-"+kind, func(browser *composerFocusCDP) {
 				browser.waitFor("permission helper", `typeof window.openVibelyPermissionErrors`, "object")
+				if kind == "webhooks" {
+					result := browser.evaluateAwait(`(async()=>{
+ window.fetch=async()=>new Response(JSON.stringify({message:'Maintainer access required'}),{status:403});
+ const form=document.getElementById('webhook_form'),modal=document.getElementById('webhook_modal');document.getElementById('webhook_name').value='Keep webhook';const before=form.innerHTML;
+ openWebhookEditModal('restricted');for(let i=0;i<100&&permissionToasts.length===0;i++)await new Promise(r=>setTimeout(r,10));
+ return permissionToasts.length===1&&permissionToasts[0].message==='Maintainer access required'&&!modal.open&&form.innerHTML===before&&document.getElementById('webhook_name').value==='Keep webhook'?'ok':'webhook UI changed';})()`)
+					if result != "ok" {
+						t.Fatal(result)
+					}
+					return
+				}
 				if kind == "skills" {
 					browser.evaluate(`window.permissionAlerts=[];window.alert=m=>permissionAlerts.push(m);window.openVibelyConfirm=async()=>true;window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});window.skillBefore=document.getElementById('skills-container').innerHTML;window.skillButton=document.createElement('button');skillButton.dataset.skillHandle='example';skillButton.dataset.skillScope='project';setSkillEnabled(skillButton,false);'started';`)
 					browser.waitFor("enable denial toast", `String(permissionToasts.length)`, "1")
