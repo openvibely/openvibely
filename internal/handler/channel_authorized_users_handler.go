@@ -2,12 +2,13 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
+
+	"github.com/openvibely/openvibely/internal/service/authz"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
-	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 type authorizedUserCRUD[T any] struct {
@@ -77,9 +78,6 @@ func (crud authorizedUserCRUD[T]) listUsers(c echo.Context, projectID string) er
 			return err
 		}
 	}
-	if projectID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
-	}
 	return crud.reload(c, projectID)
 }
 
@@ -89,12 +87,12 @@ func (crud authorizedUserCRUD[T]) createUser(c echo.Context, projectID string, c
 			return err
 		}
 	}
-	if projectID == "" || projectID == models.AllProjectsID {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
-	}
 	if err := create(c.Request().Context()); err != nil {
 		if httpErr, ok := err.(*echo.HTTPError); ok {
 			return httpErr
+		}
+		if errors.Is(err, authz.ErrDenied) {
+			return projectAccessHTTPError(err)
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to add authorized user: "+err.Error())
 	}
@@ -113,27 +111,24 @@ func (crud authorizedUserCRUD[T]) deleteUser(
 			return err
 		}
 	}
-	if projectID == "" || projectID == models.AllProjectsID {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
-	}
-	ownerProjectID, found, err := loadProjectID(c.Request().Context(), id)
+	_, found, err := loadProjectID(c.Request().Context(), id)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to find user")
 	}
-	if !found || ownerProjectID != projectID {
+	if !found {
 		return echo.NewHTTPError(http.StatusNotFound, "User not found")
 	}
 	if err := deleteUser(c.Request().Context(), projectID, id); err != nil {
+		if errors.Is(err, authz.ErrDenied) {
+			return projectAccessHTTPError(err)
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to remove user: "+err.Error())
 	}
 	return crud.reload(c, projectID)
 }
 
 func (crud authorizedUserCRUD[T]) reload(c echo.Context, projectID string) error {
-	if c.FormValue("return_project_id") == models.AllProjectsID {
-		projectID = models.AllProjectsID
-		c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
-	}
+
 	users, err := crud.list(c.Request().Context(), projectID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized users")

@@ -47,6 +47,7 @@ type ThreadInput struct {
 	Source                 string            `json:"source"`
 	OriginAgent            string            `json:"origin_agent"`
 	RetrySourceExecutionID string            `json:"retry_source_execution_id"`
+	TelegramUserID         int64             `json:"telegram_user_id"`
 	TelegramChatID         int64             `json:"telegram_chat_id"`
 	SlackTeamID            string            `json:"slack_team_id"`
 	SlackChannelID         string            `json:"slack_channel_id"`

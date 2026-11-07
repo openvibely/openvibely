@@ -194,6 +194,9 @@ func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
 
 // handleChannels renders the channels (integrations) page
 func (h *Handler) handleChannels(c echo.Context) error {
+	if err := h.prepareChannelSenderOptions(c, "", false); err != nil {
+		return projectAccessHTTPError(err)
+	}
 	projectID := c.QueryParam("project_id")
 
 	// Get projects for sidebar

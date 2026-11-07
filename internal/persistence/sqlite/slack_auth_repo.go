@@ -18,7 +18,7 @@ func NewSlackAuthRepo(db *sql.DB) *SlackAuthRepo {
 		db:                          db,
 		table:                       "slack_authorized_users",
 		identityColumn:              "slack_user_id",
-		conflictTarget:              "project_id, slack_user_id",
+		conflictTarget:              "slack_user_id",
 		matchClause:                 `slack_user_id = ?`,
 		listErrLabel:                "slack auth users",
 		scanErrLabel:                "slack auth user",
@@ -30,20 +30,20 @@ func NewSlackAuthRepo(db *sql.DB) *SlackAuthRepo {
 		updateAddedByOnEmptyDisplay: true,
 		scan: func(scanner taskContextScanner) (models.SlackAuthorizedUser, error) {
 			var u models.SlackAuthorizedUser
-			err := scanner.Scan(&u.ID, &u.ProjectID, &u.SlackUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy)
+			err := scanner.Scan(&u.ID, &u.ProjectID, &u.SlackUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy, &u.ApplicationUserID, &u.MappingReview, &u.TeamID)
 			return u, err
 		},
 	}}
 }
 
-// ListByProject returns the authorized Slack users managed by one project.
+// ListByProject returns the authorized Slack users for the shared channel (projectID is retained for compatibility).
 func (r *SlackAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.SlackAuthorizedUser, error) {
 	return r.allowlist.ListByProject(ctx, projectID)
 }
 
 // CountByProject returns the authorized Slack-user count for one project.
 func (r *SlackAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
-	return countRowsByProject(ctx, r.allowlist.db, "slack_authorized_users", "slack auth users", projectID)
+	return countRows(ctx, r.allowlist.db, "slack_authorized_users", "slack auth users")
 }
 
 // IsAuthorized checks whether a Slack user is authorized at the system channel level.
@@ -75,7 +75,7 @@ func (r *SlackAuthRepo) IsAuthorizedAnywhere(ctx context.Context, slackUserID st
 
 // Create adds a system-level authorized Slack user.
 func (r *SlackAuthRepo) Create(ctx context.Context, u *models.SlackAuthorizedUser) error {
-	identity, id, addedAt, err := r.allowlist.Create(ctx, u.ProjectID, u.SlackUserID, u.DisplayName, u.AddedBy)
+	identity, id, addedAt, err := r.allowlist.Create(ctx, u.ProjectID, u.SlackUserID, u.DisplayName, u.AddedBy, u.ChannelSenderMapping)
 	if err != nil {
 		return err
 	}

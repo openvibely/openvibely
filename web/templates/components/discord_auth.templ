@@ -11,7 +11,7 @@ templ DiscordAuthorizedUsersList(users []models.DiscordAuthorizedUser, projectID
 	@channelAuthorizationList(
 		channelAuthorizationListConfig{
 			ContainerID: "discord-authorized-users",
-			Description: "Organization administrators manage this trust list. Application identity bindings are project-specific. When authentication is enabled, Discord messages are accepted only from senders bound to an enabled application user with editor access or higher on this project.",
+			Description: "Global sender list. Map each sender once; their OV user’s project permissions apply.",
 			EmptyState: "No authorized users configured. Access is denied until authorized users are added.",
 			RemoveConfirmation: "Remove this authorized user?",
 			AddHelp: "Use the numeric Discord user ID from Developer Mode, not the username or display name.",
@@ -33,7 +33,10 @@ func discordAuthorizationRows(users []models.DiscordAuthorizedUser, projectID st
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       discordAuthorizedUserIdentity(user),
 			ProjectID:      user.ProjectID,
-			DeleteEndpoint: fmt.Sprintf("/channels/discord/authorized-users/%s?project_id=%s", user.ID, user.ProjectID),
+ ID: user.ID,
+ Mapping: user.ChannelSenderMapping,
+ Channel: "discord",
+			DeleteEndpoint: fmt.Sprintf("/channels/discord/authorized-users/%s", user.ID),
 		})
 	}
 	return rows
@@ -49,18 +52,5 @@ templ discordAuthorizedUserIdentity(user models.DiscordAuthorizedUser) {
 		<span class="text-xs opacity-50">{ fmt.Sprintf("ID: %s", user.DiscordUserID) }</span>
 	</div>
 
- <p class="text-xs opacity-60">
- if user.ApplicationUserID == "" {
- <span>Application identity: unbound</span>
- } else {
- <span>Application user: { user.ApplicationUserID }</span>
- }
- </p>
- <div id={ "discord-identity-" + user.ID } class="flex flex-wrap gap-2">
- <input type="hidden" name="project_id" value={ user.ProjectID }/>
- <input class="input input-bordered input-xs" name="application_user_id" aria-label="Application user ID" placeholder="Application user ID" value={ user.ApplicationUserID }/>
- <label class="text-xs"><input type="checkbox" name="attested" value="true"/> I verified this Discord numeric ID belongs to this application user.</label>
- <button type="button" class="btn btn-xs" hx-post={ "/channels/discord/authorized-users/" + user.ID + "/identity" } hx-include={ "#discord-identity-" + user.ID } hx-target="#discord-authorized-users" hx-swap="outerHTML" hx-confirm="Replace this project's identity binding?">Bind identity</button>
- </div>
  </div>
 }

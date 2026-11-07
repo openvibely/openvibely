@@ -30,7 +30,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			name:          "Slack",
 			containerID:   "slack-authorized-users",
 			addEndpoint:   "/channels/slack/authorized-users",
-			deleteRoute:   "/channels/slack/authorized-users/slack-row?project_id=" + projectID,
+			deleteRoute:   "/channels/slack/authorized-users/slack-row",
 			inputName:     "slack_user_id",
 			inputType:     "text",
 			emptyState:    "No authorized users configured.",
@@ -42,7 +42,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			name:          "Discord",
 			containerID:   "discord-authorized-users",
 			addEndpoint:   "/channels/discord/authorized-users",
-			deleteRoute:   "/channels/discord/authorized-users/discord-row?project_id=" + projectID,
+			deleteRoute:   "/channels/discord/authorized-users/discord-row",
 			inputName:     "discord_user_id",
 			inputType:     "text",
 			emptyState:    "No authorized users configured. Access is denied until authorized users are added.",
@@ -54,7 +54,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			name:          "Telegram",
 			containerID:   "telegram-authorized-users",
 			addEndpoint:   "/channels/telegram/authorized-users",
-			deleteRoute:   "/channels/telegram/authorized-users/telegram-row?project_id=" + projectID,
+			deleteRoute:   "/channels/telegram/authorized-users/telegram-row",
 			inputName:     "user_id_or_username",
 			inputType:     "text",
 			emptyState:    "No authorized users configured. Access is denied until authorized users are added.",
@@ -66,7 +66,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			name:          "Email",
 			containerID:   "email-authorized-senders",
 			addEndpoint:   "/channels/email/authorized-senders",
-			deleteRoute:   "/channels/email/authorized-senders/email-row?project_id=" + projectID,
+			deleteRoute:   "/channels/email/authorized-senders/email-row",
 			inputName:     "authorized_email_address",
 			inputType:     "email",
 			emptyState:    "No authorized senders configured. Access is denied until senders are added.",
@@ -82,8 +82,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			assertChannelAuthorizationContains(t, emptyHTML,
 				fmt.Sprintf(`id="%s"`, tc.containerID),
 				tc.emptyState,
-				`name="project_id"`,
-				fmt.Sprintf(`value="%s"`, projectID),
+				`name="application_user_id"`,
 				fmt.Sprintf(`<input type="%s" name="%s"`, tc.inputType, tc.inputName),
 				fmt.Sprintf(`hx-post="%s"`, tc.addEndpoint),
 				fmt.Sprintf(`hx-target="#%s"`, tc.containerID),
@@ -97,14 +96,10 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 
 			populatedHTML := renderChannelAuthorizationComponent(t, tc.populatedList)
 			assertChannelAuthorizationContains(t, populatedHTML,
-				fmt.Sprintf(`data-project-id="%s"`, projectID),
 				fmt.Sprintf(`hx-delete="%s"`, tc.deleteRoute),
 				fmt.Sprintf(`hx-confirm="%s"`, tc.confirmation),
 			)
-			mutationCount := 2
-			if tc.name == "Slack" || tc.name == "Discord" {
-				mutationCount++
-			} // Sender-binding action.
+			mutationCount := 3
 			assertChannelAuthorizationMutationScope(t, populatedHTML, tc.containerID, mutationCount)
 			if got := strings.Count(populatedHTML, fmt.Sprintf(`hx-delete="%s"`, tc.deleteRoute)); got != 1 {
 				t.Fatalf("expected exactly one Remove endpoint %s, got %d", tc.deleteRoute, got)
@@ -167,7 +162,7 @@ func TestSlackIdentityBindingControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`hx-post="/channels/slack/authorized-users/binding-row/identity"`, `name="team_id"`, `name="application_user_id"`, `hx-include="#slack-identity-binding-row"`, `name="project_id" value="project-27"`, `Confirm you verified`, `Unbound users cannot submit work`} {
+	for _, want := range []string{`hx-post="/channels/slack/senders/binding-row"`, `name="team_id"`, `name="application_user_id"`, `hx-include="#slack-authorized-users-binding-row"`} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("missing binding control %q", want)
 		}
@@ -175,8 +170,15 @@ func TestSlackIdentityBindingControls(t *testing.T) {
 }
 
 func TestDiscordIdentityBindingControls(t *testing.T) {
-	html := renderChannelAuthorizationComponent(t, DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "row", ProjectID: "project", DiscordUserID: "123"}}, "project"))
-	assertChannelAuthorizationContains(t, html, "Application identity: unbound", `name="attested"`, "I verified this Discord numeric ID", `hx-post="/channels/discord/authorized-users/row/identity"`, "senders bound to an enabled application user with editor access")
-	html = renderChannelAuthorizationComponent(t, DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "row", ProjectID: "project", DiscordUserID: "123", ApplicationUserID: "user-1"}}, "project"))
-	assertChannelAuthorizationContains(t, html, "Application user: user-1", `value="user-1"`)
+	ctx := models.WithChannelSenderOptions(context.Background(), models.ChannelSenderOptions{Authenticated: true, Actor: models.Principal{UserID: "admin", Role: "admin"}, Users: []models.OrgUser{{Principal: models.Principal{UserID: "user-1", Username: "alice", DisplayName: "Alice"}}}})
+	var output bytes.Buffer
+	err := DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "row", DiscordUserID: "123", ChannelSenderMapping: models.ChannelSenderMapping{ApplicationUserID: "user-1"}}}, "project").Render(ctx, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := output.String()
+	assertChannelAuthorizationContains(t, html, `hx-post="/channels/discord/senders/row"`, `value="user-1" selected`, `Alice`)
+	if strings.Contains(html, `name="project_id"`) || strings.Contains(html, `data-project-id=`) {
+		t.Fatal("global sender settings included a project scope")
+	}
 }

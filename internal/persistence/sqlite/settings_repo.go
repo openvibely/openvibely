@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence"
 	"sort"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type SettingsRepo struct {
@@ -126,14 +127,14 @@ func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) er
 // webhooks. Discord authorization is system-wide and is cleared only when the
 // Discord provider is part of the same removal request.
 func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string, values map[string]string, webhookIDs []string, removeDiscordAuthorization bool) error {
-	return r.removeChannels(ctx, projectID, values, webhookIDs, removeDiscordAuthorization, false)
+	return r.removeChannels(ctx, projectID, values, webhookIDs, removeDiscordAuthorization)
 }
 
 func (r *SettingsRepo) RemoveDiscordChannel(ctx context.Context, projectID string, values map[string]string) error {
-	return r.removeChannels(ctx, projectID, values, nil, true, true)
+	return r.removeChannels(ctx, projectID, values, nil, true)
 }
 
-func (r *SettingsRepo) removeChannels(ctx context.Context, projectID string, values map[string]string, webhookIDs []string, removeDiscordAuthorization, scopedDiscord bool) error {
+func (r *SettingsRepo) removeChannels(ctx context.Context, projectID string, values map[string]string, webhookIDs []string, removeDiscordAuthorization bool) error {
 	if len(values) == 0 && len(webhookIDs) == 0 {
 		return fmt.Errorf("at least one channel is required")
 	}
@@ -182,13 +183,7 @@ func (r *SettingsRepo) removeChannels(ctx context.Context, projectID string, val
 			}
 		}
 		if removeDiscordAuthorization {
-			query := `DELETE FROM discord_authorized_users`
-			var args []any
-			if scopedDiscord {
-				query += ` WHERE project_id = ?`
-				args = append(args, projectID)
-			}
-			if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM discord_authorized_users`); err != nil {
 				return err
 			}
 		}

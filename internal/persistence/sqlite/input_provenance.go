@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+
 	"github.com/openvibely/openvibely/internal/models"
 
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -11,6 +12,9 @@ import (
 // consuming an instruction. External reviewer trust is independent of the
 // application user who forwarded it, including for legacy anonymous inputs.
 func requireInputProvenance(ctx context.Context, tx sqlExecutor, inputID string) error {
+	if _, _, err := telegramInputContext(ctx, tx, inputID); err != nil {
+		return err
+	}
 	if _, _, err := discordInputContext(ctx, tx, inputID); err != nil {
 		return err
 	}

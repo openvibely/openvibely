@@ -1912,6 +1912,7 @@ func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyC
 	return service.ChannelReplyContext{
 		Source:           input.Source,
 		TelegramChatID:   input.TelegramChatID,
+		TelegramUserID:   input.TelegramUserID,
 		SlackTeamID:      input.SlackTeamID,
 		SlackChannelID:   input.SlackChannelID,
 		SlackThreadTS:    input.SlackThreadTS,

@@ -3,12 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"testing"
+
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestSlackRuntimeRechecksSenderBinding(t *testing.T) {
@@ -57,7 +58,7 @@ func TestSlackRuntimeRechecksSenderBinding(t *testing.T) {
 	}
 }
 
-func TestSlackSwitchRequiresDestinationBinding(t *testing.T) {
+func TestSlackSwitchReusesGlobalBinding(t *testing.T) {
 	env := teststores.New(t)
 	ctx := t.Context()
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
@@ -71,13 +72,14 @@ func TestSlackSwitchRequiresDestinationBinding(t *testing.T) {
 	require.NoError(t, env.SlackAuth.BindApplicationUser(owner, "default", source.ID, "T123", models.BootstrapUserID))
 	handlers := svc.slackActionHandlers("default", slackActionContext{TeamID: "T123", UserID: "U123"}, nil)
 	_, err := handlers["switch_project"](owner, json.RawMessage(`{"project":"Destination"}`))
-	require.Error(t, err)
+	require.NoError(t, err)
 	active, err := svc.getActiveProject(ctx, "T123", "U123")
 	require.NoError(t, err)
-	require.Equal(t, "default", active)
-	destination := &models.SlackAuthorizedUser{ProjectID: target.ID, SlackUserID: "U123"}
-	require.NoError(t, env.SlackAuth.Create(owner, destination))
-	require.NoError(t, env.SlackAuth.BindApplicationUser(owner, target.ID, destination.ID, "T123", models.BootstrapUserID))
+	require.Equal(t, target.ID, active)
+	// Reset selection for the admission-race check below.
+	svc.userProjects["T123:U123"] = "default"
+	require.NoError(t, env.SlackUserProjects.SetUserProject(ctx, "T123", "U123", "default"))
+	destination := source
 	// Revoke after the action guard succeeds but before its persistence call.
 	svc.slackUserProjectRepo = &slackSelectionRevocationStore{SlackUserProjectStore: env.SlackUserProjects, before: func() { require.NoError(t, env.SlackAuth.DeleteForProject(owner, target.ID, destination.ID)) }}
 	_, err = handlers["switch_project"](owner, json.RawMessage(`{"project":"Destination"}`))
@@ -98,7 +100,7 @@ func TestSlackSwitchRequiresDestinationBinding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, target.ID, active)
 	worker.SetRunAuthorization(env.RunIdentities, env.Organizations, env.ProjectAccess, true)
-	require.NoError(t, env.SlackAuth.DeleteForProject(owner, "default", source.ID))
+	require.NoError(t, env.SlackAuth.DeleteForProject(owner, "default", destination.ID))
 	_, err = handlers["get_current_project"](ctx, nil)
 	require.NoError(t, err)
 }

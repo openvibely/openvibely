@@ -17,7 +17,7 @@ architecture remain below for design context. The chronological notes and old
 | Sharing | Only project owners and org admins/owners change sharing, grants or ownership. Maintainers manage project work and read audits, but cannot change anyone’s grants. |
 | Live updates | Access is checked at subscription admission and on targeted access-change notifications. Denied subscriptions receive `access blocked` and stop; queued frames from retired subscriptions are discarded. Frame delivery performs no database authorization queries. “All projects” filters through an in-memory visibility map; goal events include ProjectID. Logout and disabled-account notifications close affected connections. |
 | Running work | Worker and follow-up one-second authorization watchers are removed. Revocation denies new starts/admissions/recovery, but does not itself cancel an admitted run. Existing tool/action and provider authorization boundaries still apply. The update banner and pings remain; session expiration is checked at the existing 15-second ping interval. |
-| Channels | Slack, Discord and X use their verified identity paths. Telegram and email are rejected with authentication enabled until reliable application-user mappings exist; auth-off retains legacy behavior. |
+| Channels | Telegram, Slack and Discord use global sender-to-user mappings and current project permissions. Email mappings are configurable, but authenticated email execution remains blocked without verified sender identity. X retains its existing identity path; auth-off retains legacy behavior. |
 | Audit | Identified mutations record atomic audits. Membership changes record JSON `before`/`after` explicit grants, including removals with org membership; empty means no individual grant. Existing history is not rewritten. |
 | Migration | Phase 2 is consolidated in `224_project_authorization.sql`, following version 223. Upgrade, rollback and re-upgrade have coverage. Rollback drops Phase 2 audit history; it is not an expected operating workflow. |
 
@@ -33,7 +33,7 @@ These are specific tested contracts, not a claim that every future feature has b
 
 ### Remaining work and product limits
 
-- Phase 2 follow-ups: author attribution in chat/task UI, an org-wide audit view, and verified Telegram/email sender mappings.
+- Phase 2 follow-ups: author attribution in chat/task UI, an org-wide audit view, and verified email sender identity.
 - Phase 3: process/filesystem sandboxing. Project roles do not isolate agent processes, worktrees, the database or secrets; production private-project creation remains disabled.
 - Phase 4: shared/private conversations and collaboration features.
 - Phase 5: user/org credential ownership and remaining channel/account work.
@@ -104,7 +104,7 @@ I derived this by migrating a scratch DB and listing columns. **55 tables carry 
 | Settings | `app_settings` (k/v) | **global** | Holds GitHub PAT/App private key (`service/github_service.go:36`), Slack/Discord/Email/Telegram/X secrets, `github_api_endpoint`, and **UI preferences** (`ui.theme`, `ui.selected_project_id`, `ui.pinned_project_ids`, `ui.model_favorites`: `handler/ui_preferences_handler.go:16-20`, `handler/model_favorites_handler.go:11`) |
 | Workers | `worker_settings` | **global** single row | `projects.max_workers` and `agent_configs.max_workers` add caps |
 | Personalities | `custom_personalities` | **global** | |
-| Channel authorization | `telegram_/slack_/discord_/x_authorized_users`, `email_authorized_senders` | project (migration `180_project_scoped_channel_authorization.sql`) | `added_by` is free text |
+| Channel authorization | `telegram_/slack_/discord_/x_authorized_users`, `email_authorized_senders` | global for Telegram/Slack/Discord/email (migration 225); X remains project-scoped | Global sender mappings reference OV users; mutations record actor and before/after user |
 | GitHub authorization | `github_authorized_actors` | **global** | `permission` column. `github_project_inboxes` is per project |
 | Channel → project selection | `slack_user_projects`, `discord_user_projects`, `telegram_user_projects`, `x_user_projects`, `email_sender_projects` | per external identity | `SlackUserProjectRepo.SetUserProject` lets a channel identity switch to **any** project |
 | Webhooks | `webhook_endpoints` | project | Path token + secret. Public route |
@@ -411,7 +411,7 @@ Where checks must go:
 | Project list/selector | `ProjectRepo.ListSelectorOptions`, `ListAPI`, breadcrumb selector, desktop project picker (`cmd/desktop/project_picker.go`) | Filter by accessible IDs |
 | Runtime tools | `handler/chat_action_tools.go`, `service/chat_action_runtime.go`, `chat_merge_tool.go`, `automation_chat_actions.go` | `streamingResponseParams.PrincipalID` becomes a `Principal`. Each tool maps to a `Permission` (e.g. `create_task`→`task.create`, `merge`→`task.merge`, `schedule_task`→`schedule.edit`, `create_alert`→`alert.create`, `github_*`→`integration.github.use`). Enforce in the shared runtime, **not** in prompts. `switch_project` checks `project.view` for the human |
 | Runtime tool policy | `llm/contracts/runtime_tool_policy.go` | Viewers in Chat get read-only tool policy (as in Plan mode) |
-| Channels | Slack/Discord/Telegram/Email/X services and `service/channel_chat_ingress.go` | Inbound identity → linked app user (§4.4) → principal. Unlinked identities keep today's project-scoped allowlist behavior as a `channel` principal limited to that project. `switch_project` and `*_user_projects` must reject projects the linked user cannot access |
+| Channels | Slack/Discord/Telegram/Email/X services and `service/channel_chat_ingress.go` | Inbound identity → linked app user (§4.4) → principal. Unlinked identities are denied when authentication is enabled. `switch_project` and `*_user_projects` must reject projects the linked user cannot access |
 | Webhooks | `/webhooks/inbound/*` (`handler/webhook_handler.go`) | Principal is `webhook` scoped to the endpoint's project. Runs are attributed to `webhook_endpoints.created_by_user_id`. Effective permission is capped at that creator's current role, so the webhook stops working if the creator loses access |
 | Scheduler | `SchedulerService.checkDueTasks` | Run as `schedules.run_as_user_id`. Before dispatch, re-check that the user still has `task.run`. If not, skip, pause, and alert the project owner |
 | Workers / follow-ups | `WorkerService`, Goal Agent continuation, swarm planner | Inherit the initiating principal from `executions.initiated_by_user_id`/task creator. Re-check on admission |
@@ -526,13 +526,14 @@ Fix: one helper, `runGitLocked(ctx, project, args...)`, that starts git through 
 
 ### 4.4 Channel identities → org users
 
-Today each channel has its own allowlist (`telegram_authorized_users`, `slack_authorized_users`, `discord_authorized_users`, `x_authorized_users`, `email_authorized_senders`, global `github_authorized_actors`). Proposal:
+Telegram, Slack, Discord and email authorized-sender lists are global (migration `225_global_channel_senders.sql`). Configure a sender once in the existing channel modal, with an OV user dropdown. There are no linking codes or per-project duplicate mappings.
 
-- Add `linked_user_id` to each allowlist row (or a unified `channel_identity_links(platform, external_id, user_id, verified_at)`).
-- **Self-service linking**: a user runs `/link` in Slack/Telegram/Discord, receives a one-time code, and confirms it in the web UI (or the reverse). Email is linked by verified address match. GitHub is linked through the GitHub OAuth identity in `user_identities`.
-- Inbound effective permission = linked user's project role. The allowlist remains the **channel admission** gate, and the user role is the **authorization** gate.
-- `github_authorized_actors` (approvers for Dev Inbox assignment) becomes per-project, or is derived: "GitHub logins linked to users with ≥ maintainer on this project". GitHub assignment-as-approval must map the assigner to a user with `task.create` on the project.
-- Slack being allow-by-default (memory note) is unsafe in multi-user mode. Default it to deny when the instance has more than one user.
+- Members may add mappings to themselves and modify only their own mappings. Org admins/owners may map any active user in the organization. The database rechecks the actor and target, independently of UI controls.
+- Telegram uses the numeric sender ID supplied by Telegram, never a display name or group chat ID. Requests and queued replies retain the application user identity; new actions and resumed work recheck current project permissions.
+- Slack retains workspace/user identity; Discord uses numeric sender IDs. One mapping applies across projects, but project selection and actions still require the mapped user's project role.
+- Email mappings alone do not verify a message's sender. Authenticated email execution remains blocked until trustworthy sender evidence is implemented. Auth-off keeps existing allowlist behavior.
+- The migration combines duplicate senders, preserves unambiguous existing bindings, and flags missing/conflicting mappings for admin review. Original identities and binding details are retained in the migration-review table. Project deletion does not delete global mappings.
+- Channel credentials remain restricted to org admins/owners. GitHub and X keep their existing identity models. Channel-specific tool restrictions are future work.
 
 ---
 

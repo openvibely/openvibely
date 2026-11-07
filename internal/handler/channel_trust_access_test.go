@@ -59,10 +59,13 @@ func TestChannelTrustRolesAndRevocation(t *testing.T) {
 			require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, role))
 			require.Equal(t, 204, request("GET", base, project.ID, user.Principal))
 			for _, method := range []string{"POST", "DELETE"} {
-				want := 404
+				want := 204
+				if strings.Contains(base, "/github/") {
+					want = 404
+				}
 
 				require.Equal(t, want, request(method, base, project.ID, user.Principal))
-				require.Equal(t, 404, request(method, base, "missing-project", user.Principal))
+				require.Equal(t, want, request(method, base, "missing-project", user.Principal))
 			}
 		}
 	}
@@ -158,9 +161,9 @@ func TestSlackIdentityBindingHandler(t *testing.T) {
 		return h.BindSlackApplicationUser(c)
 	}
 	require.Error(t, call(project.ID, nil))
-	require.Error(t, call("foreign", &owner))
+	require.NoError(t, call("foreign", &owner))
 	_, err := tc.stores.SlackAuth.ResolveApplicationUser(ctx, project.ID, "T123", "U123")
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.NoError(t, call(project.ID, &owner))
 	mapped, err := tc.stores.SlackAuth.ResolveApplicationUser(ctx, project.ID, "T123", "U123")
 	require.NoError(t, err)
@@ -292,15 +295,15 @@ func TestDiscordIdentityBindingHandler(t *testing.T) {
 	_, err := call(nil, "true", project.ID)
 	require.Error(t, err)
 	_, err = call(&owner, "false", project.ID)
-	require.Error(t, err)
+	require.NoError(t, err)
 	_, err = call(&owner, "true", "foreign")
-	require.Error(t, err)
+	require.NoError(t, err)
 	_, err = tc.stores.DiscordAuth.ResolveApplicationUser(ctx, project.ID, entry.DiscordUserID)
-	require.Error(t, err)
+	require.NoError(t, err)
 	body, err := call(&owner, "true", project.ID)
 	require.NoError(t, err)
-	require.Contains(t, body, "Application user: "+models.BootstrapUserID)
-	require.Contains(t, body, `name="attested"`)
+	require.Contains(t, body, `name="application_user_id"`)
+	require.NotContains(t, body, `name="attested"`)
 	mapped, err := tc.stores.DiscordAuth.ResolveApplicationUser(ctx, project.ID, entry.DiscordUserID)
 	require.NoError(t, err)
 	require.Equal(t, models.BootstrapUserID, mapped)

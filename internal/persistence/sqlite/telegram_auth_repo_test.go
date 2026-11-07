@@ -138,7 +138,7 @@ func TestTelegramAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 		AddedBy:        "web",
 	}
 	require.NoError(t, repo.Create(ctx, duplicate))
-	require.NotEqual(t, user.ID, duplicate.ID)
+	require.Equal(t, user.ID, duplicate.ID)
 
 	authorized, err := repo.IsAuthorized(ctx, otherProject.ID, 999, "")
 	require.NoError(t, err)
@@ -600,7 +600,7 @@ func explainTelegramAuthQueryPlan(tb testing.TB, db *sql.DB, query string, args 
 	return strings.Join(details, "\n")
 }
 
-func TestTelegramAuthRepo_CascadeDelete(t *testing.T) {
+func TestTelegramAuthRepo_ProjectDeletionPreservesGlobalSender(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTelegramAuthRepo(db)
 	projectRepo := NewProjectRepo(db)
@@ -627,12 +627,12 @@ func TestTelegramAuthRepo_CascadeDelete(t *testing.T) {
 		t.Fatalf("Delete project failed: %v", err)
 	}
 
-	// Authorized users should be cascade-deleted
+	// Global sender mappings survive project deletion.
 	users, err := repo.ListByProject(ctx, project.ID)
 	if err != nil {
 		t.Fatalf("ListByProject failed: %v", err)
 	}
-	if len(users) != 0 {
-		t.Errorf("expected 0 users after project cascade delete, got %d", len(users))
+	if len(users) != 1 {
+		t.Errorf("expected 1 global user after project deletion, got %d", len(users))
 	}
 }

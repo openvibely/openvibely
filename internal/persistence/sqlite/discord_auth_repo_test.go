@@ -68,14 +68,14 @@ func TestDiscordAuthRepo_CreateRefreshesDuplicateUser(t *testing.T) {
 
 	refresh := &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: "12345", DisplayName: "Alice Updated", AddedBy: "second"}
 	require.NoError(t, repo.Create(ctx, refresh))
-	require.NotEqual(t, original.ID, refresh.ID)
+	require.Equal(t, original.ID, refresh.ID)
 
 	users, err := repo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, users, 1)
 	assert.Equal(t, original.ID, users[0].ID)
-	assert.Equal(t, "Alice", users[0].DisplayName)
-	assert.Equal(t, "first", users[0].AddedBy)
+	assert.Equal(t, "Alice Updated", users[0].DisplayName)
+	assert.Equal(t, "second", users[0].AddedBy)
 
 	users, err = repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestDiscordAuthRepo_CreateRefreshesDuplicateUser(t *testing.T) {
 	assert.Equal(t, "third", users[0].AddedBy)
 }
 
-func TestDiscordAuthRepo_DeleteByProjectPreservesOtherProjectAllowlist(t *testing.T) {
+func TestDiscordAuthRepo_ProjectCleanupPreservesGlobalAllowlist(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewDiscordAuthRepo(db)
 	projectRepo := NewProjectRepo(db)
@@ -113,12 +113,11 @@ func TestDiscordAuthRepo_DeleteByProjectPreservesOtherProjectAllowlist(t *testin
 
 	users, err := repo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
-	assert.Len(t, users, 0)
+	assert.Len(t, users, 3)
 	otherUsers, err := repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
-	assert.Len(t, otherUsers, 1)
-	assert.Equal(t, otherProject.ID, otherUsers[0].ProjectID)
-	assert.Equal(t, "333", otherUsers[0].DiscordUserID)
+	assert.Len(t, otherUsers, 3)
+	assert.Equal(t, users, otherUsers)
 }
 
 func TestDiscordAuthRepo_AuthorizationChecks(t *testing.T) {
@@ -207,6 +206,6 @@ func TestDiscordAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	users, err := repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
 	require.Len(t, users, 1)
-	assert.Equal(t, otherProject.ID, users[0].ProjectID)
+	assert.Empty(t, users[0].ProjectID)
 	assert.Equal(t, "Duplicate", users[0].DisplayName)
 }

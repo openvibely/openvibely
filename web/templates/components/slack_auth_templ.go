@@ -36,7 +36,7 @@ func SlackAuthorizedUsersList(users []models.SlackAuthorizedUser, projectID stri
 		templ_7745c5c3_Err = channelAuthorizationList(
 			channelAuthorizationListConfig{
 				ContainerID:        "slack-authorized-users",
-				Description:        "This list authorizes installation-wide Slack ingress. Authenticated messages additionally require a verified workspace-to-application-user binding for the selected project. Only organization administrators may change these entries.",
+				Description:        "Global sender list. Map each sender once; their OV user’s project permissions apply.",
 				EmptyState:         "No authorized users configured.",
 				RemoveConfirmation: "Remove this authorized user?",
 			},
@@ -62,7 +62,10 @@ func slackAuthorizationRows(users []models.SlackAuthorizedUser, projectID string
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       slackAuthorizedUserIdentity(user),
 			ProjectID:      user.ProjectID,
-			DeleteEndpoint: fmt.Sprintf("/channels/slack/authorized-users/%s?project_id=%s", user.ID, user.ProjectID),
+			ID:             user.ID,
+			Mapping:        user.ChannelSenderMapping,
+			Channel:        "slack",
+			DeleteEndpoint: fmt.Sprintf("/channels/slack/authorized-users/%s", user.ID),
 		})
 	}
 	return rows
@@ -92,7 +95,7 @@ func slackAuthorizedUserIdentity(user models.SlackAuthorizedUser) templ.Componen
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(user.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 47, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `slack_auth.templ`, Line: 50, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -105,65 +108,13 @@ func slackAuthorizedUserIdentity(user models.SlackAuthorizedUser) templ.Componen
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("ID: %s", user.SlackUserID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 48, Col: 76}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `slack_auth.templ`, Line: 51, Col: 76}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</span></div><div id=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression("slack-identity-" + user.ID).Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 51, Col: 38}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" class=\"flex flex-wrap gap-2\"><input type=\"hidden\" name=\"project_id\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(user.ProjectID).Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 52, Col: 62}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\"> <input class=\"input input-bordered input-xs\" name=\"team_id\" aria-label=\"Slack workspace ID\" placeholder=\"Workspace ID (T…)\"> <input class=\"input input-bordered input-xs\" name=\"application_user_id\" aria-label=\"Application user ID\" placeholder=\"Application user ID\"> <button type=\"button\" class=\"btn btn-xs\" hx-post=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var7 string
-		templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/channels/slack/authorized-users/" + user.ID + "/identity").Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 55, Col: 111}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" hx-include=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var8 string
-		templ_7745c5c3_Var8, templ_7745c5c3_Err = templruntime.NewAttributeExpression("#slack-identity-" + user.ID).Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 55, Col: 155}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" hx-target=\"#slack-authorized-users\" hx-swap=\"outerHTML\" hx-confirm=\"Confirm you verified this Slack workspace and user belong to the specified application user. This replaces any existing binding for this workspace.\">Bind identity</button></div><p class=\"text-xs opacity-60\">An organization administrator must verify both identities before binding. Unbound users cannot submit work when authentication is enabled.</p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</span></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

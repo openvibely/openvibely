@@ -67,14 +67,14 @@ func TestSlackAuthRepo_CreateRefreshesDuplicateUser(t *testing.T) {
 
 	refresh := &models.SlackAuthorizedUser{ProjectID: otherProject.ID, SlackUserID: "U123", DisplayName: "Alice Updated", AddedBy: "second"}
 	require.NoError(t, repo.Create(ctx, refresh))
-	require.NotEqual(t, original.ID, refresh.ID)
+	require.Equal(t, original.ID, refresh.ID)
 
 	users, err := repo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, users, 1)
 	assert.Equal(t, original.ID, users[0].ID)
-	assert.Equal(t, "Alice", users[0].DisplayName)
-	assert.Equal(t, "first", users[0].AddedBy)
+	assert.Equal(t, "Alice Updated", users[0].DisplayName)
+	assert.Equal(t, "second", users[0].AddedBy)
 
 	users, err = repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
@@ -179,6 +179,6 @@ func TestSlackAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	users, err := repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
 	require.Len(t, users, 1)
-	assert.Equal(t, otherProject.ID, users[0].ProjectID)
+	assert.Empty(t, users[0].ProjectID)
 	assert.Equal(t, "Duplicate", users[0].DisplayName)
 }

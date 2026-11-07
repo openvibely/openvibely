@@ -19,7 +19,7 @@ func NewEmailAuthRepo(db *sql.DB) *EmailAuthRepo {
 		db:                          db,
 		table:                       "email_authorized_senders",
 		identityColumn:              "email_address",
-		conflictTarget:              "project_id, lower(email_address)",
+		conflictTarget:              "lower(email_address)",
 		matchClause:                 `lower(email_address) = lower(?)`,
 		listErrLabel:                "email authorized senders",
 		scanErrLabel:                "email authorized sender",
@@ -32,20 +32,20 @@ func NewEmailAuthRepo(db *sql.DB) *EmailAuthRepo {
 		normalize:                   persistence.NormalizeEmailAddress,
 		scan: func(scanner taskContextScanner) (models.EmailAuthorizedSender, error) {
 			var s models.EmailAuthorizedSender
-			err := scanner.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy)
+			err := scanner.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy, &s.ApplicationUserID, &s.MappingReview, &s.TeamID)
 			return s, err
 		},
 	}}
 }
 
-// ListByProject returns the authorized email senders managed by one project.
+// ListByProject returns the authorized email senders for the shared channel (projectID is retained for compatibility).
 func (r *EmailAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.EmailAuthorizedSender, error) {
 	return r.allowlist.ListByProject(ctx, projectID)
 }
 
 // CountByProject returns the authorized email-sender count for one project.
 func (r *EmailAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
-	return countRowsByProject(ctx, r.allowlist.db, "email_authorized_senders", "email authorized senders", projectID)
+	return countRows(ctx, r.allowlist.db, "email_authorized_senders", "email authorized senders")
 }
 
 // IsAuthorized checks whether an email address is authorized at the system channel level.
@@ -77,7 +77,7 @@ func (r *EmailAuthRepo) IsAuthorizedAnywhere(ctx context.Context, emailAddress s
 
 // Create adds a system-level authorized email sender.
 func (r *EmailAuthRepo) Create(ctx context.Context, s *models.EmailAuthorizedSender) error {
-	identity, id, addedAt, err := r.allowlist.Create(ctx, s.ProjectID, s.EmailAddress, s.DisplayName, s.AddedBy)
+	identity, id, addedAt, err := r.allowlist.Create(ctx, s.ProjectID, s.EmailAddress, s.DisplayName, s.AddedBy, s.ChannelSenderMapping)
 	if err != nil {
 		return err
 	}

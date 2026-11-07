@@ -1064,6 +1064,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/github/project-inbox", h.SaveGitHubProjectInbox)
 
 	// Telegram authorized users
+	e.POST("/channels/:channel/senders/:id", h.BindChannelSender)
 	e.GET("/channels/telegram/authorized-users", h.ListTelegramAuthorizedUsers)
 	e.POST("/channels/telegram/authorized-users", h.AddTelegramAuthorizedUser)
 	e.DELETE("/channels/telegram/authorized-users/:id", h.RemoveTelegramAuthorizedUser)

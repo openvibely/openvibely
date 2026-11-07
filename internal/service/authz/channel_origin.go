@@ -8,7 +8,7 @@ import "github.com/openvibely/openvibely/internal/models"
 // retain legacy behavior. Discord is verified through durable provenance instead.
 func UnmappedChannelOrigin(origin string) bool {
 	switch origin {
-	case models.TaskOriginTelegram, models.TaskOriginEmail:
+	case models.TaskOriginEmail:
 		return true
 	default:
 		return false
@@ -18,5 +18,5 @@ func UnmappedChannelOrigin(origin string) bool {
 // VerifiedChannelOrigin identifies channels whose authenticated tasks must carry
 // a current admin-attested sender binding snapshot.
 func VerifiedChannelOrigin(origin string) bool {
-	return origin == models.TaskOriginDiscord
+	return origin == models.TaskOriginDiscord || origin == models.TaskOriginTelegram
 }

@@ -20,7 +20,7 @@ func NewDiscordAuthRepo(db *sql.DB) *DiscordAuthRepo {
 		db:                          db,
 		table:                       "discord_authorized_users",
 		identityColumn:              "discord_user_id",
-		conflictTarget:              "project_id, discord_user_id",
+		conflictTarget:              "discord_user_id",
 		matchClause:                 `discord_user_id = ?`,
 		listErrLabel:                "discord auth users",
 		scanErrLabel:                "discord auth user",
@@ -33,43 +33,20 @@ func NewDiscordAuthRepo(db *sql.DB) *DiscordAuthRepo {
 		normalize:                   strings.TrimSpace,
 		scan: func(scanner taskContextScanner) (models.DiscordAuthorizedUser, error) {
 			var u models.DiscordAuthorizedUser
-			err := scanner.Scan(&u.ID, &u.ProjectID, &u.DiscordUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy)
+			err := scanner.Scan(&u.ID, &u.ProjectID, &u.DiscordUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy, &u.ApplicationUserID, &u.MappingReview, &u.TeamID)
 			return u, err
 		},
 	}}
 }
 
-// ListByProject returns the authorized Discord users managed by one project.
+// ListByProject returns the authorized Discord users for the shared channel (projectID is retained for compatibility).
 func (r *DiscordAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.DiscordAuthorizedUser, error) {
-	users, err := r.allowlist.ListByProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := r.allowlist.db.QueryContext(ctx, `SELECT s.allowlist_id,s.application_user_id FROM discord_sender_identities s JOIN discord_authorized_users a ON a.id=s.allowlist_id WHERE a.project_id=?`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	bindings := map[string]string{}
-	for rows.Next() {
-		var id, user string
-		if err := rows.Scan(&id, &user); err != nil {
-			return nil, err
-		}
-		bindings[id] = user
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i := range users {
-		users[i].ApplicationUserID = bindings[users[i].ID]
-	}
-	return users, nil
+	return r.allowlist.ListByProject(ctx, projectID)
 }
 
 // CountByProject returns the authorized Discord-user count for one project.
 func (r *DiscordAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
-	return countRowsByProject(ctx, r.allowlist.db, "discord_authorized_users", "discord auth users", projectID)
+	return countRows(ctx, r.allowlist.db, "discord_authorized_users", "discord auth users")
 }
 
 // IsAuthorized checks whether a Discord user is authorized at the system channel level.
@@ -101,7 +78,7 @@ func (r *DiscordAuthRepo) IsAuthorizedAnywhere(ctx context.Context, discordUserI
 
 // Create adds a system-level authorized Discord user.
 func (r *DiscordAuthRepo) Create(ctx context.Context, u *models.DiscordAuthorizedUser) error {
-	identity, id, addedAt, err := r.allowlist.Create(ctx, u.ProjectID, u.DiscordUserID, u.DisplayName, u.AddedBy)
+	identity, id, addedAt, err := r.allowlist.Create(ctx, u.ProjectID, u.DiscordUserID, u.DisplayName, u.AddedBy, u.ChannelSenderMapping)
 	if err != nil {
 		return err
 	}

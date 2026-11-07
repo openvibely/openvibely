@@ -45,7 +45,7 @@ func defaultThreadTaskJSON(raw string) string {
 	return raw
 }
 
-const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), reasoning_effort, service_tier, COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(retry_source_execution_id, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), COALESCE(x_account_id, ''), COALESCE(x_conversation_id, ''), COALESCE(x_reply_to_tweet_id, ''), COALESCE(x_user_id, ''), COALESCE(x_username, ''), created_at, updated_at, applied_at, author_user_id, author_name, goal_id`
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), reasoning_effort, service_tier, COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(retry_source_execution_id, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), COALESCE(x_account_id, ''), COALESCE(x_conversation_id, ''), COALESCE(x_reply_to_tweet_id, ''), COALESCE(x_user_id, ''), COALESCE(x_username, ''), created_at, updated_at, applied_at, author_user_id, author_name, goal_id, telegram_user_id`
 
 func scanThreadInput(scanner interface {
 	Scan(dest ...interface{}) error
@@ -92,7 +92,7 @@ func scanThreadInput(scanner interface {
 		&input.CreatedAt,
 		&input.UpdatedAt,
 		&input.AppliedAt,
-		&input.AuthorUserID, &input.AuthorName, &input.GoalID,
+		&input.AuthorUserID, &input.AuthorName, &input.GoalID, &input.TelegramUserID,
 	)
 	return input, err
 }
@@ -284,6 +284,9 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 		if err := saveInputAuthor(ctx, tx, input); err != nil {
 			return err
 		}
+		if err := snapshotTelegramInput(ctx, tx, input); err != nil {
+			return err
+		}
 		if err := snapshotDiscordInput(ctx, tx, input); err != nil {
 			return err
 		}
@@ -429,6 +432,9 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 	}
 	*input = created
 	if err := saveInputAuthor(ctx, exec, input); err != nil {
+		return err
+	}
+	if err := snapshotTelegramInput(ctx, exec, input); err != nil {
 		return err
 	}
 	if err := snapshotDiscordInput(ctx, exec, input); err != nil {
@@ -1663,6 +1669,9 @@ func snapshotPromotedInputIdentity(ctx context.Context, tx sqlExecutor, input mo
 	}
 	goal := input.Source == models.TaskOriginSystemAgent && input.OriginAgent == models.AgentSystemKindGoal
 	if _, err := tx.ExecContext(ctx, `INSERT INTO execution_run_identities(execution_id,user_id,goal_id,goal_continuation) VALUES(?,?,?,?)`, executionID, input.AuthorUserID, input.GoalID, goal); err != nil {
+		return err
+	}
+	if err := promoteTelegramInput(ctx, tx, input, executionID); err != nil {
 		return err
 	}
 	if err := promoteDiscordInput(ctx, tx, input, executionID); err != nil {

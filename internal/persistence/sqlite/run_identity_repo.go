@@ -24,6 +24,9 @@ func (r *RunIdentityRepo) TaskUser(ctx context.Context, taskID string) (string, 
 	if err != nil {
 		return "", err
 	}
+	if err := validateTelegramTaskSnapshot(ctx, r.db, taskID, userID); err != nil {
+		return "", err
+	}
 	if err := requireDiscordTaskProvenance(ctx, r.db, taskID, userID); err != nil {
 		return "", err
 	}
@@ -39,6 +42,9 @@ func (r *RunIdentityRepo) BindTask(ctx context.Context, taskID string) error {
 		return persistence.ErrProjectDenied
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := validateTelegramTaskSnapshot(ctx, tx, taskID, p.UserID); err != nil {
+			return err
+		}
 		if err := requireDiscordTaskProvenance(ctx, tx, taskID, p.UserID); err != nil {
 			return err
 		}
@@ -105,6 +111,9 @@ func (r *RunIdentityRepo) RequireChannelTaskProvenance(ctx context.Context, task
 	}
 	if err != nil {
 		return err
+	}
+	if origin == models.TaskOriginTelegram {
+		return requireTelegramTaskProvenance(ctx, r.db, taskID)
 	}
 	if origin != models.TaskOriginDiscord {
 		return nil

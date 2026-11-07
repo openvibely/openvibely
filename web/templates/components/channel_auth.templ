@@ -2,7 +2,6 @@ package components
 
 import templpkg "github.com/a-h/templ"
 import "github.com/openvibely/openvibely/internal/models"
-import templateui "github.com/openvibely/openvibely/web/templates"
 
 type channelAuthorizationListConfig struct {
 	ContainerID        string
@@ -11,13 +10,14 @@ type channelAuthorizationListConfig struct {
 	RemoveConfirmation string
 	AddHelp            string
 }
-
 type channelAuthorizationRow struct {
 	Identity       templpkg.Component
-	ProjectID      string
+	ProjectID      string // Legacy call compatibility; not a management boundary.
 	DeleteEndpoint string
+	ID             string
+	Channel        string
+	Mapping        models.ChannelSenderMapping
 }
-
 type channelAuthorizationAddConfig struct {
 	ProjectID        string
 	Endpoint         string
@@ -26,33 +26,41 @@ type channelAuthorizationAddConfig struct {
 	InputPlaceholder string
 }
 
+templ channelSenderSelect(value string) {
+	<select name="application_user_id" aria-label="OV user" class="select select-bordered select-sm">
+		<option value="" selected?={ value == "" }>Select OV user</option>
+		for _, user := range models.SenderOptions(ctx).Users {
+			if !user.Disabled {
+				<option value={ user.UserID } selected?={ value == user.UserID }>{ user.DisplayName } ({ user.Username })</option>
+			}
+		}
+	</select>
+}
+
 templ channelAuthorizationList(config channelAuthorizationListConfig, rows []channelAuthorizationRow, addConfig channelAuthorizationAddConfig) {
 	<div id={ config.ContainerID }>
 		<p class="text-xs opacity-60 mb-2">{ config.Description }</p>
 		if len(rows) == 0 {
 			<p class="text-sm opacity-50 italic mb-3">{ config.EmptyState }</p>
-		} else {
-			<div class="space-y-2 mb-3">
-				for _, row := range rows {
-					<div data-project-id={ row.ProjectID } class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
-						@row.Identity
- @ProjectBadge(row.ProjectID)
-						<button
-							type="button"
-							class="btn btn-ghost btn-xs text-error"
-							hx-delete={ row.DeleteEndpoint + channelAuthorizationReturnScope(addConfig.ProjectID) }
-							hx-target={ "#" + config.ContainerID }
-							hx-swap="outerHTML"
-							hx-confirm={ config.RemoveConfirmation }
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-							</svg>
-						</button>
+		}
+		<div class="space-y-2 mb-3">
+			for _, row := range rows {
+				if models.CanManageSender(ctx, row.Mapping.ApplicationUserID) {
+					<div class="flex flex-wrap items-center gap-2 bg-base-200 rounded-lg px-3 py-2" id={ config.ContainerID + "-" + row.ID }>
+						<div class="flex-1">@row.Identity</div>
+						if row.Mapping.MappingReview {
+							<span class="text-xs text-warning">Review mapping</span>
+						}
+						<label class="text-xs">OV user @channelSenderSelect(row.Mapping.ApplicationUserID)</label>
+						if row.Channel == "slack" {
+							<input class="input input-bordered input-sm" name="team_id" aria-label="Slack workspace ID" placeholder="Workspace ID (T…)" value={ row.Mapping.TeamID }/>
+						}
+						<button type="button" class="btn btn-sm" hx-params="application_user_id,team_id" hx-vals="js:{...Object.fromEntries(Array.from(this.parentElement.querySelectorAll('input,select')).map(el => [el.name, el.value]))}" hx-post={ "/channels/" + row.Channel + "/senders/" + row.ID } hx-include={ "#" + config.ContainerID + "-" + row.ID } hx-target={ "#" + config.ContainerID } hx-swap="outerHTML">Save</button>
+						<button type="button" class="btn btn-ghost btn-xs text-error" hx-params="none" hx-delete={ row.DeleteEndpoint } hx-target={ "#" + config.ContainerID } hx-swap="outerHTML" hx-confirm={ config.RemoveConfirmation }>Remove</button>
 					</div>
 				}
-			</div>
-		}
+			}
+		</div>
 		if config.AddHelp != "" {
 			<p class="text-xs opacity-60 mb-2">{ config.AddHelp }</p>
 		}
@@ -61,44 +69,13 @@ templ channelAuthorizationList(config channelAuthorizationListConfig, rows []cha
 }
 
 templ channelAuthorizationAddControls(containerID string, config channelAuthorizationAddConfig) {
-	<div class="flex gap-2" id={ containerID + "-add-controls" }>
-		if config.ProjectID == models.AllProjectsID {
- <input type="hidden" name="return_project_id" value={ models.AllProjectsID }/>
- <select name="project_id" class="select select-bordered select-sm" aria-label="Project" required>
- <option value="">Choose project</option>
- for _, project := range templateui.ProjectOptions(ctx) {
- <option value={ project.ID }>{ project.Name }</option>
- }
- </select>
- } else {
- <input type="hidden" name="project_id" value={ config.ProjectID }/>
- }
-		<input
-			type={ config.InputType }
-			name={ config.InputName }
-			placeholder={ config.InputPlaceholder }
-			class="input input-bordered input-sm flex-1"
-		/>
-		<input
-			type="text"
-			name="display_name"
-			placeholder="Display name (optional)"
-			class="input input-bordered input-sm w-40"
-		/>
-		<button
-			type="button"
-			class="btn btn-primary btn-sm"
-			hx-post={ config.Endpoint }
-			hx-target={ "#" + containerID }
-			hx-swap="outerHTML"
-			hx-include={ "#" + containerID + "-add-controls" }
-		>
-			Add
-		</button>
+	<div class="flex flex-wrap gap-2" id={ containerID + "-add-controls" }>
+		<input type={ config.InputType } name={ config.InputName } placeholder={ config.InputPlaceholder } class="input input-bordered input-sm flex-1"/>
+		<input type="text" name="display_name" placeholder="Display name (optional)" class="input input-bordered input-sm w-40"/>
+		@channelSenderSelect("")
+		if containerID == "slack-authorized-users" {
+			<input class="input input-bordered input-sm" name="team_id" aria-label="Slack workspace ID" placeholder="Workspace ID (T…)"/>
+		}
+		<button type="button" class="btn btn-primary btn-sm" hx-params={ config.InputName + ",display_name,application_user_id,team_id" } hx-vals="js:{...Object.fromEntries(Array.from(this.parentElement.querySelectorAll('input,select')).map(el => [el.name, el.value]))}" hx-post={ config.Endpoint } hx-target={ "#" + containerID } hx-swap="outerHTML" hx-include={ "#" + containerID + "-add-controls" }>Add</button>
 	</div>
-}
-
-func channelAuthorizationReturnScope(projectID string) string {
- if projectID == models.AllProjectsID { return "&return_project_id=" + models.AllProjectsID }
- return ""
 }

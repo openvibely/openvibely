@@ -296,22 +296,20 @@ func (s *TelegramService) SetTaskGoalService(svc *TaskGoalService) {
 	s.taskGoalSvc = svc
 }
 
-// Telegram currently has only a transport allowlist, not a verified binding to
-// an application user. Do not borrow a connection or request principal in
-// authenticated deployments. Embedded/unconfigured and auth-off behavior remain
-// compatible until durable sender mappings can be enforced end to end.
+// Authenticated Telegram resolves numeric sender IDs through global OV-user mappings.
 func (s *TelegramService) requiresVerifiedSender() bool {
 	return s.workerSvc != nil && s.workerSvc.runOrganizations != nil && !s.workerSvc.runAuthOff
 }
 
-const telegramIdentityUnavailable = "Telegram sender identity is not linked to an application user. Use the web interface while authenticated Telegram access is unavailable."
+const telegramIdentityUnavailable = "Telegram sender identity is not linked to an application user. Ask an organization administrator to map your numeric Telegram ID to your OV user."
 
 // checkAuthorization verifies that a Telegram user is authorized for the given project.
 // Deny-by-default: if the auth repo is configured, the user must be explicitly listed.
 // If projectID is empty, checks authorization across all projects.
 func (s *TelegramService) checkAuthorization(userID int64, username string, projectID string) bool {
 	if s.requiresVerifiedSender() {
-		return false
+		_, err := s.senderPrincipalContext(context.Background(), userID)
+		return err == nil
 	}
 	if s.telegramAuthRepo == nil {
 		applog.Infof("[telegram] auth check: no auth repo configured, allowing user %d (%s)", userID, username)
@@ -572,10 +570,11 @@ func isTelegramConflictError(err error) bool {
 
 // handleStart welcomes the user and sets the default project
 func (s *TelegramService) handleStart(userID int64) string {
-	if s.requiresVerifiedSender() {
+	ctx, err := s.senderPrincipalContext(context.Background(), userID)
+	if err != nil {
 		return telegramIdentityUnavailable
 	}
-	projects, err := s.projectRepo.List(context.Background())
+	projects, err := s.projectRepo.List(ctx)
 	if err != nil {
 		return fmt.Sprintf("Error loading projects: %v", err)
 	}
@@ -607,10 +606,10 @@ func (s *TelegramService) handleStart(userID int64) string {
 
 // handleProject shows the current project or switches to a new one
 func (s *TelegramService) handleProject(userID int64, args string) string {
-	if s.requiresVerifiedSender() {
+	ctx, err := s.senderPrincipalContext(context.Background(), userID)
+	if err != nil {
 		return telegramIdentityUnavailable
 	}
-	ctx := context.Background()
 	targetName := strings.TrimSpace(args)
 	currentProjectID := ""
 	if targetName == "" {
@@ -684,8 +683,7 @@ func (s *TelegramService) handleChatMessageUntilDurable(ctx context.Context, mes
 }
 
 func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.Context, message *tgbotapi.Message, onDurableHandoff func()) bool {
-	if s.requiresVerifiedSender() {
-		// Acknowledge rejected transport input without persisting work.
+	if message == nil || message.From == nil {
 		return true
 	}
 	userID := message.From.ID
@@ -719,6 +717,11 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 		return true
 	}
 
+	parentCtx, identityErr := s.senderProjectContext(parentCtx, userID, projectID, authz.Edit)
+	if identityErr != nil {
+		s.sendMessage(context.Background(), chatID, "Access denied. Check your OV user mapping and project permissions.")
+		return true
+	}
 	ctx, cancel := context.WithTimeout(parentCtx, telegramProcessTimeout)
 	defer cancel()
 
@@ -780,7 +783,8 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 			s.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
 		},
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task: &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
+			ReplyContext: ChannelReplyContext{Source: models.TaskOriginTelegram, TelegramChatID: chatID, TelegramUserID: userID},
+			Task:         &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
 			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
 				return s.buildTelegramActionToolRuntimeForTask(projectID, taskID, chatID, userID, nil)
 			},
@@ -1395,7 +1399,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,
-		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginTelegram, TelegramChatID: chatID},
+		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginTelegram, TelegramChatID: chatID, TelegramUserID: userID},
 		NewQueuedInput: func(_ *models.Task, runExecutionID, agentID string) *models.ThreadInput {
 			return &models.ThreadInput{TelegramChatID: chatID}
 		},
@@ -1475,8 +1479,20 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 	}))
 	for name, handler := range handlers {
 		handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
-			if s.requiresVerifiedSender() {
+			original, identified := models.PrincipalFromContext(ctx)
+			var err error
+			ctx, err = s.senderProjectContext(ctx, userID, projectID, authz.Edit)
+			resolved, _ := models.PrincipalFromContext(ctx)
+			if s.requiresVerifiedSender() && (!identified || original.UserID != resolved.UserID) {
 				return "", authz.ErrDenied
+			}
+			if err != nil {
+				return "", err
+			}
+			if s.workerSvc != nil && s.workerSvc.runAccess != nil {
+				if err := requireRuntimeToolRole(ctx, s.workerSvc.runAccess, s.workerSvc.runOrganizations, projectID, name, input); err != nil {
+					return "", err
+				}
 			}
 			return handler(ctx, input)
 		}
@@ -1492,8 +1508,10 @@ func telegramSendToTaskActionResult(result string) (string, error) {
 }
 
 func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID int64, projectID string) error {
-	if s.requiresVerifiedSender() {
-		return authz.ErrDenied
+	var err error
+	ctx, err = s.senderProjectContext(ctx, userID, projectID, authz.View)
+	if err != nil {
+		return err
 	}
 	// Serialize explicit switches so an older persistence operation cannot finish
 	// after and overwrite a newer successful switch. Cache locks remain short-held.
@@ -1747,7 +1765,7 @@ func (s *TelegramService) getActiveProject(userID int64) string {
 		if s.projectRepo == nil {
 			return ""
 		}
-		projects, err := s.projectRepo.List(context.Background())
+		projects, err := s.telegramVisibleProjects(userID)
 		if err != nil || len(projects) == 0 {
 			return ""
 		}

@@ -11,7 +11,7 @@ templ SlackAuthorizedUsersList(users []models.SlackAuthorizedUser, projectID str
 	@channelAuthorizationList(
 		channelAuthorizationListConfig{
 			ContainerID: "slack-authorized-users",
-			Description: "This list authorizes installation-wide Slack ingress. Authenticated messages additionally require a verified workspace-to-application-user binding for the selected project. Only organization administrators may change these entries.",
+			Description: "Global sender list. Map each sender once; their OV user’s project permissions apply.",
 			EmptyState: "No authorized users configured.",
 			RemoveConfirmation: "Remove this authorized user?",
 		},
@@ -32,7 +32,10 @@ func slackAuthorizationRows(users []models.SlackAuthorizedUser, projectID string
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       slackAuthorizedUserIdentity(user),
 			ProjectID:      user.ProjectID,
-			DeleteEndpoint: fmt.Sprintf("/channels/slack/authorized-users/%s?project_id=%s", user.ID, user.ProjectID),
+ ID: user.ID,
+ Mapping: user.ChannelSenderMapping,
+ Channel: "slack",
+			DeleteEndpoint: fmt.Sprintf("/channels/slack/authorized-users/%s", user.ID),
 		})
 	}
 	return rows
@@ -48,12 +51,5 @@ templ slackAuthorizedUserIdentity(user models.SlackAuthorizedUser) {
 		<span class="text-xs opacity-50">{ fmt.Sprintf("ID: %s", user.SlackUserID) }</span>
 	</div>
 
- <div id={ "slack-identity-" + user.ID } class="flex flex-wrap gap-2">
- <input type="hidden" name="project_id" value={ user.ProjectID }/>
- <input class="input input-bordered input-xs" name="team_id" aria-label="Slack workspace ID" placeholder="Workspace ID (T…)"/>
- <input class="input input-bordered input-xs" name="application_user_id" aria-label="Application user ID" placeholder="Application user ID"/>
- <button type="button" class="btn btn-xs" hx-post={ "/channels/slack/authorized-users/" + user.ID + "/identity" } hx-include={ "#slack-identity-" + user.ID } hx-target="#slack-authorized-users" hx-swap="outerHTML" hx-confirm="Confirm you verified this Slack workspace and user belong to the specified application user. This replaces any existing binding for this workspace.">Bind identity</button>
- </div>
- <p class="text-xs opacity-60">An organization administrator must verify both identities before binding. Unbound users cannot submit work when authentication is enabled.</p>
  </div>
 }

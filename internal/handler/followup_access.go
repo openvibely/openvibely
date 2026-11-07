@@ -37,6 +37,26 @@ func (h *Handler) requireFollowupAccess(ctx context.Context, params streamingRes
 	if h.projectAccessSvc == nil {
 		return nil
 	}
+	if h.authMode != auth.AuthModeDisabled && (params.ChannelReply.Source == models.TaskOriginTelegram || params.Surface == chatcontrol.SurfaceTelegram) {
+		principal, ok := models.PrincipalFromContext(ctx)
+		sender := params.ChannelReply.TelegramUserID
+		if identity, found := models.TelegramIngressIdentityFromContext(ctx); found && sender == 0 {
+			sender = identity.ExternalUserID
+		}
+		resolver, supported := h.telegramAuthRepo.(interface {
+			ResolveApplicationUser(context.Context, int64) (string, error)
+		})
+		if !ok || principal.UserID == "" || sender == 0 || !supported {
+			return authz.ErrDenied
+		}
+		mapped, err := resolver.ResolveApplicationUser(ctx, sender)
+		if err != nil {
+			return err
+		}
+		if mapped != principal.UserID {
+			return authz.ErrDenied
+		}
+	}
 	if isDiscordChannelRun(params) && h.authMode != auth.AuthModeDisabled {
 		principal, ok := models.PrincipalFromContext(ctx)
 		if !ok || principal.UserID == "" || h.discordAuthRepo == nil || params.ChannelReply.DiscordUserID == "" {
@@ -148,7 +168,7 @@ func isDiscordChannelRun(params streamingResponseParams) bool {
 }
 
 func isVerifiedChannelRun(params streamingResponseParams) bool {
-	return isSlackChannelRun(params) || isDiscordChannelRun(params)
+	return isSlackChannelRun(params) || isDiscordChannelRun(params) || params.ChannelReply.Source == models.TaskOriginTelegram || params.Surface == chatcontrol.SurfaceTelegram
 }
 
 func isSlackChannelRun(params streamingResponseParams) bool {

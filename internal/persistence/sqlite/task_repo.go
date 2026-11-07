@@ -1007,6 +1007,9 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 	if inheritedErr != nil {
 		return inheritedErr
 	}
+	if err := authorizeTelegramTask(ctx, exec, *t); err != nil {
+		return err
+	}
 	if err := authorizeDiscordTask(ctx, exec, *t); err != nil {
 		return err
 	}
@@ -1070,6 +1073,9 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 		}
 		_, err = exec.ExecContext(ctx, `INSERT INTO task_run_identities(task_id,user_id) VALUES(?,?)`, t.ID, p.UserID)
 		if err != nil {
+			return err
+		}
+		if err := saveTelegramTaskProvenance(ctx, exec, t.ID); err != nil {
 			return err
 		}
 		if _, ok := models.DiscordIngressIdentityFromContext(ctx); ok {

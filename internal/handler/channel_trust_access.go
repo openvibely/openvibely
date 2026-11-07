@@ -8,8 +8,8 @@ import (
 	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
-// These legacy trust lists authorize installation-wide channel ingress. Changes
-// require an org admin; reads use the exact project scope consumed by the CRUD handlers.
+// Global sender lists allow self-management; repositories enforce assignment ownership.
+// GitHub retains its separate admin-managed reviewer trust boundary.
 func (h *Handler) authorizeChannelTrustResource(c echo.Context) error {
 	switch c.Path() {
 	case "/channels/github/authorized-actors/:id/identity", "/channels/github/authorized-actors", "/channels/github/authorized-actors/:id",
@@ -19,6 +19,9 @@ func (h *Handler) authorizeChannelTrustResource(c echo.Context) error {
 		"/channels/email/authorized-senders", "/channels/email/authorized-senders/:id":
 	default:
 		return nil
+	}
+	if !strings.Contains(c.Path(), "/github/") {
+		return h.prepareChannelSenderOptions(c, "", false)
 	}
 	projectID := c.QueryParam("project_id")
 	mutation := c.Request().Method != http.MethodGet

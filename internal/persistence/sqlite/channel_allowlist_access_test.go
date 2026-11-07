@@ -61,12 +61,12 @@ func TestChannelAllowlistTransactions(t *testing.T) {
 			_, err = db.Exec(`UPDATE org_memberships SET role='member' WHERE user_id='manager'`)
 			require.NoError(t, err)
 			_, err = create(actor, "denied")
-			require.ErrorIs(t, err, persistence.ErrOrgDenied)
-			require.ErrorIs(t, remove(actor, "default", id), persistence.ErrOrgDenied)
+			require.ErrorIs(t, err, persistence.ErrProjectDenied)
+			require.ErrorIs(t, remove(actor, "default", id), persistence.ErrProjectDenied)
 			_, err = db.Exec(`UPDATE org_memberships SET role='admin' WHERE user_id='manager'`)
 			require.NoError(t, err)
-			require.Error(t, remove(actor, "foreign", id))
-			_, err = db.Exec(`CREATE TRIGGER fail_allowlist_audit BEFORE INSERT ON project_audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+			// Project selection no longer controls global sender deletion.
+			_, err = db.Exec(`CREATE TRIGGER fail_allowlist_audit BEFORE INSERT ON channel_sender_audit BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 			require.NoError(t, err)
 			_, err = create(actor, "rolled back")
 			require.ErrorContains(t, err, "audit unavailable")
@@ -78,7 +78,7 @@ func TestChannelAllowlistTransactions(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, remove(actor, "default", id))
 			var count int
-			require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM project_audit_events WHERE action IN ('channel.allowlist_saved','channel.allowlist_removed')`).Scan(&count))
+			require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM channel_sender_audit WHERE action IN ('saved','removed')`).Scan(&count))
 			require.Equal(t, 2, count)
 		})
 	}

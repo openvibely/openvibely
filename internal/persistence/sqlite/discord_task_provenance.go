@@ -19,7 +19,7 @@ func authorizeDiscordTask(ctx context.Context, tx sqlExecutor, task models.Task)
 		return persistence.ErrProjectDenied
 	}
 	var mapped string
-	if err := tx.QueryRowContext(ctx, `SELECT s.application_user_id FROM discord_sender_identities s JOIN discord_authorized_users a ON a.id=s.allowlist_id WHERE a.project_id=? AND a.discord_user_id=? AND s.verified_by<>''`, identity.ProjectID, identity.ExternalUserID).Scan(&mapped); err != nil || mapped != identity.UserID {
+	if err := tx.QueryRowContext(ctx, `SELECT s.application_user_id FROM discord_sender_identities s JOIN discord_authorized_users a ON a.id=s.allowlist_id WHERE a.discord_user_id=? AND s.verified_by<>''`, identity.ExternalUserID).Scan(&mapped); err != nil || mapped != identity.UserID {
 		return persistence.ErrProjectDenied
 	}
 	role, err := projectRole(ctx, tx, mapped, task.ProjectID)
