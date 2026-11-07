@@ -410,9 +410,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				textarea.value = held.content;
 				var saving = false;
 				var outsidePress = false;
-				dialog.addEventListener('pointerdown', function(event) { outsidePress = event.button === 0 && event.target === dialog; });
+				function outsideEditor(event) {
+					var bounds = dialog.querySelector('form').getBoundingClientRect();
+					return event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom);
+				}
+				dialog.addEventListener('pointerdown', function(event) { outsidePress = event.button === 0 && outsideEditor(event); });
+				dialog.addEventListener('pointercancel', function() { outsidePress = false; });
 				dialog.addEventListener('click', function(event) {
-					var dismiss = outsidePress && event.target === dialog;
+					var dismiss = outsidePress && outsideEditor(event);
 					outsidePress = false;
 					if (dismiss) return releaseEdit();
 				});

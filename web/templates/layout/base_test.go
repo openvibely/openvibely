@@ -1873,7 +1873,7 @@ global.clearTimeout = () => {};
 global.setInterval = (fn, ms) => { if(ms === 20000) renewal = fn; else expiry = fn; return ms; };
 global.clearInterval = ms => { if(ms === 20000) renewal = null; else expiry = null; };
 global.window = {addEventListener: (n,f) => listeners[n]=f, removeEventListener: n => delete listeners[n], alert: m => {throw Error(m)}};
-const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {}, '[role="alert"]': {}, '[type="submit"]': {}};
+const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {getBoundingClientRect:()=>({left:100, right:500, top:100, bottom:400})}, '[role="alert"]': {}, '[type="submit"]': {}};
 let closed = 0;
 let shown = 0;
 const dialogEvents = {};
@@ -1900,9 +1900,21 @@ global.fetch = (url, options) => {
  await dialogEvents.click({target:dialog});
  assert.equal(closed, 0);
  assert.equal(requests.length, 1);
+ // A drag into the editor can produce a click targeted at the common ancestor (dialog).
+ controls.textarea.value = 'unsaved draft';
+ dialogEvents.pointerdown({button:0, target:dialog, clientX:50, clientY:50});
+ await dialogEvents.click({target:dialog, clientX:200, clientY:200});
+ assert.equal(closed, 0);
+ assert.equal(requests.length, 1);
+ assert.equal(controls.textarea.value, 'unsaved draft');
+ // Cancelled pointer gestures must not leave a dismissal armed.
+ dialogEvents.pointerdown({button:0, target:dialog, clientX:50, clientY:50});
+ dialogEvents.pointercancel();
+ await dialogEvents.click({target:dialog, clientX:50, clientY:50});
+ assert.equal(closed, 0);
  // A backdrop click cancels through the hold-release path without saving the draft.
- dialogEvents.pointerdown({button:0, target:dialog});
- await dialogEvents.click({target:dialog});
+ dialogEvents.pointerdown({button:0, target:dialog, clientX:50, clientY:50});
+ await dialogEvents.click({target:dialog, clientX:50, clientY:50});
  assert.equal(closed, 1);
  assert.equal(requests.length, 2);
  assert.equal(requests[1].options.body.get('hold'), 'false');
