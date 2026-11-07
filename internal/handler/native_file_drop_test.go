@@ -28,6 +28,12 @@ import (
 // Linux covers its GTK chooser workaround in cmd/desktop. These scenarios use
 // the Wails WKWebView/WebView2 host and each platform's native file-drop path.
 func TestNativeComposerFileDropsInWails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Wails' WebView2 composition host does not forward native file drops.
+		// Re-enable after upgrading to a release containing this upstream fix:
+		// https://github.com/wailsapp/wails/pull/6566
+		t.Skip("Windows composition-hosted file drops require Wails PR #6566")
+	}
 	if testing.Short() || os.Getenv("OPENVIBELY_RUN_NATIVE_UI") != "1" {
 		t.Skip("requires OPENVIBELY_RUN_NATIVE_UI=1 and a graphical session")
 	}
