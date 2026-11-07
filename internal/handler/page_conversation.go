@@ -300,19 +300,24 @@ func (h *Handler) cancelPageConversation(ctx context.Context, binding pageintegr
 // loadPageChatHistory is also used by built-in page adapters; reopening never
 // creates a fresh conversation or resumes another page's provider state.
 func (h *Handler) loadPageChatHistory(ctx context.Context, binding pageintegration.Conversation) (*models.Task, []models.Execution, error) {
+	task, executions, _, err := h.loadPageChatWindow(ctx, binding, "")
+	return task, executions, err
+}
+
+func (h *Handler) loadPageChatWindow(ctx context.Context, binding pageintegration.Conversation, before string) (*models.Task, []models.Execution, bool, error) {
 	taskID, err := binding.Store.TaskID(ctx)
 	if err != nil || taskID == "" {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if task == nil || task.ProjectID != binding.Page.ProjectID {
-		return nil, nil, errors.New("invalid page conversation binding")
+		return nil, nil, false, errors.New("invalid page conversation binding")
 	}
-	executions, err := h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, 50)
-	return task, executions, err
+	executions, hasEarlier, err := h.loadTaskExecutionWindow(ctx, taskID, before, 50)
+	return task, executions, hasEarlier, err
 }
 
 // Page conversations have their own category, outside the task-thread lookup.

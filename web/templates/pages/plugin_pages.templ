@@ -21,6 +21,7 @@ type PluginPageView struct {
 	Handle           string
 	AssetURL         string
 	ChatEnabled      bool
+ ChatHasEarlier bool
 	ChatTaskID       string
 	ChatExecutions   []models.Execution
 	ChatTask         *models.Task
@@ -81,7 +82,8 @@ templ PluginPageContent(v PluginPageView) {
 			></iframe>
 			if v.ChatEnabled {
 				@components.PageSideChat(components.PageChatView{
- Title: v.Title, ProjectID: v.OwningProjectID,
+ Title: v.Title, ProjectID: v.OwningProjectID, HasEarlier:v.ChatHasEarlier, HistoryURL:pluginAPI(v,"/chat/history"),
+ SteerURL:pluginAPI(v,"/chat/steer"), QueuedSteerEndpointFor:func(input models.ThreadInput)string{return pluginAPI(v,"/chat/inputs/"+url.PathEscape(input.ID)+"/steer")+"&expected_turn_id="+url.QueryEscape(input.RunExecutionID)},
  SendURL: pluginAPI(v, "/chat"), StopURL: pluginAPI(v, "/chat/stop"),
  ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, PendingInputs:v.ChatPending, Attachments: v.ChatAttachments, Agents: v.ChatAgents, RunningExec: v.ChatRunningExec,
 })

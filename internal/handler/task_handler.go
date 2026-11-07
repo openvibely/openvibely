@@ -3152,7 +3152,7 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 	if task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	active, err := h.execRepo.FindActiveTaskThreadExecution(c.Request().Context(), taskID, "")
+	active, err := h.activeConversationTaskExecution(c.Request().Context(), taskID)
 	if err != nil {
 		applog.Infof("[handler] TaskThreadSteer active execution check failed task=%s: %v", taskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
@@ -3179,8 +3179,12 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 		Content:             message,
 		AttachmentSessionID: c.FormValue("attachment_session_id"),
 	}
-	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
+	if err := h.saveConversationSteering(c, input, active); err != nil {
 		applog.Infof("[handler] TaskThreadSteer error creating steering input: %v", err)
+		var httpErr *echo.HTTPError
+		if errors.As(err, &httpErr) {
+			return httpErr
+		}
 		if errors.Is(err, persistence.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}

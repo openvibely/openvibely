@@ -531,7 +531,7 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 		AttachmentSessionID: c.FormValue("attachment_session_id"),
 		ChatMode:            chatMode,
 	}
-	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
+	if err := h.saveConversationSteering(c, input, active); err != nil {
 		applog.Infof("[handler] ChatSteer error creating steering input: %v", err)
 		if errors.Is(err, persistence.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")

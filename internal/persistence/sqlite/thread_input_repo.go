@@ -1582,7 +1582,7 @@ func currentActiveExecutionIDForInput(ctx context.Context, exec sqlExecutor, inp
 			FROM executions e
 			JOIN tasks t ON t.id = e.task_id
 			WHERE e.task_id = ? AND e.status = 'running'
-			  AND t.category IN ('active', 'scheduled') AND t.status IN ('queued', 'running')
+			  AND t.category IN ('active', 'scheduled', 'page_chat') AND t.status IN ('queued', 'running')
 			ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`
 		args = []interface{}{input.TaskID}
 	case models.ThreadInputScopeChat:

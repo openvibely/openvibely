@@ -97,6 +97,15 @@ func (h *Handler) convertQueuedInputToSteering(
 	expectedTurnID string,
 	findActiveExecution func() (*models.Execution, error),
 ) (*models.ThreadInput, error) {
+	if input.Scope == models.ThreadInputScopeTask {
+		binding, done, err := h.beginPageSteering(ctx, input.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if binding != nil {
+			defer done()
+		}
+	}
 	active, err := findActiveExecution()
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
@@ -179,7 +188,7 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 	ctx := c.Request().Context()
 	expectedTurnID := c.FormValue("expected_turn_id")
 	steering, err := h.convertQueuedInputToSteering(ctx, input, expectedTurnID, func() (*models.Execution, error) {
-		return h.execRepo.FindActiveTaskThreadExecution(ctx, taskID, "")
+		return h.activeConversationTaskExecution(ctx, taskID)
 	})
 	if err != nil {
 		return err

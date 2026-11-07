@@ -5,10 +5,14 @@ import "github.com/openvibely/openvibely/internal/models"
 // PageChatView uses server-authorized endpoints and saved conversation records.
 // It has no dependency on a plugin, iframe, or a particular page type.
 type PageChatView struct {
+ HasEarlier bool
+ HistoryURL string
  Title string
  ProjectID string
  SendURL string
  StopURL string
+ SteerURL string
+ QueuedSteerEndpointFor func(models.ThreadInput) string
  Agents []models.LLMConfig
  RunningExec string
  ChatExecutions []models.Execution
@@ -23,8 +27,15 @@ const PageChatMessagesID = "page-chat-messages"
 
 templ PageChatMessages(v PageChatView) {
  <div id="page-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
-  @ChatMessages(v.ChatExecutions,v.ChatTask,v.Attachments,PageChatMessagesID,"",false,v.ProjectID)
+  @PageChatHistory(v)
  </div>
+}
+
+templ PageChatHistory(v PageChatView) {
+ if v.HasEarlier && len(v.ChatExecutions)>0 {
+  @ChatEarlierMessagesLoader(PageChatMessagesID,v.HistoryURL+"&before="+v.ChatExecutions[0].ID,50)
+ }
+ @ChatMessages(v.ChatExecutions,v.ChatTask,v.Attachments,PageChatMessagesID,"",v.HasEarlier,v.ProjectID)
 }
 
 templ PageSideChat(v PageChatView) {
@@ -35,7 +46,7 @@ templ PageSideChat(v PageChatView) {
    @ChatInputForm(ChatInputFormConfig{
     FormID: PageChatFormID, InputID: "page-chat-input", PostEndpoint: v.SendURL,
     TargetID: PageChatMessagesID, ProjectID: v.ProjectID, DraftScope: v.SendURL,
-    Agents: v.Agents, ShowModelSelector: true, PendingInputs:v.PendingInputs, QueuedSteerEndpointFor:func(models.ThreadInput)string{return ""},
+    Agents: v.Agents, ShowModelSelector: true, PendingInputs:v.PendingInputs, QueuedSteerEndpointFor:v.QueuedSteerEndpointFor, SteerEndpoint:v.SteerURL,
     IsRunning: v.RunningExec != "", ActiveTurnID: v.RunningExec, StopEndpoint: v.StopURL,
    })
   </div>

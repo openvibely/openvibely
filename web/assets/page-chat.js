@@ -24,6 +24,7 @@
    const rendering = window.applyChatBubbleTransforms ? window.applyChatBubbleTransforms(box) : window.cleanAssistantMessages(box);
    window._initThreadStreaming();
    window.initChatInputRequestCards(box);
+   window.initChatEarlierLoader(box);
    return window.openVibelyThreadController.restore({messages:box,tracker,getTracker:()=>tracker,stateKey,renderPromise:rendering});
   }
   on(opener,'click',()=>{side.setOpen(panel.hidden);if(!panel.hidden){hydrate();refresh();panel.querySelector('textarea').focus();}});
@@ -35,6 +36,7 @@
    if (!old || !next) return;
    window.Idiomorph.morph(old,next,{morphStyle:'outerHTML',callbacks:{
     beforeNodeMorphed:(from,to)=>{
+     if(from.id==='page-chat-messages') Array.from(from.attributes).filter(a=>a.name.startsWith('data-earlier-')).forEach(a=>to.setAttribute(a.name,a.value));
      if (preserve && from.matches && from.matches('[data-execution-pair]') && from.id===to.id) {
       if (from.dataset.execStatus==='running' && to.dataset.execStatus==='running') return false;
       if (from.dataset.execStatus!=='running' && from.dataset.executionRevision===to.dataset.executionRevision) return false;
@@ -46,7 +48,7 @@
    if(window.htmx) window.htmx.process(old);
   }
   async function refresh() {
-   if(dead || !root.isConnected) return;
+   if(dead || !root.isConnected || messages().dataset.earlierRequestLoading==='true') return;
    if(inFlight){dirty=true;return;}
    inFlight=true; dirty=false;
    const version=generation, questionRevision=window._chatInputRevision || 0;
@@ -58,6 +60,19 @@
     const template=document.createElement('template');template.innerHTML=html;
     const next=template.content.querySelector('#page-chat-messages');
     if(!next) return;
+    // Paging prepends older executions through the shared loader. A live-window
+    // refresh must retain that prefix and its cursor instead of hiding it again.
+    const currentPairs=Array.from(messages().querySelectorAll(':scope > [data-execution-pair]'));
+    const firstNext=next.querySelector('[data-execution-pair]');
+    const overlap=firstNext ? currentPairs.findIndex(pair=>pair.id===firstNext.id) : -1;
+    if(overlap>0){
+     next.querySelectorAll('[data-earlier-loader]').forEach(el=>el.remove());
+     const prefix=document.createDocumentFragment();
+     const loader=messages().querySelector('[data-earlier-loader]');
+     if(loader)prefix.append(loader.cloneNode(true));
+     currentPairs.slice(0,overlap).forEach(pair=>prefix.append(pair.cloneNode(true)));
+     next.prepend(prefix);
+    }
     // Keep active streams and unchanged rendered pairs mounted while discovering
     // Analyze/queued turns. Never replace the composer or the user's draft.
     const nextStamp=stamp(next);
@@ -94,7 +109,7 @@
   }
   // Reject snapshots captured before a local send, cancellation or answer.
   on(document,'htmx:beforeRequest',e=>{if(panel.contains(e.detail.elt))generation++;});
-  on(document,'htmx:afterRequest',e=>{if(panel.contains(e.detail.elt)){generation++;refresh();}});
+  on(document,'htmx:afterRequest',e=>{const el=e.detail.elt;if(panel.contains(el) || (el && el.dataset && el.dataset.containerId==='page-chat-messages')){generation++;refresh();}});
   on(window,'sse-chat-live-event',e=>{if(!e.detail.project_id || e.detail.project_id===root.dataset.projectId){generation++;refresh();}});
   on(window,'sse-live-connected',()=>{generation++;refresh();});
   on(window,'focus',refresh);

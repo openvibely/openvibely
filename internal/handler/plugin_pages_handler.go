@@ -56,8 +56,11 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	api.POST("/handle/retire", h.PluginRetireHandle)
 	api.POST("/chat", h.PluginChatSend)
 	api.POST("/chat/stop", h.PluginChatStop)
+	api.POST("/chat/steer", h.PluginChatSteer)
+	api.POST("/chat/inputs/:inputId/steer", h.PluginChatQueuedSteer)
 	api.GET("/chat/composer-action", h.PluginChatComposerAction)
 	api.GET("/chat/transcript", h.PluginChatTranscript)
+	api.GET("/chat/history", h.PluginChatHistory)
 	e.GET("/settings/plugin-pages", h.PluginSettings)
 	e.POST("/settings/plugin-pages/install", h.PluginSettingsInstall)
 	e.POST("/settings/plugin-pages/install-example", h.PluginSettingsInstallExample)
@@ -197,12 +200,16 @@ func (h *Handler) PluginPage(c echo.Context) error {
 }
 
 func (h *Handler) loadPluginChatHistory(ctx context.Context, v *pages.PluginPageView) error {
+	return h.loadPluginChatHistoryWindow(ctx, v, "")
+}
+func (h *Handler) loadPluginChatHistoryWindow(ctx context.Context, v *pages.PluginPageView, before string) error {
 	in, err := h.pagePlugins.Store().GetInstance(ctx, v.InstanceID)
 	if err != nil || in == nil {
 		return err
 	}
 	ref := pageintegration.PageRef{Kind: pageplugins.Kind, InstanceID: in.ID, ProjectID: in.ProjectID, PageID: in.PageID, Title: in.Title}
-	task, execs, err := h.loadPageChatHistory(ctx, h.pagePlugins.Conversation(ref))
+	task, execs, hasEarlier, err := h.loadPageChatWindow(ctx, h.pagePlugins.Conversation(ref), before)
+	v.ChatHasEarlier = hasEarlier
 	if err != nil {
 		return err
 	}
@@ -626,7 +633,7 @@ func (h *Handler) PluginChatSend(c echo.Context) error {
 		var queued *pageChatQueued
 		if errors.As(err, &queued) {
 			q := queued.Input
-			return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(q.ID, q.Content, "", q.AttachmentSessionID != "", q.AuthorName))
+			return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(q.ID, q.Content, pluginQueuedSteerURL(r.Instance.ID, r.Instance.ProjectID, q), q.AttachmentSessionID != "", q.AuthorName))
 		}
 		if pluginChatStatus(err) == http.StatusConflict {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
@@ -962,8 +969,10 @@ func (h *Handler) PluginChatTranscript(c echo.Context) error {
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return render(c, http.StatusOK, templ.Join(
-		components.PageChatMessages(components.PageChatView{ProjectID: r.Instance.ProjectID, ChatTask: v.ChatTask, ChatExecutions: v.ChatExecutions, Attachments: v.ChatAttachments}),
-		components.ChatComposerQueuedInputRows(v.ChatPending, func(models.ThreadInput) string { return "" }),
+		components.PageChatMessages(components.PageChatView{HasEarlier: v.ChatHasEarlier, HistoryURL: pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/history"), ProjectID: r.Instance.ProjectID, ChatTask: v.ChatTask, ChatExecutions: v.ChatExecutions, Attachments: v.ChatAttachments}),
+		components.ChatComposerQueuedInputRows(v.ChatPending, func(input models.ThreadInput) string {
+			return pluginQueuedSteerURL(r.Instance.ID, r.Instance.ProjectID, input)
+		}),
 		components.ChatComposerActionButtonOOB(components.PageChatFormID+"-primary-action", pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/stop"), running != "", running),
 		pages.ChatInputRequestCards(cards),
 	))
@@ -986,4 +995,61 @@ func (h *Handler) recoverPageConversation(ctx context.Context, task *models.Task
 		return pageintegration.Conversation{}, err
 	}
 	return binding, nil
+}
+
+// Page endpoints authorize the owning surface, then use the task-scoped
+// conversation handlers shared with task threads.
+func (h *Handler) pluginSteeringTask(c echo.Context) error {
+	if err := requirePluginMutation(c); err != nil {
+		return err
+	}
+	r, err := h.resolvePluginForRequest(c, false)
+	if err != nil {
+		return err
+	}
+	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
+		return pluginNotFound()
+	}
+	taskID, err := h.pagePlugins.Conversation(r.Ref()).Store.TaskID(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	if taskID == "" {
+		return echo.NewHTTPError(http.StatusConflict, "no active response to steer")
+	}
+	names, values := append([]string{}, c.ParamNames()...), append([]string{}, c.ParamValues()...)
+	c.SetParamNames(append(names, "taskId")...)
+	c.SetParamValues(append(values, taskID)...)
+	return nil
+}
+func (h *Handler) PluginChatSteer(c echo.Context) error {
+	if err := h.pluginSteeringTask(c); err != nil {
+		return err
+	}
+	return h.TaskThreadSteer(c)
+}
+func (h *Handler) PluginChatQueuedSteer(c echo.Context) error {
+	if err := h.pluginSteeringTask(c); err != nil {
+		return err
+	}
+	return h.TaskThreadQueuedInputSteer(c)
+}
+func pluginQueuedSteerURL(instanceID, projectID string, input models.ThreadInput) string {
+	return pluginAPI(instanceID, projectID, "/chat/inputs/"+url.PathEscape(input.ID)+"/steer") + "&expected_turn_id=" + url.QueryEscape(input.RunExecutionID)
+}
+
+func (h *Handler) PluginChatHistory(c echo.Context) error {
+	r, err := h.resolvePluginForRequest(c, false)
+	if err != nil {
+		return err
+	}
+	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
+		return pluginNotFound()
+	}
+	v := pages.PluginPageView{InstanceID: r.Instance.ID}
+	if err = h.loadPluginChatHistoryWindow(c.Request().Context(), &v, c.QueryParam("before")); err != nil {
+		return err
+	}
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return render(c, http.StatusOK, components.PageChatHistory(components.PageChatView{ProjectID: r.Instance.ProjectID, ChatTask: v.ChatTask, ChatExecutions: v.ChatExecutions, Attachments: v.ChatAttachments, HasEarlier: v.ChatHasEarlier, HistoryURL: pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/history")}))
 }
