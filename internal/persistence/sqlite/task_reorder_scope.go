@@ -3,11 +3,13 @@ package sqlite
 import (
 	"context"
 	"fmt"
+
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
-// Reorder by visible index, not by the numeric display_order. A project's
-// positions can be sparse after another project is interleaved in All projects.
+// Reorder within the editable task scope, not by numeric display_order.
+// Other projects' read-only tasks must never be normalized as a side effect.
 func (r *TaskRepo) reorderTaskInScope(ctx context.Context, taskID string, position int, allProjects bool, anchorID string, before bool) error {
 	if position < 0 {
 		return fmt.Errorf("invalid position")
@@ -17,10 +19,20 @@ func (r *TaskRepo) reorderTaskInScope(ctx context.Context, taskID string, positi
 		if err := exec.QueryRowContext(ctx, `SELECT category, project_id FROM tasks WHERE id=?`, taskID).Scan(&category, &owner); err != nil {
 			return err
 		}
+		// Check the moved task inside the same transaction as the ordering writes.
+		if actor, ok := models.PrincipalFromContext(ctx); ok {
+			role, err := projectRole(ctx, exec, actor.UserID, owner)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
 		if allProjects && category == "chat" {
 			return fmt.Errorf("cannot reorder chat history")
 		}
-		query := `SELECT id, display_order FROM tasks WHERE category=?`
+		query := `SELECT id, display_order FROM tasks WHERE category=? AND ` + accessibleProjectPredicate(ctx, "project_id", true)
 		args := []any{category}
 		if !allProjects {
 			query += ` AND project_id=?`
@@ -55,6 +67,9 @@ func (r *TaskRepo) reorderTaskInScope(ctx context.Context, taskID string, positi
 		if err != nil {
 			return err
 		}
+		if oldPosition < 0 {
+			return persistence.ErrProjectDenied
+		}
 		if anchorID != "" {
 			found := false
 			for i, id := range ids {
@@ -68,7 +83,7 @@ func (r *TaskRepo) reorderTaskInScope(ctx context.Context, taskID string, positi
 				}
 			}
 			if !found {
-				return fmt.Errorf("reorder target does not belong to this task scope")
+				return persistence.ErrProjectDenied
 			}
 		}
 		if position > len(ids) {

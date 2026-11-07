@@ -197,7 +197,6 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	if err := h.prepareChannelSenderOptions(c, "", false); err != nil {
 		return projectAccessHTTPError(err)
 	}
-	projectID := c.QueryParam("project_id")
 
 	// Get projects for sidebar
 	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
@@ -211,11 +210,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	connectionStateFilter := allowlistedQuery(c, "connection_state", "", "connected", "configured", "disconnected")
 	webhookEnabledFilter := allowlistedQuery(c, "webhook_enabled", "", "true", "false")
 	channelSort := allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc")
-	resolvedProjectID := projectID
-	if id, err := h.getCurrentProjectID(c); err == nil && id != "" {
-		resolvedProjectID = id
-	} else if resolvedProjectID == "" && len(projects) > 0 {
-		resolvedProjectID = projects[0].ID
+	resolvedProjectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return projectAccessHTTPError(err)
 	}
 
 	settingsValues := map[string]string{}
