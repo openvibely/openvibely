@@ -39,7 +39,6 @@ type Handler struct {
 	taskGoalSvc                *service.TaskGoalService
 	llmSvc                     *service.LLMService
 	workerSvc                  *service.WorkerService
-	schedulerSvc               *service.SchedulerService
 	alertSvc                   *service.AlertService
 	upcomingSvc                *service.UpcomingService
 	insightsSvc                *service.InsightsService
@@ -313,7 +312,6 @@ func New(
 		swarmSvc:               swarmSvc,
 		llmSvc:                 llmSvc,
 		workerSvc:              workerSvc,
-		schedulerSvc:           schedulerSvc,
 		alertSvc:               alertSvc,
 		upcomingSvc:            upcomingSvc,
 		insightsSvc:            insightsSvc,
