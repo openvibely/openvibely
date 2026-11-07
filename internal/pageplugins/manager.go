@@ -223,11 +223,14 @@ func (m *Manager) RemovePackage(ctx context.Context, packageID string) error {
 	if n > 0 {
 		return ErrPackageInUse
 	}
+	// Files go first so a failed deletion keeps the record available for retry.
+	if rel, err := filepath.Rel(m.root, pkg.InstallPath); err == nil && rel != "." && !filepath.IsAbs(rel) && rel[:min(2, len(rel))] != ".." {
+		if err := os.RemoveAll(pkg.InstallPath); err != nil {
+			return fmt.Errorf("remove plugin package files: %w", err)
+		}
+	}
 	if err := m.store.DeletePackage(ctx, packageID); err != nil {
 		return err
-	}
-	if rel, err := filepath.Rel(m.root, pkg.InstallPath); err == nil && rel != "." && !filepath.IsAbs(rel) && rel[:min(2, len(rel))] != ".." {
-		_ = os.RemoveAll(pkg.InstallPath)
 	}
 	m.mu.Lock()
 	delete(m.manifests, packageID)

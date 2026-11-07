@@ -761,3 +761,40 @@ func TestManagerPreservesExhaustedRestartBudget(t *testing.T) {
 		t.Fatal("explicit retry failed", err)
 	}
 }
+
+func TestRemovePackageKeepsRecordWhenFileDeletionFails(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs POSIX directory permissions as non-root")
+	}
+	m, _, _, _ := newTestManager(t)
+	ctx := context.Background()
+	pkg, err := m.InstallExample(ctx, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(pkg.InstallPath)
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	if err := m.RemovePackage(ctx, pkg.ID); err == nil {
+		t.Fatal("file deletion failure was not reported")
+	}
+	if kept, err := m.store.GetPackage(ctx, pkg.ID); err != nil || kept == nil {
+		t.Fatalf("package record deleted despite leftover files: %v", err)
+	}
+
+	if err := os.Chmod(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RemovePackage(ctx, pkg.ID); err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	if _, err := os.Stat(pkg.InstallPath); !os.IsNotExist(err) {
+		t.Fatal("package files not removed on retry")
+	}
+	if gone, _ := m.store.GetPackage(ctx, pkg.ID); gone != nil {
+		t.Fatal("package record not removed on retry")
+	}
+}
