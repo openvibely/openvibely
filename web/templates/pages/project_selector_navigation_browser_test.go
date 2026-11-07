@@ -353,8 +353,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	defer stderrFile.Close()
 
+	// --test-type suppresses the --no-sandbox warning infobar, which can appear mid-test and resize the viewport.
 	cmd := exec.Command(chrome,
-		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--headless=new", "--no-sandbox", "--test-type", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
 		"--no-first-run", "--no-default-browser-check", "--window-size=390,360",
 		server.URL+"/analytics?project_id=default",
