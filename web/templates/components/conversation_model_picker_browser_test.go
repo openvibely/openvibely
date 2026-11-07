@@ -527,7 +527,6 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  message.value='first';message.dispatchEvent(new Event('input',{bubbles:true}));form.requestSubmit();
  let records=[];for(let i=0;i<200;i++){records=await (await fetch('/records')).json();if(records?.length)break;await wait();}
  assert(records?.length===1,'first request is held in flight');
- assert(message.value==='', 'picker restored the submitted text after handoff');
  // Simulate a rejected steering request falling back to a normal send.
  form._chatNextSubmissionPayload={message:'queued follow-up',attachmentSessionID:'queued-attachment',fallbackFromSteer:true};
  message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';tier.value='default';
@@ -540,8 +539,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  // Rebuilt Stop controls must still run while sends are waiting.
  message.value='';message.dispatchEvent(new Event('input',{bubbles:true}));
  form.querySelector('[aria-label="Stop response"]').click();await until(()=>stopped);
- await until(()=>completed.length===2);
- assert(!completed.some(item=>item.message==='first'),'first request must still be held while later sends complete');
+ assert(completed.length===0,'Stop completes independently of the held send');
  message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';tier.value='default';
  message.dispatchEvent(new Event('input',{bubbles:true}));
  await fetch('/release');await until(()=>completed.length>=2);
@@ -555,20 +553,19 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  assert(sent.service_tier==='default'&&records[2].service_tier==='priority'&&tier.value==='default','queued sends retain their own tier and preserve draft tier');
  assert(sent.attachment_session_id==='queued-attachment','queued request retains attachments');
  assert(sent.agent_id==='a'&&sent.reasoning_effort==='high'&&sent.model_selection_managed==='1','queued request retains model ownership and effort');
- assert(completed.some(item=>item.message==='queued follow-up'&&item.attachment==='queued-attachment'&&item.fallback===true),'queued request retains completion metadata');
+ assert(completed[1].message==='queued follow-up'&&completed[1].attachment==='queued-attachment'&&completed[1].fallback===true,'queued request retains completion metadata');
  assert(records[2].message==='third message'&&records[2].attachment_session_id==='third-attachment'&&records[2].agent_id==='b'&&records[2].reasoning_effort==='medium'&&records[2].model_selection_managed==='1','third send retains its own snapshot');
- assert(completed.some(item=>item.message==='third message'&&item.fallback===false),'third send retains independent completion metadata');
+ assert(completed[2].message==='third message'&&completed[2].fallback===false,'third send retains independent completion metadata');
  assert(message.value==='unsent newer draft'&&attachment.value==='newer-attachment'&&model.value==='b'&&effort.value==='low','completion preserves newer draft and settings');
  assert(!form._chatNextSubmissionPayload,'no stale snapshot on the form');
-
- // Send owns the text and cards immediately, even while model settings are saving.
+ // Cards use the same acceptance lifecycle as text while settings are saving.
  function paste(text) {const data=new DataTransfer();data.setData('text/plain',text);message.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));}
  const cards=()=>form.querySelectorAll('[aria-label="Edit pasted text"]');
  const large='large paste '.repeat(500),newer='next paste '.repeat(500);
  message.value='instructions';paste(large);
  let releaseSettings;picker._ovModelState.pending=new Promise(resolve=>{releaseSettings=resolve;});
  form.requestSubmit();
- assert(message.value==='' && cards().length===0,'settings wait left submitted draft editable');
+ assert(message.value==='instructions' && cards().length===1,'settings wait cleared the draft');
  message.value='new draft';paste(newer);
  releaseSettings();await until(()=>completed.length===4);
  records=await (await fetch('/records')).json();
@@ -577,17 +574,11 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  form.querySelector('[aria-label="Remove pasted text"]').click();
  message.value='retry instructions';paste(large);
  let rejectSettings;picker._ovModelState.pending=new Promise((resolve,reject)=>{rejectSettings=reject;});
- form.requestSubmit();assert(message.value==='' && cards().length===0,'failed attempt did not clear immediately');
- rejectSettings(Error('settings save failed'));await until(()=>cards().length===1);
- assert(form._captureChatSubmission().message==='retry instructions\n\n'+large,'settings failure lost recovery snapshot');
+ form.requestSubmit();rejectSettings(Error('settings save failed'));
+ await until(()=>!form._chatSubmitAfterModelSavePending);await wait();
+ assert(form._captureChatSubmission().message==='retry instructions\n\n'+large,'settings failure changed draft');
  window.ovModelPicker.close(false);
- // An abandoned settings wait restores into shared storage for the next mount.
- picker._ovModelState.pending=new Promise(resolve=>{releaseSettings=resolve;});
- form.requestSubmit();assert(cards().length===0,'navigation attempt did not clear');
- const pasteKey=form.getAttribute('data-attachment-state-key')+'-pasted-text';
- form.remove();releaseSettings();
- await until(()=>window._ovPasteDrafts[pasteKey]?.length===2);
- assert(window._ovPasteDrafts[pasteKey].map(item=>item.text).join('\n\n')==='retry instructions\n\n'+large,'navigation lost abandoned submission');
+
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);await fetch('/release');}
 })();</script></body></html>`)

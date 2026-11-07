@@ -26,6 +26,14 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
 		case "/composer":
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprint(w, markup.String())
+		case "/controls":
+			w.Header().Set("Content-Type", "text/html")
+			if err := ChatQueuedInputRow("audit", "Queued message", "/queue-steer", false).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		case "/thread-inputs/audit/cancel", "/queue-steer":
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<span data-control-complete="`+html.EscapeString(r.URL.Path)+`"></span>`)
 		case "/send", "/steer":
 			r.ParseForm()
 			if r.FormValue("message") == "fail" {
@@ -49,7 +57,7 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
   if (!holdSend) return originalSend.call(this,body);
   holdSend=false; const xhr=this; releaseSend=()=>originalSend.call(xhr,body);
  };
- function assertDraftCleared() {assert(cards().length===0 && input.value==='', 'submitted draft not cleared at handoff');}
+ function assertDraftCleared() {assert(cards().length===0 && input.value==='', 'accepted draft not cleared');}
 
  function paste(text) {const data=new DataTransfer();data.setData('text/plain',text);const event=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});input.dispatchEvent(event);return event.defaultPrevented;}
  function button(label){return Array.from(document.querySelectorAll('dialog button')).find(b=>b.textContent===label);}
@@ -68,7 +76,7 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
   assert(form._captureChatSubmission().pastedTextSnapshot[0].text===large,'fallback lost pasted content');
   input.setSelectionRange(input.value.length,input.value.length);
   assert(paste(large),'second fallback paste failed');
-  const ids=form._captureChatSubmission().pastedTextIDs;
+  const ids=form._captureChatSubmission().pastedTextSnapshot.map(item=>item.id);
   assert(randomCalls===2 && ids.length===2 && ids[0]!==ids[1],'fallback IDs are not distinct');
   assert(ids.every(id=>/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)),'fallback did not produce UUID v4');
   form.querySelectorAll('[aria-label="Remove pasted text"]').forEach(button=>button.click());
@@ -89,14 +97,12 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  assert(form._captureChatSubmission().message.endsWith(large),'cancel changed paste');
  cards()[0].click();document.querySelector('dialog textarea').value='edited text';button('Save').click();await wait();
  assert(form._captureChatSubmission().message==='Explain this\n\nedited text','edit not saved');
- holdSend=true;send();assertDraftCleared();
- paste('new draft '.repeat(500));
- assert(!cards()[0].disabled,'new unsent card should stay editable');
- form.querySelectorAll('[aria-label="Remove pasted text"]')[0].click();
- assertDraftCleared();releaseSend();await wait();
+ holdSend=true;send();
+ assert(cards().length===1 && input.value==='Explain this','draft cleared before acceptance');
+ releaseSend();await wait();
  assert(document.getElementById('messages').textContent==='Explain this\n\nedited text','send lost content');
  assert(cards().length===0 && input.value==='','accepted draft not cleared');
- paste(large); cards()[0].click();document.querySelector('dialog textarea').value='fail';button('Save').click();await wait();holdSend=true;send();assertDraftCleared();releaseSend();await wait();
+ paste(large); cards()[0].click();document.querySelector('dialog textarea').value='fail';button('Save').click();await wait();holdSend=true;send();assert(cards().length===1,'pending send removed card');releaseSend();await wait();
  assert(cards().length===1 && form._captureChatSubmission().message==='fail','failed send lost card');
  assert(!cards()[0].disabled,'failed send did not unlock editor');
  cards()[0].click();assert(document.querySelector('dialog[open]'),'editor unavailable after failure');button('Cancel').click();
@@ -109,7 +115,7 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  paste(large);paste('second paste '.repeat(500));
  const expected=form._captureChatSubmission().message;
  assert(cards().length===2,'multiple pastes must have separate cards');
- holdSend=true;input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,metaKey:true,bubbles:true,cancelable:true}));assertDraftCleared();releaseSend();await wait();
+ holdSend=true;input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,metaKey:true,bubbles:true,cancelable:true}));assert(cards().length===2,'steer cleared cards before acceptance');releaseSend();await wait();
  assert(document.getElementById('pending-thread-inputs').textContent===expected,'steering lost or duplicated pasted text');
  assert(cards().length===0,'accepted steering left cards');
  // Send A, navigate back into a fresh composer, add B, then accept A.
@@ -121,10 +127,10 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  paste(large);holdSend=true;send();
  const releaseA=releaseSend;
  await remount();
- assertDraftCleared();
+ assert(cards().length===1,'pending card not retained across navigation');
  const newer='new card B '.repeat(500);
  paste(newer);input.value='new instructions';input.dispatchEvent(new Event('input',{bubbles:true}));
- assert(cards().length===1 && !cards()[0].disabled,'replacement draft missing cards');
+ assert(cards().length===2,'replacement draft missing cards');
  releaseA();await wait();
  assert(cards().length===1,'old send did not reconcile the live replacement');
  assert(form._captureChatSubmission().message==='new instructions\n\n'+newer,'old send erased newer text or cards');
@@ -136,34 +142,47 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  assert(cards().length===1 && form._captureChatSubmission().message===large,'same-composer send cleared new card or retained sent card');
  await remount();
  assert(cards().length===1 && !cards()[0].disabled,'completed send left a stale lock');
- // Failure after navigation restores the submitted draft alongside newer content.
- form.querySelector('[aria-label="Remove pasted text"]').click();
- input.value='fail';holdSend=true;send();assertDraftCleared();const releaseFailure=releaseSend;
- await remount();input.value='new text';paste(large);
- releaseFailure();await wait();
- assert(input.value==='new text','failure overwrote newer text');
- assert(cards().length===2,'failure did not preserve both drafts');
- assert(form._captureChatSubmission().message==='new text\n\n'+large+'\n\nfail','failed text was not recovered separately');
- form.querySelectorAll('[aria-label="Remove pasted text"]')[1].click();input.value='';
+ // Editing an already submitted card preserves the new version on acceptance.
+ holdSend=true;send();const releaseEdited=releaseSend;
+ cards()[0].click();document.querySelector('dialog textarea').value='new edit';button('Save').click();
+ releaseEdited();await wait();
+ assert(form._captureChatSubmission().message==='new edit','acceptance erased an edited card');
+ // An editor already open at acceptance keeps a later Save as a new draft.
+ holdSend=true;send();const releaseOpen=releaseSend;
+ cards()[0].click();document.querySelector('dialog textarea').value='edit after acceptance';
+ releaseOpen();await wait();button('Save').click();
+ assert(form._captureChatSubmission().message==='edit after acceptance','open editor lost its changes');
+ form.querySelector('[aria-label="Remove pasted text"]').click();paste(large);
  const pasteKey=form.getAttribute('data-attachment-state-key')+'-pasted-text';
  delete window._ovPasteDrafts[pasteKey];await remount();
- assert(form._captureChatSubmission().message===large,'surviving card was not persisted');
+ assert(form._captureChatSubmission().message===large,'card not persisted');
 
-
- // A second message reaches the server while the first HTTP request is held.
- const auditSends=[],previousSend=XMLHttpRequest.prototype.send;
- XMLHttpRequest.prototype.send=function(body){auditSends.push(new URLSearchParams(body).get('message'));return previousSend.call(this,body);};
- holdSend=true;send();const releaseFirst=releaseSend;
- const queuedText='queued second card '.repeat(500),nextDraft='new unsent card '.repeat(500);
- input.value='queued instructions';paste(queuedText);send();assertDraftCleared();
- paste(nextDraft);await wait();
- assert(auditSends.filter(Boolean).length===2,'second send waited in the browser');
- assert(document.getElementById('messages').textContent.includes(queuedText),'second send did not reach server before first completed');
- await remount();releaseFirst();await wait();
- assert(form._captureChatSubmission().message===nextDraft,'completed requests erased newer draft');
- assert(window._ovPendingComposerSubmissions.size===0,'pending submission registry leaked entries');
- form.querySelectorAll('[aria-label="Remove pasted text"]').forEach(button=>button.click());paste(large);
- XMLHttpRequest.prototype.send=previousSend;
+ // A destination-project guard can cancel and retry without losing the draft.
+ let needsProject=true;
+ const guard=event=>{if(event.detail.elt===form && needsProject) event.preventDefault();};
+ form.addEventListener('htmx:configRequest',guard);
+ input.value='project instructions';send();await wait();
+ assert(form._captureChatSubmission().message==='project instructions\n\n'+large,'project guard cleared the draft');
+ needsProject=false;send();await wait();
+ assert(document.getElementById('messages').textContent.endsWith('project instructions\n\n'+large),'project retry lost message');
+ assertDraftCleared();form.removeEventListener('htmx:configRequest',guard);
+ paste(large);
+ // Real queued-message controls remain usable after a composer send.
+ const controls=document.createElement('div');controls.id='audit-controls';form.append(controls);
+ for(const [label,path] of [['Cancel queued follow-up','/thread-inputs/audit/cancel'],['Convert queued follow-up to steering','/queue-steer']]) {
+  await htmx.ajax('GET','/controls',{target:'#audit-controls',swap:'innerHTML'});await wait();
+  controls.querySelector('[aria-label="'+label+'"]').click();await wait();
+  assert(controls.querySelector('[data-control-complete]')?.dataset.controlComplete===path,'queued control failed after Send: '+label);
+ }
+ // Controls invoked during a send still run when the original request completes.
+ for(const [label,path] of [['Cancel queued follow-up','/thread-inputs/audit/cancel'],['Convert queued follow-up to steering','/queue-steer']]) {
+  await htmx.ajax('GET','/controls',{target:'#audit-controls',swap:'innerHTML'});await wait();
+  holdSend=true;send();const releaseControlSend=releaseSend;
+  controls.querySelector('[aria-label="'+label+'"]').click();
+  releaseControlSend();await wait();await wait();
+  assert(controls.querySelector('[data-control-complete]')?.dataset.controlComplete===path,'queued control failed during Send: '+label);
+  paste(large);
+ }
  // Navigating with an open editor must discard its unsaved edit and remove the dialog.
  cards()[0].click();
  const oldDialog=document.querySelector('dialog[open]'), staleSave=button('Save');

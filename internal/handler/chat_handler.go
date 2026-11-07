@@ -249,15 +249,6 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	// Task worker limits (per-project/per-model) only gate task execution, not chat.
 	// This ensures the chat orchestrator remains responsive even when all task workers are busy.
 
-	// Serialize only admission, not HTTP responses or model execution. A second
-	// send must observe the first execution and persist as a queued thread input.
-	h.chatSendAdmissionMu.Lock()
-	admissionLocked := true
-	defer func() {
-		if admissionLocked {
-			h.chatSendAdmissionMu.Unlock()
-		}
-	}()
 	activeChatExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
 	if err != nil {
 		applog.Infof("[handler] ChatSend error checking active chat turn: %v", err)
@@ -288,8 +279,6 @@ func (h *Handler) ChatSend(c echo.Context) error {
 			}
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue chat message")
 		}
-		admissionLocked = false
-		h.chatSendAdmissionMu.Unlock()
 		if h.chatBroadcaster != nil {
 			h.chatBroadcaster.Publish(events.ChatEvent{
 				Type:           events.ChatNewMessage,
@@ -355,9 +344,6 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
-
-	admissionLocked = false
-	h.chatSendAdmissionMu.Unlock()
 
 	applog.Infof("[handler] ChatSend created exec=%s for chat message status=%s", exec.ID, exec.Status)
 	// Broadcast new message event so other tabs/clients update in real-time
