@@ -68,10 +68,19 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
    document.body.setAttribute('data-test-result', 'pass');
    return;
   }
+  assert(input.closest('form')._chatInputInitialized, 'composer not initialized');
+  // Chrome does not apply dropEffect writes to a script-created DataTransfer.
+  // Observe the composer's requested operation while retaining its real files;
+  // native Wails tests cover the browser/OS drag negotiation.
+  var requestedDropEffect;
+  Object.defineProperty(transfer, 'dropEffect', {
+   get: () => requestedDropEffect,
+   set: value => { requestedDropEffect = value; }
+  });
   var over = new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:transfer});
   input.dispatchEvent(over);
   assert(over.defaultPrevented, 'composer did not accept drop');
-  assert(transfer.dropEffect === 'copy', 'composer did not negotiate a copy');
+  assert(requestedDropEffect === 'copy', 'composer did not request a copy');
   input.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:transfer}));
   await new Promise(resolve => setTimeout(resolve, 100));
   assert(uploads.length === 1 && uploads[0].length === 1, 'file was not uploaded exactly once');
