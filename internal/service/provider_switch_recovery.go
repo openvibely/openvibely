@@ -125,7 +125,11 @@ func (s *LLMService) recoverPortableProviderHistory(req llmcontracts.AgentReques
 				case "task":
 					page, err = s.execRepo.ListByTaskChronologicalBefore(req.Ctx, scope.ID, before, 100)
 				case "chat_project":
-					page, err = s.execRepo.ListChatHistoryBefore(req.Ctx, scope.ID, before, 100)
+					projectID := scope.ID
+					if strings.HasPrefix(projectID, models.AllProjectsID+":user:") {
+						projectID = models.AllProjectsID
+					}
+					page, err = s.execRepo.ListChatHistoryBefore(req.Ctx, projectID, before, 100)
 				default:
 					page = nil
 				}

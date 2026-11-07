@@ -280,7 +280,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue chat message")
 		}
 		if h.chatBroadcaster != nil {
-			h.chatBroadcaster.Publish(events.ChatEvent{
+			h.publishChatEvent(events.ChatEvent{
 				Type:           events.ChatNewMessage,
 				ProjectID:      projectID,
 				ExecID:         queued.ID,
@@ -348,7 +348,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	applog.Infof("[handler] ChatSend created exec=%s for chat message status=%s", exec.ID, exec.Status)
 	// Broadcast new message event so other tabs/clients update in real-time
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:      events.ChatNewMessage,
 			ProjectID: projectID,
 			ExecID:    exec.ID,
@@ -542,7 +542,7 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")
 	}
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:           events.ChatTurnSteered,
 			ProjectID:      projectID,
 			ExecID:         input.ID,

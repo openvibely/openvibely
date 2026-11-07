@@ -76,6 +76,10 @@ func (h *Handler) liveEventVisible(ctx context.Context, cache liveProjectVisibil
 	case events.TaskEvent:
 		projectID = event.ProjectID
 	case events.ChatEvent:
+		if event.ProjectID == models.AllProjectsID {
+			p, ok := models.PrincipalFromContext(ctx)
+			return !ok || (event.AudienceUserID != "" && event.AudienceUserID == p.UserID)
+		}
 		projectID = event.ProjectID
 	default:
 		return true

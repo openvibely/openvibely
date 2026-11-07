@@ -92,7 +92,7 @@ func (h *Handler) requestSkillInstallation(ctx context.Context, req contracts.Ag
 		return err
 	}
 	if h.chatBroadcaster != nil && task.Category == models.CategoryChat {
-		h.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatUserInputRequested, ProjectID: task.ProjectID, ExecID: req.ExecID, InputRequest: chatInputRequestForEvent(pending)})
+		h.publishChatEvent(events.ChatEvent{Type: events.ChatUserInputRequested, ProjectID: task.ProjectID, ExecID: req.ExecID, InputRequest: chatInputRequestForEvent(pending)})
 	}
 	if h.broadcaster != nil {
 		h.broadcaster.Publish(events.TaskEvent{Type: events.SkillDependencyApproval, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: req.ExecID, PendingInputID: pending.ID, Status: "pending", Message: "Install missing skill dependencies?"})
@@ -186,7 +186,7 @@ func (h *Handler) answerSkillInstallation(c echo.Context, record *persistence.Ch
 
 	}
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatUserInputResolved, ProjectID: req.ProjectID, ExecID: req.ExecID, InputRequest: chatInputRequestForEvent(req)})
+		h.publishChatEvent(events.ChatEvent{Type: events.ChatUserInputResolved, ProjectID: req.ProjectID, ExecID: req.ExecID, InputRequest: chatInputRequestForEvent(req)})
 	}
 	execution, e := h.execRepo.GetByID(persistence.WithExecutionMetadata(c.Request().Context()), req.ExecID)
 	if e == nil && execution != nil {
@@ -377,6 +377,26 @@ func (h *Handler) startInstallationContinuations(ctx context.Context, project, t
 	}
 }
 func (h *Handler) startInstallationContinuation(ctx context.Context, record persistence.ChatInputRequestRecord) error {
+	if record.ProjectID == models.AllProjectsID && h.projectAccessSvc != nil {
+		if _, identified := models.PrincipalFromContext(ctx); identified {
+			if err := h.projectAccessSvc.ChatResourceAllowed(ctx, "execution", record.ExecutionID); err != nil {
+				return err
+			}
+		}
+		owner, err := h.projectAccessSvc.ChatResourceOwner(ctx, "execution", record.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if owner != "" {
+			ctx, err = h.followupUserContext(ctx, owner)
+			if err != nil {
+				return err
+			}
+		} else if _, identified := models.PrincipalFromContext(ctx); !identified {
+			return errors.New("legacy shared chat continuation requires an administrator")
+		}
+	}
+
 	original, err := h.execRepo.GetByID(persistence.WithExecutionPayload(ctx, persistence.ExecutionPrompt), record.ExecutionID)
 	if err != nil {
 		return err
@@ -446,6 +466,9 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 		ChatMode:       models.NormalizeChatMode(meta.ChatMode),
 		IsTaskFollowup: task.Category != models.CategoryChat, Task: task,
 	}
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		params.PrincipalID = "user:" + p.UserID
+	}
 	if params.IsTaskFollowup {
 		// Reuse the direct task runner's context preparation after worker admission.
 		params.DeferHistoryLoad = true
@@ -473,7 +496,7 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 	if params.IsTaskFollowup && h.broadcaster != nil {
 		h.broadcaster.Publish(events.TaskEvent{Type: events.TaskThreadExecutionStarted, ProjectID: task.ProjectID, TaskID: task.ID, TaskName: task.Title, ExecID: exec.ID})
 	} else if !params.IsTaskFollowup && h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: exec.ID, AgentName: agent.Name})
+		h.publishChatEvent(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: exec.ID, AgentName: agent.Name})
 	}
 	params.updateWorkDone = updateDone
 	if err = h.startStreamingResponse(params); err != nil {

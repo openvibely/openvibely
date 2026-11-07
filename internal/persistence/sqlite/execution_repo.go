@@ -167,7 +167,7 @@ func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Executi
 		columns = modelHistoryQuery(ctx, columns, false)
 	}
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+columns+` FROM executions WHERE id = ?`, id))
+		`SELECT `+columns+` FROM executions WHERE id = ? AND EXISTS (SELECT 1 FROM tasks ct WHERE ct.id=executions.task_id AND `+workspaceChatPredicate(ctx, "ct.project_id", "ct.chat_owner_user_id")+`)`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -212,7 +212,7 @@ func (r *ExecutionRepo) GetByIDForProject(ctx context.Context, id, projectID str
 		`SELECT `+executionSelectColumnsAlias+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
-		 WHERE e.id = ? AND `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+``, id, projectID))
+		 WHERE e.id = ? AND `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND `+workspaceChatPredicate(ctx, "t.project_id", "t.chat_owner_user_id"), id, projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1044,7 +1044,7 @@ func (r *ExecutionRepo) hasActiveTaskExecution(ctx context.Context, taskID, excl
 }
 
 func (r *ExecutionRepo) FindLatestActiveChatExecution(ctx context.Context, projectID string) (*models.Execution, error) {
-	e, err := scanExecutionRow(r.db.QueryRowContext(ctx, latestActiveChatExecutionSQL(), projectID))
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx, scopeWorkspaceExecutions(ctx, latestActiveChatExecutionSQL()), projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1108,6 +1108,7 @@ func (r *ExecutionRepo) ListChatModelHistoryBefore(ctx context.Context, projectI
  WHERE e.task_project_id = ? AND e.task_category = 'chat'
  AND (NOT EXISTS (SELECT 1 FROM email_task_context ec JOIN executions current ON current.task_id = ec.task_id WHERE current.id = ?)
  OR EXISTS (SELECT 1 FROM email_task_context ec JOIN email_task_context current_ec ON current_ec.email_session_key = ec.email_session_key JOIN executions current ON current.task_id = current_ec.task_id WHERE ec.task_id = e.task_id AND current.id = ?))`
+	query += " AND " + workspaceExecutionPredicate(ctx)
 	args := []any{projectID, currentExecID, currentExecID}
 	if beforeExecID != "" {
 		query += ` AND (e.started_at < (SELECT started_at FROM executions WHERE id = ?) OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.history_order < (SELECT history_order FROM executions WHERE id = ?)))`
@@ -1149,6 +1150,7 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 		return []models.Execution{}, nil
 	}
 	query, args := chatHistoryPageSQL(projectID, beforeExecID, limit)
+	query = scopeWorkspaceExecutions(ctx, query)
 
 	rows, err := r.db.QueryContext(ctx, modelHistoryQuery(ctx, query, true), args...)
 	if err != nil {
@@ -1816,7 +1818,7 @@ func (r *ExecutionRepo) ListLiveExecutions(ctx context.Context) ([]models.LiveEx
 // GetDisplayExecution loads a complete public response for UI fragments without
 // loading reasoning_content or diff_output. History paging remains per execution.
 func (r *ExecutionRepo) GetDisplayExecution(ctx context.Context, id string) (*models.Execution, error) {
-	execution, err := scanExecutionRow(r.db.QueryRowContext(ctx, `SELECT `+executionSelectColumnsLight+` FROM executions WHERE id=?`, id))
+	execution, err := scanExecutionRow(r.db.QueryRowContext(ctx, `SELECT `+executionSelectColumnsLight+` FROM executions WHERE id=? AND EXISTS (SELECT 1 FROM tasks ct WHERE ct.id=executions.task_id AND `+workspaceChatPredicate(ctx, "ct.project_id", "ct.chat_owner_user_id")+`)`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

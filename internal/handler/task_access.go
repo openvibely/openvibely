@@ -66,6 +66,9 @@ func (h *Handler) authorizeTaskResource(c echo.Context) error {
 			if input == nil {
 				return authz.ErrDenied
 			}
+			if err := h.projectAccessSvc.ChatResourceAllowed(ctx, "input", input.ID); err != nil {
+				return err
+			}
 			return h.projectAccessSvc.Require(ctx, input.ProjectID, authz.View)
 		}
 	case strings.HasPrefix(path, "/attachments/:id"):
@@ -84,6 +87,9 @@ func (h *Handler) authorizeTaskResource(c echo.Context) error {
 		}
 		if input == nil {
 			return authz.ErrDenied
+		}
+		if err := h.projectAccessSvc.ChatResourceAllowed(ctx, "input", input.ID); err != nil {
+			return err
 		}
 		return h.projectAccessSvc.Require(ctx, input.ProjectID, permission)
 	case path == "/tasks" || strings.HasPrefix(path, "/tasks/") || strings.HasPrefix(path, "/api/tasks/"):
