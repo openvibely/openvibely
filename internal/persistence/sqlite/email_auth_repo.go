@@ -24,10 +24,8 @@ func NewEmailAuthRepo(db *sql.DB) *EmailAuthRepo {
 		listErrLabel:                "email authorized senders",
 		scanErrLabel:                "email authorized sender",
 		getErrLabel:                 "get email authorized sender",
-		deleteEntityLabel:           "email authorized sender",
 		countAnyErrLabel:            "email authorized senders anywhere",
 		checkAnywhereErrLabel:       "check email authorization anywhere",
-		checkProjectErrLabel:        "check email project authorization",
 		updateAddedByOnEmptyDisplay: false,
 		normalize:                   persistence.NormalizeEmailAddress,
 		scan: func(scanner taskContextScanner) (models.EmailAuthorizedSender, error) {

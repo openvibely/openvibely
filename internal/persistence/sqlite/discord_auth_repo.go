@@ -25,10 +25,8 @@ func NewDiscordAuthRepo(db *sql.DB) *DiscordAuthRepo {
 		listErrLabel:                "discord auth users",
 		scanErrLabel:                "discord auth user",
 		getErrLabel:                 "get discord auth user",
-		deleteEntityLabel:           "discord auth user",
 		countAnyErrLabel:            "discord auth users anywhere",
 		checkAnywhereErrLabel:       "check discord auth anywhere",
-		checkProjectErrLabel:        "check discord project auth",
 		updateAddedByOnEmptyDisplay: true,
 		normalize:                   strings.TrimSpace,
 		scan: func(scanner taskContextScanner) (models.DiscordAuthorizedUser, error) {

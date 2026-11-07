@@ -23,10 +23,8 @@ func NewSlackAuthRepo(db *sql.DB) *SlackAuthRepo {
 		listErrLabel:                "slack auth users",
 		scanErrLabel:                "slack auth user",
 		getErrLabel:                 "get slack auth user",
-		deleteEntityLabel:           "slack auth user",
 		countAnyErrLabel:            "slack auth users anywhere",
 		checkAnywhereErrLabel:       "check slack auth anywhere",
-		checkProjectErrLabel:        "check slack project auth",
 		updateAddedByOnEmptyDisplay: true,
 		scan: func(scanner taskContextScanner) (models.SlackAuthorizedUser, error) {
 			var u models.SlackAuthorizedUser

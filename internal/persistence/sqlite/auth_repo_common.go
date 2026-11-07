@@ -10,48 +10,11 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// deleteByID deletes a single row identified by id from table and returns a
-// not-found error (naming entityLabel) when no row matched.
-func deleteByID(ctx context.Context, db *sql.DB, table, entityLabel, id string) error {
-	result, err := execBoundSQLite(ctx, db, fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, table), id)
-	if err != nil {
-		return fmt.Errorf("delete %s: %w", entityLabel, err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("%s not found", entityLabel)
-	}
-	return nil
-}
-
-// deleteByIDForProject deletes a single row only when both its ID and persisted
-// project owner match. A foreign ID is deliberately indistinguishable from a
-// missing row to avoid exposing cross-project authorization metadata.
-func deleteByIDForProject(ctx context.Context, db *sql.DB, table, entityLabel, projectID, id string) error {
-	result, err := execBoundSQLite(ctx, db, fmt.Sprintf(`DELETE FROM %s WHERE id = ? AND project_id = ?`, table), id, projectID)
-	if err != nil {
-		return fmt.Errorf("delete %s: %w", entityLabel, err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("%s not found", entityLabel)
-	}
-	return nil
-}
-
-// countAny reports whether table contains any rows. errLabel is used only in
+// countRows returns the number of rows in table. errLabel is used only in
 // the wrapped error message on query failure.
 func countRows(ctx context.Context, db *sql.DB, table, errLabel string) (int, error) {
 	var count int
 	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s`, table)).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count %s: %w", errLabel, err)
-	}
-	return count, nil
-}
-
-func countRowsByProject(ctx context.Context, db *sql.DB, table, errLabel, projectID string) (int, error) {
-	var count int
-	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE project_id = ?`, table), projectID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count %s: %w", errLabel, err)
 	}
 	return count, nil
@@ -187,35 +150,8 @@ func authorizedUsersListQuery(table, userCol string) string {
 		 ORDER BY added_at ASC`, userCol, table)
 }
 
-func authorizedUsersListByProjectQuery(table, userCol string) string {
-	return fmt.Sprintf(
-		`SELECT id, project_id, %s, display_name, added_at, added_by, application_user_id, mapping_review, team_id
-		 FROM %s
-		 WHERE project_id = ?
-		 ORDER BY added_at ASC`, userCol, table)
-}
-
 func listAuthorizedUsers[T any](ctx context.Context, db *sql.DB, table, userCol, listErrLabel, scanErrLabel string, scan func(rows *sql.Rows) (T, error)) ([]T, error) {
 	rows, err := db.QueryContext(ctx, authorizedUsersListQuery(table, userCol))
-	if err != nil {
-		return nil, fmt.Errorf("list %s: %w", listErrLabel, err)
-	}
-	defer rows.Close()
-
-	var items []T
-	for rows.Next() {
-		v, err := scan(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan %s: %w", scanErrLabel, err)
-		}
-		items = append(items, v)
-	}
-	return items, rows.Err()
-}
-
-func listAuthorizedUsersByProject[T any](ctx context.Context, db *sql.DB, table, userCol, listErrLabel, scanErrLabel, projectID string, scan func(rows *sql.Rows) (T, error)) ([]T, error) {
-	query := authorizedUsersListQuery(table, userCol)
-	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", listErrLabel, err)
 	}
@@ -270,10 +206,8 @@ type singleIdentifierAllowlist[T any] struct {
 	listErrLabel                string
 	scanErrLabel                string
 	getErrLabel                 string
-	deleteEntityLabel           string
 	countAnyErrLabel            string
 	checkAnywhereErrLabel       string
-	checkProjectErrLabel        string
 	updateAddedByOnEmptyDisplay bool
 	normalize                   func(string) string
 	scan                        func(taskContextScanner) (T, error)
@@ -294,10 +228,7 @@ func (h singleIdentifierAllowlist[T]) List(ctx context.Context) ([]T, error) {
 }
 
 func (h singleIdentifierAllowlist[T]) ListByProject(ctx context.Context, projectID string) ([]T, error) {
-	return listAuthorizedUsersByProject(ctx, h.db, h.table, h.identityColumn, h.listErrLabel, h.scanErrLabel, projectID,
-		func(rows *sql.Rows) (T, error) {
-			return h.scan(rows)
-		})
+	return h.List(ctx)
 }
 
 func (h singleIdentifierAllowlist[T]) GetByID(ctx context.Context, id string) (*T, error) {

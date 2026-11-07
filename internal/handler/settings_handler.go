@@ -1174,24 +1174,6 @@ func defaultIfBlank(value, fallback string) string {
 	return value
 }
 
-// saveOptionalBoolSetting preserves a stored preference when the form omits it.
-func saveOptionalBoolSetting(ctx context.Context, settingsRepo persistence.SettingsStore, key, value string, fallback bool) error {
-	if value == "true" || value == "false" {
-		return settingsRepo.Set(ctx, key, value)
-	}
-	if value != "" {
-		return nil
-	}
-	current, err := settingsRepo.Get(ctx, key)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(current) == "" {
-		return settingsRepo.Set(ctx, key, strconv.FormatBool(fallback))
-	}
-	return nil
-}
-
 func boolFormValue(value string, fallback bool) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if value == "true" || value == "on" || value == "1" {
