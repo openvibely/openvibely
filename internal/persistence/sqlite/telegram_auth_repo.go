@@ -14,11 +14,6 @@ const telegramAuthorizedUsersListQuery = `SELECT id, project_id, telegram_user_i
 				 FROM telegram_authorized_users
 				 ORDER BY added_at ASC`
 
-const telegramAuthorizedUsersListByProjectQuery = `SELECT id, project_id, telegram_user_id, telegram_username, display_name, added_at, added_by, application_user_id, mapping_review, team_id
-				 FROM telegram_authorized_users
-				 WHERE project_id = ?
-				 ORDER BY added_at ASC`
-
 const telegramIsAuthorizedAnywhereQuery = `SELECT COUNT(*) FROM telegram_authorized_users
 				 WHERE telegram_user_id = ? OR (telegram_user_id = 0 AND telegram_username != '' AND LOWER(telegram_username) = LOWER(?))`
 

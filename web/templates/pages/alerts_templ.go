@@ -71,32 +71,6 @@ func Alerts(projects []models.Project, currentProjectID string, alerts []models.
 	})
 }
 
-// AlertsPage renders the initial bounded alert page with its page boundary.
-func AlertsPage(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool) templ.Component {
-	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
-			return templ_7745c5c3_CtxErr
-		}
-		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-		if !templ_7745c5c3_IsBuffer {
-			defer func() {
-				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err == nil {
-					templ_7745c5c3_Err = templ_7745c5c3_BufErr
-				}
-			}()
-		}
-		ctx = templ.InitializeContext(ctx)
-		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = AlertsPageWithFilters(projects, currentProjectID, alerts, unreadCount, hasMore, "", "").Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		return nil
-	})
-}
-
 // AlertsPageWithFilters renders the initial alert page with its active workflow filters.
 func AlertsPageWithFilters(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -141,7 +115,7 @@ func AlertsPageWithFiltersAndSearch(projects []models.Project, currentProjectID 
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var6 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var5 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -159,7 +133,7 @@ func AlertsPageWithFiltersAndSearch(projects []models.Project, currentProjectID 
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layout.Base("Alerts", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var6), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.Base("Alerts", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var5), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -185,32 +159,6 @@ func AlertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = alertsContent(alerts, currentProjectID, unreadCount, false, "", "", "", alertCardListState(currentProjectID, "", "", "")).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		return nil
-	})
-}
-
-// AlertsContentPage renders a bounded alert page with its page boundary.
-func AlertsContentPage(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool) templ.Component {
-	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
-			return templ_7745c5c3_CtxErr
-		}
-		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-		if !templ_7745c5c3_IsBuffer {
-			defer func() {
-				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err == nil {
-					templ_7745c5c3_Err = templ_7745c5c3_BufErr
-				}
-			}()
-		}
-		ctx = templ.InitializeContext(ctx)
-		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = AlertsContentPageWithFilters(alerts, currentProjectID, unreadCount, hasMore, "", "").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -287,7 +235,7 @@ func AlertsPageWithState(projects []models.Project, currentProjectID string, ale
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var12 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var10 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -305,7 +253,7 @@ func AlertsPageWithState(projects []models.Project, currentProjectID string, ale
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layout.Base("Alerts", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var12), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.Base("Alerts", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var10), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -376,12 +324,12 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var15 string
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListURL("alerts", state)).ResolveURL(ctx)
+		var templ_7745c5c3_Var13 string
+		templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListURL("alerts", state)).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 92, Col: 207}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 82, Col: 207}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -389,12 +337,12 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var16 string
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(cardPaginationHasMoreAttribute(hasMore)).Resolve(ctx)
+		var templ_7745c5c3_Var14 string
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templruntime.NewAttributeExpression(cardPaginationHasMoreAttribute(hasMore)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 92, Col: 593}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 82, Col: 593}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -402,12 +350,12 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var17 string
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListURL("alerts", state)).Resolve(ctx)
+		var templ_7745c5c3_Var15 string
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListURL("alerts", state)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 94, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 84, Col: 40}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -428,12 +376,12 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var18 string
-			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", unreadCount))
+			var templ_7745c5c3_Var16 string
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", unreadCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 106, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 96, Col: 83}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -451,7 +399,7 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Var19 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Var17 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 				templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 				templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 				if !templ_7745c5c3_IsBuffer {
@@ -468,12 +416,12 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var20 string
-					templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", "/alerts/read-all", state)).Resolve(ctx)
+					var templ_7745c5c3_Var18 string
+					templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", "/alerts/read-all", state)).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 116, Col: 74}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 106, Col: 74}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -491,12 +439,12 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var21 string
-					templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", "/alerts", state)).ResolveURL(ctx)
+					var templ_7745c5c3_Var19 string
+					templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", "/alerts", state)).ResolveURL(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 130, Col: 73}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 120, Col: 73}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -507,7 +455,7 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 				}
 				return nil
 			})
-			templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions", IconClass: "h-5 w-5", MenuClass: "z-[100] w-52"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions", IconClass: "h-5 w-5", MenuClass: "z-[100] w-52"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var17), templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -524,12 +472,12 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(cardPaginationHasMoreAttribute(hasMore)).Resolve(ctx)
+		var templ_7745c5c3_Var20 string
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(cardPaginationHasMoreAttribute(hasMore)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 164, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 154, Col: 105}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -582,69 +530,6 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div></div><!-- Task Detail Dialog Container --><script>\n\t\tfunction renderSystemUpdateCard(data) {\n\t\t\t\tvar card = document.getElementById('system-update-card');\n\t\t\t\tif (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;\n\t\t\t\tif (!data) {\n\t\t\t\t\tcard.classList.add('hidden');\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tvar view = window.openVibelyNormalizeSystemUpdateSnapshot(data);\n\t\t\t\tif (view.hidden) { card.classList.add('hidden'); return; }\n\t\t\t\tcard.classList.remove('hidden');\n\t\t\t\tdocument.getElementById('system-update-summary').textContent = 'Current ' + view.currentVersion + (view.available ? ' · Available ' + view.available : ' · No update available') + ' · ' + view.distribution + ' · ' + view.channel;\n\t\t\t\tdocument.getElementById('system-update-state').textContent = view.state;\n\t\t\t\tdocument.getElementById('system-update-owner').textContent = view.ownerText;\n\t\t\t\tdocument.getElementById('system-update-work').textContent = view.workText;\n\t\t\t\tvar digest = document.getElementById('system-update-digest');\n\t\t\t\tdigest.textContent = view.imageRef ? 'Verified image: ' + view.imageRef : ''; digest.classList.toggle('hidden', !view.imageRef);\n\t\t\t\tvar notes = document.getElementById('system-update-notes');\n\t\t\t\tif (view.notesURL) { notes.href = view.notesURL; notes.classList.remove('hidden'); } else { notes.classList.add('hidden'); }\n\t\t\t\tvar error = document.getElementById('system-update-error'); error.textContent = view.errorText; error.classList.toggle('hidden', !view.errorText);\n\t\t\t\tvar accept = document.getElementById('system-update-accept');\n\t\t\t\taccept.textContent = view.acceptText;\n\t\t\t\tvar canManage = window.openVibelyCanManageUpdates === true;\n\t\t\t\taccept.disabled = !canManage;\n\t\t\t\taccept.classList.toggle('hidden', !view.actionable || !canManage);\n\t\t\t\tdocument.getElementById('system-update-permission').classList.toggle('hidden', canManage);\n\t\t\t\tdocument.getElementById('system-update-acceptance').classList.toggle('hidden', !view.showAcceptance);\n\t\t\t\tdocument.getElementById('system-update-cancel').disabled = !canManage;\n\t\t\t\tdocument.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel || !canManage);\n\t\t\t}\n\t\tasync function refreshSystemUpdateCard() {\n\t\t\t\tvar card = document.getElementById('system-update-card');\n\t\t\t\tif (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/api/system/update', {headers: {'Accept': 'application/json'}});\n\t\t\t\t\twindow.openVibelyCanManageUpdates = response.headers.get('X-OpenVibely-Can-Manage-Updates') === 'true';\n\t\t\t\t\tif (response.status === 204) {\n\t\t\t\t\t\tif (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(null);\n\t\t\t\t\t\telse renderSystemUpdateCard(null);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) return;\n\t\t\t\t\tvar data = await response.json();\n\t\t\t\t\tif (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(data);\n\t\t\t\t\telse renderSystemUpdateCard(data);\n\t\t\t\t} catch (_) {}\n\t\t\t}\n\t\t\tasync function systemUpdateAction(action) {\n\t\t\t\tif (window.openVibelyCanManageUpdates !== true) return;\n\t\t\t\tvar response = await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});\n\t\t\t\tif (action === 'cancel' && response.ok && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();\n\t\t\t\tawait refreshSystemUpdateCard();\n\t\t\t}\n\t\t\twindow.openVibelyRenderSystemUpdateCard = renderSystemUpdateCard;\n\t\t\tif (typeof window.refreshGlobalSystemUpdateIndicators === 'function') window.refreshGlobalSystemUpdateIndicators();\n\t\t\telse refreshSystemUpdateCard();\n\n\t\t\tfunction hydrateAlertMarkdown(container) {\n\t\t\t\tif (!container) return;\n\t\t\t\tvar markdown = container.querySelector('[data-alert-markdown][data-raw-content]');\n\t\t\t\tif (!markdown) return;\n\t\t\t\tvar raw = markdown.getAttribute('data-raw-content') || '';\n\t\t\t\tif (!raw) return;\n\t\t\t\tif (typeof window.renderChatMarkdown !== 'function') {\n\t\t\t\t\tmarkdown.textContent = raw;\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tmarkdown.classList.add('chat-markdown');\n\t\t\t\tmarkdown.innerHTML = window.renderChatMarkdown(raw);\n\t\t\t\tif (window.addCodeCopyButtons) window.addCodeCopyButtons(markdown);\n\t\t\t}\n\n\t\t\tfunction loadAlertDetail(details) {\n\t\t\t\tif (!details || !details.open) return;\n\t\t\t\tvar container = details.querySelector('[data-alert-detail-container]');\n\t\t\t\tif (!container || container.dataset.alertDetailState === 'loaded' || container.dataset.alertDetailState === 'loading') return;\n\t\t\t\tvar url = details.dataset.alertDetailUrl || '';\n\t\t\t\tif (!url) return;\n\t\t\t\tcontainer.dataset.alertDetailState = 'loading';\n\t\t\t\tfetch(url, {headers: {'Accept': 'text/html'}}).then(function(response) {\n\t\t\t\t\tif (!response.ok) throw new Error('detail request failed');\n\t\t\t\t\treturn response.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\tcontainer.innerHTML = html;\n\t\t\t\t\thydrateAlertMarkdown(container);\n\t\t\t\t\tcontainer.dataset.alertDetailState = 'loaded';\n\t\t\t\t}).catch(function() {\n\t\t\t\t\tcontainer.dataset.alertDetailState = '';\n\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm text-error\">Could not load detail. Close and reopen to retry.</p>';\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction decodeAlertCopyText(copyText) {\n\t\t\t\tif (!copyText) return '';\n\t\t\t\tvar encoded = copyText.getAttribute('data-alert-copy-base64') || '';\n\t\t\t\tif (!encoded) return copyText.textContent || '';\n\t\t\t\ttry {\n\t\t\t\t\tvar binary = window.atob(encoded);\n\t\t\t\t\tvar bytes = new Uint8Array(binary.length);\n\t\t\t\t\tfor (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);\n\t\t\t\t\treturn new TextDecoder('utf-8', {fatal: true}).decode(bytes);\n\t\t\t\t} catch (_) {\n\t\t\t\t\treturn '';\n\t\t\t\t}\n\t\t\t}\n\t\t\tfunction copyAlertDetails(button) {\n\t\t\t\tif (!button) return;\n\t\t\t\tvar scope = button.closest('[data-alert-detail-loaded]') || button.closest('details') || button.parentElement;\n\t\t\t\tvar copyText = scope && scope.querySelector('[data-alert-copy-text]');\n\t\t\t\tvar text = decodeAlertCopyText(copyText);\n\t\t\t\tvar defaultLabel = button.dataset.defaultLabel || 'Copy body';\n\t\t\t\tvar feedback = button.querySelector('[data-alert-copy-feedback]');\n\t\t\t\tvar copyIcon = button.querySelector('[data-alert-copy-icon]');\n\t\t\t\tvar successIcon = button.querySelector('[data-alert-copy-success-icon]');\n\t\t\t\tvar errorIcon = button.querySelector('[data-alert-copy-error-icon]');\n\t\t\t\tvar setFeedback = function(label, failed) {\n\t\t\t\t\tif (feedback) feedback.textContent = label;\n\t\t\t\t\tif (copyIcon) copyIcon.classList.add('hidden');\n\t\t\t\t\tif (successIcon) successIcon.classList.toggle('hidden', failed);\n\t\t\t\t\tif (errorIcon) errorIcon.classList.toggle('hidden', !failed);\n\t\t\t\t\tbutton.setAttribute('aria-label', label);\n\t\t\t\t\tbutton.classList.toggle('btn-error', failed);\n\t\t\t\t\tbutton.classList.toggle('btn-success', !failed);\n\t\t\t\t\twindow.setTimeout(function() {\n\t\t\t\t\t\tif (!button.isConnected) return;\n\t\t\t\t\t\tif (feedback) feedback.textContent = defaultLabel;\n\t\t\t\t\t\tif (copyIcon) copyIcon.classList.remove('hidden');\n\t\t\t\t\t\tif (successIcon) successIcon.classList.add('hidden');\n\t\t\t\t\t\tif (errorIcon) errorIcon.classList.add('hidden');\n\t\t\t\t\t\tbutton.setAttribute('aria-label', defaultLabel);\n\t\t\t\t\t\tbutton.classList.remove('btn-error', 'btn-success');\n\t\t\t\t\t}, 2000);\n\t\t\t\t};\n\t\t\t\tif (!text || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {\n\t\t\t\t\tsetFeedback('Copy failed', true);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tnavigator.clipboard.writeText(text).then(function() {\n\t\t\t\t\tsetFeedback('Copied', false);\n\t\t\t\t}).catch(function() {\n\t\t\t\t\tsetFeedback('Copy failed', true);\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction openAlertTaskDialog(taskId) {\n\t\t\twindow.openVibelyNavigate(\n\t\t\t\t'/tasks/' + taskId + '?tab=history&from=alerts',\n\t\t\t\t'/tasks/' + taskId + '?from=alerts'\n\t\t\t);\n\t\t}\n\n\t\tfunction deleteAlerts(url, target) {\n\t\t\tif (!url) return false;\n\t\t\thtmx.ajax('DELETE', url, {\n\t\t\t\ttarget: target || '#alerts-content',\n\t\t\t\tselect: '#alerts-content',\n\t\t\t\tswap: 'outerHTML show:none'\n\t\t\t});\n\t\t\treturn false;\n\t\t}\n\n\t\tfunction deleteAlertsFromDataset(el) {\n\t\t\tif (!el || !el.dataset) return false;\n\t\t\tvar url = el.dataset.deleteUrl || '';\n\t\t\tvar row = el.closest('[data-alert-scroll-anchor]');\n\t\t\tif (row && window.openVibelyAlertsViewport) {\n\t\t\t\twindow.openVibelyAlertsViewport.pendingFocusID = row.dataset.alertId || '';\n\t\t\t}\n\t\t\treturn deleteAlerts(url, '#alerts-content');\n\t\t}\n\n\t\t(function installAlertsViewportPreservation() {\n\t\t\tvar state = window.openVibelyAlertsViewport || (window.openVibelyAlertsViewport = {});\n\t\t\tif (state.installed) return;\n\t\t\tstate.installed = true;\n\n\t\t\tfunction alertRows(root) {\n\t\t\t\treturn Array.prototype.slice.call(root.querySelectorAll('[data-alert-scroll-anchor]'));\n\t\t\t}\n\n\t\t\tfunction visibleAlertRows(rows) {\n\t\t\t\treturn rows.filter(function(row) {\n\t\t\t\t\treturn row.getClientRects().length > 0;\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction focusCandidates(rows, activeID) {\n\t\t\t\tvar ids = visibleAlertRows(rows).map(function(row) { return row.dataset.alertId || ''; });\n\t\t\t\tvar index = ids.indexOf(activeID);\n\t\t\t\tif (index < 0) return [];\n\t\t\t\tvar candidates = [activeID];\n\t\t\t\tfor (var distance = 1; distance < ids.length; distance++) {\n\t\t\t\t\tif (index + distance < ids.length) candidates.push(ids[index + distance]);\n\t\t\t\t\tif (index - distance >= 0) candidates.push(ids[index - distance]);\n\t\t\t\t}\n\t\t\t\treturn candidates;\n\t\t\t}\n\n\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\tvar detail = event.detail || {};\n\t\t\t\tvar target = detail.target;\n\t\t\t\tif (!target || (target.id !== 'alerts-content' && target.id !== 'alerts-live-results')) return;\n\t\t\t\tstate.requestFocus = {xhr: detail.xhr, control: document.activeElement};\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tif (!target || (target.id !== 'alerts-content' && target.id !== 'alerts-live-results') || !root) return;\n\t\t\t\tvar requestFocus = state.requestFocus;\n\t\t\t\tvar activeControl = requestFocus && requestFocus.xhr === event.detail.xhr ? requestFocus.control : document.activeElement;\n\t\t\t\tstate.requestFocus = null;\n\n\t\t\t\tvar rows = alertRows(root);\n\t\t\t\tvar scroller = root.closest('#main-content') || root;\n\t\t\t\tvar rootRect = scroller.getBoundingClientRect();\n\t\t\t\tvar viewportTop = Math.max(rootRect.top, 0);\n\t\t\t\tvar viewportBottom = Math.min(rootRect.bottom, window.innerHeight);\n\t\t\t\tvar renderedRows = visibleAlertRows(rows);\n\t\t\t\tvar viewportRows = renderedRows.filter(function(row) {\n\t\t\t\t\tvar rect = row.getBoundingClientRect();\n\t\t\t\t\treturn rect.bottom > viewportTop && rect.top < viewportBottom;\n\t\t\t\t});\n\t\t\t\t\tvar anchors = (viewportRows.length ? viewportRows : renderedRows).map(function(row) {\n\t\t\t\t\t\treturn {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};\n\t\t\t\t\t}).sort(function(a, b) {\n\t\t\t\t\t\treturn Math.abs(a.top - viewportTop) - Math.abs(b.top - viewportTop);\n\t\t\t\t\t});\n\t\t\t\t\tvar activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');\n\t\t\t\t\tvar activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');\n\t\t\t\t\tvar focusID = state.pendingFocusID || (activeRow && activeRow.dataset.alertId) || '';\n\t\t\t\t\tvar focusedVisibleIndex = renderedRows.findIndex(function(row) { return (row.dataset.alertId || '') === focusID; });\n\t\t\t\t\tvar activeSearch = ((root.querySelector('[data-card-search]') || {}).value || '').trim();\n\t\t\t\t\tif (activeSearch && state.pendingFocusID && focusedVisibleIndex > 0) {\n\t\t\t\t\t\tvar previous = renderedRows[focusedVisibleIndex - 1];\n\t\t\t\t\t\tvar previousID = previous.dataset.alertId || '';\n\t\t\t\t\t\tanchors = [{id: previousID, top: previous.getBoundingClientRect().top}].concat(anchors.filter(function(anchor) { return anchor.id !== previousID; }));\n\t\t\t\t\t}\n\t\t\t\t\tstate.swap = {\n\t\t\t\t\t\txhr: event.detail && event.detail.xhr,\n\t\t\t\t\t\tliveRefresh: target.id === 'alerts-live-results',\n\t\t\t\t\t\tanchors: anchors,\n\t\t\t\t\t\trootScrollTop: scroller.scrollTop,\n\t\t\t\t\t\twindowScrollY: window.scrollY,\n\t\t\t\t\t\tsearch: (root.querySelector('[data-card-search]') || {}).value || '',\n\t\t\t\t\t\tfiltersOpen: !!root.querySelector('[data-card-filters-button][aria-expanded=\"true\"]'),\n\t\t\t\t\t\tpersistentFocus: target.id === 'alerts-live-results' && activeControl && !target.contains(activeControl) ? activeControl : null,\n\t\t\t\t\t\tfocusIDs: focusCandidates(rows, focusID)\n\t\t\t\t\t};\t\t\t\tstate.pendingFocusID = '';\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tvar swappedTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = state.swap;\n\t\t\t\tif (!swappedTarget || (swappedTarget.id !== 'alerts-content' && swappedTarget.id !== 'alerts-live-results') || !root || !saved) return;\n\t\t\t\tstate.swap = null;\n\t\t\t\tstate.settlingSwap = saved;\n\n\t\t\t\t\tif (swappedTarget.id === 'alerts-live-results') {\n\t\t\t\t\t\troot.setAttribute('data-card-pagination-has-more', swappedTarget.getAttribute('data-card-pagination-has-more') || 'false');\n\t\t\t\t\t}\n\t\t\t\t\tvar replacementSearch = root.querySelector('[data-card-search]');\n\t\t\t\t\tif (replacementSearch) {\n\t\t\t\t\t\treplacementSearch.value = saved.search || '';\n\t\t\t\t\t\treplacementSearch.setAttribute('data-card-search-initial', saved.search || '');\n\t\t\t\t\t}\n\t\t\t\t\tif (typeof window.refreshCardSearches === 'function') {\n\t\t\t\t\t\twindow.refreshCardSearches(root);\n\t\t\t\t\t}\n\t\t\t\t\t// Full-content actions replace the toolbar. Initialize its handlers\n\t\t\t\t\t// before installing checkboxes so they reference the current toolbar.\n\t\t\t\t\tif (typeof window.refreshCardListToolbars === 'function') {\n\t\t\t\t\t\twindow.refreshCardListToolbars(root);\n\t\t\t\t\t}\n\t\t\t\t\tif (typeof root._openVibelyInstallSelectionCards === 'function') {\n\t\t\t\t\t\troot._openVibelyInstallSelectionCards();\n\t\t\t\t\t}\n\t\t\t\t\tif (saved.filtersOpen && typeof window.setCardFilterDropdownState === 'function') {\n\t\t\t\t\t\tvar filterButton = root.querySelector('[data-card-filters-button]');\n\t\t\t\t\t\twindow.setCardFilterDropdownState(filterButton && filterButton.closest('.dropdown'), true);\n\t\t\t\t\t}\n\t\t\t\t\tif (saved.persistentFocus && saved.persistentFocus.isConnected && document.activeElement !== saved.persistentFocus) {\n\t\t\t\t\t\tsaved.persistentFocus.focus({preventScroll: true});\n\t\t\t\t\t}\n\t\t\t\t\tvar scroller = root.closest('#main-content') || root;\n\t\t\t\t\tscroller.scrollTop = saved.rootScrollTop;\n\t\t\t\tvar anchor = null;\n\t\t\t\tvar savedAnchor = null;\n\t\t\t\tfor (var i = 0; i < saved.anchors.length; i++) {\n\t\t\t\t\tanchor = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.anchors[i].id) + '\"]');\n\t\t\t\t\tif (anchor) {\n\t\t\t\t\t\tsavedAnchor = saved.anchors[i];\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (anchor && savedAnchor) {\n\t\t\t\t\tvar delta = anchor.getBoundingClientRect().top - savedAnchor.top;\n\t\t\t\t\t\tif (saved.search || scroller.scrollHeight > scroller.clientHeight) scroller.scrollTop += delta;\n\t\t\t\t\t\telse window.scrollBy(0, delta);\t\t\t\t} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {\n\t\t\t\t\twindow.scrollTo(0, saved.windowScrollY);\n\t\t\t\t}\n\t\t\t\tsaved.focusAfterSwap = document.activeElement;\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', function(event) {\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = state.settlingSwap;\n\t\t\t\tif (!root || !saved || !event.detail || event.detail.xhr !== saved.xhr) return;\n\t\t\t\tstate.settlingSwap = null;\n\t\t\t\t// A user may focus another control while a live refresh is settling.\n\t\t\t\t// Preserve that newer choice. Full-content delete swaps still need\n\t\t\t\t// their explicit next-row focus after HTMX restores the search input.\n\t\t\t\tvar active = document.activeElement;\n\t\t\t\tif (saved.liveRefresh && active && active !== document.body && active !== document.documentElement && active.isConnected && active !== saved.focusAfterSwap && active !== saved.persistentFocus) return;\n\t\t\t\tif (saved.persistentFocus && saved.persistentFocus.isConnected && document.activeElement !== saved.persistentFocus) {\n\t\t\t\t\tsaved.persistentFocus.focus({preventScroll: true});\n\t\t\t\t}\n\n\t\t\t\t\tvar focusTarget = null;\t\t\t\tfor (var j = 0; j < saved.focusIDs.length; j++) {\n\t\t\t\t\tfocusTarget = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.focusIDs[j]) + '\"] [data-alert-delete]');\n\t\t\t\t\tif (focusTarget) break;\n\t\t\t\t}\n\t\t\t\tif (!focusTarget && saved.focusIDs.length) focusTarget = root.querySelector('[data-card-search]');\n\t\t\t\tif (focusTarget) focusTarget.focus({preventScroll: true});\n\t\t\t});\n\t\t})();\n\t\t</script></div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		return nil
-	})
-}
-
-// alertSearchInput keeps the Alerts search control's established max-w-xs sizing while
-// allowing a direct search query to seed the visible input and session state.
-func alertSearchInput(search string) templ.Component {
-	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
-			return templ_7745c5c3_CtxErr
-		}
-		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-		if !templ_7745c5c3_IsBuffer {
-			defer func() {
-				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err == nil {
-					templ_7745c5c3_Err = templ_7745c5c3_BufErr
-				}
-			}()
-		}
-		ctx = templ.InitializeContext(ctx)
-		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<div class=\"mb-4 max-w-xs\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><input type=\"text\" name=\"search\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(search).Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 525, Col: 18}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" data-card-search=\"alerts\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if search != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " data-card-search-initial=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var25 string
-			templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(search).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 528, Col: 38}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, " class=\"w-full bg-transparent px-4 py-2 text-sm border-0 focus:outline-none focus:ring-0\" placeholder=\"Search alerts...\"></div></div><div data-search-no-results class=\"text-center py-8\" style=\"display:none\"><p class=\"opacity-50\">No results match your search.</p></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -707,20 +592,20 @@ func AlertDetail(alert models.Alert) templ.Component {
 		ctx = templ.ClearChildren(ctx)
 		if alert.Source == "account_usage" {
 			if link, ok := alert.Metadata["usage_url"].(string); ok && strings.HasPrefix(link, "/analytics?") {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<a class=\"btn btn-sm btn-outline mb-3\" href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<a class=\"btn btn-sm btn-outline mb-3\" href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var27 string
-				templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(link)).ResolveURL(ctx)
+				var templ_7745c5c3_Var22 string
+				templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(link)).ResolveURL(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 579, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 546, Col: 66}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\">View account usage</a>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\">View account usage</a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -752,7 +637,7 @@ func alertDetailBody(alert models.Alert) templ.Component {
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if alert.Body == "" && alertMetadataJSON(alert) == "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<p class=\"text-sm opacity-60\">No additional detail.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<p class=\"text-sm opacity-60\">No additional detail.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -761,25 +646,25 @@ func alertDetailBody(alert models.Alert) templ.Component {
 				templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 				templ_7745c5c3_Buffer := templ.GetBuffer()
 				var templ_7745c5c3_ElementScripts []templ.ComponentScript
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<div class=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<div class=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var29 = []any{"relative min-w-0 max-w-full", templ.KV("min-h-6 pr-8", alert.Body != "")}
-				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var29...)
+				var templ_7745c5c3_Var24 = []any{"relative min-w-0 max-w-full", templ.KV("min-h-6 pr-8", alert.Body != "")}
+				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var24...)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var30 string
-				templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var29).String()).Resolve(ctx)
+				var templ_7745c5c3_Var25 string
+				templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var24).String()).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
 					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 1, Col: 0}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" data-alert-detail-loaded")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" data-alert-detail-loaded")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -793,25 +678,25 @@ func alertDetailBody(alert models.Alert) templ.Component {
 				}
 				templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, ">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, ">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if alert.Body != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"chat-markdown\" data-alert-markdown data-raw-content=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"chat-markdown\" data-alert-markdown data-raw-content=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var31 string
-				templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alert.Body).Resolve(ctx)
+				var templ_7745c5c3_Var26 string
+				templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alert.Body).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 591, Col: 80}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 558, Col: 80}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\"></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\"></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -821,25 +706,25 @@ func alertDetailBody(alert models.Alert) templ.Component {
 					templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 					templ_7745c5c3_Buffer := templ.GetBuffer()
 					var templ_7745c5c3_ElementScripts []templ.ComponentScript
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<pre class=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<pre class=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var32 = []any{"max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded bg-base-300 p-2 text-xs", templ.KV("mt-3", alert.Body != "")}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var32...)
+					var templ_7745c5c3_Var27 = []any{"max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded bg-base-300 p-2 text-xs", templ.KV("mt-3", alert.Body != "")}
+					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var27...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var33 string
-					templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var32).String()).Resolve(ctx)
+					var templ_7745c5c3_Var28 string
+					templ_7745c5c3_Var28, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var27).String()).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 1, Col: 0}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -853,57 +738,57 @@ func alertDetailBody(alert models.Alert) templ.Component {
 					}
 					templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, ">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, ">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var34 string
-				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(alertMetadataJSON(alert))
+				var templ_7745c5c3_Var29 string
+				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(alertMetadataJSON(alert))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 594, Col: 172}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 561, Col: 172}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</pre>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</pre>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 			if alert.Body != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<pre class=\"hidden\" data-alert-copy-text data-alert-copy-base64=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<pre class=\"hidden\" data-alert-copy-text data-alert-copy-base64=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var35 string
-				templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alertBodyBase64(alert.Body)).Resolve(ctx)
+				var templ_7745c5c3_Var30 string
+				templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alertBodyBase64(alert.Body)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 597, Col: 97}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 564, Col: 97}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" aria-hidden=\"true\"></pre><button type=\"button\" class=\"btn btn-xs btn-ghost btn-square absolute right-0 top-0\" data-alert-copy data-default-label=\"Copy body\" data-tooltip-disabled aria-label=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var36 string
-				templ_7745c5c3_Var36, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Copy inspected " + alertDetailInspectLabel(alert) + " body").Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 604, Col: 78}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" aria-hidden=\"true\"></pre><button type=\"button\" class=\"btn btn-xs btn-ghost btn-square absolute right-0 top-0\" data-alert-copy data-default-label=\"Copy body\" data-tooltip-disabled aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" onclick=\"copyAlertDetails(this)\"><svg data-alert-copy-icon xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg> <svg data-alert-copy-success-icon xmlns=\"http://www.w3.org/2000/svg\" class=\"hidden h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg> <svg data-alert-copy-error-icon xmlns=\"http://www.w3.org/2000/svg\" class=\"hidden h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg> <span data-alert-copy-feedback class=\"sr-only\" aria-live=\"polite\">Copy body</span></button>")
+				var templ_7745c5c3_Var31 string
+				templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Copy inspected " + alertDetailInspectLabel(alert) + " body").Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 571, Col: 78}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" onclick=\"copyAlertDetails(this)\"><svg data-alert-copy-icon xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg> <svg data-alert-copy-success-icon xmlns=\"http://www.w3.org/2000/svg\" class=\"hidden h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg> <svg data-alert-copy-error-icon xmlns=\"http://www.w3.org/2000/svg\" class=\"hidden h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg> <span data-alert-copy-feedback class=\"sr-only\" aria-live=\"polite\">Copy body</span></button>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -933,121 +818,121 @@ func alertRow(alert models.AlertSummary, currentProjectID string, state CardList
 			templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 			templ_7745c5c3_Buffer := templ.GetBuffer()
 			var templ_7745c5c3_ElementScripts []templ.ComponentScript
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<div id=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var33 string
+			templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression("alert-" + alert.ID).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 592, Col: 26}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" data-alert-id=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var34 string
+			templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alert.ID).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 593, Col: 26}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" data-alert-scroll-anchor=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var35 string
+			templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alert.ID).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 594, Col: 37}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" class=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var36 = []any{"card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil), templ.KV("focus:outline-none focus-visible:ring-1 focus-visible:ring-base-content/50 focus-visible:ring-inset", alert.TaskID != nil)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var36...)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var37 string
+			templ_7745c5c3_Var37, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var36).String()).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 1, Col: 0}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" data-card-select-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var38 string
-			templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression("alert-" + alert.ID).Resolve(ctx)
+			templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alert.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 625, Col: 26}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 596, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\" data-alert-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" data-card-select-eligible=\"true\" data-search-card data-search-text=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var39 string
-			templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alert.ID).Resolve(ctx)
+			templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alertSearchText(alert)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 626, Col: 26}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 599, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" data-alert-scroll-anchor=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var40 string
-			templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alert.ID).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 627, Col: 37}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" class=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var41 = []any{"card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil), templ.KV("focus:outline-none focus-visible:ring-1 focus-visible:ring-base-content/50 focus-visible:ring-inset", alert.TaskID != nil)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var41...)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var42 string
-			templ_7745c5c3_Var42, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var41).String()).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 1, Col: 0}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" data-card-select-id=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var43 string
-			templ_7745c5c3_Var43, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alert.ID).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 629, Col: 32}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" data-card-select-eligible=\"true\" data-search-card data-search-text=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var44 string
-			templ_7745c5c3_Var44, templ_7745c5c3_Err = templruntime.NewAttributeExpression(alertSearchText(alert)).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 632, Col: 43}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if alert.TaskID != nil {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, " role=\"link\" tabindex=\"0\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, " role=\"link\" tabindex=\"0\" aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var45 string
-				templ_7745c5c3_Var45, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Open task for alert " + alert.Title).Resolve(ctx)
+				var templ_7745c5c3_Var40 string
+				templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Open task for alert " + alert.Title).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 636, Col: 52}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 603, Col: 52}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" data-task-id=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var46 string
-				templ_7745c5c3_Var46, templ_7745c5c3_Err = templruntime.NewAttributeExpression(*alert.TaskID).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 637, Col: 31}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" data-task-id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openAlertTaskDialog(this.dataset.taskId)\" onkeydown=\"if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); openAlertTaskDialog(this.dataset.taskId)\"")
+				var templ_7745c5c3_Var41 string
+				templ_7745c5c3_Var41, templ_7745c5c3_Err = templruntime.NewAttributeExpression(*alert.TaskID).Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 604, Col: 31}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openAlertTaskDialog(this.dataset.taskId)\" onkeydown=\"if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); openAlertTaskDialog(this.dataset.taskId)\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1062,27 +947,27 @@ func alertRow(alert models.AlertSummary, currentProjectID string, state CardList
 			}
 			templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "><div class=\"card-body max-w-full min-w-0 p-4 sm:p-6\"><div class=\"flex items-start gap-3 max-w-full min-w-0\"><div class=\"mt-0.5 flex-shrink-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "><div class=\"card-body max-w-full min-w-0 p-4 sm:p-6\"><div class=\"flex items-start gap-3 max-w-full min-w-0\"><div class=\"mt-0.5 flex-shrink-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if alert.Severity == models.SeverityError {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 text-error\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 text-error\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if alert.Severity == models.SeverityWarning {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 text-warning\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 text-warning\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 text-info\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 text-info\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</div><div class=\"flex-1 min-w-0 max-w-full\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</div><div class=\"flex-1 min-w-0 max-w-full\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1090,25 +975,25 @@ func alertRow(alert models.AlertSummary, currentProjectID string, state CardList
 			templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 			templ_7745c5c3_Buffer := templ.GetBuffer()
 			var templ_7745c5c3_ElementScripts []templ.ComponentScript
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<p class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<p class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var47 = []any{"font-semibold break-words [overflow-wrap:anywhere]", templ.KV("font-bold", !alert.IsRead)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var47...)
+			var templ_7745c5c3_Var42 = []any{"font-semibold break-words [overflow-wrap:anywhere]", templ.KV("font-bold", !alert.IsRead)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var42...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var48 string
-			templ_7745c5c3_Var48, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var47).String()).Resolve(ctx)
+			var templ_7745c5c3_Var43 string
+			templ_7745c5c3_Var43, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var42).String()).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 1, Col: 0}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1122,61 +1007,61 @@ func alertRow(alert models.AlertSummary, currentProjectID string, state CardList
 			}
 			templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, ">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, ">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var49 string
-		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Title)
+		var templ_7745c5c3_Var44 string
+		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 661, Col: 19}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 628, Col: 19}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</p><div class=\"mt-2 flex min-w-0 flex-wrap gap-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</p><div class=\"mt-2 flex min-w-0 flex-wrap gap-2\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if label := templateui.ProjectLabel(ctx, alert.ProjectID); label != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<span class=\"badge badge-outline badge-sm\" data-project-label>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<span class=\"badge badge-outline badge-sm\" data-project-label>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var50 string
-			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(label)
+			var templ_7745c5c3_Var45 string
+			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 665, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 632, Col: 97}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "<span class=\"badge badge-outline badge-sm\">Project scoped</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<span class=\"badge badge-outline badge-sm\">Project scoped</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<span class=\"badge badge-ghost badge-sm\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "<span class=\"badge badge-ghost badge-sm\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var51 string
-		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.Type))
+		var templ_7745c5c3_Var46 string
+		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.Type))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 669, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 636, Col: 67}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1185,25 +1070,25 @@ func alertRow(alert models.AlertSummary, currentProjectID string, state CardList
 				templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 				templ_7745c5c3_Buffer := templ.GetBuffer()
 				var templ_7745c5c3_ElementScripts []templ.ComponentScript
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<span class=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<span class=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var52 = []any{"badge badge-sm", templ.KV("badge-warning", alert.DecisionState == models.AlertDecisionPending), templ.KV("badge-success", alert.DecisionState == models.AlertDecisionApproved), templ.KV("badge-error", alert.DecisionState == models.AlertDecisionRejected || alert.DecisionState == models.AlertDecisionDismissed)}
-				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var52...)
+				var templ_7745c5c3_Var47 = []any{"badge badge-sm", templ.KV("badge-warning", alert.DecisionState == models.AlertDecisionPending), templ.KV("badge-success", alert.DecisionState == models.AlertDecisionApproved), templ.KV("badge-error", alert.DecisionState == models.AlertDecisionRejected || alert.DecisionState == models.AlertDecisionDismissed)}
+				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var47...)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var53 string
-				templ_7745c5c3_Var53, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var52).String()).Resolve(ctx)
+				var templ_7745c5c3_Var48 string
+				templ_7745c5c3_Var48, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var47).String()).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
 					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 1, Col: 0}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1217,289 +1102,289 @@ func alertRow(alert models.AlertSummary, currentProjectID string, state CardList
 				}
 				templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, ">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, ">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var54 string
-			templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.DecisionState))
+			var templ_7745c5c3_Var49 string
+			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.DecisionState))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 671, Col: 362}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 638, Col: 362}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "<span class=\"badge badge-neutral badge-sm\">Operational</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<span class=\"badge badge-neutral badge-sm\">Operational</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if alert.ProcessingState != models.AlertProcessingNotApplicable {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<span class=\"badge badge-outline badge-sm\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<span class=\"badge badge-outline badge-sm\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var55 string
-			templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.ProcessingState))
+			var templ_7745c5c3_Var50 string
+			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.ProcessingState))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 676, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 643, Col: 81}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if alert.Message != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<p class=\"text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "<p class=\"text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var51 string
+			templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Message)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 647, Col: 93}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<details class=\"mt-3 rounded-box bg-base-200/50 p-3\" onclick=\"event.stopPropagation()\" ontoggle=\"loadAlertDetail(this)\" data-alert-detail-url=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var52 string
+		templ_7745c5c3_Var52, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/alerts/%s/details?project_id=%s", alert.ID, currentProjectID)).ResolveURL(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 653, Col: 105}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "\"><summary class=\"cursor-pointer text-sm font-medium\">Inspect ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var53 string
+		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(alertSummaryInspectLabel(alert))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 655, Col: 99}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</summary><div class=\"mt-3 min-w-0 max-w-full\" data-alert-detail-container><p class=\"text-sm opacity-60\" data-alert-detail-placeholder>Loading detail…</p></div></details><div class=\"mt-2 text-xs opacity-60 break-words\"><span>Source: ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var54 string
+		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Source)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 661, Col: 34}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "</span> <span class=\"mx-1\">·</span> <span>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var55 string
+		templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 663, Col: 67}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "</span> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if alert.Claimant != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "<span class=\"mx-1\">·</span><span>Claimed by ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var56 string
-			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Message)
+			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Claimant)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 680, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 665, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "<details class=\"mt-3 rounded-box bg-base-200/50 p-3\" onclick=\"event.stopPropagation()\" ontoggle=\"loadAlertDetail(this)\" data-alert-detail-url=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var57 string
-		templ_7745c5c3_Var57, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/alerts/%s/details?project_id=%s", alert.ID, currentProjectID)).ResolveURL(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 686, Col: 105}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "\"><summary class=\"cursor-pointer text-sm font-medium\">Inspect ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var58 string
-		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(alertSummaryInspectLabel(alert))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 688, Col: 99}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "</summary><div class=\"mt-3 min-w-0 max-w-full\" data-alert-detail-container><p class=\"text-sm opacity-60\" data-alert-detail-placeholder>Loading detail…</p></div></details><div class=\"mt-2 text-xs opacity-60 break-words\"><span>Source: ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var59 string
-		templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Source)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 694, Col: 34}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "</span> <span class=\"mx-1\">·</span> <span>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var60 string
-		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 696, Col: 67}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "</span> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if alert.Claimant != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "<span class=\"mx-1\">·</span><span>Claimed by ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var61 string
-			templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Claimant)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 698, Col: 68}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "</span>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if alert.ProcessingError != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "<p class=\"mt-2 text-sm text-error break-words\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "<p class=\"mt-2 text-sm text-error break-words\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var62 string
-			templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.JoinStringErrs(alert.ProcessingError)
+			var templ_7745c5c3_Var57 string
+			templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(alert.ProcessingError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 702, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 669, Col: 76}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var62))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if alert.Source == "skill_dependency_approval" && strings.HasPrefix(alert.IdempotencyKey, "skill-dependency:") {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "<a class=\"btn btn-link btn-xs mt-2 px-0\" href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "<a class=\"btn btn-link btn-xs mt-2 px-0\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var63 string
-			templ_7745c5c3_Var63, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL("/chat/input-requests/" + strings.TrimPrefix(alert.IdempotencyKey, "skill-dependency:") + "/open?project_id=" + alert.ProjectID)).ResolveURL(ctx)
+			var templ_7745c5c3_Var58 string
+			templ_7745c5c3_Var58, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL("/chat/input-requests/" + strings.TrimPrefix(alert.IdempotencyKey, "skill-dependency:") + "/open?project_id=" + alert.ProjectID)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 705, Col: 184}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 672, Col: 184}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\">Review external tools</a> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "\">Review external tools</a> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if alert.ImplementationTaskID != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "<button class=\"btn btn-link btn-xs mt-2 px-0\" data-task-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "<button class=\"btn btn-link btn-xs mt-2 px-0\" data-task-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var64 string
-			templ_7745c5c3_Var64, templ_7745c5c3_Err = templruntime.NewAttributeExpression(*alert.ImplementationTaskID).Resolve(ctx)
+			var templ_7745c5c3_Var59 string
+			templ_7745c5c3_Var59, templ_7745c5c3_Err = templruntime.NewAttributeExpression(*alert.ImplementationTaskID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 708, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 675, Col: 94}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var64)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var59)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "\" onclick=\"event.stopPropagation(); openAlertTaskDialog(this.dataset.taskId)\">View implementation task</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "\" onclick=\"event.stopPropagation(); openAlertTaskDialog(this.dataset.taskId)\">View implementation task</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if alert.DecisionState == models.AlertDecisionPending {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "<div class=\"mt-4 flex flex-wrap gap-2\" onclick=\"event.stopPropagation()\"><button class=\"btn btn-success btn-sm\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "<div class=\"mt-4 flex flex-wrap gap-2\" onclick=\"event.stopPropagation()\"><button class=\"btn btn-success btn-sm\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var65 string
-			templ_7745c5c3_Var65, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/approve", alert.ID), state)).Resolve(ctx)
+			var templ_7745c5c3_Var60 string
+			templ_7745c5c3_Var60, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/approve", alert.ID), state)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 712, Col: 135}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 679, Col: 135}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML show:none\">Approve</button> <button class=\"btn btn-error btn-outline btn-sm\" hx-post=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var66 string
-			templ_7745c5c3_Var66, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/reject", alert.ID), state)).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 713, Col: 144}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML show:none\">Approve</button> <button class=\"btn btn-error btn-outline btn-sm\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML show:none\">Reject</button></div>")
+			var templ_7745c5c3_Var61 string
+			templ_7745c5c3_Var61, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/reject", alert.ID), state)).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 680, Col: 144}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML show:none\">Reject</button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "</div><div class=\"flex flex-shrink-0 items-center gap-1 self-start\" onclick=\"event.stopPropagation()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "</div><div class=\"flex flex-shrink-0 items-center gap-1 self-start\" onclick=\"event.stopPropagation()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if !alert.IsRead {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "<button class=\"btn btn-ghost btn-xs\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "<button class=\"btn btn-ghost btn-xs\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var67 string
-			templ_7745c5c3_Var67, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/read", alert.ID), state)).Resolve(ctx)
+			var templ_7745c5c3_Var62 string
+			templ_7745c5c3_Var62, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/read", alert.ID), state)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 721, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 688, Col: 93}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML show:none\" data-tooltip-disabled aria-label=\"Mark as read\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg></button> ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML show:none\" data-tooltip-disabled aria-label=\"Mark as read\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg></button> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "<button class=\"btn btn-ghost btn-xs text-error\" data-alert-delete aria-label=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "<button class=\"btn btn-ghost btn-xs text-error\" data-alert-delete aria-label=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var68 string
-		templ_7745c5c3_Var68, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Delete alert " + alert.Title).Resolve(ctx)
+		var templ_7745c5c3_Var63 string
+		templ_7745c5c3_Var63, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Delete alert " + alert.Title).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 736, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 703, Col: 48}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "\" data-delete-url=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var69 string
-		templ_7745c5c3_Var69, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", fmt.Sprintf("/alerts/%s", alert.ID), state)).ResolveURL(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 737, Col: 95}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "\" data-delete-url=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "\" onclick=\"event.preventDefault(); event.stopPropagation(); return deleteAlertsFromDataset(this)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg></button></div></div></div></div>")
+		var templ_7745c5c3_Var64 string
+		templ_7745c5c3_Var64, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListActionURL("alerts", fmt.Sprintf("/alerts/%s", alert.ID), state)).ResolveURL(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 704, Col: 95}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var64)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "\" onclick=\"event.preventDefault(); event.stopPropagation(); return deleteAlertsFromDataset(this)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg></button></div></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1525,20 +1410,20 @@ func AlertBadge(count int) templ.Component {
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if count > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "<span class=\"badge badge-error badge-sm inline-flex items-center\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "<span class=\"badge badge-error badge-sm inline-flex items-center\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var71 string
-			templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", count))
+			var templ_7745c5c3_Var66 string
+			templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", count))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 752, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 719, Col: 94}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var71))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

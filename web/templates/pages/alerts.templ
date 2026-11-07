@@ -25,11 +25,6 @@ templ Alerts(projects []models.Project, currentProjectID string, alerts []models
 	}
 }
 
-// AlertsPage renders the initial bounded alert page with its page boundary.
-templ AlertsPage(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool) {
-	@AlertsPageWithFilters(projects, currentProjectID, alerts, unreadCount, hasMore, "", "")
-}
-
 // AlertsPageWithFilters renders the initial alert page with its active workflow filters.
 templ AlertsPageWithFilters(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState) {
 	@AlertsPageWithFiltersAndSearch(projects, currentProjectID, alerts, unreadCount, hasMore, decisionState, processingState, "")
@@ -44,11 +39,6 @@ templ AlertsPageWithFiltersAndSearch(projects []models.Project, currentProjectID
 
 templ AlertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
 	@alertsContent(alerts, currentProjectID, unreadCount, false, "", "", "", alertCardListState(currentProjectID, "", "", ""))
-}
-
-// AlertsContentPage renders a bounded alert page with its page boundary.
-templ AlertsContentPage(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool) {
-	@AlertsContentPageWithFilters(alerts, currentProjectID, unreadCount, hasMore, "", "")
 }
 
 // AlertsContentPageWithFilters renders a bounded alert page with its active workflow filters.
@@ -511,29 +501,6 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			});
 		})();
 		</script>
-	</div>
-}
-
-// alertSearchInput keeps the Alerts search control's established max-w-xs sizing while
-// allowing a direct search query to seed the visible input and session state.
-templ alertSearchInput(search string) {
-	<div class="mb-4 max-w-xs">
-		<div class="card bg-base-100 shadow-sm border border-base-300">
-			<input
-				type="text"
-				name="search"
-				value={ search }
-				data-card-search="alerts"
-				if search != "" {
-					data-card-search-initial={ search }
-				}
-				class="w-full bg-transparent px-4 py-2 text-sm border-0 focus:outline-none focus:ring-0"
-				placeholder="Search alerts..."
-			/>
-		</div>
-	</div>
-	<div data-search-no-results class="text-center py-8" style="display:none">
-		<p class="opacity-50">No results match your search.</p>
 	</div>
 }
 
