@@ -17,7 +17,6 @@ type PluginPageView struct {
 	Version          string
 	OwningProjectID  string
 	OwningProject    string
-	RequestProjectID string
 	Handle           string
 	AssetURL         string
 	ChatEnabled      bool
@@ -46,10 +45,8 @@ templ PluginPageContent(v PluginPageView) {
 		hx-history="false"
 		class="flex flex-col h-full min-h-0"
  data-page-chat-root
-		data-plugin-instance={ v.InstanceID }
 		data-plugin-handle={ v.Handle }
 		data-project-id={ v.OwningProjectID }
-		data-request-project-id={ v.RequestProjectID }
 		data-bridge-url={ pluginAPI(v, "/bridge") }
 		data-events-url={ pluginAPI(v, "/events") }
 		data-retire-url={ pluginAPI(v, "/handle/retire") }

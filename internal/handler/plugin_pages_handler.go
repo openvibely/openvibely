@@ -124,18 +124,17 @@ func (h *Handler) pluginHandleFor(c echo.Context, r *pageplugins.Resolved, token
 	return hd, nil
 }
 
-func pluginView(r *pageplugins.Resolved, requestProjectID, projectName string, hd pageplugins.Handle) pages.PluginPageView {
+func pluginView(r *pageplugins.Resolved, projectName string, hd pageplugins.Handle) pages.PluginPageView {
 	return pages.PluginPageView{
-		InstanceID:       r.Instance.ID,
-		Title:            r.Instance.Title,
-		PluginName:       r.Manifest.Name,
-		Version:          r.Manifest.Version,
-		OwningProjectID:  r.Instance.ProjectID,
-		OwningProject:    projectName,
-		RequestProjectID: requestProjectID,
-		Handle:           hd.Token,
-		AssetURL:         "/plugin-assets/" + url.PathEscape(hd.Token) + "/" + strings.TrimPrefix(r.Page.Entry, "/") + "?handle=" + url.QueryEscape(hd.Token),
-		ChatEnabled:      r.Manifest.HasPermission(pageplugins.PermissionAgent),
+		InstanceID:      r.Instance.ID,
+		Title:           r.Instance.Title,
+		PluginName:      r.Manifest.Name,
+		Version:         r.Manifest.Version,
+		OwningProjectID: r.Instance.ProjectID,
+		OwningProject:   projectName,
+		Handle:          hd.Token,
+		AssetURL:        "/plugin-assets/" + url.PathEscape(hd.Token) + "/" + strings.TrimPrefix(r.Page.Entry, "/") + "?handle=" + url.QueryEscape(hd.Token),
+		ChatEnabled:     r.Manifest.HasPermission(pageplugins.PermissionAgent),
 	}
 }
 
@@ -174,7 +173,7 @@ func (h *Handler) PluginPage(c echo.Context) error {
 	if p, err := h.projectSvc.GetByID(ctx, r.Instance.ProjectID); err == nil && p != nil {
 		projectName = p.Name
 	}
-	v := pluginView(r, requested, projectName, hd)
+	v := pluginView(r, projectName, hd)
 	if v.ChatEnabled {
 		v.ChatAgents, err = h.llmConfigRepo.ListPickerOptions(ctx)
 		if err != nil {
