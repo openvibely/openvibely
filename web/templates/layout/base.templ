@@ -6505,6 +6505,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									var project = new URL(window.location.href).searchParams.get('project_id');
 									var endpoint = new URL(toolbar.getAttribute('data-card-bulk-url'), window.location.href); if (project) endpoint.searchParams.set('project_id', project);
 									var response = await fetch(endpoint.toString(), {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify(body)});
+									if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 									if (!response.ok) { var payload = await response.json().catch(function() { return {}; }); throw new Error(payload.message || 'Bulk deletion failed'); }
 									dialog.close(); clearSelection(); await refreshCollection();
 								} catch (err) { error.textContent = err.message || 'Bulk deletion failed'; error.classList.remove('hidden'); } finally { confirm.disabled = false; }

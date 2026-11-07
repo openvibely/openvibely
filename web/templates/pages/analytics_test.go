@@ -1725,7 +1725,11 @@ func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	fixture := `<main id="reconnect-result"></main><script>
+	permissionJS, err := os.ReadFile("../../assets/permission-errors.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := "<script>" + string(permissionJS) + "</script>" + `<main id="reconnect-result"></main><script>
  history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
  window.Chart=function(){this.destroy=function(){};};
  const toasts=[],keys=[];let payload={};
@@ -1733,7 +1737,7 @@ func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
  const response=data=>({ok:true,json:async()=>data});
  window.fetch=async function(url,opts){
  const u=new URL(url,location.href),p=u.searchParams;
- if(u.pathname.endsWith('/resets/consume')){keys.push(JSON.parse(opts.body).idempotency_key);return response(payload);}
+ if(u.pathname.endsWith('/resets/consume')){keys.push(JSON.parse(opts.body).idempotency_key);return payload.denied?new Response(JSON.stringify({message:"Admin access required"}),{status:403}):response(payload);}
  if(u.pathname.endsWith('/resets'))return response({available_count:1,credits:[{id:'credit',title:'Reset',status:'available',usable:true}]});
  if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'anthropic'}]});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[{label:'Weekly',used_percent:99}]}]});
@@ -1771,6 +1775,10 @@ func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
  assert(keys[5]!==keys[4]&&keys[6]===keys[5]&&keys[7]===keys[5],'in-progress reset must retry with the same idempotency key');
  assert(keys[8]!==keys[7]&&keys[9]===keys[8],'unknown reset must retry with the same idempotency key');
  assert(keys[10]!==keys[9],'a confirmed retry must clear the key');
+ const before=toasts.length, beforeHTML=card.innerHTML;payload={denied:true};card.querySelector('button').click();
+ for(let i=0;i<150&&(toasts.length===before||card.querySelector('button').disabled);i++)await wait();
+ assert(toasts.length===before+1&&toasts[before].text==='Admin access required','missing permission toast');
+ assert(card.innerHTML===beforeHTML,'denied reset altered controls or status');
  result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
  });</script>` + rendered.String()

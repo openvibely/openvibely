@@ -930,6 +930,7 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
+    var permissionToasts=[];
     var first = document.querySelector('[data-schedule-id="schedule-multi-a"]');
     var second = document.querySelector('[data-schedule-id="schedule-multi-b"]');
     var single = document.querySelector('[data-schedule-id="schedule-single-c"]');
@@ -956,6 +957,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (firstSelectionStroke.left !== '-2px') fail('schedule selection must cover the card own left accent border: left=' + firstSelectionStroke.left);
     var firstRect = first.getBoundingClientRect(), secondRect = second.getBoundingClientRect();
     if (firstRect.bottom > secondRect.top) fail('selected schedules in one time block must not overlap');
+    window.showToast=function(message){permissionToasts.push(message);};
     var source = first.closest('.drop-zone');
     var targetHour = Number(source.dataset.hour) + 4;
     var target = document.querySelector('.drop-zone[data-date="' + source.dataset.date + '"][data-hour="' + targetHour + '"]');
@@ -970,6 +972,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (first.classList.contains('schedule-selected') || second.classList.contains('schedule-selected')) fail('drag completion must clear schedule selection');
     await new Promise(function(resolve) { setTimeout(resolve, 20); });
 
+    await waitFor(function(){return permissionToasts.length>0;}, 'permission toast');
+    if(permissionToasts.length!==1)fail('duplicate toasts: '+JSON.stringify(permissionToasts));
+    if(permissionToasts[0]!=='Editor access required')fail('wrong permission toast');
     click(first, true); click(second, true);
     drop = await drag(second, target, 32);
     second.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:32,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
@@ -993,6 +998,8 @@ window.addEventListener('DOMContentLoaded', function() {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
+		case "/ui/preferences":
+			w.WriteHeader(http.StatusNoContent)
 		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
@@ -1026,7 +1033,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			attempt := groupAttempts
 			mu.Unlock()
 			if attempt == 1 {
-				http.Error(w, "forced grouped failure", http.StatusInternalServerError)
+				http.Error(w, `{"message":"Editor access required"}`, http.StatusForbidden)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)

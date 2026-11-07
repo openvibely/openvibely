@@ -1458,7 +1458,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 							'HX-Request': 'true'
 						},
 						body: formData
-					}).then(function(response) {
+					}).then(async function(response) {
+						if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 						if (response.ok) {
 							// Suppress scroll-to-now so viewport stays where the user dropped the task
 							_schedDragDropJustCompleted = true;
