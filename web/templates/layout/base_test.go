@@ -2062,8 +2062,15 @@ global.fetch = (url, options) => {
  controls.textarea.value = 'Keep denied draft';
  global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403});
  const closedBeforeDenied = closed;
- await controls.form.onsubmit({preventDefault(){}});
+ controls['[role="alert"]'].textContent='';controls['[type="submit"]'].disabled=false;
+ await renewal();
  assert.equal(toasts.length, 2);
+ assert.equal(renewal, null);assert.equal(expiry, null);
+ assert.equal(controls['[role="alert"]'].textContent, '');
+ assert.equal(controls['[type="submit"]'].disabled, false);
+ now += 120000;
+ await controls.form.onsubmit({preventDefault(){}});
+ assert.equal(toasts.length, 3);
  assert.equal(closed, closedBeforeDenied);
  assert.equal(controls.textarea.value, 'Keep denied draft');
  assert.equal(controls.textarea.disabled, false);

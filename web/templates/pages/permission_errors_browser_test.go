@@ -92,7 +92,21 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  document.getElementById('new_model_modal').showModal();document.getElementById('model_name').value='Keep model';
  await connectModelOAuth(button);await startCustomModelOAuth(button);
  const ok=permissionToasts.length===2&&permissionToasts.every(t=>t.message==='Admin access required')&&!document.getElementById('model_oauth_connection_status').textContent&&!document.getElementById('model_oauth_setup_status').textContent&&document.getElementById('model_form_error').classList.contains('hidden')&&document.getElementById('model_name').value==='Keep model'&&!button.disabled;
- window.fetch=originalFetch;return ok?'ok':'OAuth changed form';})()`)
+ if(!ok)return 'OAuth changed form';
+ window.alert=()=>{throw Error('Unexpected browser alert')};
+ const count=permissionToasts.length;editModelFromData({dataset:{modelId:'restricted'}});
+ for(let i=0;i<100&&permissionToasts.length===count;i++)await new Promise(r=>setTimeout(r,10));
+ if(permissionToasts.length!==count+1)return 'missing edit toast';
+ document.getElementById('model_provider').value='ollama';
+ const select=document.getElementById('model_id');select.replaceChildren(new Option('Keep model','keep-model'));select.value='keep-model';
+ discoverOllamaModels();
+ for(let i=0;i<100&&permissionToasts.length===count+1;i++)await new Promise(r=>setTimeout(r,10));
+ await new Promise(r=>setTimeout(r,20));
+ if(permissionToasts.length!==count+2||select.value!=='keep-model'||document.getElementById('openai_compatible_discovery_status').textContent)return 'discovery changed form';
+ discoverOllamaContext();
+ for(let i=0;i<100&&permissionToasts.length===count+2;i++)await new Promise(r=>setTimeout(r,10));
+ if(permissionToasts.length!==count+3)return 'missing context toast';
+ window.fetch=originalFetch;return 'ok';})()`)
 					if result != "ok" {
 						t.Fatal(result)
 					}

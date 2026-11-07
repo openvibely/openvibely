@@ -1689,9 +1689,9 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                         document.getElementById('model_ollama_base_url').value === endpoint;
                 }
                 fetch('/models/ollama/context?' + new URLSearchParams({base_url:endpoint, model:model}), {signal:controller.signal})
-                    .then(function(response) { if (!response.ok) throw Error('Discovery failed'); return response.json(); })
+                    .then(async function(response) { if (await window.openVibelyPermissionErrors?.fetch(response)) return null; if (!response.ok) throw Error('Discovery failed'); return response.json(); })
                     .then(function(data) {
-                        if (!current()) return;
+                        if (!current() || data === null) return;
                         ollamaDetectedContext = Math.max(0, Number(data.context_length) || 0);
                         ollamaModelCapacity = Math.max(0, Number(data.model_context_length) || 0);
                         updateProviderContextDisplays();
@@ -1722,12 +1722,12 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				status.textContent = 'Loading models…';
 				setModelDiscoveryLoading(true);
 				fetch('/models/ollama/available?' + new URLSearchParams({base_url:baseURL}), {signal:controller.signal})
-					.then(function(response) {return response.json().then(function(data) {
+					.then(async function(response) {if (await window.openVibelyPermissionErrors?.fetch(response)) {if (generation === openAICompatibleDiscoveryGeneration) status.textContent = '';return null;}return response.json().then(function(data) {
 						if (!response.ok) throw Error(data.error || 'Could not load Ollama models.');
 						return data || [];
 					});})
 					.then(function(models) {
-						if (generation !== openAICompatibleDiscoveryGeneration || document.getElementById('model_provider').value !== 'ollama') return;
+						if (models === null || generation !== openAICompatibleDiscoveryGeneration || document.getElementById('model_provider').value !== 'ollama') return;
 						var previous = select.value;
 						var names = Array.from(new Set(models.map(function(model) {return model.name || model.model;}).filter(Boolean)));
                         select.replaceChildren();
@@ -2298,13 +2298,15 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 								if (discoveryAbortController) fetchOptions.signal = discoveryAbortController.signal;
 								setModelDiscoveryLoading(true);
 								fetch('/models/openai-compatible/available?' + params.toString(), fetchOptions)
-									.then(function(resp) {								return resp.json().then(function(data) {
+									.then(async function(resp) {
+                                        if (await window.openVibelyPermissionErrors?.fetch(resp)) {if (openAICompatibleDiscoveryGeneration === discoveryGeneration) status.textContent = '';return null;}
+                                        return resp.json().then(function(data) {
 										if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
 										return data;
 									});
 								})
 									.then(function(data) {
-										if (openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
+										if (data === null || openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
 											currentOpenAICompatibleDiscoveryIdentity() !== discoveryIdentity) return;
 										var models = (data.models || []).filter(function(model) {return !!model.id;});
 										var select = document.getElementById('model_id');
@@ -2435,11 +2437,12 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					credentials: 'same-origin',
 					headers: {'Accept': 'application/json'},
 					cache: 'no-store'
-				}).then(function(resp) {
+				}).then(async function(resp) {
+                    if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 					if (!resp.ok) throw new Error('Could not load model configuration.');
 					return resp.json();
 				}).then(function(details) {
-					if (generation !== window._modelEditRequestGeneration || window._modelEditRequestedID !== id || details.id !== id) return;
+					if (generation !== window._modelEditRequestGeneration || window._modelEditRequestedID !== id || details === null || details.id !== id) return;
 					populateModelEditForm({dataset: {
 						modelId: details.id,
 						modelName: details.name || '',

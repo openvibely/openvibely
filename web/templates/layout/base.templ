@@ -454,6 +454,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     try {
                         var response = await timedFetch(holdURL, {method: 'POST', body: new URLSearchParams({renew: 'true', edit_token: editToken})});
                         if (released || leaving || leaseLost) return;
+                        if (await window.openVibelyPermissionErrors?.fetch(response)) {
+                            deadline = 0;
+                            clearInterval(renewalTimer);
+                            clearInterval(expiryTimer);
+                            return;
+                        }
                         if (!response.ok) { loseLease(); return; }
                         deadline = started + 119000;
                         checkExpiry();
