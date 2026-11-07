@@ -2080,18 +2080,40 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				savePastes();
 				refreshPasteComposers();
 			}
+			// Requests waiting for settings or HTMX must outlive their composer.
+			window._ovPendingComposerSubmissions = window._ovPendingComposerSubmissions || new Map();
+			var pendingSubmissions = window._ovPendingComposerSubmissions;
+			if (!window._ovPendingComposerObserver) {
+				window._ovPendingComposerObserver = new MutationObserver(function() {
+					Array.from(window._ovPendingComposerSubmissions.values()).forEach(function(entry) {
+						if (!entry.form.isConnected) entry.restore();
+					});
+				});
+			}
+			function releasePendingSubmission(payload) {
+				if (payload) pendingSubmissions.delete(payload.draftState);
+				if (!pendingSubmissions.size) window._ovPendingComposerObserver.disconnect();
+			}
+			function retainPendingSubmission(payload) {
+				if (!payload || payload.draftState.restored) return;
+				pendingSubmissions.set(payload.draftState, { form: form, restore: function() { restoreSubmittedDraft(payload, true); } });
+				window._ovPendingComposerObserver.observe(document.body, { childList: true, subtree: true });
+				if (!form.isConnected) restoreSubmittedDraft(payload);
+			}
 			// Clear when Send captures the draft, before settings saves or request queues.
 			form._beginChatSubmission = function(payload) {
 				if (!payload || payload.draftState.cleared) return;
 				payload.draftState.cleared = true;
+				retainPendingSubmission(payload);
 				if (messageInput.value === payload.composerText || messageInput.value === payload.message) {
 					messageInput.value = '';
 					messageInput.dispatchEvent(new Event('input', { bubbles: true }));
 				}
 				acceptSubmittedPastes(payload);
 			};
-			function restoreSubmittedDraft(payload) {
-				if (!payload || !payload.draftState.cleared || payload.draftState.restored) return;
+			function restoreSubmittedDraft(payload, asCards) {
+				releasePendingSubmission(payload);
+				if (!payload || !payload.draftState || !payload.draftState.cleared || payload.draftState.restored) return;
 				payload.draftState.restored = true;
 				var current = form;
 				if (pasteKey) document.querySelectorAll('form[data-attachment-state-key]').forEach(function(candidate) {
@@ -2100,7 +2122,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				var input = current.querySelector('textarea[name="message"]');
 				pastedTexts = pasteKey ? (window._ovPasteDrafts[pasteKey] || []).slice() : pastedTexts.slice();
 				if (payload.composerText) {
-					if (current.isConnected && !input.value) {
+					if (!asCards && current.isConnected && !input.value) {
 						input.value = payload.composerText;
 						input.dispatchEvent(new Event('input', { bubbles: true }));
 					} else {
@@ -2427,6 +2449,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							form.dispatchEvent(submitEvent);
 						}
 							function submitComposer(endpoint, intent, payload) {
+								if (!form.isConnected || (payload && payload.draftState && payload.draftState.restored)) { restoreSubmittedDraft(payload); return; }
 								if (!endpoint) return;
 								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : composerMessage();
 								if (submittedMessage.trim() === '') return;
@@ -3453,7 +3476,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						var payload = (triggeringEvent && triggeringEvent._chatSubmissionPayload) || form._chatNextSubmissionPayload || form._captureChatSubmission();
 
 						form._chatNextSubmissionPayload = null;
+						if (payload.draftState.restored) { event.preventDefault(); return; }
 						form._beginChatSubmission(payload);
+						releasePendingSubmission(payload);
 						var request = event.detail.xhr || {};
 						request._chatSubmittedPayload = payload;
 						request._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';
@@ -3506,6 +3531,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 						if (completedIntent === 'steer' && !replayAsNormal) setTimeout(finishSteerRequest, 0);
 						if (replayAsNormal) {
+							retainPendingSubmission(request._chatSubmittedPayload);
 							setTimeout(function() {
 								submitComposer(normalPostEndpoint, 'normal', Object.assign({}, request._chatSubmittedPayload || {}, {
 									message: submittedMessage,
