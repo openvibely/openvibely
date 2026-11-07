@@ -17,6 +17,7 @@ architecture remain below for design context. Implementation history is availabl
 | Live updates | Access is checked at subscription admission and on targeted access-change notifications. Denied subscriptions receive `access blocked` and stop; queued frames from retired subscriptions are discarded. Frame delivery performs no database authorization queries. “All projects” filters through an in-memory visibility map; goal events include ProjectID. Logout and disabled-account notifications close affected connections. |
 | Running work | Worker and follow-up one-second authorization watchers are removed. Revocation denies new starts/admissions/recovery, but does not itself cancel an admitted run. Existing tool/action and provider authorization boundaries still apply. The update banner and pings remain; session expiration is checked at the existing 15-second ping interval. |
 | Channels | Telegram, Slack and Discord use global sender-to-user mappings and current project permissions. Email mappings are configurable, but authenticated email execution remains blocked without verified sender identity. X retains its existing identity path; auth-off retains legacy behavior. |
+| Author attribution | Chat/task messages, queued inputs and steering messages display author names. |
 | Audit | Identified mutations record atomic audits. Membership changes record JSON `before`/`after` explicit grants, including removals with org membership; empty means no individual grant. Existing history is not rewritten. |
 | Migration | Phase 2 is consolidated in `224_project_authorization.sql`, following version 223. Upgrade, rollback and re-upgrade have coverage. Rollback drops Phase 2 audit history; it is not an expected operating workflow. |
 
@@ -32,10 +33,9 @@ These are specific tested contracts, not a claim that every future feature has b
 
 ### Remaining work and product limits
 
-- Phase 2 follow-ups: author attribution in chat/task UI, an org-wide audit view, and verified email sender identity.
 - Phase 3: process/filesystem sandboxing. Project roles do not isolate agent processes, worktrees, the database or secrets; production private-project creation remains disabled.
-- Phase 4: shared/private conversations and collaboration features.
-- Phase 5: user/org credential ownership and remaining channel/account work.
+- Phase 4: shared/private conversations, collaboration features and an org-wide audit view.
+- Phase 5: user/org credential ownership, channel-specific tool restrictions and verified email sender identity.
 - Phase 6: hosted multi-user onboarding, organization isolation and billing.
 - Internal/embedded calls without principals retain their existing compatibility paths; the proposed explicit system-context migration was not completed.
 
@@ -695,7 +695,7 @@ context; the Phase 2 checklist records current authorization coverage.
 - `ui.*` settings are per-user. Logout and membership removal revoke sessions; live connections respond to user-specific change notifications.
 - The initial milestone added separate logins and preferences. Phase 2 subsequently added resource roles and durable run identity. Hosted multi-member onboarding remains a later phase.
 
-### Phase 2: Sharing and app policy (implemented; follow-ups listed above)
+### Phase 2: Sharing and app policy (implemented)
 
 See [Current status](#current-status) for delivered behavior and remaining limits,
 and the [verification checklist](#authorization-verification-checklist) for evidence.
@@ -716,6 +716,7 @@ and the [verification checklist](#authorization-verification-checklist) for evid
 - `chat_conversations` + participants. Migrate the default per-project thread. Conversation list UI. Private vs project-visible conversations; share a conversation.
 - Per-conversation FIFO queue, compaction checkpoints, and context usage. Author-labeled history in model prompts. Exclude private conversations from memory extraction.
 - Per-user alert read state, `@mentions`, and notification subscriptions on the existing WebSocket. Derive the user ID from the authenticated principal; clients cannot subscribe as another user.
+- Org-wide audit view for org admins/owners, combining existing audit records across projects. Deferred from Phase 2; audit recording and project-level audit access are already implemented.
 - `tasks.version` optimistic concurrency: a second concurrent save is rejected instead of overwriting. `actor_user_id` on live events.
 - Milestone: two users in the same conversation see each other's messages live, with attribution. Private conversations are not visible to others.
 
@@ -765,7 +766,7 @@ Every surface below now has production wiring and tests; the last column lists k
 | Slack channel | Global workspace/user mapping, with self-only member assignments or org-admin assignments; task/input/execution/schedule/automation provenance; runtime tools recheck the sender binding and current role per call (`TestSlackRuntimeRechecksSenderBinding`, `TestSlackRunBindingRevocation`, `TestSlackAutomationBindingRevocationAtWorkerBoundaries`) | None known |
 | X channel | Installer and sender identity mappings; polling cancellation and receipt transaction checks; restart identity and per-call runtime role checks (`TestXRequestAndRestartIdentity`, `TestXPollRevocationDuringProviderWork`, `TestXIngressDoesNotInheritInstallerIdentity`) | None known |
 | Telegram/Discord/email channels | Global sender-to-OV-user mappings in the existing channel modal; members manage only self-mappings, org admins/owners can assign active org users; transactional before/after audit. Telegram numeric IDs and queued-reply identity survive recovery; Discord retains its provenance checks. Migration 224 deduplicates rows and flags legacy entries for review. Project permissions are checked at admission and actions. Member channel pages omit shared credentials in both full and fragment responses (`TestMemberChannelsOmitsCredentials`); org admins retain credential access. Tests: `TestGlobalChannelSenderAssignmentPermissions`, `TestGlobalSenderMappingHandlersLimitAssignments`, `TestTelegramMappedIngressPersistsSenderIdentity`, `TestTelegramQueuedInputPreservesSenderAcrossRecovery` | Authenticated email execution remains blocked: an address mapping is not spoof-resistant sender verification. Auth-off retains legacy allowlists |
-| Audit | Atomic audit records for policy, membership, ownership, project settings/deletion, run-as bindings (task, schedule, goal, webhook, execution, automation), channel bindings/allowlists/credentials (key names only, never values), GitHub reviewer/inbox/feedback, swarm transitions, steering, calendar, updates and usage reset. Audit failures roll back the mutation (tests per store). Membership entries record JSON before/after explicit roles, including org-removal cleanup. Audit reads require maintainer access | Org-wide audit presentation remains a follow-up |
+| Audit | Atomic audit records for policy, membership, ownership, project settings/deletion, run-as bindings (task, schedule, goal, webhook, execution, automation), channel bindings/allowlists/credentials (key names only, never values), GitHub reviewer/inbox/feedback, swarm transitions, steering, calendar, updates and usage reset. Audit failures roll back the mutation (tests per store). Membership entries record JSON before/after explicit roles, including org-removal cleanup. Audit reads require maintainer access | Org-wide audit presentation is deferred to Phase 4 |
 | Compatibility and isolation | Private-project creation is refused by the service and not offered in the UI (handler and browser tests); auth-off owner compatibility retained; migration preserves org-wide editor access | Phase 3 process/filesystem sandboxing is required before private projects can be offered; these tables are application authorization only |
 
 ### Scope and limitations
