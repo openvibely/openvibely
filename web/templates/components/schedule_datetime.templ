@@ -106,15 +106,14 @@ templ ScheduleDateTime(value string) {
   const menus=new WeakMap();
   function menu(input) {
    let controller=menus.get(input);
-   if(!controller){controller=window.ovMenuController.create({trigger:input,panels:()=>[input.parentElement.querySelector('.schedule-datetime-popup')],isOpen:()=>active?.input===input&&active.popup.matches(':popover-open'),open:()=>show(input),close:()=>hide(active,false)});menus.set(input,controller);}
+   if(!controller){controller=window.ovMenuController.create({trigger:input,panels:()=>[input.parentElement.querySelector('.schedule-datetime-popup')],isOpen:()=>active?.input===input&&active.popup.matches(':popover-open'),open:()=>show(input),close:()=>hide(active)});menus.set(input,controller);}
    return controller;
   }
   function close(state, focus) {menu(state.input).close(focus);}
-  function hide(state, focus) {
+  function hide(state) {
    if (state.popup.matches(':popover-open')) state.popup.hidePopover();
    state.input.setAttribute('aria-expanded','false');
    if(active===state) active=null;
-   if(focus && state.input.isConnected) state.input.focus();
   }
   function calendar(state, focusDate) {
    const {popup,selected,month} = state;
@@ -232,7 +231,7 @@ templ ScheduleDateTime(value string) {
    // Rebuild column handlers on each opening so draft/reset values are authoritative.
    popup.querySelectorAll('[data-time-column]').forEach(column=>column.replaceChildren());
    calendar(state); timeColumns(state,false);
-   popup.ontoggle=()=>{if(!popup.matches(':popover-open')){hide(state,false);menu(input).sync();}};
+   popup.ontoggle=()=>{if(!popup.matches(':popover-open')){hide(state);menu(input).sync();}};
    // Safari does not focus buttons on mouse down. Keep focus in the popup
    // while replacing calendar days so modal focus handling cannot dismiss it.
    popup.onmousedown=event=>{if(event.target.closest('button'))event.preventDefault();};

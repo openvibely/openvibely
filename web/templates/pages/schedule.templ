@@ -911,19 +911,16 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								var menu = document.getElementById('schedule-context-menu');
 								var menuCard = null;
 
-								function hideMenu(restoreFocus) {
+								function hideMenu() {
 									if (!menu || menu.classList.contains('hidden')) return;
 									menu.classList.add('hidden');
 									if (window.updateScheduleSelection) window.updateScheduleSelection();
 									menu.removeAttribute('data-schedule-id');
 									menu.removeAttribute('data-task-id');
-									if (restoreFocus && menuCard && document.contains(menuCard)) {
-										menuCard.focus({preventScroll: true});
-									}
 									menuCard = null;
 								}
 
-                                var contextController=window.ovMenuController.create({trigger:function(){return menuCard;},panels:[menu],isOpen:function(){return menu&&!menu.classList.contains('hidden');},open:positionMenu,close:function(){hideMenu(false);}});
+                                var contextController=window.ovMenuController.create({trigger:function(){return menuCard;},panels:[menu],isOpen:function(){return menu&&!menu.classList.contains('hidden');},open:positionMenu,close:hideMenu});
                                 function closeMenu(restoreFocus){contextController.close(restoreFocus);}
                                 window.closeScheduleContextMenu=closeMenu;
 

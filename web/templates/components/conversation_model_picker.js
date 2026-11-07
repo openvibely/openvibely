@@ -365,7 +365,7 @@
         panels: () => [panel, sub],
         isOpen: () => active === btn && !panel.hidden,
         open: () => showModelPicker(btn),
-        close: () => hideModelPicker(false),
+        close: hideModelPicker,
         escape: () => { if (provider) { back.click(); return false; } },
       });
       modelMenus.set(btn, menu);
@@ -373,7 +373,7 @@
     return menu;
   }
   function close(focus) { if (active) modelMenu(active).close(focus); }
-  function hideModelPicker(focus) {
+  function hideModelPicker() {
     ownerObserver.disconnect();
     const btn = active;
     closeSub();
@@ -381,7 +381,6 @@
     active = null;
     if (btn) {
       btn.setAttribute("aria-expanded", "false");
-      if (focus && btn.isConnected) btn.focus();
     }
   }
   function choose(m) {

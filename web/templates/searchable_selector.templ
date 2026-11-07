@@ -202,7 +202,7 @@ templ searchableSelectorScript() {
                         panels: () => [nodes(root).dialog?.firstElementChild],
                         isOpen: () => !!nodes(root).dialog?.open,
                         open: event => showSelector(root, event),
-                        close: () => hideSelector(root, false),
+                        close: () => hideSelector(root),
                     });
                     selectorMenus.set(root, menu);
                 }
@@ -210,7 +210,7 @@ templ searchableSelectorScript() {
             }
             function close(root, restore) { if (root) selectorMenu(root).close(restore); }
             function open(root, event) { if (root) selectorMenu(root).open(event); }
-			function hideSelector(root, restore) {
+			function hideSelector(root) {
 				var state = nodes(root);
                 // Native dialog closure restores focus synchronously. Suppress the
                 // return outline before that focus event, not afterward.
@@ -223,7 +223,6 @@ templ searchableSelectorScript() {
 					delete root.__openVibelySearchableSelectorAnchorX;
 				}
 				if (state.button) state.button.setAttribute('aria-expanded', 'false');
-                if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});
 			}
 			function showSelector(root, event) {
 				var state = nodes(root); if (!state.button || !state.dialog || !state.search || state.button.disabled || state.dialog.open) return;

@@ -6502,18 +6502,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                             const menu = dropdownController(dropdown);
                             if (open) menu.open(); else menu.close(false);
                         }
-                        function closeCardFilterDropdown(dropdown) { setCardFilterDropdown(dropdown, false); }
                         window.setCardFilterDropdownState = setCardFilterDropdown;
 						window.refreshCardListToolbars = function(scope) { (scope || document).querySelectorAll('[data-card-list-toolbar]').forEach(initToolbar); };
 						document.addEventListener('keydown', function(event) {
 							if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
 							if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open')) || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
-							var openFilters = document.querySelectorAll('[data-card-list-toolbar] .dropdown-open > [data-card-filters-button]');
-							if (openFilters.length) {
-								event.preventDefault();
-								openFilters.forEach(function(button) { closeCardFilterDropdown(button.closest('.dropdown')); button.focus({preventScroll: true}); });
-								return;
-							}
 							if (event.target.closest && event.target.closest('dialog, [popover], input, textarea, select, [contenteditable], [role="menu"], [data-kanban-menu-content]')) return;
 							document.querySelectorAll('[data-card-list-toolbar]').forEach(function(toolbar) { if (toolbar._openVibelyClearSelection) toolbar._openVibelyClearSelection(); });
 						});
