@@ -312,7 +312,7 @@ func (r *AgentRepo) ListScheduleOptions(ctx context.Context, projectID string) (
 		  AND COALESCE(selectable_as_primary, 1) = 1
 		  AND (
 			COALESCE(scope, 'global') <> 'project'
-			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate("project_id", projectID)+`)
+			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate(ctx, "project_id", projectID)+`)
 		  )
 		ORDER BY name ASC`, projectID)
 	if err != nil {
@@ -491,7 +491,7 @@ func (r *AgentRepo) GetTaskDetailAgentLabel(ctx context.Context, projectID, agen
 		  AND archived_at IS NULL
 		  AND (
 			COALESCE(scope, 'global') <> 'project'
-			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate("project_id", projectID)+`)
+			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate(ctx, "project_id", projectID)+`)
 		  )`, agentID, projectID).Scan(&option.ID, &option.Name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -534,7 +534,7 @@ func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID s
 		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
 		  AND (
 			COALESCE(scope, 'global') <> 'project'
-			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate("project_id", projectID)+`)
+			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate(ctx, "project_id", projectID)+`)
 		  )
 		ORDER BY name ASC`, projectID)
 	if err != nil {

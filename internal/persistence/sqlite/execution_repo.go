@@ -212,7 +212,7 @@ func (r *ExecutionRepo) GetByIDForProject(ctx context.Context, id, projectID str
 		`SELECT `+executionSelectColumnsAlias+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
-		 WHERE e.id = ? AND `+analyticsProjectPredicate("t.project_id", projectID)+``, id, projectID))
+		 WHERE e.id = ? AND `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+``, id, projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1412,7 +1412,7 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 			SUM(CASE WHEN e.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status IN ('completed', 'failed', 'cancelled')
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ` AND e.status IN ('completed', 'failed', 'cancelled')
 	`
 	args := []interface{}{dateFormat, projectID}
 
@@ -1460,7 +1460,7 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID
 			MAX(e.duration_ms) as max_ms
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1498,7 +1498,7 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectI
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
 		JOIN agent_configs ac ON ac.id = e.agent_config_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1559,7 +1559,7 @@ func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID 
 			COUNT(*) as count
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + `
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + `
 	`
 	args := []interface{}{projectID}
 
@@ -1613,7 +1613,7 @@ func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID st
 	args := []interface{}{}
 
 	if projectID != "" {
-		query += ` AND ` + analyticsProjectPredicate("t.project_id", projectID) + ``
+		query += ` AND ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ``
 		args = append(args, projectID)
 	}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
@@ -1653,7 +1653,7 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 			MAX(e.started_at) as last_executed_at
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ``
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ``
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1720,7 +1720,7 @@ func queryFailedTaskPatterns(ctx context.Context, db *sql.DB, projectID string, 
 
 	query := failedTaskPatternsQuery
 	if projectID == models.AllProjectsID {
-		query = strings.Replace(query, "t.project_id = ?", "? = '__all_projects__' AND t.category != 'chat'", 1)
+		query = strings.Replace(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID)+" AND t.category != 'chat'", 1)
 	}
 	rows, err := db.QueryContext(ctx, query, projectID, minFailures, limit)
 	if err != nil {
@@ -1767,7 +1767,7 @@ func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projec
 			COUNT(*) OVER(PARTITION BY t.id) failure_count,
 			ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY e.started_at DESC,e.rowid DESC) rn
 		FROM executions e JOIN tasks t ON t.id=e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status='failed'`
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ` AND e.status='failed'`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {

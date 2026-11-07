@@ -16,7 +16,7 @@ type XAuthRepo struct{ db *sql.DB }
 func NewXAuthRepo(db *sql.DB) *XAuthRepo { return &XAuthRepo{db: db} }
 
 func (r *XAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.XAuthorizedUser, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, x_user_id, username, added_at, application_user_id, verified_by FROM x_authorized_users WHERE `+analyticsProjectPredicate("project_id", projectID)+` ORDER BY username, x_user_id`, strings.TrimSpace(projectID))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, x_user_id, username, added_at, application_user_id, verified_by FROM x_authorized_users WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` ORDER BY username, x_user_id`, strings.TrimSpace(projectID))
 	if err != nil {
 		return nil, fmt.Errorf("list X authorized users: %w", err)
 	}

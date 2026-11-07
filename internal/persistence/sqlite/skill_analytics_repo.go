@@ -61,7 +61,7 @@ func (r *SkillAnalyticsRepo) RecordEvent(ctx context.Context, event *models.Skil
 }
 
 func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter persistence.SkillAnalyticsFilter) ([]models.SkillUsagePeriodMetric, error) {
-	where, args := skillAnalyticsWhere(filter)
+	where, args := skillAnalyticsWhere(ctx, filter)
 	periodExpr := skillAnalyticsPeriodExpression(filter.GroupBy)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT `+periodExpr+` AS period,
@@ -90,7 +90,7 @@ func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter persis
 }
 
 func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter persistence.SkillAnalyticsFilter) ([]models.SkillAnalyticsSkillMetric, error) {
-	where, args := skillAnalyticsWhere(filter)
+	where, args := skillAnalyticsWhere(ctx, filter)
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 10
@@ -134,7 +134,7 @@ func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter persistenc
 
 func (r *SkillAnalyticsRepo) GetSelectionFollowThrough(ctx context.Context, filter persistence.SkillAnalyticsFilter) ([]models.SkillFollowThroughMetric, error) {
 	filter.EventType = ""
-	where, args := skillAnalyticsWhere(filter)
+	where, args := skillAnalyticsWhere(ctx, filter)
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 10
@@ -173,7 +173,7 @@ func (r *SkillAnalyticsRepo) GetSelectionFollowThrough(ctx context.Context, filt
 }
 
 func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter persistence.SkillAnalyticsFilter) (models.SkillAgentUsageHeatmap, error) {
-	where, args := skillAnalyticsWhere(filter)
+	where, args := skillAnalyticsWhere(ctx, filter)
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 8
@@ -226,7 +226,7 @@ func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter persisten
 }
 
 func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter persistence.SkillAnalyticsFilter, enabledSkills []persistence.EnabledSkillInfo) ([]models.UnderusedSkillMetric, error) {
-	where, args := skillAnalyticsWhere(filter)
+	where, args := skillAnalyticsWhere(ctx, filter)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT skill_handle, skill_scope,
 		       SUM(CASE WHEN event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
@@ -317,13 +317,13 @@ func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter persistence
 	if strings.TrimSpace(filter.ProjectID) == "" {
 		return nil, 0, fmt.Errorf("skill Analytics evidence project_id is required")
 	}
-	where, args := skillAnalyticsWhere(filter)
+	where, args := skillAnalyticsWhere(ctx, filter)
 	if filter.EvidencePeriod != "" {
 		where += " AND " + skillAnalyticsPeriodExpression(filter.GroupBy) + " = ?"
 		args = append(args, filter.EvidencePeriod)
 	}
 	if filter.EvidenceEvent == "followed" || filter.EvidenceEvent == "ignored" {
-		relatedWhere, relatedArgs := skillAnalyticsWhereAlias(filter, "related")
+		relatedWhere, relatedArgs := skillAnalyticsWhereAlias(ctx, filter, "related")
 		relatedTurn := "COALESCE(NULLIF(related.execution_id,''),NULLIF(related.thread_id,''),NULLIF(related.task_id,''),related.id)"
 		selectedTurn := "COALESCE(NULLIF(e.execution_id,''),NULLIF(e.thread_id,''),NULLIF(e.task_id,''),e.id)"
 		exists := "EXISTS (SELECT 1 FROM skill_analytics_events related " + relatedWhere + " AND related.skill_handle=e.skill_handle AND related.skill_scope=e.skill_scope AND " + relatedTurn + "=" + selectedTurn + " AND related.event_type IN ('loaded','viewed'))"
@@ -411,12 +411,15 @@ func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter persiste
 	return &models.SkillAnalyticsDashboard{UsageOverTime: usage, TopSkills: top, FollowThrough: follow, AgentUsage: agent, Underused: underused, Evidence: evidence, EvidenceTotal: evidenceTotal}, nil
 }
 
-func skillAnalyticsWhere(filter persistence.SkillAnalyticsFilter) (string, []any) {
-	return skillAnalyticsWhereAlias(filter, "e")
+func skillAnalyticsWhere(ctx context.Context, filter persistence.SkillAnalyticsFilter) (string, []any) {
+	return skillAnalyticsWhereAlias(ctx, filter, "e")
 }
 
-func skillAnalyticsWhereAlias(filter persistence.SkillAnalyticsFilter, alias string) (string, []any) {
+func skillAnalyticsWhereAlias(ctx context.Context, filter persistence.SkillAnalyticsFilter, alias string) (string, []any) {
 	where := "WHERE 1=1"
+	if filter.ProjectID == models.AllProjectsID {
+		where += " AND " + accessibleProjectPredicate(ctx, alias+".project_id", false)
+	}
 	args := []any{}
 	if !filter.DateFrom.IsZero() {
 		where += " AND " + alias + ".created_at >= ?"

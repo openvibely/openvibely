@@ -550,7 +550,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					data-card-sort-name="Telegram Bot"
 					data-card-select-id="channel:telegram"
 					data-card-select-eligible="true"
-					hidden?={ !channelCardMatchesFilters(view, "telegram", strings.TrimSpace(view.TelegramToken) != "", view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) }
+					hidden?={ !channelCardMatchesFilters(view, "telegram", view.HasTelegramChannel, view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) }
 					data-channel-token={ view.TelegramToken }
 					data-channel-running={ templ.JSONString(view.IsBotRunning) }
 					data-search-card

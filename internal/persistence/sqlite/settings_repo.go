@@ -165,13 +165,13 @@ func (r *SettingsRepo) removeChannels(ctx context.Context, projectID string, val
 				args = append(args, id)
 			}
 			var count int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
 				return err
 			}
 			if count != len(webhookIDs) {
 				return persistence.ErrWebhookNotFound
 			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
 				return err
 			}
 		}

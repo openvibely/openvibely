@@ -493,7 +493,7 @@ func BenchmarkAlertAutomationInboxOwnerScopedList(b *testing.B) {
 		AutomationInboxBindings:  []models.AutomationBinding{{AutomationID: alertAutomationInboxBenchTargetAutomation}},
 		Limit:                    alertAutomationInboxBenchLimit,
 	})
-	ownerQuery, ownerArgs := buildAlertSummaryListQuery(alertAutomationInboxBenchProjectID, filter)
+	ownerQuery, ownerArgs := buildAlertSummaryListQuery(b.Context(), alertAutomationInboxBenchProjectID, filter)
 
 	b.Run("owner_driven", func(b *testing.B) {
 		benchmarkAlertAutomationInboxList(b, ownerQuery, ownerArgs)

@@ -978,7 +978,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if !channelCardMatchesFilters(view, "telegram", strings.TrimSpace(view.TelegramToken) != "", view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) {
+				if !channelCardMatchesFilters(view, "telegram", view.HasTelegramChannel, view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, " hidden")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err

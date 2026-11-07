@@ -183,7 +183,7 @@ func (r *WebhookRepo) ListCardsByProjectPage(ctx context.Context, projectID stri
 
 func (r *WebhookRepo) ListCardsByProjectPageFiltered(ctx context.Context, projectID string, limit, offset int, filter persistence.WebhookCardFilter) ([]models.WebhookEndpoint, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
-	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE ` + analyticsProjectPredicate("project_id", projectID)
+	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE ` + analyticsProjectPredicate(ctx, "project_id", projectID)
 	args := []any{projectID}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		query += ` AND INSTR(LOWER('webhook ' || COALESCE(name, '')), ?) > 0`
@@ -252,13 +252,13 @@ func (r *WebhookRepo) DeleteBulk(ctx context.Context, projectID string, ids []st
 		args = append(args, id)
 	}
 	var count int
-	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
 		return err
 	}
 	if count != len(ids) {
 		return persistence.ErrWebhookNotFound
 	}
-	if _, err := conn.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
 		return err
 	}
 	_, err = conn.ExecContext(ctx, `COMMIT`)

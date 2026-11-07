@@ -498,7 +498,7 @@ func (r *TaskRepo) listEmptyBreadcrumbSelector(ctx context.Context, projectID, c
 func (r *TaskRepo) listBreadcrumbSelectorRows(ctx context.Context, query string, capacity int, args ...any) ([]models.BreadcrumbSelectorItem, error) {
 	// The explicit virtual workspace broadens this bounded read only.
 	if len(args) > 0 && args[0] == models.AllProjectsID {
-		query = strings.ReplaceAll(query, "project_id = ?", "? = '__all_projects__'")
+		query = strings.ReplaceAll(query, "project_id = ?", analyticsProjectPredicate(ctx, "project_id", models.AllProjectsID))
 	}
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -579,7 +579,7 @@ func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]
 
 	rows, err := r.db.QueryContext(ctx, `SELECT `+taskReferenceSelectColumns+`
 		FROM tasks t
-		WHERE `+analyticsProjectPredicate("t.project_id", projectID)+` AND t.category != 'chat'
+		WHERE `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND t.category != 'chat'
 		ORDER BY t.display_order ASC, t.created_at ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing task references: %w", err)
@@ -611,7 +611,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 				 FROM tasks t WHERE t.project_id = ?`
 	args := []any{projectID}
 	if projectID == models.AllProjectsID && category != string(models.CategoryChat) {
-		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category != 'chat'`
+		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category != 'chat' AND ` + accessibleProjectPredicate(ctx, "t.project_id", false)
 		args = nil
 	}
 	if category != "" {
@@ -1209,7 +1209,7 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 				return fmt.Errorf("duplicate task in active lane move: %s", move.ID)
 			}
 			seen[move.ID] = struct{}{}
-			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND `+analyticsProjectPredicate("project_id", projectID), move.ID, projectID)
+			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND `+editableProjectPredicate(ctx, "project_id", projectID), move.ID, projectID)
 			if err != nil {
 				return fmt.Errorf("loading active lane task %s: %w", move.ID, err)
 			}
@@ -2704,7 +2704,7 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 
 func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, projectID string) ([]persistence.TaskWithSchedule, error) {
 	if projectID == models.AllProjectsID {
-		query = strings.ReplaceAll(query, "t.project_id = ?", "? = '__all_projects__'")
+		query = strings.ReplaceAll(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID))
 	}
 	rows, err := r.db.QueryContext(ctx, query, projectID)
 	if err != nil {
@@ -2889,7 +2889,7 @@ func (r *TaskRepo) MoveCompletedActiveToCompleted(ctx context.Context, projectID
 	}
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = 'completed', updated_at = datetime('now'), completed_at = datetime('now')
-		 WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND category = 'active' AND status = 'completed'`, projectID)
+		 WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND category = 'active' AND status = 'completed'`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("moving completed active tasks to completed: %w", err)
 	}
@@ -2996,7 +2996,7 @@ func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (in
 	var activated []models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		rows, err := exec.QueryContext(ctx, `SELECT id, project_id, title, status, display_order FROM tasks
-			WHERE category = 'backlog' AND `+analyticsProjectPredicate("project_id", projectID)+`
+			WHERE category = 'backlog' AND `+editableProjectPredicate(ctx, "project_id", projectID)+`
 			  AND (status != 'blocked' OR swarm_role = 'swarm_parent')
 			ORDER BY display_order ASC, created_at ASC, id ASC`, projectID)
 		if err != nil {
@@ -3115,7 +3115,7 @@ func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition i
 // Only returns tasks with status pending, failed, or cancelled (eligible for execution).
 func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, priority int) ([]models.Task, error) {
 	query := `SELECT ` + taskSelectColumns + `
-		 FROM tasks WHERE category = 'backlog' AND ` + analyticsProjectPredicate("project_id", projectID) + ` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))`
+		 FROM tasks WHERE category = 'backlog' AND ` + analyticsProjectPredicate(ctx, "project_id", projectID) + ` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))`
 	args := []any{projectID}
 
 	if priority > 0 {
@@ -3148,7 +3148,7 @@ func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, 
 func (r *TaskRepo) CountBacklogByPriority(ctx context.Context, projectID string) (map[int]int, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT priority, COUNT(*) FROM tasks
-		 WHERE category = 'backlog' AND `+analyticsProjectPredicate("project_id", projectID)+` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))
+		 WHERE category = 'backlog' AND `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))
 		 GROUP BY priority ORDER BY priority DESC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("counting backlog tasks by priority: %w", err)
@@ -3187,7 +3187,7 @@ func (r *TaskRepo) ListByTags(ctx context.Context, tags []models.TaskTag, projec
 
 	// Apply optional filters
 	if projectID != "" {
-		query += ` AND ` + analyticsProjectPredicate("project_id", projectID)
+		query += ` AND ` + analyticsProjectPredicate(ctx, "project_id", projectID)
 		args = append(args, projectID)
 	}
 

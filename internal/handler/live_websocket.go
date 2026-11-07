@@ -321,12 +321,25 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 			if !authorized() {
 				return nil
 			}
+			// Register interest before admission so a concurrent revocation is queued.
+			// Existing subscriptions remain registered throughout this check.
+			if projectWatch != nil {
+				projects := map[string]bool{cmd.ProjectID: true}
+				all := cmd.ProjectID == models.AllProjectsID
+				for _, sub := range subscriptions {
+					projects[sub.command.ProjectID] = true
+					all = all || sub.command.ProjectID == models.AllProjectsID
+				}
+				projectWatch.SetProjects(projects, all)
+			}
 			if cmd.Offset < 0 || !h.liveSubscriptionAllowed(ctx, cmd) {
+				updateWatchProjects()
 				writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription denied"})
 				continue
 			}
 			if cmd.ProjectID == models.AllProjectsID {
 				if err := h.refreshLiveVisibility(ctx, visible); err != nil {
+					updateWatchProjects()
 					writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription denied"})
 					continue
 				}
@@ -337,6 +350,13 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 			subscription := &liveSubscription{stop: stop, command: cmd}
 			subscriptions[cmd.ID] = subscription
 			updateWatchProjects()
+			// Apply changes queued during admission before starting any output.
+			if projectWatch != nil {
+				reauthorize(projectWatch.Drain())
+				if subscriptions[cmd.ID] != subscription {
+					continue
+				}
+			}
 			go func(cmd liveCommand) {
 				defer func() {
 					// Use the connection queue even after subctx is cancelled.

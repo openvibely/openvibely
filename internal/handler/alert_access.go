@@ -47,6 +47,9 @@ func (h *Handler) authorizeAlertResource(c echo.Context) error {
 		if alert == nil {
 			return authz.ErrDenied
 		}
+		if err := h.projectAccessSvc.Require(c.Request().Context(), alert.ProjectID, permission); err != nil {
+			return err
+		}
 	}
 	// Bulk operations validate all IDs transactionally in the scoped alert store.
 	return nil

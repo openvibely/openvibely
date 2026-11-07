@@ -567,6 +567,17 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		ChannelTargets:               channelTargets,
 		SendMessageExplicitTargets:   sendMessageExplicitTargets,
 	}
+	// Members may manage their sender mappings, but never receive shared secrets.
+	if options := models.SenderOptions(ctx); (options.Authenticated || h.authEnabled()) && !options.Actor.IsOrgAdmin() {
+		channelView.TelegramToken = ""
+		channelView.GitHubPrivateKeyValue = ""
+		channelView.GitHubPATValue = ""
+		channelView.SlackClientSecret = ""
+		channelView.SlackAppToken = ""
+		channelView.SlackBotToken = ""
+		channelView.DiscordBotToken = ""
+		channelView.EmailPasswordValue = ""
+	}
 	if isHTMX(c) || page.IsFragment {
 		return render(c, http.StatusOK, pages.SettingsContent(channelView))
 	}
