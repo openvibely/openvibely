@@ -13,7 +13,7 @@ templ ModalInitialFocus() {
    if (!dialog || initialized.has(dialog)) return;
    initialized.add(dialog);
    if (!event.target.matches('.ov-modal-close')) return;
-   var heading = dialog.querySelector('h1, h2, h3, [data-editor-title], [data-result-title]');
+   var heading = dialog.querySelector('h1, h2, h3, h4, h5, h6, [data-editor-title], [data-result-title]');
    if (!heading) return;
    heading.setAttribute('tabindex', '-1');
    heading.setAttribute('data-modal-initial-focus', '');

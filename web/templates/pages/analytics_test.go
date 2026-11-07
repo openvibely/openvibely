@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestAnalyticsContent_OmitsSubtitle(t *testing.T) {
@@ -1478,6 +1479,9 @@ func TestAnalyticsContent_FocusedViewsPreserveExistingMetrics(t *testing.T) {
 
 func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
 	var rendered bytes.Buffer
+	if err := layout.ModalInitialFocus().Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
 	if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project One"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
@@ -1536,7 +1540,8 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(close.parentElement===header&&Math.abs(closeRect.top+closeRect.height/2-fullHeaderRect.top-fullHeaderRect.height/2)<1&&Math.abs(fullHeaderRect.right-closeRect.right)<1,'exit icon is not inline at header right');
    check(dialog.querySelector('select')===select,'model filter was replaced');
    check(dialog.querySelector('canvas')===canvas&&resized>0,'chart was replaced or not resized');
-   check(document.activeElement===dialog,'mouse opening left focus on exit button');
+   check(document.activeElement===card.querySelector('h4'),'mouse opening did not focus the heading');
+   check(getComputedStyle(document.activeElement).outlineStyle==='none','mouse opening highlighted the heading');
    const help=card.querySelector('[data-model-help]'),tip=document.getElementById('ov-shared-tooltip'),tipParent=tip.parentElement;
    help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450)); await tick();
    check(tip.matches(':popover-open')&&tip.textContent===help.dataset.modelHelp,'preview info hover did not show tooltip');
@@ -1565,7 +1570,8 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await new Promise(resolve=>setTimeout(resolve,150));
    check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-preview-plot'),'plot sizing not restored');
    button.click(); await tick();
-   check(document.activeElement===close,'keyboard opening did not focus exit button');
+   check(document.activeElement===card.querySelector('h4'),'keyboard opening did not focus the heading');
+   check(getComputedStyle(document.activeElement).outlineStyle==='none','keyboard opening highlighted the heading');
    let outerEscapes=0;
    const outerEscape=event=>{if(event.key==='Escape')outerEscapes++;};
    window.addEventListener('keydown',outerEscape);

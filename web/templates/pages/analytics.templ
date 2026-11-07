@@ -384,11 +384,13 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
 						   active = {card, placeholder, button, plot, region};
 						   plot.setAttribute('data-analytics-preview-plot', '');
 						   region.setAttribute('data-analytics-preview-region', '');
-						   dialog.setAttribute('aria-label', card.querySelector('h4').textContent + ' preview');
+						   const title = card.querySelector('h4');
+						   dialog.setAttribute('aria-label', title.textContent + ' preview');
+						   title.setAttribute('tabindex', '-1');
+						   title.setAttribute('data-modal-initial-focus', '');
 						   button.before(close);
 						   dialog.appendChild(card); dialog.showModal(); resize(card);
-						   if (event.detail > 0) dialog.focus({preventScroll:true});
-						   else close.focus({preventScroll:true});
+						   title.focus({preventScroll:true});
 						  }, {signal:eventSignal});
 						 });
 						 eventSignal.addEventListener('abort', () => { restore(); dialog.close(); dialog.remove(); }, {once:true});
