@@ -14,10 +14,13 @@ import (
 
 func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	for _, kind := range []string{"organization", "agents", "models", "skills", "webhooks"} {
+	for _, kind := range []string{"organization", "agents", "models", "skills", "webhooks", "personality"} {
 		t.Run(kind, func(t *testing.T) {
 			var page bytes.Buffer
 			var component templ.Component = AgentsContent(nil, nil)
+			if kind == "personality" {
+				component = AppSettingsContent("", "project", nil)
+			}
 			if kind == "webhooks" {
 				component = templ.Raw(renderSettingsContentForWebhookTest(t, nil))
 			}
@@ -42,6 +45,21 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "permission-"+kind, func(browser *composerFocusCDP) {
 				browser.waitFor("permission helper", `typeof window.openVibelyPermissionErrors`, "object")
+				if kind == "personality" {
+					result := browser.evaluateAwait(`(async()=>{
+ window.fetch=async()=>new Response(JSON.stringify({message:'Admin access required'}),{status:403});
+ const form=document.getElementById('personality_form'), modal=document.getElementById('personality_modal');
+ document.getElementById('personality_prompt').value='Keep draft';const before=form.innerHTML;
+ editPersonalityFromData({dataset:{personalityKey:'custom',personalityName:'Custom'}});
+ for(let i=0;i<100&&permissionToasts.length===0;i++)await new Promise(r=>setTimeout(r,10));
+ await new Promise(r=>setTimeout(r,20));
+ return permissionToasts.length===1&&permissionToasts[0].message==='Admin access required'&&!modal.open&&form.innerHTML===before&&document.getElementById('personality_prompt').value==='Keep draft'?'ok':'personality UI changed';})()`)
+					if result != "ok" {
+						t.Fatal(result)
+					}
+					return
+				}
+
 				if kind == "webhooks" {
 					result := browser.evaluateAwait(`(async()=>{
  window.fetch=async()=>new Response(JSON.stringify({message:'Maintainer access required'}),{status:403});

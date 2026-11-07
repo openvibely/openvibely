@@ -495,87 +495,88 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 				var hasCustom = card.dataset.personalityHasCustom === 'true';
 				var requestGeneration = ++window.openVibelyPersonalityEditGeneration;
 
-				var form = document.getElementById('personality_form');
-				document.getElementById('personality_modal_title').textContent = 'Edit: ' + name;
-				form.removeAttribute('hx-post');
-				form.setAttribute('hx-put', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
-				form.setAttribute('hx-target', '#personality-section');
-				form.setAttribute('hx-swap', 'outerHTML');
-				if (window.htmx) htmx.process(form);
-
-				document.getElementById('personality_name').value = name;
-				document.getElementById('personality_description').value = description;
-				document.getElementById('personality_prompt').value = '';
-				document.getElementById('personality_prompt').placeholder = 'Loading full prompt...';
-
-				var submitBtn = document.getElementById('personality_submit_btn');
-				if (isPreset && hasCustom) {
-					submitBtn.textContent = 'Save Changes';
-				} else if (isPreset && !hasCustom) {
-					submitBtn.textContent = 'Save Override';
-				} else {
-					submitBtn.textContent = 'Save Changes';
-				}
-				submitBtn.disabled = true;
-
-				// Extra actions: Reset to Default (for preset overrides) or Delete (for custom)
-				var extras = document.getElementById('personality_modal_extra_actions');
-				extras.innerHTML = '';
-
-				if (isPreset && hasCustom) {
-					var resetBtn = document.createElement('button');
-					resetBtn.type = 'button';
-					resetBtn.className = 'btn btn-outline btn-warning btn-sm';
-					resetBtn.textContent = 'Reset to Default';
-					resetBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
-					resetBtn.setAttribute('hx-target', '#personality-section');
-					resetBtn.setAttribute('hx-swap', 'outerHTML');
-					resetBtn.setAttribute('hx-confirm', 'Reset this personality to its built-in default?');
-					if (window.htmx) {
-						extras.appendChild(resetBtn);
-						htmx.process(resetBtn);
-					}
-				} else if (!isPreset) {
-					var delBtn = document.createElement('button');
-					delBtn.type = 'button';
-					delBtn.className = 'btn btn-outline btn-error btn-sm';
-					delBtn.textContent = 'Delete';
-					delBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
-					delBtn.setAttribute('hx-target', '#personality-section');
-					delBtn.setAttribute('hx-swap', 'outerHTML');
-					delBtn.setAttribute('hx-confirm', 'Delete this custom personality?');
-					if (window.htmx) {
-						extras.appendChild(delBtn);
-						htmx.process(delBtn);
-					}
-				}
-
-				// Add "Set as Default" button when editing a non-default personality
-				var section = document.getElementById('personality-section');
-				var selectedPersonality = section ? (section.dataset.selectedPersonality || '') : '';
-				if (key !== selectedPersonality) {
-					var setDefaultBtn = document.createElement('button');
-					setDefaultBtn.type = 'button';
-					setDefaultBtn.className = 'btn btn-outline btn-primary btn-sm';
-					setDefaultBtn.textContent = 'Set as Default';
-					setDefaultBtn.setAttribute('hx-post', personalityMutationURL('/personality/save?personality=' + encodeURIComponent(key)));
-					setDefaultBtn.setAttribute('hx-target', '#personality-section');
-					setDefaultBtn.setAttribute('hx-swap', 'outerHTML');
-					if (window.htmx) {
-						extras.appendChild(setDefaultBtn);
-						htmx.process(setDefaultBtn);
-					}
-				}
-
-				personality_modal.showModal();
-
 				fetch(personalityMutationURL('/personality/custom/' + encodeURIComponent(key)), { headers: { 'Accept': 'application/json' } })
-					.then(function(response) {
+					.then(async function(response) {
+						if (await window.openVibelyPermissionErrors?.fetch(response)) return null;
 						if (!response.ok) throw new Error('Failed to load personality');
 						return response.json();
 					})
 					.then(function(detail) {
-						if (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;
+						if (detail === null || requestGeneration !== window.openVibelyPersonalityEditGeneration) return;
+						var form = document.getElementById('personality_form');
+						document.getElementById('personality_modal_title').textContent = 'Edit: ' + name;
+						form.removeAttribute('hx-post');
+						form.setAttribute('hx-put', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
+						form.setAttribute('hx-target', '#personality-section');
+						form.setAttribute('hx-swap', 'outerHTML');
+						if (window.htmx) htmx.process(form);
+
+						document.getElementById('personality_name').value = name;
+						document.getElementById('personality_description').value = description;
+						document.getElementById('personality_prompt').value = '';
+						document.getElementById('personality_prompt').placeholder = 'Loading full prompt...';
+
+						var submitBtn = document.getElementById('personality_submit_btn');
+						if (isPreset && hasCustom) {
+							submitBtn.textContent = 'Save Changes';
+						} else if (isPreset && !hasCustom) {
+							submitBtn.textContent = 'Save Override';
+						} else {
+							submitBtn.textContent = 'Save Changes';
+						}
+						submitBtn.disabled = true;
+
+						// Extra actions: Reset to Default (for preset overrides) or Delete (for custom)
+						var extras = document.getElementById('personality_modal_extra_actions');
+						extras.innerHTML = '';
+
+						if (isPreset && hasCustom) {
+							var resetBtn = document.createElement('button');
+							resetBtn.type = 'button';
+							resetBtn.className = 'btn btn-outline btn-warning btn-sm';
+							resetBtn.textContent = 'Reset to Default';
+							resetBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
+							resetBtn.setAttribute('hx-target', '#personality-section');
+							resetBtn.setAttribute('hx-swap', 'outerHTML');
+							resetBtn.setAttribute('hx-confirm', 'Reset this personality to its built-in default?');
+							if (window.htmx) {
+								extras.appendChild(resetBtn);
+								htmx.process(resetBtn);
+							}
+						} else if (!isPreset) {
+							var delBtn = document.createElement('button');
+							delBtn.type = 'button';
+							delBtn.className = 'btn btn-outline btn-error btn-sm';
+							delBtn.textContent = 'Delete';
+							delBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
+							delBtn.setAttribute('hx-target', '#personality-section');
+							delBtn.setAttribute('hx-swap', 'outerHTML');
+							delBtn.setAttribute('hx-confirm', 'Delete this custom personality?');
+							if (window.htmx) {
+								extras.appendChild(delBtn);
+								htmx.process(delBtn);
+							}
+						}
+
+						// Add "Set as Default" button when editing a non-default personality
+						var section = document.getElementById('personality-section');
+						var selectedPersonality = section ? (section.dataset.selectedPersonality || '') : '';
+						if (key !== selectedPersonality) {
+							var setDefaultBtn = document.createElement('button');
+							setDefaultBtn.type = 'button';
+							setDefaultBtn.className = 'btn btn-outline btn-primary btn-sm';
+							setDefaultBtn.textContent = 'Set as Default';
+							setDefaultBtn.setAttribute('hx-post', personalityMutationURL('/personality/save?personality=' + encodeURIComponent(key)));
+							setDefaultBtn.setAttribute('hx-target', '#personality-section');
+							setDefaultBtn.setAttribute('hx-swap', 'outerHTML');
+							if (window.htmx) {
+								extras.appendChild(setDefaultBtn);
+								htmx.process(setDefaultBtn);
+							}
+						}
+
+						personality_modal.showModal();
+
 						document.getElementById('personality_modal_title').textContent = 'Edit: ' + (detail.name || name);
 						document.getElementById('personality_name').value = detail.name || name;
 						document.getElementById('personality_description').value = detail.description || '';
@@ -585,7 +586,7 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 					})
 					.catch(function() {
 						if (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;
-						document.getElementById('personality_prompt').placeholder = 'Unable to load prompt. Close and try again.';
+						window.showToast?.('Unable to load personality.', 'failed');
 					});
 			}
 

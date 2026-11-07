@@ -1547,6 +1547,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var requestId = card.getAttribute('data-chat-input-request-id') || '';
 							var root = document.getElementById('chat-page-root');
 							var projectID = root ? root.getAttribute('data-project-id') : projectId;
+							var previousStatus = status ? {className: status.className, text: status.textContent} : null;
 							card.setAttribute('data-submitted', 'true');
 							card.querySelectorAll('button, textarea, input').forEach(function(control) { control.disabled = true; });
 							card.querySelectorAll('[role="button"][data-chat-input-option], [role="button"][data-chat-input-nav]').forEach(function(control) { control.setAttribute('aria-disabled', 'true'); control.classList.add('pointer-events-none'); });
@@ -1558,7 +1559,12 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								method: 'POST',
 								headers: {'Content-Type': 'application/json'},
 								body: JSON.stringify({project_id: projectID || '', answers: answers})
-							}).then(function(resp) {
+							}).then(async function(resp) {
+								if (await window.openVibelyPermissionErrors?.fetch(resp)) {
+									var error = new Error('Permission denied');
+									error.toastOnly = true;
+									throw error;
+								}
 								if (!resp.ok) throw new Error('Unable to submit answer');
 								completeChatInputRequest(card, {questions: Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-question-id]')).map(function(group) {
 									return {id: group.getAttribute('data-chat-input-question-id') || '', question: (group.querySelector('legend') || {}).textContent || ''};
@@ -1567,6 +1573,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								card.removeAttribute('data-submitted');
 								card.querySelectorAll('button, textarea, input').forEach(function(control) { control.disabled = false; });
 								card.querySelectorAll('[role="button"][data-chat-input-option], [role="button"][data-chat-input-nav]').forEach(function(control) { control.removeAttribute('aria-disabled'); control.classList.remove('pointer-events-none'); });
+								if (err && err.toastOnly) {
+									if (status && previousStatus) {
+										status.className = previousStatus.className;
+										status.textContent = previousStatus.text;
+									}
+									return;
+								}
 								showChatInputQuestion(card, Number(card.getAttribute('data-current-question-index') || 0));
 								if (status) {
 									status.classList.remove('hidden');
