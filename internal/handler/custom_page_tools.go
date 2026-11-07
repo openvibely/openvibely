@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -68,6 +69,12 @@ func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingRes
 	}
 	managed, err := filepath.Abs(h.pagePlugins.Root())
 	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(managed, 0o755); err != nil {
+		return "", err
+	}
+	if managed, err = filepath.EvalSymlinks(managed); err != nil {
 		return "", err
 	}
 	if rel, err := filepath.Rel(workspace, managed); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
