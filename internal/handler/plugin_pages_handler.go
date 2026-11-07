@@ -965,3 +965,22 @@ func (h *Handler) PluginChatTranscript(c echo.Context) error {
 		pages.ChatInputRequestCards(cards),
 	))
 }
+
+// Resolve only persisted bindings; task titles and client IDs never select a page.
+func (h *Handler) recoverPageConversation(ctx context.Context, task *models.Task) (pageintegration.Conversation, error) {
+	if h.pagePlugins == nil {
+		return pageintegration.Conversation{}, errors.New("page adapter unavailable")
+	}
+	ref, err := h.pagePlugins.Store().ConversationPage(ctx, task.ID)
+	if err != nil {
+		return pageintegration.Conversation{}, err
+	}
+	if ref == nil || ref.ProjectID != task.ProjectID {
+		return pageintegration.Conversation{}, errors.New("page binding unavailable")
+	}
+	binding := h.pagePlugins.Conversation(*ref)
+	if _, err = binding.Resolve(ctx); err != nil {
+		return pageintegration.Conversation{}, err
+	}
+	return binding, nil
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
@@ -25,6 +26,8 @@ type pageQueuedContext struct {
 	Principal string                    `json:"principal"`
 	Snapshot  *pageintegration.Snapshot `json:"snapshot,omitempty"`
 }
+
+var errPageTurnUnauthorized = errors.New("page turn submitting identity is unavailable")
 
 var errPageChatBusy = errors.New("a response is already in progress for this page")
 
@@ -173,19 +176,9 @@ func (h *Handler) launchPageChat(ctx context.Context, binding pageintegration.Co
 			h.completeWithFailure(context.Background(), exec.ID, task.ID, launchErr.Error(), 0)
 		}
 	}()
-	ref := binding.Page
-	integration, err := binding.Resolve(ctx)
+	params, err := h.pageChatParams(ctx, binding, task, exec, agent, message, turn)
 	if err != nil {
 		return nil, err
-	}
-	projectID := ref.ProjectID
-	principal := turn.Principal
-	snap := turn.Snapshot
-	if snap != nil {
-		raw, _ := json.Marshal(snap)
-		if err := binding.Store.SaveSnapshot(ctx, exec.ID, string(raw)); err != nil {
-			applog.Infof("[page-chat] snapshot exec=%s: %v", exec.ID, err)
-		}
 	}
 	var attachmentContext string
 	var images []models.Attachment
@@ -198,36 +191,66 @@ func (h *Handler) launchPageChat(ctx context.Context, binding pageintegration.Co
 			attachmentContext = fmt.Sprintf("Attachment processing error: %v", attErr)
 		}
 	}
-	pageContext := pageintegration.RenderContextForPrompt(ref, snap, integration.Operations())
-	tools := pageintegration.BuildRuntimeTools(integration, binding.Resolve, pageintegration.Caller{PrincipalID: principal})
-
-	history, err := h.execRepo.ListByTaskChronologicalLimit(persistence.WithModelHistory(ctx, agent.Provider), task.ID, taskThreadHistoryLimit)
-	if err != nil {
-		history = nil
-	}
-	if err := h.startStreamingResponse(streamingResponseParams{
-		CancellationContext: binding.Lifetime(),
-		ExecID:              exec.ID,
-		TaskID:              task.ID,
-		Message:             message,
-		Agent:               *agent,
-		ChatHistory:         filterChatHistory(history, exec.ID),
-		ProjectID:           projectID,
-		PrincipalID:         principal,
-		SystemContext:       combineContexts(h.getPersonalityContext(ctx, projectID), pageContext),
-		AttachmentContext:   attachmentContext,
-		ImageAttachments:    images,
-		WorkDir:             h.resolveWorkDir(ctx, projectID),
-		IsTaskFollowup:      false,
-		TaskScopedChat:      true,
-		PageConversation:    &binding,
-		ChatMode:            models.ChatModeOrchestrate,
-		Surface:             chatcontrol.SurfaceWeb,
-		RuntimeTools:        tools,
-	}); err != nil {
+	params.AttachmentContext = attachmentContext
+	params.ImageAttachments = images
+	if err := h.startStreamingResponse(params); err != nil {
 		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
 	return chatAttachments, nil
+}
+
+// Persist the submitting identity even when the page has shared no context.
+// Embedding Snapshot retains the existing turn-context JSON shape.
+type pageTurnContext struct {
+	pageintegration.Snapshot
+	Principal  string `json:"principal"`
+	HasContext bool   `json:"has_context"`
+}
+
+func (h *Handler) pageChatParams(ctx context.Context, binding pageintegration.Conversation, task *models.Task, exec *models.Execution, agent *models.LLMConfig, message string, turn pageQueuedContext) (streamingResponseParams, error) {
+	integration, err := binding.Resolve(ctx)
+	if err != nil {
+		return streamingResponseParams{}, err
+	}
+	saved := pageTurnContext{Snapshot: pageintegration.Snapshot{Page: binding.Page}, Principal: turn.Principal, HasContext: turn.Snapshot != nil}
+	if turn.Snapshot != nil {
+		saved.Snapshot = *turn.Snapshot
+	}
+	raw, err := json.Marshal(saved)
+	if err != nil {
+		return streamingResponseParams{}, err
+	}
+	if err = binding.Store.SaveSnapshot(ctx, exec.ID, string(raw)); err != nil {
+		return streamingResponseParams{}, err
+	}
+	history, err := h.execRepo.ListByTaskChronologicalLimit(persistence.WithModelHistory(ctx, agent.Provider), task.ID, taskThreadHistoryLimit)
+	if err != nil {
+		return streamingResponseParams{}, err
+	}
+	return streamingResponseParams{
+		CancellationContext: binding.Lifetime(), ExecID: exec.ID, TaskID: task.ID, Message: message, Agent: *agent,
+		ChatHistory: filterChatHistory(history, exec.ID), ProjectID: binding.Page.ProjectID, PrincipalID: turn.Principal,
+		SystemContext: combineContexts(h.getPersonalityContext(ctx, binding.Page.ProjectID), pageintegration.RenderContextForPrompt(binding.Page, turn.Snapshot, integration.Operations())),
+		WorkDir:       h.resolveWorkDir(ctx, binding.Page.ProjectID), TaskScopedChat: true, PageConversation: &binding,
+		ChatMode: models.ChatModeOrchestrate, Surface: chatcontrol.SurfaceWeb,
+		RuntimeTools: pageintegration.BuildRuntimeTools(integration, binding.Resolve, pageintegration.Caller{PrincipalID: turn.Principal}),
+	}, nil
+}
+
+func (h *Handler) authorizePageTurn(ctx context.Context, principal string) error {
+	if principal == "" {
+		return errPageTurnUnauthorized
+	}
+	if h.organizationSvc != nil && strings.HasPrefix(principal, "user:") {
+		user, err := h.organizationSvc.Store.UserByID(ctx, strings.TrimPrefix(principal, "user:"))
+		if err != nil {
+			return err
+		}
+		if user == nil || user.Disabled || user.Role == "" {
+			return errPageTurnUnauthorized
+		}
+	}
+	return nil
 }
 
 func (h *Handler) cancelPageConversation(ctx context.Context, binding pageintegration.Conversation, expectedTurn ...string) error {
@@ -341,6 +364,14 @@ func (h *Handler) startNextQueuedPageTurn(ctx context.Context, binding pageinteg
 	}
 	var turn pageQueuedContext
 	if json.Unmarshal([]byte(raw), &turn) != nil || turn.Principal == "" {
+		return
+	}
+	if err = h.authorizePageTurn(ctx, turn.Principal); err != nil {
+		if errors.Is(err, errPageTurnUnauthorized) {
+			if _, err = h.threadInputRepo.CancelPending(ctx, queued.ID); err == nil {
+				go h.startNextQueuedPageTurn(context.WithoutCancel(ctx), binding)
+			}
+		}
 		return
 	}
 	agent, _, err := h.resolveQueuedInputAgent(ctx, *queued)

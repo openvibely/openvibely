@@ -220,7 +220,7 @@ func (r *ChatInputRequestRepo) claimInstallationAnswer(ctx context.Context, tx s
 			return nil
 		}
 		execution := &models.Execution{TaskID: task, AgentConfigID: model, Status: models.ExecQueued, PromptSent: prompt, IsFollowup: true}
-		if category == "chat" {
+		if category == "chat" || category == "page_chat" {
 			execution.Status = models.ExecRunning
 		}
 		if e = createExecutionWithExecutor(ctx, tx, execution); e != nil {
@@ -228,7 +228,7 @@ func (r *ChatInputRequestRepo) claimInstallationAnswer(ctx context.Context, tx s
 		}
 		// Reactivate inactive tasks without invoking task-start or replaying the
 		// task prompt. Chat and scheduled threads retain their existing category.
-		if _, e = tx.ExecContext(ctx, `UPDATE tasks SET status='queued', category=CASE WHEN category IN ('backlog','completed') THEN 'active' ELSE category END, updated_at=CURRENT_TIMESTAMP WHERE id=?`, task); e != nil {
+		if _, e = tx.ExecContext(ctx, `UPDATE tasks SET status=CASE WHEN category='page_chat' THEN 'running' ELSE 'queued' END, category=CASE WHEN category IN ('backlog','completed') THEN 'active' ELSE category END, updated_at=CURRENT_TIMESTAMP WHERE id=?`, task); e != nil {
 			return e
 		}
 		meta.ContinuationExecutionID = execution.ID

@@ -832,7 +832,7 @@ func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Conte
 			return fmt.Errorf("requeueing interrupted installation steering inputs: %w", err)
 		}
 		if _, err := exec.ExecContext(ctx, `UPDATE tasks
-            SET status='failed', category=CASE WHEN category='chat' THEN category ELSE 'backlog' END,
+            SET status='failed', category=CASE WHEN category IN ('chat','page_chat') THEN category ELSE 'backlog' END,
                 updated_at=datetime('now')
             WHERE status!='cancelled' AND id IN (SELECT e.task_id FROM executions e WHERE `+interruptedInstallation+`)`); err != nil {
 			return fmt.Errorf("recovering interrupted installation tasks: %w", err)

@@ -735,15 +735,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									htmx.process(el);
 								});
 							}
-							// Clean up thread streaming state
-							window._taskThreadStreamingActive = false;
-							// Close thread EventSource connections
-							if (window._threadEventSources) {
-								window._threadEventSources.slice().forEach(function(es) {
-									try { es.close(); } catch(e) {}
-								});
-								window._threadEventSources = [];
-							}
+
 						}
 					});
 

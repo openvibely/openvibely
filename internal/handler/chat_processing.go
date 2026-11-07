@@ -1618,6 +1618,7 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 		}
 }
 	if completed.PageConversation != nil {
+		h.startInstallationContinuations(ctx, completed.ProjectID, completed.TaskID)
 		h.startNextQueuedPageTurn(ctx, *completed.PageConversation)
 		return
 	}

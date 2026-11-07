@@ -40,3 +40,7 @@ func (s conversationStore) SaveQueuedContext(ctx context.Context, inputID, raw s
 func (s conversationStore) QueuedContext(ctx context.Context, inputID string) (string, error) {
 	return s.manager.store.QueuedPageContext(ctx, s.instanceID, inputID)
 }
+
+func (s conversationStore) Snapshot(ctx context.Context, execID string) (string, error) {
+	return s.manager.store.GetTurnContext(ctx, execID)
+}

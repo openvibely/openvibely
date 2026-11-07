@@ -85,3 +85,9 @@ func (s *pageConversationStore) QueuedContext(ctx context.Context, inputID strin
 	err := s.db.QueryRowContext(ctx, `SELECT q.context_json FROM page_queued_contexts q JOIN thread_inputs i ON i.id=q.input_id JOIN page_conversations c ON c.task_id=i.task_id WHERE i.id=? AND c.project_id=? AND c.kind=? AND c.instance_id=? AND c.page_id=?`, inputID, s.ref.ProjectID, s.ref.Kind, s.ref.InstanceID, s.ref.PageID).Scan(&raw)
 	return raw, err
 }
+
+func (s *pageConversationStore) Snapshot(ctx context.Context, execID string) (string, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT q.snapshot_json FROM page_turn_contexts q JOIN executions e ON e.id=q.execution_id JOIN page_conversations c ON c.task_id=e.task_id WHERE e.id=? AND c.project_id=? AND c.kind=? AND c.instance_id=? AND c.page_id=?`, execID, s.ref.ProjectID, s.ref.Kind, s.ref.InstanceID, s.ref.PageID).Scan(&raw)
+	return raw, err
+}

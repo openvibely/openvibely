@@ -186,6 +186,7 @@ The plugin adapter is `internal/pageplugins/conversation.go`. Shared persistence
 ### Navigation and reconnect behavior
 
 - Leaving a page aborts its browser requests, closes its event and execution-stream subscriptions, and retires its handle. Late responses cannot update another page. This detaches the UI; it does **not** send Stop or cancel an admitted AI turn. The turn can finish and remains in saved conversation history.
+- Startup recovery routes queued page messages back through their page adapter, checking the enabled state and submitting user before FIFO promotion. Installation continuations restore the saved turn context and page tools and retain the hidden page-chat category. Turn snapshots include the submitting identity; older snapshots without that identity cannot be automatically resumed as installation continuations.
 - Reopening resumes the same conversation. Disabling/removing the page explicitly cancels its AI work and stops its backend through the existing enabled-lifetime mechanism.
 - A retired or expired handle closes existing server subscriptions immediately. Organization access is rechecked before each event and on the 25-second heartbeat.
 - Bridge subscribers receive `event` with `{type:"page.refresh"}` after subscribing and whenever the event connection opens/reconnects. Reload relevant data with a read operation. The Sales example handles this event and ignores out-of-order report responses. It also awaits context publication before Analyze.

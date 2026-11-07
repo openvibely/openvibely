@@ -272,3 +272,13 @@ func (r *PagePluginRepo) QueuedPageContext(ctx context.Context, instanceID, inpu
 	}
 	return store.QueuedContext(ctx, inputID)
 }
+
+// ConversationPage resolves a persisted page binding, including disabled instances.
+func (r *PagePluginRepo) ConversationPage(ctx context.Context, taskID string) (*pageintegration.PageRef, error) {
+	var ref pageintegration.PageRef
+	err := r.db.QueryRowContext(ctx, `SELECT c.kind,c.page_id,c.instance_id,c.project_id,i.title FROM page_conversations c JOIN page_plugin_instances i ON i.id=c.instance_id AND i.project_id=c.project_id WHERE c.task_id=? AND c.kind='plugin'`, taskID).Scan(&ref.Kind, &ref.PageID, &ref.InstanceID, &ref.ProjectID, &ref.Title)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &ref, err
+}

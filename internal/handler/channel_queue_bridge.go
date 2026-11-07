@@ -58,6 +58,15 @@ func (h *Handler) PromoteQueuedTaskThreadInput(taskID string) {
 		applog.Infof("[handler] PromoteQueuedTaskThreadInput task=%s not found", taskID)
 		return
 	}
+	if task.Category == models.CategoryPageChat {
+		binding, err := h.recoverPageConversation(context.Background(), task)
+		if err != nil {
+			applog.Infof("[page-chat] recovery task=%s: %v", task.ID, err)
+			return
+		}
+		h.startNextQueuedPageTurn(context.Background(), binding)
+		return
+	}
 	applog.Debugf("[handler] PromoteQueuedTaskThreadInput task=%s checking queue", taskID)
 	h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{
 		ProjectID:      task.ProjectID,

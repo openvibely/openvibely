@@ -458,10 +458,6 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 		`htmx.trigger(el, 'htmx:abort')`,
 		// Disable future polling
 		`el.removeAttribute('hx-trigger')`,
-		// Clean up thread streaming
-		"window._taskThreadStreamingActive = false",
-		// Close thread EventSources
-		"window._threadEventSources",
 		// Stale morph suppression via beforeSwap
 		"event.detail.shouldSwap = false",
 	}
@@ -500,6 +496,9 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 		t.Fatal("sidebar pointerdown must not cancel transcript rendering before navigation is committed")
 	}
 	beforeRequestBlock := html[beforeRequestStart:beforeSendStart]
+	if strings.Contains(beforeRequestBlock, "_threadEventSources") || strings.Contains(beforeRequestBlock, "_taskThreadStreamingActive = false") {
+		t.Fatal("sidebar must leave streams alive until navigation actually replaces the view")
+	}
 	if strings.Contains(beforeRequestBlock, `cancelChatContentRenders`) {
 		t.Fatal("HTMX beforeRequest must not cancel transcript rendering before a response is ready to swap")
 	}

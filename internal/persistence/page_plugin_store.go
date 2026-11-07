@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageintegration"
 )
 
 // PagePluginStore persists page-plugin packages, per-project instances, and side-chat bindings.
@@ -27,6 +28,7 @@ type PagePluginStore interface {
 	UpdateInstanceState(ctx context.Context, id, stateJSON string) error
 	DeleteInstance(ctx context.Context, id string) error
 
+	ConversationPage(context.Context, string) (*pageintegration.PageRef, error)
 	GetConversationTask(ctx context.Context, instanceID string) (string, error)
 	SetConversationTask(ctx context.Context, instanceID, taskID string) error
 	SaveTurnContext(ctx context.Context, executionID, instanceID, snapshotJSON string) error
