@@ -126,9 +126,17 @@ cp -R "$assets/files/." "$dist/"
 printf '@tailwind base;\n@tailwind utilities;\n' >"$cache/app-utilities.input.css"
 
 cd "$assets"
-"$tailwind" -c tailwind.config.js -i "$cache/app.input.css" -o "$dist/app.css" --minify &
+# pipefail preserves compilation failures while labeling parallel build output.
+build_css() {
+  local name=$1
+  "$tailwind" -c tailwind.config.js -i "$cache/$name.input.css" -o "$dist/$name.css" --minify 2>&1 |
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" ]] || printf '[%s.css] %s\n' "$name" "$line" >&2
+    done
+}
+build_css app &
 app_pid=$!
-"$tailwind" -c tailwind.config.js -i "$cache/app-utilities.input.css" -o "$dist/app-utilities.css" --minify &
+build_css app-utilities &
 utilities_pid=$!
 app_status=0
 utilities_status=0
