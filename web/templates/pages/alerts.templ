@@ -25,18 +25,6 @@ templ Alerts(projects []models.Project, currentProjectID string, alerts []models
 	}
 }
 
-// AlertsPageWithFilters renders the initial alert page with its active workflow filters.
-templ AlertsPageWithFilters(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState) {
-	@AlertsPageWithFiltersAndSearch(projects, currentProjectID, alerts, unreadCount, hasMore, decisionState, processingState, "")
-}
-
-// AlertsPageWithFiltersAndSearch renders the initial alert page with active workflow filters and search.
-templ AlertsPageWithFiltersAndSearch(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) {
-	@layout.Base("Alerts", projects, currentProjectID) {
-		@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState, search, alertCardListState(currentProjectID, decisionState, processingState, search))
-	}
-}
-
 templ AlertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
 	@alertsContent(alerts, currentProjectID, unreadCount, false, "", "", "", alertCardListState(currentProjectID, "", "", ""))
 }
