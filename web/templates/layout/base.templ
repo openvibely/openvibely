@@ -3948,6 +3948,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					let selectedTasks = new Set();
                     window.kanbanSelection = selectedTasks;
                     window.kanbanClearSelection = clearSelection;
+                    window.kanbanSyncSelection = syncKanbanSelection;
 					let draggedTaskIds = [];
 					let pendingKanbanMoves = new Map();
 					let kanbanMoveTransactions = new Map();
@@ -4473,9 +4474,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							selectedTasks.add(taskID);
 							card.classList.add('task-selected');
 						}
-                        // A user can change selection between swap and settle. Keep
-                        // the pending restoration from undoing that newer gesture.
-                        if (savedKanbanInteraction) savedKanbanInteraction.selectedTaskIDs = Array.from(selectedTasks);
+                        syncKanbanSelection();
                         if (window.kanbanRefresh) window.kanbanRefresh();
 
 						return;
@@ -4487,12 +4486,19 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					}
 				}
 
+                function syncKanbanSelection() {
+                    // Every selection path must update the pending snapshot so
+                    // settle cannot undo input made after the board was swapped.
+                    if (savedKanbanInteraction) savedKanbanInteraction.selectedTaskIDs = Array.from(selectedTasks);
+                }
+
 				function clearSelection() {
 					selectedTasks.forEach(id => {
 						const el = document.getElementById('task-' + id);
 						if (el) el.classList.remove('task-selected');
 					});
 					selectedTasks.clear();
+                    syncKanbanSelection();
 					draggedTaskIds = [];
 				}
 

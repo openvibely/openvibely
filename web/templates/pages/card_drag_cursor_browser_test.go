@@ -490,6 +490,38 @@ window.addEventListener('DOMContentLoaded', function() {
         location.href = '/schedule?project_id=project-card-drag-cursor';
         return;
       }
+      // Exercise real selection controls after replacement but before HTMX settle.
+      // The pending snapshot must not undo newer user input at afterSettle.
+      for (var selectionChange of ['checkbox', 'clear', 'modifier']) {
+        var selectionCard = document.querySelector('#task-task-drag-cursor');
+        selectionCard.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+        if (!window.kanbanSelection.has('task-drag-cursor')) fail('selection race setup failed');
+        var selectionChanged = false, selectionSettled = false, selectionError = '';
+        var changeAfterSwap = function(event) {
+          if (!event.detail.target || event.detail.target.id !== 'kanban-board') return;
+          document.removeEventListener('htmx:afterSwap', changeAfterSwap);
+          var card = document.querySelector('#task-task-drag-cursor');
+          var checkbox = card.querySelector('[data-kanban-checkbox] input');
+          if (!checkbox.checked) selectionError = 'selection was not restored at swap';
+          if (selectionChange === 'checkbox') checkbox.click();
+          else if (selectionChange === 'clear') window.kanbanClearSelection();
+          else card.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+          if (window.kanbanSelection.has('task-drag-cursor')) selectionError = 'selection change did not apply';
+          selectionChanged = true;
+        };
+        var selectionAfterSettle = function(event) {
+          if (!event.detail.target || event.detail.target.id !== 'kanban-board') return;
+          document.removeEventListener('htmx:afterSettle', selectionAfterSettle);
+          selectionSettled = true;
+        };
+        document.addEventListener('htmx:afterSwap', changeAfterSwap);
+        document.addEventListener('htmx:afterSettle', selectionAfterSettle);
+        await htmx.ajax('GET', '/refresh-kanban?state=persisted', {target:'#kanban-board', swap:'outerHTML settle:100ms'});
+        await waitFor(function() { return selectionSettled; }, selectionChange + ' selection settle');
+        if (!selectionChanged || selectionError) fail(selectionChange + ': ' + (selectionError || 'missing swap'));
+        selectionCard = document.querySelector('#task-task-drag-cursor');
+        if (window.kanbanSelection.has('task-drag-cursor') || selectionCard.classList.contains('task-selected') || selectionCard.querySelector('[data-kanban-checkbox] input').checked) fail(selectionChange + ' deselection was overwritten during settle');
+      }
       var selectedTask = document.querySelector('#task-task-drag-cursor');
       var selectedActiveTask = document.querySelector('#task-task-active-status-drag');
       selectedTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));

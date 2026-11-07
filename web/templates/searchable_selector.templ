@@ -94,7 +94,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 29;
+			var controllerVersion = 30;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -153,7 +153,8 @@ templ searchableSelectorScript() {
 				var left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));
 				var belowTop = trigger.bottom + gap, below = window.innerHeight - belowTop - margin, above = trigger.top - gap - margin;
 				var top = belowTop, available = below;
-				if (below < Math.min(height, 160) && above > below) {
+				var openAbove = below < Math.min(height, 160) && above > below;
+				if (openAbove) {
 					available = above;
 					top = Math.max(margin, trigger.top - gap - Math.min(height, available));
 				}
@@ -161,7 +162,7 @@ templ searchableSelectorScript() {
 				dialog.style.maxHeight = Math.max(0, available) + 'px';
                 // Measure after applying the constraint: replacing the CSS max-height
                 // can change the panel height when a local filter is cleared.
-                if (available === above) top = Math.max(margin, trigger.top - gap - dialog.offsetHeight);
+                if (openAbove) top = Math.max(margin, trigger.top - gap - dialog.offsetHeight);
 				dialog.style.top = top + 'px';
 			}
 			function applyLocalFilter(root) {

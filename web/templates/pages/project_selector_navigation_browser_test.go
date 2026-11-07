@@ -192,6 +192,17 @@ window.addEventListener('DOMContentLoaded', function() {
     var rootRect = root.getBoundingClientRect();
     var unconstrainedTriggerRect = trigger.getBoundingClientRect();
     var triggerOffset = unconstrainedTriggerRect.top - rootRect.top;
+    // Equal room above and below still prefers below, just as it does when
+    // the trigger is slightly above the midpoint in this constrained viewport.
+    for (var midpointOffset of [-1, 0]) {
+      root.style.top = ((window.innerHeight - unconstrainedTriggerRect.height) / 2 - triggerOffset + midpointOffset) + 'px';
+      window.dispatchEvent(new Event('resize'));
+      await wait(0);
+      triggerRect = trigger.getBoundingClientRect();
+      dialogRect = dialog.getBoundingClientRect();
+      if (midpointOffset === 0 && triggerRect.top !== window.innerHeight - triggerRect.bottom) fail('midpoint fixture must have equal room on both sides');
+      if (Math.abs(dialogRect.top - (triggerRect.bottom + 4)) > 2) fail('midpoint selector must prefer below its trigger: ' + JSON.stringify({offset:midpointOffset,trigger:triggerRect,dialog:dialogRect,style:dialog.getAttribute('style'),viewport:innerHeight}));
+    }
     var desiredTriggerTop = window.innerHeight - 24 - unconstrainedTriggerRect.height;
     root.style.top = Math.max(8, desiredTriggerTop - triggerOffset) + 'px';
     window.dispatchEvent(new Event('resize'));

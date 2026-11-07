@@ -112,6 +112,8 @@
             const text = !term ? '' : matched ? matched + (matched === 1 ? ' task matches' : ' tasks match') : 'No matching tasks';
             if (status.textContent !== text) status.textContent = text;
         }
+        // Checkbox, select-all and filter/search changes share this reconciliation.
+        if (window.kanbanSyncSelection) window.kanbanSyncSelection();
     }
     window.kanbanRefresh = refresh;
     function closeChoiceMenu(button) {
