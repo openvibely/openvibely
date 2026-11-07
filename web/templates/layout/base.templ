@@ -3143,12 +3143,15 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-layout="floating"]:not(.task-list-collapsed) #task-list-divider { left: calc(var(--task-list-width) + var(--shell-gap) / 2 - 4px); top: 0; bottom: var(--shell-gap); }
 				#task-list-divider:hover::after, #task-list-divider:focus-visible::after, html.task-list-resizing #task-list-divider::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; border-radius: 1px; background: oklch(var(--bc) / .28); }
 				html.task-list-resizing, html.task-list-resizing * { cursor: col-resize !important; user-select: none !important; }
-				/* Header controls anchored to the task list column. */
+				/* Center the toggle above the icon rail; keep the actions at the task list's right edge. */
 				#task-list-header { display: none; }
-				html[data-shell-frame] #task-list-header { display: flex; align-items: center; gap: 4px; position: absolute; left: var(--rail-width); width: var(--task-list-width, 300px); top: 0; height: 100%; padding: 0; --wails-draggable: drag; }
+				html[data-shell-frame] #task-list-header { display: flex; align-items: center; gap: 4px; position: absolute; left: calc((var(--rail-width) - 32px) / 2); width: calc(var(--task-list-width, 300px) + var(--rail-width) / 2 + 16px); top: 0; height: 100%; padding: 0; --wails-draggable: drag; }
 				html[data-shell-frame] #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; width: calc(var(--rail-width) + var(--task-list-width, 300px) - 80px); }
 				/* Web has no native window buttons: center the toggle above the icon rail. */
 				html[data-shell-frame][data-openvibely-runtime="web"] #task-list-header { left: calc((var(--rail-width) - 32px) / 2); width: calc(var(--task-list-width, 300px) + var(--rail-width) / 2 + 16px); }
+				/* GTK can place caption buttons on either side; reserve any occupied left space. */
+				html[data-shell-frame][data-native-linux-controls] #task-list-header { --task-list-header-left: max(calc((var(--rail-width) - 32px) / 2), calc(var(--native-controls-left, 0px) + 8px)); left: var(--task-list-header-left); }
+				html[data-shell-frame][data-native-linux-controls]:not(.task-list-collapsed) #task-list-header { width: calc(var(--rail-width) + var(--task-list-width, 300px) - var(--task-list-header-left)); }
 				#task-list-header button, #task-list-header a { --wails-draggable: no-drag; }
 								#task-list-search-toggle[aria-expanded="true"] { background: transparent; opacity: 1; }
 				.task-list-toggle-fill { fill: currentColor; }
@@ -3231,6 +3234,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-layout="floating"] #desktop-project-titlebar { padding-left: calc(var(--rail-width) + var(--task-list-width, 300px) + var(--shell-gap)) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar { padding-left: calc(var(--rail-width) + 44px) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px !important; }
+				html[data-shell-frame][data-native-linux-controls].task-list-collapsed #desktop-project-titlebar { padding-left: max(calc(var(--rail-width) + 44px), calc(var(--native-controls-left, 0px) + 48px)) !important; }
 				/* The web toggle occupies the rail, so collapsed detached tabs start at the page edge. */
 				html[data-shell-frame][data-openvibely-runtime="web"]:not([data-tab-style="attached"]).task-list-collapsed #desktop-project-titlebar { padding-left: var(--rail-width) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; }

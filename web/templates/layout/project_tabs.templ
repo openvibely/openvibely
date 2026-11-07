@@ -472,7 +472,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      closedActive = closingID;
      ids.splice(index, 1); render(); saveTabs();
      var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || add;
-     focus.focus();
+     focus.focus({preventScroll: true});
+     window.openVibelyScrollIntoPanel(focus, {container: list});
     } finally {
      pendingCloses.delete(closingID);
      sync();

@@ -284,10 +284,10 @@ jobs:
         if: runner.os == 'Linux'
         run: openbox >/tmp/openvibely-native-chat-wm.log 2>&1 &
 
-      - name: Test native Wails scrolling
+      - name: Test native Wails desktop scrolling and alignment
         env:
           OPENVIBELY_RUN_NATIVE_UI: "1"
-        run: go test ./internal/handler -run '^(TestTaskNativeWheelPagingInWails|TestNativePanelScrollIsolationInWails)$' -count=1 -timeout 600s
+        run: go test ./internal/handler -run '^(TestTaskNativeWheelPagingInWails|TestNativePanelScrollIsolationInWails|TestNativeDesktopTaskListAlignment)$' -count=1 -timeout 1020s
 
       - name: Test native WebKit storage isolation
         if: runner.os == 'macOS'

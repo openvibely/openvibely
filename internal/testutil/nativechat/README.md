@@ -88,6 +88,34 @@ lines are included in the native process output when a scenario fails. This
 separates a missing DOM event from malformed native input or inactive routing;
 a successful HTTP response alone still does not prove browser delivery.
 
+## Desktop task-list alignment
+
+The same host also runs the real desktop shell in each OS's webview:
+
+```sh
+OPENVIBELY_RUN_NATIVE_UI=1 go test ./internal/handler -run '^TestNativeDesktopTaskListAlignment$' -count=1 -timeout 420s
+```
+
+CI runs this on the existing Linux, Windows, and macOS architecture matrix.
+The fixture uses frameless 500px and 1280px windows and checks floating/unified
+layouts, attached/detached tabs, and expanded/collapsed task lists. It compares
+actual toggle and rail geometry, checks the toggle's hit target and header action
+positions, verifies keyboard tab navigation does not scroll the surrounding shell,
+and preserves macOS's 80px traffic-light reservation. Linux also checks
+right-side and left-side caption insets, including grouped left controls.
+
+This tests real WebKitGTK/WebView2/WKWebView rendering. Caption geometry is supplied
+by the fixture through the production CSS attributes/properties; the host does
+not install the production native caption overlay. Native caption tests cover
+that integration separately. `OPENVIBELY_NATIVE_LAYOUT_WIDTH` selects the
+frameless viewport for this test and leaves the scrolling host's defaults intact.
+
+For a quicker check in Chrome on the current OS:
+
+```sh
+go test ./internal/handler -run '^TestDesktopTaskListAlignmentInChrome$' -count=1 -timeout 240s
+```
+
 ## Visible host and streaming memory measurements (macOS)
 
 The larger always-on-top host previously kept as `/tmp/ov-memory-audit/native-visible`

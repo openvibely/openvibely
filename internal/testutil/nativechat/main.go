@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +66,15 @@ func main() {
 		options.Width, options.Height = 1728, 1085
 		options.AlwaysOnTop = true
 		options.Mac.CollectionBehavior = application.MacWindowCollectionBehaviorCanJoinAllSpaces | application.MacWindowCollectionBehaviorFullScreenAuxiliary
+	}
+	// Layout regressions use the desktop's frameless surface at narrow and wide sizes.
+	if value := os.Getenv("OPENVIBELY_NATIVE_LAYOUT_WIDTH"); value != "" {
+		width, err := strconv.Atoi(value)
+		if err != nil || width < 400 || width > 2000 {
+			log.Fatal("invalid OPENVIBELY_NATIVE_LAYOUT_WIDTH")
+		}
+		options.Width = width
+		options.Frameless = true
 	}
 	window := app.Window.NewWithOptions(options)
 	stage("after window creation")
