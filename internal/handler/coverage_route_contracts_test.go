@@ -705,14 +705,16 @@ func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testi
 	require.Contains(t, tc.handler.executeProjectInfo(ctx, project.ID), "Total tasks:** 1")
 	require.Contains(t, tc.handler.executeListProjects(ctx, project.ID), "Runtime Summary Project")
 
-	createOut := tc.handler.executeCreateAlertRequests(ctx, project.ID, []service.CreateAlertRequest{
-		{Title: "Runtime warning", Message: "needs attention", Severity: "warning", Type: "task_needs_followup", TaskID: task.ID},
-		{Title: "Bad severity", Severity: "severe"},
-		{Title: "Bad type", Type: "incident"},
-	})
-	require.Contains(t, createOut, "Created alert")
-	require.Contains(t, createOut, "Invalid severity")
-	require.Contains(t, createOut, "Invalid alert type")
+	alertHandlers := tc.handler.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	input, err := json.Marshal(service.CreateAlertRequest{Title: "Runtime warning", Message: "needs attention", Severity: "warning", Type: "task_needs_followup", TaskID: task.ID})
+	require.NoError(t, err)
+	createOut, err := alertHandlers["create_alert"](ctx, input)
+	require.NoError(t, err)
+	require.Contains(t, createOut, "Runtime warning")
+	_, err = alertHandlers["create_alert"](ctx, json.RawMessage(`{"title":"Bad severity","severity":"severe"}`))
+	require.ErrorContains(t, err, "Invalid severity")
+	_, err = alertHandlers["create_alert"](ctx, json.RawMessage(`{"title":"Bad type","type":"incident"}`))
+	require.ErrorContains(t, err, "Invalid alert type")
 	alerts, err := tc.alertRepo.ListByProject(ctx, project.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, alerts, 1)
@@ -745,10 +747,17 @@ func TestChatActionReadHelpersUseRepositories(t *testing.T) {
 	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"model_id":"missing"}`)), "not found")
 	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"model_id":`)), "Invalid input")
 	require.Contains(t, tc.handler.executeGetCurrentProject(ctx, project.ID), "action helper description")
-	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"`+alert.ID+`"}`)), "Action alert")
-	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"missing"}`)), "not found")
-	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{}`)), "requires alert_id")
-	require.Contains(t, (&Handler{}).executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"`+alert.ID+`"}`)), "Alert service not available")
+	getAlert := tc.handler.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["get_alert"]
+	out, err := getAlert(ctx, json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, out, "Action alert")
+	_, err = getAlert(ctx, json.RawMessage(`{"alert_id":"missing"}`))
+	require.Error(t, err)
+	_, err = getAlert(ctx, json.RawMessage(`{}`))
+	require.ErrorContains(t, err, "alert_id is required")
+	unavailable := (&Handler{}).chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["get_alert"]
+	_, err = unavailable(ctx, json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+	require.ErrorContains(t, err, "alert service not available")
 }
 
 func TestChatModelStatusToolsUseCompactRuntimeSummaries(t *testing.T) {
@@ -804,11 +813,8 @@ func TestChatActionRuntimeBuildersFiltersAndLineageHelpers(t *testing.T) {
 	collector := newChatActionSummaryCollector()
 	collector.addCreated("created\nTask One [TASK_ID:t1]\n- Task One [TASK_ID:t1]")
 	collector.addEdited("Task One [TASK_EDITED:t1]")
-	out := collector.appendToOutput("base")
-	require.Contains(t, out, "Created 1 task(s)")
-	require.Contains(t, out, "Edited 1 task(s)")
-	require.Equal(t, out, collector.appendToOutput(out))
-	require.Equal(t, "base", (*chatActionSummaryCollector)(nil).appendToOutput("base"))
+	require.Equal(t, []string{"- Task One [TASK_ID:t1]"}, collector.createdLines)
+	require.Equal(t, []string{"- Task One [TASK_EDITED:t1]"}, collector.editedLines)
 
 	allowed := taskThreadAllowedRuntimeToolNames(&models.Agent{Tools: []string{" send_message ", "mark_task_goal_achieved", "report_task_goal_blocked", "ignored"}})
 	for _, name := range []string{"send_message", "memory_view", "mark_task_goal_achieved", "report_task_goal_blocked"} {
@@ -1001,9 +1007,8 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 		})
 	}
 
-	summary := collector.appendToOutput("")
-	require.Contains(t, summary, "Created")
-	require.Contains(t, summary, "Edited")
+	require.NotEmpty(t, collector.createdLines)
+	require.NotEmpty(t, collector.editedLines)
 }
 
 func TestPrimaryAgentSelectabilityMatchesTaskUIProjection(t *testing.T) {

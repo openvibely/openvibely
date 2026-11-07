@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -86,7 +87,7 @@ func setupXBatchService(t testing.TB, db *teststores.Env, counter storefixture.I
 	svc.SetConfigurationID("generation")
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentionsFunc = xMentionBatchFunc(mentionsPerPage, pages)
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 	counter.Reset()
 	return ctx, svc, settings
@@ -391,7 +392,7 @@ func TestXPollPersistsContinuationWithoutAdvancingCursor(t *testing.T) {
 	api := &fakeXAPI{me: XUser{ID: "bot"}}
 	api.mentions.Meta.NewestID = "100"
 	api.mentions.Meta.NextToken = "more"
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 
 	require.NoError(t, svc.pollOnce(ctx))
@@ -454,7 +455,7 @@ func TestXPollResumesLargeBacklogAcrossRestartAndFetchesNewMentions(t *testing.T
 		}
 		return response, nil
 	}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 
 	require.NoError(t, svc.pollOnce(ctx))
@@ -482,7 +483,7 @@ func TestXPollResumesLargeBacklogAcrossRestartAndFetchesNewMentions(t *testing.T
 	restarted.SetRepositories(auth, selections, svc.taskContextRepo, svc.receiptRepo, svc.threadInputRepo)
 	restarted.SetConfigurationID("generation")
 	restarted.me = api.me
-	restarted.setAPI(api)
+	restarted.SetAPI(api)
 	require.NoError(t, restarted.pollOnce(ctx))
 	require.Len(t, requests, 12)
 	require.Equal(t, "page-10", requests[10].pagination, "restart must resume at the first unprocessed page")
@@ -526,7 +527,7 @@ func TestXPollIgnoresContinuationFromReplacedConfiguration(t *testing.T) {
 		response.Meta.NewestID = "60"
 		return response, nil
 	}}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	require.NoError(t, svc.pollOnce(ctx))
 	require.Empty(t, gotPagination)
@@ -543,7 +544,7 @@ func TestXPollCannotOverwriteCursorAfterAccountReplacement(t *testing.T) {
 	require.NoError(t, settings.SetMany(ctx, map[string]string{XSettingAccountID: "new-account", XSettingSinceID: "50"}))
 	api := &fakeXAPI{me: XUser{ID: "old-account"}}
 	api.mentions.Meta.NewestID = "99"
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 	require.ErrorContains(t, svc.pollOnce(ctx), "configuration changed")
 	cursor, err := settings.Get(ctx, XSettingSinceID)
@@ -554,7 +555,7 @@ func TestXPollCannotOverwriteCursorAfterAccountReplacement(t *testing.T) {
 func TestXTestConnectionRequiresMentionReadAccess(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{me: XUser{ID: "bot"}, mentionsErr: errors.New("mention access revoked")}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	_, err := svc.TestConnection(ctx)
 	require.ErrorContains(t, err, "mention access")
 }
@@ -562,7 +563,7 @@ func TestXTestConnectionRequiresMentionReadAccess(t *testing.T) {
 func TestXPollProviderFailureDoesNotAdvanceCursor(t *testing.T) {
 	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{me: XUser{ID: "bot"}, mentionsErr: errors.New("provider down")}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 	require.Error(t, svc.pollOnce(ctx))
 	cursor, err := settings.Get(ctx, XSettingSinceID)
@@ -585,7 +586,7 @@ func TestXPollCursorReadFailureDoesNotCallProvider(t *testing.T) {
 	)
 	svc.SetRepositories(db.XAuth, db.XUserProjects, db.XTaskContexts, db.XInboundReceipts, db.ThreadInputs)
 	called := false
-	svc.setAPI(&fakeXAPI{mentionsFunc: func(context.Context, string, string, string) (xMentionsResponse, error) {
+	svc.SetAPI(&fakeXAPI{mentionsFunc: func(context.Context, string, string, string) (xMentionsResponse, error) {
 		called = true
 		return xMentionsResponse{}, nil
 	}})
@@ -604,7 +605,7 @@ func TestXReplySettingReadFailureDoesNotPost(t *testing.T) {
 		settings, nil, nil, nil, nil, nil, nil,
 	)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	require.NoError(t, db.Close())
 
 	svc.SendReply(context.Background(), "tweet", "must not post", "")
@@ -623,7 +624,7 @@ func TestXPollConfigurationRemovalDuringProviderRequestCreatesNoWork(t *testing.
 		page.Data = []XTweet{{ID: "22", Text: "@openvibely stale", AuthorID: "author", ConversationID: "conversation"}}
 		return page, nil
 	}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 
 	require.ErrorContains(t, svc.pollOnce(ctx), "configuration changed")
@@ -649,7 +650,7 @@ func TestXPollSameAccountReplacementGenerationCreatesNoWork(t *testing.T) {
 		page.Data = []XTweet{{ID: "23", Text: "@openvibely stale", AuthorID: "author", ConversationID: "conversation"}}
 		return page, nil
 	}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 
 	require.ErrorContains(t, svc.pollOnce(ctx), "configuration changed")
@@ -701,7 +702,7 @@ func TestXPollReplacementBetweenMentionHandoffsCreatesNoStaleWork(t *testing.T) 
 				{ID: "2", Text: "@openvibely second", AuthorID: "author", ConversationID: "conversation-2"},
 				{ID: "1", Text: "@openvibely first", AuthorID: "author", ConversationID: "conversation-1"},
 			}
-			svc.setAPI(api)
+			svc.SetAPI(api)
 			svc.me = api.me
 
 			err := svc.pollOnce(ctx)
@@ -733,7 +734,7 @@ func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff
 	api.mentions.Meta.NewestID = "20"
 	api.mentions.Data = []XTweet{{ID: "20", Text: "@openvibely ship it", AuthorID: "author", ConversationID: "conversation"}}
 	api.mentions.Includes.Users = []XUser{{ID: "author", Username: "alice"}}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 
 	require.NoError(t, svc.pollOnce(ctx))
@@ -785,7 +786,7 @@ func TestXAuthorizedMentionTextPreservesHandlesAndPunctuation(t *testing.T) {
 			api := &fakeXAPI{me: XUser{ID: "bot", Username: tt.username}}
 			api.mentions.Meta.NewestID = fmt.Sprintf("%d", 100+i)
 			api.mentions.Data = []XTweet{{ID: api.mentions.Meta.NewestID, Text: tt.text, AuthorID: "author", ConversationID: "conversation"}}
-			svc.setAPI(api)
+			svc.SetAPI(api)
 			svc.me = api.me
 
 			require.NoError(t, svc.pollOnce(ctx))
@@ -820,7 +821,7 @@ func TestXAuthorizedMentionUsesAuthorIDWhenExpansionIsMissing(t *testing.T) {
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentions.Meta.NewestID = "21"
 	api.mentions.Data = []XTweet{{ID: "21", Text: "@openvibely ship it", AuthorID: "author", ConversationID: "conversation"}}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 
 	require.NoError(t, svc.pollOnce(ctx))
@@ -836,7 +837,7 @@ func TestXMissingAuthorIDFailsClosedWithoutAdvancingCursor(t *testing.T) {
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentions.Meta.NewestID = "22"
 	api.mentions.Data = []XTweet{{ID: "22", Text: "@openvibely ship it", ConversationID: "conversation"}}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 
 	require.ErrorContains(t, svc.pollOnce(ctx), "author_id")
@@ -859,7 +860,7 @@ func TestXSameAccountCursorRaceIsBenign(t *testing.T) {
 		page.Meta.NewestID = "20"
 		return page, nil
 	}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 	svc.running = true
 	svc.connected = true
@@ -874,7 +875,7 @@ func TestXSameAccountCursorRaceIsBenign(t *testing.T) {
 func TestXReplyRequiresOriginatingAccount(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = XUser{ID: "new-account", Username: "new"}
 
 	require.False(t, svc.SendReplyForAccount(ctx, "old-account", "tweet", "response", ""))
@@ -898,7 +899,7 @@ func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t
 
 	replacement := NewXService(old.credentials, settings, old.projectRepo, old.llmConfigRepo, old.taskRepo, old.execRepo, old.scheduleRepo, old.taskSvc)
 	replacement.SetRepositories(auth, selections, old.taskContextRepo, old.receiptRepo, old.threadInputRepo)
-	replacement.setAPI(api)
+	replacement.SetAPI(api)
 	replacement.me = api.me
 	replacement.SetConfigurationID("generation")
 	replacement.running = true
@@ -973,7 +974,7 @@ func TestXPollAcknowledgesUnauthorizedMentionsWithoutCreatingWork(t *testing.T) 
 	api.mentions.Meta.NewestID = "10"
 	api.mentions.Data = []XTweet{{ID: "10", Text: "@openvibely hello", AuthorID: "intruder", ConversationID: "conversation"}}
 	api.mentions.Includes.Users = []XUser{{ID: "intruder", Username: "intruder"}}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	svc.me = api.me
 
 	require.NoError(t, svc.pollOnce(ctx))
@@ -996,7 +997,7 @@ func TestXDisconnectedAndResponsesDisabledFailClosed(t *testing.T) {
 
 	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "false"))
 	svc.SendReply(ctx, "tweet", "response", "")
 	require.Empty(t, api.posted)
@@ -1022,7 +1023,7 @@ func TestXReadinessTracksPollingFailureAndRecovery(t *testing.T) {
 func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
 	overlongURL := maxURL + "a"
@@ -1088,7 +1089,7 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 func TestXIDNAPunycodeExpansionRejectsURLEntityAndTruncatesReply(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	domain := strings.Repeat("界.", 500) + "com"
 	url := "https://" + domain
@@ -1114,7 +1115,7 @@ func TestXIDNAPunycodeExpansionRejectsURLEntityAndTruncatesReply(t *testing.T) {
 func TestXReplyTruncatesToWeightedPostLimit(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	svc.SendReply(ctx, "tweet", strings.Repeat("😀", 141), "")
 	require.Equal(t, []string{"tweet|" + strings.Repeat("😀", 139) + "…"}, api.posted)
@@ -1131,7 +1132,7 @@ func TestXReplyTruncatesToWeightedPostLimit(t *testing.T) {
 func TestXWeightedLengthConformanceRegressions(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	directCases := []struct {
 		name       string
@@ -1176,7 +1177,7 @@ func TestXEmojiRangesRespectVariationSelectorPresentation(t *testing.T) {
 func TestXIDNASeparatorsRespectOuterASCIIDotLabelLimits(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	for _, tt := range []struct {
 		name      string
@@ -1242,7 +1243,7 @@ func TestXIDNASeparatorsRespectOuterASCIIDotLabelLimits(t *testing.T) {
 func TestXIDNASeparatorsPreserveEmptyInnerSegments(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	for _, tt := range []struct {
 		name      string
@@ -1340,7 +1341,7 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 	multiSuffixURL := strings.Repeat("x", 241) + " example.com.例.foo.org"
 
 	tests := []struct {
@@ -1370,7 +1371,7 @@ func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T
 func TestXReplyRejectsOversizedURLEntitiesBeforeProviderPost(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
 	overlongURL := maxURL + "a"
@@ -1397,7 +1398,7 @@ func TestXReplyRejectsOversizedURLEntitiesBeforeProviderPost(t *testing.T) {
 func TestXReplyDisabledOrEmptyDoesNotPost(t *testing.T) {
 	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "false"))
 	svc.SendReply(ctx, "tweet", "disabled", "")
@@ -1411,7 +1412,7 @@ func TestXReplyDisabledOrEmptyDoesNotPost(t *testing.T) {
 func TestXOutboundRejectsUnsupportedTargetAndOversizeAndPropagatesProviderFailure(t *testing.T) {
 	_, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{postErr: errors.New("write access unavailable")}
-	svc.setAPI(api)
+	svc.SetAPI(api)
 
 	result := svc.SendOutboundMessage(context.Background(), "123", "", "hello")
 	require.False(t, result.OK)
@@ -1490,7 +1491,7 @@ func TestXRuntimeCreateTaskPersistsReplyContextBeforeWorkerSubmission(t *testing
 	)
 	xSvc.SetRepositories(db.XAuth, db.XUserProjects, xTaskContextRepo, db.XInboundReceipts, db.ThreadInputs)
 	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
-	xSvc.setAPI(&fakeXAPI{me: xSvc.me})
+	xSvc.SetAPI(&fakeXAPI{me: xSvc.me})
 
 	runtime := xSvc.RuntimeTools("parent-task", project.ID, "bot", "author", "conversation", "source-tweet", "alice")
 	type actionResult struct {
@@ -1598,7 +1599,7 @@ func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 	xSvc.SetRepositories(db.XAuth, db.XUserProjects, xTaskContextRepo, db.XInboundReceipts, db.ThreadInputs)
 	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
 	api := &fakeXAPI{me: xSvc.me}
-	xSvc.setAPI(api)
+	xSvc.SetAPI(api)
 	llmSvc.SetXService(xSvc)
 
 	worker.Start(ctx)

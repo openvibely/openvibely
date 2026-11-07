@@ -1549,7 +1549,7 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	require.NotNil(t, stc)
 	require.Equal(t, "C1", stc.SlackChannelID)
 
-	finalOutput := collector.appendToOutput("Done.")
+	finalOutput := strings.Join(collector.createdLines, "\n")
 	require.Contains(t, finalOutput, "[TASK_ID:")
 	require.Contains(t, finalOutput, swarmParent.ID)
 }

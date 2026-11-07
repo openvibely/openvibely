@@ -143,7 +143,6 @@ func (s *XService) SetRuntime(agent persistence.AgentStore, personalities persis
 	s.queuedTaskThreadPromoter = taskPromoter
 	s.channelMessageRouter = router
 }
-func (s *XService) setAPI(api XAPI) { s.api = api }
 
 // SetAPI replaces the provider transport before the service starts. It is used
 // by settings reconfiguration so verification and the running service share one
@@ -1082,11 +1081,6 @@ domainComplete:
 		length += xUTF16Length("https://")
 	}
 	return length <= xMaxURLLength
-}
-
-func xURLIDNADomainValid(domain string) bool {
-	_, ok := xURLIDNAEncodedDomain(domain)
-	return ok
 }
 
 func xURLIDNAEncodedDomain(domain string) (string, bool) {

@@ -7,10 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/llm/jsonview"
-	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
-	"github.com/openvibely/openvibely/internal/llm/requestjson"
-	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
 	"math"
 	"net"
@@ -18,6 +14,11 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -301,9 +302,6 @@ type nativeCompactionState struct {
 	Messages []agenticMessage `json:"messages"`
 }
 
-func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
-	return decodeNativeCompactionReplay(models.ExecutionReplayMessage{TranscriptJSON: raw})
-}
 func decodeNativeCompactionReplay(replay models.ExecutionReplayMessage) ([]agenticMessage, error) {
 	raw := replay.TranscriptJSON
 	var state nativeCompactionState
@@ -1742,23 +1740,6 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	return result, nil
 }
 
-// parseAgenticStream parses a streaming response, handling text, tool_use, and compaction blocks.
-func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThinking func(string)) (*turnResult, error) {
-	return c.parseAgenticStreamWithCallbacks(body, onText, onThinking, nil, nil)
-}
-
-// parseAgenticStreamWithCallbacks parses a streaming response, handling text,
-// tool use, and compaction blocks while optionally emitting tool callbacks.
-func (c *Client) parseAgenticStreamWithCallbacks(
-	body io.Reader,
-	onText func(string),
-	onThinking func(string),
-	onToolUse func(string, json.RawMessage),
-	onToolResult func(string, string, bool),
-	compactionCallbacks ...func(llmcontracts.CompactionProgress),
-) (*turnResult, error) {
-	return c.parseAgenticStreamCapturing(body, onText, onThinking, onToolUse, onToolResult, nil, compactionCallbacks...)
-}
 func (c *Client) parseAgenticStreamCapturing(
 	body io.Reader, onText func(string), onThinking func(string),
 	onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool),

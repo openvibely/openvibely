@@ -7,9 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	llmrecovery "github.com/openvibely/openvibely/internal/llm/recovery"
-	"github.com/openvibely/openvibely/internal/llm/requestjson"
-	"github.com/openvibely/openvibely/internal/transcript"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -20,6 +17,10 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+
+	llmrecovery "github.com/openvibely/openvibely/internal/llm/recovery"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/transcript"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -2052,9 +2053,6 @@ func compactionInstructions(opts *AgenticOptions) string {
 	return openAICompactionInstructions
 }
 
-func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string, configuredContextWindow ...int) ([]any, error) {
-	return trimCompactionInputWithOverhead(inputItems, compactionRequestFixedTokenOverhead(tools, instructions), model, configuredContextWindow...)
-}
 func trimCompactionInputWithOverhead(inputItems []any, overhead int, model string, configuredContextWindow ...int) ([]any, error) {
 	contextWindow := 0
 	if len(configuredContextWindow) > 0 {

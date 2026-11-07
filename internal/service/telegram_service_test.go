@@ -896,7 +896,7 @@ func TestTelegramService_RuntimeCreateTaskTool_SetsTelegramOrigin(t *testing.T) 
 	require.Equal(t, models.TaskOriginTelegram, swarmParent.CreatedVia)
 	require.Equal(t, int64(12345), swarmParent.TelegramChatID)
 
-	finalOutput := collector.appendToOutput("Done.")
+	finalOutput := strings.Join(collector.createdLines, "\n")
 	require.Contains(t, finalOutput, "[TASK_ID:")
 	require.Contains(t, finalOutput, swarmParent.ID)
 }

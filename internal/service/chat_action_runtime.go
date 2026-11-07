@@ -3487,34 +3487,6 @@ func containsChannelSummaryLine(items []string, target string) bool {
 	return false
 }
 
-func (c *channelActionSummaryCollector) appendToOutput(output string) string {
-	if c == nil {
-		return output
-	}
-	var blocks []string
-	if len(c.createdLines) > 0 {
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Created %d task(s):\n", len(c.createdLines)))
-		b.WriteString(strings.Join(c.createdLines, "\n"))
-		blocks = append(blocks, b.String())
-	}
-	if len(c.editedLines) > 0 {
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Edited %d task(s):\n", len(c.editedLines)))
-		b.WriteString(strings.Join(c.editedLines, "\n"))
-		blocks = append(blocks, b.String())
-	}
-	if len(blocks) == 0 {
-		return output
-	}
-
-	summary := "\n\n---\n" + strings.Join(blocks, "\n\n")
-	if strings.Contains(output, summary) {
-		return output
-	}
-	return output + summary
-}
-
 // actionToolDefinitions returns tool definitions from the canonical registry
 // for channel surfaces. Uses orchestrate mode since channels always operate in
 // orchestrate mode.

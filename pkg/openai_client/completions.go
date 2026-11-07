@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/llm/jsonview"
-	"github.com/openvibely/openvibely/internal/llm/requestjson"
-	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
 	"math"
 	"net/http"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -803,13 +804,6 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 		return result, httpretry.NewStreamError(err)
 	}
 	return result, nil
-}
-
-func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*completionsTurnResult, error) {
-	return c.parseCompletionsStreamCapturing(body, onText, nil)
-}
-func (c *Client) parseCompletionsStreamCapturing(body io.Reader, onText func(string), textBuilder *strings.Builder) (*completionsTurnResult, error) {
-	return c.parseCompletionsStreamWithMode(body, onText, textBuilder, false)
 }
 
 func (c *Client) parseCompletionsStreamWithMode(body io.Reader, onText func(string), textBuilder *strings.Builder, compatible bool) (*completionsTurnResult, error) {

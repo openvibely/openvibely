@@ -879,12 +879,6 @@ func formatGitSince(since time.Time) string {
 	return since.UTC().Format(time.RFC3339)
 }
 
-// getProjectChanges runs git commands against a project's repo to gather change data
-func (s *UpcomingService) getProjectChanges(repoPath string, since time.Time) (*models.ProjectChanges, error) {
-	pc, _, err := s.getProjectChangesInRangeWithFiles(repoPath, since, time.Time{})
-	return pc, err
-}
-
 func (s *UpcomingService) getProjectChangesInRangeWithFiles(repoPath string, since, before time.Time) (*models.ProjectChanges, []string, error) {
 	// Verify this is a git repo
 	absPath, err := filepath.Abs(repoPath)

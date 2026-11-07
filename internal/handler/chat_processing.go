@@ -2315,20 +2315,6 @@ func (h *Handler) deregisterTaskCancellation(taskID string, registrationID uint6
 	}
 }
 
-// completeWithSuccess marks an execution and its task as completed.
-// Also moves Active tasks to the Completed category so they appear in the right column.
-// Logs errors but does not fail since this runs in a background goroutine.
-// Captures git diff if workDir is provided.
-func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, completionOptions ...interface{}) persistence.CompleteSuccessOutcome {
-	outcome, err := h.completeWithSuccessWithPRReconciliation(ctx, execID, taskID, output, workDir, tokensUsed, durationMs, false, completionOptions...)
-	if err != nil {
-		applog.Infof("[handler] completeWithSuccess exec=%s completion policy failed: %v", execID, err)
-		h.completeWithFinalizationError(ctx, execID, taskID, err, output, tokensUsed, durationMs, completionOptions...)
-		return persistence.CompleteSuccessAlreadyTerminal
-	}
-	return outcome
-}
-
 // completeWithFinalizationError preserves cancellation ownership when Stop or a
 // deadline interrupts finalization, just as cancellation during the model call does.
 func (h *Handler) completeWithFinalizationError(ctx context.Context, execID, taskID string, err error, output string, tokensUsed int, durationMs int64, completionOptions ...interface{}) models.ExecutionStatus {
@@ -3784,23 +3770,6 @@ const maxThreadTranscriptBytes = 80 * 1024
 // maxPerMessageBytes is a safety limit for a single message within the transcript (50KB).
 const maxPerMessageBytes = 50 * 1024
 
-// formatThreadTranscript formats a task's execution history as a readable thread transcript.
-// offset/limit control pagination: offset is the execution index to start from (0-based),
-// limit is the max number of executions to include (0 = all).
-func (h *Handler) formatThreadTranscript(task *models.Task, executions []models.Execution, offset, limit int) string {
-	total := len(executions)
-	if offset > 0 {
-		if offset >= total {
-			return h.formatThreadTranscriptPage(task, nil, total, offset).transcript
-		}
-		executions = executions[offset:]
-	}
-	if limit > 0 && limit < len(executions) {
-		executions = executions[:limit]
-	}
-	return h.formatThreadTranscriptWithTotal(task, executions, total, offset)
-}
-
 // formatThreadTranscriptWithTotal formats a page that has already been bounded
 // by the repository. total is the full execution count used for pagination
 // metadata and executions starts at offset.
@@ -4115,71 +4084,6 @@ func (h *Handler) executeListProjects(ctx context.Context, projectID string) str
 	}
 
 	return sb.String()
-}
-
-// executeCreateAlertRequests creates alerts from typed runtime-tool requests.
-func (h *Handler) executeCreateAlertRequests(ctx context.Context, projectID string, requests []service.CreateAlertRequest) string {
-	if len(requests) == 0 {
-		return ""
-	}
-	if h.alertSvc == nil {
-		return "Alert Create Results:\n- Alert service not available"
-	}
-
-	var results []string
-	for _, req := range requests {
-		// Default severity to info
-		severity := models.SeverityInfo
-		switch req.Severity {
-		case "warning":
-			severity = models.SeverityWarning
-		case "error":
-			severity = models.SeverityError
-		case "info", "":
-			severity = models.SeverityInfo
-		default:
-			results = append(results, fmt.Sprintf("- Invalid severity %q (use info, warning, or error)", req.Severity))
-			continue
-		}
-
-		// Default type to custom
-		alertType := models.AlertCustom
-		switch req.Type {
-		case "task_failed":
-			alertType = models.AlertTaskFailed
-		case "task_needs_followup":
-			alertType = models.AlertTaskNeedsFollowup
-		case "custom", "":
-			alertType = models.AlertCustom
-		default:
-			results = append(results, fmt.Sprintf("- Invalid alert type %q (use custom, task_failed, or task_needs_followup)", req.Type))
-			continue
-		}
-
-		a := &models.Alert{
-			ProjectID: projectID,
-			Type:      alertType,
-			Severity:  severity,
-			Title:     req.Title,
-			Message:   req.Message,
-		}
-		if req.TaskID != "" {
-			a.TaskID = &req.TaskID
-		}
-
-		if err := h.alertSvc.Create(ctx, a); err != nil {
-			applog.Infof("[handler] executeCreateAlertRequests error: %v", err)
-			results = append(results, fmt.Sprintf("- Error creating alert %q: %v", req.Title, err))
-			continue
-		}
-
-		results = append(results, fmt.Sprintf("- Created alert %q (id: `%s`, severity: %s)", req.Title, a.ID, severity))
-	}
-
-	if len(results) == 0 {
-		return ""
-	}
-	return "Alert Create Results:\n" + strings.Join(results, "\n")
 }
 
 // executeAlertMutationRequests applies one alert mutation to each requested ID and formats the results.
