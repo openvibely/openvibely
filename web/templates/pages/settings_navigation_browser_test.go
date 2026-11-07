@@ -406,10 +406,10 @@ func TestBrowserFunctional_UnmarkedDropdownsConsumeOutsideClick(t *testing.T) {
 				b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('ready'))))`)
 
 				visible := `(()=>{const panel=document.querySelector('` + tc.panel + `');return panel.getClientRects().length>0 && getComputedStyle(panel).visibility==='visible' && getComputedStyle(panel).opacity!=='0'})()`
-				// Allow a paint between release and click. Focus-driven header/user
-				// menus must not raise the outside-click layer over the opening click.
+				// Focus and release must leave the menu closed until click.
 				b.evaluate(`window.openingMenuTrigger=document.querySelector('` + tc.trigger + `'); openingMenuTrigger.scrollIntoView(); openingMenuTrigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1})); openingMenuTrigger.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,buttons:1})); openingMenuTrigger.focus(); openingMenuTrigger.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0})); 'released'`)
 				b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('painted'))))`)
+				b.waitFor("focus does not open menu", `String(!`+visible+`)`, "true")
 				b.waitFor("opening click is not intercepted", `String((()=>{const r=openingMenuTrigger.getBoundingClientRect();const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return openingMenuTrigger.contains(hit) || JSON.stringify({rect:r,hit:hit&&hit.outerHTML.slice(0,400),backdrop:!!document.querySelector('#ov-menu-backdrop')?.getClientRects().length});})())`, "true")
 				b.evaluate(`(()=>{const r=openingMenuTrigger.getBoundingClientRect();document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));return 'clicked';})()`)
 				b.waitFor("menu open", `String(`+visible+`)`, "true")
@@ -450,11 +450,11 @@ func TestBrowserFunctional_AutomationViewSelectionRestoresMenuFocus(t *testing.T
 	runComposerFocusCDP(t, chrome, server.URL+"/fixture", "automation-selection-focus", func(b *composerFocusCDP) {
 		b.waitFor("ready", `String(document.readyState==='complete' && !!document.querySelector('[data-automation-view-yaml]'))`, "true")
 		for _, view := range []string{"yaml", "graph", "yaml"} {
-			b.click(`[data-automation-live-menu] > label`)
+			b.click(`[data-automation-live-menu] > button`)
 			b.waitFor("menu reopened", `String(getComputedStyle(document.querySelector('[data-automation-live-menu] > ul')).visibility==='visible')`, "true")
 			b.click(`[data-automation-view-` + view + `]`)
 			b.waitFor("view selected", `document.querySelector('[data-automation-view-`+view+`]').getAttribute('aria-pressed')`, "true")
-			b.waitFor("selection closes menu and restores focus", `String(document.activeElement===document.querySelector('[data-automation-live-menu] > label') && getComputedStyle(document.querySelector('[data-automation-live-menu] > ul')).visibility==='hidden')`, "true")
+			b.waitFor("selection closes menu and restores focus", `String(document.activeElement===document.querySelector('[data-automation-live-menu] > button') && getComputedStyle(document.querySelector('[data-automation-live-menu] > ul')).visibility==='hidden')`, "true")
 		}
 	})
 }

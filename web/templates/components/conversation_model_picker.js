@@ -356,7 +356,24 @@
       });
     }
   }
-  function close(focus) {
+  const modelMenus = new WeakMap();
+  function modelMenu(btn) {
+    let menu = modelMenus.get(btn);
+    if (!menu) {
+      menu = window.ovMenuController.create({
+        trigger: btn,
+        panels: () => [panel, sub],
+        isOpen: () => active === btn && !panel.hidden,
+        open: () => showModelPicker(btn),
+        close: () => hideModelPicker(false),
+        escape: () => { if (provider) { back.click(); return false; } },
+      });
+      modelMenus.set(btn, menu);
+    }
+    return menu;
+  }
+  function close(focus) { if (active) modelMenu(active).close(focus); }
+  function hideModelPicker(focus) {
     ownerObserver.disconnect();
     const btn = active;
     closeSub();
@@ -803,11 +820,7 @@
       })
       .catch(() => {});
   }
-  window.ovModelPicker = {
-    init,
-    save,
-    close,
-    open(btn) {
+  function showModelPicker(btn) {
       if (!ownerVisible(btn)) return;
       init(btn);
       active = btn;
@@ -829,7 +842,13 @@
             ? loadSelection(btn)
             : load(btn);
       }
-    },
+  }
+  window.ovModelPicker = {
+    init,
+    save,
+    close,
+    open(btn) { if (ownerVisible(btn)) modelMenu(btn).open(); },
+    toggle(btn, event) { if (ownerVisible(btn)) modelMenu(btn).toggle(event); },
     changed(btn) {
       init(btn);
       const s = state(btn);
@@ -881,35 +900,6 @@
       .find((b) => b.dataset.provider === old)
       ?.focus();
   };
-  function outsidePicker(target) {
-    return (
-      active &&
-      !panel.contains(target) &&
-      !sub.contains(target) &&
-      !active.contains(target)
-    );
-  }
-  // Window capture runs before document-level navigation handlers, including
-  // handlers that stop propagation. The first outside click only dismisses.
-  window.addEventListener(
-    "pointerdown",
-    (e) => {
-      if (e.button !== 0 || !outsidePicker(e.target)) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    },
-    true,
-  );
-  window.addEventListener(
-    "click",
-    (e) => {
-      if (!outsidePicker(e.target)) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      close(false);
-    },
-    true,
-  );
   document.addEventListener(
     "keydown",
     (e) => {
@@ -953,14 +943,7 @@
         else window.ovModelPicker.open(btn);
         return;
       }
-      if (!active) return;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (provider) back.click();
-        else close(true);
-        return;
-      }
+      if (!active || e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
       if (e.key === "ArrowLeft" && provider && e.target !== search) {
         e.preventDefault();
         back.click();

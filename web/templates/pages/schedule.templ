@@ -911,7 +911,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								var menu = document.getElementById('schedule-context-menu');
 								var menuCard = null;
 
-								function closeMenu(restoreFocus) {
+								function hideMenu(restoreFocus) {
 									if (!menu || menu.classList.contains('hidden')) return;
 									menu.classList.add('hidden');
 									if (window.updateScheduleSelection) window.updateScheduleSelection();
@@ -922,6 +922,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									}
 									menuCard = null;
 								}
+
+                                var contextController=window.ovMenuController.create({trigger:function(){return menuCard;},panels:[menu],isOpen:function(){return menu&&!menu.classList.contains('hidden');},open:positionMenu,close:function(){hideMenu(false);}});
+                                function closeMenu(restoreFocus){contextController.close(restoreFocus);}
+                                window.closeScheduleContextMenu=closeMenu;
 
 								function positionMenu(event) {
 									if (!menu) return;
@@ -945,7 +949,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
                                     if (window.updateScheduleSelection) window.updateScheduleSelection();
                                     var first = menu.querySelector('[role="menuitem"]:not([hidden]):not([disabled])');
                                     if (!first) { menuCard = null; return; }
-                                    positionMenu(event);
+                                    contextController.open(event);
                                     if (window.updateScheduleSelection) window.updateScheduleSelection();
                                     first.focus({preventScroll: true});
                                 };
@@ -965,7 +969,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									menu.dataset.taskId = card.dataset.taskId || '';
 									menu.dataset.scheduleTitle = card.dataset.scheduleTitle || 'this task';
 									menu.dataset.scheduleEnabled = card.dataset.scheduleEnabled || 'true';
-									positionMenu(event);
+									contextController.open(event);
 									if (window.updateScheduleSelection) window.updateScheduleSelection();
 									var first = menu.querySelector('[role="menuitem"]:not([hidden])');
 									if (first) first.focus({preventScroll: true});
@@ -1001,18 +1005,6 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								}
 
 								if (menu) menu.addEventListener('click', handleMenuAction, {signal: signal});
-								document.addEventListener('keydown', function(event) {
-									if (event.key === 'Escape') closeMenu(true);
-								}, {signal: signal});
-                                function dismissOutsideScheduleMenu(event) {
-                                    if (event.type === 'pointerdown' && event.button !== 0) return;
-                                    if (!menu || menu.classList.contains('hidden') || menu.contains(event.target)) return;
-                                    var modal = document.querySelector('dialog:modal'); if (modal && !modal.contains(menu)) return;
-                                    event.preventDefault(); event.stopImmediatePropagation();
-                                    if (event.type === 'click') closeMenu(true);
-                                }
-                                window.addEventListener('pointerdown', dismissOutsideScheduleMenu, {capture: true, signal: signal});
-                                window.addEventListener('click', dismissOutsideScheduleMenu, {capture: true, signal: signal});
 								document.addEventListener('contextmenu', function(event) {
 									if (!menu || menu.classList.contains('hidden')) return;
 									if (event.target && event.target.closest && event.target.closest('[data-schedule-card]')) return;

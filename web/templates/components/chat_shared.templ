@@ -1875,8 +1875,28 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 			var _csActiveBtn = null;
 
-			function _csClose() {
-				if (window.ovModelPicker) window.ovModelPicker.close(false);
+            var customSelectMenus = new WeakMap();
+            function customSelectMenu(btn) {
+                var menu = customSelectMenus.get(btn);
+                if (!menu) {
+                    menu = window.ovMenuController.create({
+                        trigger: btn, panels: [_cspanel],
+                        isOpen: function() { return _csActiveBtn === btn && _cspanel.style.display !== 'none'; },
+                        open: function() { _csShow(btn); }, close: _csHide,
+                    });
+                    customSelectMenus.set(btn, menu);
+                }
+                return menu;
+            }
+            function _csClose() {
+                if (window.ovModelPicker) window.ovModelPicker.close(false);
+                if (_csActiveBtn) customSelectMenu(_csActiveBtn).close(false);
+            }
+            function _csOpen(btn) {
+                if (btn.classList.contains('chat-model-select') && window.ovModelPicker) window.ovModelPicker.open(btn);
+                else customSelectMenu(btn).open();
+            }
+			function _csHide() {
 				if (_csActiveBtn) {
 					_csActiveBtn.setAttribute('aria-expanded', 'false');
 					_csActiveBtn = null;
@@ -1885,8 +1905,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				_cspanel.innerHTML = '';
 			}
 
-			function _csOpen(btn) {
-				_csClose();
+			function _csShow(btn) {
 				if (btn.classList.contains("chat-model-select") && window.ovModelPicker) {
 					window.ovModelPicker.open(btn);
 					return;
@@ -1958,27 +1977,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			window._openChatCustomSelectPanel = _csOpen;
 			window._closeChatCustomSelectPanel = _csClose;
 
-			// The first outside click dismisses without activating the underlying UI.
-			function dismissOutsideCustomSelect(e) {
-				if (e.type === 'pointerdown' && e.button !== 0) return;
-				if (_cspanel.style.display === 'none') return;
-				if (_csActiveBtn && _csActiveBtn.contains(e.target)) return;
-				if (_cspanel.contains(e.target)) return;
-				e.preventDefault();
-				e.stopImmediatePropagation();
-				if (e.type === 'click') _csClose();
-			}
-			window.addEventListener('pointerdown', dismissOutsideCustomSelect, true);
-			window.addEventListener('click', dismissOutsideCustomSelect, true);
-
-			// Close on Escape
-			document.addEventListener('keydown', function(e) {
-				if (e.key === 'Escape') _csClose();
-			});
-
 			// Reposition on resize so the panel stays near the trigger
 			window.addEventListener('resize', function() {
-				if (_csActiveBtn) _csOpen(_csActiveBtn);
+				if (_csActiveBtn) _csShow(_csActiveBtn);
 			});
 		}
 
@@ -2000,11 +2001,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				btn.addEventListener('click', function(e) {
 					e.preventDefault();
 					e.stopPropagation();
-					if (btn.getAttribute('aria-expanded') === 'true') {
-						if (window._closeChatCustomSelectPanel) window._closeChatCustomSelectPanel();
-					} else {
-						if (window._openChatCustomSelectPanel) window._openChatCustomSelectPanel(btn);
-					}
+					if (btn.classList.contains('chat-model-select') && window.ovModelPicker) window.ovModelPicker.toggle(btn, e);
+                    else if (btn.getAttribute('aria-expanded') === 'true') window._closeChatCustomSelectPanel();
+                    else window._openChatCustomSelectPanel(btn);
 				});
 			}
 		};

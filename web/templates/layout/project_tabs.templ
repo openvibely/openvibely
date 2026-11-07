@@ -197,11 +197,13 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    var menu = document.getElementById('project-tab-menu');
    var projectTabShortcut = (bar.dataset.platform === 'darwin' || (bar.dataset.platform === 'web' && /Mac|iPhone|iPad/.test(navigator.platform))) ? '⌘⇧' : 'Ctrl+Shift+';
    if (typeof menu.showPopover !== 'function') menu.removeAttribute('popover');
-   function closeMenu() {
+   function hideMenu() {
     if (typeof menu.hidePopover === 'function') menu.hidePopover();
     menu.removeAttribute('data-menu-open');
    }
  var menuTab;
+ var contextController=window.ovMenuController.create({trigger:function(){return menuTab;},panels:[menu],isOpen:function(){return menu.hasAttribute('data-menu-open')||(typeof menu.showPopover==='function'&&menu.matches(':popover-open'));},open:function(point){showMenu(point.x,point.y);},close:hideMenu});
+ function closeMenu(){contextController.close(false);}
  var add = document.querySelector('[data-project-selector]');
  if (bar.dataset.platform === 'web') {
   var home = document.createElement('span');
@@ -402,7 +404,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    list.addEventListener('dragstart', function(event) { if (event.target.closest('[data-project-tab]')) event.preventDefault(); });
    function openMenu(tab, x, y) {
     if (!tab || tab.dataset.projectTab === '__all_projects__') return;
-    menuTab = tab;
+    closeMenu(); menuTab = tab; contextController.open({x:x,y:y});
+   }
+   function showMenu(x,y) {
     if (typeof menu.showPopover === 'function') menu.showPopover();
     else menu.setAttribute('data-menu-open', '');
     menu.style.left = Math.max(0, Math.min(x, innerWidth - menu.offsetWidth)) + 'px';
@@ -419,15 +423,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var tab = event.target.closest('[data-project-tab]'); if (!tab) return;
     event.preventDefault(); var rect = tab.getBoundingClientRect(); openMenu(tab, rect.left, rect.bottom);
    });
-   function dismissOutsideTabMenu(event) {
-    if (event.type === 'pointerdown' && event.button !== 0) return;
-    if (!(menu.hasAttribute('data-menu-open') || (typeof menu.showPopover === 'function' && menu.matches(':popover-open'))) || menu.contains(event.target)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    if (event.type === 'click') closeMenu();
-   }
-   window.addEventListener('pointerdown', dismissOutsideTabMenu, true);
-   window.addEventListener('click', dismissOutsideTabMenu, true);
    window.addEventListener('resize', closeMenu);
    list.addEventListener('scroll', closeMenu);
    menu.addEventListener('keydown', function(event) {
@@ -435,7 +430,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      event.preventDefault(); var items = Array.from(menu.querySelectorAll('[role=menuitem]'));
      items[(items.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
     }
-    if (event.key === 'Escape' || event.key === 'Tab') { closeMenu(); if (menuTab) menuTab.focus(); } });
+    if (event.key === 'Tab') { closeMenu(); if (menuTab) menuTab.focus(); } });
    document.getElementById('project-tab-settings-action').addEventListener('click', function() {
     if (!menuTab) return;
     closeMenu();

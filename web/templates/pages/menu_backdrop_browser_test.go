@@ -121,14 +121,15 @@ func TestBrowserFunctional_AutomationMenuOpeningClickSurvivesReleasePaint(t *tes
 				// Split release and click across paints, as can happen in a desktop
 				// WebView. Hit-test the eventual click instead of dispatching directly
 				// to the trigger, which would hide backdrop interception.
-				b.evaluate(`window.menuTrigger=document.querySelector('[data-automation-card-action] label'); menuTrigger.scrollIntoView(); menuTrigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1})); menuTrigger.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,buttons:1})); menuTrigger.focus(); menuTrigger.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0})); 'released'`)
+				b.evaluate(`window.menuTrigger=document.querySelector('[data-automation-card-action] [data-menu-dropdown] > button'); menuTrigger.scrollIntoView(); menuTrigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1})); menuTrigger.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,buttons:1})); menuTrigger.focus(); menuTrigger.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0})); 'released'`)
 				b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('painted'))))`)
+				b.waitFor("focus alone leaves menu closed", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='hidden')`, "true")
 				b.waitFor("opening click still hits trigger", `String((()=>{const r=menuTrigger.getBoundingClientRect();return menuTrigger.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})())`, "true")
 				b.evaluate(`(()=>{const r=menuTrigger.getBoundingClientRect();document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));return 'clicked';})()`)
 				b.waitFor("menu remains open with backdrop", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='visible' && !!document.querySelector('#ov-menu-backdrop')?.getClientRects().length)`, "true")
-				b.clickMenuBackdrop(`[data-automation-card-action] label`)
+				b.clickMenuBackdrop(`[data-automation-card-action] [data-menu-dropdown] > button`)
 				b.waitFor("outside click dismisses menu", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='hidden')`, "true")
-				b.click(`[data-automation-card-action] label`)
+				b.click(`[data-automation-card-action] [data-menu-dropdown] > button`)
 				b.click(`[data-automation-card-delete="menu-card"]`)
 				b.waitFor("menu action works", `String(document.getElementById('delete-automation-card-modal').open)`, "true")
 			})
@@ -178,14 +179,34 @@ func TestBrowserFunctional_CardMenuOpeningClickSurvivesReleasePaint(t *testing.T
 					// Split release and click across paints, as can happen in a desktop
 					// WebView. Hit-test the eventual click instead of dispatching directly
 					// to the trigger, which would hide backdrop interception.
-					b.evaluate(`window.menuTrigger=document.querySelector('[data-menu-dropdown] > label'); menuTrigger.scrollIntoView(); menuTrigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1})); menuTrigger.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,buttons:1})); menuTrigger.focus(); menuTrigger.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0})); 'released'`)
+					b.evaluate(`window.menuTrigger=document.querySelector('[data-menu-dropdown] > button'); menuTrigger.scrollIntoView(); menuTrigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,buttons:1})); menuTrigger.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,buttons:1})); menuTrigger.focus(); menuTrigger.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0})); 'released'`)
 					b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('painted'))))`)
+					b.waitFor("focus alone leaves menu closed", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='hidden')`, "true")
 					b.waitFor("opening click still hits trigger", `String((()=>{const r=menuTrigger.getBoundingClientRect();return menuTrigger.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})())`, "true")
 					b.evaluate(`(()=>{const r=menuTrigger.getBoundingClientRect();document.elementFromPoint(r.x+r.width/2,r.y+r.height/2).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));return 'clicked';})()`)
 					b.waitFor("menu remains open with backdrop", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='visible' && !!document.querySelector('#ov-menu-backdrop')?.getClientRects().length)`, "true")
-					b.clickMenuBackdrop(`[data-menu-dropdown] > label`)
+					b.clickMenuBackdrop(`[data-menu-dropdown] > button`)
 					b.waitFor("outside click dismisses menu", `String(getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='hidden')`, "true")
-					b.click(`[data-menu-dropdown] > label`)
+					for _, key := range []struct {
+						key, code string
+						virtual   int
+					}{{"Enter", "Enter", 13}, {" ", "Space", 32}} {
+						b.evaluate(`menuTrigger.focus(); 'focused'`)
+						for _, opening := range []bool{true, false} {
+							text := key.key
+							if key.key == "Enter" {
+								text = "\r"
+							}
+							b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": key.key, "code": key.code, "text": text, "windowsVirtualKeyCode": key.virtual}, nil)
+							b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key.key, "code": key.code, "windowsVirtualKeyCode": key.virtual}, nil)
+							b.waitFor(fmt.Sprintf("%s toggles menu to %t", key.code, opening), `menuTrigger.getAttribute('aria-expanded')`, fmt.Sprint(opening))
+						}
+					}
+					b.click(`[data-menu-dropdown] > button`)
+					b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
+					b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape"}, nil)
+					b.waitFor("Escape closes without focus reopening", `String(menuTrigger.getAttribute('aria-expanded')==='false' && document.activeElement===menuTrigger && getComputedStyle(menuTrigger.parentElement.querySelector('[data-menu-content]')).visibility==='hidden')`, "true")
+					b.click(`[data-menu-dropdown] > button`)
 					b.evaluate(`window.menuAction=menuTrigger.parentElement.querySelector('[data-menu-content] button:not([disabled]), [data-menu-content] a'); menuAction.id='tested-menu-action'; menuAction.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();window.menuActionClicked=true;},true); 'armed'`)
 					b.click(`#tested-menu-action`)
 					b.waitFor("menu action receives click", `String(window.menuActionClicked===true)`, "true")

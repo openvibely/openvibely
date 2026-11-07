@@ -315,7 +315,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		targetBranch := taskCardMergeTarget(task, state)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<li class=\"group relative\" data-task-card-local-submenu><button type=\"button\" class=\"justify-between\" onfocus=\"positionMenuSubmenu(this.parentElement)\" onkeydown=\"handleMenuSubmenuKeydown(event, this.parentElement)\"><span>Local</span> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18 6-6-6-6\"></path></svg></button><ul tabindex=\"-1\" data-menu-submenu-panel class=\"ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<li class=\"group relative\" data-task-card-local-submenu><button type=\"button\" class=\"justify-between\" onclick=\"positionMenuSubmenu(this.parentElement)\" onkeydown=\"handleMenuSubmenuKeydown(event, this.parentElement)\"><span>Local</span> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18 6-6-6-6\"></path></svg></button><ul tabindex=\"-1\" data-menu-submenu-panel class=\"ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -338,7 +338,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"group relative\" data-task-card-github-submenu><button type=\"button\" class=\"justify-between\" onfocus=\"positionMenuSubmenu(this.parentElement)\" onkeydown=\"handleMenuSubmenuKeydown(event, this.parentElement)\"><span>GitHub</span> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18 6-6-6-6\"></path></svg></button><ul tabindex=\"-1\" data-menu-submenu-panel class=\"ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]\"><li>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"group relative\" data-task-card-github-submenu><button type=\"button\" class=\"justify-between\" onclick=\"positionMenuSubmenu(this.parentElement)\" onkeydown=\"handleMenuSubmenuKeydown(event, this.parentElement)\"><span>GitHub</span> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18 6-6-6-6\"></path></svg></button><ul tabindex=\"-1\" data-menu-submenu-panel class=\"ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]\"><li>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -1518,7 +1518,7 @@ func TestTasksMergeOptionLoaderSupportsKeyboardDeduplicationAndRetry(t *testing.
 		`options.classList.add('htmx-request')`,
 		`setTaskCardMergeOptionsStatus(options, 'loading', dropdown, label)`,
 		`options.outerHTML = html`,
-		`event.target === trigger && trigger.matches('[data-task-card-menu-trigger]')`,
+		`if (button?.matches('[data-task-card-menu-trigger]')) loadTaskCardMergeOptions(dropdown, button);`,
 		`setTaskCardMergeOptionsStatus(options, 'error', dropdown, label)`,
 		`loadTaskCardMergeOptions(openDropdown, openDropdown.querySelector('[data-kanban-menu-trigger]'))`,
 	} {
@@ -1548,7 +1548,7 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 		function fail(message){throw new Error(message)}
 		function waitFor(fn,label){return new Promise(function(resolve,reject){var end=Date.now()+5000;(function poll(){if(fn())return resolve();if(Date.now()>end)return reject(new Error('timeout '+label));setTimeout(poll,20)})()})}
 		(async function(){
-			var card=document.getElementById('task-merge-loader-browser-task');var trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();
+			var card=document.getElementById('task-merge-loader-browser-task');var trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();if(trigger.getAttribute('aria-expanded')==='true')fail('focus alone opened task menu');trigger.click();
 			await waitFor(function(){var options=card.querySelector('[data-task-card-merge-options]');return options&&options.getAttribute('aria-busy')==='true'},'keyboard loader start');
 			var options=card.querySelector('[data-task-card-merge-options]');var loading=options.querySelector('[data-task-card-merge-options-loading-status]');await waitFor(function(){return !loading.classList.contains('hidden')},'visible loading spinner');
 			if(document.activeElement!==trigger)fail('merge option loading moved focus from the menu trigger');await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});
@@ -1558,7 +1558,7 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 			card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');if(document.activeElement!==trigger)fail('shared request hydration lost trigger focus');await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});
 			await waitFor(function(){return !!document.querySelector('[data-task-card-local-submenu]')},'settled request replacement hydration');if((await fetch('/option-count').then(function(r){return r.text()})).trim()!=='2')fail('settled request replacement did not start a fresh Git request');
 			var dropdown=document.querySelector('[data-kanban-menu-key="task-merge-loader-browser-task"]');if(window.closeKanbanMenu)window.closeKanbanMenu(dropdown,false);
-			await fetch('/set-mode?mode=fail',{method:'POST'});await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();
+			await fetch('/set-mode?mode=fail',{method:'POST'});await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();if(trigger.getAttribute('aria-expanded')==='true')fail('focus alone opened task menu');trigger.click();
 			await waitFor(function(){var retry=card.querySelector('[data-task-card-merge-options-retry]');return retry&&!retry.classList.contains('hidden')},'visible retry');
 			await fetch('/set-mode?mode=auth',{method:'POST'});card.querySelector('[data-task-card-merge-options-retry]').click();
 			await waitFor(function(){var current=card.querySelector('[data-task-card-merge-options]');var retry=current.querySelector('[data-task-card-merge-options-retry]');var loading=current.querySelector('[data-task-card-merge-options-loading-status]');return current.getAttribute('aria-busy')==='true'&&retry.classList.contains('hidden')&&!loading.classList.contains('hidden')},'visible retry progress');
@@ -1767,7 +1767,7 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 				localTrigger.focus();localTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));if(!localPanel.contains(document.activeElement))fail('keyboard could not enter portaled Local submenu');
 				var focusedLocalAction=document.activeElement;focusedLocalAction.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-menu-submenu-portaled="true"]'))fail('Escape inside portaled submenu did not close its owning menu');if(document.activeElement!==trigger)fail('Escape inside portaled submenu did not restore trigger focus');
 				clickTrigger(trigger);await waitFor(function(){var dropdown=menu.closest('[data-kanban-menu-key]');return dropdown.getAttribute('data-kanban-menu-open')==='true'&&dropdown.getAttribute('data-kanban-menu-positioning')!=='true'},'stable GitHub menu reveal');var github=menu.querySelector('[data-task-card-github-submenu]'),githubTrigger=github.querySelector(':scope > button'),githubPanel=github.querySelector(':scope > ul');
-				githubTrigger.focus();githubPanel=Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(panel){return !!panel.querySelector('[data-task-card-pr-action]')});if(!githubPanel||getComputedStyle(githubPanel).display==='none'||githubPanel.querySelector('[data-task-card-pr-action]').disabled)fail('eligible GitHub submenu was not precomputed');
+				githubTrigger.focus();githubTrigger.click();githubPanel=Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(panel){return !!panel.querySelector('[data-task-card-pr-action]')});if(!githubPanel||getComputedStyle(githubPanel).display==='none'||githubPanel.querySelector('[data-task-card-pr-action]').disabled)fail('eligible GitHub submenu was not precomputed');
 				document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerId:2,pointerType:'mouse',isPrimary:true}));document.body.click();await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-menu-submenu-portaled="true"]'))fail('outside click did not dismiss the owning menu');clickTrigger(trigger);await frame();			var boardBefore=document.getElementById('kanban-board');window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_updated',project_id:'project-card-merge-browser'}}));await new Promise(function(r){setTimeout(r,700)});
 			if(document.getElementById('kanban-board')!==boardBefore)fail('SSE replaced board while kebab was open');
 			clickTrigger(trigger);await waitFor(function(){return document.getElementById('kanban-board')!==boardBefore},'deferred board refresh after close');
@@ -2120,7 +2120,7 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 	    zone.scrollTop = zone.scrollHeight;
 	    await frame();
 		    var dropdown = card.querySelector('.dropdown');
-		    var label = dropdown && dropdown.querySelector('label');
+		    var label = dropdown && dropdown.querySelector(':scope > button');
 		    var menu = dropdown && dropdown.querySelector('.dropdown-content');
 		    if (!dropdown || !label || !menu) fail('missing task card dropdown controls');
 		    if (!card.classList.contains('overflow-visible')) fail('task card root does not opt out of overflow clipping');
@@ -2158,7 +2158,7 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 		    var localTrigger = local && local.querySelector(':scope > button');
 		    var localPanel = local && local.querySelector(':scope > ul');
 		    if (!localTrigger || !localPanel) fail('missing Local submenu controls');
-		    localTrigger.focus();
+		    localTrigger.focus();localTrigger.click();
 		    await frame();
 		    localPanel = document.querySelector('[data-menu-submenu-portaled="true"]');
 		    if (!localPanel) fail('Local submenu did not create a portaled interaction panel');
@@ -2174,7 +2174,7 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 			    var githubTrigger = github && github.querySelector(':scope > button');
 			    if (!taskEdit || !githubTrigger) fail('missing task menu rows for automation height parity');
 			    var taskHeights = {edit:taskEdit.getBoundingClientRect().height,local:localTrigger.getBoundingClientRect().height,github:githubTrigger.getBoundingClientRect().height,merge:localAction.getBoundingClientRect().height};
-			    githubTrigger.focus();
+			    githubTrigger.focus();githubTrigger.click();
 			    await frame();
 			    var githubPanel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(panel){return !!panel.querySelector('[data-task-card-pr-action]')});
 			    var prAction = githubPanel && githubPanel.querySelector('[data-task-card-pr-action]');
@@ -2182,8 +2182,9 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 			    taskHeights.pr = prAction.getBoundingClientRect().height;
 			    var automationEdit = document.querySelector('[data-automation-card-edit="automation-menu-height-reference"]');
 			    var automationDropdown = automationEdit && automationEdit.closest('.dropdown');
-			    var automationTrigger = automationDropdown && automationDropdown.querySelector(':scope > label');
+			    var automationTrigger = automationDropdown && automationDropdown.querySelector(':scope > button');
 			    if (!automationEdit || !automationTrigger) fail('missing rendered automation menu reference action');
+			    document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
 			    automationTrigger.focus();
 			    automationTrigger.click();
 			    await frame();
@@ -2194,8 +2195,11 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 				      var columnTrigger = columnDropdown && columnDropdown.querySelector(':scope > [data-kanban-menu-trigger]');
 				      var columnMenu = columnDropdown && columnDropdown.querySelector(':scope > [data-kanban-menu-content]');
 				      if (!columnTrigger || !columnMenu) fail('missing '+columnKey+' drop-zone menu');
+				      document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
 				      columnTrigger.focus();
+				      if(columnTrigger.getAttribute('aria-expanded')==='true')fail('focus alone opened '+columnKey);
 				      columnTrigger.click();
+				      if(columnTrigger.getAttribute('aria-expanded')!=='true')fail('click did not open '+columnKey);
 				      await frame();
 				      var columnActions = Array.from(columnMenu.querySelectorAll(':scope > li > button'));
 				      if (!columnActions.length) fail('missing '+columnKey+' drop-zone actions');
@@ -2359,7 +2363,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var button = action(category);
     if (!button) fail('missing ' + category + ' Delete All action');
     var dropdown = button.closest('.dropdown');
-    var menuTrigger = dropdown && dropdown.querySelector('label');
+    var menuTrigger = dropdown && dropdown.querySelector(':scope > button');
     if (!menuTrigger) fail('missing ' + category + ' dropzone menu trigger');
     menuTrigger.focus();
     menuTrigger.click();
@@ -2398,7 +2402,7 @@ window.addEventListener('DOMContentLoaded', function() {
     cancel.click();
     await waitFor(function() { return !modal.open; }, 'cancel close');
     await new Promise(function(resolve) { setTimeout(resolve, 50); });
-    var completedMenuTrigger = completedAction.closest('.dropdown').querySelector('label');
+    var completedMenuTrigger = completedAction.closest('.dropdown').querySelector(':scope > button');
     if (document.activeElement !== completedMenuTrigger) fail('cancel focus restoration active=' + (document.activeElement && document.activeElement.outerHTML || 'none'));
     if ((await currentState()) !== initialState) fail('cancelling confirmation changed task state');
 
@@ -2406,7 +2410,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function() { return modal.open; }, 'Escape confirmation modal');
     cancel = modalCancel(modal);
     cancel.dispatchEvent(new KeyboardEvent('keydown', {bubbles:true, cancelable:true, key:'Escape'}));
-    completedMenuTrigger = completedAction.closest('.dropdown').querySelector('label');
+    completedMenuTrigger = completedAction.closest('.dropdown').querySelector(':scope > button');
     await waitFor(function() { return !modal.open && document.activeElement === completedMenuTrigger; }, 'Escape close and focus restoration');
     if ((await currentState()) !== initialState) fail('Escape cancellation changed task state');
 
@@ -2438,7 +2442,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function() { return modal.open; }, 'backlog confirmation modal');
     if (modal.querySelector('#delete_all_tasks_confirm_name').textContent !== '1 tasks') fail('backlog confirmation name was not rendered');
     modalCancel(modal).click();
-    var backlogMenuTrigger = backlogAction.closest('.dropdown').querySelector('label');
+    var backlogMenuTrigger = backlogAction.closest('.dropdown').querySelector(':scope > button');
     await waitFor(function() { return !modal.open && document.activeElement === backlogMenuTrigger; }, 'backlog cancel focus restoration');
     backlogAction = openAction('backlog');
     await waitFor(function() { return modal.open; }, 'backlog confirmation retry');
@@ -2590,7 +2594,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (window.innerWidth > 500) fail('mobile regression ran at desktop width: ' + window.innerWidth);
     var modal = document.getElementById('delete_all_tasks_confirm_modal');
     var action = document.querySelector('button[data-kanban-action="delete"][data-column="completed"]');
-    var menuTrigger = action && action.closest('.dropdown').querySelector('label');
+    var menuTrigger = action && action.closest('.dropdown').querySelector(':scope > button');
     if (!modal || !action || !menuTrigger) fail('mobile confirmation controls are missing');
     menuTrigger.focus();
     menuTrigger.click();

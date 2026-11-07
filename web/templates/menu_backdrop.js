@@ -144,8 +144,8 @@
       (index + (event.shiftKey ? -1 : 1) + tabbable.length) % tabbable.length;
     tabbable[next].focus();
   }, true);
-  // Dismissal remains owned by each menu. Its outside-click listener receives
-  // this surface as the target, so no underlying control can activate.
+  // The shared lifecycle receives this surface as the outside-click target,
+  // so no underlying control can activate.
   backdrop.addEventListener('pointerdown', event => event.preventDefault());
   window.addEventListener('pointerdown', event => {
     if (event.button === 0 && !backdrop.contains(event.target)) pressHeld = true;

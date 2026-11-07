@@ -42,7 +42,7 @@ func TestBrowserFunctional_SidebarProjectSelectorSearchAndSwitchInChrome(t *test
 	var selectorScripts strings.Builder
 	for _, match := range scriptPattern.FindAllStringSubmatch(sidebarHTML, -1) {
 		body := match[1]
-		if strings.Contains(body, "window.openVibelySearchableSelectorInstalled") || strings.Contains(body, "function persistSelectedProject") {
+		if strings.Contains(body, "window.ovMenuController") || strings.Contains(body, "window.openVibelySearchableSelectorInstalled") || strings.Contains(body, "function persistSelectedProject") {
 			selectorScripts.WriteString("<script>")
 			selectorScripts.WriteString(body)
 			selectorScripts.WriteString("</script>")

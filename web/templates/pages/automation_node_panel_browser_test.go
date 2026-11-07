@@ -175,7 +175,7 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		b.waitFor("validation rerender preserves edits", `document.querySelector('[name="node_first_prompt"]').value`, "Preserve this edited prompt")
 		b.waitFor("settled response keeps header outside inspector", `String(window.validationSettled && document.getElementById('automation-details-opener').getBoundingClientRect().right <= document.getElementById('automation-node-panel').getBoundingClientRect().left)`, "true")
 		b.click("[data-automation-node-close]")
-		b.click("[data-automation-builder-actions] > label")
+		b.click("[data-automation-builder-actions] > button")
 		b.evaluate(`var reference=document.createElement('div');reference.id='menu-color-reference';reference.className='ov-menu';reference.style.cssText='position:fixed;left:-1000px';reference.innerHTML='<a data-breadcrumb-selector-option aria-selected="true">Selected</a><a data-breadcrumb-selector-option data-selector-active>Hover</a>';document.body.appendChild(reference);'ready'`)
 		var menuPoint struct{ X, Y float64 }
 		fmt.Sscan(b.evaluate(`(function(){var r=document.querySelector('[data-automation-view-yaml]').getBoundingClientRect();return (r.left+r.width/2)+' '+(r.top+r.height/2)})()`), &menuPoint.X, &menuPoint.Y)
@@ -185,7 +185,7 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		b.click("[data-automation-view-yaml]")
 		b.waitFor("view choice closes kebab", `String(document.querySelector("[data-automation-builder-actions]").hasAttribute("data-menu-dismissed"))`, "true")
 		b.waitFor("YAML retains save and hides graph tools", `String(document.querySelector('[data-automation-graph-tool]').hidden&&document.querySelector('[data-automation-node-tool]').hidden&&document.querySelector('[data-automation-builder-save]').getBoundingClientRect().width>0)`, "true")
-		b.click("[data-automation-builder-actions] > label")
+		b.click("[data-automation-builder-actions] > button")
 		b.click("[data-automation-view-graph]")
 		b.click("[data-automation-add-node-open]")
 		b.evaluate(`document.querySelector('[name="node_kind"]').value='task';document.querySelector('[name="node_name"]').value='Validate work';'named'`)

@@ -103,7 +103,14 @@ templ ScheduleDateTime(value string) {
    state.input.dispatchEvent(new Event('input',{bubbles:true}));
    state.input.dispatchEvent(new Event('change',{bubbles:true}));
   }
-  function close(state, focus) {
+  const menus=new WeakMap();
+  function menu(input) {
+   let controller=menus.get(input);
+   if(!controller){controller=window.ovMenuController.create({trigger:input,panels:()=>[input.parentElement.querySelector('.schedule-datetime-popup')],isOpen:()=>active?.input===input&&active.popup.matches(':popover-open'),open:()=>show(input),close:()=>hide(active,false)});menus.set(input,controller);}
+   return controller;
+  }
+  function close(state, focus) {menu(state.input).close(focus);}
+  function hide(state, focus) {
    if (state.popup.matches(':popover-open')) state.popup.hidePopover();
    state.input.setAttribute('aria-expanded','false');
    if(active===state) active=null;
@@ -208,7 +215,8 @@ templ ScheduleDateTime(value string) {
     if(scroll)column.scrollTop=Array.from(column.children).indexOf(selected)*rowHeight;
    });
   }
-  window.openScheduleDateTime=input=>{
+  window.openScheduleDateTime=input=>menu(input).toggle();
+  function show(input){
    const popup=input.parentElement.querySelector('.schedule-datetime-popup');
    // Native light dismissal queues toggle cleanup; allow reopening before it runs.
    if(active && active.popup===popup && popup.matches(':popover-open'))return;
@@ -224,7 +232,7 @@ templ ScheduleDateTime(value string) {
    // Rebuild column handlers on each opening so draft/reset values are authoritative.
    popup.querySelectorAll('[data-time-column]').forEach(column=>column.replaceChildren());
    calendar(state); timeColumns(state,false);
-   popup.ontoggle=()=>{if(!popup.matches(':popover-open'))close(state,false);};
+   popup.ontoggle=()=>{if(!popup.matches(':popover-open')){hide(state,false);menu(input).sync();}};
    // Safari does not focus buttons on mouse down. Keep focus in the popup
    // while replacing calendar days so modal focus handling cannot dismiss it.
    popup.onmousedown=event=>{if(event.target.closest('button'))event.preventDefault();};
@@ -248,21 +256,6 @@ templ ScheduleDateTime(value string) {
     write(state); calendar(state); timeColumns(state,true);
    }
   });
-  // Suppress native controls on press, then consume the matching dismissal click.
-  function dismissOutside(event){
-   if(event.type==='pointerdown' && event.button!==0)return;
-   if(!active || event.composedPath().includes(active.popup) || event.composedPath().includes(active.input))return;
-   const modal=document.querySelector('dialog:modal');if(modal&&!modal.contains(active.input))return;
-   event.preventDefault();event.stopImmediatePropagation();
-   if(event.type==='click')close(active,false);
-  }
-  window.addEventListener('pointerdown',dismissOutside,true);
-  window.addEventListener('click',dismissOutside,true);
-  document.addEventListener('keydown',event=>{
-   if(event.key!=='Escape'||!active)return;
-   const modal=document.querySelector('dialog:modal');if(modal&&!modal.contains(active.input))return;
-   event.preventDefault();event.stopPropagation();close(active,true);
-  },true);
   window.addEventListener('resize',()=>{if(active)position(active);});
   document.addEventListener('scroll',event=>{if(active && !active.popup.contains(event.target))position(active);},true);
   document.addEventListener('close',event=>{if(active && event.target.contains(active.input))close(active,false);},true);

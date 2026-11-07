@@ -1,4 +1,11 @@
-/* Shared popup appearance. Position, dimensions and interaction belong to each menu. */
+/* Focus never opens a popup. Explicit lifecycle state is authoritative. */
+.dropdown:not([data-kanban-menu-key]):not([data-menu-open="true"]):not(.dropdown-open) > .dropdown-content:not([popover]) {
+  visibility: hidden !important; opacity: 0 !important; pointer-events: none !important;
+}
+.dropdown[data-menu-open="true"] > .dropdown-content:not([popover]) {
+  visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;
+}
+/* Shared popup appearance. Position and dimensions belong to each menu. */
 .ov-menu {
   box-sizing: border-box;
   background: var(--ov-menu-surface, #1e242c);

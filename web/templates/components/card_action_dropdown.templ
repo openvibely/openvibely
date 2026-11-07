@@ -77,7 +77,8 @@ templ CardActionDropdown(config CardActionDropdownConfig) {
 			data-automation-builder-actions
 		}
 	>
-		<label
+		<button
+			type="button"
 			tabindex="0"
 			class={ cardActionDropdownTriggerClass(config) }
 			data-tooltip-disabled
@@ -85,6 +86,8 @@ templ CardActionDropdown(config CardActionDropdownConfig) {
 			onclick="handleDropdownToggle(event)"
 			if config.TriggerAriaExpanded != "" {
 				aria-expanded={ config.TriggerAriaExpanded }
+			} else {
+				aria-expanded="false"
 			}
 			if config.TriggerKanbanMenu {
 				data-kanban-menu-trigger
@@ -96,7 +99,7 @@ templ CardActionDropdown(config CardActionDropdownConfig) {
 			<svg xmlns="http://www.w3.org/2000/svg" class={ cardActionDropdownIconClass(config) } fill="none" viewBox="0 0 24 24" stroke="currentColor">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 			</svg>
-		</label>
+		</button>
 		<ul
 			data-menu-content
 			tabindex="0"
@@ -112,7 +115,7 @@ templ CardActionDropdown(config CardActionDropdownConfig) {
 
 templ MenuSubmenu(label string) {
 	<li class="group relative">
-		<button type="button" class="justify-between" onclick="positionMenuSubmenu(this.parentElement)" onfocus="positionMenuSubmenu(this.parentElement)" onkeydown="handleMenuSubmenuKeydown(event, this.parentElement)">{ label }<span aria-hidden="true">›</span></button>
+		<button type="button" class="justify-between" onclick="positionMenuSubmenu(this.parentElement)" onkeydown="handleMenuSubmenuKeydown(event, this.parentElement)">{ label }<span aria-hidden="true">›</span></button>
 		<ul tabindex="-1" data-menu-submenu-panel class="ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]">
 			{ children... }
 		</ul>

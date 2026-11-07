@@ -388,7 +388,7 @@ func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *test
 	}
 	html := buf.String()
 	start := strings.Index(html, "window._tabVisibility = (function() {")
-	end := strings.Index(html[start:], "// Track which element was focused before mousedown")
+	end := strings.Index(html[start:], "function closestDropdownScrollBoundary")
 	if start < 0 || end < 0 {
 		t.Fatal("tab visibility manager boundaries are missing")
 	}
@@ -409,12 +409,14 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 		t.Fatalf("failed to render Base: %v", err)
 	}
 	html := buf.String()
-	start := strings.Index(html, "let focusedBeforeClick")
-	end := strings.Index(html[start:], "function handleTaskSelect(event)")
-	if start < 0 || end < 0 {
-		t.Fatal("base layout must define shared dropdown positioning before task-card click handling")
+	start := strings.Index(html, "function closestDropdownScrollBoundary")
+	end := strings.Index(html, "function menuDropdownForTarget")
+	positionStart := strings.Index(html, "function positionDropdownForViewport")
+	positionEnd := strings.Index(html, "function finishKanbanMenuPosition")
+	if start < 0 || end < start || positionStart < 0 || positionEnd < positionStart {
+		t.Fatal("base layout must define shared dropdown positioning")
 	}
-	dropdownScript := html[start : start+end]
+	dropdownScript := html[start:end] + html[positionStart:positionEnd]
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required to execute the rendered dropdown positioning script")
@@ -469,32 +471,16 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 	}
 	` + dropdownScript + `
 	const bottom = makeDropdown(230, 254, 100);
-	handleDropdownToggle({ currentTarget: bottom.label, stopPropagation: function() {} });
+	positionDropdownForViewport(bottom.label);
 	if (!bottom.dropdown.classList.contains('dropdown-top')) throw new Error('near-bottom dropdown did not open upward: ' + bottom.dropdown.classList.toString());
 	const roomy = makeDropdown(80, 104, 100);
-	handleDropdownToggle({ currentTarget: roomy.label, stopPropagation: function() {} });
+	positionDropdownForViewport(roomy.label);
 	if (roomy.dropdown.classList.contains('dropdown-top')) throw new Error('roomy dropdown should stay downward: ' + roomy.dropdown.classList.toString());
 	const originalTop = makeDropdown(80, 104, 40);
 	originalTop.dropdown.classList.add('dropdown-top');
-	handleDropdownToggle({ currentTarget: originalTop.label, stopPropagation: function() {} });
+	positionDropdownForViewport(originalTop.label);
 	if (!originalTop.dropdown.classList.contains('dropdown-top')) throw new Error('original dropdown-top class should be preserved');
 
-	runtime = 'desktop';
-	const startupFocusedChat = makeDropdown(80, 104, 100);
-	document.activeElement = startupFocusedChat.label;
-	listeners['mousedown']({});
-	const startupActivation = {
-	  currentTarget: startupFocusedChat.label,
-	  defaultPrevented: false,
-	  stopPropagation: function() {},
-	  preventDefault: function() { this.defaultPrevented = true; }
-	};
-	startupFocusedChat.dropdown.getAttribute = function(name) {
-	  return name === 'data-chat-actions-open' ? null : null;
-	};
-	startupFocusedChat.label.closest = function(selector) { return selector === '[data-chat-actions-dropdown]' || selector === '.dropdown' ? startupFocusedChat.dropdown : null; };
-	handleDropdownToggle(startupActivation);
-	if (startupActivation.defaultPrevented) throw new Error('desktop startup focus was treated as an already-open Chat menu');
 	`
 
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {

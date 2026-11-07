@@ -3981,25 +3981,6 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     };
                 })();
 
-                // Track which element was focused before mousedown to properly detect dropdown toggle.
-			// Also record whether a Kanban menu was open so focus changes during the click
-			// do not invert first-click behavior.
-			let focusedBeforeClick = null;
-			let kanbanMenuWasOpenBeforeClick = false;
-			let pointerFocusedKanbanTrigger = null;
-
-			document.addEventListener('mousedown', function(e) {
-				// Record state before this interaction starts. Pointer focus on a
-				// Kanban trigger must not open it before the matching click toggles it.
-				focusedBeforeClick = document.activeElement;
-				const kanbanDropdown = kanbanDropdownForTarget(e.target);
-				const kanbanTrigger = e.target && e.target.closest ? e.target.closest('[data-kanban-menu-trigger]') : null;
-				pointerFocusedKanbanTrigger = kanbanTrigger && kanbanDropdown && kanbanDropdown.contains(kanbanTrigger) ? kanbanTrigger : null;
-				kanbanMenuWasOpenBeforeClick = !!(kanbanDropdown && kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true');
-			}, true);
-			document.addEventListener('mouseup', function() {
-				setTimeout(function() { pointerFocusedKanbanTrigger = null; }, 0);
-			}, true);
 			function closestDropdownScrollBoundary(element) {
 				let current = element ? element.parentElement : null;
 				while (current && current !== document.body) {
@@ -4156,85 +4137,84 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 			});
 
 
-            function closeGenericDropdown(dropdown) {
-                closeMenuSubmenus(dropdown, null);
-                if (dropdown.contains(document.activeElement)) document.activeElement.blur();
-                if (dropdown.hasAttribute('data-chat-actions-dropdown')) {
-                    dropdown.removeAttribute('data-chat-actions-open');
-                    dropdown.querySelector('[aria-controls="chat-actions-menu"]')?.setAttribute('aria-expanded', 'false');
-                }
-                if (dropdown.querySelector('[data-card-filters-button]') && window.setCardFilterDropdownState) {
-                    window.setCardFilterDropdownState(dropdown, false);
-                }
-                dropdown.classList.remove('dropdown-open');
-                dropdown.setAttribute('data-menu-dismissed', '');
+            const dropdownControllers = new WeakMap();
+            function dropdownController(dropdown) {
+                if (!dropdown) return null;
+                let controller = dropdownControllers.get(dropdown);
+                if (controller) return controller;
+                const trigger = () => dropdown.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
+                const kanban = dropdown.hasAttribute('data-kanban-menu-key');
+                controller = window.ovMenuController.create({
+                    trigger,
+                    panels: () => [dropdown.querySelector(':scope > .dropdown-content')],
+                    restoreFocus: button => (dropdown.__openVibelyMenuReturnFocus || button).focus({preventScroll: true}),
+                    // Kanban replacement restores its saved interaction on the new DOM.
+                    detach: kanban ? () => closeMenuSubmenus(dropdown, null) : null,
+                    contains: target => menuDropdownForTarget(target) === dropdown,
+                    isOpen: () => kanban ? dropdown.getAttribute('data-kanban-menu-open') === 'true' : dropdown.getAttribute('data-menu-open') === 'true' || dropdown.classList.contains('dropdown-open'),
+                    open: () => {
+                        const button = trigger();
+                        dropdown.removeAttribute('data-menu-dismissed');
+                        if (kanban) {
+                            prepareKanbanMenuPosition(dropdown, button);
+                            openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key') || '';
+                            const board = dropdown.closest('#kanban-board');
+                            if (board) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
+                            setKanbanMenuExpanded(dropdown, true);
+                            window.dispatchEvent(new CustomEvent('kanban-menu-opened'));
+                            if (button?.matches('[data-task-card-menu-trigger]')) loadTaskCardMergeOptions(dropdown, button);
+                        } else {
+                            dropdown.setAttribute('data-menu-open', 'true');
+                            dropdown.classList.add('dropdown-open');
+                            if (dropdown.hasAttribute('data-chat-actions-dropdown')) dropdown.setAttribute('data-chat-actions-open', 'true');
+                            requestAnimationFrame(() => positionDropdownForViewport(button));
+                        }
+                    },
+                    close: () => {
+                        if (kanban) { closeKanbanMenu(dropdown, false); return; }
+                        closeMenuSubmenus(dropdown, null);
+                        dropdown.removeAttribute('data-menu-open');
+                        dropdown.removeAttribute('data-chat-actions-open');
+                        dropdown.classList.remove('dropdown-open');
+                        dropdown.setAttribute('data-menu-dismissed', '');
+                        if (dropdown.contains(document.activeElement)) document.activeElement.blur();
+                    },
+                });
+                dropdownControllers.set(dropdown, controller);
+                return controller;
+            }
+            window.dropdownController = dropdownController;
+            window.syncOpenDropdownMenus = function() {
+                document.querySelectorAll('.dropdown[data-menu-open="true"], .dropdown.dropdown-open, [data-kanban-menu-open="true"]').forEach(dropdown => dropdownController(dropdown).sync());
+            };
+            function closeGenericDropdown(dropdown) { dropdownController(dropdown)?.close(false); }
+            function dropdownTrigger(target) {
+                const dropdown = target?.closest?.('.dropdown');
+                const trigger = dropdown?.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
+                return trigger?.contains(target) && dropdown.querySelector(':scope > .dropdown-content:not([popover])') ? trigger : null;
             }
             document.addEventListener('click', function(event) {
-                // Focus-only triggers (such as Merge and the user menu) stay
-                // focused after Escape, so reopening cannot rely on focusin.
-                const dropdown = menuDropdownForTarget(event.target);
-                if (dropdown && dropdown.hasAttribute('data-menu-dismissed') && !dropdown.hasAttribute('data-kanban-menu-key')) {
-                    const trigger = dropdown.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
-                    if (trigger && trigger.contains(event.target)) dropdown.removeAttribute('data-menu-dismissed');
-                }
+                const trigger = dropdownTrigger(event.target);
+                if (trigger) { event.preventDefault(); dropdownController(trigger.closest('.dropdown')).toggle(event); return; }
                 const choice = event.target.closest('[data-menu-close-on-select]');
                 const owner = choice && menuDropdownForTarget(choice);
-                if (!owner || owner.hasAttribute('data-kanban-menu-key')) return;
-                const trigger = owner.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
-                closeGenericDropdown(owner);
-                if (trigger) trigger.focus({preventScroll: true});
-                // Restoring focus must not reopen a focus-driven dropdown.
-                owner.setAttribute('data-menu-dismissed', '');
+                if (owner) dropdownController(owner).close(true);
             });
-            // Consume dismissal before document navigation and pointer handlers.
-            // Keep menus open until click so that the matching click is consumed too.
-            function dismissOutsideDropdowns(event) {
-                if (event.type === 'pointerdown' && event.button !== 0) return;
-                const owner = menuDropdownForTarget(event.target);
-                // A confirmation dialog may open from a menu before its request
-                // closes that menu. Background menus must not intercept the dialog.
-                const modal = document.querySelector('dialog:modal');
-                const outside = Array.from(document.querySelectorAll('[data-menu-dropdown], .dropdown')).filter(function(dropdown) {
-                    if (modal && !modal.contains(dropdown)) return false;
-                    if (dropdown === owner || dropdown.contains(event.target)) return false;
-                    if (dropdown.hasAttribute('data-kanban-menu-key')) return dropdown.getAttribute('data-kanban-menu-open') === 'true';
-                    const panel = dropdown.querySelector(':scope > [data-menu-content], :scope > .dropdown-content:not([popover])');
-                    if (!panel || !panel.getClientRects().length) return false;
-                    const style = getComputedStyle(panel);
-                    return style.visibility === 'visible' && style.display !== 'none' && style.opacity !== '0';
-                });
-                if (!outside.length) return;
-                event.preventDefault();
-                event.stopImmediatePropagation();
-                if (event.type !== 'click') return;
-                outside.forEach(function(dropdown) {
-                    if (dropdown.hasAttribute('data-kanban-menu-key')) window.closeKanbanMenu(dropdown, false);
-                    else closeGenericDropdown(dropdown);
-                });
-            }
-            window.addEventListener('pointerdown', dismissOutsideDropdowns, true);
-            window.addEventListener('click', dismissOutsideDropdowns, true);
-            document.addEventListener('focusin', function(event) {
-                const owner = menuDropdownForTarget(event.target);
-                if (owner && !owner.hasAttribute('data-kanban-menu-key')) owner.removeAttribute('data-menu-dismissed');
-            });
-            document.addEventListener('focusout', function(event) {
-                const owner = menuDropdownForTarget(event.target);
-                if (!owner || owner.hasAttribute('data-kanban-menu-key')) return;
-                setTimeout(function() {
-                    // Focus falls back to <body> when a swap replaces the focused row; outside clicks are handled by pointerdown.
-                    if (document.activeElement === document.body && owner.isConnected) return;
-                    if (menuDropdownForTarget(document.activeElement) !== owner) closeGenericDropdown(owner);
-                }, 0);
-            });
+            document.addEventListener('click', function(event) {
+                const action = event.target.closest('button:not(:disabled), a[href]');
+                if (!action || !action.closest('[data-menu-content], [data-menu-submenu-portaled], ul.dropdown-content') || action.closest('[data-submenu-back], [data-task-card-merge-options-retry]')) return;
+                if (action.parentElement.querySelector(':scope > [data-menu-submenu-panel]')) return;
+                const owner = menuDropdownForTarget(action);
+                if (!owner) return;
+                // Let delegated actions finish before removing a portaled submenu.
+                setTimeout(() => dropdownController(owner).close(false), 0);
+            }, true);
             document.addEventListener('keydown', function(event) {
-                const owner = menuDropdownForTarget(event.target);
-                if (!owner || owner.hasAttribute('data-kanban-menu-key') || event.key !== 'Escape') return;
-                event.preventDefault();
-                closeGenericDropdown(owner);
-                const trigger = owner.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
-                if (trigger) trigger.focus({preventScroll: true});
-                owner.setAttribute('data-menu-dismissed', '');
+                if (event.defaultPrevented || event.isComposing || event.repeat || !['Enter', ' '].includes(event.key)) return;
+                const trigger = dropdownTrigger(event.target);
+                // Native buttons synthesize click for Enter/Space themselves.
+                if (!trigger || trigger.matches('button, input, a[href]')) return;
+                event.preventDefault(); trigger.click();
             });
             document.addEventListener('htmx:beforeCleanupElement', function(event) {
                 const element = event.detail.elt;
@@ -4445,53 +4425,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				});
 			}
 
-			function handleDropdownToggle(event) {
-				event.stopPropagation(); // Prevent event from bubbling to parent handlers
-				const label = event.currentTarget;
-                const genericOwner = label.closest('[data-menu-dropdown]:not([data-kanban-menu-key]), .dropdown:not([data-kanban-menu-key])');
-                if (genericOwner && genericOwner.hasAttribute('data-menu-dismissed')) {
-                    genericOwner.removeAttribute('data-menu-dismissed');
-                    label.focus({preventScroll: true});
-                    positionDropdownForViewport(label);
-                    return;
-                }
-				if (pointerFocusedKanbanTrigger === label) pointerFocusedKanbanTrigger = null;
-				const dropdown = label && label.closest ? label.closest('[data-chat-actions-dropdown]') : null;
-				const kanbanDropdown = label && label.closest ? label.closest('[data-kanban-menu-key]') : null;
-				const desktopChatStartupFocus = dropdown && document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop' && dropdown.getAttribute('data-chat-actions-open') !== 'true';
-
-					// Check if this dropdown was already open before the click. A desktop Chat
-					// trigger may only be focused by WebView startup, which is not an open action.
-					if ((kanbanDropdown && kanbanMenuWasOpenBeforeClick && !kanbanDropdown.hasAttribute('data-task-list-context-menu')) || (focusedBeforeClick === label && !kanbanDropdown && !desktopChatStartupFocus)) {
-						// Dropdown was already open, close it.
-						event.preventDefault();
-						if (kanbanDropdown && window.closeKanbanMenu) {
-							window.closeKanbanMenu(kanbanDropdown, true);
-						} else {
-                            const owner = menuDropdownForTarget(label);
-                            if (owner) closeGenericDropdown(owner);
-							label.blur();
-						}
-						return;
-					}
-
-					// Otherwise, keep the Kanban dropdown hidden while its current measurable
-					// content settles into fixed viewport coordinates, then reveal it.
-					if (kanbanDropdown) {
-						document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
-							if (candidate !== kanbanDropdown) setKanbanMenuExpanded(candidate, false);
-						});
-						prepareKanbanMenuPosition(kanbanDropdown, label);
-						openKanbanMenuKey = kanbanDropdown.getAttribute('data-kanban-menu-key') || '';
-						const board = kanbanDropdown.closest('#kanban-board');
-						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
-						setKanbanMenuExpanded(kanbanDropdown, true);
-						window.dispatchEvent(new CustomEvent('kanban-menu-opened'));
-						if (label.matches('[data-task-card-menu-trigger]')) loadTaskCardMergeOptions(kanbanDropdown, label);
-					} else {
-						requestAnimationFrame(function() { positionDropdownForViewport(label); });
-					}
-				}
+            function handleDropdownToggle(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                dropdownController(event.currentTarget.closest('.dropdown'))?.toggle(event);
+            }
 
 				function handleTaskSelect(event) {
 
@@ -5372,47 +5310,17 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					}
 				}
 
-				document.addEventListener('focusin', function(event) {
-					const dropdown = kanbanDropdownForTarget(event.target);
-					if (!dropdown || suppressKanbanMenuFocusOpen) return;
-					const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
-					if (event.target === trigger && pointerFocusedKanbanTrigger === trigger) return;
-					if (trigger && dropdown.getAttribute('data-kanban-menu-open') !== 'true') {
-						prepareKanbanMenuPosition(dropdown, trigger);
-					} else if (trigger && event.target !== trigger && dropdown.getAttribute('data-kanban-menu-positioning') === 'true') {
-						finishKanbanMenuPosition(dropdown, trigger);
-					}
-					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
-					const board = dropdown.closest('#kanban-board');
-					if (board) {
-						board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
-						snapshotKanbanInteraction(board);
-					}
-					document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
-						setKanbanMenuExpanded(candidate, candidate === dropdown);
-					});
-					if (event.target === trigger && trigger.matches('[data-task-card-menu-trigger]')) {
-						loadTaskCardMergeOptions(dropdown, trigger);
-					}
-				});
-				document.addEventListener('pointerdown', function(event) {
-					if (!kanbanDropdownForTarget(event.target)) {
-						closeKanbanMenu(null, false);
-					}
-				}, true);
+                document.addEventListener('focusin', function(event) {
+                    const dropdown = kanbanDropdownForTarget(event.target);
+                    if (!dropdown || dropdown.getAttribute('data-kanban-menu-open') !== 'true') return;
+                    const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+                    if (trigger && event.target !== trigger && dropdown.getAttribute('data-kanban-menu-positioning') === 'true') finishKanbanMenuPosition(dropdown, trigger);
+                });
 				document.addEventListener('keydown', function(event) {
                     if (event.key === 'ArrowLeft') {
                         const panel = event.target.closest('[data-menu-submenu-portaled="true"]');
                         if (panel) { event.preventDefault(); event.stopPropagation(); backMenuSubmenu(panel); return; }
                     }
-					if (event.key === 'Escape') {
-						const dropdown = kanbanDropdownForTarget(event.target);
-						if (dropdown) {
-							event.preventDefault();
-							event.stopPropagation();
-							closeKanbanMenu(dropdown, true);
-						}
-					}
 					if (event.key === 'Tab') {
 						const dropdown = kanbanDropdownForTarget(event.target);
 						const trigger = dropdown && dropdown.querySelector('[data-kanban-menu-trigger]');
@@ -6598,27 +6506,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							root._openVibelyInstallSelectionCards = installCards; installCards();
 						}
 
-						function setCardFilterDropdown(dropdown, open) {
-							if (!dropdown) return;
-							dropdown.classList.toggle('dropdown-open', open);
-                            if (open) dropdown.removeAttribute('data-menu-dismissed');
-							var button = dropdown.querySelector('[data-card-filters-button]');
-							if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
-							var popover = dropdown.querySelector('[data-card-filters-popover]');
-							if (popover) {
-								popover.style.setProperty('visibility', open ? 'visible' : 'hidden', 'important');
-								popover.style.setProperty('opacity', open ? '1' : '0', 'important');
-								popover.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
-							}
-						}
-						function closeCardFilterDropdown(dropdown) {
-							setCardFilterDropdown(dropdown, false);
-						}
-						document.addEventListener('click', function(event) {							var target = event.target;
-							if (target && target.closest && target.closest('[data-card-filters-button], [data-card-filters-popover]')) return;
-							document.querySelectorAll('[data-card-filters-button]').forEach(function(button) { closeCardFilterDropdown(button.closest('.dropdown')); });
-						});
-						window.setCardFilterDropdownState = setCardFilterDropdown;
+                        function setCardFilterDropdown(dropdown, open) {
+                            const menu = dropdownController(dropdown);
+                            if (open) menu.open(); else menu.close(false);
+                        }
+                        function closeCardFilterDropdown(dropdown) { setCardFilterDropdown(dropdown, false); }
+                        window.setCardFilterDropdownState = setCardFilterDropdown;
 						window.refreshCardListToolbars = function(scope) { (scope || document).querySelectorAll('[data-card-list-toolbar]').forEach(initToolbar); };
 						document.addEventListener('keydown', function(event) {
 							if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
