@@ -63,10 +63,11 @@ try {
  const check=(ok,msg)=>{if(!ok)throw Error(msg)};
  const stable=()=>{check(document.querySelector('header').getBoundingClientRect().top===0,'title bar moved');check(!document.body.scrollTop&&!document.documentElement.scrollTop&&!document.getElementById('shell').scrollTop,'shell scrolled')};
  check(openVibelyScrollIntoPanel(target,{block:'center',inline:'center'}),'panel not discovered');
- check(panel.scrollTop===540&&panel.scrollLeft===500,'centering must account for borders');stable();
- openVibelyScrollIntoPanel(target);check(panel.scrollTop===540&&panel.scrollLeft===500,'nearest moved a visible target');stable();
+ const centerTop=Math.round(740-panel.clientHeight/2),centerLeft=Math.round(650-panel.clientWidth/2);
+ check(panel.scrollTop===centerTop&&panel.scrollLeft===centerLeft,'centering must account for borders and scrollbars');stable();
+ openVibelyScrollIntoPanel(target);check(panel.scrollTop===centerTop&&panel.scrollLeft===centerLeft,'nearest moved a visible target');stable();
  panel.scrollTop=0;panel.scrollLeft=0;openVibelyScrollIntoPanel(target);
- check(panel.scrollTop===380&&panel.scrollLeft===400,'nearest reveal failed');stable();
+ check(panel.scrollTop===780-panel.clientHeight&&panel.scrollLeft===700-panel.clientWidth,'nearest reveal failed');stable();
  target.style.height='600px';openVibelyScrollIntoPanel(target,{block:'center'});
  check(panel.scrollTop===700,'oversized target should start at panel top');stable();
  check(!openVibelyScrollIntoPanel(target,{container:document.body}),'body must not be scrollable');

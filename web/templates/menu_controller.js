@@ -39,6 +39,7 @@
           else trigger.focus({preventScroll: true});
         }
       },
+      dismiss(event) { config.dismiss?.(event); handle.close(false); },
       toggle(event) { if (handle.isOpen()) handle.close(true); else handle.open(event); },
       escape(event) {
         if (config.escape && config.escape(event) === false) return;
@@ -70,7 +71,7 @@
     // Leave the layer in place through release; consume both halves of dismissal.
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (event.type === 'click') outsideMenus.forEach(menu => menu.close(false));
+    if (event.type === 'click') outsideMenus.forEach(menu => menu.dismiss(event));
   }
   window.addEventListener('pointerdown', outside, true);
   window.addEventListener('click', outside, true);

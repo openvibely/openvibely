@@ -270,6 +270,8 @@ func TestBrowserFunctional_CatalogCardsSuppressPointerFocusFlashButKeepKeyboardF
 				t.Fatalf("mouse-down on %s changed border color: got %s, want %s (state %q)", selector, parts[5], beforeBorder, got)
 			}
 			mouseRelease(selector)
+			// Card activation may open the skill editor; dismiss it before the next gesture.
+			browser.evaluate(`document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close()); "closed"`)
 		}
 
 		browser.click(`input[data-card-search="automations"]`)

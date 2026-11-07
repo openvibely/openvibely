@@ -46,7 +46,7 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 	if err := layout.ConfirmationDialog().Render(context.Background(), &confirmation); err != nil {
 		t.Fatal(err)
 	}
-	navigationScript := extractNativeChatNavigation(t, baseHTML)
+	navigationScript := extractChatLayoutInteractions(t, baseHTML)
 
 	var chat bytes.Buffer
 	if err := ChatContent(nil, nil, "project-native", nil, nil, nil, false, false, 30).Render(context.Background(), &chat); err != nil {
@@ -181,24 +181,11 @@ func runNativeWailsHelper() error {
 	return app.Run()
 }
 
-func extractNativeChatNavigation(t *testing.T, html string) string {
-	t.Helper()
-	start := strings.Index(html, "window.openVibelyNavigate = function")
-	if start < 0 {
-		t.Fatal("could not isolate production HTMX navigation helper")
-	}
-	endOffset := strings.Index(html[start:], "// Scroll position restoration for drop zones")
-	if endOffset < 0 {
-		t.Fatal("could not find end of production HTMX navigation helper")
-	}
-	return html[start : start+endOffset]
-}
-
 func nativeChatDocument(style, navigation, chat, runner string) string {
 	return `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="desktop"><head><meta charset="utf-8"><script src="/htmx-2.0.11.min.js"></script><script>` + navigation + `</script>` + style + `<style>
 html, body, #main-content { height: 100%; margin: 0; }
 .dropdown-content { display: none; visibility: hidden; opacity: 0; pointer-events: none; }
-.dropdown:focus-within > .dropdown-content { display: block; }
+.dropdown:focus-within > .dropdown-content, .dropdown.dropdown-open > .dropdown-content { display: block; }
 .hidden { display: none !important; }
 </style></head><body><main id="main-content">` + chat + `</main>` + runner + `</body></html>`
 }
@@ -269,7 +256,10 @@ window.addEventListener('DOMContentLoaded', function() {
     if (currentTrigger.getAttribute('aria-expanded') !== 'true') fail(stage + ' did not update aria-expanded: ' + menuState());
   }
   function key(target, value) {
-    target.dispatchEvent(new KeyboardEvent('keydown', {key: value, bubbles: true, cancelable: true}));
+    var event = new KeyboardEvent('keydown', {key: value, bubbles: true, cancelable: true});
+    target.dispatchEvent(event);
+    // Untrusted key events do not perform the browser's native button activation.
+    if (!event.defaultPrevented && target.matches('button') && (value === 'Enter' || value === ' ')) target.click();
   }
   function mouseClick(target) {
     if (!target) fail('mouse click target is missing');

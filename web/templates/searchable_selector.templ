@@ -94,7 +94,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 28;
+			var controllerVersion = 29;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -158,8 +158,11 @@ templ searchableSelectorScript() {
 					top = Math.max(margin, trigger.top - gap - Math.min(height, available));
 				}
 				dialog.style.left = left + 'px';
-				dialog.style.top = top + 'px';
 				dialog.style.maxHeight = Math.max(0, available) + 'px';
+                // Measure after applying the constraint: replacing the CSS max-height
+                // can change the panel height when a local filter is cleared.
+                if (available === above) top = Math.max(margin, trigger.top - gap - dialog.offsetHeight);
+				dialog.style.top = top + 'px';
 			}
 			function applyLocalFilter(root) {
 				if (!root || !root.hasAttribute('data-searchable-selector-local')) return;
@@ -203,6 +206,10 @@ templ searchableSelectorScript() {
                         isOpen: () => !!nodes(root).dialog?.open,
                         open: event => showSelector(root, event),
                         close: () => hideSelector(root),
+                        dismiss: event => {
+                            root.__selectorKeyboard = false;
+                            trackBreadcrumbHover(event);
+                        },
                     });
                     selectorMenus.set(root, menu);
                 }

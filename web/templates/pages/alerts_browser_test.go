@@ -1024,15 +1024,16 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 	    if (!selectedCount || selectedCount.textContent.trim() !== '1 selected') fail('live refresh did not remove stale selected alert IDs');
 	    var selectLoaded = document.querySelector('[data-card-select-loaded]');
 	    if (!selectLoaded || !selectLoaded.indeterminate) fail('live refresh did not reconcile the loaded selection master');
-	    newSelection.click();
-	    if (selectedCount.textContent.trim() !== '2 selected') fail('new alert selection control is not functional after live refresh');
-	    newSelection.click();
 	    filterButton = document.querySelector('[data-card-filters-button]');
 	    filterDropdown = filterButton && filterButton.closest('.dropdown');
 	    if (!filterDropdown || !filterDropdown.classList.contains('dropdown-open')) fail('live refresh closed the Alerts filter menu');
 	    if (filterButton.getAttribute('aria-expanded') !== 'true') fail('restored Alerts filter menu is not exposed as expanded');
 	    if (document.getElementById('alerts-page-header').textContent === headerBeforeLiveRefresh) fail('live refresh left the Alerts page unread count stale');
 	    filterButton.click();
+	    // Selection controls become interactive after dismissing the filter menu.
+	    newSelection.click();
+	    if (selectedCount.textContent.trim() !== '2 selected') fail('new alert selection control is not functional after live refresh');
+	    newSelection.click();
 	    survivingSelection.click();
 	    if (selectedCount.textContent.trim() !== '0 selected') fail('surviving Alerts selection could not be cleared after live refresh');
 

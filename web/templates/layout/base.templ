@@ -4210,7 +4210,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 const owner = menuDropdownForTarget(action);
                 if (!owner) return;
                 // Let delegated actions finish before removing a portaled submenu.
-                setTimeout(() => dropdownController(owner).close(false), 0);
+                setTimeout(() => {
+                    // A context menu can reopen with new items before this deferred
+                    // dismissal runs. Do not let the old action close the new menu.
+                    if (action.isConnected && menuDropdownForTarget(action) === owner) dropdownController(owner).close(false);
+                }, 0);
             }, true);
             document.addEventListener('keydown', function(event) {
                 if (event.defaultPrevented || event.isComposing || event.repeat || !['Enter', ' '].includes(event.key)) return;
@@ -4469,6 +4473,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							selectedTasks.add(taskID);
 							card.classList.add('task-selected');
 						}
+                        // A user can change selection between swap and settle. Keep
+                        // the pending restoration from undoing that newer gesture.
+                        if (savedKanbanInteraction) savedKanbanInteraction.selectedTaskIDs = Array.from(selectedTasks);
                         if (window.kanbanRefresh) window.kanbanRefresh();
 
 						return;
