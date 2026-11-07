@@ -10,6 +10,7 @@ import (
 // Every asset the layout references must exist, or URL panics at render time.
 var layoutAssets = []string{
 	"app.css",
+	"permission-errors.js",
 	"app-utilities.css",
 	"vendor/htmx.min.js",
 	"vendor/idiomorph-ext.min.js",

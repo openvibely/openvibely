@@ -3031,6 +3031,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							body: formData
 						});
 						if (!response.ok) {
+							if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 							var error = await response.text();
 							alert('Upload failed: ' + error);
 							return;

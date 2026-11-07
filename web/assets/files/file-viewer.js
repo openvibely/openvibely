@@ -41,7 +41,7 @@
   savingDownload=true;link.setAttribute('aria-busy','true');
   try{
    const response=await fetch(url,{method:'POST',headers:{'X-OpenVibely-Save':'1'}});
-   if(!response.ok)throw Error('Could not save the file. Please try again.');
+   if(!response.ok){if(await window.openVibelyPermissionErrors?.fetch(response))return;throw Error('Could not save the file. Please try again.');}
    const result=await response.json();
    if(result.saved)window.showToast?.('File saved.','success');
   }catch(error){window.showToast?.(error.message,'failed')}

@@ -30,6 +30,7 @@ templ OrganizationContent(content templ.Component) {
                 }
                 function showError(event, networkFailure) {
                     if (!organizationForm(event)) return;
+                    if (!networkFailure && window.openVibelyPermissionErrors?.htmx(event.detail.xhr)) return;
                     var alert = document.getElementById('organization-error');
                     if (!alert) return;
                     var message = networkFailure ? 'Could not reach the server. Check your connection and try again.' : 'Could not save this change. Please try again.';

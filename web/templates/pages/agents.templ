@@ -2035,6 +2035,7 @@ window.renderSkillDependencyDetails?.(document.getElementById('agent_skill_depen
 					if (!event.detail || !event.detail.target || event.detail.target.id !== 'agents-container') return;
 					const xhr = event.detail.xhr;
 					if (!xhr) return;
+					if (window.openVibelyPermissionErrors?.htmx(xhr)) { event.preventDefault(); return; }
 					const message = String(xhr.responseText || '').trim() || 'Could not save agent';
 					const modal = document.getElementById('agent_modal');
 					if (xhr.status === 400 && message.toLowerCase().includes('directory')) {
