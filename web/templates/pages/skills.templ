@@ -684,13 +684,14 @@ var action = enable ? 'Enable' : 'Disable';
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify({enabled: enable, scope: scope})
-				}).then(function(resp) {
+				}).then(async function(resp) {
 					if (!resp.ok) {
+						if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to ' + action.toLowerCase() + ' skill.'); });
 					}
 					return resp.text();
 				}).then(function(html) {
-					replaceSkillsContainer(html);
+					if (html !== null) replaceSkillsContainer(html);
 				}).catch(function(err) {
 					alert(err.message || 'Failed to ' + action.toLowerCase() + ' skill.');
 				});
@@ -706,13 +707,14 @@ var action = enable ? 'Enable' : 'Disable';
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify({always_use: alwaysUse, scope: scope})
-				}).then(function(resp) {
+				}).then(async function(resp) {
 					if (!resp.ok) {
+						if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to update always use setting.'); });
 					}
 					return resp.text();
 				}).then(function(html) {
-					replaceSkillsContainer(html);
+					if (html !== null) replaceSkillsContainer(html);
 				}).catch(function(err) {
 					alert(err.message || 'Failed to update always use setting.');
 				});

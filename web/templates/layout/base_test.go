@@ -1856,6 +1856,10 @@ func TestPendingEditorReleasesOnPageExit(t *testing.T) {
 	if err := Base("Chat", nil, "").Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
+	helper, err := os.ReadFile("../../assets/permission-errors.js")
+	if err != nil {
+		t.Fatal(err)
+	}
 	html := buf.String()
 	start := strings.Index(html, "window.editPendingThreadInput = async")
 	end := strings.Index(html[start:], "</script>")
@@ -1888,7 +1892,7 @@ global.fetch = (url, options) => {
  if (!options.body.get('renew') && !options.body.get('hold')) return new Promise(resolve => completeHold = () => resolve({ok:true, json:async()=>({content:'original'})}));
  return Promise.resolve({ok:true});
 };
-` + html[start:start+end] + `
+` + string(helper) + html[start:start+end] + `
 (async () => {
  let opening = window.editPendingThreadInput(button);
  completeHold(); await opening;
@@ -2041,6 +2045,31 @@ global.fetch = (url, options) => {
  finishSave({ok:true, json:async()=>({content:largeDraft})});
  await savingNow;
  assert.equal(saveRequests.length, 1);
+ // Permission denials only toast: acquisition never opens a dialog.
+ const toasts = [];
+ window.showToast = message => toasts.push(message);
+ global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403});
+ const shownBeforeDenied = shown;
+ await window.editPendingThreadInput(button);
+ assert.equal(shown, shownBeforeDenied);
+ assert.equal(toasts.length, 1);
+ assert.equal(button.disabled, false);
+ assert.equal(listeners.pagehide, undefined);
+ // A denied save preserves the draft and leaves the editor usable.
+ global.fetch = workingFetch;
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
+ controls.textarea.value = 'Keep denied draft';
+ global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403});
+ const closedBeforeDenied = closed;
+ await controls.form.onsubmit({preventDefault(){}});
+ assert.equal(toasts.length, 2);
+ assert.equal(closed, closedBeforeDenied);
+ assert.equal(controls.textarea.value, 'Keep denied draft');
+ assert.equal(controls.textarea.disabled, false);
+ assert.equal(controls['[role="alert"]'].textContent, '');
+ global.fetch = workingFetch;
+ listeners.pagehide();
 })().catch(error => {console.error(error); process.exit(1)});
 `
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
