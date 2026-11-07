@@ -23,6 +23,9 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
 			w.Write(htmx2011)
+		case "/composer":
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, markup.String())
 		case "/send", "/steer":
 			r.ParseForm()
 			if r.FormValue("message") == "fail" {
@@ -34,9 +37,9 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
 			fmt.Fprint(w, html.EscapeString(r.FormValue("message")))
 		default:
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending"><script src="/htmx.js"></script><div id="messages"></div><div id="pending-thread-inputs"></div>%s<div id="browser-result"></div><script>
+			fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending"><script src="/htmx.js"></script><div id="messages"></div><div id="pending-thread-inputs"></div><div id="composer-fixture">%s</div><div id="browser-result"></div><script>
 (async function() {
- const form=document.getElementById('paste-form'), input=document.getElementById('paste-input');
+ let form=document.getElementById('paste-form'), input=document.getElementById('paste-input');
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)};
  const wait=()=>new Promise(resolve=>setTimeout(resolve,180));
  const cards=()=>form.querySelectorAll('[aria-label="Edit pasted text"]');
@@ -97,8 +100,36 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  form._chatSubmissionFailed(waiting);assertEditorLocked();
  form._chatSubmissionFailed(second);assert(!cards()[0].disabled,'failed preparation left editor locked');
 
+ // Send A, navigate back into a fresh composer, add B, then accept A.
+ form.querySelector('[aria-label="Remove pasted text"]').click();
+ async function remount() {
+  await htmx.ajax('GET','/composer',{target:'#composer-fixture',swap:'innerHTML'});
+  await wait();
+  form=document.getElementById('paste-form');input=document.getElementById('paste-input');
+ }
+ paste(large);holdSend=true;send();
+ const releaseA=releaseSend;
+ await remount();
+ assertEditorLocked();
+ const newer='new card B '.repeat(500);
+ paste(newer);input.value='new instructions';input.dispatchEvent(new Event('input',{bubbles:true}));
+ assert(cards().length===2 && !cards()[1].disabled,'replacement draft missing cards');
+ releaseA();await wait();
+ assert(cards().length===1,'old send did not reconcile the live replacement');
+ assert(form._captureChatSubmission().message==='new instructions\n\n'+newer,'old send erased newer text or cards');
+ await remount();
+ assert(cards().length===1 && form._captureChatSubmission().message===newer,'new card lost on next remount');
+ // The same cleanup also removes submitted cards when a new card is added without navigation.
+ holdSend=true;send();const releaseB=releaseSend;paste(large);
+ releaseB();await wait();
+ assert(cards().length===1 && form._captureChatSubmission().message===large,'same-composer send cleared new card or retained sent card');
+ await remount();
+ assert(cards().length===1 && !cards()[0].disabled,'completed send left a stale lock');
+ const pasteKey=form.getAttribute('data-attachment-state-key')+'-pasted-text';
+ delete window._ovPasteDrafts[pasteKey];await remount();
+ assert(form._captureChatSubmission().message===large,'surviving card was not persisted');
  document.body.setAttribute('data-test-result','pass');document.getElementById('browser-result').textContent='PASS';
-})().catch(error=>{document.body.setAttribute('data-test-result','fail');document.body.setAttribute('data-test-error',error.stack)});
+})().catch(error=>{document.body.setAttribute('data-test-result','fail');document.body.setAttribute('data-test-error',error.stack);const failure=document.createElement('pre');failure.textContent=error.stack;document.body.append(failure)});
 </script></body></html>`, markup.String())
 		}
 	}))

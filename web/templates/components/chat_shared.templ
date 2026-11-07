@@ -2045,8 +2045,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				pastedTexts = pastedTexts.filter(function(item) { return item && typeof item.text === 'string' && typeof item.id === 'string'; });
 			}
 			form.querySelectorAll('[data-pasted-text-cards]').forEach(function(oldCards) { oldCards.remove(); });
-			var pasteSubmissions = new Map();
-			var nextPasteSubmissionID = 0;
+			// A remounted composer shares the pending sends for this draft.
+			window._ovPasteSubmissions = window._ovPasteSubmissions || {};
+			var pasteSubmissions = pasteKey ? (window._ovPasteSubmissions[pasteKey] || (window._ovPasteSubmissions[pasteKey] = new Map())) : new Map();
+			if (pasteKey) window._ovPasteDrafts[pasteKey] = pastedTexts;
 			var pasteCards = document.createElement('div');
 			pasteCards.className = 'flex flex-wrap gap-2 mb-2';
 			pasteCards.setAttribute('data-pasted-text-cards', '');
@@ -2059,18 +2061,40 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				window._ovPasteDrafts[pasteKey] = pastedTexts;
 				try { sessionStorage.setItem(pasteKey, JSON.stringify(pastedTexts)); } catch (_) {}
 			}
+			form._refreshPastedTextDraft = function() {
+				if (pasteKey) pastedTexts = window._ovPasteDrafts[pasteKey] || [];
+				renderPastes();
+				refreshPrimaryActionForInput();
+			};
+			function refreshPasteComposers() {
+				form._refreshPastedTextDraft();
+				if (!pasteKey) return;
+				document.querySelectorAll('form[data-attachment-state-key]').forEach(function(current) {
+					if (current !== form && current.getAttribute('data-attachment-state-key') === pasteScope && current._refreshPastedTextDraft) current._refreshPastedTextDraft();
+				});
+			}
+			function acceptSubmittedPastes(payload) {
+				if (!payload || !payload.pastedTextSnapshot) return;
+				// A detached sender must reconcile the latest draft, not its old copy.
+				var latest = pasteKey ? (window._ovPasteDrafts[pasteKey] || []) : pastedTexts;
+				pastedTexts = latest.filter(function(item) {
+					return !payload.pastedTextSnapshot.some(function(sent) { return sent.id === item.id && sent.text === item.text; });
+				});
+				savePastes();
+				refreshPasteComposers();
+			}
 			function pasteIsSending(id) {
 				return Array.from(pasteSubmissions.values()).some(function(ids) { return ids.indexOf(id) !== -1; });
 			}
 			// Retain the same lock across picker waits, HTMX queues and steering fallback.
 			form._beginChatSubmission = function(payload) {
 				if (!payload) return;
-				if (!payload.pasteSubmissionID) payload.pasteSubmissionID = ++nextPasteSubmissionID;
+				if (!payload.pasteSubmissionID) payload.pasteSubmissionID = {};
 				pasteSubmissions.set(payload.pasteSubmissionID, payload.pastedTextIDs || []);
-				renderPastes();
+				refreshPasteComposers();
 			};
 			function finishPasteSubmission(payload) {
-				if (payload && pasteSubmissions.delete(payload.pasteSubmissionID)) renderPastes();
+				if (payload && pasteSubmissions.delete(payload.pasteSubmissionID)) refreshPasteComposers();
 			}
 			function renderPastes() {
 				pasteCards.replaceChildren();
@@ -2298,6 +2322,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							});
 							var snapshot = Object.assign({
 								message: composerMessage(),
+								composerText: messageInput.value,
+								pastedTextSnapshot: pastedTexts.map(function(item) { return { id: item.id, text: item.text }; }),
 								pastedTextIDs: pastedTexts.map(function(item) { return item.id; }),
 								attachmentSessionID: sessionInput ? sessionInput.value : '',
 								modelID: fields.has('agent_id') ? fields.get('agent_id') : undefined,
@@ -3395,12 +3421,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
-									if (messageInput && composerMessage() === submittedMessage) {
-                                        pastedTexts = []; savePastes(); renderPastes();
+									if (messageInput && messageInput.value === (request._chatSubmittedPayload ? request._chatSubmittedPayload.composerText : submittedMessage)) {
 										messageInput.value = '';
 										messageInput.dispatchEvent(new Event('input', { bubbles: true }));
 										refreshPrimaryActionForInput();
 									}
+									acceptSubmittedPastes(request._chatSubmittedPayload);
 									if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
 								}
 						} else if (completedIntent === 'steer' && !request._chatSubmittedFallbackFromSteer && submittedMessage.trim() !== '' && request.status === 409) {
