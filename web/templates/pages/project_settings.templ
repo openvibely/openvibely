@@ -298,6 +298,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					var response = await fetch(recoverButton.form.getAttribute('hx-put') + '/reclone', {
 						method: 'POST', headers: {'HX-Request': 'true'}
 					});
+					if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 					var payload = await response.json();
 					if (!response.ok || payload.status !== 'healthy') throw new Error(payload.error || 'Re-clone failed. Please retry.');
 					healthStatus.dataset.repoPathHealth = 'healthy';

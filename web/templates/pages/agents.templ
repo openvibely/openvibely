@@ -1189,6 +1189,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ source: source, scope: 'user' })
 				});
+				if (await window.openVibelyPermissionErrors?.fetch(response)) { setMarketplaceActionStatus('', ''); return; }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'add marketplace failed');
 					throw new Error(msg);
@@ -1215,6 +1216,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			renderPluginMarketplaces();
 			try {
 				const response = await fetch('/agents/plugins/marketplaces/reset-defaults', { method: 'POST' });
+				if (await window.openVibelyPermissionErrors?.fetch(response)) { setMarketplaceActionStatus('', ''); return; }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'reset default marketplaces failed');
 					throw new Error(msg);
@@ -1242,6 +1244,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			renderPluginMarketplaces();
 			try {
 				const response = await fetch('/agents/plugins/marketplaces/' + encodeURIComponent(safeName) + '/update', { method: 'POST' });
+				if (await window.openVibelyPermissionErrors?.fetch(response)) { setMarketplaceActionStatus('', ''); return; }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'update marketplace failed');
 					throw new Error(msg);
@@ -1270,6 +1273,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			renderPluginMarketplaces();
 			try {
 				const response = await fetch('/agents/plugins/marketplaces/' + encodeURIComponent(safeName), { method: 'DELETE' });
+				if (await window.openVibelyPermissionErrors?.fetch(response)) { setMarketplaceActionStatus('', ''); return; }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'remove marketplace failed');
 					throw new Error(msg);
@@ -1365,6 +1369,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ plugin_id: id })
 				});
+				if (await window.openVibelyPermissionErrors?.fetch(response)) {
+                    pendingUninstalledPluginIDs.delete(id);
+                    setMarketplaceActionStatus('', '');
+                    return;
+                }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'uninstall plugin failed');
 					throw new Error(msg);
@@ -1560,6 +1569,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 					body: body.toString()
 				});
+				if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 				if (!response.ok) throw new Error('generation failed');
 				const data = await response.json();
 				fillAgentFormFromGenerated(data);

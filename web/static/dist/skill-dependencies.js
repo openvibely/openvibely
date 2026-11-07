@@ -44,6 +44,7 @@
  }
  async function request(url, body) {
   const response = await fetch(url, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','X-OpenVibely-UI':'chat-input-answer'},body:JSON.stringify(body)});
+  if (await window.openVibelyPermissionErrors?.fetch(response)) { const error = new Error('Permission denied'); error.toastOnly = true; throw error; }
   if (!response.ok) throw new Error(await response.text() || 'Approval request failed');
   return response.json();
  }
@@ -104,14 +105,14 @@
   event.preventDefault();event.stopImmediatePropagation();
   if(card.dataset.submitted==='true')return;
   card.dataset.submitted='true';
-  const status=card.querySelector('[role="status"]');status.hidden=false;status.classList.remove('hidden');status.textContent='Submitting answer…';
+  const status=card.querySelector('[role="status"]');const previousStatus={hidden:status.hidden,className:status.className,text:status.textContent};status.hidden=false;status.classList.remove('hidden');status.textContent='Submitting answer…';
   try {
    const root=card.closest('[data-execution-pair][data-exec-id]');
    await window.submitChatInputAnswers(card,[{question_id:option.dataset.questionId,label:option.dataset.optionLabel}]);
    card.remove();
    // A load started before the answer would re-add the answered card.
    if(root)load(root,true);
-  } catch(error) {delete card.dataset.submitted;status.textContent=error.message;}
+  } catch(error) {delete card.dataset.submitted;if(error.toastOnly){status.hidden=previousStatus.hidden;status.className=previousStatus.className;status.textContent=previousStatus.text;}else{status.textContent=error.message;}}
  },true);
  document.addEventListener('keydown',event=>{
   const option=event.target.closest?.('[data-chat-input-option]');

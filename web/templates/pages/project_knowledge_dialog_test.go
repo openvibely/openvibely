@@ -131,11 +131,18 @@ func TestBrowserFunctional_ProjectRepoRecovery(t *testing.T) {
 		if err := EditProjectDialog(&models.Project{ID: "recover-test", Name: "Test", RepoURL: "https://github.com/acme/widgets", RepoPath: "/missing", IsDefault: true}, nil, true, 4, models.ProjectRepoPathHealth{Status: models.RepoPathHealthMissing}).Render(r.Context(), w); err != nil {
 			t.Error(err)
 		}
-		fmt.Fprint(w, "</body></html>")
+		fmt.Fprint(w, `<script src="/static/permission-errors.js"></script></body></html>`)
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "project-recovery", func(b *composerFocusCDP) {
 		b.waitFor("ready", `String(!!document.querySelector('[data-recover-repo]'))`, "true")
+		result := b.evaluateAwait(`(async()=>{
+ const button=document.querySelector('[data-recover-repo]');window.deniedRecoveryToasts=[];window.showToast=m=>deniedRecoveryToasts.push(m);window.fetch=async()=>new Response(JSON.stringify({message:'Maintainer access required'}),{status:403});
+ button.click();for(let i=0;i<100&&button.disabled;i++)await new Promise(r=>setTimeout(r,10));
+ return deniedRecoveryToasts.length===1&&deniedRecoveryToasts[0]==='Maintainer access required'&&!button.disabled&&document.querySelector('[data-recovery-feedback]').classList.contains('hidden')&&document.querySelector('[name="repo_url"]').value==='https://github.com/acme/widgets'?'ok':'denied recovery changed form';})()`)
+		if result != "ok" {
+			t.Fatal(result)
+		}
 		b.evaluate(`window.recoveryRequests=[]; window.fetch=(url,options)=>{recoveryRequests.push([url,options.method]);return new Promise(resolve=>window.finishRecovery=resolve)};document.querySelector('[data-recover-repo]').click();document.querySelector('[data-recover-repo]').click();'ok'`)
 		b.waitFor("single in-flight request", `String(recoveryRequests.length===1 && recoveryRequests[0][0]==='/projects/recover-test/reclone' && recoveryRequests[0][1]==='POST' && document.querySelector('[data-recover-repo]').disabled)`, "true")
 		b.evaluate(`finishRecovery({ok:false,json:async()=>({error:'Check GitHub access'})});'ok'`)

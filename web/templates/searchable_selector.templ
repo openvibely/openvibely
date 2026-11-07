@@ -425,6 +425,7 @@ templ searchableSelectorScript() {
 			listen(document, 'close', function(event) { var root = rootFor(event.target), button = nodes(root).button; if (button) button.setAttribute('aria-expanded', 'false'); }, true);
 			listen(document, 'htmx:responseError', function(event) {
 				var root = rootFor(event.detail && event.detail.elt); if (!root || root.hasAttribute('data-searchable-selector-local')) return;
+				if (window.openVibelyPermissionErrors?.htmx(event.detail.xhr)) return;
 				var results = root.querySelector('[data-searchable-selector-results]'), status = root.querySelector('[data-searchable-selector-status]');
 				if (results) results.innerHTML = '<div class="px-3 py-8 text-center"><p class="font-medium">Could not load results</p><p class="mt-1 text-sm opacity-60">Try searching again.</p></div>';
 				if (status) status.textContent = 'Could not load results.';

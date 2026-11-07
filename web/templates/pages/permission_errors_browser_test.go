@@ -69,6 +69,22 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 				if result != "ok" {
 					t.Fatal(result)
 				}
+				if kind == "agents" {
+					result := browser.evaluateAwait(`(async()=>{
+ const originalFetch=window.fetch;window.fetch=async()=>new Response(JSON.stringify({message:'Admin access required'}),{status:403});window.openVibelyConfirm=async()=>true;
+ permissionToasts.length=0;document.getElementById('plugin_marketplace_source').value='example';
+ for(const action of [()=>addPluginMarketplace(),()=>resetDefaultPluginMarketplaces(),()=>updatePluginMarketplace('example'),()=>deletePluginMarketplace('example')]) {
+ await action();if(document.getElementById('plugin_marketplace_action_status').textContent)return 'inline marketplace error';
+ }
+ if(permissionToasts.length!==4)return 'wrong marketplace toast count';
+ document.getElementById('agent_description').value='Keep this draft';document.getElementById('advanced_scope').value='user';await generateAgentFromPrompt();
+ if(permissionToasts.length!==5||permissionToasts.some(t=>t.message!=='Admin access required'))return 'wrong denial message';
+ if(document.getElementById('agent_description').value!=='Keep this draft')return 'draft changed';
+ window.fetch=originalFetch;return 'ok';})()`)
+					if result != "ok" {
+						t.Fatal(result)
+					}
+				}
 				result = browser.evaluateAwait(`(async()=>{
  permissionToasts.length=0;
  const response=new Response(JSON.stringify({message:'Viewer access cannot perform this action'}),{status:403});
