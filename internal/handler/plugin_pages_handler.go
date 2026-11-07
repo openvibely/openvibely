@@ -294,11 +294,13 @@ func (h *Handler) PluginAsset(c echo.Context) error {
 	hdr.Set("Content-Type", ctype)
 	hdr.Set("X-Frame-Options", "SAMEORIGIN")
 	if rel == r.Page.Entry {
-		data, err := io.ReadAll(io.LimitReader(f, 64<<20))
-		if err != nil {
+		head := make([]byte, pluginHTMLPrefixBytes)
+		n, err := io.ReadFull(f, head)
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return err
 		}
-		return c.HTML(http.StatusOK, instrumentPluginHTML(string(data), hd.Token))
+		instrumented := instrumentPluginHTML(string(head[:n]), hd.Token)
+		return c.Stream(http.StatusOK, ctype, io.MultiReader(strings.NewReader(instrumented), f))
 	}
 	return c.Stream(http.StatusOK, ctype, f)
 }

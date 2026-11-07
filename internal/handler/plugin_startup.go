@@ -5,6 +5,10 @@ import (
 	"strings"
 )
 
+// pluginHTMLPrefixBytes is enough to find a leading doctype; the rest of the
+// entry file is streamed unchanged.
+const pluginHTMLPrefixBytes = 1024
+
 // Install the observer before plugin scripts, without changing installed files or
 // weakening the sandbox. A successful startup still requires explicit readiness.
 func instrumentPluginHTML(html, handle string) string {
