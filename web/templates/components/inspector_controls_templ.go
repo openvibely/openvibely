@@ -366,7 +366,7 @@ func InspectorDialog(id, title string, attributes ...templ.Attributes) templ.Com
 			}
 			templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "><div class=\"modal-box\"><button type=\"button\" class=\"btn btn-sm btn-circle btn-ghost absolute right-2 top-2\" aria-label=\"Close editor\" onclick=\"this.closest('dialog').close()\">×</button><h3 id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "><div class=\"modal-box\"><button data-tooltip-disabled type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" aria-label=\"Close editor\" onclick=\"this.closest('dialog').close()\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

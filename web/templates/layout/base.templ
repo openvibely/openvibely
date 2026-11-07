@@ -279,6 +279,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					script.addEventListener('error', ready, {once:true});
 				});
 			</script>
+			@ModalInitialFocus()
 			<script>
 			window.appendPendingThreadInputEditButton = function(actions) {
 				var button = document.createElement('button');

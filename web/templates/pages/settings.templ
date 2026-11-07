@@ -834,7 +834,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 			<dialog id="x_config_modal" class="modal">
 				<div class="modal-box max-w-2xl">
-					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration">×</button>
+					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
 					<h3 class="font-bold text-lg mb-2">Configure X (formerly Twitter)</h3>
 					<div class="alert alert-info text-sm mb-4"><span>Requires an X developer app with OAuth 1.0a user authentication and read/write permissions. Mention polling and posting remain subject to your X API access tier. OpenVibely cannot create or upgrade provider credentials.</span></div>
 					<form method="post" action="/channels/x/configure" hx-post="/channels/x/configure" hx-swap="none" class="space-y-3">
@@ -1241,7 +1241,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 		<dialog id="discord_config_modal" class="modal" onclose="resetDiscordConfigForm()">
 			<div class="modal-box max-w-2xl">
-				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('discord_config_modal')" aria-label="Close Discord configuration">×</button>
+				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('discord_config_modal')" aria-label="Close Discord configuration"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Discord</h3>
 					<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none">
 						<div class="alert alert-info mb-4 text-sm">

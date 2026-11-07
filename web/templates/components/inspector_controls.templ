@@ -54,7 +54,7 @@ templ InspectorDialog(id, title string, attributes ...templ.Attributes) {
  {{ attrs := templ.Attributes{}; if len(attributes) > 0 { attrs = attributes[0] } }}
  <dialog id={ id } class="modal" aria-labelledby={ id + "-title" } { attrs... }>
   <div class="modal-box">
-   <button type="button" class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2" aria-label="Close editor" onclick="this.closest('dialog').close()">×</button>
+   <button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" aria-label="Close editor" onclick="this.closest('dialog').close()"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
    <h3 id={ id + "-title" } class="font-semibold text-lg mb-4 pr-10" data-editor-title>{ title }</h3>
    { children... }
   </div>
