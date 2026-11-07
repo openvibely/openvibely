@@ -2169,14 +2169,35 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				document.body.append(dialog);
 				dialog.showModal(); editor.focus();
 			}
+			function pastedTextID() {
+				var cryptoAPI = window.crypto;
+				if (!cryptoAPI) return null;
+				if (typeof cryptoAPI.randomUUID === 'function') return cryptoAPI.randomUUID();
+				// getRandomValues is also available on plain HTTP origins.
+				if (typeof cryptoAPI.getRandomValues !== 'function') return null;
+				var bytes = cryptoAPI.getRandomValues(new Uint8Array(16));
+				bytes[6] = (bytes[6] & 15) | 64;
+				bytes[8] = (bytes[8] & 63) | 128;
+				var hex = Array.from(bytes, function(byte) { return byte.toString(16).padStart(2, '0'); }).join('');
+				return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+			}
 			messageInput.addEventListener('paste', function(event) {
 				if (!event.clipboardData || messageInput.disabled || messageInput.readOnly) return;
 				if (event.clipboardData.files.length) return;
 				var text = event.clipboardData.getData('text/plain');
 				if (text.length < 5000) return;
+				var nextPastes;
+				try {
+					var id = pastedTextID();
+					if (!id) return;
+					nextPastes = pastedTexts.concat({ id: id, text: text });
+				} catch (_) {
+					// Leave the selection and default paste intact if preparation fails.
+					return;
+				}
 				event.preventDefault();
 				messageInput.setRangeText('', messageInput.selectionStart, messageInput.selectionEnd, 'end');
-				pastedTexts = pastedTexts.concat({ id: crypto.randomUUID(), text: text });
+				pastedTexts = nextPastes;
 				pastesChanged();
 			});
 			renderPastes();

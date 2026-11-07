@@ -61,6 +61,31 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  function send(){input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));}
  const large='hello <script> literal & text\n'.repeat(250);
  assert(!paste('short text'),'short paste intercepted');
+ // Model a plain HTTP browser: randomUUID is absent, getRandomValues still works.
+ const nativeUUID=crypto.randomUUID, nativeRandomValues=crypto.getRandomValues;
+ try {
+  crypto.randomUUID=undefined;
+  let randomCalls=0;
+  crypto.getRandomValues=function(bytes) {randomCalls++;return nativeRandomValues.call(this,bytes)};
+  input.value='before SELECTED after';input.setSelectionRange(7,15);
+  assert(paste(large),'UUID fallback did not create a card');
+  assert(input.value==='before  after','fallback paste changed surrounding text');
+  assert(form._captureChatSubmission().pastedTextSnapshot[0].text===large,'fallback lost pasted content');
+  input.setSelectionRange(input.value.length,input.value.length);
+  assert(paste(large),'second fallback paste failed');
+  const ids=form._captureChatSubmission().pastedTextIDs;
+  assert(randomCalls===2 && ids.length===2 && ids[0]!==ids[1],'fallback IDs are not distinct');
+  assert(ids.every(id=>/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)),'fallback did not produce UUID v4');
+  form.querySelectorAll('[aria-label="Remove pasted text"]').forEach(button=>button.click());
+  // Synthetic paste has no browser default insertion; assert that we leave it allowed.
+  for (const unavailable of [undefined,function(){throw Error('random generation failed')}]) {
+   crypto.getRandomValues=unavailable;
+   input.value='keep SELECTED text';input.setSelectionRange(5,13);
+   assert(!paste(large),'failed card preparation suppressed normal paste');
+   assert(input.value==='keep SELECTED text' && input.selectionStart===5 && input.selectionEnd===13,'failed card preparation deleted the selection');
+   assert(cards().length===0,'failed preparation added a card');
+  }
+ } finally {crypto.randomUUID=nativeUUID;crypto.getRandomValues=nativeRandomValues;}
  input.value='Explain this'; input.setSelectionRange(12,12);
  assert(paste(large),'large paste not intercepted');
  assert(cards().length===1 && input.value==='Explain this','card must keep composer compact');
