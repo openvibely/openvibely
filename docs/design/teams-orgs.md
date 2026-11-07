@@ -5,10 +5,9 @@ Scope: Organization → members → projects → project roles. Private projects
 
 ## Current status
 
-This section and the [verification checklist](phase-2-authorization-checklist.md)
+This section and the [verification checklist](#authorization-verification-checklist)
 are the current implementation summary. The original baseline audit and future
-architecture remain below for design context. The chronological notes and old
-“unfinished” lists are in the [historical archive](teams-orgs-history.md).
+architecture remain below for design context. Implementation history is available in Git; this document describes the current design.
 
 | Area | Implemented behavior |
 | --- | --- |
@@ -23,7 +22,7 @@ architecture remain below for design context. The chronological notes and old
 
 ### Validation evidence
 
-- [Authorization checklist](phase-2-authorization-checklist.md): production boundaries and focused tests by surface.
+- [Authorization checklist](#authorization-verification-checklist): production boundaries and focused tests by surface.
 - [Sharing browser test](../../internal/handler/project_sharing_browser_test.go): `TestProjectSharingPanelInChrome` exercises policy changes, grants, removals, audit and ownership transfer in headless Chrome.
 - [Live access tests](../../internal/handler/project_access_live_test.go): targeted revocation, logout/disabled accounts and no frame-time authorization queries; access-change tests also run under Go’s race detector.
 - [Worker regression](../../internal/service/worker_lazy_revocation_test.go): an admitted task finishes after revocation without polling, and its next start is denied.
@@ -104,7 +103,7 @@ I derived this by migrating a scratch DB and listing columns. **55 tables carry 
 | Settings | `app_settings` (k/v) | **global** | Holds GitHub PAT/App private key (`service/github_service.go:36`), Slack/Discord/Email/Telegram/X secrets, `github_api_endpoint`, and **UI preferences** (`ui.theme`, `ui.selected_project_id`, `ui.pinned_project_ids`, `ui.model_favorites`: `handler/ui_preferences_handler.go:16-20`, `handler/model_favorites_handler.go:11`) |
 | Workers | `worker_settings` | **global** single row | `projects.max_workers` and `agent_configs.max_workers` add caps |
 | Personalities | `custom_personalities` | **global** | |
-| Channel authorization | `telegram_/slack_/discord_/x_authorized_users`, `email_authorized_senders` | global for Telegram/Slack/Discord/email (migration 225); X remains project-scoped | Global sender mappings reference OV users; mutations record actor and before/after user |
+| Channel authorization | `telegram_/slack_/discord_/x_authorized_users`, `email_authorized_senders` | global for Telegram/Slack/Discord/email (migration 224); X remains project-scoped | Global sender mappings reference OV users; mutations record actor and before/after user |
 | GitHub authorization | `github_authorized_actors` | **global** | `permission` column. `github_project_inboxes` is per project |
 | Channel → project selection | `slack_user_projects`, `discord_user_projects`, `telegram_user_projects`, `x_user_projects`, `email_sender_projects` | per external identity | `SlackUserProjectRepo.SetUserProject` lets a channel identity switch to **any** project |
 | Webhooks | `webhook_endpoints` | project | Path token + secret. Public route |
@@ -526,13 +525,13 @@ Fix: one helper, `runGitLocked(ctx, project, args...)`, that starts git through 
 
 ### 4.4 Channel identities → org users
 
-Telegram, Slack, Discord and email authorized-sender lists are global (migration `225_global_channel_senders.sql`). Configure a sender once in the existing channel modal, with an OV user dropdown. There are no linking codes or per-project duplicate mappings.
+Telegram, Slack, Discord and email authorized-sender lists are global (migration `224_project_authorization.sql`). Configure a sender once in the existing channel modal, with an OV user dropdown. There are no linking codes or per-project duplicate mappings.
 
 - Members may add mappings to themselves and modify only their own mappings. Org admins/owners may map any active user in the organization. The database rechecks the actor and target, independently of UI controls.
 - Telegram uses the numeric sender ID supplied by Telegram, never a display name or group chat ID. Requests and queued replies retain the application user identity; new actions and resumed work recheck current project permissions.
 - Slack retains workspace/user identity; Discord uses numeric sender IDs. One mapping applies across projects, but project selection and actions still require the mapped user's project role.
 - Email mappings alone do not verify a message's sender. Authenticated email execution remains blocked until trustworthy sender evidence is implemented. Auth-off keeps existing allowlist behavior.
-- The migration combines duplicate senders, preserves unambiguous existing bindings, and flags missing/conflicting mappings for admin review. Original identities and binding details are retained in the migration-review table. Project deletion does not delete global mappings.
+- The migration combines duplicate senders and flags legacy entries for explicit OV user assignment; version 223 has no sender-to-user bindings to preserve. Original sender IDs, project IDs and creator metadata are retained in the migration-review table. Project deletion does not delete global mappings.
 - Channel credentials remain restricted to org admins/owners. GitHub and X keep their existing identity models. Channel-specific tool restrictions are future work.
 
 ---
@@ -699,9 +698,7 @@ context; the Phase 2 checklist records current authorization coverage.
 ### Phase 2: Sharing and app policy (implemented; follow-ups listed above)
 
 See [Current status](#current-status) for delivered behavior and remaining limits,
-and the [verification checklist](phase-2-authorization-checklist.md) for evidence.
-The [implementation archive](teams-orgs-history.md) preserves the old checkpoints;
-its unfinished-work lists are not the current backlog.
+and the [verification checklist](#authorization-verification-checklist) for evidence.
 
 ### Phase 3: Kernel sandbox (3–4 weeks)
 - Start with the **one-day Landlock test** on a hosted server (§3.5). If Landlock is unavailable there, re-plan around container-per-run.
@@ -725,7 +722,7 @@ its unfinished-work lists are not the current backlog.
 ### Phase 5: Credentials and channels (3–4 weeks)
 - `agent_configs`/`oauth_connections` gain `owner_kind/owner_id`. Personal vs org models; project model allow-list; follow-up model re-resolution.
 - `integration_credentials` (org scope, with optional project override). Move secrets out of `app_settings`; encrypt at rest.
-- Channel identity linking (`/link` flow), linked-user authorization, `switch_project` gating, Slack deny-by-default in multi-user mode, and per-project GitHub approvers.
+- Channel-specific tool restrictions and verified email sender identity. Global sender-to-user mappings already use admin/self assignment in channel settings; no linking-code flow is required.
 - Usage analytics by user. Org and user worker caps. Optional fair-share admission.
 - Personal API tokens.
 - Milestone: Bob's personal Claude subscription is never used for Alice's work. A Slack user linked to Bob can only reach Bob's projects.
@@ -744,4 +741,36 @@ its unfinished-work lists are not the current backlog.
 - Presence, task assignees, and a "My work" view.
 - Multi-org instances (instance admin UI). Evaluate Postgres based on measured load; backend-neutral interfaces are already available.
 
-Historical estimates and implementation checkpoints: [archive](teams-orgs-history.md).
+## Authorization verification checklist
+
+The unreleased Phase 2 database changes are consolidated in `224_project_authorization.sql`, upgrading directly from version 223. Tests cover upgrade, rollback, and re-upgrade from that released boundary. Rollback removes the Phase 2 schema while preserving existing source records; no external-user bindings are inferred. The same migration makes Telegram/Slack/Discord/email sender mappings global, combines duplicate senders, and requires explicit OV user assignment for legacy entries. Earlier incremental Phase 2 migrations are consolidated; main’s migrations through 223 are preserved.
+
+Every surface below now has production wiring and tests; the last column lists known limitations. Private projects remain disabled until Phase 3 sandboxing. A surface closes only after its production wiring, role boundaries, cross-project behavior, revocation, auth-off behavior, and relevant tests are verified.
+
+| Surface | Existing evidence | Remaining verification / implementation |
+| --- | --- | --- |
+| Shared permission service and migration | One store-level role resolver (`projectRole`) backs HTTP, runtime, selector, WebSocket and worker checks; migration 224 gives every existing project org visibility with editor default and the bootstrap owner, preserving prior access; auth-off resolves the bootstrap owner. Migration tests cover defaults, identity backfill, webhook owners and rollback | None known |
+| HTTP/JSON | Guards for sharing, Insights, channel settings/allowlists, global administrative actions, chat, conversation model settings and outbound targets. `route_authorization_sweep_test.go` walks every registered route as an authenticated non-member of a private project (no leak, no mutation, ≥400 on scoped routes) and as a project viewer (every mutating route refused) | Channels propagates denied project resolution for full and fragment responses; aggregate reorder mutations and anchors are limited to editable projects (`project_scope_regressions_test.go`, `task_reorder_access_test.go`). New routes are covered automatically by the sweep; editor/maintainer/owner boundaries are covered by focused tests, not by the sweep |
+| Runtime tools | One classification (`service.RuntimeToolPermission`) covers every registry tool: task/schedule/alert reads=viewer, writes=editor; automation and project-settings mutations, merge/auto-merge fields and GitHub mutations=maintainer; messaging and `request_user_input`=editor; settings/models/agents/personality also require an org admin. Web/API/follow-up executors apply it before discovery caches; Telegram, Slack, Discord and X channel runtimes and background task runtimes recheck it on every call after their sender/run-as checks. Production GitHub runtimes keep their stronger provider-boundary rechecks. `create_project` is org-scoped; `switch_project` targets are authorized by the guarded project store. Tests: role matrix in `TestProjectRuntimeToolsEnforceRoleBoundaries` and `TestRuntimeToolRoleRechecksCurrentProjectRole` | Email remains fail-closed without verified sender evidence |
+| Lists/selectors | All project lists, selectors, worker-capacity rows, repo validation and API projections go through `authz.ProjectStore`, which filters by current view access for any principal; `list_projects` tools use the same store (test asserts a private project is hidden from a non-member and shown to its owner). `/events/running-executions` filters by project view access. Aggregate database reads filter real project permissions before pagination/counting; aggregate alert writes require edit access and mixed-permission bulk selections roll back (`aggregate_access_test.go`, `audit_regressions_test.go`) | None known |
+| WebSockets | Subscription admission/replay checks view access and object ownership. Change interests are registered before admission, and changes queued during admission are applied before output starts (`TestRevocationDuringSubscriptionAdmissionBlocksOutput`). Targeted access-change notifications recheck affected subscriptions and retire denied ones. All-project events use an in-memory visibility map; retired subscriptions discard queued frames. No per-frame database authorization queries or 1s subscription recheck. Existing 15s ping-time session-expiry checks remain | None known |
+| Sharing/member/ownership UI | Project settings sharing panel (existing settings patterns): org access level, grants, removal, owner transfer, audit list. Handler tests cover viewer/editor denial (404), maintainer mutation denial and audit visibility, owner/org-admin-only policy/grants/transfer, removal falling back to org access, stale forms after downgrade, same-origin check and private visibility being refused. `TestProjectSharingPanelInChrome` drives the panel in headless Chrome (policy save, grant, removal, audit, confirmed transfer) | None known |
+| Workers | Saved run-as and execution snapshots resolved at admission, claim and recovery (`worker_authorization.go`); missing identity fails closed except auth-off (bootstrap owner); no periodic authorization watcher: admitted runs may finish; subsequent starts/recovery and new actions check current access; unmapped Telegram/Discord origins and authenticated email origins rejected. Tests: `TestWorkerDurableRunIdentityAndRevocation`, `TestWorkerMissingIdentityAndAuthOff`, `TestWorkerRejectsMissingIdentityBeforeClaimOrHooks`, channel binding revocation tests | Email execution stays rejected without verified sender evidence |
+| Schedules | Independent user/Slack/Discord provenance; calendar and automation admission checks; dispatched runs use worker admission checks without a per-run authorization timer. Tests: `TestScheduleRunIdentityAdmissionRecoveryAndRevocation`, `TestScheduleMissingIdentityFailsClosedExceptAuthOff` | None known |
+| Goals | Exact-goal/user snapshots; every goal mutation and evaluation rechecks the caller (`TestGoalServiceCurrentPermissions`); continuations run only as the saved goal user and must match the current goal ID (`goal_continuation_access.go`, tests in `goal_continuation_access_test.go`); a reassigned task does not change the goal user (`TestGoalSavedCreatorSurvivesTaskReassignment`) | None known |
+| Webhooks | Endpoints save their creator as run-as (not forgeable through updates); signed inbound requests run as that user with maintainer access, and revocation returns 403 even with a valid secret; missing run-as fails closed except auth-off (`TestWebhookSavedIdentityAndRevocation`, `TestWebhookManagementBoundary`) | None known |
+| Automation publication/invocation/dispatch | Publisher/initiator identities with Slack/Discord provenance and launch archives; queued worker/continuation checks; graph-save and registered-publication role, provenance and atomic audit checks | None known. Every worker admission path (`Submit`, `SubmitAs`, `SubmitPrepared`, startup reconciliation, swarm/chain children, scheduler) resolves the saved task, execution or envelope run-as user at run time. Historical versions without a recorded publisher get no invented identity; their tasks still need a maintainer run-as user (`checkRunPermission`) |
+| External automation actions | Reservation/release and GitHub lease admission/dispatch/reuse checks; archived launch evidence; label provisioning follows admission and reused-issue label repair rechecks after provider reads; production GitHub mutation calls recheck current roles and saved execution provenance after intervening reads, retaining optional PR body/branch capabilities; assigned-issue discovery rechecks after provider reads and transactionally validates launch authority with atomic audits; feedback queue transactions validate PR/task/project scope, identified caller role and atomic handoff audits; production forwarding rechecks pinned execution provenance before fetches and each handoff, including within queue transactions; queued feedback independently retains the source execution’s Slack sender binding for promotion/recovery; reviewer allowlist trust is rechecked transactionally before admission or deduplication and again at queued promotion, steering conversion, preparation and local commit; independent input/execution reviewer snapshots survive PR/input cleanup, and promoted execution recovery/startup and action boundaries recheck them | Only GitHub has external automation actions today; a provider request cannot be made atomic with the authorization check, so a revocation that lands mid-request is recorded rather than undone |
+| GitHub reviewer identities | Project/host/numeric-ID admin attestations; authenticated feedback queue and execution snapshots; permission, rebinding, source-cleanup and denied restart/recovery tests. Historical inputs/executions without captured identity evidence fail closed in authenticated mode (`TestHistoricalReviewerRecoveryRequiresCapturedIdentityWhenAuthenticated`, `TestStandaloneFollowupHistoricalReviewerPolicy`); auth-off keeps login trust | Embedded callers without a principal keep the legacy auth-off contract |
+| Slack channel | Global workspace/user mapping, with self-only member assignments or org-admin assignments; task/input/execution/schedule/automation provenance; runtime tools recheck the sender binding and current role per call (`TestSlackRuntimeRechecksSenderBinding`, `TestSlackRunBindingRevocation`, `TestSlackAutomationBindingRevocationAtWorkerBoundaries`) | None known |
+| X channel | Installer and sender identity mappings; polling cancellation and receipt transaction checks; restart identity and per-call runtime role checks (`TestXRequestAndRestartIdentity`, `TestXPollRevocationDuringProviderWork`, `TestXIngressDoesNotInheritInstallerIdentity`) | None known |
+| Telegram/Discord/email channels | Global sender-to-OV-user mappings in the existing channel modal; members manage only self-mappings, org admins/owners can assign active org users; transactional before/after audit. Telegram numeric IDs and queued-reply identity survive recovery; Discord retains its provenance checks. Migration 224 deduplicates rows and flags legacy entries for review. Project permissions are checked at admission and actions. Member channel pages omit shared credentials in both full and fragment responses (`TestMemberChannelsOmitsCredentials`); org admins retain credential access. Tests: `TestGlobalChannelSenderAssignmentPermissions`, `TestGlobalSenderMappingHandlersLimitAssignments`, `TestTelegramMappedIngressPersistsSenderIdentity`, `TestTelegramQueuedInputPreservesSenderAcrossRecovery` | Authenticated email execution remains blocked: an address mapping is not spoof-resistant sender verification. Auth-off retains legacy allowlists |
+| Audit | Atomic audit records for policy, membership, ownership, project settings/deletion, run-as bindings (task, schedule, goal, webhook, execution, automation), channel bindings/allowlists/credentials (key names only, never values), GitHub reviewer/inbox/feedback, swarm transitions, steering, calendar, updates and usage reset. Audit failures roll back the mutation (tests per store). Membership entries record JSON before/after explicit roles, including org-removal cleanup. Audit reads require maintainer access | Org-wide audit presentation remains a follow-up |
+| Compatibility and isolation | Private-project creation is refused by the service and not offered in the UI (handler and browser tests); auth-off owner compatibility retained; migration preserves org-wide editor access | Phase 3 process/filesystem sandboxing is required before private projects can be offered; these tables are application authorization only |
+
+### Scope and limitations
+
+This checklist describes current application authorization, not process or
+filesystem isolation. See [Current status](#current-status) for the
+consolidated remaining work. Browser coverage includes the sharing panel; it does
+not imply every feature has an end-to-end browser test.
