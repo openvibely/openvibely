@@ -90,7 +90,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, ">Editor</option></select></label> <button class=\"btn btn-primary btn-sm\" type=\"submit\">Save access</button></form><p class=\"text-xs opacity-60\">Individual grants add access; removing a grant keeps organization access. Maintainers can manage settings and sharing. Owners can transfer or delete the project.</p><table class=\"table table-sm\"><thead><tr><th>Member</th><th>Additional access</th><th></th></tr></thead> <tbody>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, ">Editor</option></select></label> <button class=\"btn btn-primary btn-sm\" type=\"submit\">Save access</button></form><p class=\"text-xs opacity-60\">Individual grants add access; removing a grant keeps organization access. Maintainers can manage project settings. Only the project owner and organization admins/owners can change sharing, transfer ownership or delete the project.</p><table class=\"table table-sm\"><thead><tr><th>Member</th><th>Additional access</th><th></th></tr></thead> <tbody>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

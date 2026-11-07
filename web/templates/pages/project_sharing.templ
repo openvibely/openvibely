@@ -19,7 +19,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 				<label class="form-control"><span class="label-text">Organization access</span><select name="org_role" class="select select-bordered select-sm"><option value="viewer" selected?={ policy.OrgRole == "viewer" }>Viewer</option><option value="editor" selected?={ policy.OrgRole == "editor" }>Editor</option></select></label>
 				<button class="btn btn-primary btn-sm" type="submit">Save access</button>
 			</form>
-			<p class="text-xs opacity-60">Individual grants add access; removing a grant keeps organization access. Maintainers can manage settings and sharing. Owners can transfer or delete the project.</p>
+			<p class="text-xs opacity-60">Individual grants add access; removing a grant keeps organization access. Maintainers can manage project settings. Only the project owner and organization admins/owners can change sharing, transfer ownership or delete the project.</p>
 			<table class="table table-sm">
 				<thead><tr><th>Member</th><th>Additional access</th><th></th></tr></thead>
 				<tbody>
