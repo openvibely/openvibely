@@ -63,6 +63,8 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  function button(label){return Array.from(document.querySelectorAll('dialog button')).find(b=>b.textContent===label);}
  function send(){input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));}
  const large='hello <script> literal & text\n'.repeat(250);
+ // Wait for HTMX to bind the form before exercising Send.
+ await wait();
  assert(!paste('short text'),'short paste intercepted');
  // Model a plain HTTP browser: randomUUID is absent, getRandomValues still works.
  const nativeUUID=crypto.randomUUID, nativeRandomValues=crypto.getRandomValues;
@@ -89,6 +91,21 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
    assert(cards().length===0,'failed preparation added a card');
   }
  } finally {crypto.randomUUID=nativeUUID;crypto.getRandomValues=nativeRandomValues;}
+ // Show in composer moves only the selected card and never selects its text.
+ input.value='Keep these instructions';paste(large);paste('other context '.repeat(500));
+ const other=form._captureChatSubmission().pastedTextSnapshot[1].text;
+ form.querySelector('.ov-paste-show').click();
+ assert(input.value==='Keep these instructions\n\n'+large,'show in composer lost existing instructions');
+ assert(cards().length===1 && form._captureChatSubmission().message===input.value+'\n\n'+other,'show duplicated content or removed another card');
+ assert(document.activeElement===input && input.selectionStart===input.value.length && input.selectionEnd===input.value.length,'show selected text or misplaced cursor');
+ const savedKey=form.getAttribute('data-attachment-state-key')+'-pasted-text';
+ assert(JSON.parse(sessionStorage.getItem(savedKey)).length===1,'shown card remained in saved draft');
+ send();await wait();
+ assert(document.getElementById('messages').textContent==='Keep these instructions\n\n'+large+'\n\n'+other,'shown text was not sent exactly once');
+ document.getElementById('messages').replaceChildren();
+ paste(large);form.querySelector('.ov-paste-show').click();
+ assert(input.value===large && cards().length===0,'show into empty composer added spacing or kept card');
+ input.value='';
  input.value='Explain this'; input.setSelectionRange(12,12);
  assert(paste(large),'large paste not intercepted');
  assert(cards().length===1 && input.value==='Explain this','card must keep composer compact');

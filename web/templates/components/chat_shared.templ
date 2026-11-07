@@ -1553,6 +1553,15 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 templ ChatInputForm(config ChatInputFormConfig) {
 	@templateui.MenuStyles()
 	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
+	<style>
+		.ov-paste-card { position:relative; display:flex; align-items:center; gap:14px; padding:12px 40px 12px 12px; width:360px; max-width:100%; border:1px solid oklch(var(--bc)/.14); border-radius:12px; }
+		.ov-paste-icon { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:52px; height:56px; border-radius:10px; background:oklch(var(--bc)/.04); color:oklch(var(--bc)/.55); }
+		.ov-paste-copy { min-width:0; flex:1; }
+		.ov-paste-title { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; font-size:15px; font-weight:500; }
+		.ov-paste-show { margin-top:5px; margin-left:-8px; color:oklch(var(--bc)/.8); text-decoration:none; }
+		.ov-paste-show:hover { text-decoration:none; }
+		.ov-paste-card .ov-modal-close { position:absolute; top:6px; right:6px; }
+	</style>
 	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2">
 		<form
 			id={ config.FormID }
@@ -2085,30 +2094,46 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				pasteCards.hidden = pastedTexts.length === 0;
 				pastedTexts.forEach(function(item) {
 					var card = document.createElement('div');
-					card.className = 'flex items-center gap-1 rounded-lg border border-base-content/20 p-2 max-w-full';
+					card.className = 'ov-paste-card bg-base-100';
+					var icon = document.createElement('button');
+					icon.type = 'button';
+					icon.className = 'ov-paste-icon';
+					icon.setAttribute('aria-label', 'Open pasted text editor');
+					icon.innerHTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3M14 4h2a2 2 0 0 1 2 2v2"/><rect x="8" y="2" width="6" height="4" rx="1"/><rect x="11" y="10" width="10" height="12" rx="1"/><path d="M14 14h4m-4 4h4"/></svg>';
+					icon.onclick = function() { editPaste(item, icon); };
+					var content = document.createElement('div');
+					content.className = 'ov-paste-copy';
 					var edit = document.createElement('button');
 					edit.type = 'button';
-					edit.className = 'text-left text-sm min-w-0';
+					edit.className = 'ov-paste-title';
 					edit.setAttribute('aria-label', 'Edit pasted text');
-					var title = document.createElement('div');
-					title.className = 'truncate max-w-64';
-					title.textContent = item.text.trim().slice(0, 80) || 'Pasted text';
-					var subtitle = document.createElement('div');
-					subtitle.className = 'text-xs opacity-60';
-					subtitle.textContent = 'Pasted text · ' + item.text.length.toLocaleString() + ' characters';
-					edit.append(title, subtitle);
+					edit.textContent = item.text.trim().slice(0, 80) || 'Pasted text';
 					edit.onclick = function() { editPaste(item, edit); };
+					var show = document.createElement('button');
+					show.type = 'button';
+					show.className = 'ov-paste-show btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';
+					show.textContent = 'Show in composer';
+					show.onclick = function() {
+						messageInput.value += (messageInput.value ? '\n\n' : '') + item.text;
+						pastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });
+						pastesChanged();
+						messageInput.focus();
+						messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
+						messageInput.scrollTop = messageInput.scrollHeight;
+					};
 					var remove = document.createElement('button');
 					remove.type = 'button';
-					remove.className = 'btn btn-ghost btn-xs';
-					remove.textContent = '×';
+					remove.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';
+					remove.setAttribute('data-tooltip-disabled', '');
+					remove.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
 					remove.setAttribute('aria-label', 'Remove pasted text');
 					remove.onclick = function() {
 						pastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });
 						pastesChanged();
 						messageInput.focus();
 					};
-					card.append(edit, remove);
+					content.append(edit, show);
+					card.append(icon, content, remove);
 					pasteCards.append(card);
 				});
 			}
