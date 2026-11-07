@@ -2,12 +2,14 @@ package pageplugins
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageintegration"
 )
 
 func replacementBundle(t *testing.T, version string) string {
@@ -199,4 +201,38 @@ func TestNativeReplacementApprovalAndRollback(t *testing.T) {
 		t.Fatal("backup retained after success")
 	}
 
+}
+
+func TestStaleIntegrationCannotRunOperationsAfterUpdate(t *testing.T) {
+	m, _, a, _ := newTestManager(t)
+	ctx := t.Context()
+	in := enabledSales(t, m, a)
+	r, err := m.Resolve(ctx, in.ID, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := m.Integration(r)
+	if err = m.store.UpdateInstanceState(ctx, in.ID, `{"n":100}`); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	manifest := `{"schema_version":1,"id":"openvibely.sales-example","name":"Sales","version":"2.0.0","pages":[{"id":"sales","title":"Sales","entry":"index.html"}]}`
+	if err = os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.PublishToInstance(ctx, dir, a, in.PageID, "task", in.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = stale.Invoke(ctx, pageintegration.Caller{Via: "agent"}, "refresh_data", nil); !errors.Is(err, ErrPackageChanged) {
+		t.Fatalf("stale operation not rejected: %v", err)
+	}
+	fresh, _ := m.store.GetInstance(ctx, in.ID)
+	if fresh.StateJSON != `{"n":100}` {
+		t.Fatalf("stale operation changed state: %s", fresh.StateJSON)
+	}
 }

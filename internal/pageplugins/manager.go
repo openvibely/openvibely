@@ -29,6 +29,7 @@ var (
 	ErrNotFound         = errors.New("plugin page not found")
 	ErrDisabled         = errors.New("plugin page is disabled")
 	ErrApprovalRequired = errors.New("administrator approval required before this plugin's backend can run")
+	ErrPackageChanged   = errors.New("plugin page was updated; reload it to use the current version")
 	ErrContentChanged   = errors.New("plugin package content no longer matches the approved hash")
 	ErrVersionConflict  = errors.New("this plugin version is already installed with different content; bump the version")
 	ErrPackageInUse     = errors.New("package still has project instances")
@@ -708,6 +709,16 @@ func (p *pluginIntegration) Invoke(ctx context.Context, caller pageintegration.C
 		return nil, err
 	}
 	defer done()
+	fresh, err := p.m.store.GetInstance(ctx, p.r.Instance.ID)
+	if err != nil {
+		return nil, err
+	}
+	if fresh == nil || !fresh.Enabled || fresh.ProjectID != p.r.Instance.ProjectID {
+		return nil, ErrDisabled
+	}
+	if fresh.PackageID != p.r.Package.ID || fresh.ContentHash != p.r.Package.ContentHash {
+		return nil, ErrPackageChanged
+	}
 	opDef, ok := pageintegration.FindOperation(p, op)
 	if !ok {
 		return nil, pageintegration.ErrOperationNotFound
@@ -721,13 +732,6 @@ func (p *pluginIntegration) Invoke(ctx context.Context, caller pageintegration.C
 		b := p.m.builtins[man.Backend.Builtin]
 		if b == nil {
 			return nil, fmt.Errorf("builtin backend %q unavailable", man.Backend.Builtin)
-		}
-		fresh, err := p.m.store.GetInstance(ctx, p.r.Instance.ID)
-		if err != nil {
-			return nil, err
-		}
-		if fresh == nil || !fresh.Enabled || fresh.ProjectID != p.r.Instance.ProjectID {
-			return nil, ErrNotFound
 		}
 		res, err := b.Invoke(ctx, BuiltinRequest{Instance: *fresh, Operation: op, Input: input, Caller: caller})
 		if err != nil {
@@ -743,14 +747,7 @@ func (p *pluginIntegration) Invoke(ctx context.Context, caller pageintegration.C
 		}
 		out = res.Output
 	} else {
-		in, err := p.m.store.GetInstance(ctx, p.r.Instance.ID)
-		if err != nil {
-			return nil, err
-		}
-		if in == nil || !in.Enabled || in.ProjectID != p.r.Instance.ProjectID {
-			return nil, ErrDisabled
-		}
-		proc, err := p.m.ensureProcess(ctx, in, &p.r.Package, man)
+		proc, err := p.m.ensureProcess(ctx, fresh, &p.r.Package, man)
 		if err != nil {
 			return nil, err
 		}
