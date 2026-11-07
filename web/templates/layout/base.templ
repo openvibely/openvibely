@@ -3232,9 +3232,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					--project-tab-selected: var(--shell-page);
 				}
 				html[data-shell-frame][data-layout="floating"] #desktop-project-titlebar { padding-left: calc(var(--rail-width) + var(--task-list-width, 300px) + var(--shell-gap)) !important; }
-				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar { padding-left: calc(var(--rail-width) + 44px) !important; }
+				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar { padding-left: var(--rail-width) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px !important; }
-				html[data-shell-frame][data-native-linux-controls].task-list-collapsed #desktop-project-titlebar { padding-left: max(calc(var(--rail-width) + 44px), calc(var(--native-controls-left, 0px) + 48px)) !important; }
+				html[data-shell-frame][data-native-linux-controls].task-list-collapsed #desktop-project-titlebar { padding-left: max(var(--rail-width), calc(var(--native-controls-left, 0px) + 48px)) !important; }
 				/* The web toggle occupies the rail, so collapsed detached tabs start at the page edge. */
 				html[data-shell-frame][data-openvibely-runtime="web"]:not([data-tab-style="attached"]).task-list-collapsed #desktop-project-titlebar { padding-left: var(--rail-width) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; }

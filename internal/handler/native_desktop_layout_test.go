@@ -138,6 +138,16 @@ const desktopAlignmentScenario = `<script>
     const projectTabs=document.querySelectorAll('#desktop-project-tabs [data-project-tab]');
     assert(projectTabs.length>1,'keyboard test requires multiple project tabs');
     const tab=projectTabs[0];
+    const tabStrip=document.getElementById('desktop-project-tabs');
+    tabStrip.scrollLeft=0;
+    await frame();
+    const pageLeft=document.getElementById('main-content').getBoundingClientRect().left;
+    let expectedTabLeft=pageLeft;
+    if(collapsed && platform==='darwin')expectedTabLeft=Math.max(expectedTabLeft,128);
+    if(collapsed && inset>0)expectedTabLeft=Math.max(expectedTabLeft,inset+48);
+    expectedTabLeft+=parseFloat(getComputedStyle(tabStrip).paddingLeft)||0;
+    const firstTabLeft=tab.closest('.desktop-project-tab').getBoundingClientRect().left;
+    assert(Math.abs(firstTabLeft-expectedTabLeft)<1,'first tab misaligned with page '+JSON.stringify({platform,inset,layout,tabs,collapsed,firstTabLeft,expectedTabLeft}));
     tab.focus({preventScroll:true});
     tab.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));
     await frame();
