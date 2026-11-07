@@ -72,3 +72,43 @@ func TestWorkspaceChatModelSettingsAuthOffUsesOwner(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, value)
 }
+
+func TestPrivateChatModelSettingsRequireOwnership(t *testing.T) {
+	tc, app := organizationTestApp(t, true)
+	h, ctx := tc.handler, t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+	guarded := authz.NewProjectStore(tc.stores.Projects, &authz.Authorizer{Store: tc.stores.ProjectAccess})
+	h.projectRepo = guarded
+	h.projectSvc = service.NewProjectService(guarded)
+	agent := createAgent(t, h.llmConfigRepo)
+	ownerCtx := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+	task := &models.Task{ProjectID: models.AllProjectsID, Title: "Owner private chat", Category: models.CategoryChat, Status: models.StatusCompleted, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ownerCtx, task))
+	token, err := h.organizationSvc.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := h.organizationSvc.Accept(ctx, token, "audit-private-settings", "long-member-password", "")
+	require.NoError(t, err)
+	hidden, err := h.taskRepo.GetByID(models.WithPrincipal(ctx, member.Principal), task.ID)
+	require.NoError(t, err)
+	require.Nil(t, hidden)
+	login := orgRequest(app, http.MethodPost, "/login", url.Values{"username": {"audit-private-settings"}, "password": {"long-member-password"}}, nil)
+	response := orgRequest(app, http.MethodGet, "/conversation/model-settings?project_id="+models.AllProjectsID+"&task_id="+task.ID, nil, orgCookie(t, login))
+	require.Equal(t, 404, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), agent.ID)
+
+	cookie := orgCookie(t, login)
+	own := &models.Task{ProjectID: models.AllProjectsID, Title: "Member personal chat", Category: models.CategoryChat, Status: models.StatusCompleted, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(models.WithPrincipal(ctx, member.Principal), own))
+	response = orgRequest(app, http.MethodGet, "/conversation/model-settings?project_id="+models.AllProjectsID+"&task_id="+own.ID, nil, cookie)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), agent.ID)
+	project := createProject(t, h, "Shared task settings")
+	shared := createTask(t, h, project.ID, "Shared thread", func(tk *models.Task) { tk.AgentID = &agent.ID })
+	endpoint := "/conversation/model-settings?project_id=" + project.ID + "&task_id=" + shared.ID
+	response = orgRequest(app, http.MethodGet, endpoint, nil, cookie)
+	require.Equal(t, 404, response.Code, response.Body.String())
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, member.UserID, "viewer"))
+	response = orgRequest(app, http.MethodGet, endpoint, nil, cookie)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), agent.ID)
+}
