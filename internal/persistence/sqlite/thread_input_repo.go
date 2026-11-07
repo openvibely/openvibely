@@ -1132,7 +1132,7 @@ func (r *ThreadInputRepo) RequeuePendingSteeringForExecution(ctx context.Context
 }
 
 func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution) error {
-	return r.claimQueuedForTaskExecution(ctx, inputID, exec, nil, false, nil)
+	return r.claimQueuedForTaskExecution(ctx, inputID, exec, nil, false, nil, false)
 }
 
 // ClaimQueuedForTaskExecutionWithModel checks the task selection and reads its
@@ -1142,10 +1142,10 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecutionWithModel(ctx context.Conte
 	if agent == nil || exec == nil || agent.ID != exec.AgentConfigID {
 		return fmt.Errorf("matching execution model is required")
 	}
-	return r.claimQueuedForTaskExecution(ctx, inputID, exec, expectedAgentID, true, agent)
+	return r.claimQueuedForTaskExecution(ctx, inputID, exec, expectedAgentID, true, agent, false)
 }
 
-func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string, checkModel bool, agent *models.LLMConfig) error {
+func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string, checkModel bool, agent *models.LLMConfig, pageChat bool) error {
 	if exec == nil {
 		return fmt.Errorf("execution is required")
 	}
@@ -1211,10 +1211,13 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			}
 			return persistence.ErrActiveTurnChanged
 		}
-		var taskAdmissionPredicate = `status NOT IN ('running', 'queued')`
+		var taskAdmissionPredicate = `status NOT IN ('running', 'queued') AND category != 'page_chat'`
+		if pageChat {
+			taskAdmissionPredicate = `status NOT IN ('running', 'queued') AND category = 'page_chat'`
+		}
 		args := []any{exec.TaskID}
 		if expected, guarded := persistence.ActiveLaneExpectedState(ctx, exec.TaskID); guarded {
-			taskAdmissionPredicate = `category = ? AND status = ?`
+			taskAdmissionPredicate = `category = ? AND status = ? AND category != 'page_chat'`
 			args = append(args, expected.ExpectedCategory, expected.ExpectedStatus)
 		}
 		if err := dbexec.QueryRowContext(ctx, `
@@ -1243,7 +1246,7 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 		}
 		if _, err := dbexec.ExecContext(ctx, `
 			UPDATE tasks
-			SET status = 'queued', category = 'active',
+			SET status = CASE WHEN category='page_chat' THEN 'running' ELSE 'queued' END, category = CASE WHEN category='page_chat' THEN category ELSE 'active' END,
 				display_order = `+activeBoardTailOrderExpression+`,
 				updated_at = datetime('now')
 			WHERE id = ?`, exec.TaskID); err != nil {
@@ -1254,6 +1257,9 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			isFollowup = 1
 		}
 		exec.Status = models.ExecQueued
+		if pageChat {
+			exec.Status = models.ExecRunning
+		}
 		exec.AuthorUserID, exec.AuthorName = promoted.AuthorUserID, promoted.AuthorName
 		if err := dbexec.QueryRowContext(ctx, `
 					INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, author_user_id, author_name)
@@ -1701,4 +1707,9 @@ func snapshotPromotedInputIdentity(ctx context.Context, tx sqlExecutor, input mo
 		return err
 	}
 	return projectAudit(ctx, tx, input.ProjectID, input.AuthorUserID, "execution.run_as", executionID, `{}`)
+}
+// ClaimQueuedForPageExecution shares atomic queue claiming while keeping the page
+// off the task board and bypassing coding-task worker dispatch.
+func (r *ThreadInputRepo) ClaimQueuedForPageExecution(ctx context.Context, inputID string, exec *models.Execution) error {
+	return r.claimQueuedForTaskExecution(ctx, inputID, exec, nil, false, nil, true)
 }

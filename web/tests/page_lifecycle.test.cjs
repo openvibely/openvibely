@@ -39,12 +39,13 @@ test('reconnect requests fresh page data; navigation closes streams and ignores 
  assert.equal(h.requests.some(r=>r.url.includes('/stop')),false);
 });
 
-test('late approval responses cannot overwrite a newer view',async()=>{
- const h=setup();const first=h.requests.find(r=>r.url==='/approvals');
- h.events[0].onopen();const second=h.requests.filter(r=>r.url==='/approvals').at(-1);
- h.respond(second,'new');await flush();h.respond(first,'old');await flush();assert.equal(h.approvals.innerHTML,'new');
- h.events[0].onopen();const late=h.requests.filter(r=>r.url==='/approvals').at(-1);
- h.window.emit('pagehide');h.respond(late,'after navigation');await flush();assert.equal(h.approvals.innerHTML,'new');
+test('failed navigation keeps the current bridge alive', async()=>{
+ const h=setup();
+ h.document.emit('htmx:beforeSwap',{detail:{target:{id:'main-content'},shouldSwap:false}});
+ assert.equal(h.events[0].closed,undefined);
+ assert.equal(h.requests.some(r=>r.url.startsWith('/retire')),false);
+ h.send('op.invoke');h.respond(h.requests.find(r=>r.url==='/bridge'),{value:1});await flush();
+ assert.ok(h.posts.some(p=>p.type==='result'));
 });
 
 test('leaving detaches an active analysis stream without sending Stop',async()=>{

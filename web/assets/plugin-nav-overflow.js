@@ -101,7 +101,10 @@
   schedule();
  }
  document.addEventListener('DOMContentLoaded', init);
- document.addEventListener('htmx:afterSwap', init);
+ document.addEventListener('htmx:afterSwap', function(event) {
+  const target = event.detail && event.detail.target;
+  if (!nav || !nav.isConnected || (target && (target === nav || target.contains(nav)))) init();
+ });
  window.addEventListener('resize', schedule);
  if (document.readyState !== 'loading') init();
 })();

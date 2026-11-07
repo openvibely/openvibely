@@ -257,3 +257,18 @@ func (r *PagePluginRepo) FinishReplacement(ctx context.Context, id string, resto
 		return err
 	})
 }
+
+func (r *PagePluginRepo) SaveQueuedPageContext(ctx context.Context, instanceID, inputID, raw string) error {
+	store, err := r.conversationStore(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	return store.SaveQueuedContext(ctx, inputID, raw)
+}
+func (r *PagePluginRepo) QueuedPageContext(ctx context.Context, instanceID, inputID string) (string, error) {
+	store, err := r.conversationStore(ctx, instanceID)
+	if err != nil {
+		return "", err
+	}
+	return store.QueuedContext(ctx, inputID)
+}

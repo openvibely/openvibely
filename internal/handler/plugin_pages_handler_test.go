@@ -205,10 +205,10 @@ func TestPluginBridge_ButtonAndAgentToolShareOperation(t *testing.T) {
 		t.Fatalf("turn context not persisted: %q %v", snap, err)
 	}
 
-	// Second turn while the first is running is rejected instead of interleaving.
+	// A second turn is queued without interleaving with the active turn.
 	rec = env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat?project_id="+env.projA.ID, "message=again", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("concurrent turn = %d", rec.Code)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "queued-input-row") {
+		t.Fatalf("concurrent turn = %d %s", rec.Code, rec.Body.String())
 	}
 	rec = env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat/stop?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
 	if rec.Code != http.StatusOK {

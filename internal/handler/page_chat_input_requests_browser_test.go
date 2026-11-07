@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPageSideChatAnswersQuestion(t *testing.T) {
+func TestPageSideChatAnswersQuestion(t *testing.T)          { testPageSideChatQuestion(t, false) }
+func TestPageSideChatDiscoversAnalyzeQuestion(t *testing.T) { testPageSideChatQuestion(t, true) }
+func testPageSideChatQuestion(t *testing.T, analyze bool) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
 	}
@@ -25,9 +28,13 @@ func TestPageSideChatAnswersQuestion(t *testing.T) {
 	}
 	env := setupPluginPages(t)
 	in := env.inA
-	rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+in.ID+"/chat?project_id="+in.ProjectID, "message=hello", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	turn := env.starts[len(env.starts)-1]
+	var turn streamingResponseParams
+	handle := env.openPage(t, in)
+	if !analyze {
+		rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+in.ID+"/chat?project_id="+in.ProjectID, "message=hello", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		turn = env.starts[len(env.starts)-1]
+	}
 
 	created := make(chan *chatInputRequest, 1)
 	runner := `<script>
@@ -50,8 +57,15 @@ func TestPageSideChatAnswersQuestion(t *testing.T) {
             toggle.click();
             if (!panel.hidden) throw new Error('panel did not collapse');
             toggle.click();
-			await waitFor(function() { return document.querySelector('#page-chat-messages [data-exec-id]'); }, 'side chat history missing');
-			await new Promise(function(r) { setTimeout(r, 200); });
+			if (!ANALYZE_TEST) await waitFor(function() { return document.querySelector('#page-chat-messages [data-exec-id]'); }, 'side chat history missing');
+			if (!ANALYZE_TEST) await waitFor(function() { return Array.from(document.querySelectorAll('#page-chat-messages [data-streaming-resume]')).some(function(el){ return el._sseConnected; }); }, 'running reply did not reconnect after page load');
+            if (panel.dataset.overlay === 'true') {
+                var close = panel.querySelector('[data-page-chat-close]');
+                if (getComputedStyle(close).display === 'none') throw new Error('overlay close hidden');
+                close.click();
+                if (!panel.hidden) throw new Error('overlay close failed');
+                toggle.click();
+            }
 			event = await (await fetch('/make-question')).json();
 			window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: event}));
 			await waitFor(card, 'question card did not render in side chat');
@@ -64,6 +78,7 @@ func TestPageSideChatAnswersQuestion(t *testing.T) {
 	})();
 	</script>`
 
+	runner = strings.ReplaceAll(runner, "ANALYZE_TEST", strconv.FormatBool(analyze))
 	result := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -79,6 +94,14 @@ func TestPageSideChatAnswersQuestion(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/make-question" {
+			if analyze {
+				response, _ := env.bridge(t, in, in.ProjectID, handle, "analyze.request", `{"prompt":"Analyze the selected rows"}`)
+				if response.Code != http.StatusOK {
+					http.Error(w, response.Body.String(), 500)
+					return
+				}
+				turn = env.starts[len(env.starts)-1]
+			}
 			pending, err := env.h.chatInputRequests.create(in.ProjectID, turn.ExecID, []chatInputRequestQuestion{{
 				ID: "continue", Question: "Continue?", Options: []chatInputRequestOption{{Label: "Yes", Description: "Continue"}, {Label: "No", Description: "Stop"}},
 			}})
@@ -112,7 +135,7 @@ func TestPageSideChatAnswersQuestion(t *testing.T) {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
-		"--window-size=1024,768", server.URL+"/p/"+in.ID+"?project_id="+in.ProjectID,
+		"--window-size=500,768", server.URL+"/p/"+in.ID+"?project_id="+in.ProjectID,
 	)
 	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	defer stopHandlerBrowserProcess(t, cmd)

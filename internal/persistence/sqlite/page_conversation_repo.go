@@ -63,3 +63,25 @@ func (s *pageConversationStore) SaveSnapshot(ctx context.Context, execID, raw st
 	}
 	return nil
 }
+
+func (s *pageConversationStore) SaveQueuedContext(ctx context.Context, inputID, raw string) error {
+	result, err := execBoundSQLite(ctx, s.db, `INSERT INTO page_queued_contexts(input_id,context_json)
+ SELECT i.id,? FROM thread_inputs i JOIN page_conversations c ON c.task_id=i.task_id
+ WHERE i.id=? AND c.project_id=? AND c.kind=? AND c.instance_id=? AND c.page_id=?`, raw, inputID, s.ref.ProjectID, s.ref.Kind, s.ref.InstanceID, s.ref.PageID)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errors.New("input does not belong to this page")
+	}
+	return nil
+}
+func (s *pageConversationStore) QueuedContext(ctx context.Context, inputID string) (string, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT q.context_json FROM page_queued_contexts q JOIN thread_inputs i ON i.id=q.input_id JOIN page_conversations c ON c.task_id=i.task_id WHERE i.id=? AND c.project_id=? AND c.kind=? AND c.instance_id=? AND c.page_id=?`, inputID, s.ref.ProjectID, s.ref.Kind, s.ref.InstanceID, s.ref.PageID).Scan(&raw)
+	return raw, err
+}

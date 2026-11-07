@@ -30,6 +30,8 @@ test('page overflow fits, resizes, navigates by keyboard and refreshes project l
  assert.equal(await evaluate("document.querySelector('[data-plugin-nav-overflow]').getBoundingClientRect().bottom <= document.querySelector('footer').getBoundingClientRect().top"),true);
  await evaluate("document.querySelector('[data-plugin-nav-overflow] button').click()"); await settle();
  assert.equal(await evaluate("document.querySelectorAll('#plugin-pages-overflow-menu a').length"),initial);
+ await evaluate("document.dispatchEvent(new CustomEvent('htmx:afterSwap',{detail:{target:document.querySelector('footer')}}))");await settle();
+ assert.equal(await evaluate("document.querySelector('[data-plugin-nav-overflow] button').getAttribute('aria-expanded')"),'true');
  assert.match(await evaluate('document.activeElement.textContent'),/Alpha/);
  assert.match(await evaluate("document.activeElement.getAttribute('hx-get')"),/project_id=alpha/);
  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'End'});

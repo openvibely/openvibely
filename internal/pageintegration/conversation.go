@@ -9,6 +9,8 @@ type ConversationStore interface {
 	TaskID(context.Context) (string, error)
 	BindTask(context.Context, string) error
 	SaveSnapshot(context.Context, string, string) error
+	SaveQueuedContext(context.Context, string, string) error
+	QueuedContext(context.Context, string) (string, error)
 }
 
 // Conversation binds the shared chat runtime to a server-authorized page. Begin

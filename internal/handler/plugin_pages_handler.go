@@ -20,6 +20,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/pageplugins"
@@ -56,6 +57,7 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	api.POST("/chat", h.PluginChatSend)
 	api.POST("/chat/stop", h.PluginChatStop)
 	api.GET("/chat/composer-action", h.PluginChatComposerAction)
+	api.GET("/chat/transcript", h.PluginChatTranscript)
 	e.GET("/settings/plugin-pages", h.PluginSettings)
 	e.POST("/settings/plugin-pages/install", h.PluginSettingsInstall)
 	e.POST("/settings/plugin-pages/install-example", h.PluginSettingsInstallExample)
@@ -206,6 +208,12 @@ func (h *Handler) loadPluginChatHistory(ctx context.Context, v *pages.PluginPage
 	}
 	if task != nil {
 		v.ChatTaskID, v.ChatTask, v.ChatExecutions = task.ID, task, execs
+		if h.threadInputRepo != nil {
+			v.ChatPending, err = h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+			if err != nil {
+				return err
+			}
+		}
 		if h.chatAttachmentRepo != nil {
 			v.ChatAttachments, err = h.chatAttachmentRepo.ListByExecutionIDs(ctx, executionIDs(execs))
 			if err != nil {
@@ -610,8 +618,13 @@ func (h *Handler) PluginChatSend(c echo.Context) error {
 	if message == "" || utf8.RuneCountInString(message) > maxPluginChatMessage {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required (max 8000 characters)")
 	}
-	exec, attachments, err := h.startPluginChatTurn(c, r, message, pageChatInput{AgentID: c.FormValue("agent_id"), AttachmentSessionID: strings.TrimSpace(c.FormValue("attachment_session_id"))})
+	exec, attachments, err := h.startPluginChatTurn(c, r, message, pageChatInput{AllowQueue: true, AgentID: c.FormValue("agent_id"), AttachmentSessionID: strings.TrimSpace(c.FormValue("attachment_session_id"))})
 	if err != nil {
+		var queued *pageChatQueued
+		if errors.As(err, &queued) {
+			q := queued.Input
+			return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(q.ID, q.Content, "", q.AttachmentSessionID != "", q.AuthorName))
+		}
 		if pluginChatStatus(err) == http.StatusConflict {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
@@ -911,4 +924,44 @@ func (h *Handler) PluginSettingsRemovePackage(c echo.Context) error {
 	}
 	err = h.pagePlugins.RemovePackage(c.Request().Context(), c.Param("packageId"))
 	return h.renderPluginSettings(c, projectID, "Package removed", err)
+}
+
+// PluginChatTranscript returns the authorized conversation without remounting its composer.
+func (h *Handler) PluginChatTranscript(c echo.Context) error {
+	r, err := h.resolvePluginForRequest(c, false)
+	if err != nil {
+		return err
+	}
+	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
+		return pluginNotFound()
+	}
+	v := pages.PluginPageView{InstanceID: r.Instance.ID}
+	if err = h.loadPluginChatHistory(c.Request().Context(), &v); err != nil {
+		return err
+	}
+	running, err := h.pluginChatRunningExec(c.Request().Context(), r.Instance.ID)
+	if err != nil {
+		return err
+	}
+	var cards []*events.ChatInputRequestEvent
+	if h.chatInputRequestRepo != nil && len(v.ChatExecutions) > 0 {
+		records, err := h.chatInputRequestRepo.ListByExecutions(c.Request().Context(), r.Instance.ProjectID, executionIDs(v.ChatExecutions))
+		if err != nil {
+			return err
+		}
+		for _, record := range records {
+			request, err := chatInputRequestFromRecord(record)
+			if err != nil {
+				return err
+			}
+			cards = append(cards, chatInputRequestForEvent(request))
+		}
+	}
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return render(c, http.StatusOK, templ.Join(
+		components.PageChatMessages(components.PageChatView{ProjectID: r.Instance.ProjectID, ChatTask: v.ChatTask, ChatExecutions: v.ChatExecutions, Attachments: v.ChatAttachments}),
+		components.ChatComposerQueuedInputRows(v.ChatPending, func(models.ThreadInput) string { return "" }),
+		components.ChatComposerActionButtonOOB(components.PageChatFormID+"-primary-action", pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/stop"), running != "", running),
+		pages.ChatInputRequestCards(cards),
+	))
 }

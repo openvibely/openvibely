@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
@@ -106,5 +108,80 @@ func TestPageConversationStoreRejectsCrossProjectTask(t *testing.T) {
 	id, err := wrong.TaskID(t.Context())
 	if err != nil || id != "" {
 		t.Fatal("cross-project lookup returned conversation")
+	}
+}
+
+func TestPageConversationQueuedTurnKeepsContextAndIsolation(t *testing.T) {
+	h, e, configs, stores := setupTestHandlerWithStores(t)
+	project := createProject(t, h, "Queued page")
+	createAgent(t, configs)
+	contexts := pageintegration.NewContextStore()
+	ref := pageintegration.PageRef{Kind: "test", PageID: "report", InstanceID: "queued", ProjectID: project.ID, Title: "Report"}
+	binding := pageintegration.Conversation{Page: ref, Store: stores.PageConversations.ForPage(ref), Contexts: contexts,
+		Resolve: func(context.Context) (pageintegration.Integration, error) { return plainPage{ref}, nil },
+		Begin:   func(ctx context.Context) (context.Context, func(), error) { return ctx, func() {}, nil }, Lifetime: context.Background}
+	starts := make(chan streamingResponseParams, 4)
+	h.startStreamingResponseOverride = func(p streamingResponseParams) error { starts <- p; return nil }
+	c := e.NewContext(httptest.NewRequest("POST", "/test", nil), httptest.NewRecorder())
+	first, _, err := h.startPageChatTurn(c, binding, "first", pageChatInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := <-starts
+	_, err = contexts.Set(h.authPrincipalID(c), ref, pageintegration.Context{Summary: "queued North selection"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.startPageChatTurn(c, binding, "second", pageChatInput{AllowQueue: true})
+	queued, ok := err.(*pageChatQueued)
+	if !ok {
+		t.Fatalf("expected queued input, got %v", err)
+	}
+	if _, err = binding.Store.QueuedContext(t.Context(), queued.Input.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	otherRef := ref
+	otherRef.InstanceID = "other"
+	if _, err = stores.PageConversations.ForPage(otherRef).QueuedContext(t.Context(), queued.Input.ID); err == nil {
+		t.Fatal("another page read queued context")
+	}
+	_, err = contexts.Set(h.authPrincipalID(c), ref, pageintegration.Context{Summary: "later South selection"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = h.execRepo.Complete(t.Context(), first.ID, models.ExecCompleted, "done", "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.taskRepo.UpdateStatus(t.Context(), first.TaskID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(t.Context(), queued.Input.ID, &models.Execution{TaskID: first.TaskID, AgentConfigID: initial.Agent.ID}, &initial.Agent.ID, &initial.Agent); err == nil {
+		t.Fatal("task board claimed page input")
+	}
+	h.startNextQueuedTurnAfter(t.Context(), initial, "")
+	var next streamingResponseParams
+	select {
+	case next = <-starts:
+	case <-time.After(time.Second):
+		t.Fatal("queue did not advance")
+	}
+	if next.TaskID != first.TaskID || next.Message != "second" || next.PrincipalID != initial.PrincipalID || !strings.Contains(next.SystemContext, "queued North selection") || strings.Contains(next.SystemContext, "later South selection") {
+		t.Fatalf("lost queued context: %+v", next)
+	}
+	task, err := h.taskRepo.GetByID(t.Context(), first.TaskID)
+	if err != nil || task.Category != models.CategoryPageChat || task.Status != models.StatusRunning {
+		t.Fatalf("page escaped isolation: %+v %v", task, err)
+	}
+	_, _, err = h.startPageChatTurn(c, binding, "third", pageChatInput{AllowQueue: true})
+	if _, ok = err.(*pageChatQueued); !ok {
+		t.Fatal(err)
+	}
+	if err = h.cancelPageConversation(t.Context(), binding); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := h.threadInputRepo.FindOldestQueuedForTask(t.Context(), first.TaskID)
+	if err != nil || pending != nil {
+		t.Fatalf("Stop left queued work: %+v %v", pending, err)
 	}
 }

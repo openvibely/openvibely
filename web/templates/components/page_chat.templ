@@ -14,94 +14,39 @@ type PageChatView struct {
  ChatExecutions []models.Execution
  ChatTask *models.Task
  Attachments map[string][]models.ChatAttachment
+ PendingInputs []models.ThreadInput
 }
 
 const PageChatFormID = "page-chat-form"
 const PageChatMessagesID = "page-chat-messages"
 
+
+templ PageChatMessages(v PageChatView) {
+ <div id="page-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
+  @ChatMessages(v.ChatExecutions,v.ChatTask,v.Attachments,PageChatMessagesID,"",false,v.ProjectID)
+ </div>
+}
+
 templ PageSideChat(v PageChatView) {
  @SidePanel("page-side-chat", "page-chat-divider", "Page chat") {
-  <div id="page-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
-   @ChatMessages(v.ChatExecutions, v.ChatTask, v.Attachments, PageChatMessagesID, "", false, v.ProjectID)
-  </div>
+  <button type="button" class="btn btn-ghost btn-sm btn-square" data-page-chat-close aria-label="Close page chat" style="position:absolute;right:8px;top:8px;z-index:2">✕</button>
+  @PageChatMessages(v)
   <div class="p-3">
    @ChatInputForm(ChatInputFormConfig{
     FormID: PageChatFormID, InputID: "page-chat-input", PostEndpoint: v.SendURL,
     TargetID: PageChatMessagesID, ProjectID: v.ProjectID, DraftScope: v.SendURL,
-    Agents: v.Agents, ShowModelSelector: true,
+    Agents: v.Agents, ShowModelSelector: true, PendingInputs:v.PendingInputs, QueuedSteerEndpointFor:func(models.ThreadInput)string{return ""},
     IsRunning: v.RunningExec != "", ActiveTurnID: v.RunningExec, StopEndpoint: v.StopURL,
    })
   </div>
   @ChatAutoScrollScript()
-  @pageChatInputRequestsScript()
+  @ChatStreamingResumeInitScript()
  }
+ <style>
+  #page-side-chat [data-page-chat-close]{display:none}
+  #page-side-chat[data-overlay="true"] [data-page-chat-close]{display:flex}
+  #page-side-chat[data-overlay="true"] #page-chat-messages{padding-top:48px}
+ </style>
  @SidePanelScript()
- <script>
- (function() {
-  var panel = document.getElementById('page-side-chat');
-  var root = panel.closest('[data-page-chat-root]');
-  var opener = root.querySelector('[data-page-chat-toggle]');
-  var messages = panel.querySelector('#page-chat-messages');
-  var controller = window.createSidePanel({root:root, panel:panel, opener:opener,
-   storageKey:'page-chat-width', escapeDocked:true,
-   onClose:function() { controller.setOpen(false); opener.focus(); },
-   onLayout:function() { opener.setAttribute('aria-label', panel.hidden ? 'Open page chat' : 'Collapse page chat'); }
-  });
-  opener.addEventListener('click', function() {
-   controller.setOpen(panel.hidden);
-   if (!panel.hidden) { messages.scrollTop = messages.scrollHeight; panel.querySelector('textarea').focus(); }
-  });
-  window.refreshChatComposerAction = function() {
-   if (!panel.isConnected || !window.htmx) return;
-   var endpoint = root.getAttribute('data-page-chat-action-url');
-   return htmx.ajax('GET', endpoint, {target:'#page-chat-form-primary-action', swap:'outerHTML'});
-  };
-  if (window.cleanAssistantMessages) window.cleanAssistantMessages(messages);
- })();
- </script>
-}
-
-script pageChatInputRequestsScript() {
-	function sideChat() { return document.getElementById('page-chat-messages'); }
-	function loadCards(execId) {
-		var box = sideChat();
-		var pair = box && document.getElementById('chat-execution-' + execId);
-		if (!pair || !box.contains(pair)) return;
-		var pid = box.getAttribute('data-project-id') || '';
-		fetch('/chat/input-requests?project_id=' + encodeURIComponent(pid) + '&execution_id=' + encodeURIComponent(execId)).then(function(resp) {
-			if (!resp.ok) throw new Error('HTTP ' + resp.status);
-			return resp.text();
-		}).then(function(html) {
-			if (sideChat() !== box) return;
-			var t = document.createElement('template');
-			t.innerHTML = html;
-			t.content.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
-				if (document.getElementById(card.id)) return;
-				pair.appendChild(card);
-			});
-			window.initChatInputRequestCards(pair);
-			if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(box, true);
-		}).catch(function(err) { console.error('[page-chat] input request load failed:', err); });
-	}
-	window.bindChatInputRequestControls();
-	if (!window._pageChatInputRequestsBound) {
-		window._pageChatInputRequestsBound = true;
-		window.addEventListener('sse-chat-live-event', function(event) {
-			var data = event.detail || {};
-			var box = sideChat();
-			if (!box || (data.project_id && data.project_id !== box.getAttribute('data-project-id'))) return;
-			var request = data.input_request || {};
-			if (data.type === 'chat_user_input_requested' && !request.completed) loadCards(request.exec_id || data.exec_id || '');
-			if (data.type === 'chat_user_input_resolved' || request.completed) {
-				var card = request.id && document.getElementById('chat-input-request-' + request.id);
-				if (card && box.contains(card)) window.completeChatInputRequest(card);
-			}
-		});
-	}
-	var box = sideChat();
-	if (box) {
-		// Cards restored on page load come from the shared execution-pair loader.
-		new MutationObserver(function() { window.initChatInputRequestCards(box); }).observe(box, {childList: true, subtree: true});
-		window.initChatInputRequestCards(box);
-	}
+ <script>if(window.initPageChat) window.initPageChat();</script>
 }

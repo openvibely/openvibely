@@ -33,3 +33,10 @@ func (s conversationStore) BindTask(ctx context.Context, taskID string) error {
 func (s conversationStore) SaveSnapshot(ctx context.Context, execID, raw string) error {
 	return s.manager.store.SaveTurnContext(ctx, execID, s.instanceID, raw)
 }
+
+func (s conversationStore) SaveQueuedContext(ctx context.Context, inputID, raw string) error {
+	return s.manager.store.SaveQueuedPageContext(ctx, s.instanceID, inputID, raw)
+}
+func (s conversationStore) QueuedContext(ctx context.Context, inputID string) (string, error) {
+	return s.manager.store.QueuedPageContext(ctx, s.instanceID, inputID)
+}

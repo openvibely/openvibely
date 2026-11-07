@@ -31,4 +31,6 @@ type PagePluginStore interface {
 	SetConversationTask(ctx context.Context, instanceID, taskID string) error
 	SaveTurnContext(ctx context.Context, executionID, instanceID, snapshotJSON string) error
 	GetTurnContext(ctx context.Context, executionID string) (string, error)
+	SaveQueuedPageContext(context.Context, string, string, string) error
+	QueuedPageContext(context.Context, string, string) (string, error)
 }

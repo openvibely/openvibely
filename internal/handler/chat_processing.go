@@ -19,6 +19,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
@@ -77,6 +78,7 @@ type streamingResponseParams struct {
 	// state, and compaction checkpoints using its persisted conversation task.
 	// It does not select the coding-agent prompt used by task follow-ups.
 	TaskScopedChat              bool
+	PageConversation            *pageintegration.Conversation
 	ChatMode                    models.ChatMode
 	Surface                     chatcontrol.Surface // chat entry point (web/api/telegram/slack)
 	TelegramInitialAckMessageID int
@@ -1614,6 +1616,13 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 			}
 			ctx = restored
 		}
+}
+	if completed.PageConversation != nil {
+		h.startNextQueuedPageTurn(ctx, *completed.PageConversation)
+		return
+	}
+	if completed.TaskScopedChat {
+		return
 	}
 
 	installationTaskID := completed.TaskID

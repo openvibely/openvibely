@@ -27,6 +27,7 @@ type PluginPageView struct {
 	ChatRunningExec  string
  ChatAgents []models.LLMConfig
  ChatAttachments map[string][]models.ChatAttachment
+ ChatPending []models.ThreadInput
 }
 
 func pluginAPI(v PluginPageView, suffix string) string {
@@ -47,6 +48,7 @@ templ PluginPageContent(v PluginPageView) {
 		class="flex flex-col h-full min-h-0"
  data-page-chat-root
  data-page-chat-action-url={ pluginAPI(v, "/chat/composer-action") }
+ data-page-chat-transcript-url={ pluginAPI(v, "/chat/transcript") }
 		data-plugin-instance={ v.InstanceID }
 		data-plugin-handle={ v.Handle }
 		data-project-id={ v.OwningProjectID }
@@ -81,7 +83,7 @@ templ PluginPageContent(v PluginPageView) {
 				@components.PageSideChat(components.PageChatView{
  Title: v.Title, ProjectID: v.OwningProjectID,
  SendURL: pluginAPI(v, "/chat"), StopURL: pluginAPI(v, "/chat/stop"),
- ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, Attachments: v.ChatAttachments, Agents: v.ChatAgents, RunningExec: v.ChatRunningExec,
+ ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, PendingInputs:v.ChatPending, Attachments: v.ChatAttachments, Agents: v.ChatAgents, RunningExec: v.ChatRunningExec,
 })
 			}
 		</div>
@@ -315,6 +317,7 @@ templ pluginHostBridgeScript() {
 			events.addEventListener('closed', function () { events.close(); events = null; });
 		}
 		function streamAnalysis(execID) {
+            if (window.openVibelyPageChat) window.openVibelyPageChat.refresh();
 			if (dead) return;
 			if (!window.openVibelyLive) { post('analysis.done', null, {exec_id: execID, error: 'live transport unavailable'}); return; }
 			var s = window.openVibelyLive.execution(execID, 0, projectID);
@@ -345,7 +348,7 @@ templ pluginHostBridgeScript() {
 		}
 		function onSwap(e) {
 			var t = e.detail && e.detail.target;
-			if (t && (t.id === 'main-content' || t.contains(root))) cleanup();
+			if (e.detail.shouldSwap !== false && t && (t.id === 'main-content' || t.contains(root))) cleanup();
 		}
 		function onMessage(ev) {
 			if (dead || ev.source !== frame.contentWindow) return;

@@ -23,10 +23,57 @@ type PageChatView struct {
 	ChatExecutions []models.Execution
 	ChatTask       *models.Task
 	Attachments    map[string][]models.ChatAttachment
+	PendingInputs  []models.ThreadInput
 }
 
 const PageChatFormID = "page-chat-form"
 const PageChatMessagesID = "page-chat-messages"
+
+func PageChatMessages(v PageChatView) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"page-chat-messages\" class=\"flex-1 min-h-0 overflow-y-auto p-3 space-y-4\" data-project-id=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var2 string
+		templ_7745c5c3_Var2, templ_7745c5c3_Err = templruntime.NewAttributeExpression(v.ProjectID).Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/page_chat.templ`, Line: 25, Col: 112}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = ChatMessages(v.ChatExecutions, v.ChatTask, v.Attachments, PageChatMessagesID, "", false, v.ProjectID).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
 
 func PageSideChat(v PageChatView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -45,7 +92,7 @@ func PageSideChat(v PageChatView) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var2 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var4 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -57,41 +104,28 @@ func PageSideChat(v PageChatView) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"page-chat-messages\" class=\"flex-1 min-h-0 overflow-y-auto p-3 space-y-4\" data-project-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<button type=\"button\" class=\"btn btn-ghost btn-sm btn-square\" data-page-chat-close aria-label=\"Close page chat\" style=\"position:absolute;right:8px;top:8px;z-index:2\">✕</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var3 string
-			templ_7745c5c3_Var3, templ_7745c5c3_Err = templruntime.NewAttributeExpression(v.ProjectID).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/page_chat.templ`, Line: 24, Col: 113}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
+			templ_7745c5c3_Err = PageChatMessages(v).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = ChatMessages(v.ChatExecutions, v.ChatTask, v.Attachments, PageChatMessagesID, "", false, v.ProjectID).Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div><div class=\"p-3\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"p-3\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			templ_7745c5c3_Err = ChatInputForm(ChatInputFormConfig{
 				FormID: PageChatFormID, InputID: "page-chat-input", PostEndpoint: v.SendURL,
 				TargetID: PageChatMessagesID, ProjectID: v.ProjectID, DraftScope: v.SendURL,
-				Agents: v.Agents, ShowModelSelector: true,
+				Agents: v.Agents, ShowModelSelector: true, PendingInputs: v.PendingInputs, QueuedSteerEndpointFor: func(models.ThreadInput) string { return "" },
 				IsRunning: v.RunningExec != "", ActiveTurnID: v.RunningExec, StopEndpoint: v.StopURL,
 			}).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -99,13 +133,17 @@ func PageSideChat(v PageChatView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = pageChatInputRequestsScript().Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ChatStreamingResumeInitScript().Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = SidePanel("page-side-chat", "page-chat-divider", "Page chat").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = SidePanel("page-side-chat", "page-chat-divider", "Page chat").Render(templ.WithChildren(ctx, templ_7745c5c3_Var4), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<style>\n  #page-side-chat [data-page-chat-close]{display:none}\n  #page-side-chat[data-overlay=\"true\"] [data-page-chat-close]{display:flex}\n  #page-side-chat[data-overlay=\"true\"] #page-chat-messages{padding-top:48px}\n </style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -113,63 +151,12 @@ func PageSideChat(v PageChatView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<script>\n (function() {\n  var panel = document.getElementById('page-side-chat');\n  var root = panel.closest('[data-page-chat-root]');\n  var opener = root.querySelector('[data-page-chat-toggle]');\n  var messages = panel.querySelector('#page-chat-messages');\n  var controller = window.createSidePanel({root:root, panel:panel, opener:opener,\n   storageKey:'page-chat-width', escapeDocked:true,\n   onClose:function() { controller.setOpen(false); opener.focus(); },\n   onLayout:function() { opener.setAttribute('aria-label', panel.hidden ? 'Open page chat' : 'Collapse page chat'); }\n  });\n  opener.addEventListener('click', function() {\n   controller.setOpen(panel.hidden);\n   if (!panel.hidden) { messages.scrollTop = messages.scrollHeight; panel.querySelector('textarea').focus(); }\n  });\n  window.refreshChatComposerAction = function() {\n   if (!panel.isConnected || !window.htmx) return;\n   var endpoint = root.getAttribute('data-page-chat-action-url');\n   return htmx.ajax('GET', endpoint, {target:'#page-chat-form-primary-action', swap:'outerHTML'});\n  };\n  if (window.cleanAssistantMessages) window.cleanAssistantMessages(messages);\n })();\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<script>if(window.initPageChat) window.initPageChat();</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		return nil
 	})
-}
-
-func pageChatInputRequestsScript() templ.ComponentScript {
-	return templ.ComponentScript{
-		Name: `__templ_pageChatInputRequestsScript_845c`,
-		Function: `function __templ_pageChatInputRequestsScript_845c(){function sideChat() { return document.getElementById('page-chat-messages'); }
-	function loadCards(execId) {
-		var box = sideChat();
-		var pair = box && document.getElementById('chat-execution-' + execId);
-		if (!pair || !box.contains(pair)) return;
-		var pid = box.getAttribute('data-project-id') || '';
-		fetch('/chat/input-requests?project_id=' + encodeURIComponent(pid) + '&execution_id=' + encodeURIComponent(execId)).then(function(resp) {
-			if (!resp.ok) throw new Error('HTTP ' + resp.status);
-			return resp.text();
-		}).then(function(html) {
-			if (sideChat() !== box) return;
-			var t = document.createElement('template');
-			t.innerHTML = html;
-			t.content.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
-				if (document.getElementById(card.id)) return;
-				pair.appendChild(card);
-			});
-			window.initChatInputRequestCards(pair);
-			if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(box, true);
-		}).catch(function(err) { console.error('[page-chat] input request load failed:', err); });
-	}
-	window.bindChatInputRequestControls();
-	if (!window._pageChatInputRequestsBound) {
-		window._pageChatInputRequestsBound = true;
-		window.addEventListener('sse-chat-live-event', function(event) {
-			var data = event.detail || {};
-			var box = sideChat();
-			if (!box || (data.project_id && data.project_id !== box.getAttribute('data-project-id'))) return;
-			var request = data.input_request || {};
-			if (data.type === 'chat_user_input_requested' && !request.completed) loadCards(request.exec_id || data.exec_id || '');
-			if (data.type === 'chat_user_input_resolved' || request.completed) {
-				var card = request.id && document.getElementById('chat-input-request-' + request.id);
-				if (card && box.contains(card)) window.completeChatInputRequest(card);
-			}
-		});
-	}
-	var box = sideChat();
-	if (box) {
-		// Cards restored on page load come from the shared execution-pair loader.
-		new MutationObserver(function() { window.initChatInputRequestCards(box); }).observe(box, {childList: true, subtree: true});
-		window.initChatInputRequestCards(box);
-	}
-}`,
-		Call:       templ.SafeScript(`__templ_pageChatInputRequestsScript_845c`),
-		CallInline: templ.SafeScriptInline(`__templ_pageChatInputRequestsScript_845c`),
-	}
 }
 
 var _ = templruntime.GeneratedTemplate
