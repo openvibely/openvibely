@@ -1893,6 +1893,24 @@ global.fetch = (url, options) => {
  let opening = window.editPendingThreadInput(button);
  completeHold(); await opening;
  assert.equal(shown, 1);
+ // Clicking inside, or dragging from the editor onto the backdrop, keeps it open.
+ dialogEvents.pointerdown({button:0, target:controls.textarea});
+ await dialogEvents.click({target:controls.textarea});
+ dialogEvents.pointerdown({button:0, target:controls.textarea});
+ await dialogEvents.click({target:dialog});
+ assert.equal(closed, 0);
+ assert.equal(requests.length, 1);
+ // A backdrop click cancels through the hold-release path without saving the draft.
+ dialogEvents.pointerdown({button:0, target:dialog});
+ await dialogEvents.click({target:dialog});
+ assert.equal(closed, 1);
+ assert.equal(requests.length, 2);
+ assert.equal(requests[1].options.body.get('hold'), 'false');
+ assert.equal(requests[1].options.body.get('edit_token'), requests[0].options.body.get('edit_token'));
+ assert.equal(requests[1].options.body.has('content'), false);
+ requests = []; closed = 0;
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
  controls.textarea.value = 'draft';
  listeners['htmx:afterSwap']({detail:{target:{id:'pending-thread-inputs', contains:()=>true}}});
  assert.equal(closed, 0);

@@ -409,6 +409,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				var textarea = dialog.querySelector('textarea');
 				textarea.value = held.content;
 				var saving = false;
+				var outsidePress = false;
+				dialog.addEventListener('pointerdown', function(event) { outsidePress = event.button === 0 && event.target === dialog; });
+				dialog.addEventListener('click', function(event) {
+					var dismiss = outsidePress && event.target === dialog;
+					outsidePress = false;
+					if (dismiss) return releaseEdit();
+				});
 				dialog.addEventListener('cancel', function(event) { event.preventDefault(); releaseEdit(); });
 				dialog.addEventListener('close', function() { if (!released && !leaving) leaveEditor(); detachLifecycle(); dialog.remove(); if (button.isConnected) button.focus(); });
 				async function releaseEdit() {
