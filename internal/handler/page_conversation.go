@@ -57,7 +57,7 @@ func (h *Handler) pageConversationTask(ctx context.Context, binding pageintegrat
 	}
 	task := &models.Task{
 		ProjectID: binding.Page.ProjectID,
-		Title:     "Page chat: " + binding.Page.Title,
+		Title:     fmt.Sprintf("Page chat: %s [%s]", binding.Page.Title, binding.Page.Key()),
 		Prompt:    message,
 		Status:    models.StatusPending,
 		Category:  pageConversationCategory,

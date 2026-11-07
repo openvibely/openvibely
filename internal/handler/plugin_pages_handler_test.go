@@ -244,6 +244,12 @@ func TestPluginAsset_SandboxHeadersAndBlockedFiles(t *testing.T) {
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing nosniff")
 	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatal("opaque-origin module and font requests require CORS")
+	}
+	if rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatal("plugin assets must not enable credentialed CORS")
+	}
 	for _, p := range []string{"plugin.json", "..%2f..%2fplugin.json", "missing.js"} {
 		if rec := env.do(t, http.MethodGet, "/plugin-assets/"+handle+"/"+p, "", nil); rec.Code != http.StatusNotFound {
 			t.Errorf("%s served: %d", p, rec.Code)

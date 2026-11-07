@@ -317,6 +317,9 @@ func (h *Handler) PluginAsset(c echo.Context) error {
 	hdr.Set("Referrer-Policy", "no-referrer")
 	hdr.Set("Cache-Control", "no-store")
 	hdr.Set("Content-Type", ctype)
+	// Sandboxed pages have an opaque origin. Modules and fonts need CORS;
+	// the page-load capability above still authorizes every asset request.
+	hdr.Set("Access-Control-Allow-Origin", "*")
 	hdr.Set("X-Frame-Options", "SAMEORIGIN")
 	if rel == r.Page.Entry {
 		head := make([]byte, pluginHTMLPrefixBytes)
