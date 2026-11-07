@@ -5434,3 +5434,70 @@ func waitForExecutionStreamSubscribers(t *testing.T, hub *events.ExecutionStream
 	}
 	t.Fatalf("timed out waiting for %d execution stream subscribers; got %d", want, hub.SubscriberCount())
 }
+
+// Delay the HTTP response after admission, without delaying database persistence.
+type heldChatQueueResponse struct {
+	http.ResponseWriter
+	started chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (w *heldChatQueueResponse) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.started) })
+	<-w.release
+	return w.ResponseWriter.Write(p)
+}
+
+func TestHandler_ChatSend_PersistsSecondMessageBeforeFirstResponseCompletes(t *testing.T) {
+	h, e, configs := setupTestHandler(t)
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Concurrent chat queue")
+	task := createTask(t, h, project.ID, "Active chat", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+	endpoint := "/chat/send?project_id=" + project.ID
+	first := httptest.NewRecorder()
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	writer := &heldChatQueueResponse{ResponseWriter: first, started: make(chan struct{}), release: release}
+	form := url.Values{"message": {"first queued message"}, "agent_id": {agent.ID}}
+	req := httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+	req.Header.Set("HX-Request", "true")
+	done := make(chan struct{})
+	go func() { defer close(done); e.ServeHTTP(writer, req) }()
+	select {
+	case <-writer.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first response did not reach the response writer")
+	}
+	secondDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		secondDone <- htmxPost(e, endpoint, url.Values{"message": {"second queued message"}, "agent_id": {agent.ID}})
+	}()
+	select {
+	case second := <-secondDone:
+		assertCode(t, second, http.StatusOK)
+		assertContains(t, second, `data-input-mode="queued"`)
+	case <-time.After(5 * time.Second):
+		t.Fatal("second admission waited for the first HTTP response")
+	}
+	inputs, err := h.threadInputRepo.ListPendingForChat(context.Background(), project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 2)
+	assert.Equal(t, "first queued message", inputs[0].Content)
+	assert.Equal(t, "second queued message", inputs[1].Content)
+	// Reloading the queue reads the persisted rows, independent of either composer.
+	reloaded := htmxGet(e, "/chat/pending-inputs?project_id="+project.ID)
+	assertCode(t, reloaded, http.StatusOK)
+	assertContains(t, reloaded, "first queued message")
+	assertContains(t, reloaded, "second queued message")
+	releaseOnce.Do(func() { close(release) })
+	<-done
+	assertCode(t, first, http.StatusOK)
+}

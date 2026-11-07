@@ -540,7 +540,8 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  // Rebuilt Stop controls must still run while sends are waiting.
  message.value='';message.dispatchEvent(new Event('input',{bubbles:true}));
  form.querySelector('[aria-label="Stop response"]').click();await until(()=>stopped);
- assert(completed.length===0,'Stop completes independently of the held send');
+ await until(()=>completed.length===2);
+ assert(!completed.some(item=>item.message==='first'),'first request must still be held while later sends complete');
  message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';tier.value='default';
  message.dispatchEvent(new Event('input',{bubbles:true}));
  await fetch('/release');await until(()=>completed.length>=2);
@@ -554,9 +555,9 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  assert(sent.service_tier==='default'&&records[2].service_tier==='priority'&&tier.value==='default','queued sends retain their own tier and preserve draft tier');
  assert(sent.attachment_session_id==='queued-attachment','queued request retains attachments');
  assert(sent.agent_id==='a'&&sent.reasoning_effort==='high'&&sent.model_selection_managed==='1','queued request retains model ownership and effort');
- assert(completed[1].message==='queued follow-up'&&completed[1].attachment==='queued-attachment'&&completed[1].fallback===true,'queued request retains completion metadata');
+ assert(completed.some(item=>item.message==='queued follow-up'&&item.attachment==='queued-attachment'&&item.fallback===true),'queued request retains completion metadata');
  assert(records[2].message==='third message'&&records[2].attachment_session_id==='third-attachment'&&records[2].agent_id==='b'&&records[2].reasoning_effort==='medium'&&records[2].model_selection_managed==='1','third send retains its own snapshot');
- assert(completed[2].message==='third message'&&completed[2].fallback===false,'third send retains independent completion metadata');
+ assert(completed.some(item=>item.message==='third message'&&item.fallback===false),'third send retains independent completion metadata');
  assert(message.value==='unsent newer draft'&&attachment.value==='newer-attachment'&&model.value==='b'&&effort.value==='low','completion preserves newer draft and settings');
  assert(!form._chatNextSubmissionPayload,'no stale snapshot on the form');
 

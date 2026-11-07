@@ -1559,7 +1559,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			method="post"
 			novalidate
 			hx-post={ config.PostEndpoint }
-			hx-sync="this:queue all"
 			hx-target={ "#" + config.TargetID }
 			hx-swap="beforeend"
 			data-input-id={ config.InputID }
@@ -3470,6 +3469,21 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 					// Capture and clear the outgoing draft at request handoff.
 					// A user may type or attach a steering update while an earlier send is still in flight.
+					// Give each HTTP submission its own synchronization scope. The server
+					// persists follow-ups in thread_inputs instead of waiting in HTMX.
+					form.addEventListener('htmx:confirm', function(event) {
+						if (!event.detail || event.detail.elt !== form) return;
+						var scope = document.createElement('span');
+						window._ovComposerRequestSequence = (window._ovComposerRequestSequence || 0) + 1;
+						scope.id = 'composer-request-' + window._ovComposerRequestSequence;
+						scope.hidden = true;
+						document.body.append(scope);
+						form.setAttribute('hx-sync', '#' + scope.id + ':drop');
+						form._chatRequestScope = scope;
+						queueMicrotask(function() {
+							if (!scope._requestStarted) scope.remove();
+						});
+					});
 					form.addEventListener('htmx:beforeRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
 						var triggeringEvent = event.detail.requestConfig && event.detail.requestConfig.triggeringEvent;
@@ -3480,6 +3494,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						form._beginChatSubmission(payload);
 						releasePendingSubmission(payload);
 						var request = event.detail.xhr || {};
+						request._chatRequestScope = form._chatRequestScope;
+						if (request._chatRequestScope) request._chatRequestScope._requestStarted = true;
 						request._chatSubmittedPayload = payload;
 						request._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';
 						request._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();
@@ -3491,6 +3507,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					form.addEventListener('htmx:afterRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
 						var request = event.detail.xhr || {};
+						if (request._chatRequestScope) request._chatRequestScope.remove();
 						var completedIntent = request._chatSubmittedIntent || 'normal';
 						var submittedMessage = request._chatSubmittedMessage || '';
 						var submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';

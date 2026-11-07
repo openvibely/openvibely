@@ -65,6 +65,7 @@ type Handler struct {
 	broadcaster                *events.Broadcaster
 	chatBroadcaster            *events.ChatBroadcaster
 	chatInputRequests          *chatInputRequestBroker
+	chatSendAdmissionMu        sync.Mutex
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	nativeLiveTickets          nativeLiveTickets

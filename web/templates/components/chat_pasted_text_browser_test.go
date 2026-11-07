@@ -149,22 +149,19 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  delete window._ovPasteDrafts[pasteKey];await remount();
  assert(form._captureChatSubmission().message===large,'surviving card was not persisted');
 
- // A queued send never reaches the server after its composer is removed.
- // Restore it alongside the newer draft, without restoring the in-flight send.
+
+ // A second message reaches the server while the first HTTP request is held.
  const auditSends=[],previousSend=XMLHttpRequest.prototype.send;
  XMLHttpRequest.prototype.send=function(body){auditSends.push(new URLSearchParams(body).get('message'));return previousSend.call(this,body);};
  holdSend=true;send();const releaseFirst=releaseSend;
  const queuedText='queued second card '.repeat(500),nextDraft='new unsent card '.repeat(500);
  input.value='queued instructions';paste(queuedText);send();assertDraftCleared();
- paste(nextDraft);await remount();
- assert(cards().length===3,'navigation did not restore queued text and card alongside newer draft');
- const recovered=form._captureChatSubmission().message;
- assert(recovered===nextDraft+'\n\nqueued instructions\n\n'+queuedText,'queued recovery changed draft contents');
- releaseFirst();await wait();await wait();
- assert(auditSends.filter(Boolean).length===1,'cancelled queued send reached the server');
- assert(form._captureChatSubmission().message===recovered,'first completion erased recovered draft');
+ paste(nextDraft);await wait();
+ assert(auditSends.filter(Boolean).length===2,'second send waited in the browser');
+ assert(document.getElementById('messages').textContent.includes(queuedText),'second send did not reach server before first completed');
+ await remount();releaseFirst();await wait();
+ assert(form._captureChatSubmission().message===nextDraft,'completed requests erased newer draft');
  assert(window._ovPendingComposerSubmissions.size===0,'pending submission registry leaked entries');
- await remount();assert(form._captureChatSubmission().message===recovered,'recovered draft did not survive another remount');
  form.querySelectorAll('[aria-label="Remove pasted text"]').forEach(button=>button.click());paste(large);
  XMLHttpRequest.prototype.send=previousSend;
  // Navigating with an open editor must discard its unsaved edit and remove the dialog.
