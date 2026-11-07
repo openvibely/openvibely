@@ -2,6 +2,7 @@ package pageplugins
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -39,7 +40,10 @@ func SafeJoin(root, rel string) (string, error) {
 	return resolved, nil
 }
 
-// HashTree hashes every regular file (sorted relative path + contents). Any
+// HashPrefix is versioned so hashes from older formats never match current content.
+const HashPrefix = "sha256-v2:"
+
+// HashTree hashes every regular file as length-prefixed path + per-file digest. Any
 // symlink or special file is rejected so the hash covers what will be served/executed.
 func HashTree(fsys fs.FS) (string, error) {
 	var files []string
@@ -73,20 +77,25 @@ func HashTree(fsys fs.FS) (string, error) {
 	}
 	sort.Strings(files)
 	h := sha256.New()
+	h.Write([]byte("openvibely-page-plugin-tree-v2\x00"))
+	var n [8]byte
 	for _, p := range files {
 		f, err := fsys.Open(p)
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(h, "%s\x00", p)
-		_, err = io.Copy(h, f)
+		fh := sha256.New()
+		_, err = io.Copy(fh, f)
 		f.Close()
 		if err != nil {
 			return "", err
 		}
-		h.Write([]byte{0})
+		binary.BigEndian.PutUint64(n[:], uint64(len(p)))
+		h.Write(n[:])
+		h.Write([]byte(p))
+		h.Write(fh.Sum(nil))
 	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+	return HashPrefix + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // copyTree copies a validated package into dst, preserving the executable bit only.

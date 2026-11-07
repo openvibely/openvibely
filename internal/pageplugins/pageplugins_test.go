@@ -100,6 +100,25 @@ func TestHashTreeDetectsChanges(t *testing.T) {
 	}
 }
 
+func TestHashTreeFileBoundariesAreUnambiguous(t *testing.T) {
+	a := fstest.MapFS{"a": {Data: []byte("x\x00b\x00y")}, "b": {Data: []byte("z")}}
+	b := fstest.MapFS{"a": {Data: []byte("x")}, "b": {Data: []byte("y\x00b\x00z")}}
+	ha, err := HashTree(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hb, err := HashTree(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ha == hb {
+		t.Fatalf("different package trees produced the same hash %s", ha)
+	}
+	if !strings.HasPrefix(ha, HashPrefix) {
+		t.Fatalf("hash %q missing %q prefix", ha, HashPrefix)
+	}
+}
+
 func TestParseBridgeMessage(t *testing.T) {
 	ok := `{"v":1,"type":"op.invoke","id":"m1","handle":"h","payload":{"operation":"refresh_data"}}`
 	m, err := ParseBridgeMessage([]byte(ok), "h")
