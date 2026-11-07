@@ -1,15 +1,77 @@
--- +goose Up
 -- +goose NO TRANSACTION
--- Page side-chat tasks get their own hidden category instead of the unused legacy 'freezer'.
+-- +goose Up
+-- First release of custom pages; upgrade directly from main version 225.
 
 PRAGMA foreign_keys=OFF;
 PRAGMA legacy_alter_table=ON;
+BEGIN IMMEDIATE;
+
+-- Installed page-plugin packages are global and immutable per (plugin_id, version).
+CREATE TABLE page_plugin_packages (
+    id            TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    plugin_id     TEXT NOT NULL,
+    version       TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    install_path  TEXT NOT NULL,
+    installed_by  TEXT NOT NULL DEFAULT '',
+    installed_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (plugin_id, version)
+);
+
+-- A page-plugin instance belongs to exactly one project. Config and state are per instance.
+CREATE TABLE page_plugin_instances (
+    id              TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    package_id      TEXT NOT NULL REFERENCES page_plugin_packages(id) ON DELETE RESTRICT,
+    page_id         TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 0,
+    config_json     TEXT NOT NULL DEFAULT '{}',
+    state_json      TEXT NOT NULL DEFAULT '{}',
+    approved_hash   TEXT NOT NULL DEFAULT '',
+    approved_by     TEXT NOT NULL DEFAULT '',
+    approved_at     DATETIME,
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at      DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (project_id, package_id, page_id)
+);
+CREATE INDEX idx_page_plugin_instances_project ON page_plugin_instances(project_id, enabled);
+
+CREATE TABLE page_conversations (
+ project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL,
+ instance_id TEXT NOT NULL,
+ page_id TEXT NOT NULL,
+ task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+ PRIMARY KEY(project_id, kind, instance_id, page_id)
+);
+CREATE TABLE page_turn_contexts (
+ execution_id TEXT PRIMARY KEY REFERENCES executions(id) ON DELETE CASCADE,
+ snapshot_json TEXT NOT NULL
+);
+-- Temporary recovery information, removed after update commit or rollback.
+CREATE TABLE page_plugin_replacements (
+ instance_id TEXT PRIMARY KEY REFERENCES page_plugin_instances(id) ON DELETE CASCADE,
+ package_id TEXT NOT NULL REFERENCES page_plugin_packages(id) ON DELETE RESTRICT,
+ approved_hash TEXT NOT NULL,
+ approved_by TEXT NOT NULL,
+ approved_at DATETIME,
+ was_enabled INTEGER NOT NULL
+);
+CREATE TABLE page_queued_contexts (
+ input_id TEXT PRIMARY KEY REFERENCES thread_inputs(id) ON DELETE CASCADE,
+ context_json TEXT NOT NULL
+);
+
 
 DROP TRIGGER IF EXISTS schedule_admission_task_withdrawn;
 DROP TRIGGER IF EXISTS executions_history_metadata_task_update;
 DROP TRIGGER IF EXISTS all_projects_chat_only_insert;
 DROP TRIGGER IF EXISTS all_projects_chat_only_update;
 DROP TRIGGER IF EXISTS task_checkpoint_cleanup;
+DROP INDEX IF EXISTS idx_tasks_chat_owner;
 DROP INDEX IF EXISTS idx_tasks_project_id;
 DROP INDEX IF EXISTS idx_tasks_category;
 DROP INDEX IF EXISTS idx_tasks_status;
@@ -62,16 +124,17 @@ CREATE TABLE tasks (
     auto_merge_on_goal_achieved INTEGER NOT NULL DEFAULT 0,
     author_user_id TEXT NOT NULL DEFAULT '',
     author_name TEXT NOT NULL DEFAULT '',
-    title_explicitly_set INTEGER NOT NULL DEFAULT 0
+    title_explicitly_set INTEGER NOT NULL DEFAULT 0,
+    chat_owner_user_id TEXT NOT NULL DEFAULT ''
 );
 
-INSERT INTO tasks (id,project_id,title,category,priority,status,prompt,agent_id,tag,display_order,created_at,updated_at,parent_task_id,chain_config,execution_cost_cents,execution_duration_ms,worktree_path,worktree_branch,auto_merge,merge_target_branch,merge_status,created_via,telegram_chat_id,agent_definition_id,base_branch,base_commit_sha,lineage_depth,completed_at,swarm_role,swarm_status,swarm_config,swarm_sequence,auto_merge_on_goal_achieved,author_user_id,author_name,title_explicitly_set)
-SELECT id,project_id,title,category,priority,status,prompt,agent_id,tag,display_order,created_at,updated_at,parent_task_id,chain_config,execution_cost_cents,execution_duration_ms,worktree_path,worktree_branch,auto_merge,merge_target_branch,merge_status,created_via,telegram_chat_id,agent_definition_id,base_branch,base_commit_sha,lineage_depth,completed_at,swarm_role,swarm_status,swarm_config,swarm_sequence,auto_merge_on_goal_achieved,author_user_id,author_name,title_explicitly_set FROM tasks_old;
+INSERT INTO tasks (id,project_id,title,category,priority,status,prompt,agent_id,tag,display_order,created_at,updated_at,parent_task_id,chain_config,execution_cost_cents,execution_duration_ms,worktree_path,worktree_branch,auto_merge,merge_target_branch,merge_status,created_via,telegram_chat_id,agent_definition_id,base_branch,base_commit_sha,lineage_depth,completed_at,swarm_role,swarm_status,swarm_config,swarm_sequence,auto_merge_on_goal_achieved,author_user_id,author_name,title_explicitly_set,chat_owner_user_id)
+SELECT id,project_id,title,category,priority,status,prompt,agent_id,tag,display_order,created_at,updated_at,parent_task_id,chain_config,execution_cost_cents,execution_duration_ms,worktree_path,worktree_branch,auto_merge,merge_target_branch,merge_status,created_via,telegram_chat_id,agent_definition_id,base_branch,base_commit_sha,lineage_depth,completed_at,swarm_role,swarm_status,swarm_config,swarm_sequence,auto_merge_on_goal_achieved,author_user_id,author_name,title_explicitly_set,chat_owner_user_id FROM tasks_old;
 
 DROP TABLE tasks_old;
 
-UPDATE tasks SET category = 'page_chat' WHERE id IN (SELECT task_id FROM page_conversations);
 
+CREATE INDEX idx_tasks_chat_owner ON tasks(project_id, chat_owner_user_id, category);
 CREATE INDEX idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX idx_tasks_category ON tasks(category);
 CREATE INDEX idx_tasks_status ON tasks(status);
@@ -131,14 +194,24 @@ BEGIN
 END;
 -- +goose StatementEnd
 
+COMMIT;
 PRAGMA foreign_keys=ON;
 PRAGMA legacy_alter_table=OFF;
 
+
 -- +goose Down
--- +goose NO TRANSACTION
+
 
 PRAGMA foreign_keys=OFF;
 PRAGMA legacy_alter_table=ON;
+BEGIN IMMEDIATE;
+DROP TABLE page_queued_contexts;
+DROP TABLE page_turn_contexts;
+DROP TABLE page_conversations;
+DROP TABLE page_plugin_replacements;
+DROP TABLE page_plugin_instances;
+DROP TABLE page_plugin_packages;
+
 
 UPDATE tasks SET category = 'freezer' WHERE category = 'page_chat';
 
@@ -147,6 +220,7 @@ DROP TRIGGER IF EXISTS executions_history_metadata_task_update;
 DROP TRIGGER IF EXISTS all_projects_chat_only_insert;
 DROP TRIGGER IF EXISTS all_projects_chat_only_update;
 DROP TRIGGER IF EXISTS task_checkpoint_cleanup;
+DROP INDEX IF EXISTS idx_tasks_chat_owner;
 DROP INDEX IF EXISTS idx_tasks_project_id;
 DROP INDEX IF EXISTS idx_tasks_category;
 DROP INDEX IF EXISTS idx_tasks_status;
@@ -199,14 +273,16 @@ CREATE TABLE tasks (
     auto_merge_on_goal_achieved INTEGER NOT NULL DEFAULT 0,
     author_user_id TEXT NOT NULL DEFAULT '',
     author_name TEXT NOT NULL DEFAULT '',
-    title_explicitly_set INTEGER NOT NULL DEFAULT 0
+    title_explicitly_set INTEGER NOT NULL DEFAULT 0,
+    chat_owner_user_id TEXT NOT NULL DEFAULT ''
 );
 
-INSERT INTO tasks (id,project_id,title,category,priority,status,prompt,agent_id,tag,display_order,created_at,updated_at,parent_task_id,chain_config,execution_cost_cents,execution_duration_ms,worktree_path,worktree_branch,auto_merge,merge_target_branch,merge_status,created_via,telegram_chat_id,agent_definition_id,base_branch,base_commit_sha,lineage_depth,completed_at,swarm_role,swarm_status,swarm_config,swarm_sequence,auto_merge_on_goal_achieved,author_user_id,author_name,title_explicitly_set)
-SELECT id,project_id,title,category,priority,status,prompt,agent_id,tag,display_order,created_at,updated_at,parent_task_id,chain_config,execution_cost_cents,execution_duration_ms,worktree_path,worktree_branch,auto_merge,merge_target_branch,merge_status,created_via,telegram_chat_id,agent_definition_id,base_branch,base_commit_sha,lineage_depth,completed_at,swarm_role,swarm_status,swarm_config,swarm_sequence,auto_merge_on_goal_achieved,author_user_id,author_name,title_explicitly_set FROM tasks_old;
+INSERT INTO tasks (id,project_id,title,category,priority,status,prompt,agent_id,tag,display_order,created_at,updated_at,parent_task_id,chain_config,execution_cost_cents,execution_duration_ms,worktree_path,worktree_branch,auto_merge,merge_target_branch,merge_status,created_via,telegram_chat_id,agent_definition_id,base_branch,base_commit_sha,lineage_depth,completed_at,swarm_role,swarm_status,swarm_config,swarm_sequence,auto_merge_on_goal_achieved,author_user_id,author_name,title_explicitly_set,chat_owner_user_id)
+SELECT id,project_id,title,category,priority,status,prompt,agent_id,tag,display_order,created_at,updated_at,parent_task_id,chain_config,execution_cost_cents,execution_duration_ms,worktree_path,worktree_branch,auto_merge,merge_target_branch,merge_status,created_via,telegram_chat_id,agent_definition_id,base_branch,base_commit_sha,lineage_depth,completed_at,swarm_role,swarm_status,swarm_config,swarm_sequence,auto_merge_on_goal_achieved,author_user_id,author_name,title_explicitly_set,chat_owner_user_id FROM tasks_old;
 
 DROP TABLE tasks_old;
 
+CREATE INDEX idx_tasks_chat_owner ON tasks(project_id, chat_owner_user_id, category);
 CREATE INDEX idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX idx_tasks_category ON tasks(category);
 CREATE INDEX idx_tasks_status ON tasks(status);
@@ -266,5 +342,6 @@ BEGIN
 END;
 -- +goose StatementEnd
 
+COMMIT;
 PRAGMA foreign_keys=ON;
 PRAGMA legacy_alter_table=OFF;

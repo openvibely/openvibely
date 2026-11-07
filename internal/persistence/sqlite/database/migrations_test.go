@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 228
+const latestMigrationVersion = 226
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -4241,102 +4241,89 @@ func TestMigration212PreservesExistingGeneratedFiles(t *testing.T) {
 	}
 }
 
-func TestMigration225PreservesPageConversations(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "pages.db"))
+func TestMigration226CustomPagesFromMain(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "custom-pages.db"))
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.UpTo(db, ".", 224); err != nil {
-		t.Fatal(err)
-	}
-	_, err := db.Exec(`
- INSERT INTO projects(id,name) VALUES('page-project','Pages');
- INSERT INTO tasks(id,project_id,title,category,status) VALUES('page-task','page-project','Page chat','freezer','pending');
- INSERT INTO executions(id,task_id,task_project_id,status) VALUES('page-exec','page-task','page-project','completed');
- INSERT INTO page_plugin_packages(id,plugin_id,version,name,content_hash,manifest_json,install_path) VALUES('pkg','example','1.0.0','Example','hash','{}','/unused');
- INSERT INTO page_plugin_instances(id,project_id,package_id,page_id,title) VALUES('instance','page-project','pkg','sales','Sales');
- INSERT INTO page_plugin_conversations(instance_id,task_id) VALUES('instance','page-task');
- INSERT INTO page_plugin_turn_contexts(execution_id,instance_id,snapshot_json) VALUES('page-exec','instance','{"summary":"saved context"}');
- `)
-	if err != nil {
 		t.Fatal(err)
 	}
 	if err := goose.UpTo(db, ".", 225); err != nil {
 		t.Fatal(err)
 	}
-	var task, raw string
-	if err := db.QueryRow(`SELECT task_id FROM page_conversations WHERE project_id='page-project' AND kind='plugin' AND instance_id='instance' AND page_id='sales'`).Scan(&task); err != nil || task != "page-task" {
-		t.Fatalf("binding: %q %v", task, err)
-	}
-	if err := db.QueryRow(`SELECT snapshot_json FROM page_turn_contexts WHERE execution_id='page-exec'`).Scan(&raw); err != nil || raw != `{"summary":"saved context"}` {
-		t.Fatalf("snapshot: %q %v", raw, err)
-	}
-	if err := goose.DownTo(db, ".", 224); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRow(`SELECT task_id FROM page_plugin_conversations WHERE instance_id='instance'`).Scan(&task); err != nil || task != "page-task" {
-		t.Fatalf("rollback binding: %q %v", task, err)
-	}
-	if err := goose.UpTo(db, ".", 225); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestMigration227MovesPageConversationTasksToPageChat(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "page-chat.db"))
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.UpTo(db, ".", 226); err != nil {
-		t.Fatal(err)
-	}
-	_, err := db.Exec(`
- INSERT INTO projects(id,name) VALUES('p','Pages');
- INSERT INTO tasks(id,project_id,title,category,status) VALUES('page-task','p','Page chat','freezer','pending');
- INSERT INTO tasks(id,project_id,title,category,status) VALUES('other','p','Other','freezer','pending');
- INSERT INTO executions(id,task_id,task_project_id,status) VALUES('page-exec','page-task','p','completed');
- INSERT INTO page_conversations(project_id,kind,instance_id,page_id,task_id) VALUES('p','builtin','','analytics','page-task');
- `)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.UpTo(db, ".", 227); err != nil {
-		t.Fatal(err)
-	}
-	category := func(id string) string {
-		var c string
-		if err := db.QueryRow(`SELECT category FROM tasks WHERE id=?`, id).Scan(&c); err != nil {
+	exec := func(query string) {
+		t.Helper()
+		if _, err := db.Exec(query); err != nil {
 			t.Fatal(err)
 		}
-		return c
 	}
-	if got := category("page-task"); got != "page_chat" {
-		t.Fatalf("page task category = %q", got)
+	exec(`INSERT INTO projects(id,name) VALUES('p','Pages');
+ INSERT INTO tasks(id,project_id,title,category,chat_owner_user_id,title_explicitly_set) VALUES('chat','p','Existing chat','chat','local-owner',1);
+ INSERT INTO tasks(id,project_id,title,category,parent_task_id) VALUES('child','p','Existing task','backlog','chat');
+ INSERT INTO task_run_identities(task_id,user_id) VALUES('chat','local-owner');
+ INSERT INTO executions(id,task_id,task_project_id,status) VALUES('existing-exec','chat','p','completed');
+ INSERT INTO execution_run_identities(execution_id,user_id) VALUES('existing-exec','local-owner');`)
+	checkExisting := func() {
+		t.Helper()
+		var owner, parent, runUser string
+		var explicit int
+		if err := db.QueryRow(`SELECT chat_owner_user_id,title_explicitly_set FROM tasks WHERE id='chat'`).Scan(&owner, &explicit); err != nil {
+			t.Fatal(err)
+		}
+		if owner != "local-owner" || explicit != 1 {
+			t.Fatalf("existing chat changed: owner=%q explicit=%d", owner, explicit)
+		}
+		if err := db.QueryRow(`SELECT parent_task_id FROM tasks WHERE id='child'`).Scan(&parent); err != nil || parent != "chat" {
+			t.Fatalf("parent lost: %q %v", parent, err)
+		}
+		if err := db.QueryRow(`SELECT user_id FROM execution_run_identities WHERE execution_id='existing-exec'`).Scan(&runUser); err != nil || runUser != "local-owner" {
+			t.Fatalf("execution identity lost: %q %v", runUser, err)
+		}
+		for _, name := range []string{"idx_tasks_chat_owner", "schedule_admission_task_withdrawn", "executions_history_metadata_task_update", "all_projects_chat_only_insert", "all_projects_chat_only_update", "task_checkpoint_cleanup"} {
+			var n int
+			if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name=?`, name).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("schema object %s: %d %v", name, n, err)
+			}
+		}
+		rows, err := db.Query(`PRAGMA foreign_key_check`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bad := rows.Next()
+		rows.Close()
+		if bad {
+			t.Fatal("foreign key violation")
+		}
+		var enabled int
+		if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&enabled); err != nil || enabled != 1 {
+			t.Fatalf("foreign keys disabled: %d %v", enabled, err)
+		}
 	}
-	if got := category("other"); got != "freezer" {
-		t.Fatalf("other task category = %q", got)
-	}
-	var n int
-	if err := db.QueryRow(`SELECT count(*) FROM executions WHERE task_id='page-task'`).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("executions = %d %v", n, err)
-	}
-	rows, err := db.Query(`PRAGMA foreign_key_check`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rows.Next() {
-		t.Fatal("foreign key violations after migration")
-	}
-	rows.Close()
-	if _, err := db.Exec(`DELETE FROM tasks WHERE id='page-task'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRow(`SELECT count(*) FROM page_conversations`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("page conversations after task delete = %d %v", n, err)
-	}
-	if err := goose.DownTo(db, ".", 226); err != nil {
-		t.Fatal(err)
+	for pass := 0; pass < 2; pass++ {
+		if err := goose.UpTo(db, ".", 226); err != nil {
+			t.Fatal(err)
+		}
+		checkExisting()
+		for _, table := range []string{"page_plugin_packages", "page_plugin_instances", "page_conversations", "page_turn_contexts", "page_plugin_replacements", "page_queued_contexts"} {
+			var n int
+			if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("missing final table %s: %v", table, err)
+			}
+		}
+		exec(`INSERT INTO tasks(id,project_id,title,category) VALUES('page','p','Page chat','page_chat');
+   INSERT INTO page_conversations(project_id,kind,instance_id,page_id,task_id) VALUES('p','builtin','','analytics','page');
+   INSERT INTO executions(id,task_id,task_project_id,status) VALUES('page-exec','page','p','completed');
+   INSERT INTO page_turn_contexts(execution_id,snapshot_json) VALUES('page-exec','{}');
+   DELETE FROM tasks WHERE id='page';`)
+		var n int
+		if err := db.QueryRow(`SELECT (SELECT count(*) FROM page_conversations)+(SELECT count(*) FROM page_turn_contexts)`).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("page cascade failed: %d %v", n, err)
+		}
+		if err := goose.DownTo(db, ".", 225); err != nil {
+			t.Fatal(err)
+		}
+		checkExisting()
+		if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE 'page_%'`).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("page tables remain after rollback: %d %v", n, err)
+		}
 	}
 }
