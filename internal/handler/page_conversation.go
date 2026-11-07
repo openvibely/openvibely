@@ -145,7 +145,7 @@ func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conv
 			return nil, nil, err
 		}
 		if active == nil {
-			go h.startNextQueuedPageTurn(context.WithoutCancel(ctx), binding)
+			h.goStartNextQueuedTurnAfter(streamingResponseParams{ProjectID: binding.Page.ProjectID, TaskID: task.ID, PageConversation: &binding}, "")
 		}
 		return nil, nil, &pageChatQueued{Input: queued}
 	}
@@ -369,7 +369,7 @@ func (h *Handler) startNextQueuedPageTurn(ctx context.Context, binding pageinteg
 	if err = h.authorizePageTurn(ctx, turn.Principal); err != nil {
 		if errors.Is(err, errPageTurnUnauthorized) {
 			if _, err = h.threadInputRepo.CancelPending(ctx, queued.ID); err == nil {
-				go h.startNextQueuedPageTurn(context.WithoutCancel(ctx), binding)
+				h.goStartNextQueuedTurnAfter(streamingResponseParams{ProjectID: binding.Page.ProjectID, TaskID: taskID, PageConversation: &binding}, "")
 			}
 		}
 		return

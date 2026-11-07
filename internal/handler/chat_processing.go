@@ -1600,8 +1600,9 @@ func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID 
 	return ad
 }
 
-// registerTaskCancellation registers a cancel function for a task with the worker service.
-// No-op if worker service is unavailable.
+// startNextQueuedTurnAfter is the shared queue dispatcher for completion, edit
+// release, expired editors, and restart recovery. Recover page identity here so
+// callers with only a persisted task ID cannot accidentally use the coding runner.
 func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed streamingResponseParams, excludeExecID string) {
 	if completed.ProjectID == models.AllProjectsID && !completed.IsTaskFollowup && h.projectAccessSvc != nil {
 		if _, identified := models.PrincipalFromContext(ctx); !identified {
@@ -1617,6 +1618,25 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 			ctx = restored
 		}
 }
+	if completed.PageConversation == nil && completed.TaskID != "" && (completed.IsTaskFollowup || completed.TaskScopedChat) {
+		if h.taskRepo == nil {
+			return
+		}
+		task, err := h.taskRepo.GetByID(ctx, completed.TaskID)
+		if err != nil || task == nil {
+			applog.Infof("[handler] queue routing task=%s: unavailable (%v)", completed.TaskID, err)
+			return
+		}
+		completed.ProjectID = task.ProjectID
+		if task.Category == models.CategoryPageChat {
+			binding, err := h.recoverPageConversation(ctx, task)
+			if err != nil {
+				applog.Infof("[page-chat] queue routing task=%s: %v", task.ID, err)
+				return
+			}
+			completed.PageConversation = &binding
+		}
+	}
 	if completed.PageConversation != nil {
 		h.startInstallationContinuations(ctx, completed.ProjectID, completed.TaskID)
 		h.startNextQueuedPageTurn(ctx, *completed.PageConversation)

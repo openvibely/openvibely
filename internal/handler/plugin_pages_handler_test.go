@@ -17,9 +17,11 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/pageplugins"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 type pluginTestEnv struct {
+	stores *teststores.Env
 	h      *Handler
 	e      *echo.Echo
 	mgr    *pageplugins.Manager
@@ -37,7 +39,7 @@ func setupPluginPages(t *testing.T) *pluginTestEnv {
 	mgr := pageplugins.NewManager(stores.PagePlugins, t.TempDir())
 	t.Cleanup(mgr.StopAll)
 	h.SetPagePlugins(mgr)
-	env := &pluginTestEnv{h: h, e: e, mgr: mgr, projA: createProject(t, h, "Alpha"), projB: createProject(t, h, "Beta")}
+	env := &pluginTestEnv{stores: stores, h: h, e: e, mgr: mgr, projA: createProject(t, h, "Alpha"), projB: createProject(t, h, "Beta")}
 	env.agent = createAgent(t, llmRepo)
 	h.startStreamingResponseOverride = func(p streamingResponseParams) error {
 		env.starts = append(env.starts, p)
