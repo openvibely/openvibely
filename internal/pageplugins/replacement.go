@@ -34,7 +34,11 @@ func (m *Manager) stageReplacement(ctx context.Context, in *models.PagePluginIns
 			return err
 		}
 	}
-	if err := m.store.StageReplacement(ctx, in.ID, in.PackageID, pkg.ID); err != nil {
+	// Replacement also admits a new reference to the installed package.
+	m.packageMu.Lock()
+	err := m.store.StageReplacement(ctx, in.ID, in.PackageID, pkg.ID)
+	m.packageMu.Unlock()
+	if err != nil {
 		if in.Enabled {
 			_ = m.enableLocked(ctx, in.ID)
 		}

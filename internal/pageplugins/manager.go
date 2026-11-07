@@ -97,7 +97,9 @@ type Manager struct {
 	builtins map[string]Builtin
 
 	publishMu sync.Mutex
-	installMu sync.Mutex
+	// packageMu serializes package files and admission of new package references.
+	// Never hold it while acquiring instance lifecycle locks or invoking callbacks.
+	packageMu sync.Mutex
 	mu        sync.Mutex
 	procs     map[string]*procEntry
 	handles   map[string]Handle
@@ -154,8 +156,8 @@ func (m *Manager) InstallExample(ctx context.Context, installedBy string) (*mode
 }
 
 func (m *Manager) install(ctx context.Context, src fs.FS, installedBy string) (*models.PagePluginPackage, error) {
-	m.installMu.Lock()
-	defer m.installMu.Unlock()
+	m.packageMu.Lock()
+	defer m.packageMu.Unlock()
 	man, hash, err := validatePackageFS(src)
 	if err != nil {
 		return nil, err
@@ -208,6 +210,8 @@ func (m *Manager) install(ctx context.Context, src fs.FS, installedBy string) (*
 
 // RemovePackage deletes an unused package and its files.
 func (m *Manager) RemovePackage(ctx context.Context, packageID string) error {
+	m.packageMu.Lock()
+	defer m.packageMu.Unlock()
 	pkg, err := m.store.GetPackage(ctx, packageID)
 	if err != nil {
 		return err
@@ -257,6 +261,8 @@ func (m *Manager) Manifest(pkg *models.PagePluginPackage) (*Manifest, error) {
 
 // CreateInstance adds a disabled page instance of a package to one project.
 func (m *Manager) CreateInstance(ctx context.Context, projectID, packageID, pageID string) (*models.PagePluginInstance, error) {
+	m.packageMu.Lock()
+	defer m.packageMu.Unlock()
 	pkg, err := m.store.GetPackage(ctx, packageID)
 	if err != nil {
 		return nil, err
