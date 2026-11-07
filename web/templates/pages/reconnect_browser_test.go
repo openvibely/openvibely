@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -55,16 +56,12 @@ func renderedTabVisibilityManager(t *testing.T) string {
 	if err := layout.Base("Reconnect fixture", nil, "").Render(context.Background(), &base); err != nil {
 		t.Fatalf("render base visibility manager: %v", err)
 	}
-	html := base.String()
-	start := strings.Index(html, "window._tabVisibility = (function() {")
-	if start < 0 {
-		t.Fatal("tab visibility manager start not found")
+	// Match the IIFE itself; adjacent layout comments are not part of its contract.
+	script := regexp.MustCompile(`(?s)window\._tabVisibility = \(function\(\) \{.*?\n[\t ]*\}\)\(\);`).FindString(base.String())
+	if script == "" {
+		t.Fatal("tab visibility manager IIFE not found")
 	}
-	endOffset := strings.Index(html[start:], "// Track which element was focused before mousedown")
-	if endOffset < 0 {
-		t.Fatal("tab visibility manager end not found")
-	}
-	return html[start : start+endOffset]
+	return script
 }
 
 func reconnectChatEventJSON(t *testing.T, event events.ChatEvent) string {

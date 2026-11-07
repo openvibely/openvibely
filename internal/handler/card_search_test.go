@@ -31,7 +31,7 @@ func TestCollectionSelectionBrowserContractIsShared(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`checkbox.addEventListener('click'`, `event.stopPropagation()`, `state.last`, `event.key !== 'Escape'`,
-		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `if (selectLoaded.checked) state.ids[id] = true`, `selectLoaded.indeterminate`, `selectLoaded.checked`, `data-card-filters-popover`, `setCardFilterDropdown(dropdown, false)`,
+		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `if (selectLoaded.checked) state.ids[id] = true`, `selectLoaded.indeterminate`, `selectLoaded.checked`, `data-card-filters-popover`, `const menu = dropdownController(dropdown);`, `if (open) menu.open(); else menu.close(false);`,
 		`data-card-query-secondary`, `data-card-selection-actions`, `data-card-mark-read-selected`,
 		`[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover]`,
 		`absolute left-5 top-8 z-20 hidden md:block`, `[data-card-pagination-root]:has([data-card-list-toolbar]) [data-search-card]:not([data-search-empty-state])`, `padding-left: 2rem`, `alignSelectionGutter(card, gutter)`, `_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`,
