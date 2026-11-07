@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -106,7 +107,7 @@ type Process struct {
 	startedAt time.Time
 
 	notifyMu     sync.Mutex
-	notifyClosed bool
+	notifyClosed atomic.Bool
 }
 
 func NewProcess(spec ProcessSpec) *Process {
@@ -222,7 +223,7 @@ func (p *Process) readStdout(cmd *exec.Cmd, r io.Reader) {
 		}
 		if msg.Method != "" && msg.ID == nil && p.spec.OnNotify != nil {
 			p.notifyMu.Lock()
-			if !p.notifyClosed {
+			if !p.notifyClosed.Load() {
 				p.spec.OnNotify(msg.Method, msg.Params)
 			}
 			p.notifyMu.Unlock()
@@ -453,11 +454,11 @@ func (p *Process) Status() string {
 	}
 }
 
-// CloseNotifications waits for any running notification handler and drops all
-// later notifications, so a retired backend cannot write after its successor starts.
+// CloseNotifications closes admission before waiting for the handler already
+// in progress. A waiting shutdown must not let the reader admit another update.
 func (p *Process) CloseNotifications() {
+	p.notifyClosed.Store(true)
 	p.notifyMu.Lock()
-	p.notifyClosed = true
 	p.notifyMu.Unlock()
 }
 
