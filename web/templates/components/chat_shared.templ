@@ -2045,9 +2045,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				pastedTexts = pastedTexts.filter(function(item) { return item && typeof item.text === 'string' && typeof item.id === 'string'; });
 			}
 			form.querySelectorAll('[data-pasted-text-cards]').forEach(function(oldCards) { oldCards.remove(); });
-			// A remounted composer shares the pending sends for this draft.
-			window._ovPasteSubmissions = window._ovPasteSubmissions || {};
-			var pasteSubmissions = pasteKey ? (window._ovPasteSubmissions[pasteKey] || (window._ovPasteSubmissions[pasteKey] = new Map())) : new Map();
 			if (pasteKey) window._ovPasteDrafts[pasteKey] = pastedTexts;
 			var pasteCards = document.createElement('div');
 			pasteCards.className = 'flex flex-wrap gap-2 mb-2';
@@ -2083,18 +2080,39 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				savePastes();
 				refreshPasteComposers();
 			}
-			function pasteIsSending(id) {
-				return Array.from(pasteSubmissions.values()).some(function(ids) { return ids.indexOf(id) !== -1; });
-			}
-			// Retain the same lock across picker waits, HTMX queues and steering fallback.
+			// Clear at request handoff; completion must never clear a newer draft.
 			form._beginChatSubmission = function(payload) {
-				if (!payload) return;
-				if (!payload.pasteSubmissionID) payload.pasteSubmissionID = {};
-				pasteSubmissions.set(payload.pasteSubmissionID, payload.pastedTextIDs || []);
-				refreshPasteComposers();
+				if (!payload || payload.draftState.cleared) return;
+				payload.draftState.cleared = true;
+				if (messageInput.value === payload.composerText || messageInput.value === payload.message) {
+					messageInput.value = '';
+					messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+				}
+				acceptSubmittedPastes(payload);
 			};
-			function finishPasteSubmission(payload) {
-				if (payload && pasteSubmissions.delete(payload.pasteSubmissionID)) refreshPasteComposers();
+			function restoreSubmittedDraft(payload) {
+				if (!payload || !payload.draftState.cleared || payload.draftState.restored) return;
+				payload.draftState.restored = true;
+				var current = form;
+				if (pasteKey) document.querySelectorAll('form[data-attachment-state-key]').forEach(function(candidate) {
+					if (candidate.getAttribute('data-attachment-state-key') === pasteScope) current = candidate;
+				});
+				var input = current.querySelector('textarea[name="message"]');
+				pastedTexts = pasteKey ? (window._ovPasteDrafts[pasteKey] || []).slice() : pastedTexts.slice();
+				if (payload.composerText) {
+					if (current.isConnected && !input.value) {
+						input.value = payload.composerText;
+						input.dispatchEvent(new Event('input', { bubbles: true }));
+					} else {
+						// Preserve both drafts when the user has already started another message.
+						pastedTexts.push({ id: pastedTextID(), text: payload.composerText });
+					}
+				}
+				(payload.pastedTextSnapshot || []).forEach(function(item) {
+					if (!pastedTexts.some(function(existing) { return existing.id === item.id; })) pastedTexts.push(item);
+				});
+				savePastes();
+				refreshPasteComposers();
 			}
 			function renderPastes() {
 				pasteCards.replaceChildren();
@@ -2106,7 +2124,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					edit.type = 'button';
 					edit.className = 'text-left text-sm min-w-0';
 					edit.setAttribute('aria-label', 'Edit pasted text');
-					edit.disabled = pasteIsSending(item.id);
 					var title = document.createElement('div');
 					title.className = 'truncate max-w-64';
 					title.textContent = item.text.trim().slice(0, 80) || 'Pasted text';
@@ -2135,7 +2152,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				messageInput.dispatchEvent(new Event('input', { bubbles: true }));
 			}
 			function editPaste(item, trigger) {
-				if (pasteIsSending(item.id)) return;
 				var dialog = document.createElement('dialog');
 				dialog.className = 'rounded-xl bg-base-100 text-base-content p-5 shadow-xl';
 				dialog.style.cssText = 'width:min(800px,92vw);max-height:85vh';
@@ -2352,6 +2368,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
  serviceTier: fields.has('service_tier') ? fields.get('service_tier') : undefined,
 								submitIntent: form.getAttribute('data-submit-intent') || 'normal'
 							}, payload || {});
+							snapshot.draftState = snapshot.draftState || { cleared: false, restored: false };
 							snapshot.parameters = Object.assign(parameters, snapshot.parameters || {});
 							if (intent) snapshot.submitIntent = intent;
 							return snapshot;
@@ -2359,7 +2376,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						form.addEventListener('submit', function(event) {
 							if (event.target !== form) return;
 							event._chatSubmissionPayload = form._captureChatSubmission(event._chatSubmissionPayload || form._chatNextSubmissionPayload);
-							form._beginChatSubmission(event._chatSubmissionPayload);
+
 							form._chatNextSubmissionPayload = null;
 						}, true);
 						form.addEventListener('htmx:configRequest', function(event) {
@@ -2401,11 +2418,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 									var signature = JSON.stringify([payload.message, payload.attachmentSessionID, payload.expectedTurnID]);
 									if (steerRequestInFlight) {
 										if (signature === steerRequestSignature || queuedSteerSubmissions.some(function(submission) { return submission.signature === signature; })) return;
-										form._beginChatSubmission(payload);
+
 										queuedSteerSubmissions.push({signature: signature, payload: payload});
 										return;
 									}
-									form._beginChatSubmission(payload);
+
 									steerRequestSignature = signature;
 								}
 								var visibleMessageBeforePayload = messageInput ? messageInput.value : '';
@@ -2440,16 +2457,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 										// HTMX resolves queued ajax promises before sending the request.
 										// Release steering only on its actual afterRequest event.
 										if (steerRequest && typeof steerRequest.catch === 'function') {
-											steerRequest.catch(function() { finishPasteSubmission(payload); });
+											steerRequest.catch(function() { if (!steerFallbackPending) restoreSubmittedDraft(payload); });
 										}
 									} catch (error) {
-										finishPasteSubmission(payload);
+										restoreSubmittedDraft(payload);
 										finishSteerRequest();
 										throw error;
 									} finally {
 										if (form._chatNextSubmissionPayload === payload) form._chatNextSubmissionPayload = null;
 										if (restorePayloadValues) {
-											if (messageInput) messageInput.value = visibleMessageBeforePayload;
+											if (messageInput) messageInput.value = payload && payload.draftState.cleared && visibleMessageBeforePayload === payload.composerText ? '' : visibleMessageBeforePayload;
 											if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
 										}
 									}
@@ -2460,7 +2477,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								safeSubmit();
 							} finally {
 								if (restorePayloadValues) {
-									if (messageInput) messageInput.value = visibleMessageBeforePayload;
+									if (messageInput) messageInput.value = payload && payload.draftState.cleared && visibleMessageBeforePayload === payload.composerText ? '' : visibleMessageBeforePayload;
 									if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
 								}
 							}
@@ -2468,7 +2485,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							// A picker failure can end a fallback before HTMX creates a request,
 							// so no afterRequest event will release the steering queue.
 							form._chatSubmissionFailed = function(payload) {
-								finishPasteSubmission(payload);
+								restoreSubmittedDraft(payload);
 								if (!payload || !payload.fallbackFromSteer || !steerFallbackPending) return;
 								steerFallbackPending = false;
 								finishSteerRequest();
@@ -2517,9 +2534,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 						function deferSteerWhileSendPending() {
 							if (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !composerMessage().trim()) return false;
-							finishPasteSubmission(deferredSteer);
+							restoreSubmittedDraft(deferredSteer);
 							deferredSteer = form._captureChatSubmission(null, 'steer');
-							form._beginChatSubmission(deferredSteer);
+
 							return true;
 						}
 						function flushDeferredSteer() {
@@ -3403,14 +3420,15 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				});
 			})();
 
-					// Clear only the draft and attachment session accepted by this request.
+					// Capture and clear the outgoing draft at request handoff.
 					// A user may type or attach a steering update while an earlier send is still in flight.
 					form.addEventListener('htmx:beforeRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
 						var triggeringEvent = event.detail.requestConfig && event.detail.requestConfig.triggeringEvent;
 						var payload = (triggeringEvent && triggeringEvent._chatSubmissionPayload) || form._chatNextSubmissionPayload || form._captureChatSubmission();
-						form._beginChatSubmission(payload);
+
 						form._chatNextSubmissionPayload = null;
+						form._beginChatSubmission(payload);
 						var request = event.detail.xhr || {};
 						request._chatSubmittedPayload = payload;
 						request._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';
@@ -3442,22 +3460,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
-									if (messageInput && messageInput.value === (request._chatSubmittedPayload ? request._chatSubmittedPayload.composerText : submittedMessage)) {
-										messageInput.value = '';
-										messageInput.dispatchEvent(new Event('input', { bubbles: true }));
-										refreshPrimaryActionForInput();
-									}
-									acceptSubmittedPastes(request._chatSubmittedPayload);
 									if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
 								}
 						} else if (completedIntent === 'steer' && !request._chatSubmittedFallbackFromSteer && submittedMessage.trim() !== '' && request.status === 409) {
 							replayAsNormal = true;
 							steerFallbackPending = true;
 						}
-						if (!replayAsNormal) finishPasteSubmission(request._chatSubmittedPayload);
+						if (!accepted && !replayAsNormal) restoreSubmittedDraft(request._chatSubmittedPayload);
 						if (completedIntent === 'normal') normalRequestInFlight = Math.max(0, normalRequestInFlight - 1);
 						if (completedIntent === 'normal' && !accepted) {
-							finishPasteSubmission(deferredSteer);
+							restoreSubmittedDraft(deferredSteer);
 							deferredSteer = null;
 						}
 						form.setAttribute('hx-post', normalPostEndpoint);

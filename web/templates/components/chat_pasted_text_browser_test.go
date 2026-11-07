@@ -49,12 +49,7 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
   if (!holdSend) return originalSend.call(this,body);
   holdSend=false; const xhr=this; releaseSend=()=>originalSend.call(xhr,body);
  };
- function assertEditorLocked() {
-  assert(cards()[0].disabled,'submitted card editor is enabled');
-  cards()[0].click();
-  cards()[0].dispatchEvent(new MouseEvent('click',{bubbles:true}));
-  assert(!document.querySelector('dialog[open]'),'submitted card opened editor');
- }
+ function assertDraftCleared() {assert(cards().length===0 && input.value==='', 'submitted draft not cleared at handoff');}
 
  function paste(text) {const data=new DataTransfer();data.setData('text/plain',text);const event=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});input.dispatchEvent(event);return event.defaultPrevented;}
  function button(label){return Array.from(document.querySelectorAll('dialog button')).find(b=>b.textContent===label);}
@@ -94,14 +89,14 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  assert(form._captureChatSubmission().message.endsWith(large),'cancel changed paste');
  cards()[0].click();document.querySelector('dialog textarea').value='edited text';button('Save').click();await wait();
  assert(form._captureChatSubmission().message==='Explain this\n\nedited text','edit not saved');
- holdSend=true;send();assertEditorLocked();
+ holdSend=true;send();assertDraftCleared();
  paste('new draft '.repeat(500));
- assert(!cards()[1].disabled,'new unsent card should stay editable');
- form.querySelectorAll('[aria-label="Remove pasted text"]')[1].click();
- assertEditorLocked();releaseSend();await wait();
+ assert(!cards()[0].disabled,'new unsent card should stay editable');
+ form.querySelectorAll('[aria-label="Remove pasted text"]')[0].click();
+ assertDraftCleared();releaseSend();await wait();
  assert(document.getElementById('messages').textContent==='Explain this\n\nedited text','send lost content');
  assert(cards().length===0 && input.value==='','accepted draft not cleared');
- paste(large); cards()[0].click();document.querySelector('dialog textarea').value='fail';button('Save').click();await wait();holdSend=true;send();assertEditorLocked();releaseSend();await wait();
+ paste(large); cards()[0].click();document.querySelector('dialog textarea').value='fail';button('Save').click();await wait();holdSend=true;send();assertDraftCleared();releaseSend();await wait();
  assert(cards().length===1 && form._captureChatSubmission().message==='fail','failed send lost card');
  assert(!cards()[0].disabled,'failed send did not unlock editor');
  cards()[0].click();assert(document.querySelector('dialog[open]'),'editor unavailable after failure');button('Cancel').click();
@@ -114,19 +109,10 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  paste(large);paste('second paste '.repeat(500));
  const expected=form._captureChatSubmission().message;
  assert(cards().length===2,'multiple pastes must have separate cards');
- holdSend=true;input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,metaKey:true,bubbles:true,cancelable:true}));assertEditorLocked();releaseSend();await wait();
+ holdSend=true;input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,metaKey:true,bubbles:true,cancelable:true}));assertDraftCleared();releaseSend();await wait();
  assert(document.getElementById('pending-thread-inputs').textContent===expected,'steering lost or duplicated pasted text');
  assert(cards().length===0,'accepted steering left cards');
- paste(large);
- const waiting=form._captureChatSubmission();
- assert(!cards()[0].disabled,'capturing a snapshot should not lock cards');
- form._beginChatSubmission(waiting);assertEditorLocked();
- const second=form._captureChatSubmission();form._beginChatSubmission(second);
- form._chatSubmissionFailed(waiting);assertEditorLocked();
- form._chatSubmissionFailed(second);assert(!cards()[0].disabled,'failed preparation left editor locked');
-
  // Send A, navigate back into a fresh composer, add B, then accept A.
- form.querySelector('[aria-label="Remove pasted text"]').click();
  async function remount() {
   await htmx.ajax('GET','/composer',{target:'#composer-fixture',swap:'innerHTML'});
   await wait();
@@ -135,10 +121,10 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  paste(large);holdSend=true;send();
  const releaseA=releaseSend;
  await remount();
- assertEditorLocked();
+ assertDraftCleared();
  const newer='new card B '.repeat(500);
  paste(newer);input.value='new instructions';input.dispatchEvent(new Event('input',{bubbles:true}));
- assert(cards().length===2 && !cards()[1].disabled,'replacement draft missing cards');
+ assert(cards().length===1 && !cards()[0].disabled,'replacement draft missing cards');
  releaseA();await wait();
  assert(cards().length===1,'old send did not reconcile the live replacement');
  assert(form._captureChatSubmission().message==='new instructions\n\n'+newer,'old send erased newer text or cards');
@@ -150,6 +136,15 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  assert(cards().length===1 && form._captureChatSubmission().message===large,'same-composer send cleared new card or retained sent card');
  await remount();
  assert(cards().length===1 && !cards()[0].disabled,'completed send left a stale lock');
+ // Failure after navigation restores the submitted draft alongside newer content.
+ form.querySelector('[aria-label="Remove pasted text"]').click();
+ input.value='fail';holdSend=true;send();assertDraftCleared();const releaseFailure=releaseSend;
+ await remount();input.value='new text';paste(large);
+ releaseFailure();await wait();
+ assert(input.value==='new text','failure overwrote newer text');
+ assert(cards().length===2,'failure did not preserve both drafts');
+ assert(form._captureChatSubmission().message==='new text\n\n'+large+'\n\nfail','failed text was not recovered separately');
+ form.querySelectorAll('[aria-label="Remove pasted text"]')[1].click();input.value='';
  const pasteKey=form.getAttribute('data-attachment-state-key')+'-pasted-text';
  delete window._ovPasteDrafts[pasteKey];await remount();
  assert(form._captureChatSubmission().message===large,'surviving card was not persisted');

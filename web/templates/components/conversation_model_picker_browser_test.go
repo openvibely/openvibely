@@ -527,6 +527,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  message.value='first';message.dispatchEvent(new Event('input',{bubbles:true}));form.requestSubmit();
  let records=[];for(let i=0;i<200;i++){records=await (await fetch('/records')).json();if(records?.length)break;await wait();}
  assert(records?.length===1,'first request is held in flight');
+ assert(message.value==='', 'picker restored the submitted text after handoff');
  // Simulate a rejected steering request falling back to a normal send.
  form._chatNextSubmissionPayload={message:'queued follow-up',attachmentSessionID:'queued-attachment',fallbackFromSteer:true};
  message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';tier.value='default';

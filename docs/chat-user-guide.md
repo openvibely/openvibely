@@ -119,7 +119,7 @@ By default, Chat may send only to saved outbound targets or each platform's save
 
 Use attachments whenever the answer depends on local file content or visual context.
 
-Pasting 5,000 or more characters into the Chat or task composer creates a compact pasted-text card. Click it to edit the full text, then Save or Cancel; use × to remove it. You can add multiple cards and type instructions alongside them. Sending includes your instructions followed by the full text of each card in paste order. Cards remain in the draft after a failed send.
+Pasting 5,000 or more characters into the Chat or task composer creates a compact pasted-text card. Click it to edit the full text, then Save or Cancel; use × to remove it. You can add multiple cards and type instructions alongside them. Sending includes your instructions followed by the full text of each card in paste order. Text and cards clear together when the request starts. If sending fails, the submitted content returns to the draft. If you have already typed a new message, the failed message’s text returns as a separate card so your new text stays intact.
 
 ## Queueing And Steering
 
