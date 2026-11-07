@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo gtk3 pkg-config: gtk+-3.0
+#cgo gtk3 pkg-config: gtk+-3.0 webkit2gtk-4.1
 #cgo !gtk3 pkg-config: gtk4
 #include "window_controls_linux.h"
 */

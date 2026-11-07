@@ -31,7 +31,7 @@ func TestNativeLinuxComposerPNGDrop(t *testing.T) {
 	if os.Getenv("OPENVIBELY_RUN_NATIVE_UI") != "1" {
 		t.Skip("set OPENVIBELY_RUN_NATIVE_UI=1 with Xvfb and GTK3/WebKit installed")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	flags, err := exec.CommandContext(ctx, "pkg-config", "--cflags", "--libs", "webkit2gtk-4.1", "xtst", "x11").CombinedOutput()
 	if err != nil {
@@ -94,37 +94,54 @@ func TestNativeLinuxComposerPNGDrop(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<!doctype html><html><head><style>
-.hidden {display:none} svg {width:16px;height:16px} #message-input {position:fixed;left:20px;top:60px;width:500px;height:120px} [id$="-drop-overlay"] {pointer-events:none}
-</style></head><body><div id="chat-messages"></div>%s<script>
+.hidden {display:none} svg {width:16px;height:16px} #message-input {position:fixed;left:20px;top:60px;width:500px;height:120px} [id$="-drop-overlay"] {pointer-events:none} #outside {position:fixed;left:20px;top:300px;width:500px;height:150px;z-index:100}
+</style></head><body><div id="chat-messages"></div>%s<div id="outside">Outside composer</div><script>
 (function() {
  const report = text => window.webkit.messageHandlers.test.postMessage(text);
  window.alert = text => report('fail: '+text);
  window.addEventListener('error', event => report('fail: '+event.message));
  document.addEventListener('dragenter', event => report('dragenter: '+event.target.id+' types='+Array.from(event.dataTransfer.types)), true);
  document.addEventListener('drop', event => report('drop: '+event.target.id+' files='+event.dataTransfer.files.length+' types='+Array.from(event.dataTransfer.types)+' items='+Array.from(event.dataTransfer.items).map(item=>item.kind+':'+item.type)+' uri='+event.dataTransfer.getData('text/uri-list')), true);
- let trustedDrop = false;
- document.getElementById('message-input').addEventListener('drop', event => {
-  trustedDrop = event.isTrusted;
-  const hasFile = event.dataTransfer.files.length > 0 || Array.from(event.dataTransfer.items).some(item => item.kind === 'file' && item.getAsFile());
-  if (!trustedDrop || !hasFile) report('fail: native drop supplied no File objects (types: '+Array.from(event.dataTransfer.types)+')');
- });
+ const mode = new URLSearchParams(location.search).get('mode');
+ const expectUpload = mode === 'composer';
+ let trustedDrag = false, selectedFile = false, sawOverlay = false;
+ document.getElementById(mode === 'outside' ? 'outside' : 'message-input').addEventListener('dragenter', event => { trustedDrag = event.isTrusted; });
+ document.getElementById('message-input').addEventListener('dragover', () => requestAnimationFrame(() => {
+  sawOverlay ||= !document.getElementById('chat-form-drop-overlay').classList.contains('hidden');
+ }));
+ document.querySelector('input[type="file"]').addEventListener('change', event => { selectedFile = event.isTrusted; });
  const timer = setInterval(() => {
   const row = document.querySelector('[data-pending-attachment-filename="native-drop.png"]');
+  if (!expectUpload) {
+   if (!window._ovNativeDropTestFinished) return;
+   clearInterval(timer);
+   report(trustedDrag && !row && !selectedFile ? 'pass' : 'fail: outside/internal drag selected a file or never reached its target');
+   return;
+  }
   if (!row) return;
   clearInterval(timer);
   const session = document.querySelector('input[name="attachment_session_id"]').value;
-  report(trustedDrop && row.getClientRects().length && session === 'native-drop-session' ? 'pass' : 'fail: missing trusted drop, visible preview, or session');
+  report(trustedDrag && selectedFile && sawOverlay && row.getClientRects().length && session === 'native-drop-session' ? 'pass' : 'fail: missing native drag, overlay, file selection, visible preview, or session');
  }, 50);
  window.addEventListener('load', () => setTimeout(() => report('ready'), 200));
 })();</script></body></html>`, composer.String())
 	}))
 	defer server.Close()
-	cmd := exec.CommandContext(ctx, "xvfb-run", "-a", "-s", "-screen 0 1280x800x24 -nolisten tcp", binary, server.URL, filename)
-	cmd.Env = append(os.Environ(), "GDK_BACKEND=x11")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("native PNG drag: %v: %s", err, output)
-	}
-	if got := uploads.Load(); got != 1 {
-		t.Fatalf("uploads = %d, want exactly one", got)
+	for _, mode := range []string{"composer", "outside", "internal"} {
+		t.Run(mode, func(t *testing.T) {
+			uploads.Store(0)
+			cmd := exec.CommandContext(ctx, "xvfb-run", "-a", "-s", "-screen 0 1280x800x24 -nolisten tcp", binary, server.URL+"?mode="+mode, filename, mode)
+			cmd.Env = append(os.Environ(), "GDK_BACKEND=x11")
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("native PNG drag: %v: %s", err, output)
+			}
+			want := int32(0)
+			if mode == "composer" {
+				want = 1
+			}
+			if got := uploads.Load(); got != want {
+				t.Fatalf("uploads = %d, want %d", got, want)
+			}
+		})
 	}
 }

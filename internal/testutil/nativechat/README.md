@@ -201,3 +201,38 @@ Native test hosts watch a shutdown request file under the test directory and cal
 Cleanup retries transient deletion errors; it does not infer browser shutdown
 from a fixed period without filesystem writes. Wails does not explicitly promise
 that every OS-managed browser service has exited when the host exits.
+
+## Native composer file drops
+
+The OS/architecture CI matrix runs attachment-drop checks on Linux, macOS, and
+Windows (amd64 and arm64). macOS and Windows reuse this Wails host:
+
+```sh
+OPENVIBELY_RUN_NATIVE_UI=1 go test ./internal/handler -run '^TestNativeComposerFileDropsInWails$' -count=1 -timeout 300s
+```
+
+The scenarios drop a PNG and a text file into the production composer and a PNG
+outside it. They require trusted native DOM drag/drop events, the original file
+bytes in a real multipart HTTP request, exactly one visible preview and a saved
+attachment session. Outside drops must not upload or navigate away. The upload
+endpoint is a fixture; these tests do not exercise backend attachment storage.
+
+- macOS sends an AppKit `NSDraggingInfo` carrying a native file pasteboard through
+  the Wails WKWebView's drag destination methods. It covers native file import,
+  WebKit IPC and upload, without global pointer injection or Accessibility
+  permission. It does not simulate Finder or a physical mouse gesture.
+- Windows launches a separate WinForms source with a shell-format file list and
+  performs an OLE drag into Wails' composition-hosted WebView2. This moves the
+  pointer in the opted-in test desktop; run it in CI or a dedicated GUI session.
+  The helper requires Windows PowerShell, WinForms and WebView2 (available on the
+  Windows runners). Paths are passed as process arguments, not shell code.
+- Linux keeps `TestNativeLinuxComposerPNGDrop` in `cmd/desktop`, exercising the
+  production GTK file-chooser bridge in a private Xvfb display. It also checks
+  rejection of same-process URI drags; its native GTK workaround differs from
+  the macOS/Windows browser File path.
+
+The `/drop` input endpoint is test-only, origin-restricted and serialized with
+wheel input. Its sole allowed file is supplied by the parent test in
+`OPENVIBELY_NATIVE_DROP_FILE`; the page cannot submit filesystem paths. Opted-in
+failures are failures, not skips. macOS/Windows need their native CI runners to
+execute these tests; cross-compilation alone does not validate file-drop behavior.

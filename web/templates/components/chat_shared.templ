@@ -2873,9 +2873,21 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			}
 
 
+			// The Linux native bridge uses WebKit's chooser API for genuine OS drops
+			// because affected WebKitGTK versions hide DataTransfer File objects.
+			form._ovAcceptNativeFileDrop = function() {
+				dragCounter = 0;
+				if (dropOverlay) dropOverlay.classList.add('hidden');
+				if (fileInput && !fileInput.disabled) fileInput.click();
+			};
+			window.ovAcceptNativeFileDrop = function(x, y) {
+				var target = document.elementFromPoint(x, y);
+				var targetForm = target && target.closest('form');
+				if (targetForm && targetForm._ovAcceptNativeFileDrop) targetForm._ovAcceptNativeFileDrop();
+			};
 			// File drags may expose items before the FileList becomes available.
 			function isFileDrag(transfer) {
-				return transfer && (Array.from(transfer.types || []).indexOf('Files') !== -1 ||
+				return transfer && (window._ovNativeFileDrag || Array.from(transfer.types || []).indexOf('Files') !== -1 ||
 					Array.from(transfer.items || []).some(function(item) { return item.kind === 'file'; }) ||
 					(transfer.files && transfer.files.length > 0));
 			}
