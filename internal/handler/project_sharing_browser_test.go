@@ -44,22 +44,26 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
  try {
   window.openVibelyConfirm=q=>{confirmQuestion=q;return Promise.resolve(true)};
   document.getElementById('project-settings-btn').click();
-  await wait(()=>panel()&&panel().querySelector('select[name=org_role]'),'sharing panel load');
-  assert(!panel().querySelector('option[value=private]'),'private visibility must not be offered');
-  assert(panel().textContent.includes('sandboxing'),'sandbox limitation not shown');
-  let roleSelect=panel().querySelector('select[name=org_role]');
-  roleSelect.value='viewer';
-  roleSelect.form.requestSubmit();
-  await wait(()=>panel()&&panel().querySelector('select[name=org_role]').value==='viewer'&&panel().querySelector('select[name=org_role]')!==roleSelect,'policy save');
+  await wait(()=>document.getElementById('edit-project-sharing-tab')&&panel(),'sharing panel load');
+  assert(document.getElementById('edit-project-sharing').hidden,'sharing should start hidden');
+  document.getElementById('edit-project-sharing-tab').click();
+  assert(!document.getElementById('edit-project-sharing').hidden,'sharing tab did not open');
+  assert(!panel().closest('form'),'sharing forms must not nest in settings form');
+  assert(document.getElementById('edit-project-save-button').closest('.modal-action').hidden,'general Save must hide on Sharing');
+  document.getElementById('edit-project-general-tab').click();
+  assert(document.getElementById('edit-project-sharing').hidden,'sharing did not hide on General');
+  assert(!document.getElementById('edit-project-save-button').closest('.modal-action').hidden,'general Save was not restored');
+  document.getElementById('edit-project-sharing-tab').click();
+  assert(!panel().querySelector('select[name=org_role]'),'organization-wide access must not be offered');
   const add=panel().querySelector('select[aria-label="Project role"]').form;
   add.querySelector('select[name=user_id]').value='` + member.UserID + `';
   add.querySelector('select[name=role]').value='maintainer';
   add.requestSubmit();
   await wait(()=>rows().some(r=>r.textContent.includes('browser-member')&&r.textContent.includes('maintainer')),'grant row');
   rows().find(r=>r.textContent.includes('browser-member')).querySelector('button').click();
-  await wait(()=>panel()&&panel().querySelector('select[name=org_role]')&&!rows().some(r=>r.textContent.includes('browser-member')),'grant removal');
+  await wait(()=>panel()&&!rows().some(r=>r.textContent.includes('browser-member')),'grant removal');
   const audit=panel().querySelector('details');
-  assert(audit&&audit.querySelectorAll('tbody tr').length>=3,'audit rows missing');
+  assert(audit&&audit.querySelectorAll('tbody tr').length>=2,'audit rows missing');
   const transfer=Array.from(panel().querySelectorAll('button')).find(b=>b.textContent.includes('Transfer ownership'));
   assert(transfer&&!transfer.disabled,'owner transfer unavailable');
   transfer.form.querySelector('select[name=user_id]').value='` + member.UserID + `';
@@ -126,7 +130,7 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
 	policy, err := stores.ProjectAccess.Get(ctx, project.ID)
 	require.NoError(t, err)
 	require.Equal(t, "org", policy.Visibility)
-	require.Equal(t, "viewer", policy.OrgRole)
+	require.Equal(t, "editor", policy.OrgRole)
 	require.Equal(t, member.UserID, policy.OwnerUserID)
 	members, err := stores.ProjectAccess.Members(ctx, project.ID)
 	require.NoError(t, err)

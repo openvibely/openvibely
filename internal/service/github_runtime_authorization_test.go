@@ -20,10 +20,7 @@ func TestGitHubRuntimeCurrentProjectAuthorization(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "github-runtime-user", "long-password-value", "")
 	require.NoError(t, err)
-	policy, err := f.stores.ProjectAccess.Get(ctx, f.project.ID)
-	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, f.stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, f.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, f.project.ID, user.UserID, "viewer"))
 	calls := 0
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {

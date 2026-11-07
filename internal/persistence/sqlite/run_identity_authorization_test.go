@@ -16,7 +16,7 @@ func TestBindTaskRechecksRequiredRoleTransactionally(t *testing.T) {
 			ctx := t.Context()
 			owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 			task := createThreadInputTask(t, owner, db, "default")
-			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('runner','runner'); INSERT INTO org_memberships VALUES('default','runner','member')`)
+			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('runner','runner'); INSERT INTO org_memberships VALUES('default','runner','member'); INSERT INTO project_members VALUES('default','runner','editor')`)
 			require.NoError(t, err)
 			switch kind {
 			case "merge":

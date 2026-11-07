@@ -25,6 +25,7 @@ func TestSlackRunBindingRevocation(t *testing.T) {
 			require.NoError(t, err)
 			user, err := org.Accept(ctx, token, "slack-run-user", "long-password-value", "")
 			require.NoError(t, err)
+			require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 			owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 			caller := models.WithPrincipal(ctx, user.Principal)
 			entry := &models.SlackAuthorizedUser{ProjectID: "default", SlackUserID: "U123"}
@@ -51,8 +52,7 @@ func TestSlackRunBindingRevocation(t *testing.T) {
 			case "downgrade":
 				policy, err := tc.stores.ProjectAccess.Get(ctx, "default")
 				require.NoError(t, err)
-				policy.OrgRole = "viewer"
-				require.NoError(t, tc.stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+				require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, user.UserID, "viewer"))
 			}
 			require.NoError(t, active.Err(), "revocation does not stop a run already started")
 			require.Error(t, h.requireFollowupAccess(caller, params))

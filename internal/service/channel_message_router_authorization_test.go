@@ -18,10 +18,7 @@ func TestChannelMessageRouterRechecksProjectRole(t *testing.T) {
 	bob, err := org.Accept(ctx, invite, "router-bob", "bob-long-password", "")
 	require.NoError(t, err)
 	bobCtx := models.WithPrincipal(ctx, bob.Principal)
-	policy, err := env.ProjectAccess.Get(ctx, project.ID)
-	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, bob.UserID, "viewer"))
 
 	// Background callers without a run-as principal are denied in auth mode.
 	require.False(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack", Message: "anon"}).OK)

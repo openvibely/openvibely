@@ -33,7 +33,7 @@ func TestGitHubReviewerIdentityAttestation(t *testing.T) {
 	ctx := t.Context()
 	repo := NewGitHubAuthRepo(db)
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('reviewer','reviewer'); INSERT INTO org_memberships VALUES('default','reviewer','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('reviewer','reviewer'); INSERT INTO org_memberships VALUES('default','reviewer','member'); INSERT INTO project_members VALUES('default','reviewer','editor')`)
 	require.NoError(t, err)
 	actor := &models.GitHubAuthorizedActor{GitHubLogin: "reviewer"}
 	require.NoError(t, repo.UpsertAuthorizedActor(owner, actor))
@@ -84,7 +84,7 @@ func TestGitHubMappedReviewerSurvivesCleanupAndRejectsRebinding(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := t.Context()
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('reviewer','reviewer'); INSERT INTO org_memberships VALUES('default','reviewer','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('reviewer','reviewer'); INSERT INTO org_memberships VALUES('default','reviewer','member'); INSERT INTO project_members VALUES('default','reviewer','editor')`)
 	require.NoError(t, err)
 	auth := NewGitHubAuthRepo(db)
 	a := &models.GitHubAuthorizedActor{GitHubLogin: "reviewer"}

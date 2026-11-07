@@ -1,6 +1,8 @@
 -- +goose Up
 -- Unreleased Phase 2 schema, upgrading directly from version 223.
--- Preserve existing project access and recorded users; never infer channel bindings.
+-- Preserve recorded owners and users; project access requires explicit grants.
+-- visibility/org_role are retained metadata, not implicit organization-wide grants.
+-- Never infer channel bindings.
 
 ALTER TABLE project_organizations ADD COLUMN visibility TEXT NOT NULL DEFAULT 'org' CHECK(visibility IN ('org','private'));
 ALTER TABLE project_organizations ADD COLUMN org_role TEXT NOT NULL DEFAULT 'editor' CHECK(org_role IN ('viewer','editor'));

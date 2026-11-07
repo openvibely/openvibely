@@ -6,8 +6,9 @@ type ProjectAccess struct {
 	ProjectID   string `json:"project_id"`
 	OrgID       string `json:"org_id"`
 	OwnerUserID string `json:"owner_user_id"`
-	Visibility  string `json:"visibility"`
-	OrgRole     string `json:"org_role"`
+	// Legacy policy metadata retained for schema compatibility; neither field grants access.
+	Visibility string `json:"visibility"`
+	OrgRole    string `json:"org_role"`
 }
 type ProjectMember struct {
 	UserID   string `json:"user_id"`

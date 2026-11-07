@@ -216,7 +216,7 @@ func TestXVerifiedSenderBindingAndHandoff(t *testing.T) {
 	ctx := t.Context()
 	auth := NewXAuthRepo(db)
 	receipts := NewXInboundReceiptRepo(db)
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('sender','sender'); INSERT INTO org_memberships VALUES('default','sender','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('sender','sender'); INSERT INTO org_memberships VALUES('default','sender','member'); INSERT INTO project_members VALUES('default','sender','editor')`)
 	require.NoError(t, err)
 	sender := models.WithPrincipal(ctx, models.Principal{UserID: "sender"})
 	binding := &models.XAuthorizedUser{ProjectID: "default", XUserID: "123", ApplicationUserID: "sender"}

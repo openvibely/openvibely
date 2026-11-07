@@ -35,7 +35,7 @@ func TestInsightsResultWritesRecheckActorAndAuditAtomically(t *testing.T) {
 		t.Run(tc.table, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			repo := NewInsightsRepo(db)
-			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('analyst','analyst'); INSERT INTO org_memberships VALUES('default','analyst','member')`)
+			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('analyst','analyst'); INSERT INTO org_memberships VALUES('default','analyst','member'); INSERT INTO project_members VALUES('default','analyst','editor')`)
 			require.NoError(t, err)
 			ctx := models.WithPrincipal(t.Context(), models.Principal{UserID: "analyst", Role: "owner"})
 			// Simulate access revoked while model work was in flight; stale claims must not grant access.
@@ -50,11 +50,11 @@ func TestInsightsResultWritesRecheckActorAndAuditAtomically(t *testing.T) {
 			require.Zero(t, count())
 			_, err = db.Exec(`INSERT INTO org_memberships VALUES('default','analyst','member')`)
 			require.NoError(t, err)
-			_, err = db.Exec(`UPDATE project_organizations SET org_role='viewer' WHERE project_id='default'`)
+			_, err = db.Exec(`UPDATE project_members SET role='viewer' WHERE project_id='default' AND user_id='analyst'`)
 			require.NoError(t, err)
 			require.ErrorIs(t, tc.write(ctx, repo), persistence.ErrProjectDenied)
 			require.Zero(t, count(), "downgraded editor cannot save a model result")
-			_, err = db.Exec(`UPDATE project_organizations SET org_role='editor' WHERE project_id='default'`)
+			_, err = db.Exec(`UPDATE project_members SET role='editor' WHERE project_id='default' AND user_id='analyst'`)
 			require.NoError(t, err)
 			_, err = db.Exec(`CREATE TRIGGER fail_result_audit BEFORE INSERT ON project_audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 			require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestInsightsMutationsRecheckAccessAndRollbackAuditFailure(t *testing.T) {
 			knowledge := &models.KnowledgeEntry{ProjectID: "default", Topic: "original", Source: "test"}
 			require.NoError(t, repo.CreateKnowledge(ctx, knowledge))
 			task := createThreadInputTask(t, ctx, db, "default")
-			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('editor','editor'); INSERT INTO org_memberships VALUES('default','editor','member')`)
+			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('editor','editor'); INSERT INTO org_memberships VALUES('default','editor','member'); INSERT INTO project_members VALUES('default','editor','editor')`)
 			require.NoError(t, err)
 			actor := models.WithPrincipal(ctx, models.Principal{UserID: "editor", Role: "owner"})
 			mutate := func() error {
@@ -107,11 +107,11 @@ func TestInsightsMutationsRecheckAccessAndRollbackAuditFailure(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, knowledge, gotK)
 			}
-			_, err = db.Exec(`UPDATE project_organizations SET org_role='viewer' WHERE project_id='default'`)
+			_, err = db.Exec(`UPDATE project_members SET role='viewer' WHERE project_id='default' AND user_id='editor'`)
 			require.NoError(t, err)
 			require.ErrorIs(t, mutate(), persistence.ErrProjectDenied)
 			unchanged()
-			_, err = db.Exec(`UPDATE project_organizations SET org_role='editor' WHERE project_id='default'; DELETE FROM org_memberships WHERE user_id='editor'`)
+			_, err = db.Exec(`UPDATE project_members SET role='editor' WHERE project_id='default' AND user_id='editor'; DELETE FROM org_memberships WHERE user_id='editor'`)
 			require.NoError(t, err)
 			require.ErrorIs(t, mutate(), persistence.ErrProjectDenied)
 			unchanged()

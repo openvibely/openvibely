@@ -27,7 +27,7 @@ func TestScheduleRunIdentityAuditRollbackAndViewerDenial(t *testing.T) {
 	require.Zero(t, count)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM schedule_run_identities`).Scan(&count))
 	require.Zero(t, count)
-	_, err = db.Exec(`DROP TRIGGER reject_schedule_audit; INSERT INTO users(id,username) VALUES('viewer','viewer'); INSERT INTO org_memberships VALUES('default','viewer','member'); UPDATE project_organizations SET org_role='viewer' WHERE project_id='default'`)
+	_, err = db.Exec(`DROP TRIGGER reject_schedule_audit; INSERT INTO users(id,username) VALUES('viewer','viewer'); INSERT INTO org_memberships VALUES('default','viewer','member'); INSERT INTO project_members VALUES('default','viewer','viewer')`)
 	require.NoError(t, err)
 	viewer := models.WithPrincipal(ctx, models.Principal{UserID: "viewer"})
 	require.ErrorIs(t, schedules.Create(viewer, &schedule), persistence.ErrProjectDenied)

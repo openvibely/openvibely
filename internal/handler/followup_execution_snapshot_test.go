@@ -22,6 +22,7 @@ func TestFollowupExecutionSnapshotRejectsReassignedCallerAndGoal(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(owner, token, "snapshot-caller", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(owner, models.BootstrapUserID, "default", user.UserID, "editor"))
 	caller := models.WithPrincipal(t.Context(), user.Principal)
 	task := createTask(t, h, "default", "Execution identity", func(task *models.Task) { task.Category = models.CategoryBacklog; task.Status = models.StatusCompleted })
 	model := models.LLMConfig{Name: "Snapshot", Provider: "test", Model: "test"}

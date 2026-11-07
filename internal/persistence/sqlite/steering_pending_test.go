@@ -51,7 +51,7 @@ func TestSteeringPreparationRejectsRevokedSenderAndAuditsAtomically(t *testing.T
 	task := createThreadInputTask(t, owner, db, "default")
 	execution := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
 	require.NoError(t, NewExecutionRepo(db).Create(owner, execution))
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('steerer','steerer'); INSERT INTO org_memberships VALUES('default','steerer','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('steerer','steerer'); INSERT INTO org_memberships VALUES('default','steerer','member'); INSERT INTO project_members VALUES('default','steerer','editor')`)
 	require.NoError(t, err)
 	sender := models.WithPrincipal(ctx, models.Principal{UserID: "steerer"})
 	repo := NewThreadInputRepo(db)
@@ -87,7 +87,7 @@ func TestSteeringCommitRechecksSenderAfterPreparation(t *testing.T) {
 	task := createThreadInputTask(t, owner, db, "default")
 	execution := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
 	require.NoError(t, NewExecutionRepo(db).Create(owner, execution))
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('late-revoked','late-revoked'); INSERT INTO org_memberships VALUES('default','late-revoked','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('late-revoked','late-revoked'); INSERT INTO org_memberships VALUES('default','late-revoked','member'); INSERT INTO project_members VALUES('default','late-revoked','editor')`)
 	require.NoError(t, err)
 	repo := NewThreadInputRepo(db)
 	var ids []string
@@ -135,7 +135,7 @@ func TestPrivilegedSteeringRechecksRequiredRole(t *testing.T) {
 				require.NoError(t, err)
 				execution := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
 				require.NoError(t, NewExecutionRepo(db).Create(owner, execution))
-				_, err = db.Exec(`INSERT INTO users(id,username) VALUES('steerer','steerer'); INSERT INTO org_memberships VALUES('default','steerer','member')`)
+				_, err = db.Exec(`INSERT INTO users(id,username) VALUES('steerer','steerer'); INSERT INTO org_memberships VALUES('default','steerer','member'); INSERT INTO project_members VALUES('default','steerer','editor')`)
 				require.NoError(t, err)
 				access := NewProjectAccessRepo(db)
 				require.NoError(t, access.SetMember(ctx, models.BootstrapUserID, "default", "steerer", "maintainer"))
@@ -147,8 +147,8 @@ func TestPrivilegedSteeringRechecksRequiredRole(t *testing.T) {
 					require.NoError(t, err)
 					require.Len(t, prepared, 1)
 				}
-				// Membership remains active: only the maintainer grant is revoked.
-				require.NoError(t, access.SetMember(ctx, models.BootstrapUserID, "default", "steerer", ""))
+				// Downgrading to editor permits ordinary work but blocks privileged work.
+				require.NoError(t, access.SetMember(ctx, models.BootstrapUserID, "default", "steerer", "editor"))
 				if boundary == "commit" {
 					err = repo.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: execution.ID, InputIDs: []string{input.ID}, ResponsesHistory: []any{map[string]any{"role": "user", "content": "instruction"}}})
 					if kind == "ordinary" {

@@ -72,7 +72,7 @@ func TestProjectManagementHTTPPermissions(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/chat", nil).WithContext(bobCtx)
 	selected, err := tc.handler.getCurrentProjectID(e.NewContext(request, httptest.NewRecorder()))
 	require.NoError(t, err)
-	require.Equal(t, "default", selected)
+	require.Equal(t, models.AllProjectsID, selected)
 	request = httptest.NewRequest(http.MethodGet, "/chat?project_id="+project.ID, nil).WithContext(bobCtx)
 	_, err = tc.handler.getCurrentProjectID(e.NewContext(request, httptest.NewRecorder()))
 	require.ErrorIs(t, err, authz.ErrDenied)

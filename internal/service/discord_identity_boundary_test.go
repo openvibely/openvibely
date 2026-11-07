@@ -29,6 +29,7 @@ func discordTestMember(t *testing.T, env *teststores.Env, name string) string {
 	require.NoError(t, err)
 	user, err := org.Accept(t.Context(), token, name, "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, "default", user.UserID, "editor"))
 	return user.UserID
 }
 
@@ -89,8 +90,7 @@ func TestDiscordAuthenticatedIngressRequiresVerifiedSender(t *testing.T) {
 	require.NoError(t, env.DiscordAuth.BindApplicationUser(owner, "default", entry.ID, member))
 	policy, err := env.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, member, "viewer"))
 	_, err = svc.authorizeSenderAction(resolved, "default", sender)
 	require.Error(t, err, "viewer demotion revokes channel authority")
 	_, err = handlers["list_tasks"](resolved, json.RawMessage(`{}`))

@@ -25,6 +25,7 @@ func TestSlackSenderCannotInheritConnectionIdentity(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, token, "slack-sender", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	require.NoError(t, env.SlackAuth.BindApplicationUser(owner, "default", row.ID, "T123", user.UserID))
 	resolved, err := svc.senderPrincipalContext(owner, msg)
 	require.NoError(t, err)

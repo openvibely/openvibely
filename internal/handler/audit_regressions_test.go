@@ -120,10 +120,7 @@ func TestAllProjectsCannotDeleteViewerAlert(t *testing.T) {
 	user, err := org.Accept(ctx, token, "audit-viewer", "long-password-value", "")
 	require.NoError(t, err)
 	project := createProject(t, h, "Viewer-only project")
-	policy, err := stores.ProjectAccess.Get(ctx, project.ID)
-	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, "viewer"))
 	alert := &models.Alert{ProjectID: project.ID, Title: "Protected alert", Type: "custom", Severity: "info"}
 	require.NoError(t, h.alertSvc.Create(ctx, alert))
 	call := func(scope string) *httptest.ResponseRecorder {

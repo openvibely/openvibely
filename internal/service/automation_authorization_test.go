@@ -23,6 +23,7 @@ func TestAutomationDispatchAuthorizationBeforeAdmission(t *testing.T) {
 				require.NoError(t, err)
 				user, err := org.Accept(ctx, invite, "automation-user", "long-password-value", "")
 				require.NoError(t, err)
+				require.NoError(t, f.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, f.project.ID, user.UserID, "editor"))
 				require.NoError(t, f.stores.RunIdentities.BindTask(models.WithPrincipal(ctx, user.Principal), f.task.ID))
 				if mode == "maintainer" || mode == "revoked" {
 					require.NoError(t, f.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, f.project.ID, user.UserID, "maintainer"))
@@ -58,6 +59,7 @@ func TestAutomationMaintainerDowngradeDeniesNextStart(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "running-user", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, f.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, f.project.ID, user.UserID, "editor"))
 	require.NoError(t, f.stores.RunIdentities.BindTask(models.WithPrincipal(ctx, user.Principal), f.task.ID))
 	require.NoError(t, f.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, f.project.ID, user.UserID, "maintainer"))
 	worker := NewWorkerService(nil, 1, f.stores.Projects)

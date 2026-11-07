@@ -30,6 +30,9 @@ func TestTaskThreadResponseShowsSendingAccount(t *testing.T) {
 		principals[username] = member.Principal
 	}
 	project := createProject(t, h, "Author labels")
+	for _, principal := range principals {
+		require.NoError(t, tc.stores.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, project.ID, principal.UserID, "editor"))
+	}
 	task := createTask(t, h, project.ID, "Shared thread", func(task *models.Task) {
 		task.Category = models.CategoryCompleted
 		task.Status = models.StatusCompleted

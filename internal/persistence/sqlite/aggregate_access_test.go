@@ -75,6 +75,8 @@ func TestAggregateAlertsFilterBeforePaginationAndProtectBulkWrites(t *testing.T)
 	editor := create("Editor", "org", "editor")
 	viewer := create("Viewer", "org", "viewer")
 	hidden := create("Hidden", "private", "viewer")
+	require.NoError(t, access.SetMember(ctx, models.BootstrapUserID, editor.ProjectID, "reader", "editor"))
+	require.NoError(t, access.SetMember(ctx, models.BootstrapUserID, viewer.ProjectID, "reader", "viewer"))
 	// Make the inaccessible record sort first; pagination must still return a visible record.
 	_, err = db.Exec(`UPDATE alerts SET created_at='2099-01-01 00:00:00' WHERE id=?`, hidden.ID)
 	require.NoError(t, err)

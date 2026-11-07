@@ -52,9 +52,6 @@ func (h *Handler) UpdateProjectSharing(c echo.Context) error {
 		return projectAccessHTTPError(err)
 	}
 	switch c.FormValue("action") {
-	case "policy":
-		policy.OrgRole = c.FormValue("org_role")
-		err = h.projectAccessSvc.Update(ctx, *policy)
 	case "member":
 		err = h.projectAccessSvc.SetMember(ctx, id, c.FormValue("user_id"), c.FormValue("role"))
 	case "transfer":

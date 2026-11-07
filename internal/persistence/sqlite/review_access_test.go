@@ -34,10 +34,7 @@ func TestReviewScopedMutationAuditRollbackAndRevocation(t *testing.T) {
 	_, err = db.Exec(`DROP TRIGGER fail_review_audit; INSERT INTO users(id,username) VALUES('reviewer','reviewer'); INSERT INTO org_memberships VALUES('default','reviewer','member')`)
 	require.NoError(t, err)
 	policyRepo := NewProjectAccessRepo(db)
-	policy, err := policyRepo.Get(ctx, project.ID)
-	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, policyRepo.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, policyRepo.SetMember(ctx, models.BootstrapUserID, project.ID, "reviewer", "viewer"))
 	editor := models.WithPrincipal(ctx, models.Principal{UserID: "reviewer", Role: "owner"})
 	require.ErrorIs(t, repo.UpdateTextForProject(editor, project.ID, comment.ID, "denied"), persistence.ErrProjectDenied)
 	require.NoError(t, policyRepo.SetMember(ctx, models.BootstrapUserID, project.ID, "reviewer", "editor"))

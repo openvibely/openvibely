@@ -11,7 +11,7 @@ import (
 func TestMessageAuthorsSurviveReloadAndQueuePromotion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('alice-id','alice'),('bob-id','testuser1'); INSERT INTO org_memberships VALUES('default','alice-id','member'),('default','bob-id','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('alice-id','alice'),('bob-id','testuser1'); INSERT INTO org_memberships VALUES('default','alice-id','member'),('default','bob-id','member'); INSERT INTO project_members VALUES('default','alice-id','editor'),('default','bob-id','editor')`)
 	require.NoError(t, err)
 	alice := models.WithPrincipal(ctx, models.Principal{UserID: "alice-id", Username: "alice"})
 	bob := models.WithPrincipal(ctx, models.Principal{UserID: "bob-id", Username: "testuser1"})
@@ -57,7 +57,7 @@ func TestMessageAuthorsSurviveReloadAndQueuePromotion(t *testing.T) {
 func TestMessageAuthorsDirectFollowupAndSteering(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('bob-id','testuser1'); INSERT INTO org_memberships VALUES('default','bob-id','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('bob-id','testuser1'); INSERT INTO org_memberships VALUES('default','bob-id','member'); INSERT INTO project_members VALUES('default','bob-id','editor')`)
 	require.NoError(t, err)
 	sender := models.WithPrincipal(ctx, models.Principal{UserID: "bob-id", Username: "testuser1"})
 	agent := createThreadInputLLMConfig(t, ctx, db)

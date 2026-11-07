@@ -27,7 +27,7 @@ func TestProjectAccessRolesRevocationAndAudit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "alice", policy.OwnerUserID)
 	require.Equal(t, "org", policy.Visibility)
-	require.NoError(t, a.Require(bob, project.ID, authz.Edit))
+	require.ErrorIs(t, a.Require(bob, project.ID, authz.Edit), authz.ErrDenied)
 	require.ErrorIs(t, a.Require(bob, project.ID, authz.Manage), authz.ErrDenied)
 	require.ErrorIs(t, a.Require(ctx, project.ID, authz.View), authz.ErrDenied)
 	require.ErrorIs(t, a.Require(bob, project.ID, authz.Permission("unknown")), authz.ErrDenied)

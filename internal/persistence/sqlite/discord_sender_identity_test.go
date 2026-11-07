@@ -11,7 +11,7 @@ import (
 func TestDiscordSenderIdentityAttestationAndRevocation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := t.Context()
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('sender','sender'); INSERT INTO org_memberships VALUES('default','sender','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('sender','sender'); INSERT INTO org_memberships VALUES('default','sender','member'); INSERT INTO project_members VALUES('default','sender','editor')`)
 	require.NoError(t, err)
 	repo := NewDiscordAuthRepo(db)
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
@@ -46,8 +46,7 @@ func TestDiscordSenderIdentityAttestationAndRevocation(t *testing.T) {
 	access := NewProjectAccessRepo(db)
 	policy, err := access.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, access.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, access.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, "sender", "viewer"))
 	_, err = repo.ResolveApplicationUser(ctx, "default", row.DiscordUserID)
 	require.Error(t, err)
 	require.NoError(t, repo.BindApplicationUser(owner, "default", row.ID, "sender"))

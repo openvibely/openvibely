@@ -13,7 +13,7 @@ func TestIdentifiedExecutionAdmissionSnapshotAndRollback(t *testing.T) {
 	ctx := t.Context()
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 	task := createThreadInputTask(t, owner, db, "default")
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('executor','executor'); INSERT INTO org_memberships VALUES('default','executor','member');`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('executor','executor'); INSERT INTO org_memberships VALUES('default','executor','member'); INSERT INTO project_members VALUES('default','executor','editor');`)
 	require.NoError(t, err)
 	actor := models.WithPrincipal(ctx, models.Principal{UserID: "executor", Role: "owner"})
 	repo := NewExecutionRepo(db)
@@ -103,7 +103,7 @@ func TestDirectFollowupDenialLeavesQueueAndTaskUnchanged(t *testing.T) {
 			owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 			task := createThreadInputTask(t, owner, db, "default")
 			require.NoError(t, NewTaskRepo(db, nil).UpdateStatus(ctx, task.ID, status))
-			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('viewer','viewer'); INSERT INTO org_memberships VALUES('default','viewer','member'); UPDATE project_organizations SET org_role='viewer' WHERE project_id='default'`)
+			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('viewer','viewer'); INSERT INTO org_memberships VALUES('default','viewer','member'); INSERT INTO project_members VALUES('default','viewer','viewer')`)
 			require.NoError(t, err)
 			actor := models.WithPrincipal(ctx, models.Principal{UserID: "viewer", Role: "owner"})
 			execution := models.Execution{TaskID: task.ID, IsFollowup: true}
