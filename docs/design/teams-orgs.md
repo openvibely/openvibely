@@ -20,7 +20,7 @@ architecture remain below for design context. Implementation history is availabl
 | All-projects chat | Personal history, pending messages, active runs and provider context per user. Existing shared history is admin-only; authorship is not treated as ownership. Live lifecycle events carry a server-only audience ID; frame filtering stays in memory. Ordinary project chat remains shared with authorized project members. |
 | Author attribution | Chat/task messages, queued inputs and steering messages display author names. |
 | Audit | Identified mutations record atomic audits. Membership changes record JSON `before`/`after` explicit grants, including removals with org membership; empty means no individual grant. Existing history is not rewritten. |
-| Migration | Phase 2 authorization is in `224_project_authorization.sql`, following version 223. Migration 225 adds personal workspace-chat ownership for databases already running 224; existing shared history remains unowned and admin-only. Upgrade, rollback and re-upgrade have coverage. Rollback drops Phase 2 audit history; it is not an expected operating workflow. |
+| Migration | Phase 2 authorization and personal workspace-chat ownership are consolidated in `224_project_authorization.sql`, following version 223. Existing shared history remains unowned and admin-only. Upgrade, rollback and re-upgrade have coverage. Rollback drops Phase 2 audit history; it is not an expected operating workflow. |
 
 ### Validation evidence
 
