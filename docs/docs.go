@@ -1203,86 +1203,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/plugin-pages/{instanceId}/approvals": {
-            "get": {
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "plugin-pages"
-                ],
-                "summary": "List pending page agent approvals",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Plugin page instance ID",
-                        "name": "instanceId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Rendered approval cards",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handler.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/plugin-pages/{instanceId}/approvals/{approvalId}/{decision}": {
-            "post": {
-                "tags": [
-                    "plugin-pages"
-                ],
-                "summary": "Approve or deny a page agent action",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Plugin page instance ID",
-                        "name": "instanceId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Approval ID",
-                        "name": "approvalId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "enum": [
-                            "approve",
-                            "deny"
-                        ],
-                        "type": "string",
-                        "description": "Decision",
-                        "name": "decision",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handler.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/plugin-pages/{instanceId}/bridge": {
             "post": {
                 "description": "Executes one validated v1 bridge message relayed by the host page. Body is the bridge envelope including the page-load handle.",
@@ -1419,7 +1339,7 @@ const docTemplate = `{
         },
         "/api/plugin-pages/{instanceId}/events": {
             "get": {
-                "description": "Server-sent events for refreshes and approval prompts.",
+                "description": "Server-sent events for page refreshes.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -4003,24 +3923,28 @@ const docTemplate = `{
                 "completed",
                 "backlog",
                 "scheduled",
-                "chat"
+                "chat",
+                "page_chat"
             ],
             "x-enum-comments": {
-                "CategoryChat": "Internal category for chat messages (not displayed in UI)"
+                "CategoryChat": "Internal category for chat messages (not displayed in UI)",
+                "CategoryPageChat": "Internal category for page side-chat history"
             },
             "x-enum-descriptions": [
                 "",
                 "",
                 "",
                 "",
-                "Internal category for chat messages (not displayed in UI)"
+                "Internal category for chat messages (not displayed in UI)",
+                "Internal category for page side-chat history"
             ],
             "x-enum-varnames": [
                 "CategoryActive",
                 "CategoryCompleted",
                 "CategoryBacklog",
                 "CategoryScheduled",
-                "CategoryChat"
+                "CategoryChat",
+                "CategoryPageChat"
             ]
         },
         "models.TaskStatus": {

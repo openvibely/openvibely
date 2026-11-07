@@ -110,7 +110,7 @@ func TestSalesExampleTwoProjectsIsolated(t *testing.T) {
 		t.Fatal("refresh did not publish data.changed")
 	}
 
-	tools := pageintegration.BuildRuntimeTools(ia, m.Resolver(inA.ID, projA), m.Approvals, pageintegration.Caller{PrincipalID: "u"})
+	tools := pageintegration.BuildRuntimeTools(ia, m.Resolver(inA.ID, projA), pageintegration.Caller{PrincipalID: "u"})
 	res, _, isErr, err := tools.Executor(ctx, pageintegration.ToolName("refresh_data"), json.RawMessage(`{}`))
 	if err != nil || isErr || revisionOf(t, json.RawMessage(res)) != 3 {
 		t.Fatalf("agent tool did not share page operation state: %s %v", res, err)
@@ -163,7 +163,7 @@ func TestDisableRetiresRuntimeResources(t *testing.T) {
 	if _, err := m.Resolve(ctx, in.ID, projA); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("disabled instance resolved: %v", err)
 	}
-	tools := pageintegration.BuildRuntimeTools(m.Integration(r), m.Resolver(in.ID, projA), nil, pageintegration.Caller{})
+	tools := pageintegration.BuildRuntimeTools(m.Integration(r), m.Resolver(in.ID, projA), pageintegration.Caller{})
 	if out, _, isErr, _ := tools.Executor(ctx, pageintegration.ToolName("get_report"), nil); !isErr || !strings.Contains(out, "unavailable") {
 		t.Fatalf("disabled page served agent tool: %s", out)
 	}

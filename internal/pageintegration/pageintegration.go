@@ -89,15 +89,14 @@ const (
 
 // Operation is defined once and invoked identically by page buttons and agent tools.
 type Operation struct {
-	Name             string          `json:"name"`
-	Description      string          `json:"description"`
-	Kind             OperationKind   `json:"kind"`
-	InputSchema      json.RawMessage `json:"input_schema,omitempty"`
-	OutputSchema     json.RawMessage `json:"output_schema,omitempty"`
-	Permissions      []string        `json:"permissions,omitempty"`
-	ExposeAsTool     bool            `json:"expose_as_tool"`
-	RequiresApproval bool            `json:"requires_approval,omitempty"`
-	Emits            []string        `json:"emits,omitempty"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	Kind         OperationKind   `json:"kind"`
+	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
+	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
+	Permissions  []string        `json:"permissions,omitempty"`
+	ExposeAsTool bool            `json:"expose_as_tool"`
+	Emits        []string        `json:"emits,omitempty"`
 }
 
 var operationNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
@@ -122,11 +121,6 @@ func ValidateOperation(op Operation) error {
 		}
 	}
 	return nil
-}
-
-// RequiresUserApproval reports whether agent invocations must be confirmed by a person.
-func (op Operation) RequiresUserApproval() bool {
-	return op.Kind == OperationAction || op.RequiresApproval
 }
 
 func compileSchema(schema json.RawMessage) (*jsonschema.Schema, error) {

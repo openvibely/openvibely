@@ -50,7 +50,6 @@ templ PluginPageContent(v PluginPageView) {
 		data-bridge-url={ pluginAPI(v, "/bridge") }
 		data-events-url={ pluginAPI(v, "/events") }
 		data-retire-url={ pluginAPI(v, "/handle/retire") }
-		data-approvals-url={ pluginAPI(v, "/approvals") }
 	>
 		<div data-page-header class="flex items-center justify-between gap-2 mb-3">
 			<div class="min-w-0">
@@ -64,7 +63,7 @@ templ PluginPageContent(v PluginPageView) {
 			}
 		</div>
 		<div id="plugin-startup" class="text-xs mb-2" role="status">Loading page…</div>
-		<div id="plugin-approvals" class="space-y-2 mb-2" aria-live="polite"></div>
+		<div id="plugin-notice" class="text-xs mb-2" aria-live="polite"></div>
 		<div class="flex flex-1 min-h-0 gap-3">
 			<iframe
 				id="plugin-frame"
@@ -87,18 +86,6 @@ templ PluginPageContent(v PluginPageView) {
 }
 
 
-
-// PluginApprovalCard renders a pending agent action that needs user confirmation.
-templ PluginApprovalCard(v PluginPageView, id, operation, input string) {
-	<div class="alert alert-warning text-sm" data-plugin-approval={ id }>
-		<div class="flex-1 min-w-0">
-			<div class="font-semibold">The agent wants to run <code>{ operation }</code></div>
-			<pre class="text-xs whitespace-pre-wrap break-all opacity-80">{ input }</pre>
-		</div>
-		<button class="btn btn-xs btn-primary" hx-post={ pluginAPI(v, "/approvals/"+url.PathEscape(id)+"/approve") } hx-target="closest [data-plugin-approval]" hx-swap="outerHTML">Approve</button>
-		<button class="btn btn-xs" hx-post={ pluginAPI(v, "/approvals/"+url.PathEscape(id)+"/deny") } hx-target="closest [data-plugin-approval]" hx-swap="outerHTML">Deny</button>
-	</div>
-}
 
 // PluginNavEntry is one enabled page instance in the left rail.
 type PluginNavEntry struct {
@@ -284,13 +271,11 @@ templ pluginHostBridgeScript() {
 		var bridgeURL = root.getAttribute('data-bridge-url');
 		var eventsURL = root.getAttribute('data-events-url');
 		var retireURL = root.getAttribute('data-retire-url');
-		var approvalsURL = root.getAttribute('data-approvals-url');
 		var projectID = root.getAttribute('data-project-id');
 		var MAX = 65536;
 		var ALLOWED = ['ready', 'op.invoke', 'context.set', 'analyze.request', 'events.subscribe', 'page.loaded', 'page.failed'];
 		var dead = false, loads = 0, events = null, subscribed = false, streams = [];
 		var requests = new AbortController();
-		var approvalRevision = 0;
 		var startupTimer = setTimeout(function () {
 			onMessage({source: frame.contentWindow, data: {v: 1, handle: handle, id: 'startup-timeout', type: 'page.failed', payload: {error: 'Page did not confirm startup within 30 seconds.'}}});
 		}, 30000);
@@ -301,25 +286,13 @@ templ pluginHostBridgeScript() {
 			// recipient is pinned to this iframe's window object.
 			frame.contentWindow.postMessage({v: 1, type: type, replyTo: replyTo, handle: handle, payload: payload || {}}, '*');
 		}
-		function refreshApprovals() {
-			var revision = ++approvalRevision;
-			fetch(approvalsURL, {credentials: 'same-origin', signal: requests.signal})
-				.then(function (r) { if (!r.ok) throw new Error('approvals unavailable'); return r.text(); })
-				.then(function (html) {
-					if (dead || revision !== approvalRevision) return;
-					var target = root.querySelector('#plugin-approvals');
-					target.innerHTML = html;
-					if (typeof htmx !== 'undefined') htmx.process(target);
-				}).catch(function () {});
-		}
 		function startEvents() {
 			if (events || dead) return;
 			events = new EventSource(eventsURL + '&handle=' + encodeURIComponent(handle));
-			events.onopen = function () { if (subscribed) post('event', null, {type: 'page.refresh'}); refreshApprovals(); };
+			events.onopen = function () { if (subscribed) post('event', null, {type: 'page.refresh'}); };
 			events.onmessage = function (e) {
 				if (dead) return;
 				var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
-				if (ev.type === 'approval.pending') refreshApprovals();
 				if (subscribed) post('event', null, ev);
 			};
 			events.addEventListener('closed', function () { events.close(); events = null; });
@@ -383,13 +356,12 @@ templ pluginHostBridgeScript() {
 		frame.addEventListener('load', function () {
 			loads++;
 			// The bridge is bound to the entry document; a navigated frame loses it.
-			if (loads > 1) { cleanup(); root.querySelector('#plugin-approvals').textContent = 'The plugin page navigated away; reload to reconnect.'; }
+			if (loads > 1) { cleanup(); root.querySelector('#plugin-notice').textContent = 'The plugin page navigated away; reload to reconnect.'; }
 		});
 		window.addEventListener('message', onMessage);
 		document.addEventListener('htmx:beforeSwap', onSwap);
 		window.addEventListener('pagehide', onPageHide, {once: true});
 		startEvents();
-		refreshApprovals();
 		var toggle = root.querySelector('[data-plugin-chat-toggle]');
 		var chat = root.querySelector('#page-side-chat');
 		if (toggle && chat) toggle.addEventListener('click', function () {

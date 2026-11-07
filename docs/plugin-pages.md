@@ -50,7 +50,6 @@ The managed root is `$OPENVIBELY_PAGE_PLUGIN_ROOT`, or `<AppDataDir>/page-plugin
       "description": "Reload widget data",
       "kind": "read",
       "expose_as_tool": true,
-      "requires_approval": false,
       "permissions": ["events"],
       "emits": ["data.changed"],
       "input_schema": {"type": "object", "properties": {}},
@@ -77,7 +76,7 @@ Validation is strict:
 | `agent` | Enables the side chat and `analyze.request` |
 | `backend.exec` | Runs the backend executable. Requires administrator approval. |
 
-Operation `kind` is either `read` or `action`. Actions, and any operation with `requires_approval: true`, need the user to confirm in the page before an **agent** can run them. A page button click counts as the user's own action.
+Operation `kind` is either `read` or `action`. Agent tool calls run directly, like other OV tools; there is no per-action confirmation.
 
 ### Platform executable selection
 
@@ -131,7 +130,7 @@ Use **Settings → Plugin pages** (`/settings/plugin-pages?project_id=<project>`
 1. **Install**: either "Install Sales example" or "Install from directory" with an absolute path to a prebuilt bundle. You need to be an administrator when organizations are enabled.
 2. **Add to project**: pick an installed package and a page to create a disabled instance in the current project.
 3. **Approve** (only for `backend.exec`): the approval screen shows the permissions and the content hash. Approval is bound to that hash. Every actual launch, including a cached process's automatic crash recovery, rechecks the enabled instance, its persisted approval, and the installed package's content hash before executing code. Changed files block launch. Restore the approved files, or install the changes as a new package version and approve that version; approving the old package record does not authorize edits to its files.
-4. **Enable**: the page appears in the left rail. **Disable** closes admission to new operations, cancels that instance's running side-chat and inline analysis through OV's existing cancellation machinery, interrupts backend startup and active calls, and releases its handles, subscriptions, and approvals. Backend termination does not depend on the process reading stdin. Saved state and conversation history remain intact. Re-enabling creates a new runtime lifetime; cancelled work from the previous lifetime stays cancelled. Other instances are unaffected.
+4. **Enable**: the page appears in the left rail. **Disable** closes admission to new operations, cancels that instance's running side-chat and inline analysis through OV's existing cancellation machinery, interrupts backend startup and active calls, and releases its handles and subscriptions. Backend termination does not depend on the process reading stdin. Saved state and conversation history remain intact. Re-enabling creates a new runtime lifetime; cancelled work from the previous lifetime stays cancelled. Other instances are unaffected.
 5. **Remove instance**: deletes only that instance, together with its state, side-chat conversation, and turn-context snapshots. Other projects' instances of the same package are unaffected.
 6. **Remove package**: only allowed once no instance uses it. Its files are deleted from the managed root.
 
@@ -164,7 +163,7 @@ The "Chat about this page" panel reuses the standard chat message components and
 The bundled example (`internal/pageplugins/examples/sales`) uses a host-implemented builtin backend, so it does not execute any process. It generates deterministic sample data per instance, keeps state per instance, and offers these operations:
 - `refresh_data` (read, tool, emits `data.changed`)
 - `get_report` (read, tool)
-- `set_target` (action, tool, requires approval when the agent calls it)
+- `set_target` (action, tool)
 
 To try it:
 1. Open Settings → Plugin pages in project A, click **Install Sales example**, add the `sales` page, and click **Enable**.
@@ -178,7 +177,7 @@ These pages are not retrofitted yet. To adopt the interface, a built-in page wou
 
 1. Implement `pageintegration.Integration` (`Ref()`, `Operations()`, `Invoke()`). Use a distinct `PageRef.Kind` such as `"analytics"`, the owning project ID, and handlers that call existing services.
 2. When the page's selection, filters, or date range change, post them to a small endpoint that calls `ContextStore.Set(principal, ref, ctx, source)`. Never read them from the DOM.
-3. Build a `pageintegration.Conversation` binding with the server-resolved `PageRef`, `stores.PageConversations.ForPage(ref)`, a `ContextStore`, an approval broker, and an authorized `Resolver`. Its `Begin` callback rechecks access and admits work against the page's enabled lifetime. Its `Lifetime` callback returns a context cancelled on disable/removal, independent of the request or browser lifetime. The page adapter owns authorization and enabled-state admission; frontend IDs never grant access.
+3. Build a `pageintegration.Conversation` binding with the server-resolved `PageRef`, `stores.PageConversations.ForPage(ref)`, a `ContextStore`, and an authorized `Resolver`. Its `Begin` callback rechecks access and admits work against the page's enabled lifetime. Its `Lifetime` callback returns a context cancelled on disable/removal, independent of the request or browser lifetime. The page adapter owns authorization and enabled-state admission; frontend IDs never grant access.
 4. Use the shared handler methods `startPageChatTurn`, `loadPageChatHistory`, and `cancelPageConversation`. They create/resume the backing task, snapshot context, construct authorized page tools, reuse OV streaming/cancellation, and isolate provider sessions. Render `components.PageSideChat` with the owning project, history, and your authorized Send/Stop endpoints. No plugin manager or iframe is needed. Do not duplicate the conversation runtime in the page's handler.
 5. Publish `pageintegration.Event`s on a `Hub` after mutations. Close subscriptions on view disposal and refetch data when reconnecting. Use a request generation counter to ignore responses belonging to previous filters/views; do not replay mutating operations to refresh the view.
 
@@ -196,7 +195,7 @@ The plugin adapter is `internal/pageplugins/conversation.go`. Shared persistence
 
 - Installation is from a local directory or the bundled example only. There is no upload and no signing.
 - Backends are not OS-sandboxed (see above). Frontend-only plugins and builtins never execute code on the host.
-- Approvals for agent actions and page contexts are kept in memory and are lost on restart; the agent is told the action was declined.
+- Page contexts are kept in memory and are lost on restart.
 - The side chat uses the project's default agent selection and runs one turn at a time per instance.
 
 ## Browser startup reports

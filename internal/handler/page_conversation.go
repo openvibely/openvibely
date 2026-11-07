@@ -121,7 +121,7 @@ func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conv
 		}
 	}
 	pageContext := pageintegration.RenderContextForPrompt(ref, snap, integration.Operations())
-	tools := pageintegration.BuildRuntimeTools(integration, binding.Resolve, binding.Approvals, pageintegration.Caller{PrincipalID: principal})
+	tools := pageintegration.BuildRuntimeTools(integration, binding.Resolve, pageintegration.Caller{PrincipalID: principal})
 
 	history, err := h.execRepo.ListByTaskChronologicalLimit(persistence.WithModelHistory(ctx, agent.Provider), task.ID, taskThreadHistoryLimit)
 	if err != nil {

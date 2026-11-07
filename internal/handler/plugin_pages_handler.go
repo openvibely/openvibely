@@ -15,7 +15,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -41,9 +40,6 @@ func (h *Handler) SetPagePlugins(m *pageplugins.Manager) {
 		m.OnDisable = func(ctx context.Context, instanceID string) error {
 			return h.cancelPluginConversation(ctx, instanceID)
 		}
-		m.Approvals.OnPending = func(a pageintegration.Approval) {
-			m.Hub.Publish(a.InstanceID, pageintegration.Event{Type: "approval.pending", Operation: a.Operation, At: time.Now().UTC()})
-		}
 	}
 }
 
@@ -57,8 +53,6 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	api.POST("/handle/retire", h.PluginRetireHandle)
 	api.POST("/chat", h.PluginChatSend)
 	api.POST("/chat/stop", h.PluginChatStop)
-	api.GET("/approvals", h.PluginApprovals)
-	api.POST("/approvals/:approvalId/:decision", h.PluginApprovalDecide)
 	e.GET("/settings/plugin-pages", h.PluginSettings)
 	e.POST("/settings/plugin-pages/install", h.PluginSettingsInstall)
 	e.POST("/settings/plugin-pages/install-example", h.PluginSettingsInstallExample)
@@ -464,9 +458,9 @@ func pluginChatStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// PluginEvents streams instance events (refreshes, approval prompts) to the host page.
+// PluginEvents streams instance events to the host page.
 // @Summary Stream plugin page events
-// @Description Server-sent events for refreshes and approval prompts.
+// @Description Server-sent events for page refreshes.
 // @Tags plugin-pages
 // @Param instanceId path string true "Plugin page instance ID"
 // @Param handle query string true "Page-load handle"
@@ -643,54 +637,6 @@ func (h *Handler) cancelPluginConversation(ctx context.Context, instanceID strin
 	}
 	ref := pageintegration.PageRef{Kind: pageplugins.Kind, PageID: in.PageID, InstanceID: in.ID, ProjectID: in.ProjectID, Title: in.Title}
 	return h.cancelPageConversation(ctx, h.pagePlugins.Conversation(ref))
-}
-
-// PluginApprovals lists pending agent actions awaiting confirmation on this page.
-// @Summary List pending page agent approvals
-// @Tags plugin-pages
-// @Param instanceId path string true "Plugin page instance ID"
-// @Produce html
-// @Success 200 {string} string "Rendered approval cards"
-// @Failure 404 {object} ErrorResponse
-// @Router /api/plugin-pages/{instanceId}/approvals [get]
-func (h *Handler) PluginApprovals(c echo.Context) error {
-	r, err := h.resolvePluginForRequest(c, false)
-	if err != nil {
-		return err
-	}
-	v := pages.PluginPageView{InstanceID: r.Instance.ID, OwningProjectID: r.Instance.ProjectID}
-	var cards []templ.Component
-	for _, a := range h.pagePlugins.Approvals.List(r.Instance.ID, r.Instance.ProjectID) {
-		cards = append(cards, pages.PluginApprovalCard(v, a.ID, a.Operation, string(a.Input)))
-	}
-	return render(c, http.StatusOK, templ.Join(cards...))
-}
-
-// PluginApprovalDecide approves or denies one pending agent action.
-// @Summary Approve or deny a page agent action
-// @Tags plugin-pages
-// @Param instanceId path string true "Plugin page instance ID"
-// @Param approvalId path string true "Approval ID"
-// @Param decision path string true "Decision" Enums(approve, deny)
-// @Success 200
-// @Failure 404 {object} ErrorResponse
-// @Router /api/plugin-pages/{instanceId}/approvals/{approvalId}/{decision} [post]
-func (h *Handler) PluginApprovalDecide(c echo.Context) error {
-	if err := requirePluginMutation(c); err != nil {
-		return err
-	}
-	r, err := h.resolvePluginForRequest(c, false)
-	if err != nil {
-		return err
-	}
-	decision := c.Param("decision")
-	if decision != "approve" && decision != "deny" {
-		return pluginNotFound()
-	}
-	if !h.pagePlugins.Approvals.Resolve(c.Param("approvalId"), r.Instance.ID, r.Instance.ProjectID, decision == "approve") {
-		return pluginNotFound()
-	}
-	return c.HTML(http.StatusOK, "")
 }
 
 // requirePluginAdmin enforces administrator access for install/approval actions.

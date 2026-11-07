@@ -115,46 +115,9 @@ func TestRunValidatesInput(t *testing.T) {
 	}
 }
 
-func TestApprovalsResolveIsScoped(t *testing.T) {
-	a := NewApprovals()
-	ids := make(chan string, 1)
-	a.OnPending = func(ap Approval) { ids <- ap.ID }
-	ref := newFake().ref
-	done := make(chan bool, 1)
-	go func() {
-		ok, _ := a.Request(context.Background(), ref, "set_target", nil)
-		done <- ok
-	}()
-	id := <-ids
-	if a.Resolve(id, ref.InstanceID, "proj-b", true) {
-		t.Fatal("approval resolved from another project")
-	}
-	if len(a.List(ref.InstanceID, ref.ProjectID)) != 1 {
-		t.Fatal("pending approval not listed")
-	}
-	if !a.Resolve(id, ref.InstanceID, ref.ProjectID, true) {
-		t.Fatal("resolve failed")
-	}
-	if !<-done {
-		t.Fatal("approval not granted")
-	}
-
-	go func() {
-		ok, _ := a.Request(context.Background(), ref, "set_target", nil)
-		done <- ok
-	}()
-	<-ids
-	a.CancelInstance(ref.InstanceID)
-	if <-done {
-		t.Fatal("cancelled approval granted")
-	}
-}
-
 func TestBuildRuntimeToolsSharesOperationPath(t *testing.T) {
 	f := newFake()
-	approvals := NewApprovals()
-	approvals.OnPending = func(ap Approval) { go approvals.Resolve(ap.ID, ap.InstanceID, ap.ProjectID, false) }
-	rt := BuildRuntimeTools(f, func(context.Context) (Integration, error) { return f, nil }, approvals, Caller{PrincipalID: "u"})
+	rt := BuildRuntimeTools(f, func(context.Context) (Integration, error) { return f, nil }, Caller{PrincipalID: "u"})
 	if rt == nil || len(rt.Definitions) != 2 {
 		t.Fatalf("expected 2 tool definitions, got %+v", rt)
 	}
@@ -168,9 +131,9 @@ func TestBuildRuntimeToolsSharesOperationPath(t *testing.T) {
 	if len(f.calls) != 1 || f.calls[0].Via != "agent" || f.calls[0].PrincipalID != "u" {
 		t.Fatalf("unexpected caller %+v", f.calls)
 	}
-	out, _, isErr, _ = rt.Executor(context.Background(), ToolName("set_target"), json.RawMessage(`{}`))
-	if !isErr || !strings.Contains(out, "declined") || len(f.calls) != 1 {
-		t.Fatalf("action ran without approval: %q", out)
+	out, _, isErr, err = rt.Executor(context.Background(), ToolName("set_target"), json.RawMessage(`{}`))
+	if err != nil || isErr || len(f.calls) != 2 || f.calls[1].Via != "agent" {
+		t.Fatalf("action tool did not run directly: %q %v %+v", out, err, f.calls)
 	}
 }
 
@@ -178,12 +141,12 @@ func TestBuildRuntimeToolsRejectsBindingChange(t *testing.T) {
 	f := newFake()
 	moved := newFake()
 	moved.ref.ProjectID = "proj-b"
-	rt := BuildRuntimeTools(f, func(context.Context) (Integration, error) { return moved, nil }, nil, Caller{})
+	rt := BuildRuntimeTools(f, func(context.Context) (Integration, error) { return moved, nil }, Caller{})
 	out, _, isErr, _ := rt.Executor(context.Background(), ToolName("refresh"), nil)
 	if !isErr || !strings.Contains(out, "binding changed") {
 		t.Fatalf("binding change not detected: %q", out)
 	}
-	rt = BuildRuntimeTools(f, func(context.Context) (Integration, error) { return nil, errors.New("disabled") }, nil, Caller{})
+	rt = BuildRuntimeTools(f, func(context.Context) (Integration, error) { return nil, errors.New("disabled") }, Caller{})
 	out, _, isErr, _ = rt.Executor(context.Background(), ToolName("refresh"), nil)
 	if !isErr || !strings.Contains(out, "unavailable") {
 		t.Fatalf("revoked page still served tool: %q", out)

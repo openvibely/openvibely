@@ -11,7 +11,7 @@ import (
 func (m *Manager) Conversation(ref pageintegration.PageRef) pageintegration.Conversation {
 	return pageintegration.Conversation{
 		Page: ref, Store: conversationStore{m, ref.InstanceID}, Contexts: m.Contexts,
-		Approvals: m.Approvals, Resolve: m.Resolver(ref.InstanceID, ref.ProjectID),
+		Resolve: m.Resolver(ref.InstanceID, ref.ProjectID),
 		Begin: func(ctx context.Context) (context.Context, func(), error) {
 			return m.BeginInstance(ctx, ref.InstanceID)
 		},

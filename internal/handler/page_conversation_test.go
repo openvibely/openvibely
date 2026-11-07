@@ -28,7 +28,7 @@ func TestPageConversationWithoutPlugin(t *testing.T) {
 	contexts := pageintegration.NewContextStore()
 	makeBinding := func(id string) pageintegration.Conversation {
 		ref := pageintegration.PageRef{Kind: "test-page", PageID: "report", InstanceID: id, ProjectID: project.ID, Title: id}
-		return pageintegration.Conversation{Page: ref, Store: stores.PageConversations.ForPage(ref), Contexts: contexts, Approvals: pageintegration.NewApprovals(),
+		return pageintegration.Conversation{Page: ref, Store: stores.PageConversations.ForPage(ref), Contexts: contexts,
 			Resolve:  func(context.Context) (pageintegration.Integration, error) { return plainPage{ref}, nil },
 			Begin:    func(ctx context.Context) (context.Context, func(), error) { return ctx, func() {}, nil },
 			Lifetime: func() context.Context { return lifetime },

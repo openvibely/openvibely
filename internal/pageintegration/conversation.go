@@ -15,13 +15,12 @@ type ConversationStore interface {
 // must recheck access and admit work against the page's enabled lifetime. Lifetime
 // is cancelled on disable/removal, never merely on navigation away.
 type Conversation struct {
-	Page      PageRef
-	Store     ConversationStore
-	Contexts  *ContextStore
-	Approvals *Approvals
-	Resolve   Resolver
-	Begin     func(context.Context) (context.Context, func(), error)
-	Lifetime  func() context.Context
+	Page     PageRef
+	Store    ConversationStore
+	Contexts *ContextStore
+	Resolve  Resolver
+	Begin    func(context.Context) (context.Context, func(), error)
+	Lifetime func() context.Context
 }
 
 func (c Conversation) LockKey() string { return "page-chat:" + c.Page.ProjectID + ":" + c.Page.Key() }

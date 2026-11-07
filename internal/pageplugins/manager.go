@@ -90,12 +90,11 @@ type procEntry struct {
 
 // Manager owns plugin packages, instances, processes, and bridge handles.
 type Manager struct {
-	store     persistence.PagePluginStore
-	root      string
-	Hub       *pageintegration.Hub
-	Contexts  *pageintegration.ContextStore
-	Approvals *pageintegration.Approvals
-	builtins  map[string]Builtin
+	store    persistence.PagePluginStore
+	root     string
+	Hub      *pageintegration.Hub
+	Contexts *pageintegration.ContextStore
+	builtins map[string]Builtin
 
 	publishMu sync.Mutex
 	installMu sync.Mutex
@@ -118,7 +117,6 @@ func NewManager(store persistence.PagePluginStore, root string) *Manager {
 		root:      root,
 		Hub:       pageintegration.NewHub(),
 		Contexts:  pageintegration.NewContextStore(),
-		Approvals: pageintegration.NewApprovals(),
 		builtins:  map[string]Builtin{},
 		procs:     map[string]*procEntry{},
 		handles:   map[string]Handle{},
@@ -416,7 +414,6 @@ func (m *Manager) releaseInstance(instanceID string) {
 	}
 	m.Hub.CloseInstance(instanceID)
 	m.Contexts.ForgetInstance(instanceID)
-	m.Approvals.CancelInstance(instanceID)
 }
 
 // StopAll stops every backend process (server shutdown).
