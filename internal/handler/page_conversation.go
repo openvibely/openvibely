@@ -304,13 +304,6 @@ func (h *Handler) cancelPageConversation(ctx context.Context, binding pageintegr
 	return nil
 }
 
-// loadPageChatHistory is also used by built-in page adapters; reopening never
-// creates a fresh conversation or resumes another page's provider state.
-func (h *Handler) loadPageChatHistory(ctx context.Context, binding pageintegration.Conversation) (*models.Task, []models.Execution, error) {
-	task, executions, _, err := h.loadPageChatWindow(ctx, binding, "")
-	return task, executions, err
-}
-
 func (h *Handler) loadPageChatWindow(ctx context.Context, binding pageintegration.Conversation, before string) (*models.Task, []models.Execution, bool, error) {
 	taskID, err := binding.Store.TaskID(ctx)
 	if err != nil || taskID == "" {

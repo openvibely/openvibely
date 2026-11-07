@@ -22,10 +22,8 @@ type PluginPageView struct {
 	AssetURL         string
 	ChatEnabled      bool
  ChatHasEarlier bool
-	ChatTaskID       string
 	ChatExecutions   []models.Execution
 	ChatTask         *models.Task
-	ChatRunningExec  string
  ChatAgents []models.LLMConfig
  ChatAttachments map[string][]models.ChatAttachment
  ChatPending []models.ThreadInput
@@ -48,8 +46,6 @@ templ PluginPageContent(v PluginPageView) {
 		hx-history="false"
 		class="flex flex-col h-full min-h-0"
  data-page-chat-root
- data-page-chat-action-url={ pluginAPI(v, "/chat/composer-action") }
- data-page-chat-transcript-url={ pluginAPI(v, "/chat/transcript") }
 		data-plugin-instance={ v.InstanceID }
 		data-plugin-handle={ v.Handle }
 		data-project-id={ v.OwningProjectID }

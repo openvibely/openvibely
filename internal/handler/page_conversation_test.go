@@ -69,7 +69,7 @@ func TestPageConversationWithoutPlugin(t *testing.T) {
 	if err != nil || active.Status != models.ExecRunning {
 		t.Fatalf("generic page incorrectly recovered: %+v %v", active, err)
 	}
-	task, history, err := h.loadPageChatHistory(t.Context(), makeBinding("a"))
+	task, history, _, err := h.loadPageChatWindow(t.Context(), makeBinding("a"), "")
 	if err != nil || task.ID != first.TaskID || len(history) != 1 {
 		t.Fatalf("reopen failed: %v", err)
 	}

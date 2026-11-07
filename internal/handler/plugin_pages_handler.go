@@ -58,8 +58,6 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	api.POST("/chat/steer", h.PluginChatSteer)
 	api.POST("/chat/inputs/:inputId/steer", h.PluginChatQueuedSteer)
 	api.GET("/chat/composer-action", h.PluginChatComposerAction)
-	api.GET("/chat/transcript", h.PluginChatTranscript)
-	api.GET("/chat/history", h.PluginChatHistory)
 	api.GET("/chat/thread", h.PluginChatThread)
 	api.GET("/chat/thread/pending-inputs", h.PluginChatThreadPending)
 	api.GET("/chat/thread/composer-action", h.PluginChatComposerAction)
@@ -185,10 +183,6 @@ func (h *Handler) PluginPage(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		v.ChatRunningExec, err = h.pluginChatRunningExec(ctx, v.InstanceID)
-		if err != nil {
-			return err
-		}
 		binding := h.pagePlugins.Conversation(r.Ref())
 		unlock := persistence.LockTaskLifecycle(binding.LockKey())
 		_, err = h.pageConversationTask(ctx, binding, "", "")
@@ -213,21 +207,18 @@ func (h *Handler) PluginPage(c echo.Context) error {
 }
 
 func (h *Handler) loadPluginChatHistory(ctx context.Context, v *pages.PluginPageView) error {
-	return h.loadPluginChatHistoryWindow(ctx, v, "")
-}
-func (h *Handler) loadPluginChatHistoryWindow(ctx context.Context, v *pages.PluginPageView, before string) error {
 	in, err := h.pagePlugins.Store().GetInstance(ctx, v.InstanceID)
 	if err != nil || in == nil {
 		return err
 	}
 	ref := pageintegration.PageRef{Kind: pageplugins.Kind, InstanceID: in.ID, ProjectID: in.ProjectID, PageID: in.PageID, Title: in.Title}
-	task, execs, hasEarlier, err := h.loadPageChatWindow(ctx, h.pagePlugins.Conversation(ref), before)
+	task, execs, hasEarlier, err := h.loadPageChatWindow(ctx, h.pagePlugins.Conversation(ref), "")
 	v.ChatHasEarlier = hasEarlier
 	if err != nil {
 		return err
 	}
 	if task != nil {
-		v.ChatTaskID, v.ChatTask, v.ChatExecutions = task.ID, task, execs
+		v.ChatTask, v.ChatExecutions = task, execs
 		if h.threadInputRepo != nil {
 			v.ChatPending, err = h.threadInputRepo.ListPendingForTask(ctx, task.ID)
 			if err != nil {
@@ -949,11 +940,6 @@ func (h *Handler) PluginSettingsRemovePackage(c echo.Context) error {
 	return h.renderPluginSettings(c, projectID, "Package removed", err)
 }
 
-// PluginChatTranscript returns the authorized conversation without remounting its composer.
-func (h *Handler) PluginChatTranscript(c echo.Context) error {
-	return h.PluginChatThread(c)
-}
-
 // Resolve only persisted bindings; task titles and client IDs never select a page.
 func (h *Handler) recoverPageConversation(ctx context.Context, task *models.Task) (pageintegration.Conversation, error) {
 	if h.pagePlugins == nil {
@@ -1012,8 +998,4 @@ func (h *Handler) PluginChatQueuedSteer(c echo.Context) error {
 }
 func pluginQueuedSteerURL(instanceID, projectID string, input models.ThreadInput) string {
 	return pluginAPI(instanceID, projectID, "/chat/thread/queued/"+url.PathEscape(input.ID)+"/steer") + "&expected_turn_id=" + url.QueryEscape(input.RunExecutionID)
-}
-
-func (h *Handler) PluginChatHistory(c echo.Context) error {
-	return h.PluginChatThread(c)
 }
