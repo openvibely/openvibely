@@ -3451,13 +3451,6 @@ func mergeChannelRuntimeActionHandlers(dst, src map[string]chatcontrol.RuntimeAc
 	return dst
 }
 
-func newChannelActionSummaryCollector() *channelActionSummaryCollector {
-	return &channelActionSummaryCollector{
-		createdLines: []string{},
-		editedLines:  []string{},
-	}
-}
-
 func (c *channelActionSummaryCollector) addCreated(summary string) {
 	c.addMarkerLines(summary, "[TASK_ID:", &c.createdLines)
 }

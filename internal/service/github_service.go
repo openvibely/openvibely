@@ -1444,24 +1444,6 @@ func pathEscapeGitRef(ref string) string {
 	return strings.Join(parts, "/")
 }
 
-func localCommitSHA(ctx context.Context, dir, ref string) (string, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return "", fmt.Errorf("ref is required")
-	}
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", ref+"^{commit}")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
-	}
-	sha := strings.TrimSpace(string(out))
-	if sha == "" {
-		return "", fmt.Errorf("git rev-parse %s returned empty sha", ref)
-	}
-	return sha, nil
-}
-
 const gitHubModeLookupChunkArgBytes = 64 * 1024
 
 func collectGitHubBranchChanges(ctx context.Context, dir, baseBranch string) ([]githubBranchChange, error) {

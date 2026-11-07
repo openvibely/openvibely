@@ -258,40 +258,6 @@ func (c *chatActionSummaryCollector) appendToOutput(output string) string {
 	return output + summary
 }
 
-// buildChatActionToolRuntime creates request-scoped runtime tools using the
-// canonical registry and direct typed action handlers.
-func (h *Handler) buildChatActionToolRuntime(params streamingResponseParams, collector *chatActionSummaryCollector) *llmcontracts.RuntimeTools {
-	surface := chatcontrol.SurfaceWeb
-	mode := params.ChatMode
-	if mode == "" {
-		mode = models.ChatModeOrchestrate
-	}
-	// Web handler includes thread tools for orchestrate mode
-	includeThread := mode == models.ChatModeOrchestrate
-	defs := chatToolDefsForProject(params, mode, surface, includeThread)
-
-	return &llmcontracts.RuntimeTools{
-		Definitions: defs,
-		Executor:    h.chatActionExecutor(params, collector, mode, surface),
-	}
-}
-
-// buildAPIChatActionToolRuntime creates a RuntimeTools for the API surface.
-func (h *Handler) buildAPIChatActionToolRuntime(params streamingResponseParams, collector *chatActionSummaryCollector) *llmcontracts.RuntimeTools {
-	surface := chatcontrol.SurfaceAPI
-	mode := params.ChatMode
-	if mode == "" {
-		mode = models.ChatModeOrchestrate
-	}
-	includeThread := mode == models.ChatModeOrchestrate
-	defs := chatToolDefsForProject(params, mode, surface, includeThread)
-
-	return &llmcontracts.RuntimeTools{
-		Definitions: defs,
-		Executor:    h.chatActionExecutor(params, collector, mode, surface),
-	}
-}
-
 // chatActionExecutor returns a RuntimeToolExecutor that uses the canonical
 // chatcontrol execution engine with a surface-aware action handler map.
 func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) llmcontracts.RuntimeToolExecutor {
@@ -1130,12 +1096,6 @@ func (h *Handler) buildLifecycleChatActionToolRuntimeFromDefs(params streamingRe
 		Definitions: defs,
 		Executor:    h.authorizeProjectRuntimeExecutor(params.ProjectID, chatcontrol.BuildLifecycleRuntimeToolExecutor(mode, surface, handlers)),
 	}
-}
-
-// chatActionToolDefinitions returns tool definitions from the canonical registry.
-// Kept for backward compatibility with existing tests.
-func chatActionToolDefinitions() []llmcontracts.RuntimeToolDefinition {
-	return chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 }
 
 type sendToTaskToolInput struct {

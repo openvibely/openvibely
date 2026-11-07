@@ -763,10 +763,6 @@ func (s *DiscordService) populateActiveProject(key, projectID string, expectedGe
 	return projectID, true
 }
 
-func (s *DiscordService) buildDiscordActionToolRuntime(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	return s.buildDiscordActionToolRuntimeForTask(projectID, "", actionCtx, collector)
-}
-
 func (s *DiscordService) buildDiscordActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.discordActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
 	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceDiscord, handlers)
@@ -777,10 +773,6 @@ type discordActionContext struct {
 	ThreadID  string
 	MessageID string
 	UserID    string
-}
-
-func (s *DiscordService) discordActionHandlers(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
-	return s.discordActionHandlersForTask(projectID, "", actionCtx, collector)
 }
 
 func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {

@@ -1462,17 +1462,9 @@ type slackActionContext struct {
 	UserID    string
 }
 
-func (s *SlackService) buildSlackActionToolRuntime(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	return s.buildSlackActionToolRuntimeForTask(projectID, "", actionCtx, collector)
-}
-
 func (s *SlackService) buildSlackActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.slackActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
 	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceSlack, handlers)
-}
-
-func (s *SlackService) slackActionHandlers(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
-	return s.slackActionHandlersForTask(projectID, "", actionCtx, collector)
 }
 
 func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {

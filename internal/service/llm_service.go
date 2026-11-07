@@ -2139,10 +2139,6 @@ func (s *LLMService) SummarizeWorktreeCommitDiff(ctx context.Context, worktreePa
 	return cleanCommitSubject(s.generateName(ctx, prompt, agent, worktreePath, 72))
 }
 
-func parseWorktreeCommitSummaryOutput(output string) string {
-	return cleanCommitSubject(parseGeneratedName(output, 72))
-}
-
 func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeCommitMessageContext) string {
 	var b strings.Builder
 	b.WriteString("Write one concise git commit subject for these worktree changes.\n\n")

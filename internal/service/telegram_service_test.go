@@ -1964,21 +1964,6 @@ func TestTelegramService_FormatThreadTranscript_OffsetLimit(t *testing.T) {
 	assert.Contains(t, transcript, "Showing executions 2–2 of 3")
 }
 
-func TestTelegramService_SelectDefaultAgent(t *testing.T) {
-	env := teststores.New(t)
-	llmConfigRepo := env.LLMConfigs
-
-	svc := &TelegramService{
-		llmConfigRepo: llmConfigRepo,
-		userProjects:  make(map[int64]string),
-	}
-
-	ctx := context.Background()
-	agent, err := svc.selectDefaultAgent(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, agent)
-}
-
 func TestTelegramService_BuildTelegramTaskChatContext(t *testing.T) {
 	// With history
 	ctx := buildTelegramTaskChatContext("My Task", true)

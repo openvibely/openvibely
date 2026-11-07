@@ -1489,11 +1489,6 @@ func emailIncomingAttachmentsRequireVision(parts []EmailInboundAttachment) bool 
 	return false
 }
 
-func (s *EmailService) resolveAuthorizedProject(ctx context.Context, sender string) string {
-	projectID, _, _ := s.resolveAuthorizedProjectForInbound(ctx, sender)
-	return projectID
-}
-
 func (s *EmailService) resolveAuthorizedProjectForInbound(ctx context.Context, sender string) (string, bool, error) {
 	if s.requiresVerifiedEmailIdentity() {
 		return "", false, authz.ErrDenied
@@ -1604,10 +1599,6 @@ func (s *EmailService) getConfiguredAddress(ctx context.Context) string {
 	}
 	v, _ := s.settingsRepo.Get(ctx, EmailSettingAddress)
 	return persistence.NormalizeEmailAddress(v)
-}
-
-func isIgnoredEmail(msg EmailInboundMessage, selfAddress string) bool {
-	return isIgnoredEmailWithNormalizedSelfAddress(msg, persistence.NormalizeEmailAddress(selfAddress))
 }
 
 func isIgnoredEmailWithNormalizedSelfAddress(msg EmailInboundMessage, selfAddress string) bool {

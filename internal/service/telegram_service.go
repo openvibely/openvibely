@@ -658,11 +658,6 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 	return fmt.Sprintf("✅ Switched to project: *%s*", selection.Target.Name)
 }
 
-// handleChatMessage forwards a Telegram message to the chat orchestrator.
-func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
-	s.handleChatMessageWithDurableHandoff(context.Background(), message, nil)
-}
-
 func (s *TelegramService) handleChatMessageUntilDurable(ctx context.Context, message *tgbotapi.Message) bool {
 	result := make(chan bool, 1)
 	var reportOnce sync.Once
@@ -1340,17 +1335,9 @@ func telegramStreamingDisplay(cleaned string, terminal bool) string {
 	return cleaned + "\n\n⏳ _Generating..._"
 }
 
-func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	return s.buildTelegramActionToolRuntimeForTask(projectID, "", chatID, userID, collector)
-}
-
 func (s *TelegramService) buildTelegramActionToolRuntimeForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.telegramActionHandlersForTask(projectID, callerTaskID, chatID, userID, collector)
 	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceTelegram, handlers)
-}
-
-func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
-	return s.telegramActionHandlersForTask(projectID, "", chatID, userID, collector)
 }
 
 func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
@@ -1592,23 +1579,6 @@ func extractProjectSwitchTarget(lower string) string {
 	return ""
 }
 
-// selectDefaultAgent retrieves the default model or falls back to the first available.
-func (s *TelegramService) selectDefaultAgent(ctx context.Context) (*models.LLMConfig, error) {
-	agents, err := s.llmConfigRepo.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list agents: %w", err)
-	}
-	if len(agents) == 0 {
-		return nil, fmt.Errorf("no agents configured")
-	}
-	for i := range agents {
-		if agents[i].IsDefault {
-			return &agents[i], nil
-		}
-	}
-	return &agents[0], nil
-}
-
 // telegramMaxThreadTranscriptBytes is the total size budget for a Telegram thread transcript (80KB).
 const telegramMaxThreadTranscriptBytes = 80 * 1024
 
@@ -1794,11 +1764,6 @@ func (s *TelegramService) InvalidateProjectSelection(projectID string) {
 			s.userProjectVersions[userID]++
 		}
 	}
-}
-
-func (s *TelegramService) cachedTelegramActiveProject(userID int64) (string, bool, uint64) {
-	projectID, ok, version, _ := s.cachedTelegramActiveProjectWithGeneration(userID)
-	return projectID, ok, version
 }
 
 func (s *TelegramService) cachedTelegramActiveProjectWithGeneration(userID int64) (string, bool, uint64, uint64) {
