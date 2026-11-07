@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -62,6 +63,9 @@ func (h *Handler) pageConversationTask(ctx context.Context, binding pageintegrat
 		Status:    models.StatusPending,
 		Category:  pageConversationCategory,
 		AgentID:   &agentID,
+	}
+	if agentID == "" {
+		task.AgentID = nil
 	}
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		return nil, err
@@ -193,6 +197,9 @@ func (h *Handler) launchPageChat(ctx context.Context, binding pageintegration.Co
 	}
 	params.AttachmentContext = attachmentContext
 	params.ImageAttachments = images
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{Type: events.TaskThreadExecutionStarted, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: exec.ID, Message: message})
+	}
 	if err := h.startStreamingResponse(params); err != nil {
 		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
@@ -390,6 +397,9 @@ func (h *Handler) startNextQueuedPageTurn(ctx context.Context, binding pageinteg
 	exec := &models.Execution{TaskID: taskID, AgentConfigID: agent.ID, PromptSent: queued.Content, IsFollowup: true}
 	if err = h.threadInputRepo.ClaimQueuedForPageExecution(ctx, queued.ID, exec); err != nil {
 		return
+	}
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{Type: events.TaskThreadInputApplied, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: exec.ID, PendingInputID: queued.ID, Message: exec.PromptSent})
 	}
 	if _, err = h.launchPageChat(ctx, binding, task, exec, agent, exec.PromptSent, queued.AttachmentSessionID, turn); err != nil {
 		applog.Infof("[page-chat] queued turn: %v", err)

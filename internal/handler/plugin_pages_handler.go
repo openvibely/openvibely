@@ -19,11 +19,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/openvibely/openvibely/internal/applog"
-	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/pageplugins"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -61,6 +60,12 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	api.GET("/chat/composer-action", h.PluginChatComposerAction)
 	api.GET("/chat/transcript", h.PluginChatTranscript)
 	api.GET("/chat/history", h.PluginChatHistory)
+	api.GET("/chat/thread", h.PluginChatThread)
+	api.GET("/chat/thread/pending-inputs", h.PluginChatThreadPending)
+	api.GET("/chat/thread/composer-action", h.PluginChatComposerAction)
+	api.GET("/chat/thread/executions/:execId/fragment", h.PluginChatThreadFragment)
+	api.POST("/chat/thread/steer", h.PluginChatSteer)
+	api.POST("/chat/thread/queued/:inputId/steer", h.PluginChatQueuedSteer)
 	e.GET("/settings/plugin-pages", h.PluginSettings)
 	e.POST("/settings/plugin-pages/install", h.PluginSettingsInstall)
 	e.POST("/settings/plugin-pages/install-example", h.PluginSettingsInstallExample)
@@ -184,9 +189,17 @@ func (h *Handler) PluginPage(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := h.loadPluginChatHistory(ctx, &v); err != nil {
-			applog.Infof("[plugin-pages] history load failed instance=%s: %v", r.Instance.ID, err)
+		binding := h.pagePlugins.Conversation(r.Ref())
+		unlock := persistence.LockTaskLifecycle(binding.LockKey())
+		_, err = h.pageConversationTask(ctx, binding, "", "")
+		unlock()
+		if err != nil {
+			return err
 		}
+		if err := h.loadPluginChatHistory(ctx, &v); err != nil {
+			return err
+		}
+		c.SetRequest(c.Request().WithContext(components.WithThreadSurface(ctx, pluginThreadSurface(r.Instance.ID, r.Instance.ProjectID))))
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if isHTMX(c) {
@@ -641,7 +654,7 @@ func (h *Handler) PluginChatSend(c echo.Context) error {
 		return err
 	}
 	return render(c, http.StatusOK, templ.Join(
-		components.ChatFollowupResponse(message, exec.ID, components.PageChatMessagesID, "", false, attachments, r.Instance.ProjectID, *exec),
+		components.TaskThreadFollowupResponse(message, exec.ID, attachments, r.Instance.ProjectID, *exec),
 		components.ChatComposerActionButtonOOB(components.PageChatFormID+"-primary-action", pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/stop"), true, exec.ID),
 	))
 }
@@ -938,44 +951,7 @@ func (h *Handler) PluginSettingsRemovePackage(c echo.Context) error {
 
 // PluginChatTranscript returns the authorized conversation without remounting its composer.
 func (h *Handler) PluginChatTranscript(c echo.Context) error {
-	r, err := h.resolvePluginForRequest(c, false)
-	if err != nil {
-		return err
-	}
-	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
-		return pluginNotFound()
-	}
-	v := pages.PluginPageView{InstanceID: r.Instance.ID}
-	if err = h.loadPluginChatHistory(c.Request().Context(), &v); err != nil {
-		return err
-	}
-	running, err := h.pluginChatRunningExec(c.Request().Context(), r.Instance.ID)
-	if err != nil {
-		return err
-	}
-	var cards []*events.ChatInputRequestEvent
-	if h.chatInputRequestRepo != nil && len(v.ChatExecutions) > 0 {
-		records, err := h.chatInputRequestRepo.ListByExecutions(c.Request().Context(), r.Instance.ProjectID, executionIDs(v.ChatExecutions))
-		if err != nil {
-			return err
-		}
-		for _, record := range records {
-			request, err := chatInputRequestFromRecord(record)
-			if err != nil {
-				return err
-			}
-			cards = append(cards, chatInputRequestForEvent(request))
-		}
-	}
-	c.Response().Header().Set("Cache-Control", "no-store")
-	return render(c, http.StatusOK, templ.Join(
-		components.PageChatMessages(components.PageChatView{HasEarlier: v.ChatHasEarlier, HistoryURL: pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/history"), ProjectID: r.Instance.ProjectID, ChatTask: v.ChatTask, ChatExecutions: v.ChatExecutions, Attachments: v.ChatAttachments}),
-		components.ChatComposerQueuedInputRows(v.ChatPending, func(input models.ThreadInput) string {
-			return pluginQueuedSteerURL(r.Instance.ID, r.Instance.ProjectID, input)
-		}),
-		components.ChatComposerActionButtonOOB(components.PageChatFormID+"-primary-action", pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/stop"), running != "", running),
-		pages.ChatInputRequestCards(cards),
-	))
+	return h.PluginChatThread(c)
 }
 
 // Resolve only persisted bindings; task titles and client IDs never select a page.
@@ -1035,21 +1011,9 @@ func (h *Handler) PluginChatQueuedSteer(c echo.Context) error {
 	return h.TaskThreadQueuedInputSteer(c)
 }
 func pluginQueuedSteerURL(instanceID, projectID string, input models.ThreadInput) string {
-	return pluginAPI(instanceID, projectID, "/chat/inputs/"+url.PathEscape(input.ID)+"/steer") + "&expected_turn_id=" + url.QueryEscape(input.RunExecutionID)
+	return pluginAPI(instanceID, projectID, "/chat/thread/queued/"+url.PathEscape(input.ID)+"/steer") + "&expected_turn_id=" + url.QueryEscape(input.RunExecutionID)
 }
 
 func (h *Handler) PluginChatHistory(c echo.Context) error {
-	r, err := h.resolvePluginForRequest(c, false)
-	if err != nil {
-		return err
-	}
-	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
-		return pluginNotFound()
-	}
-	v := pages.PluginPageView{InstanceID: r.Instance.ID}
-	if err = h.loadPluginChatHistoryWindow(c.Request().Context(), &v, c.QueryParam("before")); err != nil {
-		return err
-	}
-	c.Response().Header().Set("Cache-Control", "no-store")
-	return render(c, http.StatusOK, components.PageChatHistory(components.PageChatView{ProjectID: r.Instance.ProjectID, ChatTask: v.ChatTask, ChatExecutions: v.ChatExecutions, Attachments: v.ChatAttachments, HasEarlier: v.ChatHasEarlier, HistoryURL: pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/history")}))
+	return h.PluginChatThread(c)
 }

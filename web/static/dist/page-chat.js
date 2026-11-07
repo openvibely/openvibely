@@ -14,16 +14,13 @@
   const close=()=>{side.setOpen(false);opener.focus({preventScroll:true});};
   const side=window.createSidePanel({root,panel,opener,storageKey:'page-chat-width',escapeDocked:true,
    onClose:close,onLayout:()=>opener.setAttribute('aria-label',panel.hidden?'Open page chat':'Collapse page chat')});
-  const conversation=window.openVibelyThreadController.mount({root,panel,
-   messages:panel.querySelector('[data-chat-transcript]'),projectID:root.dataset.projectId,
-   transcriptURL:root.dataset.pageChatTranscriptUrl,stateKey:'page-chat-scroll-'+root.dataset.pageChatTranscriptUrl,
-   controls:['pending-thread-inputs','page-chat-form-primary-action']});
-  on(opener,'click',()=>{side.setOpen(panel.hidden);if(!panel.hidden){conversation.hydrate();conversation.refresh();panel.querySelector('textarea').focus();}});
+  const refresh=()=>{const view=panel.querySelector('#task-thread-view');if(view && window.reconcileTaskThreadState) return window.reconcileTaskThreadState(view.dataset.taskId);};
+  on(opener,'click',()=>{side.setOpen(panel.hidden);if(!panel.hidden){window.dispatchEvent(new Event('resize'));refresh();panel.querySelector('textarea').focus();}});
   on(panel.querySelector('[data-page-chat-close]'),'click',close);
-  function destroy(){abort.abort();conversation.destroy();side.destroy();root._pageChatMounted=false;}
+  function destroy(){abort.abort();side.destroy();root._pageChatMounted=false;}
   on(document,'htmx:beforeCleanupElement',e=>{if(e.target===root || e.target.contains(root))destroy();});
   on(window,'pagehide',destroy);
-  window.openVibelyPageChat={refresh:conversation.refresh,destroy};
+  window.openVibelyPageChat={refresh,destroy};
  };
  document.addEventListener('DOMContentLoaded',window.initPageChat);
  document.addEventListener('htmx:afterSwap',window.initPageChat);

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,7 +47,7 @@ func TestPageSharedHistoryAndSteeringBrowser(t *testing.T) {
  try{
  if(document.readyState==='loading')await new Promise(r=>document.addEventListener('DOMContentLoaded',r,{once:true}));
  document.querySelector('[data-page-chat-toggle]').click();
- const box=document.getElementById('page-chat-messages');
+ const box=document.getElementById('task-thread-messages');
  await wait(()=>box.querySelector('[data-earlier-loader]'),'history loader missing');
  await wait(()=>box.querySelector('[data-chat-virtual-owner]'),'shared virtualization missing');
  if(box.querySelectorAll('.stream-tool').length>=160)throw Error('all tool rows mounted');
@@ -58,7 +59,7 @@ func TestPageSharedHistoryAndSteeringBrowser(t *testing.T) {
  await wait(()=>box.dataset.earlierRequestLoading!=='true','paging did not settle');
  await window.openVibelyPageChat.refresh();
  if(!document.getElementById('chat-execution-OLDEST'))throw Error('refresh discarded loaded history');
- const form=document.getElementById('page-chat-form');
+ const form=document.getElementById('task-thread-form');
  if(!form.dataset.steerEndpoint)throw Error('composer steering not wired');
  await wait(()=>form.querySelector('[aria-label="Edit message"]'),'queue editor missing');
  form.querySelector('[aria-label="Edit message"]').click();
@@ -72,6 +73,13 @@ func TestPageSharedHistoryAndSteeringBrowser(t *testing.T) {
  document.querySelector('[data-page-chat-toggle]').click();
  document.querySelector('[data-page-chat-toggle]').click();
  await wait(()=>box.querySelector('[data-chat-virtual-owner]'),'reopening lost virtual rows');
+ const done=await (await fetch('/complete-active')).json();
+ window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:done}));
+ await wait(()=>!window._taskThreadStreamingActive,'completion did not release stream ownership');
+ window.dispatchEvent(new CustomEvent('sse-live-connected',{detail:{reconnected:true}}));
+ await window.openVibelyPageChat.refresh();
+ await wait(()=>document.querySelector('[data-execution-pair][data-exec-id="'+done.exec_id+'"]').dataset.execStatus==='completed','reconnect did not reconcile completion');
+ if(!document.getElementById('chat-execution-OLDEST'))throw Error('reconnect discarded loaded history');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}
 })();</script>`
@@ -88,6 +96,21 @@ func TestPageSharedHistoryAndSteeringBrowser(t *testing.T) {
 			default:
 			}
 			w.WriteHeader(204)
+			return
+		}
+
+		if r.URL.Path == "/complete-active" {
+			active := env.starts[1]
+			if err := env.h.execRepo.Complete(r.Context(), active.ExecID, models.ExecCompleted, "finished answer", "", 0, 0); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"type": "chat_response_done", "task_id": active.TaskID, "exec_id": active.ExecID, "completed_output": "finished answer", "status": "completed"})
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/tasks/"+first.TaskID+"/thread") {
+			t.Errorf("page bypassed its authorized adapter: %s", r.URL.String())
+			http.Error(w, "wrong surface endpoint", 500)
 			return
 		}
 		rec := httptest.NewRecorder()

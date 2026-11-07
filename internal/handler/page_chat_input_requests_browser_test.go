@@ -45,7 +45,7 @@ func testPageSideChatQuestion(t *testing.T, analyze bool) {
 			while (Date.now() < deadline) { var v = predicate(); if (v) return v; await new Promise(function(r) { setTimeout(r, 25); }); }
 			throw new Error(message);
 		}
-		var event, card = function() { return event && document.querySelector('#page-chat-messages [data-chat-input-request-id="' + event.input_request.id + '"]'); };
+		var event, card = function() { return event && document.querySelector('#task-thread-messages [data-chat-input-request-id="' + event.input_request.id + '"]'); };
 		try {
             var toggle = document.querySelector('[data-page-chat-toggle]');
             var panel = document.getElementById('page-side-chat');
@@ -57,10 +57,10 @@ func testPageSideChatQuestion(t *testing.T, analyze bool) {
             toggle.click();
             if (!panel.hidden) throw new Error('panel did not collapse');
             toggle.click();
-			if (!ANALYZE_TEST) await waitFor(function() { return document.querySelector('#page-chat-messages [data-exec-id]'); }, 'side chat history missing');
-			if (!ANALYZE_TEST) await waitFor(function() { return Array.from(document.querySelectorAll('#page-chat-messages [data-streaming-resume]')).some(function(el){ return el._sseConnected; }); }, 'running reply did not reconnect after page load');
+			if (!ANALYZE_TEST) await waitFor(function() { return document.querySelector('#task-thread-messages [data-exec-id]'); }, 'side chat history missing');
+			if (!ANALYZE_TEST) await waitFor(function() { return Array.from(document.querySelectorAll('#task-thread-messages [data-streaming-resume]')).some(function(el){ return el._sseConnected; }); }, 'running reply did not reconnect after page load');
             if (!ANALYZE_TEST) {
-                var streamNode = document.querySelector('#page-chat-messages [data-streaming-resume]');
+                var streamNode = document.querySelector('#task-thread-messages [data-streaming-resume]');
                 var controller = window.openVibelyThreadController, attach = controller.attach, source;
                 controller.detach(streamNode); delete streamNode._sseConnected;
                 controller.attach = function(){ source = attach.apply(controller,arguments);return source; };
@@ -81,14 +81,20 @@ func testPageSideChatQuestion(t *testing.T, analyze bool) {
                 toggle.click();
             }
 			event = await (await fetch('/make-question')).json();
-			window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: event}));
+			if (ANALYZE_TEST) {
+             window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started',task_id:document.getElementById('task-thread-view').dataset.taskId,exec_id:event.exec_id}}));
+             await waitFor(function(){return document.querySelector('[data-exec-id="'+event.exec_id+'"]');},'Analyze turn did not load through task-thread event');
+            }
+            window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: event}));
 			await waitFor(card, 'question card did not render in side chat');
 			card().querySelector('[data-option-label="No"]').click();
 			await waitFor(function() { var b = card().querySelector('[data-chat-input-nav="submit"]'); return b && !b.disabled; }, 'submit not enabled');
 			card().querySelector('[data-chat-input-nav="submit"]').click();
 			await waitFor(function() { return !card(); }, 'card not removed after answer');
             if (!ANALYZE_TEST) {
-                document.querySelector('[data-page-chat-root]').dispatchEvent(new CustomEvent('htmx:beforeCleanupElement',{bubbles:true}));
+                document.getElementById('main-content').dispatchEvent(new CustomEvent('htmx:beforeSwap',{bubbles:true,detail:{target:document.getElementById('main-content'),shouldSwap:true}}));
+                document.querySelector('[data-page-chat-root]').remove();
+                document.getElementById('main-content').dispatchEvent(new CustomEvent('htmx:afterSwap',{bubbles:true,detail:{target:document.getElementById('main-content')}}));
                 if(closeCount !== 1) throw new Error('successful view removal did not release reply stream');
             }
 			await report('pass');

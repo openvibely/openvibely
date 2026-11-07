@@ -302,7 +302,7 @@ templ TaskPrimaryAgentBanner(agentDef *models.Agent) {
 
 templ TaskThreadEarlierMessages(task *models.Task, executions []models.Execution, chatAttachments map[string][]models.ChatAttachment, hasEarlier bool, windowLimit int) {
 	if hasEarlier && len(executions) > 0 {
-		@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
+		@ChatEarlierMessagesLoader("task-thread-messages", threadEndpoint(ctx, task, "", fmt.Sprintf("before=%s&limit=%d", executions[0].ID, windowLimit)), windowLimit)
 	}
 	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
 }
@@ -325,13 +325,16 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full"
 			if task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) {
-			hx-get={ fmt.Sprintf("/tasks/%s/thread?poll=1&limit=%d", task.ID, windowLimit) }
+			hx-get={ threadEndpoint(ctx, task, "", fmt.Sprintf("poll=1&limit=%d", windowLimit)) }
 			hx-trigger="every 3s"
 			hx-target="#task-thread-view"
 			hx-swap="morph:outerHTML"
 			hx-on::config-request="if (event.target === this) event.detail.parameters.preserved_exec_ids = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : ''"
 		}
 		data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
+		data-project-id={ task.ProjectID }
+        data-thread-api-base={ threadAPIBase(ctx, task) }
+		data-thread-project-id={ threadProjectID(ctx) }
 		data-task-id={ task.ID }
 		data-task-status={ string(task.Status) }
 		data-task-category={ string(task.Category) }
@@ -347,22 +350,22 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					data-transcript-hydrating="true"
 				}
 				data-window-limit={ fmt.Sprintf("%d", windowLimit) }
-				data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
+				data-earlier-url-base={ threadEndpoint(ctx, task, "", fmt.Sprintf("limit=%d", windowLimit)) }
 				data-scroll-intent-scope={ task.ID }
 			>
 				@TaskPrimaryAgentBanner(agentDef)
 				if hasEarlier && len(executions) > 0 {
-					@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
+					@ChatEarlierMessagesLoader("task-thread-messages", threadEndpoint(ctx, task, "", fmt.Sprintf("before=%s&limit=%d", executions[0].ID, windowLimit)), windowLimit)
 				}
 				if len(executions) == 0 && len(pendingInputs) == 0 {
-					@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
+					@ChatEmptyState(threadEmptyMessage(ctx))
 				} else {
 					if preservedExecIDs != nil {
 						@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID, preservedExecIDs)
 					} else {
 						@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
 					}
-					@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
+					@PendingThreadInputRows(pendingInputs, threadQueuedSteerEndpoint(ctx, task))
 					@TaskThreadStatusIndicator(task, executions)
 				}
 			</div>
@@ -372,21 +375,21 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		@ChatInputForm(ChatInputFormConfig{
 			FormID:                 "task-thread-form",
 			InputID:                "task-message-input",
-			PostEndpoint:           fmt.Sprintf("/tasks/%s/thread?project_id=%s", task.ID, url.QueryEscape(task.ProjectID)),
+			PostEndpoint:           threadSendEndpoint(ctx, task),
 			TargetID:               "task-thread-messages",
 			Agents:                 agents,
 			ShowModelSelector:      true,
-			ShowChangesSummary:     true,
+			ShowChangesSummary:     threadProjectID(ctx) == "",
 			TaskID:                 task.ID,
 			ProjectID:              task.ProjectID,
 			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
 			ActiveTurnID:           taskThreadActiveTurnID(executions),
-			StopEndpoint:           SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID)),
-			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer?project_id=%s", task.ID, url.QueryEscape(task.ProjectID)),
+			StopEndpoint:           threadStopEndpoint(ctx, task),
+			SteerEndpoint:          threadEndpoint(ctx, task, "/steer", "project_id="+url.QueryEscape(task.ProjectID)),
 			SelectedAgentID:        derefString(task.AgentID),
 			DefaultAgentID:         defaultAgentID,
 			PendingInputs:          pendingInputs,
-			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
+			QueuedSteerEndpointFor: threadQueuedSteerEndpoint(ctx, task),
 		})
 		if preservedExecIDs != nil {
 			<div id={ "task-thread-runtime-" + task.ID } class="contents" hx-preserve="true"></div>
@@ -542,7 +545,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					var generation = window._taskThreadRevisionSyncGeneration;
 					var messages = document.getElementById('task-thread-messages');
 					var limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';
-					var url = '/tasks/' + encodeURIComponent(taskID) + '/thread?poll=1&limit=' + encodeURIComponent(limit);
+					var url = window.taskThreadURL(taskID, '', 'poll=1&limit=' + encodeURIComponent(limit));
 					var detail = document.getElementById('task-detail-content');
 					var projectID = (detail && detail.dataset.projectId) || '';
 					if (projectID) url += '&project_id=' + encodeURIComponent(projectID);
@@ -609,7 +612,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					if (view.dataset.reconcilePending === 'true' || typeof htmx === 'undefined') return Promise.resolve(false);
 					var messages = document.getElementById('task-thread-messages');
 					var limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';
-					var url = view.getAttribute('hx-get') || ('/tasks/' + encodeURIComponent(reconnectTaskId) + '/thread?poll=1&limit=' + encodeURIComponent(limit));
+					var url = view.getAttribute('hx-get') || window.taskThreadURL(reconnectTaskId, '', 'poll=1&limit=' + encodeURIComponent(limit));
 					var preserved = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : '';
 					url += (url.indexOf('?') === -1 ? '?' : '&') + 'preserved_exec_ids=' + encodeURIComponent(preserved);
 					view.dataset.reconcilePending = 'true';
@@ -771,6 +774,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					// Before swaps, reject unchanged authoritative snapshots before capturing
 					// state or closing streams, then preserve state for a real replacement.
 				document.body.addEventListener('htmx:beforeSwap', function(event) {
+                    if (event.detail.shouldSwap === false) return;
 					var target = event.detail.target;
 					if (target && target.id === 'task-thread-view') {
 						var attachmentSession = document.getElementById('task-thread-form-session-id');
@@ -909,7 +913,15 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 }
 
 templ TaskThreadLiveEventsScript(taskID string) {
-	<script type="text/javascript">
+ <script type="text/javascript">
+ window.taskThreadURL = function(taskID, suffix, query) {
+  var view = document.getElementById('task-thread-view');
+  var base = view && view.getAttribute('data-task-id') === taskID ? view.getAttribute('data-thread-api-base') : '';
+  var project = view && view.getAttribute('data-task-id') === taskID ? view.getAttribute('data-thread-project-id') : '';
+  var params = query || '';
+  if (project && !new URLSearchParams(params).has('project_id')) params += (params ? '&' : '') + 'project_id=' + encodeURIComponent(project);
+  return (base || '/tasks/' + encodeURIComponent(taskID) + '/thread') + (suffix || '') + (params ? '?' + params : '');
+ };
 			(function() {
 					var threadView = document.getElementById('task-thread-view');
 					var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
@@ -921,7 +933,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						var directSteerClearTimer = null;					function taskQueuedSteerInputID(triggerEl) {
 						if (!triggerEl || !triggerEl.getAttribute) return '';
 						var hxPost = triggerEl.getAttribute('hx-post') || '';
-						var match = hxPost.match(/^\/tasks\/[^\/]+\/thread\/queued\/([^\/]+)\/steer(?:\?.*)?$/);
+						var match = hxPost.match(/\/thread\/queued\/([^\/]+)\/steer(?:\?.*)?$/);
 						return match ? match[1] : '';
 					}
 						var queuedSteerBeforeRequestHandler = function(event) {
@@ -1011,11 +1023,11 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							}
 							function refreshPendingInputsIfVisible() {							var pendingContainer = currentPendingContainer();
 							if (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;
-							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
+							htmx.ajax('GET', window.taskThreadURL(taskId, '/pending-inputs'), {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
 						}
 						function refreshThreadComposerAction() {
 							if (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;
-							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
+							htmx.ajax('GET', window.taskThreadURL(taskId, '/composer-action'), {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
 						}
 						function stopThreadPollingAfterCompletion() {
 							var view = currentTaskThreadView();
@@ -1122,7 +1134,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						var steerBtn = document.createElement('button');
 						steerBtn.type = 'button';
 						steerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';
-						steerBtn.setAttribute('hx-post', '/tasks/' + encodeURIComponent(taskId) + '/thread/queued/' + encodeURIComponent(data.pending_input_id) + '/steer?expected_turn_id=' + encodeURIComponent(data.exec_id || ''));
+						steerBtn.setAttribute('hx-post', window.taskThreadURL(taskId, '/queued/' + encodeURIComponent(data.pending_input_id) + '/steer', 'expected_turn_id=' + encodeURIComponent(data.exec_id || '')));
 						steerBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);
 						steerBtn.setAttribute('hx-swap', 'outerHTML');
 						steerBtn.setAttribute('data-tooltip-disabled', '');
@@ -1225,7 +1237,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							if (typeof htmx === 'undefined') return;
 							if (pendingFragmentExecs[data.exec_id] && attempt === 0) return;
 							pendingFragmentExecs[data.exec_id] = true;
-							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {
+							htmx.ajax('GET', window.taskThreadURL(taskId, '/executions/' + encodeURIComponent(data.exec_id) + '/fragment'), {
 								target: '#task-thread-messages',
 								swap: 'beforeend'
 							}).then(function() {
@@ -1249,7 +1261,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							});
 						}
 						var chatHandler = function(event) {
-							var data = event.detail || {};
+                            var data = event.detail || {};
+
 							if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;
 							try {
 								syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || '');
@@ -1310,7 +1323,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						if (!detail.reconnected || !currentTaskThreadView()) return;
 						var pendingContainer = currentPendingContainer();
 						if (pendingContainer && typeof htmx !== 'undefined') {
-							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
+							htmx.ajax('GET', window.taskThreadURL(taskId, '/pending-inputs'), {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
 						}
 						if (window.reconcileTaskThreadState) window.reconcileTaskThreadState(taskId);
 					};				window._taskThreadReconnectHandlers = window._taskThreadReconnectHandlers || {};
@@ -1321,6 +1334,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 				window.addEventListener('sse-live-connected', reconnectHandler);
 
 					var cleanupTaskThreadLiveHandlers = function(event) {
+                        if (event.detail && event.detail.shouldSwap === false) return;
 						var target = event.detail && event.detail.target;
 						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content')) {
 							disposed = true;

@@ -13,102 +13,17 @@ import "github.com/openvibely/openvibely/internal/models"
 
 // PageChatView uses server-authorized endpoints and saved conversation records.
 // It has no dependency on a plugin, iframe, or a particular page type.
+// The caller supplies authorized thread endpoints with WithThreadSurface.
 type PageChatView struct {
-	HasEarlier             bool
-	HistoryURL             string
-	Title                  string
-	ProjectID              string
-	SendURL                string
-	StopURL                string
-	SteerURL               string
-	QueuedSteerEndpointFor func(models.ThreadInput) string
-	Agents                 []models.LLMConfig
-	RunningExec            string
-	ChatExecutions         []models.Execution
-	ChatTask               *models.Task
-	Attachments            map[string][]models.ChatAttachment
-	PendingInputs          []models.ThreadInput
+	HasEarlier     bool
+	Agents         []models.LLMConfig
+	ChatExecutions []models.Execution
+	ChatTask       *models.Task
+	Attachments    map[string][]models.ChatAttachment
+	PendingInputs  []models.ThreadInput
 }
 
-const PageChatFormID = "page-chat-form"
-const PageChatMessagesID = "page-chat-messages"
-
-func PageChatMessages(v PageChatView) templ.Component {
-	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
-			return templ_7745c5c3_CtxErr
-		}
-		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-		if !templ_7745c5c3_IsBuffer {
-			defer func() {
-				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err == nil {
-					templ_7745c5c3_Err = templ_7745c5c3_BufErr
-				}
-			}()
-		}
-		ctx = templ.InitializeContext(ctx)
-		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"page-chat-messages\" data-chat-transcript data-transcript-hydrating=\"true\" class=\"flex-1 min-h-0 overflow-y-auto p-3 space-y-4\" data-project-id=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var2 string
-		templ_7745c5c3_Var2, templ_7745c5c3_Err = templruntime.NewAttributeExpression(v.ProjectID).Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/page_chat.templ`, Line: 29, Col: 166}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = PageChatHistory(v).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		return nil
-	})
-}
-
-func PageChatHistory(v PageChatView) templ.Component {
-	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
-			return templ_7745c5c3_CtxErr
-		}
-		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-		if !templ_7745c5c3_IsBuffer {
-			defer func() {
-				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err == nil {
-					templ_7745c5c3_Err = templ_7745c5c3_BufErr
-				}
-			}()
-		}
-		ctx = templ.InitializeContext(ctx)
-		ctx = templ.ClearChildren(ctx)
-		if v.HasEarlier && len(v.ChatExecutions) > 0 {
-			templ_7745c5c3_Err = ChatEarlierMessagesLoader(PageChatMessagesID, v.HistoryURL+"&before="+v.ChatExecutions[0].ID, 50).Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = ChatMessages(v.ChatExecutions, v.ChatTask, v.Attachments, PageChatMessagesID, "", v.HasEarlier, v.ProjectID).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		return nil
-	})
-}
+const PageChatFormID = "task-thread-form"
 
 func PageSideChat(v PageChatView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -127,7 +42,7 @@ func PageSideChat(v PageChatView) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var5 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var2 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -139,46 +54,21 @@ func PageSideChat(v PageChatView) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<button type=\"button\" class=\"btn btn-ghost btn-sm btn-square\" data-page-chat-close aria-label=\"Close page chat\" style=\"position:absolute;right:8px;top:8px;z-index:2\">✕</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<button type=\"button\" class=\"btn btn-ghost btn-sm btn-square\" data-page-chat-close aria-label=\"Close page chat\" style=\"position:absolute;right:8px;top:8px;z-index:2\">✕</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = PageChatMessages(v).Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"p-3\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = ChatInputForm(ChatInputFormConfig{
-				FormID: PageChatFormID, InputID: "page-chat-input", PostEndpoint: v.SendURL,
-				TargetID: PageChatMessagesID, ProjectID: v.ProjectID, DraftScope: v.SendURL,
-				Agents: v.Agents, ShowModelSelector: true, PendingInputs: v.PendingInputs, QueuedSteerEndpointFor: v.QueuedSteerEndpointFor, SteerEndpoint: v.SteerURL,
-				IsRunning: v.RunningExec != "", ActiveTurnID: v.RunningExec, StopEndpoint: v.StopURL,
-			}).Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = ChatAutoScrollScript().Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = ChatStreamingResumeInitScript().Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = TaskThreadView(v.ChatTask, v.ChatExecutions, v.Agents, nil, v.Attachments, v.PendingInputs, v.HasEarlier, 50).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = SidePanel("page-side-chat", "page-chat-divider", "Page chat").Render(templ.WithChildren(ctx, templ_7745c5c3_Var5), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = SidePanel("page-side-chat", "page-chat-divider", "Page chat").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<style>\n  #page-side-chat [data-page-chat-close]{display:none}\n  #page-side-chat[data-overlay=\"true\"] [data-page-chat-close]{display:flex}\n  #page-side-chat[data-overlay=\"true\"] #page-chat-messages{padding-top:48px}\n </style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<style>\n  #page-side-chat [data-page-chat-close]{display:none}\n  #page-side-chat[data-overlay=\"true\"] [data-page-chat-close]{display:flex}\n  #page-side-chat[data-overlay=\"true\"] #task-thread-messages{padding-top:48px}\n </style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -186,7 +76,7 @@ func PageSideChat(v PageChatView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<script>if(window.initPageChat) window.initPageChat();</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<script>if(window.initPageChat) window.initPageChat();</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

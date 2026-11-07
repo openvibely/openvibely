@@ -433,7 +433,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var view = document.getElementById('task-thread-view');
 							var taskId = view ? (view.getAttribute('data-task-id') || '') : '';
 							if (!taskId) return;
-							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
+							htmx.ajax('GET', (window.taskThreadURL ? window.taskThreadURL(taskId, '/composer-action') : '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action'), {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
 						}
 
 						function showThreadTerminalStatus(status) {
@@ -937,7 +937,7 @@ templ ChatStreamingResumeInitScript() {
 							var view = document.getElementById('task-thread-view');
 							var taskId = view ? (view.getAttribute('data-task-id') || '') : '';
 							if (!taskId) return;
-							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
+							htmx.ajax('GET', (window.taskThreadURL ? window.taskThreadURL(taskId, '/composer-action') : '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action'), {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
 						}
 
 						function showThreadTerminalStatus(status) {

@@ -4,59 +4,28 @@ import "github.com/openvibely/openvibely/internal/models"
 
 // PageChatView uses server-authorized endpoints and saved conversation records.
 // It has no dependency on a plugin, iframe, or a particular page type.
+// The caller supplies authorized thread endpoints with WithThreadSurface.
 type PageChatView struct {
  HasEarlier bool
- HistoryURL string
- Title string
- ProjectID string
- SendURL string
- StopURL string
- SteerURL string
- QueuedSteerEndpointFor func(models.ThreadInput) string
  Agents []models.LLMConfig
- RunningExec string
  ChatExecutions []models.Execution
  ChatTask *models.Task
  Attachments map[string][]models.ChatAttachment
  PendingInputs []models.ThreadInput
 }
 
-const PageChatFormID = "page-chat-form"
-const PageChatMessagesID = "page-chat-messages"
+const PageChatFormID = "task-thread-form"
 
-
-templ PageChatMessages(v PageChatView) {
- <div id="page-chat-messages" data-chat-transcript data-transcript-hydrating="true" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
-  @PageChatHistory(v)
- </div>
-}
-
-templ PageChatHistory(v PageChatView) {
- if v.HasEarlier && len(v.ChatExecutions)>0 {
-  @ChatEarlierMessagesLoader(PageChatMessagesID,v.HistoryURL+"&before="+v.ChatExecutions[0].ID,50)
- }
- @ChatMessages(v.ChatExecutions,v.ChatTask,v.Attachments,PageChatMessagesID,"",v.HasEarlier,v.ProjectID)
-}
 
 templ PageSideChat(v PageChatView) {
  @SidePanel("page-side-chat", "page-chat-divider", "Page chat") {
   <button type="button" class="btn btn-ghost btn-sm btn-square" data-page-chat-close aria-label="Close page chat" style="position:absolute;right:8px;top:8px;z-index:2">✕</button>
-  @PageChatMessages(v)
-  <div class="p-3">
-   @ChatInputForm(ChatInputFormConfig{
-    FormID: PageChatFormID, InputID: "page-chat-input", PostEndpoint: v.SendURL,
-    TargetID: PageChatMessagesID, ProjectID: v.ProjectID, DraftScope: v.SendURL,
-    Agents: v.Agents, ShowModelSelector: true, PendingInputs:v.PendingInputs, QueuedSteerEndpointFor:v.QueuedSteerEndpointFor, SteerEndpoint:v.SteerURL,
-    IsRunning: v.RunningExec != "", ActiveTurnID: v.RunningExec, StopEndpoint: v.StopURL,
-   })
-  </div>
-  @ChatAutoScrollScript()
-  @ChatStreamingResumeInitScript()
+  @TaskThreadView(v.ChatTask,v.ChatExecutions,v.Agents,nil,v.Attachments,v.PendingInputs,v.HasEarlier,50)
  }
  <style>
   #page-side-chat [data-page-chat-close]{display:none}
   #page-side-chat[data-overlay="true"] [data-page-chat-close]{display:flex}
-  #page-side-chat[data-overlay="true"] #page-chat-messages{padding-top:48px}
+  #page-side-chat[data-overlay="true"] #task-thread-messages{padding-top:48px}
  </style>
  @SidePanelScript()
  <script>if(window.initPageChat) window.initPageChat();</script>
