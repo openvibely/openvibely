@@ -244,7 +244,7 @@ func (h *Handler) executeRequestUserInputTool(ctx context.Context, params stream
 		h.chatInputRequests.expire(pending.ID)
 		return "", fmt.Errorf("chat live updates unavailable")
 	}
-	h.chatBroadcaster.Publish(events.ChatEvent{
+	h.publishChatEvent(events.ChatEvent{
 		Type:      events.ChatUserInputRequested,
 		ProjectID: projectID,
 		ExecID:    params.ExecID,
@@ -300,6 +300,22 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 	if err := h.requireChatInputProject(c.Request().Context(), projectID, authz.Edit); err != nil {
 		return err
 	}
+	if projectID == models.AllProjectsID && h.projectAccessSvc != nil {
+		requests, err := h.listChatInputRequests(c.Request().Context(), projectID)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, request := range requests {
+			if request.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return echo.NewHTTPError(http.StatusNotFound, "input request not found")
+		}
+	}
 	if h.chatInputRequestRepo != nil {
 		record, err := h.chatInputRequestRepo.Get(c.Request().Context(), id)
 		if err != nil {
@@ -333,7 +349,7 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 		h.completeRecoveredChatInputExecution(c.Request().Context(), resolved)
 	}
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:         events.ChatUserInputResolved,
 			ProjectID:    projectID,
 			ExecID:       resolved.ExecID,
@@ -441,6 +457,16 @@ func (h *Handler) persistChatInputRequestResolution(ctx context.Context, id, pro
 
 func (h *Handler) listChatInputRequests(ctx context.Context, projectID string) ([]*chatInputRequest, error) {
 	live := h.chatInputRequests.listProject(projectID)
+	allowed := func(req *chatInputRequest) bool {
+		return projectID != models.AllProjectsID || h.projectAccessSvc == nil || h.projectAccessSvc.ChatResourceAllowed(ctx, "execution", req.ExecID) == nil
+	}
+	filtered := live[:0]
+	for _, req := range live {
+		if allowed(req) {
+			filtered = append(filtered, req)
+		}
+	}
+	live = filtered
 	byID := make(map[string]*chatInputRequest, len(live))
 	for _, req := range live {
 		byID[req.ID] = req
@@ -459,6 +485,9 @@ func (h *Handler) listChatInputRequests(ctx context.Context, projectID string) (
 		req, err := chatInputRequestFromRecord(record)
 		if err != nil {
 			return nil, err
+		}
+		if !allowed(req) {
+			continue
 		}
 		byID[req.ID] = req
 		live = append(live, req)

@@ -11,7 +11,7 @@ import (
 func TestDiscordTaskAdmissionAndRecovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := t.Context()
-	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('sender','sender'); INSERT INTO org_memberships VALUES('default','sender','member')`)
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('sender','sender'); INSERT INTO org_memberships VALUES('default','sender','member'); INSERT INTO project_members VALUES('default','sender','editor')`)
 	require.NoError(t, err)
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 	auth := NewDiscordAuthRepo(db)

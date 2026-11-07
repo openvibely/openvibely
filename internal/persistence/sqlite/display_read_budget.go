@@ -20,7 +20,7 @@ func (r *ExecutionRepo) ReadProjectDisplayTail(ctx context.Context, projectID, i
 	}
 	defer tx.Rollback()
 	var exists bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM executions e JOIN tasks t ON t.id=e.task_id WHERE e.id=? AND t.project_id=?)`, id, projectID).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM executions e JOIN tasks t ON t.id=e.task_id WHERE e.id=? AND t.project_id=? AND `+workspaceChatPredicate(ctx, "t.project_id", "t.chat_owner_user_id")+`)`, id, projectID).Scan(&exists); err != nil {
 		return models.DisplayTail{}, err
 	}
 	if !exists {
@@ -175,9 +175,12 @@ func (r *ExecutionRepo) ListDisplayExecutions(ctx context.Context, projectID, ta
 	var args []any
 	if taskID == "" {
 		query, args = chatHistoryPageSQL(projectID, before, limit+1)
+		query = scopeWorkspaceExecutions(ctx, query)
 		query = strings.Replace(query, executionSelectColumnsAliasLight, strings.Replace(executionSelectColumnsAliasLight, executionOutputSelectAlias, "''", 1), 1)
 	} else {
 		query, args = taskExecutionPageSQL(taskID, before, limit+1)
+		i := strings.LastIndex(query, " ORDER BY")
+		query = query[:i] + " AND EXISTS (SELECT 1 FROM tasks ct WHERE ct.id=executions.task_id AND " + workspaceChatPredicate(ctx, "ct.project_id", "ct.chat_owner_user_id") + ")" + query[i:]
 		query = strings.Replace(query, executionSelectColumnsLight, strings.Replace(executionSelectColumnsLight, executionOutputSelect, "''", 1), 1)
 	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -228,7 +231,7 @@ func (r *ExecutionRepo) GetDisplayExecutionTail(ctx context.Context, id string) 
 	}
 	defer tx.Rollback()
 	columns := strings.Replace(executionSelectColumnsLight, executionOutputSelect, "''", 1)
-	execution, err := scanExecutionRow(tx.QueryRowContext(ctx, `SELECT `+columns+` FROM executions WHERE id=?`, id))
+	execution, err := scanExecutionRow(tx.QueryRowContext(ctx, `SELECT `+columns+` FROM executions WHERE id=? AND EXISTS (SELECT 1 FROM tasks ct WHERE ct.id=executions.task_id AND `+workspaceChatPredicate(ctx, "ct.project_id", "ct.chat_owner_user_id")+`)`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

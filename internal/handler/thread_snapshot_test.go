@@ -61,6 +61,7 @@ func TestRunningExecutionsHidesInaccessibleProjects(t *testing.T) {
 	require.NoError(t, err)
 	bob, err := org.Accept(ctx, token, "running-bob", "bob-password-long", "")
 	require.NoError(t, err)
+	require.NoError(t, stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, open.ID, bob.UserID, "viewer"))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/events/running-executions", nil).WithContext(models.WithPrincipal(ctx, bob.Principal)))
 	require.Equal(t, http.StatusOK, rec.Code)

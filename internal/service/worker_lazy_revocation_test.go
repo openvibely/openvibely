@@ -33,6 +33,7 @@ func TestWorkerAlreadyRunningFinishesAfterRevocationWithoutPolling(t *testing.T)
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "running-member", "long-test-password", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	actor := models.WithPrincipal(ctx, user.Principal)
 	model := &models.LLMConfig{Name: "Test", Provider: models.ProviderTest, Model: "test-model", AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
 	require.NoError(t, env.LLMConfigs.Create(ctx, model))
@@ -71,8 +72,7 @@ func TestWorkerAlreadyRunningFinishesAfterRevocationWithoutPolling(t *testing.T)
 	}
 	policy, err := env.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, user.UserID, "viewer"))
 	before := counter.calls.Load()
 	timer := time.NewTimer(1200 * time.Millisecond)
 	defer timer.Stop()

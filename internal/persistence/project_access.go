@@ -13,6 +13,8 @@ var ErrProjectDenied = errors.New("project not found")
 // ProjectAccessStore resolves roles from current membership, never client claims.
 // Policy changes and their audit event are committed in the same transaction.
 type ProjectAccessStore interface {
+	ChatResourceAllowed(ctx context.Context, kind, id string) error
+	ChatResourceOwner(ctx context.Context, kind, id string) (string, error)
 	Get(context.Context, string) (*models.ProjectAccess, error)
 	Role(ctx context.Context, userID, projectID string) (string, error)
 	Members(context.Context, string) ([]models.ProjectMember, error)

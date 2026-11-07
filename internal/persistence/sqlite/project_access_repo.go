@@ -25,13 +25,22 @@ func (r *ProjectAccessRepo) Get(ctx context.Context, id string) (*models.Project
 	return p, err
 }
 
-// projectRole resolves the maximum of org access and explicit grants. An org
+// projectRole resolves explicit grants only. Organization membership alone grants no access. An org
 // admin or project owner has owner authority; departed/disabled users have none.
 func projectRole(ctx context.Context, db sqlExecutor, userID, projectID string) (string, error) {
+	// The virtual workspace is a collection scope, not a project grant. Its
+	// queries and mutations authorize each real project separately.
+	if projectID == models.AllProjectsID {
+		var role string
+		err := db.QueryRowContext(ctx, `SELECT CASE WHEN m.role IN ('owner','admin') THEN 'owner' ELSE 'editor' END FROM users u JOIN org_memberships m ON m.user_id=u.id WHERE u.id=? AND u.disabled=0 AND m.org_id='default'`, userID).Scan(&role)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return role, err
+	}
 	var rank int
 	err := db.QueryRowContext(ctx, `SELECT MAX(
  CASE WHEN m.role IN ('owner','admin') OR p.owner_user_id=u.id THEN 4 ELSE 0 END,
- CASE WHEN p.visibility='org' THEN CASE p.org_role WHEN 'editor' THEN 2 ELSE 1 END ELSE 0 END,
  CASE pm.role WHEN 'maintainer' THEN 3 WHEN 'editor' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END)
  FROM project_organizations p JOIN org_memberships m ON m.org_id=p.org_id
  JOIN users u ON u.id=m.user_id AND u.disabled=0

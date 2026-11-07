@@ -21,6 +21,7 @@ func TestSlackRuntimeRechecksSenderBinding(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "slack-action-user", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	caller := models.WithPrincipal(ctx, user.Principal)
 	worker := &WorkerService{}
 	worker.SetRunAuthorization(env.RunIdentities, env.Organizations, env.ProjectAccess, false)
@@ -42,12 +43,10 @@ func TestSlackRuntimeRechecksSenderBinding(t *testing.T) {
 	require.NoError(t, err)
 	policy, err := env.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, user.UserID, "viewer"))
 	_, err = handlers["get_current_project"](caller, nil)
 	require.ErrorIs(t, err, authz.ErrDenied)
-	policy.OrgRole = "editor"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, user.UserID, "editor"))
 	require.NoError(t, env.SlackAuth.BindApplicationUser(owner, "default", entry.ID, "T123", models.BootstrapUserID))
 	_, err = handlers["get_current_project"](caller, nil)
 	require.ErrorIs(t, err, authz.ErrDenied)

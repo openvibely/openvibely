@@ -13,13 +13,14 @@ architecture remain below for design context. Implementation history is availabl
 | --- | --- |
 | Accounts | Organization users, invitations, revocable sessions and per-user preferences. Auth-off uses the bootstrap owner. |
 | Application authorization | Current database roles guard HTTP/JSON, runtime tools, project lists/selectors, subscription admission, and background admission/recovery. A registered-route sweep and focused role tests cover the boundaries. |
-| Sharing | Only project owners and org admins/owners change sharing, grants or ownership. Maintainers manage project work and read audits, but cannot change anyone’s grants. |
+| Sharing | Project Settings has a Sharing tab. Joining the org grants no project access. Owners and org admins/owners assign explicit viewer/editor/maintainer roles; removing a grant removes access unless the user is the owner or an org admin/owner. Maintainers manage project work and read audits, but cannot change grants. |
 | Live updates | Access is checked at subscription admission and on targeted access-change notifications. Denied subscriptions receive `access blocked` and stop; queued frames from retired subscriptions are discarded. Frame delivery performs no database authorization queries. “All projects” filters through an in-memory visibility map; goal events include ProjectID. Logout and disabled-account notifications close affected connections. |
 | Running work | Worker and follow-up one-second authorization watchers are removed. Revocation denies new starts/admissions/recovery, but does not itself cancel an admitted run. Existing tool/action and provider authorization boundaries still apply. The update banner and pings remain; session expiration is checked at the existing 15-second ping interval. |
 | Channels | Telegram, Slack and Discord use global sender-to-user mappings and current project permissions. Email mappings are configurable, but authenticated email execution remains blocked without verified sender identity. X retains its existing identity path; auth-off retains legacy behavior. |
+| All-projects chat | Personal history, pending messages, active runs, provider context and model preferences per user. Model, reasoning effort and service tier use user-specific keys in `app_settings`; private task model reads enforce chat ownership. Existing shared history is admin-only; authorship is not treated as ownership. Live lifecycle events carry a server-only audience ID; frame filtering stays in memory. Ordinary project chat remains shared with authorized project members. |
 | Author attribution | Chat/task messages, queued inputs and steering messages display author names. |
 | Audit | Identified mutations record atomic audits. Membership changes record JSON `before`/`after` explicit grants, including removals with org membership; empty means no individual grant. Existing history is not rewritten. |
-| Migration | Phase 2 is consolidated in `224_project_authorization.sql`, following version 223. Upgrade, rollback and re-upgrade have coverage. Rollback drops Phase 2 audit history; it is not an expected operating workflow. |
+| Migration | Phase 2 authorization and personal workspace-chat ownership are consolidated in `224_project_authorization.sql`, following version 223. Existing shared history remains unowned and admin-only. Upgrade, rollback and re-upgrade have coverage. Rollback drops Phase 2 audit history; it is not an expected operating workflow. |
 
 ### Validation evidence
 
@@ -34,7 +35,7 @@ These are specific tested contracts, not a claim that every future feature has b
 ### Remaining work and product limits
 
 - Phase 3: process/filesystem sandboxing and an org-wide audit view. Project roles do not isolate agent processes, worktrees, the database or secrets; production private-project creation remains disabled.
-- Phase 4: shared/private conversations and collaboration features.
+- Phase 4: named conversations, participant sharing, conversation lists and collaboration features. Personal all-projects chat and shared project/task threads already exist.
 - Phase 5: user/org credential ownership, channel-specific tool restrictions and verified email sender identity.
 - Phase 6: hosted multi-user onboarding, organization isolation and billing.
 - Internal/embedded calls without principals retain their existing compatibility paths; the proposed explicit system-context migration was not completed.
@@ -239,15 +240,14 @@ CREATE TABLE project_members (
 CREATE INDEX idx_project_members_user ON project_members(user_id, project_id);
 ```
 
-Visibility semantics:
+Current application access semantics:
 
-- `private`: only `owner_user_id`, org owners and admins, and explicit `project_members`. Default.
-- `shared`: same as private, plus the UI shows a "Shared" badge. This is a **derived/UX state**, effectively `private` with members ≥1. **Recommendation:** store only `private`/`org` and derive "shared" from membership count, to avoid two sources of truth. The CHECK above lists all three for discussion; the final migration should pick one.
-- `org`: every org member gets an implicit `viewer` role (configurable to `editor` via `organizations.default_project_visibility`). Explicit `project_members` rows can raise a role. Org-wide visibility never *lowers* an explicit role.
+- Projects require an explicit `project_members` grant, project ownership, or an org admin/owner role. This applies to existing and new projects; invitations do not grant project access.
+- **Effective project role** = explicit membership, overridden by project ownership or org admin/owner authority. No grant means no access for an ordinary member.
+- Legacy `visibility` and `org_role` columns remain for database compatibility, but do not grant access. The role resolver ignores those fields; migration 224 also contains the new chat ownership columns. Unreleased test databases must match the consolidated schema.
+- Private filesystem/process isolation remains Phase 3 work. Application access restrictions do not sandbox agents.
 
-**Effective project role** = max(explicit membership, owner → `owner`, org admin/owner → `owner`, org-visible → org default role).
-
-The owner is also stored in `project_members` with role `owner`. This makes listing a single join, and `owner_user_id` is denormalized for transfers.
+The owner is stored in `project_organizations.owner_user_id`; ordinary grants are stored in `project_members`.
 
 ### 2.3 Invitations
 
@@ -290,7 +290,9 @@ For chat, the first user turn of a chat "message" is currently the chat-category
 
 ### 2.5 Chat conversations
 
-Today: one implicit chat per project, made of `tasks.category='chat'`, one row per turn, and history = `ListChatHistory(projectID)`. For collaboration we need:
+Today, chat turns still use `tasks.category='chat'`, one row per turn. Ordinary project chat is shared among authorized members. The virtual `__all_projects__` workspace has a separate personal history, queue, provider context and model preferences per user. Its task/input rows carry `chat_owner_user_id`; empty ownership identifies legacy shared history restricted to org admins/owners. Task threads already support collaboration.
+
+Phase 4 adds explicit, named conversations and participant controls; it is not the first implementation of shared task threads or personal chat. The following schema is proposed, not implemented:
 
 ```sql
 CREATE TABLE chat_conversations (
@@ -315,11 +317,12 @@ ALTER TABLE thread_inputs ADD COLUMN conversation_id TEXT REFERENCES chat_conver
 ALTER TABLE executions ADD COLUMN conversation_id TEXT; -- denormalized like task_project_id
 ```
 
-- The migration creates one `is_default=1, visibility='project'` conversation per project and backfills `conversation_id` on chat-category tasks, inputs, and executions.
-- `chat_compaction_checkpoints` / `chat_context_usage` gain `scope_type='conversation'`, keyed by conversation ID, instead of the project.
+- For ordinary projects, migrate the existing shared chat into one `is_default=1, visibility='project'` conversation and backfill turn/input/execution IDs.
+- For `__all_projects__`, migrate each user's owned rows into a separate private conversation. Preserve the admin-only restriction on unowned legacy history; never turn it into an organization-visible default conversation or infer ownership from message authors.
+- `chat_compaction_checkpoints` / `chat_context_usage` gain `scope_type='conversation'`, keyed by conversation ID. Migrate both shared project scopes and personal workspace scopes without mixing users. Preserve existing shared project model settings and per-user workspace settings when moving preferences to conversations.
 - `ClearChat` becomes "archive conversation" for editors+. It no longer deletes history for everyone.
 - `private` conversations are visible only to their creator and participants within a project they can access. They can be **shared** by flipping to `project` or by adding participants. This answers "chat should be shareable with other people".
-- The queue/FIFO semantics in `thread_inputs` (per project chat today) must become per-conversation. Two people chatting in the same conversation share one ordered queue. That is the intended collaborative semantic: each message is attributed, and the agent sees `[@alice]: …` in history.
+- The queue/FIFO semantics in `thread_inputs` (shared per ordinary project, personal per user in all-projects chat today) must become per-conversation. Two people chatting in the same conversation share one ordered queue. That is the intended collaborative semantic: each message is attributed, and the agent sees `[@alice]: …` in history.
 - Execution history for the LLM must include author labels when more than one human participated (prompt builder in `handler/chat_processing.go` / `service/task_creation.go BuildChatContext*`).
 
 ### 2.6 Backend-neutral persistence: implemented
@@ -617,16 +620,19 @@ Single-user compatibility rules:
 
 ## 8. Data Migration
 
-Migration `21x_teams_backfill` (idempotent, `NO TRANSACTION` where tables are rebuilt):
+The implemented Phase 2 schema is one migration: **223 → 224**, in `224_project_authorization.sql`.
 
-1. Create `users` row **bootstrap**: username = `AUTH_USERNAME` if set, else `owner`; `is_instance_admin=1`. Because migrations cannot read env reliably, create a placeholder user in SQL. `server.Start` then reconciles it with `AUTH_USERNAME` and the hosted SSO first login on boot ("claim bootstrap user").
-2. Create organization `default` (name from hostname or "My Organization"), and `org_memberships(bootstrap, owner)`.
-3. `UPDATE projects SET org_id=default, owner_user_id=bootstrap, visibility='private'`. Insert `project_members(project, bootstrap, 'owner')`. Rebuild `projects` to make the columns NOT NULL.
-4. Create one default `chat_conversations` row per project. Backfill `conversation_id` on `tasks WHERE category='chat'`, `thread_inputs WHERE scope='chat'`, and `executions WHERE task_category='chat'`. Re-key `chat_compaction_checkpoints`/`chat_context_usage` rows of project scope to the conversation.
-5. Attribution columns stay NULL for legacy rows, rendered as "Owner (legacy)". Optionally backfill `created_by_user_id = bootstrap` for tasks, schedules, and automations so background run-as resolution works. **Recommended: backfill**, because schedules and automations need a run-as user.
-6. Move `ui.*` keys from `app_settings` to `user_preferences` for the bootstrap user. Leave secrets in place until the Phase 5 credential move.
-7. `agent_configs` / `oauth_connections` get `owner_kind='org', owner_id=default`, which preserves today's sharing.
-8. Channel allowlist rows: `linked_user_id = NULL`; `added_by` stays as text.
+- Preserve existing project ownership and use explicit project grants; organization membership alone grants no project access.
+- Add authorization, run-identity, provenance and audit records. Historical identity backfills follow the migration's explicit rules; channel users are never inferred from display names.
+- Make Telegram/Slack/Discord/email sender mappings global, combine duplicate senders and flag missing/conflicting bindings for review.
+- Add `chat_owner_user_id` to tasks and inputs. Pre-existing all-projects history remains unowned and admin-only, even when messages have authors.
+- Personal all-projects model preferences reuse `app_settings` with user-specific keys; no separate settings migration is needed. Shared project preferences retain their existing keys.
+
+Future migrations belong to their respective phases:
+
+- **Phase 4:** introduce conversations and participants, preserving personal workspace histories, shared project threads and restricted legacy history as described in §2.5. Migrate queue, provider-context and preference scopes without widening access.
+- **Phase 5:** introduce credential ownership and encrypted integration storage. Existing app settings and credentials remain in their current stores until then.
+
 
 Note the project rules: never touch `openvibely.db` destructively, follow the table-rebuild rules, and respect CHECK/FK constraints. Each migration needs a regression test on a populated fixture DB.
 
@@ -700,6 +706,8 @@ context; the Phase 2 checklist records current authorization coverage.
 See [Current status](#current-status) for delivered behavior and remaining limits,
 and the [verification checklist](#authorization-verification-checklist) for evidence.
 
+Delivered: explicit project grants and the Sharing tab; personal all-projects chat (history, queue, live output, provider context and model preferences); ownership checks on private chat reads. Project chat and task threads remain shared with authorized members.
+
 ### Phase 3: Kernel sandbox and org-wide audit (sandbox estimate: 3–4 weeks)
 - Start with the **one-day Landlock test** on a hosted server (§3.5). If Landlock is unavailable there, re-plan around container-per-run.
 - **Landlock launcher**: `openvibely --sandbox-exec`; each bash call is locked to its project's folders, and scripts and programs it starts inherit the lock.
@@ -714,8 +722,9 @@ and the [verification checklist](#authorization-verification-checklist) for evid
 
 - Org-wide audit view for org admins/owners, combining existing audit records across projects. Deferred from Phase 2; audit recording and project-level audit access are already implemented.
 
-### Phase 4: Shared chat (3–4 weeks)
-- `chat_conversations` + participants. Migrate the default per-project thread. Conversation list UI. Private vs project-visible conversations; share a conversation.
+### Phase 4: Conversations and collaboration (3–4 weeks)
+- `chat_conversations` + participants, titles and conversation-list UI. Add multiple private/project-visible conversations and explicit participant/sharing controls.
+- Migrate existing shared project threads and personal all-projects histories separately. Keep legacy unowned history admin-only and preserve per-user model preferences. Existing task threads already support collaboration.
 - Per-conversation FIFO queue, compaction checkpoints, and context usage. Author-labeled history in model prompts. Exclude private conversations from memory extraction.
 - Per-user alert read state, `@mentions`, and notification subscriptions on the existing WebSocket. Derive the user ID from the authenticated principal; clients cannot subscribe as another user.
 - `tasks.version` optimistic concurrency: a second concurrent save is rejected instead of overwriting. `actor_user_id` on live events.
@@ -751,12 +760,13 @@ Every surface below now has production wiring and tests; the last column lists k
 
 | Surface | Existing evidence | Remaining verification / implementation |
 | --- | --- | --- |
-| Shared permission service and migration | One store-level role resolver (`projectRole`) backs HTTP, runtime, selector, WebSocket and worker checks; migration 224 gives every existing project org visibility with editor default and the bootstrap owner, preserving prior access; auth-off resolves the bootstrap owner. Migration tests cover defaults, identity backfill, webhook owners and rollback | None known |
+| Shared permission service and migration | One store-level role resolver (`projectRole`) backs HTTP, runtime, selector, WebSocket and worker checks; migration 224 preserves project ownership and explicit grants; legacy org visibility/editor fields confer no implicit access. Auth-off resolves the bootstrap owner. Migration tests cover defaults, identity backfill, webhook owners and rollback | None known |
 | HTTP/JSON | Guards for sharing, Insights, channel settings/allowlists, global administrative actions, chat, conversation model settings and outbound targets. `route_authorization_sweep_test.go` walks every registered route as an authenticated non-member of a private project (no leak, no mutation, ≥400 on scoped routes) and as a project viewer (every mutating route refused) | Channels propagates denied project resolution for full and fragment responses; aggregate reorder mutations and anchors are limited to editable projects (`project_scope_regressions_test.go`, `task_reorder_access_test.go`). New routes are covered automatically by the sweep; editor/maintainer/owner boundaries are covered by focused tests, not by the sweep |
 | Runtime tools | One classification (`service.RuntimeToolPermission`) covers every registry tool: task/schedule/alert reads=viewer, writes=editor; automation and project-settings mutations, merge/auto-merge fields and GitHub mutations=maintainer; messaging and `request_user_input`=editor; settings/models/agents/personality also require an org admin. Web/API/follow-up executors apply it before discovery caches; Telegram, Slack, Discord and X channel runtimes and background task runtimes recheck it on every call after their sender/run-as checks. Production GitHub runtimes keep their stronger provider-boundary rechecks. `create_project` is org-scoped; `switch_project` targets are authorized by the guarded project store. Tests: role matrix in `TestProjectRuntimeToolsEnforceRoleBoundaries` and `TestRuntimeToolRoleRechecksCurrentProjectRole` | Email remains fail-closed without verified sender evidence |
 | Lists/selectors | All project lists, selectors, worker-capacity rows, repo validation and API projections go through `authz.ProjectStore`, which filters by current view access for any principal; `list_projects` tools use the same store (test asserts a private project is hidden from a non-member and shown to its owner). `/events/running-executions` filters by project view access. Aggregate database reads filter real project permissions before pagination/counting; aggregate alert writes require edit access and mixed-permission bulk selections roll back (`aggregate_access_test.go`, `audit_regressions_test.go`) | None known |
 | WebSockets | Subscription admission/replay checks view access and object ownership. Change interests are registered before admission, and changes queued during admission are applied before output starts (`TestRevocationDuringSubscriptionAdmissionBlocksOutput`). Targeted access-change notifications recheck affected subscriptions and retire denied ones. All-project events use an in-memory visibility map; retired subscriptions discard queued frames. No per-frame database authorization queries or 1s subscription recheck. Existing 15s ping-time session-expiry checks remain | None known |
-| Sharing/member/ownership UI | Project settings sharing panel (existing settings patterns): org access level, grants, removal, owner transfer, audit list. Handler tests cover viewer/editor denial (404), maintainer mutation denial and audit visibility, owner/org-admin-only policy/grants/transfer, removal falling back to org access, stale forms after downgrade, same-origin check and private visibility being refused. `TestProjectSharingPanelInChrome` drives the panel in headless Chrome (policy save, grant, removal, audit, confirmed transfer) | None known |
+| Personal all-projects chat | User-owned history, pending/active turns, direct reads, live-event audiences, provider context and model preferences. Legacy history is admin-only. Tests: `TestWorkspaceChatIsPersonal`, `TestWorkspaceChatModelSettingsArePersonal`, `TestWorkspaceChatModelSettingsAuthOffUsesOwner`, `TestPrivateChatModelSettingsRequireOwnership`, workspace migration and provider recovery tests | Named conversations and participant sharing remain Phase 4 work; project chat and task threads remain shared |
+| Sharing/member/ownership UI | Project Settings Sharing tab: explicit grants, removal, owner transfer, audit list. Handler tests cover viewer/editor denial (404), maintainer mutation denial and audit visibility, owner/org-admin-only policy/grants/transfer, removal denying access for ordinary members, stale forms after downgrade, same-origin check and private visibility being refused. `TestProjectSharingPanelInChrome` drives the panel in headless Chrome (tab switching, grant, removal, audit, confirmed transfer) | None known |
 | Workers | Saved run-as and execution snapshots resolved at admission, claim and recovery (`worker_authorization.go`); missing identity fails closed except auth-off (bootstrap owner); no periodic authorization watcher: admitted runs may finish; subsequent starts/recovery and new actions check current access; unmapped Telegram/Discord origins and authenticated email origins rejected. Tests: `TestWorkerDurableRunIdentityAndRevocation`, `TestWorkerMissingIdentityAndAuthOff`, `TestWorkerRejectsMissingIdentityBeforeClaimOrHooks`, channel binding revocation tests | Email execution stays rejected without verified sender evidence |
 | Schedules | Independent user/Slack/Discord provenance; calendar and automation admission checks; dispatched runs use worker admission checks without a per-run authorization timer. Tests: `TestScheduleRunIdentityAdmissionRecoveryAndRevocation`, `TestScheduleMissingIdentityFailsClosedExceptAuthOff` | None known |
 | Goals | Exact-goal/user snapshots; every goal mutation and evaluation rechecks the caller (`TestGoalServiceCurrentPermissions`); continuations run only as the saved goal user and must match the current goal ID (`goal_continuation_access.go`, tests in `goal_continuation_access_test.go`); a reassigned task does not change the goal user (`TestGoalSavedCreatorSurvivesTaskReassignment`) | None known |
@@ -768,7 +778,7 @@ Every surface below now has production wiring and tests; the last column lists k
 | X channel | Installer and sender identity mappings; polling cancellation and receipt transaction checks; restart identity and per-call runtime role checks (`TestXRequestAndRestartIdentity`, `TestXPollRevocationDuringProviderWork`, `TestXIngressDoesNotInheritInstallerIdentity`) | None known |
 | Telegram/Discord/email channels | Global sender-to-OV-user mappings in the existing channel modal; members manage only self-mappings, org admins/owners can assign active org users; transactional before/after audit. Telegram numeric IDs and queued-reply identity survive recovery; Discord retains its provenance checks. Migration 224 deduplicates rows and flags legacy entries for review. Project permissions are checked at admission and actions. Member channel pages omit shared credentials in both full and fragment responses (`TestMemberChannelsOmitsCredentials`); org admins retain credential access. Tests: `TestGlobalChannelSenderAssignmentPermissions`, `TestGlobalSenderMappingHandlersLimitAssignments`, `TestTelegramMappedIngressPersistsSenderIdentity`, `TestTelegramQueuedInputPreservesSenderAcrossRecovery` | Authenticated email execution remains blocked: an address mapping is not spoof-resistant sender verification. Auth-off retains legacy allowlists |
 | Audit | Atomic audit records for policy, membership, ownership, project settings/deletion, run-as bindings (task, schedule, goal, webhook, execution, automation), channel bindings/allowlists/credentials (key names only, never values), GitHub reviewer/inbox/feedback, swarm transitions, steering, calendar, updates and usage reset. Audit failures roll back the mutation (tests per store). Membership entries record JSON before/after explicit roles, including org-removal cleanup. Audit reads require maintainer access | Org-wide audit presentation is scheduled for Phase 3 |
-| Compatibility and isolation | Private-project creation is refused by the service and not offered in the UI (handler and browser tests); auth-off owner compatibility retained; migration preserves org-wide editor access | Phase 3 process/filesystem sandboxing is required before private projects can be offered; these tables are application authorization only |
+| Compatibility and isolation | Private-project creation is refused by the service and not offered in the UI (handler and browser tests); auth-off owner compatibility retained; organization membership alone grants no project access | Phase 3 process/filesystem sandboxing is required before private projects can be offered; these tables are application authorization only |
 
 ### Scope and limitations
 

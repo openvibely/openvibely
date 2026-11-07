@@ -710,7 +710,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	if len(projects) > 0 {
 		return projects[0].ID, nil
 	}
-	return "", nil
+	return models.AllProjectsID, nil
 }
 
 // isHTMX returns true for ordinary HTMX fragment requests. History cache misses

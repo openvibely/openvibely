@@ -80,6 +80,7 @@ func (r *ChatAttachmentRepo) GetByIDForProject(ctx context.Context, id, projectI
 			JOIN tasks t ON t.id = e.task_id
 			WHERE ca.id = ? AND t.project_id = ?
 		`
+	query += " AND " + workspaceChatPredicate(ctx, "t.project_id", "t.chat_owner_user_id")
 	return r.scanAttachment(ctx, query, id, projectID)
 }
 

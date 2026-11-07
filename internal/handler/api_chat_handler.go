@@ -294,7 +294,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to queue chat message"})
 		}
 		if h.chatBroadcaster != nil {
-			h.chatBroadcaster.Publish(events.ChatEvent{
+			h.publishChatEvent(events.ChatEvent{
 				Type:           events.ChatNewMessage,
 				ProjectID:      projectID,
 				ExecID:         queued.ID,
@@ -354,7 +354,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	applog.Infof("[handler] APIChatMessage created exec=%s task=%s status=%s", exec.ID, task.ID, exec.Status)
 	// Broadcast new message event
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:      events.ChatNewMessage,
 			ProjectID: projectID,
 			ExecID:    exec.ID,

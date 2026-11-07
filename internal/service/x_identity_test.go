@@ -148,6 +148,7 @@ func TestXIngressDoesNotInheritInstallerIdentity(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "sender", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, "editor"))
 	require.NoError(t, allowlist.Create(owner, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123", ApplicationUserID: user.UserID}))
 	ok, err = svc.processMention(owner, tweet, XUser{ID: "456"})
 	require.False(t, ok)

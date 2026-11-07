@@ -131,6 +131,13 @@ func streamingTransportScope(params streamingResponseParams) string {
 	return ""
 }
 
+func streamingTransportScopeForUser(ctx context.Context, params streamingResponseParams) string {
+	if !params.IsTaskFollowup {
+		params.ProjectID = models.WorkspaceChatScope(ctx, params.ProjectID)
+	}
+	return streamingTransportScope(params)
+}
+
 // processStreamingResponse is the shared goroutine that handles LLM streaming for
 // both chat and task follow-up messages. This function runs asynchronously in a
 // background goroutine, allowing the HTTP handler to return immediately.
@@ -780,7 +787,7 @@ modelLoop:
 				break modelLoop
 			}
 		}
-		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScopeForUser(ctx, params))
 		if h.threadInputRepo != nil && params.ExecID != "" {
 			requestCtx = llmcontracts.WithBeforeModelSend(requestCtx, func(sendCtx context.Context) error {
 				return h.threadInputRepo.CheckSteeringDelivery(sendCtx, params.ExecID, preparedSteeringInputIDs(pendingSteering))
@@ -1339,7 +1346,7 @@ func (h *Handler) publishThreadInputAppliedEvents(params streamingResponseParams
 			})
 		}
 		if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
-			h.chatBroadcaster.Publish(events.ChatEvent{
+			h.publishChatEvent(events.ChatEvent{
 				Type:           events.ChatThreadInputApplied,
 				ProjectID:      input.ProjectID,
 				ExecID:         params.ExecID,
@@ -1403,7 +1410,7 @@ func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
 			})
 		}
 		if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
-			h.chatBroadcaster.Publish(events.ChatEvent{
+			h.publishChatEvent(events.ChatEvent{
 				Type:           events.ChatNewMessage,
 				ProjectID:      input.ProjectID,
 				ExecID:         input.ID,
@@ -1521,7 +1528,7 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 		}
 	}
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:            events.ChatResponseDone,
 			ProjectID:       params.ProjectID,
 			ExecID:          params.ExecID,
@@ -1584,6 +1591,21 @@ func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID 
 // registerTaskCancellation registers a cancel function for a task with the worker service.
 // No-op if worker service is unavailable.
 func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed streamingResponseParams, excludeExecID string) {
+	if completed.ProjectID == models.AllProjectsID && !completed.IsTaskFollowup && h.projectAccessSvc != nil {
+		if _, identified := models.PrincipalFromContext(ctx); !identified {
+			if !strings.HasPrefix(completed.PrincipalID, "user:") {
+				// Recovery enumerates each saved sender rather than sharing an active turn.
+				h.PromoteQueuedChatInput(completed.ProjectID)
+				return
+			}
+			restored, err := h.followupUserContext(ctx, strings.TrimPrefix(completed.PrincipalID, "user:"))
+			if err != nil {
+				return
+			}
+			ctx = restored
+		}
+	}
+
 	installationTaskID := completed.TaskID
 	if !completed.IsTaskFollowup {
 		installationTaskID = ""
@@ -1640,6 +1662,19 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 }
 
 func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadInput) {
+	if input.ProjectID == models.AllProjectsID && h.projectAccessSvc != nil {
+		// Restore the queued sender before loading history or any provider context.
+		restored, err := h.followupUserContext(ctx, input.AuthorUserID)
+		if err == nil {
+			err = h.projectAccessSvc.ChatResourceAllowed(restored, "input", input.ID)
+		}
+		if err != nil {
+			h.cancelUnstartableQueuedInput(ctx, input)
+			return
+		}
+		ctx = restored
+	}
+
 	var updateWorkDone func()
 	if h.updateWorkTracker != nil {
 		var err error
@@ -1751,7 +1786,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		chatMode = models.ChatModeOrchestrate
 	}
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:           events.ChatNewMessage,
 			ProjectID:      input.ProjectID,
 			ExecID:         exec.ID,

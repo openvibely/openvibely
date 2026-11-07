@@ -267,15 +267,15 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 		if name == "modal" && !strings.Contains(body, "No outbound targets saved yet.") {
 			t.Fatalf("empty %s response should preserve the empty target row: %s", name, body)
 		}
-		if !strings.Contains(body, `data-project-id=""`) && name == "modal" {
-			t.Fatalf("empty modal response should preserve an empty project context: %s", body)
+		if !strings.Contains(body, `data-project-id="__all_projects__"`) && name == "modal" {
+			t.Fatalf("empty modal response should use the virtual workspace: %s", body)
 		}
 		if strings.Contains(body, targetA.TargetID) || strings.Contains(body, targetB.TargetID) {
 			t.Fatalf("empty %s response rendered saved target state: %s", name, body)
 		}
 	}
-	if !strings.Contains(cardBody, "Saved targets only") {
-		t.Fatalf("empty card response should preserve the disabled policy state: %s", cardBody)
+	if strings.Contains(cardBody, "Saved targets only") || strings.Contains(cardBody, "Explicit targets allowed") {
+		t.Fatalf("virtual workspace must not display a single-project policy: %s", cardBody)
 	}
 	policyToggle := `name="enabled" value="true" class="toggle toggle-primary toggle-sm"`
 	if strings.Contains(modalBody, policyToggle+` checked`) {

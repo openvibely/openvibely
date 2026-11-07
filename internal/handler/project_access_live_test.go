@@ -41,6 +41,7 @@ func TestProjectAccessWebSocketRevokesOnlyDeniedSubscription(t *testing.T) {
 	require.NoError(t, tc.stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
 	ownerCtx := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 	require.NoError(t, access.SetMember(ownerCtx, project.ID, bob.UserID, "viewer"))
+	require.NoError(t, access.SetMember(ownerCtx, "default", bob.UserID, "viewer"))
 	server := httptest.NewServer(e)
 	defer server.Close()
 	conn, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http", "ws", 1)+"/events/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {server.URL}, "Cookie": {auth.DefaultCookieName + "=" + token}}})

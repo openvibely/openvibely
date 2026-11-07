@@ -18,6 +18,7 @@ func TestWorkerDurableRunIdentityAndRevocation(t *testing.T) {
 	require.NoError(t, err)
 	bob, err := org.Accept(ctx, invite, "worker-bob", "bob-long-password", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, "editor"))
 	bobCtx := models.WithPrincipal(ctx, bob.Principal)
 	task := models.Task{ProjectID: "default", Title: "Saved identity", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, env.Tasks.Create(bobCtx, &task))
@@ -35,8 +36,7 @@ func TestWorkerDurableRunIdentityAndRevocation(t *testing.T) {
 	// Project role is checked against persistence, never the saved role claim.
 	policy, err := env.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, bob.UserID, "viewer"))
 	_, err = worker.runPrincipalContext(ctx, task)
 	require.ErrorIs(t, err, authz.ErrDenied)
 	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, "editor"))
@@ -91,6 +91,7 @@ func TestWorkerSubmitAsDoesNotReplaceQueuedIdentity(t *testing.T) {
 	require.NoError(t, err)
 	bob, err := org.Accept(ctx, invite, "duplicate-bob", "bob-long-password", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, "editor"))
 	require.NoError(t, worker.SubmitAs(models.WithPrincipal(ctx, bob.Principal), task))
 	userID, err := env.RunIdentities.TaskUser(ctx, task.ID)
 	require.NoError(t, err)
@@ -99,7 +100,13 @@ func TestWorkerSubmitAsDoesNotReplaceQueuedIdentity(t *testing.T) {
 	events, err := env.ProjectAccess.Audit(ctx, "default")
 	require.NoError(t, err)
 	require.NotEmpty(t, events)
-	require.Equal(t, "task.run_as", events[0].Action)
+	var runAsEvents []models.ProjectAuditEvent
+	for _, event := range events {
+		if event.Action == "task.run_as" {
+			runAsEvents = append(runAsEvents, event)
+		}
+	}
+	require.Len(t, runAsEvents, 1, "duplicate submission must not rebind the run")
 }
 
 func TestWebhookWorkerRequiresCurrentMaintainer(t *testing.T) {

@@ -26,6 +26,9 @@ func TestTaskReorderRespectsCurrentProjectAccess(t *testing.T) {
 		policy.Visibility = visibility
 		policy.OrgRole = role
 		require.NoError(t, access.Update(ctx, models.BootstrapUserID, *policy))
+		if visibility == "org" {
+			require.NoError(t, access.SetMember(ctx, models.BootstrapUserID, p.ID, "reorder-user", role))
+		}
 		return p
 	}
 	editable := create("Editable", "org", "editor")
@@ -69,8 +72,7 @@ func TestTaskReorderRespectsCurrentProjectAccess(t *testing.T) {
 	// Permission changes must take effect even when the caller still has stale claims.
 	policy, err := access.Get(ctx, editable.ID)
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, access.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, access.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, "reorder-user", "viewer"))
 	require.ErrorIs(t, tasks.ReorderTask(user, first.ID, 0, models.AllProjectsID), persistence.ErrProjectDenied)
 	require.Equal(t, after, snapshot())
 }

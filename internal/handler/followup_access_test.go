@@ -24,6 +24,7 @@ func TestFollowupRevocationDeniesNextStartOnly(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "followup-user", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	task := createTask(t, h, "default", "Followup access", func(task *models.Task) { task.Category = models.CategoryBacklog })
 	params := streamingResponseParams{TaskID: task.ID, ProjectID: "default", IsTaskFollowup: true}
 	restored, err := h.followupUserContext(ctx, user.UserID)
@@ -37,8 +38,7 @@ func TestFollowupRevocationDeniesNextStartOnly(t *testing.T) {
 	defer runCancel()
 	policy, err := tc.stores.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, tc.stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, user.UserID, "viewer"))
 	for _, child := range []context.Context{waiting, running} {
 		require.NoError(t, child.Err(), "revocation does not stop a run already started")
 	}
@@ -171,6 +171,7 @@ func TestFollowupDiscordRequiresCurrentSenderBinding(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "discord-followup", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 	entry := &models.DiscordAuthorizedUser{ProjectID: "default", DiscordUserID: "323456789"}
 	require.NoError(t, tc.stores.DiscordAuth.Create(owner, entry))
@@ -209,6 +210,7 @@ func TestFollowupTelegramRequiresCurrentSenderBinding(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "telegram-followup", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	owner := models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
 	entry := &models.TelegramAuthorizedUser{TelegramUserID: 323456789, ChannelSenderMapping: models.ChannelSenderMapping{ApplicationUserID: user.UserID}}
 	require.NoError(t, tc.stores.TelegramAuth.Create(owner, entry))

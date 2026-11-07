@@ -198,6 +198,13 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 				return err
 			}
 		}
+		var allowed bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM executions e WHERE e.id=? AND "+workspaceExecutionPredicate(ctx)+")", activeExecutionID).Scan(&allowed); err != nil {
+			return err
+		}
+		if !allowed {
+			return persistence.ErrProjectDenied
+		}
 		input.RunExecutionID = activeExecutionID
 		input.TurnID = activeExecutionID
 		input.InputMode = models.ThreadInputModeSteering
@@ -370,6 +377,16 @@ func (r *ThreadInputRepo) notifySteeringWakeups(activeExecutionID string) {
 }
 
 func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, input *models.ThreadInput) error {
+	if input.ProjectID == models.AllProjectsID && input.RunExecutionID != "" {
+		var allowed bool
+		if err := exec.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM executions e WHERE e.id=? AND "+workspaceExecutionPredicate(ctx)+")", input.RunExecutionID).Scan(&allowed); err != nil {
+			return err
+		}
+		if !allowed {
+			return persistence.ErrProjectDenied
+		}
+	}
+
 	if input.QueuePosition == 0 {
 		var next sql.NullInt64
 		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(queue_position), 0) + 1 FROM thread_inputs WHERE scope = ? AND project_id = ? AND COALESCE(task_id, '') = ?`, input.Scope, input.ProjectID, input.TaskID).Scan(&next); err != nil {
@@ -444,7 +461,7 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 }
 
 func (r *ThreadInputRepo) GetByID(ctx context.Context, id string) (*models.ThreadInput, error) {
-	input, err := scanThreadInput(r.db.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
+	input, err := scanThreadInput(r.db.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -493,7 +510,7 @@ func (r *ThreadInputRepo) ListPendingForTask(ctx context.Context, taskID string)
 func (r *ThreadInputRepo) ListPendingForChat(ctx context.Context, projectID string) ([]models.ThreadInput, error) {
 	// Exclude prepared/in-flight steering rows for the same reason as ListPendingForTask, while
 	// surfacing ambiguous deliveries after their execution stops.
-	inputs, err := r.list(ctx, `WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (
+	inputs, err := r.list(ctx, `WHERE `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id")+` AND scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (
 		input_mode = 'steering' AND COALESCE(expected_turn_id, '') = ''
 		AND NOT (
 			EXISTS (SELECT 1 FROM thread_input_provider_steering ps WHERE ps.thread_input_id = thread_inputs.id AND ps.delivery_state = 'accepted_ambiguous')
@@ -631,6 +648,7 @@ const listRecoverableQueuedChatProjectIDsAfterSQL = `
 	    JOIN tasks active_task ON active_task.id = active.task_id
 	    WHERE active_task.project_id = ti.project_id
 	      AND active_task.category = 'chat'
+ AND (ti.project_id != '__all_projects__' OR active_task.chat_owner_user_id=ti.chat_owner_user_id)
 	      AND active.status = 'running'
 	  )
 	GROUP BY ti.project_id
@@ -722,6 +740,7 @@ func (r *ThreadInputRepo) findOldestQueued(ctx context.Context, scope models.Thr
 		query += ` AND task_id = ?`
 		args = append(args, taskID)
 	}
+	query += " AND " + workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id")
 	query += ` ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`
 	query = `SELECT ` + threadInputSelectColumns + ` FROM thread_inputs WHERE edit_hold = 0 AND id = (SELECT id FROM (` + query + `))`
 	input, err := scanThreadInput(r.db.QueryRowContext(ctx, query, args...))
@@ -745,7 +764,7 @@ func retargetRemainingQueuedInputGuards(ctx context.Context, exec sqlExecutor, p
 	args := []interface{}{newExecutionID, promoted.Scope, promoted.RunExecutionID}
 	switch promoted.Scope {
 	case models.ThreadInputScopeChat:
-		query += ` AND project_id = ? AND COALESCE(task_id, '') = ''`
+		query += ` AND project_id = ? AND COALESCE(task_id, '') = '' AND ` + workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id")
 		args = append(args, promoted.ProjectID)
 	case models.ThreadInputScopeTask:
 		query += ` AND task_id = ?`
@@ -1322,7 +1341,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 		return fmt.Errorf("task and execution are required")
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
+		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), inputID))
 		if err == sql.ErrNoRows {
 			return persistence.ErrInputNotPending
 		}
@@ -1353,6 +1372,9 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 			return fmt.Errorf("creating queued chat task: %w", err)
 		}
 		task.DisplayOrder = displayOrder
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET chat_owner_user_id=(SELECT chat_owner_user_id FROM thread_inputs WHERE id=?) WHERE id=?`, inputID, task.ID); err != nil {
+			return err
+		}
 
 		if slackContext != nil {
 			slackContext.TaskID = task.ID
@@ -1526,7 +1548,7 @@ func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID st
 	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
-		WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending'
+		WHERE `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id")+` AND scope = 'chat' AND project_id = ? AND input_status = 'pending'
 			  AND NOT (
 			    input_mode = 'steering'
 			    AND COALESCE(expected_turn_id, '') = ''
@@ -1565,6 +1587,7 @@ func currentActiveExecutionIDForInput(ctx context.Context, exec sqlExecutor, inp
 			FROM executions e
 			WHERE e.task_project_id = ? AND e.task_category = 'chat' AND e.status = 'running'
 			ORDER BY e.started_at DESC, e.history_order DESC LIMIT 1`
+		query = scopeWorkspaceExecutions(ctx, query)
 		args = []interface{}{input.ProjectID}
 	default:
 		return "", nil

@@ -50,6 +50,11 @@ func (h *Handler) authorizeChatResource(c echo.Context) error {
 	if err := h.projectAccessSvc.Require(ctx, projectID, permission); err != nil {
 		return err
 	}
+	if path == "/chat/output/:id" {
+		if err := h.projectAccessSvc.ChatResourceAllowed(ctx, "execution", c.Param("id")); err != nil {
+			return err
+		}
+	}
 	query := c.QueryParams()
 	query.Set("project_id", projectID)
 	c.Request().URL.RawQuery = query.Encode()

@@ -19,6 +19,7 @@ func TestScheduleRunIdentityAdmissionRecoveryAndRevocation(t *testing.T) {
 	require.NoError(t, err)
 	bob, err := org.Accept(ctx, token, "scheduler-bob", "bob-long-password", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, "editor"))
 	bobCtx := models.WithPrincipal(ctx, bob.Principal)
 	task := models.Task{ProjectID: "default", Title: "Owner's task", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, env.Tasks.Create(owner, &task))
@@ -39,8 +40,7 @@ func TestScheduleRunIdentityAdmissionRecoveryAndRevocation(t *testing.T) {
 	scheduler.now = func() time.Time { return now }
 	policy, err := env.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, bob.UserID, "viewer"))
 	scheduler.checkDueTasks(ctx)
 	stored, err := env.Schedules.GetByID(ctx, schedule.ID)
 	require.NoError(t, err)

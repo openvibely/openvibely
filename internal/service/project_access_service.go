@@ -87,3 +87,11 @@ func (s *ProjectAccessService) RecordAction(ctx context.Context, projectID, acti
 func (s *ProjectAccessService) InvalidateProjectSelection(projectID string) {
 	s.changes.notify(AccessChange{ProjectID: projectID})
 }
+
+func (s *ProjectAccessService) ChatResourceAllowed(ctx context.Context, kind, id string) error {
+	return s.store.ChatResourceAllowed(ctx, kind, id)
+}
+
+func (s *ProjectAccessService) ChatResourceOwner(ctx context.Context, kind, id string) (string, error) {
+	return s.store.ChatResourceOwner(ctx, kind, id)
+}

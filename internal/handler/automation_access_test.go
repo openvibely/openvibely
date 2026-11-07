@@ -194,7 +194,8 @@ func TestProjectRuntimeToolsEnforceRoleBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "changed", stored.Description, "the maintainer run must reach the settings handler")
 
-	// Listing from an accessible project must not reveal private projects.
+	// Listing from an accessible project must not reveal projects without a grant.
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, "viewer"))
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, bob.UserID, ""))
 	other := h.chatActionExecutor(streamingResponseParams{ProjectID: "default"}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceAPI)
 	out, _, isError, err := other(bobCtx, "list_projects", json.RawMessage(`{}`))

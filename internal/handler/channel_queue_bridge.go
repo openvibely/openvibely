@@ -20,6 +20,25 @@ func (h *Handler) PromoteQueuedChatInput(projectID string) {
 		ChatMode:  models.ChatModeOrchestrate,
 	}
 	defer h.trackQueuedPromotion(params)()
+	if projectID == models.AllProjectsID && h.projectAccessSvc != nil && h.threadInputRepo != nil {
+		inputs, err := h.threadInputRepo.ListPendingForChat(context.Background(), projectID)
+		if err != nil {
+			return
+		}
+		seen := make(map[string]bool)
+		for _, input := range inputs {
+			if seen[input.AuthorUserID] {
+				continue
+			}
+			seen[input.AuthorUserID] = true
+			ctx, err := h.followupUserContext(context.Background(), input.AuthorUserID)
+			if err != nil {
+				continue
+			}
+			h.startNextQueuedTurnAfter(ctx, params, "")
+		}
+		return
+	}
 	h.startNextQueuedTurnAfter(context.Background(), params, "")
 }
 

@@ -102,8 +102,8 @@ func TestTaskHTTPViewerCannotDeleteOrEnableAutoMerge(t *testing.T) {
 	require.NoError(t, err)
 	policy, err := tc.stores.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, tc.stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.Equal(t, "editor", policy.OrgRole, "legacy baseline must not override the explicit viewer grant")
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", bob.UserID, "viewer"))
 	task := createTask(t, tc.handler, "default", "Keep me", func(t *models.Task) { t.Category = models.CategoryBacklog })
 	login := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"bob"}, "password": {"bob-password-long"}}, nil)
 	cookie := orgCookie(t, login)
@@ -155,4 +155,54 @@ func TestTaskCollectionNormalizesMissingProjectBeforeHandler(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, request)
 	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+}
+
+func TestInvitedMemberNeedsExplicitProjectGrant(t *testing.T) {
+	tc, app := organizationTestApp(t, true)
+	ctx := t.Context()
+	h := tc.handler
+	h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+	guarded := authz.NewProjectStore(tc.stores.Projects, &authz.Authorizer{Store: tc.stores.ProjectAccess})
+	h.projectRepo = guarded
+	h.projectSvc = service.NewProjectService(guarded)
+	project := createProject(t, h, "Explicit access project")
+	task := createTask(t, h, project.ID, "Not visible to new members", func(task *models.Task) { task.Category = models.CategoryBacklog })
+	org := h.organizationSvc
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := org.Accept(ctx, token, "explicit-member", "long-member-password", "")
+	require.NoError(t, err)
+	login := orgRequest(app, http.MethodPost, "/login", url.Values{"username": {"explicit-member"}, "password": {"long-member-password"}}, nil)
+	cookie := orgCookie(t, login)
+	memberCtx := models.WithPrincipal(ctx, member.Principal)
+	projects, err := guarded.ListSelectorOptions(memberCtx)
+	require.NoError(t, err)
+	require.Empty(t, projects, "joining the org must not reveal any project")
+	for _, path := range []string{"/tasks", "/organization"} {
+		response := orgRequest(app, http.MethodGet, path, nil, cookie)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.NotContains(t, response.Body.String(), task.Title)
+	}
+	for _, role := range []string{"", "viewer", "editor", ""} {
+		require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, member.UserID, role))
+		projects, err = guarded.ListSelectorOptions(memberCtx)
+		require.NoError(t, err)
+		if role == "" {
+			require.Empty(t, projects)
+		} else {
+			require.Len(t, projects, 1)
+		}
+		if role != "editor" {
+			created := orgRequest(app, http.MethodPost, "/tasks?project_id="+project.ID, url.Values{"title": {"Forbidden task"}, "prompt": {"No"}, "category": {"backlog"}}, cookie)
+			require.Equal(t, http.StatusNotFound, created.Code, created.Body.String())
+			followup := orgRequest(app, http.MethodPost, "/tasks/"+task.ID+"/thread?project_id="+project.ID, url.Values{"message": {"Forbidden followup"}}, cookie)
+			require.Equal(t, http.StatusNotFound, followup.Code, followup.Body.String())
+		}
+		updated := orgRequest(app, http.MethodPatch, "/tasks/"+task.ID+"/details/property?project_id="+project.ID, url.Values{"field": {"priority"}, "value": {"4"}}, cookie)
+		if role == "editor" {
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+		} else {
+			require.Equal(t, http.StatusNotFound, updated.Code, updated.Body.String())
+		}
+	}
 }

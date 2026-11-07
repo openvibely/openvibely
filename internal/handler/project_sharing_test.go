@@ -40,15 +40,16 @@ func TestProjectSharingControlsAndOwnership(t *testing.T) {
 	rec := request("GET", owner, nil)
 	require.Equal(t, 200, rec.Code)
 	require.Contains(t, rec.Body.String(), "Transfer ownership")
-	require.Contains(t, rec.Body.String(), "sandboxing")
+	require.Contains(t, rec.Body.String(), "members granted a role")
 	require.NotContains(t, rec.Body.String(), `value="private"`)
 	rec = request("POST", owner, url.Values{"action": {"policy"}, "org_role": {"viewer"}, "visibility": {"private"}})
 	require.Equal(t, 200, rec.Code)
 	policy, err := tc.stores.ProjectAccess.Get(ctx, project.ID)
 	require.NoError(t, err)
 	require.Equal(t, "org", policy.Visibility)
-	require.Equal(t, "viewer", policy.OrgRole)
-	require.Contains(t, rec.Body.String(), `<option value="viewer" selected>`)
+	require.Equal(t, "editor", policy.OrgRole)
+	require.Contains(t, rec.Body.String(), "Choose a valid sharing action.")
+	require.NotContains(t, rec.Body.String(), `name="org_role"`)
 	require.NotContains(t, rec.Body.String(), `selected="false"`)
 	rec = request("POST", owner, url.Values{"action": {"member"}, "user_id": {user.UserID}, "role": {"maintainer"}})
 	require.Equal(t, 200, rec.Code)
@@ -67,7 +68,7 @@ func TestProjectSharingControlsAndOwnership(t *testing.T) {
 	require.Equal(t, user.UserID, policy.OwnerUserID)
 	events, err := tc.stores.ProjectAccess.Audit(ctx, project.ID)
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(events), 3)
+	require.GreaterOrEqual(t, len(events), 2)
 	// Origin checks happen before any mutation.
 	req := httptest.NewRequest("POST", path, strings.NewReader("action=policy&org_role=editor")).WithContext(models.WithPrincipal(ctx, owner))
 	req.Header.Set("Origin", "https://foreign.example")
@@ -77,7 +78,7 @@ func TestProjectSharingControlsAndOwnership(t *testing.T) {
 	require.Equal(t, 403, denied.Code)
 	policy, err = tc.stores.ProjectAccess.Get(ctx, project.ID)
 	require.NoError(t, err)
-	require.Equal(t, "viewer", policy.OrgRole)
+	require.Equal(t, "editor", policy.OrgRole)
 }
 
 func TestProjectSharingRoleMatrixRemovalAndAudit(t *testing.T) {
@@ -125,11 +126,11 @@ func TestProjectSharingRoleMatrixRemovalAndAudit(t *testing.T) {
 			require.NotContains(t, page.Body.String(), "Save member")
 			require.NotContains(t, page.Body.String(), "Save access")
 			require.NotContains(t, page.Body.String(), "Remove grant")
-			require.Equal(t, "editor", targetRole)
+			require.Empty(t, targetRole)
 		} else {
 			require.Equal(t, 404, page.Code, role)
 			require.Equal(t, 404, rec.Code, role)
-			// Org-wide editor access still applies; no individual grant was saved.
+			// No individual grant was saved, so the target still has no access.
 			members, err := tc.stores.ProjectAccess.Members(ctx, project.ID)
 			require.NoError(t, err)
 			for _, member := range members {
@@ -137,17 +138,17 @@ func TestProjectSharingRoleMatrixRemovalAndAudit(t *testing.T) {
 			}
 		}
 	}
-	// Removing a grant drops back to organization access, never below it.
+	// Removing a grant removes access.
 	rec := request("POST", models.Principal{UserID: models.BootstrapUserID}, url.Values{"action": {"member"}, "user_id": {target.UserID}, "role": {""}})
 	require.Equal(t, 200, rec.Code)
 	targetRole, err := tc.stores.ProjectAccess.Role(ctx, target.UserID, project.ID)
 	require.NoError(t, err)
-	require.Equal(t, "editor", targetRole)
+	require.Empty(t, targetRole)
 	// A stale form submitted after the actor's own downgrade is refused.
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, actor.UserID, ""))
 	rec = request("POST", actor, url.Values{"action": {"member"}, "user_id": {target.UserID}, "role": {"maintainer"}})
 	require.Equal(t, 404, rec.Code)
 	targetRole, err = tc.stores.ProjectAccess.Role(ctx, target.UserID, project.ID)
 	require.NoError(t, err)
-	require.Equal(t, "editor", targetRole)
+	require.Empty(t, targetRole)
 }

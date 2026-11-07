@@ -25,11 +25,11 @@ func TestGoalServiceCurrentPermissions(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "goal-user", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	caller := models.WithPrincipal(ctx, user.Principal)
 	policy, err := env.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, user.UserID, "viewer"))
 	_, err = svc.GetGoal(caller, task.ID)
 	require.NoError(t, err)
 	callback := false
@@ -79,6 +79,7 @@ func TestGoalSavedCreatorSurvivesTaskReassignment(t *testing.T) {
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, invite, "goal-creator", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	caller := models.WithPrincipal(ctx, user.Principal)
 	task := models.Task{ProjectID: "default", Title: "Durable goal", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, env.Tasks.Create(caller, &task))
@@ -96,8 +97,7 @@ func TestGoalSavedCreatorSurvivesTaskReassignment(t *testing.T) {
 	require.Equal(t, user.UserID, loaded.RunAsUserID)
 	policy, err := env.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, user.UserID, "viewer"))
 	_, err = svc.GetEvaluableGoal(owner, task.ID)
 	require.ErrorIs(t, err, authz.ErrDenied)
 	called := false

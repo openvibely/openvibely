@@ -199,7 +199,7 @@ var organizationTemplate = template.Must(template.New("organization").Parse(`{{i
 <body class="min-h-screen bg-base-200 p-6"><main class="max-w-3xl mx-auto space-y-6"><a href="/" class="link">Back to OpenVibely</a>{{else}}<div id="organization-container" class="w-full min-w-0 max-w-full flex-none pb-6"><h2 data-page-header class="text-2xl font-bold mb-6">Organization</h2><div id="organization-error" role="alert" tabindex="-1" class="alert alert-error mb-6 hidden"></div>{{end}}
 <section class="card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0"><div class="card-body min-w-0"><h3 class="card-title text-lg">{{if .Joining}}Join {{.Org.Name}}{{else}}General{{end}}</h3>
 {{if .Joining}}
-<p>All organization members currently have access to every project. Join only an organization you trust.</p>
+<p>Joining does not grant access to projects. A project owner or organization admin must grant you a project role.</p>
 {{if .Error}}<p role="alert" class="text-sm text-error">{{.Error}}</p>{{end}}
 <form id="org-join-form" method="post" action="/invite" class="space-y-4"><input type="hidden" name="token" value="{{.Token}}">
 {{if .SignedIn}}<p>Join as <strong>{{.Principal.Username}}</strong>.</p>{{else}}
@@ -245,7 +245,7 @@ var organizationTemplate = template.Must(template.New("organization").Parse(`{{i
 {{else}}
 {{if not .Admin}}<p class="font-medium">{{.Org.Name}}</p>{{end}}
 <p class="text-sm opacity-60">Signed in as {{.Principal.Username}} · {{.Principal.Role}}</p>
-<p class="text-sm opacity-60 mb-4">All members currently share access to every project. Private projects are not available yet.</p>
+<p class="text-sm opacity-60 mb-4">Members need an explicit role on each project. Organization admins and owners can access all projects.</p>
 {{if .AuthOff}}<p class="text-sm text-warning mb-4">Authentication is off. Anyone who can reach this app acts as the owner. Enable authentication before inviting people.</p>{{end}}
 {{if .Admin}}<form method="post" action="/organization" hx-post="/organization" hx-target="#main-content" class="flex flex-wrap items-end gap-3"><label class="form-control w-full max-w-md"><span class="label"><span class="label-text">Organization name</span></span><input class="input input-bordered input-sm w-full" name="name" value="{{.Org.Name}}" maxlength="100" required></label><button class="btn btn-primary btn-sm" type="submit">Save name</button></form>{{end}}
 </div></section>

@@ -3,7 +3,7 @@ package pages
 import "github.com/openvibely/openvibely/internal/models"
 
 templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember, users []models.OrgUser, audit []models.ProjectAuditEvent, canManageSharing bool, message string) {
-	<section id="project-sharing" class="mt-6 border-t border-base-300 pt-4 space-y-4">
+	<section id="project-sharing" class="space-y-4">
 		<h3 class="text-base font-semibold">Sharing and ownership</h3>
 		if !canManageSharing {
 			<p class="text-sm opacity-70">Only the project owner and organization admins can change sharing and membership.</p>
@@ -13,15 +13,10 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 					{ message }
 				</p>
 			}
-			<p class="text-sm opacity-70">All organization members can access this project. Private projects require sandboxing and are not available yet.</p>
-			<form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" class="flex flex-wrap items-end gap-2">
-				<input type="hidden" name="action" value="policy"/>
-				<label class="form-control"><span class="label-text">Organization access</span><select name="org_role" class="select select-bordered select-sm"><option value="viewer" selected?={ policy.OrgRole == "viewer" }>Viewer</option><option value="editor" selected?={ policy.OrgRole == "editor" }>Editor</option></select></label>
-				<button class="btn btn-primary btn-sm" type="submit">Save access</button>
-			</form>
-			<p class="text-xs opacity-60">Individual grants add access; removing a grant keeps organization access. Maintainers can manage project settings. Only the project owner and organization admins/owners can change sharing, transfer ownership or delete the project.</p>
+			<p class="text-sm opacity-70">Only the project owner, organization admins/owners and members granted a role below can access this project.</p>
+			<p class="text-xs opacity-60">Viewers can read. Editors can create and run work. Maintainers can also manage project settings. Only the project owner and organization admins/owners can change access or ownership.</p>
 			<table class="table table-sm">
-				<thead><tr><th>Member</th><th>Additional access</th><th></th></tr></thead>
+				<thead><tr><th>Member</th><th>Project role</th><th></th></tr></thead>
 				<tbody>
 					for _, member := range members {
 						<tr>
@@ -31,7 +26,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 							<td>
 								{ member.Role }
 							</td>
-							<td><form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML"><input type="hidden" name="action" value="member"/><input type="hidden" name="user_id" value={ member.UserID }/><input type="hidden" name="role" value=""/><button type="submit" class="btn btn-ghost btn-xs">Remove grant</button></form></td>
+							<td><form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML"><input type="hidden" name="action" value="member"/><input type="hidden" name="user_id" value={ member.UserID }/><input type="hidden" name="role" value=""/><button type="submit" class="btn btn-ghost btn-xs">Remove access</button></form></td>
 						</tr>
 					}
 				</tbody>

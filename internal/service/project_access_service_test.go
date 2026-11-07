@@ -50,7 +50,7 @@ func TestProjectAccessServiceGatesPrivateAndNotifiesChanges(t *testing.T) {
 	}
 	require.Equal(t, []AccessChange{{ProjectID: project.ID}}, watch.Drain())
 	require.Len(t, other.Drain(), 1, "policy changes reach every user of the project")
-	require.NoError(t, s.Require(bobCtx, project.ID, authz.View))
+	require.ErrorIs(t, s.Require(bobCtx, project.ID, authz.View), authz.ErrDenied)
 	require.ErrorIs(t, s.Require(bobCtx, project.ID, authz.Edit), authz.ErrDenied)
 	require.NoError(t, s.SetMember(ownerCtx, project.ID, bob.UserID, "editor"))
 	select {
@@ -70,12 +70,12 @@ func TestProjectAccessServiceGatesPrivateAndNotifiesChanges(t *testing.T) {
 	require.Len(t, events, 2)
 	require.NoError(t, env.Organizations.ChangeMember(ctx, models.BootstrapUserID, bob.UserID, "", true))
 	require.ErrorIs(t, s.Require(bobCtx, project.ID, authz.View), authz.ErrDenied)
-	// Rejoining restores the org-wide viewer floor, not a previous editor grant.
+	// Rejoining does not restore project access or a previous editor grant.
 	token, err = org.Invite(ctx, models.BootstrapUserID, "member")
 	require.NoError(t, err)
 	_, err = org.Accept(ctx, token, "", "", bob.UserID)
 	require.NoError(t, err)
-	require.NoError(t, s.Require(bobCtx, project.ID, authz.View))
+	require.ErrorIs(t, s.Require(bobCtx, project.ID, authz.View), authz.ErrDenied)
 	require.ErrorIs(t, s.Require(bobCtx, project.ID, authz.Edit), authz.ErrDenied)
 	events, err = s.Audit(ownerCtx, project.ID)
 	require.NoError(t, err)

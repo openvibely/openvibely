@@ -81,6 +81,11 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 		req.AgentID = c.QueryParam("agent_id")
 	}
 	settingKey := "conversation.chat.model." + projectID
+	if projectID == models.AllProjectsID {
+		if principal, ok := models.PrincipalFromContext(ctx); ok {
+			settingKey += ".user." + principal.UserID
+		}
+	}
 	var raw string
 	prefs := conversationModelPreferences{AgentID: "auto", Overrides: map[string]conversationModelOverride{}}
 	if task == nil {

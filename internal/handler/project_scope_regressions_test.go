@@ -27,8 +27,8 @@ func TestAllProjectsReorderPreservesViewerProject(t *testing.T) {
 	other := createProject(t, h, "Viewer only")
 	policy, err := stores.ProjectAccess.Get(ctx, other.ID)
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, stores.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, user.UserID, "viewer"))
+	require.NoError(t, stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, own.ID, user.UserID, "editor"))
 	a := &models.Task{ProjectID: own.ID, Title: "Editable", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, DisplayOrder: 20}
 	b := &models.Task{ProjectID: other.ID, Title: "Protected", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, DisplayOrder: 50}
 	require.NoError(t, stores.Tasks.Create(ctx, a))

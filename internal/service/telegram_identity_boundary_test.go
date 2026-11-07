@@ -83,8 +83,7 @@ func TestTelegramMappedSenderUsesCurrentProjectPermissions(t *testing.T) {
 	require.Error(t, err, "editor cannot perform maintainer actions")
 	policy, err := env.ProjectAccess.Get(ctx, "default")
 	require.NoError(t, err)
-	policy.OrgRole = "viewer"
-	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, policy.ProjectID, member, "viewer"))
 	_, err = s.senderProjectContext(sender, 123, "default", authz.Edit)
 	require.Error(t, err)
 	require.Error(t, worker.checkRunPermission(sender, *task), "next start checks revocation")

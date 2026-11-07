@@ -18,6 +18,7 @@ func TestRecoveredGoalExecutionKeepsCreatorAndDeniesRestartAfterReplacement(t *t
 	require.NoError(t, err)
 	user, err := org.Accept(ctx, token, "goal-recovery-user", "long-password-value", "")
 	require.NoError(t, err)
+	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, "editor"))
 	userCtx := models.WithPrincipal(ctx, user.Principal)
 	task := models.Task{ProjectID: "default", Title: "Goal recovery", Category: models.CategoryBacklog, Status: models.StatusCompleted, Priority: 2}
 	require.NoError(t, env.Tasks.Create(owner, &task))

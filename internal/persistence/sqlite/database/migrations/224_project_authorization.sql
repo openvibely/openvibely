@@ -1,6 +1,8 @@
 -- +goose Up
 -- Unreleased Phase 2 schema, upgrading directly from version 223.
--- Preserve existing project access and recorded users; never infer channel bindings.
+-- Preserve recorded owners and users; project access requires explicit grants.
+-- visibility/org_role are retained metadata, not implicit organization-wide grants.
+-- Never infer channel bindings.
 
 ALTER TABLE project_organizations ADD COLUMN visibility TEXT NOT NULL DEFAULT 'org' CHECK(visibility IN ('org','private'));
 ALTER TABLE project_organizations ADD COLUMN org_role TEXT NOT NULL DEFAULT 'editor' CHECK(org_role IN ('viewer','editor'));
@@ -385,7 +387,28 @@ CREATE INDEX IF NOT EXISTS idx_email_auth_list_covering
 
 CREATE INDEX idx_telegram_auth_username_lower_unknown_id ON telegram_authorized_users(telegram_user_id, lower(telegram_username)) WHERE telegram_user_id=0 AND telegram_username != '';
 
+-- Existing workspace conversations were shared, even when messages had authors.
+-- Keep them unowned (admin-only); only newly created conversations are personal.
+ALTER TABLE tasks ADD COLUMN chat_owner_user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE thread_inputs ADD COLUMN chat_owner_user_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX idx_tasks_chat_owner ON tasks(project_id, chat_owner_user_id, category);
+CREATE INDEX idx_thread_inputs_chat_owner ON thread_inputs(project_id, chat_owner_user_id, input_status);
+
+DROP INDEX idx_thread_inputs_recover_chat_project;
+CREATE INDEX idx_thread_inputs_recover_chat_project
+ON thread_inputs(scope, input_status, input_mode, project_id, run_execution_id, chat_owner_user_id)
+WHERE scope = 'chat' AND input_status = 'pending' AND input_mode = 'queued';
+
 -- +goose Down
+DROP INDEX idx_thread_inputs_recover_chat_project;
+CREATE INDEX idx_thread_inputs_recover_chat_project
+ON thread_inputs(scope, input_status, input_mode, project_id, run_execution_id)
+WHERE scope = 'chat' AND input_status = 'pending' AND input_mode = 'queued';
+DROP INDEX idx_thread_inputs_chat_owner;
+DROP INDEX idx_tasks_chat_owner;
+ALTER TABLE thread_inputs DROP COLUMN chat_owner_user_id;
+ALTER TABLE tasks DROP COLUMN chat_owner_user_id;
+
 -- Downgrading places global senders in the default project; global mapping audits are removed.
 CREATE TEMP TABLE downgrade_telegram AS SELECT * FROM telegram_authorized_users;
 DROP TABLE telegram_authorized_users;

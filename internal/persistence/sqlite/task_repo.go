@@ -619,6 +619,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 		args = append(args, category)
 	}
 
+	query += " AND " + workspaceChatPredicate(ctx, "t.project_id", "t.chat_owner_user_id")
 	// Fetch in stable default order and apply category-specific sorts in memory.
 	query += ` ORDER BY display_order ASC, created_at ASC`
 
@@ -774,14 +775,14 @@ func taskDisplayOrderDesc(a models.Task, b models.Task) bool {
 func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {
 	return r.getOne(ctx,
 		`SELECT `+taskSelectColumns+`
-			 FROM tasks WHERE id = ?`, id)
+			 FROM tasks WHERE id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), id)
 }
 
 // GetByIDForProject returns a task only when it belongs to the requested project.
 func (r *TaskRepo) GetByIDForProject(ctx context.Context, projectID, id string) (*models.Task, error) {
 	return r.getOne(ctx,
 		`SELECT `+taskSelectColumns+`
-			 FROM tasks WHERE project_id = ? AND id = ?`, projectID, id)
+			 FROM tasks WHERE project_id = ? AND id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), projectID, id)
 }
 
 // GetThreadRenderMetadata returns the compact task fields needed by recurring
@@ -791,7 +792,7 @@ func (r *TaskRepo) GetThreadRenderMetadata(ctx context.Context, id string) (*mod
 	var t models.Task
 	err := r.db.QueryRowContext(ctx,
 		`SELECT `+taskThreadRenderMetadataColumns+`
-			 FROM tasks WHERE id = ?`, id).
+			 FROM tasks WHERE id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), id).
 		Scan(&t.ID, &t.ProjectID, &t.Category, &t.Status, &t.AgentID, &t.AgentDefinitionID)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -1066,6 +1067,9 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 		return fmt.Errorf("creating task: %w", err)
 	}
 	t.DisplayOrder = displayOrder
+	if err := stampWorkspaceChatOwner(ctx, exec, "tasks", t.ID, t.ProjectID); err != nil {
+		return err
+	}
 	if p, ok := models.PrincipalFromContext(ctx); ok {
 		_, err := exec.ExecContext(ctx, `UPDATE tasks SET author_user_id=?, author_name=? WHERE id=?`, p.UserID, p.Username, t.ID)
 		if err != nil {
@@ -2959,7 +2963,7 @@ func (r *TaskRepo) DeleteAllBacklog(ctx context.Context, projectID string) (int,
 // Returns the number of tasks deleted.
 func (r *TaskRepo) DeleteAllChat(ctx context.Context, projectID string) (int, error) {
 	result, err := execTaskDeletion(ctx, r.db,
-		`DELETE FROM tasks WHERE category = 'chat' AND project_id = ?`, projectID)
+		`DELETE FROM tasks WHERE category = 'chat' AND project_id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), projectID)
 	if err != nil {
 		return 0, fmt.Errorf("deleting chat tasks: %w", err)
 	}
@@ -2974,7 +2978,7 @@ func (r *TaskRepo) DeleteAllChat(ctx context.Context, projectID string) (int, er
 // for a project. Used to cancel active goroutines before clearing chat history.
 func (r *TaskRepo) ListRunningChatTaskIDs(ctx context.Context, projectID string) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id FROM tasks WHERE category = 'chat' AND project_id = ? AND status IN ('pending', 'queued', 'running')`, projectID)
+		`SELECT id FROM tasks WHERE category = 'chat' AND project_id = ? AND status IN ('pending', 'queued', 'running') AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing running chat tasks: %w", err)
 	}
