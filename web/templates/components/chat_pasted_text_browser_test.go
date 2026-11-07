@@ -110,6 +110,15 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  assert(paste(large),'large paste not intercepted');
  assert(cards().length===1 && input.value==='Explain this','card must keep composer compact');
  assert(form._captureChatSubmission().message==='Explain this\n\n'+large,'full paste missing');
+ form.querySelector('.ov-paste-card').click();
+ let dialog=document.querySelector('dialog[open]');
+ assert(dialog,'card background did not open editor');
+ dialog.querySelector('textarea').value='unsaved outside edit';
+ dialog.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:-1,clientY:-1,button:0}));
+ dialog.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:-1,clientY:-1}));
+ assert(!document.querySelector('dialog[open]'),'outside click did not dismiss editor');
+ assert(form._captureChatSubmission().message.endsWith(large),'outside dismissal saved unsaved edits');
+
  cards()[0].click(); document.querySelector('dialog textarea').value='discard';button('Cancel').click();await wait();
  assert(form._captureChatSubmission().message.endsWith(large),'cancel changed paste');
  cards()[0].click();document.querySelector('dialog textarea').value='edited text';button('Save').click();await wait();

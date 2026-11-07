@@ -1554,13 +1554,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 	@templateui.MenuStyles()
 	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
 	<style>
-		.ov-paste-card { position:relative; display:flex; align-items:center; gap:14px; padding:12px 40px 12px 12px; width:360px; max-width:100%; border:1px solid oklch(var(--bc)/.14); border-radius:12px; }
-		.ov-paste-icon { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:52px; height:56px; border-radius:10px; background:oklch(var(--bc)/.04); color:oklch(var(--bc)/.55); }
+		.ov-paste-card { position:relative; display:flex; align-items:center; gap:10px; padding:8px 32px 8px 8px; width:260px; cursor:pointer; max-width:100%; border:1px solid oklch(var(--bc)/.14); border-radius:10px; }
+		.ov-paste-icon { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:36px; height:40px; border-radius:8px; background:oklch(var(--bc)/.04); color:oklch(var(--bc)/.55); }
 		.ov-paste-copy { min-width:0; flex:1; }
-		.ov-paste-title { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; font-size:15px; font-weight:500; }
-		.ov-paste-show { margin-top:5px; margin-left:-8px; color:oklch(var(--bc)/.8); text-decoration:none; }
+		.ov-paste-title { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; font-size:13px; line-height:20px; font-weight:500; }
+		.ov-paste-show.btn { font-size:12px; margin-top:2px; margin-left:-8px; color:oklch(var(--bc)/.8); text-decoration:none; }
 		.ov-paste-show:hover { text-decoration:none; }
-		.ov-paste-card .ov-modal-close { position:absolute; top:6px; right:6px; }
+		.ov-paste-card .ov-modal-close { position:absolute; top:4px; right:4px; }
 	</style>
 	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2">
 		<form
@@ -2099,7 +2099,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					icon.type = 'button';
 					icon.className = 'ov-paste-icon';
 					icon.setAttribute('aria-label', 'Open pasted text editor');
-					icon.innerHTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3M14 4h2a2 2 0 0 1 2 2v2"/><rect x="8" y="2" width="6" height="4" rx="1"/><rect x="11" y="10" width="10" height="12" rx="1"/><path d="M14 14h4m-4 4h4"/></svg>';
+					icon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3M14 4h2a2 2 0 0 1 2 2v2"/><rect x="8" y="2" width="6" height="4" rx="1"/><rect x="11" y="10" width="10" height="12" rx="1"/><path d="M14 14h4m-4 4h4"/></svg>';
 					icon.onclick = function() { editPaste(item, icon); };
 					var content = document.createElement('div');
 					content.className = 'ov-paste-copy';
@@ -2109,6 +2109,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					edit.setAttribute('aria-label', 'Edit pasted text');
 					edit.textContent = item.text.trim().slice(0, 80) || 'Pasted text';
 					edit.onclick = function() { editPaste(item, edit); };
+					card.onclick = function(event) {
+						if (!event.target.closest('button')) editPaste(item, edit);
+					};
 					var show = document.createElement('button');
 					show.type = 'button';
 					show.className = 'ov-paste-show btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';
@@ -2185,6 +2188,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					pastesChanged(); closePasteEditor();
 				});
 				dialog.append(heading, editor, actions);
+				var outsidePress = false;
+				function outsideDialog(event) {
+					var bounds = dialog.getBoundingClientRect();
+					return event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom);
+				}
+				dialog.addEventListener('pointerdown', function(event) { outsidePress = event.button === 0 && outsideDialog(event); });
+				dialog.addEventListener('click', function(event) {
+					if (outsidePress && outsideDialog(event)) closePasteEditor();
+					outsidePress = false;
+				});
 				dialog.addEventListener('cancel', function(event) { event.preventDefault(); closePasteEditor(); });
 				dialog.addEventListener('close', function() { closePasteEditor(false); }, { signal: lifecycle.signal });
 				window.addEventListener('popstate', function() { closePasteEditor(false); }, { signal: lifecycle.signal });
