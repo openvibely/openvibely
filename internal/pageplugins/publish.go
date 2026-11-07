@@ -13,16 +13,10 @@ type PublishResult struct {
 	ApprovalRequired bool
 }
 
-// Publish installs a task-authored package and registers a page in its owning
-// project. It never approves or launches native code. Identical retries reuse
-// the existing package and project instance.
-func (m *Manager) Publish(ctx context.Context, source, projectID, pageID, by string) (*PublishResult, error) {
-	if projectID == "" || projectID == models.AllProjectsID {
-		return nil, errors.New("a real owning project is required")
-	}
-	return m.PublishToInstance(ctx, source, projectID, pageID, by, "")
-}
-
+// PublishToInstance installs a task-authored package and registers or updates a
+// page in its owning project. An empty instanceID selects the project instance
+// automatically. It never approves or launches native code. Identical retries
+// reuse the existing package and project instance.
 func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, pageID, by, instanceID string) (*PublishResult, error) {
 	if projectID == "" || projectID == models.AllProjectsID {
 		return nil, errors.New("a real owning project is required")

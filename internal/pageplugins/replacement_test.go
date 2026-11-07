@@ -31,11 +31,11 @@ func TestPageReplacementPreservesIdentityAndOtherProject(t *testing.T) {
 	m, env, a, b := newTestManager(t)
 	ctx := t.Context()
 	v1 := replacementBundle(t, "1.0.0")
-	first, err := m.Publish(ctx, v1, a, "", "task")
+	first, err := m.PublishToInstance(ctx, v1, a, "", "task", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := m.Publish(ctx, v1, b, "", "task")
+	other, err := m.PublishToInstance(ctx, v1, b, "", "task", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestPageReplacementPreservesIdentityAndOtherProject(t *testing.T) {
 	}
 	r, _ := m.Resolve(ctx, id, a)
 	hd, _ := m.IssueHandle(r, "local")
-	updated, err := m.Publish(ctx, replacementBundle(t, "1.1.0"), a, "", "task")
+	updated, err := m.PublishToInstance(ctx, replacementBundle(t, "1.1.0"), a, "", "task", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestPageReplacementPreservesIdentityAndOtherProject(t *testing.T) {
 	if _, err = os.Stat(oldPkg.InstallPath); err != nil {
 		t.Fatal("deleted shared package", err)
 	}
-	if _, err = m.Publish(ctx, replacementBundle(t, "1.1.0"), b, "", "task"); err != nil {
+	if _, err = m.PublishToInstance(ctx, replacementBundle(t, "1.1.0"), b, "", "task", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = os.Stat(oldPkg.InstallPath); !os.IsNotExist(err) {
@@ -242,7 +242,7 @@ func TestStaleIntegrationCannotRunOperationsAfterUpdate(t *testing.T) {
 func TestRepublishKeepsAdminDisabledPageOff(t *testing.T) {
 	m, _, a, _ := newTestManager(t)
 	ctx := t.Context()
-	first, err := m.Publish(ctx, replacementBundle(t, "1.0.0"), a, "", "task")
+	first, err := m.PublishToInstance(ctx, replacementBundle(t, "1.0.0"), a, "", "task", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestRepublishKeepsAdminDisabledPageOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, version := range []string{"1.0.0", "1.1.0"} {
-		result, err := m.Publish(ctx, replacementBundle(t, version), a, "", "task")
+		result, err := m.PublishToInstance(ctx, replacementBundle(t, version), a, "", "task", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +268,7 @@ func TestRepublishKeepsAdminDisabledPageOff(t *testing.T) {
 	if err = m.Enable(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	result, err := m.Publish(ctx, replacementBundle(t, "1.2.0"), a, "", "task")
+	result, err := m.PublishToInstance(ctx, replacementBundle(t, "1.2.0"), a, "", "task", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestPublishDiscardsNewPackageWhenPageCreationFails(t *testing.T) {
 	m, env, a, _ := newTestManager(t)
 	ctx := t.Context()
 	m.store = failingCreateInstanceStore{PagePluginStore: env.PagePlugins}
-	if _, err := m.Publish(ctx, replacementBundle(t, "1.0.0"), a, "", "task"); err == nil {
+	if _, err := m.PublishToInstance(ctx, replacementBundle(t, "1.0.0"), a, "", "task", ""); err == nil {
 		t.Fatal("publish should fail")
 	}
 	pkgs, err := env.PagePlugins.ListPackages(ctx)
@@ -308,11 +308,11 @@ func TestPublishKeepsPreexistingPackageWhenPageCreationFails(t *testing.T) {
 	m, env, a, b := newTestManager(t)
 	ctx := t.Context()
 	bundle := replacementBundle(t, "1.0.0")
-	if _, err := m.Publish(ctx, bundle, a, "", "task"); err != nil {
+	if _, err := m.PublishToInstance(ctx, bundle, a, "", "task", ""); err != nil {
 		t.Fatal(err)
 	}
 	m.store = failingCreateInstanceStore{PagePluginStore: env.PagePlugins}
-	if _, err := m.Publish(ctx, bundle, b, "", "task"); err == nil {
+	if _, err := m.PublishToInstance(ctx, bundle, b, "", "task", ""); err == nil {
 		t.Fatal("publish should fail")
 	}
 	pkgs, err := env.PagePlugins.ListPackages(ctx)
