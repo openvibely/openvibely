@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -431,6 +433,8 @@ func TestCrashRecoveryVerifiesApprovedPackageBeforeEveryLaunch(t *testing.T) {
 		t.Run(changed, func(t *testing.T) {
 			m, _, project, _ := newTestManager(t)
 			defer m.StopAll()
+			var revoked atomic.Bool
+			m.store = revokedApprovalStore{PagePluginStore: m.store, revoked: &revoked}
 			ctx := context.Background()
 			pkg, err := m.InstallFromDir(ctx, writeProcessPackage(t), "admin")
 			if err != nil {
@@ -481,9 +485,7 @@ func TestCrashRecoveryVerifiesApprovedPackageBeforeEveryLaunch(t *testing.T) {
 			crash()
 			want := ErrContentChanged
 			if changed == "approval" {
-				if err := m.Store().ApproveInstance(ctx, in.ID, "revoked", "admin"); err != nil {
-					t.Fatal(err)
-				}
+				revoked.Store(true)
 				want = ErrApprovalRequired
 			} else {
 				f, err := os.OpenFile(filepath.Join(pkg.InstallPath, changed), os.O_APPEND|os.O_WRONLY, 0)
@@ -841,4 +843,17 @@ func TestApproveRejectsContentAdminDidNotReview(t *testing.T) {
 	if err := m.Approve(ctx, in.ID, fresh.ContentHash, "admin"); err != nil {
 		t.Fatalf("approval of current content failed: %v", err)
 	}
+}
+
+type revokedApprovalStore struct {
+	persistence.PagePluginStore
+	revoked *atomic.Bool
+}
+
+func (s revokedApprovalStore) GetInstance(ctx context.Context, id string) (*models.PagePluginInstance, error) {
+	in, err := s.PagePluginStore.GetInstance(ctx, id)
+	if in != nil && s.revoked.Load() {
+		in.ApprovedHash = "revoked"
+	}
+	return in, err
 }
