@@ -1,6 +1,7 @@
 package pageplugins
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 func replacementBundle(t *testing.T, version string) string {
@@ -272,5 +274,52 @@ func TestRepublishKeepsAdminDisabledPageOff(t *testing.T) {
 	}
 	if !result.Instance.Enabled || result.Instance.Version != "1.2.0" {
 		t.Fatalf("enabled page not kept on after update: %+v", result.Instance)
+	}
+}
+
+type failingCreateInstanceStore struct {
+	persistence.PagePluginStore
+}
+
+func (failingCreateInstanceStore) CreateInstance(context.Context, *models.PagePluginInstance) error {
+	return errors.New("create instance failed")
+}
+
+func TestPublishDiscardsNewPackageWhenPageCreationFails(t *testing.T) {
+	m, env, a, _ := newTestManager(t)
+	ctx := t.Context()
+	m.store = failingCreateInstanceStore{PagePluginStore: env.PagePlugins}
+	if _, err := m.Publish(ctx, replacementBundle(t, "1.0.0"), a, "", "task"); err == nil {
+		t.Fatal("publish should fail")
+	}
+	pkgs, err := env.PagePlugins.ListPackages(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 0 {
+		t.Fatalf("orphaned packages left behind: %d", len(pkgs))
+	}
+	if entries, _ := os.ReadDir(filepath.Join(m.Root(), "custom.update")); len(entries) != 0 {
+		t.Fatalf("orphaned package files left behind: %d", len(entries))
+	}
+}
+
+func TestPublishKeepsPreexistingPackageWhenPageCreationFails(t *testing.T) {
+	m, env, a, b := newTestManager(t)
+	ctx := t.Context()
+	bundle := replacementBundle(t, "1.0.0")
+	if _, err := m.Publish(ctx, bundle, a, "", "task"); err != nil {
+		t.Fatal(err)
+	}
+	m.store = failingCreateInstanceStore{PagePluginStore: env.PagePlugins}
+	if _, err := m.Publish(ctx, bundle, b, "", "task"); err == nil {
+		t.Fatal("publish should fail")
+	}
+	pkgs, err := env.PagePlugins.ListPackages(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("shared package must remain, got %d", len(pkgs))
 	}
 }

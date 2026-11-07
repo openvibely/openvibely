@@ -91,22 +91,34 @@ func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, page
 			enable = pending.Enabled
 		}
 	}
+	existing, err := m.store.GetPackageByVersion(ctx, man.ID, man.Version)
+	if err != nil {
+		return nil, err
+	}
 	pkg, err := m.InstallFromDir(ctx, source, by)
 	if err != nil {
 		return nil, err
 	}
+	discardNew := func() {
+		if existing == nil {
+			m.removeUnusedReplacementPackage(context.WithoutCancel(ctx), pkg.ID)
+		}
+	}
 	man, err = m.Manifest(pkg)
 	if err != nil {
+		discardNew()
 		return nil, err
 	}
 	if instance == nil {
 		instance, err = m.CreateInstance(ctx, projectID, pkg.ID, pageID)
 		if err != nil {
+			discardNew()
 			return nil, err
 		}
 	}
 	if instance.PackageID != pkg.ID {
 		if err = m.stageReplacement(ctx, instance, pkg); err != nil {
+			discardNew()
 			return nil, err
 		}
 	}
