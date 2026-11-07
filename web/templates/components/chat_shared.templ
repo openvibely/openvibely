@@ -1906,10 +1906,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			}
 
 			function _csShow(btn) {
-				if (btn.classList.contains("chat-model-select") && window.ovModelPicker) {
-					window.ovModelPicker.open(btn);
-					return;
-				}
 				var optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');
 				if (!optList) return;
 				var currentValue = btn.dataset.currentValue || '';
