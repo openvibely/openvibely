@@ -59,7 +59,7 @@ const chatTaskContextQuery = `WITH RECURSIVE
 		SELECT t.id AS task_id, tree.id AS node_id, tree.parent, tree.key, tree.type, tree.value
 		FROM tasks t
 		JOIN json_tree(CASE WHEN json_valid(t.chain_config) THEN t.chain_config ELSE 'null' END) AS tree ON TRUE
-		WHERE t.project_id = ? AND t.category != 'chat'
+		WHERE t.project_id = ? AND t.category != 'chat' AND category != 'page_chat'
 	),
 	chain_nodes(task_id, node_id) AS (
 		SELECT task_id, node_id
@@ -128,7 +128,7 @@ const chatTaskContextQuery = `WITH RECURSIVE
 		COALESCE(chain_projection.chain_config, '{}')
 	FROM tasks t
 	LEFT JOIN chain_projection ON chain_projection.task_id = t.id
-	WHERE t.project_id = ? AND t.category != 'chat'
+	WHERE t.project_id = ? AND t.category != 'chat' AND category != 'page_chat'
 	ORDER BY t.display_order ASC, t.created_at ASC`
 
 const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, auto_merge_on_goal_achieved, merge_target_branch, merge_status`
@@ -321,14 +321,14 @@ const breadcrumbSelectorSelectColumns = `id, title, project_id, status, category
 
 const breadcrumbSelectorCurrentQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND id = ? AND category != 'chat'
+				WHERE project_id = ? AND id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))`
 
 const breadcrumbSelectorCurrentSearchQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND id = ? AND category != 'chat'
+				WHERE project_id = ? AND id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -336,7 +336,7 @@ const breadcrumbSelectorCurrentSearchQuery = `SELECT ` + breadcrumbSelectorSelec
 
 const breadcrumbSelectorRunningQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks INDEXED BY idx_tasks_status
-				WHERE project_id = ? AND category != 'chat'
+				WHERE project_id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -347,7 +347,7 @@ const breadcrumbSelectorRunningQuery = `SELECT ` + breadcrumbSelectorSelectColum
 
 const breadcrumbSelectorSearchRunningQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND category != 'chat'
+				WHERE project_id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -360,7 +360,7 @@ const breadcrumbSelectorSearchRunningQuery = `SELECT ` + breadcrumbSelectorSelec
 
 const breadcrumbSelectorSearchOtherQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND category != 'chat'
+				WHERE project_id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -373,7 +373,7 @@ const breadcrumbSelectorSearchOtherQuery = `SELECT ` + breadcrumbSelectorSelectC
 
 const breadcrumbSelectorRecencyQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND category != 'chat'
+				WHERE project_id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -579,7 +579,7 @@ func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]
 
 	rows, err := r.db.QueryContext(ctx, `SELECT `+taskReferenceSelectColumns+`
 		FROM tasks t
-		WHERE `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND t.category != 'chat'
+		WHERE `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND t.category NOT IN ('chat','page_chat')
 		ORDER BY t.display_order ASC, t.created_at ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing task references: %w", err)
@@ -611,7 +611,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 				 FROM tasks t WHERE t.project_id = ?`
 	args := []any{projectID}
 	if projectID == models.AllProjectsID && category != string(models.CategoryChat) {
-		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category != 'chat' AND ` + accessibleProjectPredicate(ctx, "t.project_id", false)
+		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category NOT IN ('chat','page_chat') AND ` + accessibleProjectPredicate(ctx, "t.project_id", false)
 		args = nil
 	}
 	if category != "" {
@@ -2031,7 +2031,7 @@ func (r *TaskRepo) SearchByTitle(ctx context.Context, projectID string, titleQue
 	queryPattern := escapeSQLLikePatternLiteral(titleQuery)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskSelectColumns+`
-		 FROM tasks WHERE project_id = ? AND category != 'chat' AND title LIKE ? ESCAPE '\'
+		 FROM tasks WHERE project_id = ? AND category != 'chat' AND category != 'page_chat' AND title LIKE ? ESCAPE '\'
 		 ORDER BY
 		   CASE WHEN LOWER(title) = LOWER(?) THEN 0
 		        WHEN LOWER(title) LIKE LOWER(? || '%') ESCAPE '\' THEN 1
@@ -2090,7 +2090,7 @@ func escapeSQLLikePatternLiteral(value string) string {
 // relevance (exact, then prefix, then contains) and then by updated_at DESC with a
 // task id tiebreaker; without a query, results are ordered by updated_at DESC, id ASC.
 func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, filter persistence.TaskDiscoveryFilter) ([]models.Task, int, error) {
-	where := `project_id = ? AND category != 'chat'`
+	where := `project_id = ? AND category != 'chat' AND category != 'page_chat'`
 	args := []any{projectID}
 
 	query := strings.TrimSpace(filter.Query)
@@ -2189,7 +2189,7 @@ func (r *TaskRepo) GetTaskForSwarmInspection(ctx context.Context, projectID, tas
 	if projectID == "" {
 		return nil, fmt.Errorf("getting swarm inspection task: project id is required")
 	}
-	where := `project_id = ? AND category != 'chat'`
+	where := `project_id = ? AND category != 'chat' AND category != 'page_chat'`
 	args := []any{projectID}
 	if taskID != "" {
 		where += ` AND id = ?`
@@ -2209,7 +2209,7 @@ func (r *TaskRepo) ListSwarmChildrenForInspection(ctx context.Context, projectID
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+swarmInspectionSelectColumns+`
 		 FROM tasks
-		 WHERE project_id = ? AND parent_task_id = ? AND category != 'chat'
+		 WHERE project_id = ? AND parent_task_id = ? AND category != 'chat' AND category != 'page_chat'
 		   AND swarm_role IN ('planner','worker','reviewer','merger','integrator')
 		 ORDER BY swarm_sequence ASC,
 		 CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'merger' THEN 3 WHEN 'integrator' THEN 3 ELSE 9 END,
@@ -2859,7 +2859,7 @@ func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 		                    WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
 		       THEN 'failed' ELSE 'pending' END,
 		     category = CASE
-		       WHEN category != 'chat' AND EXISTS (SELECT 1 FROM thread_inputs i
+		       WHEN category != 'chat' AND category != 'page_chat' AND EXISTS (SELECT 1 FROM thread_inputs i
 		                    WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
 		       THEN 'backlog' ELSE category END,
 		     updated_at = datetime('now')

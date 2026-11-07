@@ -137,3 +137,22 @@ func TestResolveTaskReferenceLiteralTitle(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskToolsCannotSeePageChatTasks(t *testing.T) {
+	taskRepo, project, _, _ := newTaskReferenceTestData(t)
+	ctx := context.Background()
+	pageTask := &models.Task{ProjectID: project.ID, Title: "Deploy service page chat", Category: models.CategoryPageChat, Status: models.StatusPending}
+	require.NoError(t, taskRepo.Create(ctx, pageTask))
+
+	_, err := ResolveTaskReference(ctx, taskRepo, project.ID, pageTask.ID, "", TaskReferenceResolutionOptions{})
+	require.EqualError(t, err, "task "+pageTask.ID+" not found")
+	_, err = ResolveTaskReference(ctx, taskRepo, project.ID, "", "page chat", TaskReferenceResolutionOptions{})
+	require.EqualError(t, err, `no task found matching "page chat"`)
+
+	tasks, total, err := taskRepo.ListTasksForDiscovery(ctx, project.ID, persistence.TaskDiscoveryFilter{Limit: 50})
+	require.NoError(t, err)
+	require.Equal(t, 2, total)
+	for _, task := range tasks {
+		require.NotEqual(t, pageTask.ID, task.ID)
+	}
+}

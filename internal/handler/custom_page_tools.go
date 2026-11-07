@@ -27,7 +27,7 @@ func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingRes
 	if err != nil {
 		return "", err
 	}
-	if task == nil || task.ProjectID != params.ProjectID || task.ProjectID == models.AllProjectsID || task.Category == models.CategoryChat || task.Category == pagePluginChatCategory {
+	if task == nil || task.ProjectID != params.ProjectID || task.ProjectID == models.AllProjectsID || task.Category == models.CategoryChat || task.Category == models.CategoryPageChat {
 		return "", errors.New("custom page must belong to the current coding task's project")
 	}
 	var req struct {
@@ -114,7 +114,7 @@ func (h *Handler) customPageStatusTool(ctx context.Context, params streamingResp
 	if err != nil {
 		return "", err
 	}
-	if task == nil || task.ProjectID != params.ProjectID || task.ProjectID == models.AllProjectsID || task.Category == models.CategoryChat || task.Category == pagePluginChatCategory {
+	if task == nil || task.ProjectID != params.ProjectID || task.ProjectID == models.AllProjectsID || task.Category == models.CategoryChat || task.Category == models.CategoryPageChat {
 		return "", errors.New("custom page must belong to the current coding task's project")
 	}
 	var request struct {

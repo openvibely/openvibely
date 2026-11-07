@@ -12,7 +12,8 @@ const (
 	CategoryCompleted TaskCategory = "completed"
 	CategoryBacklog   TaskCategory = "backlog"
 	CategoryScheduled TaskCategory = "scheduled"
-	CategoryChat      TaskCategory = "chat" // Internal category for chat messages (not displayed in UI)
+	CategoryChat      TaskCategory = "chat"      // Internal category for chat messages (not displayed in UI)
+	CategoryPageChat  TaskCategory = "page_chat" // Internal category for page side-chat history
 )
 
 var AllCategories = []TaskCategory{

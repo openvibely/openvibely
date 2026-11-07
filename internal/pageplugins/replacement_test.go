@@ -45,7 +45,7 @@ func TestPageReplacementPreservesIdentityAndOtherProject(t *testing.T) {
 	if err = m.store.UpdateInstanceState(ctx, id, `{"target":20000}`); err != nil {
 		t.Fatal(err)
 	}
-	task := &models.Task{ProjectID: a, Title: "Page chat", Category: models.TaskCategory("freezer"), Status: models.StatusPending}
+	task := &models.Task{ProjectID: a, Title: "Page chat", Category: models.CategoryPageChat, Status: models.StatusPending}
 	if err = env.Tasks.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

@@ -865,7 +865,7 @@ func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Conte
 			      JOIN tasks t ON t.id = e.task_id
 			      WHERE e.status = 'running'
 			        AND e.dispatch_id IS NULL
-			        AND t.category != 'chat'
+			        AND t.category NOT IN ('chat','page_chat')
 			        AND t.status = 'queued'
 			        AND NOT EXISTS (
 			          SELECT 1 FROM automation_task_run_reservations reservation
@@ -878,7 +878,7 @@ func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Conte
 			UPDATE tasks
 			SET status = 'failed', category = 'backlog', updated_at = datetime('now')
 			WHERE status = 'queued'
-			  AND category != 'chat'
+			  AND category NOT IN ('chat','page_chat')
 			  AND NOT EXISTS (
 			    SELECT 1 FROM automation_task_run_reservations reservation
 			    WHERE reservation.task_id = tasks.id
@@ -931,10 +931,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 	staleTaskPredicate := `
 			t.category != 'chat'
 			AND (t.status NOT IN ('queued', 'running')
-			     OR (t.category NOT IN ('active', 'scheduled')
-			         AND NOT EXISTS (
-			             SELECT 1 FROM page_conversations pc WHERE pc.task_id = t.id
-			         )))`
+			     OR t.category NOT IN ('active', 'scheduled', 'page_chat'))`
 	if _, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
@@ -1725,7 +1722,7 @@ func queryFailedTaskPatterns(ctx context.Context, db *sql.DB, projectID string, 
 
 	query := failedTaskPatternsQuery
 	if projectID == models.AllProjectsID {
-		query = strings.Replace(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID)+" AND t.category != 'chat'", 1)
+		query = strings.Replace(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID)+" AND t.category NOT IN ('chat','page_chat')", 1)
 	}
 	rows, err := db.QueryContext(ctx, query, projectID, minFailures, limit)
 	if err != nil {

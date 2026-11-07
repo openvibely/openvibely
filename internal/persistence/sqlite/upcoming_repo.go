@@ -74,7 +74,7 @@ const upcomingRunningTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
 	` + upcomingTaskListWithoutScheduleColumns + `
  FROM tasks t
  LEFT JOIN agent_configs ac ON ac.id = t.agent_id
- WHERE t.project_id = ? AND t.status = 'running' AND t.category != 'chat'
+ WHERE t.project_id = ? AND t.status = 'running' AND t.category NOT IN ('chat','page_chat')
  ORDER BY t.updated_at DESC`
 
 const upcomingWaitingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
@@ -88,7 +88,7 @@ const upcomingBlockedTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
 	` + upcomingTaskListWithoutScheduleColumns + `
  FROM tasks t
  LEFT JOIN agent_configs ac ON ac.id = t.agent_id
- WHERE t.project_id = ? AND t.category != 'chat' AND t.status = 'blocked'
+ WHERE t.project_id = ? AND t.category NOT IN ('chat','page_chat') AND t.status = 'blocked'
  ORDER BY t.priority DESC, t.display_order ASC, t.updated_at ASC, t.id ASC
  LIMIT ?`
 
@@ -178,7 +178,7 @@ func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID strin
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 LEFT JOIN agent_configs ac ON ac.id = e.agent_config_id
-		 WHERE `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND t.category != 'chat' AND e.started_at >= ?
+		 WHERE `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND t.category NOT IN ('chat','page_chat') AND e.started_at >= ?
 		 ORDER BY e.started_at DESC
 		 LIMIT ?`,
 		historyOutputPreviewLen, historyErrorPreviewLen, projectID, since, historyExecutionLimit)
@@ -218,7 +218,7 @@ func (r *UpcomingRepo) GetHistorySummary(ctx context.Context, projectID string, 
 			COALESCE(AVG(CASE WHEN e.duration_ms > 0 THEN e.duration_ms END), 0) as avg_duration
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
-		 WHERE `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND t.category != 'chat' AND e.started_at >= ?`,
+		 WHERE `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND t.category NOT IN ('chat','page_chat') AND e.started_at >= ?`,
 		projectID, since).
 		Scan(&s.TotalExecutions, &s.SuccessCount, &s.FailureCount, &s.CancelledCount,
 			&s.TotalDurationMs, &avgDuration)
@@ -236,7 +236,7 @@ func (r *UpcomingRepo) GetTaskSummary(ctx context.Context, projectID string, now
 	// Get counts by status (excluding chat and completed-category tasks)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT status, COUNT(*) FROM tasks
-		 WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND category != 'chat'
+		 WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND category NOT IN ('chat','page_chat')
 		 GROUP BY status`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("getting task status counts: %w", err)
@@ -268,7 +268,7 @@ func (r *UpcomingRepo) GetTaskSummary(ctx context.Context, projectID string, now
 	// Get counts by category (excluding chat)
 	rows, err = r.db.QueryContext(ctx,
 		`SELECT category, COUNT(*) FROM tasks
-		 WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND category != 'chat'
+		 WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND category NOT IN ('chat','page_chat')
 		 GROUP BY category`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("getting task category counts: %w", err)

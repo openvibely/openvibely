@@ -19,7 +19,7 @@ func (r *ExecutionRepo) GetTaskRunActivity(ctx context.Context, f persistence.An
 	SUM(CASE WHEN e.status='completed' THEN 1 ELSE 0 END),SUM(CASE WHEN e.status='failed' THEN 1 ELSE 0 END),SUM(CASE WHEN e.status='cancelled' THEN 1 ELSE 0 END),
 	COALESCE(SUM(CASE WHEN e.completed_at IS NOT NULL THEN MAX(0,(julianday(e.completed_at)-julianday(e.started_at))*86400000) END),0),COUNT(e.completed_at)
 	FROM executions e JOIN tasks t ON t.id=e.task_id LEFT JOIN agent_configs a ON a.id=e.agent_config_id
-	WHERE `+analyticsProjectPredicate(ctx, "t.project_id", f.ProjectID)+` AND COALESCE(t.category,'')<>'chat'`+window+` GROUP BY 1,6,7 ORDER BY 1,6,7`, append([]any{f.ProjectID}, args...)...)
+	WHERE `+analyticsProjectPredicate(ctx, "t.project_id", f.ProjectID)+` AND COALESCE(t.category,'') NOT IN ('chat','page_chat')`+window+` GROUP BY 1,6,7 ORDER BY 1,6,7`, append([]any{f.ProjectID}, args...)...)
 	if err != nil {
 		return out, err
 	}

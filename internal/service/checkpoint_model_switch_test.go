@@ -220,8 +220,8 @@ func TestPageConversationCheckpointIsolation(t *testing.T) {
 	ctx := context.Background()
 	stores := teststores.New(t).Stores
 	agent := models.LLMConfig{ID: "page-model", Provider: models.ProviderOpenAI, Model: "test"}
-	pageA := &models.Task{ProjectID: "default", Title: "Page A conversation", Category: models.TaskCategory("freezer"), Status: models.StatusCompleted}
-	pageB := &models.Task{ProjectID: "default", Title: "Page B conversation", Category: models.TaskCategory("freezer"), Status: models.StatusCompleted}
+	pageA := &models.Task{ProjectID: "default", Title: "Page A conversation", Category: models.CategoryPageChat, Status: models.StatusCompleted}
+	pageB := &models.Task{ProjectID: "default", Title: "Page B conversation", Category: models.CategoryPageChat, Status: models.StatusCompleted}
 	require.NoError(t, stores.Tasks.Create(ctx, pageA))
 	require.NoError(t, stores.Tasks.Create(ctx, pageB))
 	svc := &LLMService{execRepo: stores.Executions}

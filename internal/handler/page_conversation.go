@@ -14,7 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 )
 
-const pageConversationCategory = models.TaskCategory("freezer")
+const pageConversationCategory = models.CategoryPageChat
 
 var errPageChatBusy = errors.New("a response is already in progress for this page")
 

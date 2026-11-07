@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 226
+const latestMigrationVersion = 227
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -4279,6 +4279,64 @@ func TestMigration225PreservesPageConversations(t *testing.T) {
 		t.Fatalf("rollback binding: %q %v", task, err)
 	}
 	if err := goose.UpTo(db, ".", 225); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigration227MovesPageConversationTasksToPageChat(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "page-chat.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 226); err != nil {
+		t.Fatal(err)
+	}
+	_, err := db.Exec(`
+ INSERT INTO projects(id,name) VALUES('p','Pages');
+ INSERT INTO tasks(id,project_id,title,category,status) VALUES('page-task','p','Page chat','freezer','pending');
+ INSERT INTO tasks(id,project_id,title,category,status) VALUES('other','p','Other','freezer','pending');
+ INSERT INTO executions(id,task_id,task_project_id,status) VALUES('page-exec','page-task','p','completed');
+ INSERT INTO page_conversations(project_id,kind,instance_id,page_id,task_id) VALUES('p','builtin','','analytics','page-task');
+ `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 227); err != nil {
+		t.Fatal(err)
+	}
+	category := func(id string) string {
+		var c string
+		if err := db.QueryRow(`SELECT category FROM tasks WHERE id=?`, id).Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if got := category("page-task"); got != "page_chat" {
+		t.Fatalf("page task category = %q", got)
+	}
+	if got := category("other"); got != "freezer" {
+		t.Fatalf("other task category = %q", got)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM executions WHERE task_id='page-task'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("executions = %d %v", n, err)
+	}
+	rows, err := db.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows.Next() {
+		t.Fatal("foreign key violations after migration")
+	}
+	rows.Close()
+	if _, err := db.Exec(`DELETE FROM tasks WHERE id='page-task'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM page_conversations`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("page conversations after task delete = %d %v", n, err)
+	}
+	if err := goose.DownTo(db, ".", 226); err != nil {
 		t.Fatal(err)
 	}
 }

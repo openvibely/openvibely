@@ -26,10 +26,6 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-// pagePluginChatCategory hides page side-chat tasks from boards and from the
-// main project chat history (which is keyed by category=chat).
-const pagePluginChatCategory = pageConversationCategory
-
 const (
 	maxPluginChatMessage   = 8000
 	maxPluginAnalyzePrompt = 4000
