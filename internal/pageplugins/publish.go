@@ -76,6 +76,8 @@ func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, page
 	if instanceID != "" && instance == nil {
 		return nil, ErrNotFound
 	}
+	// Publishing never overrides an administrator's decision to disable a page.
+	enable := instance == nil
 	if instance != nil {
 		pending, err := m.store.GetReplacement(ctx, instance.ID)
 		if err != nil {
@@ -83,6 +85,10 @@ func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, page
 		}
 		if pending != nil && instance.Version != man.Version {
 			return nil, errors.New("finish the pending page update before publishing another version")
+		}
+		enable = instance.Enabled
+		if pending != nil {
+			enable = pending.Enabled
 		}
 	}
 	pkg, err := m.InstallFromDir(ctx, source, by)
@@ -105,7 +111,12 @@ func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, page
 		}
 	}
 	if !man.RunsProcess() {
-		if err = m.Enable(ctx, instance.ID); err != nil {
+		if enable {
+			err = m.Enable(ctx, instance.ID)
+		} else {
+			err = m.finishDisabledReplacement(ctx, instance.ID)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}

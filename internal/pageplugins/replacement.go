@@ -84,6 +84,22 @@ func (m *Manager) enableReplacementLocked(ctx context.Context, id string) error 
 	return nil
 }
 
+// finishDisabledReplacement commits an update to a disabled page without starting it.
+func (m *Manager) finishDisabledReplacement(ctx context.Context, id string) error {
+	lifecycle := m.instanceLock("lifecycle:" + id)
+	lifecycle.Lock()
+	defer lifecycle.Unlock()
+	previous, err := m.store.GetReplacement(ctx, id)
+	if err != nil || previous == nil {
+		return err
+	}
+	if err := m.store.FinishReplacement(ctx, id, false); err != nil {
+		return err
+	}
+	m.removeUnusedReplacementPackage(ctx, previous.PackageID)
+	return nil
+}
+
 func (m *Manager) removeUnusedReplacementPackage(ctx context.Context, id string) {
 	if err := m.RemovePackage(ctx, id); err != nil && !errors.Is(err, ErrPackageInUse) && !errors.Is(err, ErrNotFound) {
 		applog.Infof("[pageplugins] unused update package cleanup failed: %v", err)

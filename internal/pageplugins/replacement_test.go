@@ -236,3 +236,41 @@ func TestStaleIntegrationCannotRunOperationsAfterUpdate(t *testing.T) {
 		t.Fatalf("stale operation changed state: %s", fresh.StateJSON)
 	}
 }
+
+func TestRepublishKeepsAdminDisabledPageOff(t *testing.T) {
+	m, _, a, _ := newTestManager(t)
+	ctx := t.Context()
+	first, err := m.Publish(ctx, replacementBundle(t, "1.0.0"), a, "", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Instance.Enabled {
+		t.Fatal("new frontend-only page was not enabled")
+	}
+	id := first.Instance.ID
+	if err = m.Disable(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"1.0.0", "1.1.0"} {
+		result, err := m.Publish(ctx, replacementBundle(t, version), a, "", "task")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Instance.ID != id || result.Instance.Enabled || result.Instance.Version != version {
+			t.Fatalf("republish %s: %+v", version, result.Instance)
+		}
+		if pending, _ := m.store.GetReplacement(ctx, id); pending != nil {
+			t.Fatalf("republish %s left an unfinished update", version)
+		}
+	}
+	if err = m.Enable(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.Publish(ctx, replacementBundle(t, "1.2.0"), a, "", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Instance.Enabled || result.Instance.Version != "1.2.0" {
+		t.Fatalf("enabled page not kept on after update: %+v", result.Instance)
+	}
+}
