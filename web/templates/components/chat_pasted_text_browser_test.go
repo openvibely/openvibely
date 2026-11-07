@@ -148,6 +148,25 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  const pasteKey=form.getAttribute('data-attachment-state-key')+'-pasted-text';
  delete window._ovPasteDrafts[pasteKey];await remount();
  assert(form._captureChatSubmission().message===large,'surviving card was not persisted');
+ // Navigating with an open editor must discard its unsaved edit and remove the dialog.
+ cards()[0].click();
+ const oldDialog=document.querySelector('dialog[open]'), staleSave=button('Save');
+ oldDialog.querySelector('textarea').value='stale edit';
+ await remount();
+ assert(!oldDialog.isConnected && !document.querySelector('dialog[open]'),'navigation left an orphan editor');
+ staleSave.click();
+ assert(form._captureChatSubmission().message===large,'stale editor changed the replacement composer');
+ assert(window._ovPasteDrafts[pasteKey][0].text===large,'stale editor changed the saved draft');
+ // Native close and browser history navigation also dispose the editor.
+ cards()[0].click();const closedDialog=document.querySelector('dialog[open]');closedDialog.close();await wait();
+ assert(!closedDialog.isConnected,'native close leaked editor');
+ cards()[0].click();window.dispatchEvent(new PopStateEvent('popstate'));await wait();
+ assert(!document.querySelector('dialog'),'history navigation leaked editor');
+ // Guard Save even before the mutation observer notices a non-HTMX removal.
+ cards()[0].click();const detachedSave=button('Save');
+ document.querySelector('dialog textarea').value='detached edit';form.remove();detachedSave.click();await wait();
+ assert(!document.querySelector('dialog'),'detached composer left editor behind');
+ assert(window._ovPasteDrafts[pasteKey][0].text===large,'detached editor overwrote saved draft');
  document.body.setAttribute('data-test-result','pass');document.getElementById('browser-result').textContent='PASS';
 })().catch(error=>{document.body.setAttribute('data-test-result','fail');document.body.setAttribute('data-test-error',error.stack);const failure=document.createElement('pre');failure.textContent=error.stack;document.body.append(failure)});
 </script></body></html>`, markup.String())

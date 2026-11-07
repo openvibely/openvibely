@@ -2171,18 +2171,39 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					button.type = 'button'; button.className = 'btn btn-sm'; button.textContent = label;
 					button.onclick = callback; actions.append(button);
 				}
-				function closePasteEditor() {
+				var disposed = false;
+				var lifecycle = new AbortController();
+				var observer = new MutationObserver(function() {
+					if (!form.isConnected || !dialog.isConnected || !dialog.open) closePasteEditor(false);
+				});
+				function closePasteEditor(restoreFocus) {
+					if (disposed) return;
+					disposed = true;
+					observer.disconnect();
+					lifecycle.abort();
 					dialog.close(); dialog.remove();
-					if (trigger.isConnected) trigger.focus(); else if (messageInput.isConnected) messageInput.focus();
+					if (restoreFocus !== false && form.isConnected) {
+						if (trigger.isConnected) trigger.focus(); else if (messageInput.isConnected) messageInput.focus();
+					}
 				}
 				action('Cancel', closePasteEditor);
 				action('Save', function() {
+					if (disposed || !form.isConnected) { closePasteEditor(false); return; }
 					pastedTexts = pastedTexts.map(function(value) { return value.id === item.id ? { id: item.id, text: editor.value } : value; }).filter(function(value) { return value.text !== ''; });
 					pastesChanged(); closePasteEditor();
 				});
 				dialog.append(heading, editor, actions);
 				dialog.addEventListener('cancel', function(event) { event.preventDefault(); closePasteEditor(); });
+				dialog.addEventListener('close', function() { closePasteEditor(false); }, { signal: lifecycle.signal });
+				window.addEventListener('popstate', function() { closePasteEditor(false); }, { signal: lifecycle.signal });
+				window.addEventListener('pagehide', function() { closePasteEditor(false); }, { signal: lifecycle.signal });
+				document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
+					var element = event.detail && event.detail.elt;
+					if (element && (element === form || element.contains(form))) closePasteEditor(false);
+				}, { signal: lifecycle.signal });
 				document.body.append(dialog);
+				observer.observe(document.body, { childList: true, subtree: true });
+				observer.observe(dialog, { attributes: true, attributeFilter: ['open'] });
 				dialog.showModal(); editor.focus();
 			}
 			function pastedTextID() {
