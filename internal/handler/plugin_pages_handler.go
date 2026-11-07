@@ -646,7 +646,7 @@ func (h *Handler) PluginChatSend(c echo.Context) error {
 		var queued *pageChatQueued
 		if errors.As(err, &queued) {
 			q := queued.Input
-			return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(q.ID, q.Content, pluginQueuedSteerURL(r.Instance.ID, r.Instance.ProjectID, q), q.AttachmentSessionID != "", q.AuthorName))
+			return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(q.ID, q.Content, pluginQueuedSteerURL(r.Instance.ID, r.Instance.ProjectID, q), q.AttachmentSessionID != "", q.TaskID, q.AuthorName))
 		}
 		if pluginChatStatus(err) == http.StatusConflict {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
