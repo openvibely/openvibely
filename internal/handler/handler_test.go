@@ -8715,7 +8715,9 @@ func TestHandler_GetTaskThread_DraftClearLogic_DoesNotTreatPollingGetAsSend(t *t
 
 	// Draft clearing belongs to the submitting composer, not every thread GET/POST.
 	// Real navigation and delayed-send behavior is covered by the composer browser test.
-	assert.Contains(t, body, "messageInput && messageInput.value === submittedMessage")
+	assert.Contains(t, body, "if (!event.detail || event.detail.elt !== form) return;")
+	assert.Contains(t, body, "var submittedText = request._chatSubmittedPayload ? request._chatSubmittedPayload.composerText : submittedMessage;")
+	assert.Contains(t, body, "messageInput && (messageInput.value === submittedText || messageInput.value === submittedMessage)")
 	assert.Contains(t, body, "textarea.closest('#task-thread-view')")
 	assert.NotContains(t, body, "delete window._taskThreadDrafts[")
 }
