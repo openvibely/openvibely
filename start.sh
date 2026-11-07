@@ -143,6 +143,10 @@ ensure_templ
 log "Generating templates..."
 templ generate
 
+# Refresh the assets embedded by go build after templates change.
+log "Building front-end assets..."
+"$SCRIPT_DIR/scripts/build-assets.sh"
+
 # Build
 log "Building..."
 mkdir -p "$BIN_DIR"

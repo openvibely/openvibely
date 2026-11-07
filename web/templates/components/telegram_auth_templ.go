@@ -95,7 +95,7 @@ func telegramAuthorizedUserIdentity(user models.TelegramAuthorizedUser) templ.Co
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(user.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `telegram_auth.templ`, Line: 49, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 49, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -113,7 +113,7 @@ func telegramAuthorizedUserIdentity(user models.TelegramAuthorizedUser) templ.Co
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("@%s", user.TelegramUsername))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `telegram_auth.templ`, Line: 51, Col: 79}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 51, Col: 79}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -132,7 +132,7 @@ func telegramAuthorizedUserIdentity(user models.TelegramAuthorizedUser) templ.Co
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("ID: %d", user.TelegramUserID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `telegram_auth.templ`, Line: 54, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 54, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
