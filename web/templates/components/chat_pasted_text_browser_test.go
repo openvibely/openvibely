@@ -40,6 +40,19 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)};
  const wait=()=>new Promise(resolve=>setTimeout(resolve,180));
  const cards=()=>form.querySelectorAll('[aria-label="Edit pasted text"]');
+ const originalSend=XMLHttpRequest.prototype.send;
+ let holdSend=false, releaseSend;
+ XMLHttpRequest.prototype.send=function(body) {
+  if (!holdSend) return originalSend.call(this,body);
+  holdSend=false; const xhr=this; releaseSend=()=>originalSend.call(xhr,body);
+ };
+ function assertEditorLocked() {
+  assert(cards()[0].disabled,'submitted card editor is enabled');
+  cards()[0].click();
+  cards()[0].dispatchEvent(new MouseEvent('click',{bubbles:true}));
+  assert(!document.querySelector('dialog[open]'),'submitted card opened editor');
+ }
+
  function paste(text) {const data=new DataTransfer();data.setData('text/plain',text);const event=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});input.dispatchEvent(event);return event.defaultPrevented;}
  function button(label){return Array.from(document.querySelectorAll('dialog button')).find(b=>b.textContent===label);}
  function send(){input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));}
@@ -53,11 +66,18 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  assert(form._captureChatSubmission().message.endsWith(large),'cancel changed paste');
  cards()[0].click();document.querySelector('dialog textarea').value='edited text';button('Save').click();await wait();
  assert(form._captureChatSubmission().message==='Explain this\n\nedited text','edit not saved');
- send();await wait();
+ holdSend=true;send();assertEditorLocked();
+ paste('new draft '.repeat(500));
+ assert(!cards()[1].disabled,'new unsent card should stay editable');
+ form.querySelectorAll('[aria-label="Remove pasted text"]')[1].click();
+ assertEditorLocked();releaseSend();await wait();
  assert(document.getElementById('messages').textContent==='Explain this\n\nedited text','send lost content');
  assert(cards().length===0 && input.value==='','accepted draft not cleared');
- paste(large); cards()[0].click();document.querySelector('dialog textarea').value='fail';button('Save').click();await wait();send();await wait();
+ paste(large); cards()[0].click();document.querySelector('dialog textarea').value='fail';button('Save').click();await wait();holdSend=true;send();assertEditorLocked();releaseSend();await wait();
  assert(cards().length===1 && form._captureChatSubmission().message==='fail','failed send lost card');
+ assert(!cards()[0].disabled,'failed send did not unlock editor');
+ cards()[0].click();assert(document.querySelector('dialog[open]'),'editor unavailable after failure');button('Cancel').click();
+
  form.querySelector('[aria-label="Remove pasted text"]').click();assert(cards().length===0,'remove failed');
  paste(large);send();await wait();assert(cards().length===0,'card-only send failed');
  assert(document.getElementById('messages').textContent.endsWith(large),'card-only text changed');
@@ -66,9 +86,17 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  paste(large);paste('second paste '.repeat(500));
  const expected=form._captureChatSubmission().message;
  assert(cards().length===2,'multiple pastes must have separate cards');
- input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,metaKey:true,bubbles:true,cancelable:true}));await wait();
+ holdSend=true;input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,metaKey:true,bubbles:true,cancelable:true}));assertEditorLocked();releaseSend();await wait();
  assert(document.getElementById('pending-thread-inputs').textContent===expected,'steering lost or duplicated pasted text');
  assert(cards().length===0,'accepted steering left cards');
+ paste(large);
+ const waiting=form._captureChatSubmission();
+ assert(!cards()[0].disabled,'capturing a snapshot should not lock cards');
+ form._beginChatSubmission(waiting);assertEditorLocked();
+ const second=form._captureChatSubmission();form._beginChatSubmission(second);
+ form._chatSubmissionFailed(waiting);assertEditorLocked();
+ form._chatSubmissionFailed(second);assert(!cards()[0].disabled,'failed preparation left editor locked');
+
  document.body.setAttribute('data-test-result','pass');document.getElementById('browser-result').textContent='PASS';
 })().catch(error=>{document.body.setAttribute('data-test-result','fail');document.body.setAttribute('data-test-error',error.stack)});
 </script></body></html>`, markup.String())

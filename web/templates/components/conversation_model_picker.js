@@ -1019,6 +1019,7 @@
       const payload = form._captureChatSubmission(
         form._chatNextSubmissionPayload,
       );
+      form._beginChatSubmission?.(payload);
       payload.managedModelSelection = !!form.dataset.conversationTaskId;
       // This attempt owns the captured snapshot while settings load. Do not
       // leave it on the form for a later Send if loading or saving fails.
