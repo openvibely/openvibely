@@ -342,6 +342,9 @@ func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virt
 	}
 	stderr, _ := os.ReadFile(stderrPath)
 	rootState := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
+	if rootState == "" {
+		rootState = regexp.MustCompile(`<body[^>]*>`).FindString(result)
+	}
 	if len(result) > 5000 {
 		result = result[len(result)-5000:]
 	}
