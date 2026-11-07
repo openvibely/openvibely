@@ -122,6 +122,15 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 			</a>
 		</li>
 	}
+ if len(entries) > 0 {
+  <li data-plugin-nav-overflow hidden>
+   <button type="button" aria-label="More pages" aria-haspopup="menu" aria-expanded="false" aria-controls="plugin-pages-overflow-menu">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+    <span class="sidebar-text">More pages</span>
+   </button>
+  </li>
+ }
+
 }
 
 // PluginSettingsRow is one project instance shown in settings.

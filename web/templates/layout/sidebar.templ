@@ -999,7 +999,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						hx-trigger="load, plugin-nav-refresh from:body"
 						hx-swap="innerHTML"
 					></ul>
-					<style>.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style>
+					<style>#sidebar #plugin-pages-nav [hidden]{display:none!important}.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style>
 					<script>
 						window.openVibelyRefreshPluginNav = function(projectID) {
 							var nav = document.getElementById('plugin-pages-nav');

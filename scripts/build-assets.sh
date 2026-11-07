@@ -99,6 +99,7 @@ trap 'rm -rf "$dist"' EXIT
 mkdir -p "$dist/vendor"
 cp "$assets/panel-scroll.js" "$dist/panel-scroll.js"
 cp "$assets/permission-errors.js" "$dist/permission-errors.js"
+cp "$assets/plugin-nav-overflow.js" "$dist/plugin-nav-overflow.js"
 cp "$assets/kanban.js" "$dist/kanban.js"
 cp "$assets/thread-navigation.js" "$dist/thread-navigation.js"
 cp "$assets/thread-output-window.js" "$dist/thread-output-window.js"
