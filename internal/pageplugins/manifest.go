@@ -117,7 +117,8 @@ func (m *Manifest) Validate() error {
 		return fmt.Errorf("pages must contain 1-%d entries", MaxPages)
 	}
 	seenPages := map[string]bool{}
-	for _, p := range m.Pages {
+	for i := range m.Pages {
+		p := &m.Pages[i]
 		if !pageIDPattern.MatchString(p.ID) {
 			return fmt.Errorf("page id %q must match %s", p.ID, pageIDPattern)
 		}
@@ -131,9 +132,11 @@ func (m *Manifest) Validate() error {
 		if len(p.Icon) > 8 {
 			return fmt.Errorf("page %q icon must be a short emoji or glyph", p.ID)
 		}
-		if _, err := CleanRelPath(p.Entry); err != nil {
+		clean, err := CleanRelPath(p.Entry)
+		if err != nil {
 			return fmt.Errorf("page %q entry: %w", p.ID, err)
 		}
+		p.Entry = clean
 		if ext := strings.ToLower(path.Ext(p.Entry)); ext != ".html" && ext != ".htm" {
 			return fmt.Errorf("page %q entry must be an .html file", p.ID)
 		}

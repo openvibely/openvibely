@@ -52,6 +52,16 @@ func TestParseManifest(t *testing.T) {
 	}
 }
 
+func TestParseManifestNormalizesEntry(t *testing.T) {
+	m, err := ParseManifest([]byte(strings.Replace(validManifest, `"index.html"`, `"./index.html"`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Pages[0].Entry != "index.html" {
+		t.Fatalf("entry not normalized: %q", m.Pages[0].Entry)
+	}
+}
+
 func TestSelectExecutable(t *testing.T) {
 	m, _ := ParseManifest([]byte(validManifest))
 	if exe, _ := m.Backend.SelectExecutable("darwin", "arm64"); exe != "bin/w-mac" {
