@@ -118,9 +118,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// Bubble after local drop handlers so upload targets keep handling their files.
 				if (!window._fileDropNavigationGuardInstalled) {
 					window._fileDropNavigationGuardInstalled = true;
-					document.addEventListener('drop', function(e) {
+					// Accept file drags so WebKit dispatches a cancellable DOM drop
+					// outside upload targets instead of navigating directly to the file.
+					function preventFileNavigation(e) {
 						if (e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') !== -1) e.preventDefault();
-					});
+					}
+					document.addEventListener('dragover', preventFileNavigation);
+					document.addEventListener('drop', preventFileNavigation);
 				}
 			</script>
 			<!-- Wide layouts use the inset rail + page frame; narrow web keeps the drawer sidebar. -->

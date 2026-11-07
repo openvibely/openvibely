@@ -49,10 +49,16 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
   };
   var transfer = new DataTransfer();
   transfer.items.add(new File(['hello'], 'hello.txt', {type:'text/plain'}));
+  var outsideOver = new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:transfer});
+  document.body.dispatchEvent(outsideOver);
+  assert(outsideOver.defaultPrevented, 'outside file drag did not enable a cancellable drop');
   var outside = new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:transfer});
   document.body.dispatchEvent(outside);
   assert(outside.defaultPrevented, 'outside file drop could navigate');
   var text = new DataTransfer(); text.setData('text/plain', 'text');
+  var outsideTextOver = new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:text});
+  document.body.dispatchEvent(outsideTextOver);
+  assert(!outsideTextOver.defaultPrevented, 'outside plain text drags were blocked');
   var textDrop = new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:text});
   document.body.dispatchEvent(textDrop);
   assert(!textDrop.defaultPrevented, 'plain text drops were blocked');
