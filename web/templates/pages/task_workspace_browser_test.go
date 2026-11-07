@@ -868,7 +868,8 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerDistinguishesSelection(t *
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/hover-task", "breadcrumb-pointer", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
-		b.waitFor("breadcrumb", `String(!!document.querySelector('[data-breadcrumb-selector-button]'))`, "true")
+		// Stylesheets and the sidebar move the breadcrumb until the page finishes loading.
+		b.waitFor("breadcrumb", `String(document.readyState==='complete' && !!document.querySelector('[data-breadcrumb-selector-button]'))`, "true")
 		b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus(); 'focused'`)
 		b.waitFor("breadcrumb trigger has no primary focus ring", `getComputedStyle(document.querySelector('[data-breadcrumb-selector-button]')).outlineStyle`, "none")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
