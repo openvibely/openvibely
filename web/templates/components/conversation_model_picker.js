@@ -193,6 +193,27 @@
     return url.pathname + url.search;
   }
 
+  async function settingsError(response, fallback) {
+    let message = fallback;
+    if (response.status === 403) {
+      message = "You do not have permission to change these model settings. Ask the project owner or an organization admin for access.";
+      let toast;
+      try {
+        toast = JSON.parse(response.headers.get("HX-Trigger") || "{}").openvibelyToast;
+      } catch (_) {}
+      if (typeof toast?.message === "string" && toast.message) {
+        message = toast.message;
+      } else {
+        try {
+          const body = await response.json();
+          if (typeof body.message === "string" && body.message) message = body.message;
+        } catch (_) {}
+      }
+      if (window.showToast) window.showToast(message, "failed");
+    }
+    return Error(message);
+  }
+
   async function importLegacyPreferences(btn) {
     const form = btn.closest("form");
     if (form.dataset.conversationTaskId) return;
@@ -216,7 +237,7 @@
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({agent_id: selected, import_only: true, overrides}),
     });
-    if (!response.ok) throw Error("Could not migrate model settings. Reopen the picker to retry.");
+    if (!response.ok) throw await settingsError(response, "Could not migrate model settings. Reopen the picker to retry.");
     try { keys.forEach(k => localStorage.removeItem(k)); } catch (_) {}
   }
   function save(btn) {
@@ -231,8 +252,8 @@
       service_tier: tierField(btn)?.value || "",
     });
     const request = () =>
-      fetch(settingsEndpoint(btn), { method: "POST", body }).then((r) => {
-        if (!r.ok) throw Error("Could not save model settings. Try again.");
+      fetch(settingsEndpoint(btn), { method: "POST", body }).then(async (r) => {
+        if (!r.ok) throw await settingsError(r, "Could not save model settings. Try again.");
       });
     s.pending = (s.pending || Promise.resolve()).catch(() => {}).then(request);
     s.pending.then(

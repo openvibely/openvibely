@@ -302,12 +302,13 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<!doctype html><html><head><style>body{font-family:sans-serif}form{margin-top:550px}</style></head><body data-test-result="pending"><script>
  localStorage.clear();window.htmx={process:function(){}};
- const stored={a:'high',b:'low'},posts=[];let failNextWrite=false,failNextRead=false;
+ const stored={a:'high',b:'low'},posts=[];let failNextWrite=false,failNextRead=false,denyNextWrite=false;
+ const permissionMessage="You have viewer access. Editor access is required to change the model or its settings.",toasts=[];window.showToast=(message,status)=>toasts.push({message,status});
  window.fetch=async function(url,options){
  if(String(url).startsWith('/ui/model-favorites'))return {ok:true,json:async()=>({})};
  // Another project is selected globally; task requests must identify their own project.
  if(new URL(url,location.href).searchParams.get('project_id')!=='task-project')throw Error('task settings request used the globally selected project');
- if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')==='default'?'b':body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
+ if(options?.method==='POST'){if(denyNextWrite){denyNextWrite=false;return new Response(JSON.stringify({message:permissionMessage}),{status:403,headers:{'HX-Trigger':JSON.stringify({openvibelyToast:{message:permissionMessage,status:'failed'}})}});}if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')==='default'?'b':body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
  if(failNextRead){failNextRead=false;return {ok:false};}const selected=new URL(url,location.href).searchParams.get('agent_id')||'a',id=selected==='default'?'b':selected;await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
  };
  </script>`+content.String()+`<div id="browser-result"></div><script>
@@ -356,6 +357,13 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  assert(posts.at(-1)==='b','reopen retries the failed model selection');
  assert(!panel.querySelector('input[type=range]').disabled,'effort controls recover after retry');
  choose('a');await trigger._ovModelState.ready;assert(posts.at(-1)==='a','can save after failure');
+ const writesBeforeDenial=posts.length;
+ denyNextWrite=true;choose('b');await trigger._ovModelState.ready;
+ assert(posts.length===writesBeforeDenial,'denied preference was not saved');
+ assert(toasts.length===1&&toasts[0].message===permissionMessage&&toasts[0].status==='failed','permission explanation shown as one error toast');
+ assert(trigger._ovModelState.error===permissionMessage&&panel.querySelector('.ov-mp-status').textContent===permissionMessage,'inline error preserves permission explanation');
+ choose('a');await trigger._ovModelState.ready;
+
  const form=trigger.closest('form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]');
  let sent=null;
  form.addEventListener('submit',event=>{event.preventDefault();sent=new FormData(form);},{once:true});

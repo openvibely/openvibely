@@ -93,6 +93,8 @@ func projectAccessResponse(c echo.Context, err error) error {
 			}
 		case "/tasks/:taskId/thread":
 			requirement = "Editor access is required to send follow-ups."
+		case "/conversation/model-settings":
+			requirement = "Editor access is required to change the model or its settings."
 		case "/tasks/:taskId/run":
 			requirement = "Editor access is required to run tasks."
 		}
