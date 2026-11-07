@@ -39,5 +39,51 @@ templ PageSideChat(v PageChatView) {
 			</div>
 		</form>
 		@ChatAutoScrollScript()
+		@pageChatInputRequestsScript()
 	</aside>
+}
+
+script pageChatInputRequestsScript() {
+	function sideChat() { return document.getElementById('page-chat-messages'); }
+	function loadCards(execId) {
+		var box = sideChat();
+		var pair = box && document.getElementById('chat-execution-' + execId);
+		if (!pair || !box.contains(pair)) return;
+		var pid = box.getAttribute('data-project-id') || '';
+		fetch('/chat/input-requests?project_id=' + encodeURIComponent(pid) + '&execution_id=' + encodeURIComponent(execId)).then(function(resp) {
+			if (!resp.ok) throw new Error('HTTP ' + resp.status);
+			return resp.text();
+		}).then(function(html) {
+			if (sideChat() !== box) return;
+			var t = document.createElement('template');
+			t.innerHTML = html;
+			t.content.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
+				if (document.getElementById(card.id)) return;
+				pair.appendChild(card);
+			});
+			window.initChatInputRequestCards(pair);
+			if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(box, true);
+		}).catch(function(err) { console.error('[page-chat] input request load failed:', err); });
+	}
+	window.bindChatInputRequestControls();
+	if (!window._pageChatInputRequestsBound) {
+		window._pageChatInputRequestsBound = true;
+		window.addEventListener('sse-chat-live-event', function(event) {
+			var data = event.detail || {};
+			var box = sideChat();
+			if (!box || (data.project_id && data.project_id !== box.getAttribute('data-project-id'))) return;
+			var request = data.input_request || {};
+			if (data.type === 'chat_user_input_requested' && !request.completed) loadCards(request.exec_id || data.exec_id || '');
+			if (data.type === 'chat_user_input_resolved' || request.completed) {
+				var card = request.id && document.getElementById('chat-input-request-' + request.id);
+				if (card && box.contains(card)) window.completeChatInputRequest(card);
+			}
+		});
+	}
+	var box = sideChat();
+	if (box) {
+		// Cards restored on page load come from the shared execution-pair loader.
+		new MutationObserver(function() { window.initChatInputRequestCards(box); }).observe(box, {childList: true, subtree: true});
+		window.initChatInputRequestCards(box);
+	}
 }

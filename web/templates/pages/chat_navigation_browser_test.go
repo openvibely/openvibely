@@ -40,7 +40,7 @@ func TestBrowserFunctional_ChatNavigationStateAndActiveStreamInChrome(t *testing
 		t.Fatal("could not isolate production HTMX navigation helper")
 	}
 	navigationScript := baseHTML[navStart : navStart+navEnd]
-	performanceScripts := `<script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
+	performanceScripts := `<script src="` + static.URL("chat-input-requests.js") + `"></script><script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
 
 	history := make([]models.Execution, 0, 14)
 	for i := 0; i < 14; i++ {
@@ -502,7 +502,7 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 		t.Fatal(err)
 	}
 	navigationScript := extractChatLayoutInteractions(t, baseHTML)
-	performanceScripts := `<script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
+	performanceScripts := `<script src="` + static.URL("chat-input-requests.js") + `"></script><script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
 
 	var renderedChat bytes.Buffer
 	if err := ChatContent(nil, nil, "project-actions", nil, nil, nil, false, false, 30).Render(context.Background(), &renderedChat); err != nil {

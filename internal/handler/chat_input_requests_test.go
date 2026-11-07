@@ -365,8 +365,8 @@ func TestChatPageRendersInputRequestClientControls(t *testing.T) {
 	body := tc.HTTP().Get("/chat?project_id=" + project.ID).Execute().Body.String()
 	require.Contains(t, body, "chat_user_input_requested")
 	require.Contains(t, body, "renderChatInputRequest")
-	require.Contains(t, body, "[data-chat-input-option]")
 	require.Contains(t, body, "/chat/input-requests?project_id=")
+	require.Contains(t, body, "/static/chat-input-requests.js")
 	require.NotContains(t, body, "document.createElement('section')")
 }
 

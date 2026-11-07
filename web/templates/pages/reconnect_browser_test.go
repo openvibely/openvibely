@@ -192,7 +192,7 @@ func runReconnectChromeFixture(t *testing.T, body string) string {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<!doctype html><html><head><meta charset=\"utf-8\"><script src=\"" + static.URL("panel-scroll.js") + "\"></script></head><body>" + body + "</body></html>"))
+		_, _ = w.Write([]byte("<!doctype html><html><head><meta charset=\"utf-8\"><script src=\"" + static.URL("panel-scroll.js") + "\"></script><script src=\"" + static.URL("chat-input-requests.js") + "\"></script></head><body>" + body + "</body></html>"))
 	}))
 	defer server.Close()
 
