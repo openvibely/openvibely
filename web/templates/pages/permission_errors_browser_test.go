@@ -50,6 +50,10 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 					result := browser.evaluateAwait(`(async()=>{
  const form=document.getElementById('skill_form'),modal=document.getElementById('skill_modal');modal.showModal();
  document.getElementById('skill_handle').value='example';document.getElementById('skill_body').value='Keep draft';
+ const priorBody=document.getElementById('skill_body').value;
+ editSkillFromData({dataset:{skillHandle:'denied',skillScope:'project'}});
+ for(let i=0;i<100&&permissionToasts.length===2;i++)await new Promise(r=>setTimeout(r,10));
+ if(permissionToasts.length!==3||document.getElementById('skill_body').value!==priorBody||document.getElementById('skill_handle').value!=='example')return 'denied details changed editor';
  for(const mode of ['create','edit']){
  form.dataset.mode=mode;form.dataset.originalHandle='example';submitSkillForm({preventDefault(){}});
  for(let i=0;i<100&&document.getElementById('skill_submit_btn').disabled;i++)await new Promise(r=>setTimeout(r,10));
@@ -59,7 +63,7 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  const files=new DataTransfer();files.items.add(new File(['sample'],'SKILL.md'));document.getElementById('skill_import_files').files=files.files;
  submitSkillImportForm({preventDefault(){}});
  for(let i=0;i<100&&document.getElementById('skill_import_submit_btn').disabled;i++)await new Promise(r=>setTimeout(r,10));
- return permissionToasts.length===5&&importer.open&&!document.getElementById('skill_import_error').textContent&&document.getElementById('skill_import_files').files.length===1?'ok':'import changed';})()`)
+ return permissionToasts.length===6&&importer.open&&!document.getElementById('skill_import_error').textContent&&document.getElementById('skill_import_files').files.length===1?'ok':'import changed';})()`)
 					if result != "ok" {
 						t.Fatal(result)
 					}
@@ -122,6 +126,11 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  document.getElementById('agent_description').value='Keep this draft';document.getElementById('advanced_scope').value='user';await generateAgentFromPrompt();
  if(permissionToasts.length!==5||permissionToasts.some(t=>t.message!=='Admin access required'))return 'wrong denial message';
  if(document.getElementById('agent_description').value!=='Keep this draft')return 'draft changed';
+ deleteAgentID='denied';const confirmation=document.getElementById('delete_agent_confirm_modal');confirmation.showModal();
+ await confirmDeleteAgent();if(!confirmation.open||permissionToasts.length!==6||permissionToasts[5].message!=='Admin access required')return 'delete denial changed modal';confirmation.close();
+ activeAgentID='denied';const hooks=document.getElementById('lifecycle_hooks_list');hooks.textContent='Keep hooks';const status=document.getElementById('lifecycle_hooks_status'),previous=status.outerHTML;
+ await loadLifecycleHooksForAgent('denied',agentModalGeneration);
+ if(permissionToasts.length!==7||hooks.textContent!=='Keep hooks'||status.outerHTML!==previous)return 'hooks changed';
  window.fetch=originalFetch;return 'ok';})()`)
 					if result != "ok" {
 						t.Fatal(result)

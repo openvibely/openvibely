@@ -592,6 +592,17 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				var handle = card.dataset.skillHandle || '';
 				var scope = card.dataset.skillScope || 'project';
 				var requestGeneration = ++skillDetailRequestGeneration;
+				fetch('/skills/' + encodeURIComponent(handle) + '/details?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery(card.dataset.skillProject).replace(/^\?/, '&'), {
+					method: 'GET',
+					headers: {'Accept': 'application/json'}
+				}).then(async function(resp) {
+                    if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
+					if (!resp.ok) {
+						return resp.text().then(function(text) { throw new Error(text || 'Failed to load skill details.'); });
+					}
+					return resp.json();
+				}).then(function(detail) {
+					if (detail === null || requestGeneration !== skillDetailRequestGeneration) return;
 				form.dataset.mode = 'edit';
  form.dataset.skillProject = card.dataset.skillProject || '';
  var projectChoice = document.getElementById('skill_project_owner'); if(projectChoice){projectChoice.value=form.dataset.skillProject;projectChoice.disabled=true;}
@@ -616,16 +627,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				renderSkillPackageFiles('');
 				setSkillModalError('');
 				skill_modal.showModal();
-				fetch('/skills/' + encodeURIComponent(handle) + '/details?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery(card.dataset.skillProject).replace(/^\?/, '&'), {
-					method: 'GET',
-					headers: {'Accept': 'application/json'}
-				}).then(function(resp) {
-					if (!resp.ok) {
-						return resp.text().then(function(text) { throw new Error(text || 'Failed to load skill details.'); });
-					}
-					return resp.json();
-				}).then(function(detail) {
-					if (requestGeneration !== skillDetailRequestGeneration || form.dataset.mode !== 'edit' || form.dataset.originalHandle !== handle || document.getElementById('skill_scope').value !== scope) return;
+
 					document.getElementById('skill_handle').value = detail.handle || handle;
 					document.getElementById('skill_name').value = detail.name || '';
 					document.getElementById('skill_description').value = detail.description || '';
@@ -638,9 +640,8 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
  window.renderSkillDependencyDetails?.(document.getElementById('skill_dependency_details'), detail);
 					document.getElementById('skill_submit_btn').disabled = false;
 				}).catch(function(err) {
-					if (requestGeneration !== skillDetailRequestGeneration || form.dataset.mode !== 'edit' || form.dataset.originalHandle !== handle) return;
-					document.getElementById('skill_body').value = '';
-					setSkillModalError(err.message || 'Failed to load skill details.');
+					if (requestGeneration !== skillDetailRequestGeneration) return;
+                    window.showToast?.(err.message || 'Failed to load skill details.', 'failed');
 				});
 			}
 

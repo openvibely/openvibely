@@ -290,6 +290,16 @@ window.addEventListener('DOMContentLoaded', async function() {
   dismiss.click();
   check(!completedHost.textContent, 'dismiss clears completed status');
   window.fetch = originalFetch; window.htmx.ajax = originalAjax;
+  const originalToast=window.showToast;const deniedToasts=[];
+  window.showToast=message=>deniedToasts.push(message);
+  window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
+  window.htmx.ajax=()=>Promise.resolve();
+  try {
+  await window.kanbanBatch(action('ff'), [{id:'one',title:'One',status:'completed',merge:''}]);
+  check(deniedToasts.length===1&&deniedToasts[0]==='Editor access required','bulk denial emits one permission toast');
+  const deniedProgress=col('completed').querySelector('[data-kanban-progress]').textContent;
+  check(deniedProgress.includes('1 failed')&&!deniedProgress.includes('Editor access required'),'bulk failure count without inline permission error');
+  } finally {window.fetch=originalFetch;window.htmx.ajax=originalAjax;window.showToast=originalToast;}
   await fetch('/result?status=pass', {method:'POST'});
  } catch(error) { await fetch('/result?status='+encodeURIComponent(error.stack), {method:'POST'}); }
 });

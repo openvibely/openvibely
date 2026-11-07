@@ -549,7 +549,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (!deleteAgentID) return;
 					var id = deleteAgentID;
 					var modal = document.getElementById('delete_agent_confirm_modal');
-					if (modal) modal.close();
+
 					var container = document.getElementById('agents-container');
 					var deleteURL = withCurrentAgentListState('/agents/' + encodeURIComponent(id));
 					if (window.cardPaginationRefreshURL) deleteURL = window.cardPaginationRefreshURL(container, deleteURL);
@@ -558,9 +558,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							method: 'DELETE',
 							headers: { 'HX-Request': 'true' }
 						});
+						if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 						if (!response.ok) {
 							throw new Error(await response.text() || 'Delete failed');
 						}
+						if (modal) modal.close();
 						const html = await response.text();
 						if (container && typeof window.replaceSearchableCardContainer === 'function') {
 							window.replaceSearchableCardContainer('#agents-container', html);
@@ -1768,10 +1770,10 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 
 			async function loadLifecycleHooksForAgent(agentID, generation) {
 				if (!isCurrentAgentModalLoad(agentID, generation)) return;
-				lifecycleHooksState = [];
-				document.getElementById('lifecycle_hooks_list').innerHTML = '';
+
 				try {
 					const response = await fetch(withCurrentProject('/agents/' + encodeURIComponent(agentID) + '/lifecycle-hooks'), { headers: { 'Accept': 'application/json' }});
+					if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 					if (!response.ok) {
 						throw new Error('failed to load hooks: ' + response.status);
 					}
