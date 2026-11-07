@@ -194,6 +194,15 @@ definitions:
       queued_tasks:
         type: integer
     type: object
+  handler.pluginBridgeResponse:
+    properties:
+      error:
+        type: string
+      ok:
+        type: boolean
+      result:
+        type: object
+    type: object
   models.AccountLimitView:
     properties:
       label:
@@ -2610,6 +2619,195 @@ paths:
       summary: Get lifecycle execution trace events
       tags:
       - Lifecycle
+  /api/plugin-pages/{instanceId}/approvals:
+    get:
+      parameters:
+      - description: Plugin page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Rendered approval cards
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: List pending page agent approvals
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/approvals/{approvalId}/{decision}:
+    post:
+      parameters:
+      - description: Plugin page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      - description: Approval ID
+        in: path
+        name: approvalId
+        required: true
+        type: string
+      - description: Decision
+        enum:
+        - approve
+        - deny
+        in: path
+        name: decision
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Approve or deny a page agent action
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/bridge:
+    post:
+      consumes:
+      - application/json
+      description: Executes one validated v1 bridge message relayed by the host page.
+        Body is the bridge envelope including the page-load handle.
+      parameters:
+      - description: Plugin page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.pluginBridgeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.pluginBridgeResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.pluginBridgeResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Run a plugin page bridge call
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/chat:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      parameters:
+      - description: Plugin page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      - description: Message (max 8000 characters)
+        in: formData
+        name: message
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Rendered chat turn
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Send a page side-chat message
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/chat/stop:
+    post:
+      parameters:
+      - description: Plugin page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Stop the page side-chat turn
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/events:
+    get:
+      description: Server-sent events for refreshes and approval prompts.
+      parameters:
+      - description: Plugin page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      - description: Page-load handle
+        in: query
+        name: handle
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: event stream
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Stream plugin page events
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/handle/retire:
+    post:
+      parameters:
+      - description: Plugin page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      - description: Page-load handle
+        in: query
+        name: handle
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      summary: Retire a page-load handle
+      tags:
+      - plugin-pages
   /api/projects:
     get:
       description: Get a list of all available projects with their IDs, names, paths,

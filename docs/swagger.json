@@ -1201,6 +1201,291 @@
                 }
             }
         },
+        "/api/plugin-pages/{instanceId}/approvals": {
+            "get": {
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "List pending page agent approvals",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Rendered approval cards",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/approvals/{approvalId}/{decision}": {
+            "post": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Approve or deny a page agent action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Approval ID",
+                        "name": "approvalId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "approve",
+                            "deny"
+                        ],
+                        "type": "string",
+                        "description": "Decision",
+                        "name": "decision",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/bridge": {
+            "post": {
+                "description": "Executes one validated v1 bridge message relayed by the host page. Body is the bridge envelope including the page-load handle.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Run a plugin page bridge call",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.pluginBridgeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.pluginBridgeResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handler.pluginBridgeResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat": {
+            "post": {
+                "consumes": [
+                    "application/x-www-form-urlencoded"
+                ],
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Send a page side-chat message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Message (max 8000 characters)",
+                        "name": "message",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Rendered chat turn",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat/stop": {
+            "post": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Stop the page side-chat turn",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/events": {
+            "get": {
+                "description": "Server-sent events for refreshes and approval prompts.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Stream plugin page events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page-load handle",
+                        "name": "handle",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "event stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/handle/retire": {
+            "post": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Retire a page-load handle",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page-load handle",
+                        "name": "handle",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
         "/api/projects": {
             "get": {
                 "description": "Get a list of all available projects with their IDs, names, paths, and creation timestamps",
@@ -2090,6 +2375,20 @@
                 },
                 "queued_tasks": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.pluginBridgeResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "result": {
+                    "type": "object"
                 }
             }
         },

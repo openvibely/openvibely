@@ -324,7 +324,7 @@ func isPluginExecutable(b *pageplugins.Backend, rel string) bool {
 
 type pluginBridgeResponse struct {
 	OK     bool            `json:"ok"`
-	Result json.RawMessage `json:"result,omitempty"`
+	Result json.RawMessage `json:"result,omitempty" swaggertype:"object"`
 	Error  string          `json:"error,omitempty"`
 }
 
@@ -341,6 +341,17 @@ func bridgeResult(c echo.Context, v any) error {
 }
 
 // PluginBridge executes one validated v1 bridge message relayed by the host page.
+// @Summary Run a plugin page bridge call
+// @Description Executes one validated v1 bridge message relayed by the host page. Body is the bridge envelope including the page-load handle.
+// @Tags plugin-pages
+// @Param instanceId path string true "Plugin page instance ID"
+// @Accept json
+// @Produce json
+// @Success 200 {object} pluginBridgeResponse
+// @Failure 400 {object} pluginBridgeResponse
+// @Failure 403 {object} pluginBridgeResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/bridge [post]
 func (h *Handler) PluginBridge(c echo.Context) error {
 	if err := requirePluginMutation(c); err != nil {
 		return err
@@ -458,6 +469,15 @@ func pluginChatStatus(err error) int {
 }
 
 // PluginEvents streams instance events (refreshes, approval prompts) to the host page.
+// @Summary Stream plugin page events
+// @Description Server-sent events for refreshes and approval prompts.
+// @Tags plugin-pages
+// @Param instanceId path string true "Plugin page instance ID"
+// @Param handle query string true "Page-load handle"
+// @Produce text/event-stream
+// @Success 200 {string} string "event stream"
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/events [get]
 func (h *Handler) PluginEvents(c echo.Context) error {
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
@@ -538,6 +558,12 @@ func (h *Handler) pluginSubscriptionAuthorized(c echo.Context, r *pageplugins.Re
 }
 
 // PluginRetireHandle invalidates a page-load handle (unload or navigation).
+// @Summary Retire a page-load handle
+// @Tags plugin-pages
+// @Param instanceId path string true "Plugin page instance ID"
+// @Param handle query string true "Page-load handle"
+// @Success 204
+// @Router /api/plugin-pages/{instanceId}/handle/retire [post]
 func (h *Handler) PluginRetireHandle(c echo.Context) error {
 	if err := h.requirePagePlugins(); err != nil {
 		return err
@@ -549,6 +575,17 @@ func (h *Handler) PluginRetireHandle(c echo.Context) error {
 }
 
 // PluginChatSend starts a side-chat turn bound to this page instance.
+// @Summary Send a page side-chat message
+// @Tags plugin-pages
+// @Param instanceId path string true "Plugin page instance ID"
+// @Accept x-www-form-urlencoded
+// @Param message formData string true "Message (max 8000 characters)"
+// @Produce html
+// @Success 200 {string} string "Rendered chat turn"
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/chat [post]
 func (h *Handler) PluginChatSend(c echo.Context) error {
 	if err := requirePluginMutation(c); err != nil {
 		return err
@@ -581,6 +618,12 @@ func (h *Handler) startPluginChatTurn(c echo.Context, r *pageplugins.Resolved, m
 }
 
 // PluginChatStop cancels the running side-chat turn for this page.
+// @Summary Stop the page side-chat turn
+// @Tags plugin-pages
+// @Param instanceId path string true "Plugin page instance ID"
+// @Success 204
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/chat/stop [post]
 func (h *Handler) PluginChatStop(c echo.Context) error {
 	if err := requirePluginMutation(c); err != nil {
 		return err
@@ -607,6 +650,13 @@ func (h *Handler) cancelPluginConversation(ctx context.Context, instanceID strin
 }
 
 // PluginApprovals lists pending agent actions awaiting confirmation on this page.
+// @Summary List pending page agent approvals
+// @Tags plugin-pages
+// @Param instanceId path string true "Plugin page instance ID"
+// @Produce html
+// @Success 200 {string} string "Rendered approval cards"
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/approvals [get]
 func (h *Handler) PluginApprovals(c echo.Context) error {
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
@@ -621,6 +671,14 @@ func (h *Handler) PluginApprovals(c echo.Context) error {
 }
 
 // PluginApprovalDecide approves or denies one pending agent action.
+// @Summary Approve or deny a page agent action
+// @Tags plugin-pages
+// @Param instanceId path string true "Plugin page instance ID"
+// @Param approvalId path string true "Approval ID"
+// @Param decision path string true "Decision" Enums(approve, deny)
+// @Success 200
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/approvals/{approvalId}/{decision} [post]
 func (h *Handler) PluginApprovalDecide(c echo.Context) error {
 	if err := requirePluginMutation(c); err != nil {
 		return err
