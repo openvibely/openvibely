@@ -2946,7 +2946,11 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 	// Page turns require their owning surface's authorization and context.
 	// Never admit them through the ordinary coding-task follow-up path.
-	if task == nil || task.Category == models.CategoryPageChat {
+	pageOwned, err := h.taskRepo.IsPageConversation(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil || pageOwned {
 		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
 			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s for missing task: %v", sessionID, cleanupErr)
 		}

@@ -23,6 +23,15 @@ func (h *Handler) taskProjectBoundary(next echo.HandlerFunc) echo.HandlerFunc {
 		} else {
 			return next(c)
 		}
+		// Page adapters call shared readers only after their own authorization.
+		// Raw task routes must never reinterpret a page conversation as a task.
+		owned, err := h.taskRepo.IsPageConversation(c.Request().Context(), taskID)
+		if err != nil {
+			return err
+		}
+		if owned {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
 		projectID := h.mutationProjectID(c)
 		if projectID == "" {
 			return next(c)

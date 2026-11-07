@@ -659,6 +659,8 @@ type TaskPullRequestStore interface {
 
 // TaskStore persists tasks and their lifecycle state.
 type TaskStore interface {
+	// IsPageConversation checks durable ownership, even if category was changed.
+	IsPageConversation(context.Context, string) (bool, error)
 	UpdatePreservingTitle(ctx context.Context, task *models.Task) error
 	UpdateGeneratedTitle(ctx context.Context, id, expectedTitle, expectedPrompt, title string) (bool, error)
 	TaskModelSettings(ctx context.Context, taskID, selectedID string) (*models.TaskModelSettings, error)

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -77,6 +78,50 @@ func TestTaskThreadSendRejectsPageConversations(t *testing.T) {
 				require.Len(t, env.starts, 1)
 				require.NotNil(t, env.starts[0].PageConversation)
 			}
+		})
+	}
+}
+
+// The durable binding must protect even conversations reclassified by old code.
+func TestPageBindingRejectsAllRawTaskRoutes(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryPageChat, models.CategoryBacklog} {
+		t.Run(string(category), func(t *testing.T) {
+			env := setupPluginPages(t)
+			env.openPage(t, env.inA)
+			id, err := env.mgr.Store().GetConversationTask(t.Context(), env.inA.ID)
+			require.NoError(t, err)
+			require.NoError(t, env.mgr.Disable(t.Context(), env.inA.ID))
+			require.NoError(t, env.h.taskRepo.UpdateCategory(t.Context(), id, category))
+			count := 0
+			for _, route := range env.e.Routes() {
+				if route.Method == "echo_route_not_found" || (!strings.HasPrefix(route.Path, "/tasks/:taskId") && !strings.HasPrefix(route.Path, "/api/tasks/:id/")) {
+					continue
+				}
+				count++
+				path := strings.NewReplacer(":taskId", id, ":id", id, ":execId", "exec", ":executionID", "exec", ":inputId", "input").Replace(route.Path)
+				for _, query := range []string{"", "?project_id=" + env.projA.ID} {
+					rec := env.do(t, route.Method, path+query, "category=backlog&message=bypass", map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
+					require.Equal(t, http.StatusNotFound, rec.Code, "%s %s: %s", route.Method, path+query, rec.Body.String())
+				}
+			}
+			require.Greater(t, count, 40)
+			ordinary := &models.Task{ProjectID: env.projA.ID, Title: "ordinary task", Prompt: "ordinary task", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.NoError(t, env.h.taskRepo.Create(t.Context(), ordinary))
+			batch := env.do(t, http.MethodPatch, "/tasks/batch-category", "project_id="+env.projA.ID+"&task_ids="+ordinary.ID+","+id+"&category=completed", map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
+			require.Equal(t, http.StatusBadRequest, batch.Code, batch.Body.String())
+			unchanged, err := env.h.taskRepo.GetByID(t.Context(), ordinary.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryBacklog, unchanged.Category, "reject the entire batch before changing ordinary tasks")
+			// Service callers and bulk preflight must use the same durable ownership.
+			require.Error(t, env.h.taskSvc.UpdateCategory(t.Context(), id, models.CategoryBacklog))
+			require.Error(t, env.h.taskSvc.RunTask(t.Context(), id))
+			require.Error(t, env.h.taskSvc.ValidateTaskIDsForProject(t.Context(), env.projA.ID, []string{id}))
+			task, err := env.h.taskRepo.GetByID(t.Context(), id)
+			require.NoError(t, err)
+			require.Error(t, env.h.taskSvc.Update(t.Context(), task))
+			require.Error(t, env.h.taskSvc.UpdatePreservingTitle(t.Context(), task))
+			require.Equal(t, category, task.Category)
+			require.Empty(t, env.starts)
 		})
 	}
 }

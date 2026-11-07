@@ -3608,3 +3608,11 @@ func auditSlackTaskDeletion(ctx context.Context, tx sqlExecutor, id string) erro
 	identity, _ := models.SlackIngressIdentityFromContext(ctx)
 	return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, "slack.task_deleted", id, `{}`)
 }
+
+// IsPageConversation treats the durable binding as authoritative. The category
+// also protects a newly-created conversation before its binding is inserted.
+func (r *TaskRepo) IsPageConversation(ctx context.Context, id string) (bool, error) {
+	var owned bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_conversations WHERE task_id=?) OR EXISTS(SELECT 1 FROM tasks WHERE id=? AND category='page_chat')`, id, id).Scan(&owned)
+	return owned, err
+}

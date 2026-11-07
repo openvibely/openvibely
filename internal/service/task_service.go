@@ -276,7 +276,11 @@ func (s *TaskService) ValidateTaskIDsForProject(ctx context.Context, projectID s
 		if err != nil {
 			return fmt.Errorf("validating task %s for project %s: %w", id, projectID, err)
 		}
-		if task == nil || task.Category == models.CategoryChat {
+		pageOwned, err := s.repo.IsPageConversation(ctx, id)
+		if err != nil {
+			return err
+		}
+		if task == nil || task.Category == models.CategoryChat || pageOwned {
 			return fmt.Errorf("%w: %s", ErrTaskNotFoundInProject, id)
 		}
 	}
@@ -397,6 +401,9 @@ func (s *TaskService) UpdatePreservingTitle(ctx context.Context, t *models.Task)
 }
 
 func (s *TaskService) updateTask(ctx context.Context, t *models.Task, preserveTitle bool) error {
+	if err := s.requireBoardTask(ctx, t.ID); err != nil {
+		return err
+	}
 	if err := normalizeTaskTitleAndPrompt(t); err != nil {
 		return err
 	}
@@ -507,6 +514,9 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 }
 
 func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
+	if err := s.requireBoardTask(ctx, id); err != nil {
+		return err
+	}
 	if category != models.CategoryActive {
 		// A demotion may cancel the observed run after its board update. Keep
 		// direct follow-ups and manual worker submissions out until that older
@@ -847,6 +857,9 @@ func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, cate
 }
 
 func (s *TaskService) RunTask(ctx context.Context, id string) error {
+	if err := s.requireBoardTask(ctx, id); err != nil {
+		return err
+	}
 	applog.Infof("[task-svc] RunTask id=%s", id)
 	task, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -1315,4 +1328,16 @@ func (s *TaskService) ExecuteTasksByTags(ctx context.Context, tags []models.Task
 
 	applog.Infof("[task-svc] ExecuteTasksByTags submitted %d tasks for execution", submitted)
 	return allTasks, submitted, nil
+}
+
+// Page conversation lifecycle belongs to its surface, not task-board actions.
+func (s *TaskService) requireBoardTask(ctx context.Context, id string) error {
+	owned, err := s.repo.IsPageConversation(ctx, id)
+	if err != nil {
+		return err
+	}
+	if owned {
+		return fmt.Errorf("%w: %s", ErrTaskNotFoundInProject, id)
+	}
+	return nil
 }
