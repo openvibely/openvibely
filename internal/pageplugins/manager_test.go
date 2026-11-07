@@ -51,6 +51,15 @@ func enabledSales(t *testing.T, m *Manager, projectID string) *models.PagePlugin
 	return in
 }
 
+func approveCurrent(t *testing.T, m *Manager, ctx context.Context, id string) error {
+	t.Helper()
+	in, err := m.store.GetInstance(ctx, id)
+	if err != nil || in == nil {
+		t.Fatalf("load instance for approval: %v", err)
+	}
+	return m.Approve(ctx, id, in.ContentHash, "admin")
+}
+
 func revisionOf(t *testing.T, raw json.RawMessage) int {
 	t.Helper()
 	var r struct {
@@ -234,7 +243,7 @@ func TestProcessBackendRequiresHashBoundApproval(t *testing.T) {
 	if err := m.Enable(ctx, inA.ID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("backend enabled without approval: %v", err)
 	}
-	if err := m.Approve(ctx, inA.ID, "admin"); err != nil {
+	if err := approveCurrent(t, m, ctx, inA.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Enable(ctx, inA.ID); err != nil {
@@ -298,7 +307,7 @@ func TestDisableCancelsNativeOperationAndRejectsStaleIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Approve(ctx, in.ID, "admin"); err != nil {
+	if err := approveCurrent(t, m, ctx, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Enable(ctx, in.ID); err != nil {
@@ -378,7 +387,7 @@ func TestDisableInterruptsNativeStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Approve(ctx, in.ID, "admin"); err != nil {
+	if err := approveCurrent(t, m, ctx, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	enabled := make(chan error, 1)
@@ -431,7 +440,7 @@ func TestCrashRecoveryVerifiesApprovedPackageBeforeEveryLaunch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := m.Approve(ctx, in.ID, "admin"); err != nil {
+			if err := approveCurrent(t, m, ctx, in.ID); err != nil {
 				t.Fatal(err)
 			}
 			if err := m.Enable(ctx, in.ID); err != nil {
@@ -586,7 +595,7 @@ func TestCrashRecoveryLoadsLatestSavedStatePerInstance(t *testing.T) {
 		if err := m.Store().UpdateInstanceState(t.Context(), in.ID, state); err != nil {
 			t.Fatal(err)
 		}
-		if err := m.Approve(t.Context(), in.ID, "admin"); err != nil {
+		if err := approveCurrent(t, m, t.Context(), in.ID); err != nil {
 			t.Fatal(err)
 		}
 		if err := m.Enable(t.Context(), in.ID); err != nil {
@@ -715,7 +724,7 @@ func TestManagerPreservesExhaustedRestartBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = m.Approve(t.Context(), in.ID, "admin"); err != nil {
+	if err = approveCurrent(t, m, t.Context(), in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = m.Enable(t.Context(), in.ID); err != nil {
@@ -796,5 +805,40 @@ func TestRemovePackageKeepsRecordWhenFileDeletionFails(t *testing.T) {
 	}
 	if gone, _ := m.store.GetPackage(ctx, pkg.ID); gone != nil {
 		t.Fatal("package record not removed on retry")
+	}
+}
+
+func TestApproveRejectsContentAdminDidNotReview(t *testing.T) {
+	m, _, project, _ := newTestManager(t)
+	ctx := context.Background()
+	v1, err := m.InstallFromDir(ctx, writeProcessPackage(t), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := m.CreateInstance(ctx, project, v1.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed := v1.ContentHash
+
+	other := writeProcessPackage(t)
+	raw, _ := os.ReadFile(filepath.Join(other, ManifestFile))
+	os.WriteFile(filepath.Join(other, ManifestFile), []byte(strings.Replace(string(raw), `"0.1.0"`, `"0.2.0"`, 1)), 0o644)
+	if _, err := m.PublishToInstance(ctx, other, project, in.PageID, "task", in.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.Approve(ctx, in.ID, reviewed, "admin"); !errors.Is(err, ErrApprovalStale) {
+		t.Fatalf("approval of unreviewed content not rejected: %v", err)
+	}
+	if err := m.Approve(ctx, in.ID, "", "admin"); !errors.Is(err, ErrApprovalStale) {
+		t.Fatalf("approval without a reviewed hash not rejected: %v", err)
+	}
+	fresh, _ := m.store.GetInstance(ctx, in.ID)
+	if fresh.ApprovedHash != "" {
+		t.Fatalf("unreviewed content approved: %s", fresh.ApprovedHash)
+	}
+	if err := m.Approve(ctx, in.ID, fresh.ContentHash, "admin"); err != nil {
+		t.Fatalf("approval of current content failed: %v", err)
 	}
 }

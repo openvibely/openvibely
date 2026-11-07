@@ -501,3 +501,21 @@ func TestPluginNavigationRetiresSubscriptionNotConversation(t *testing.T) {
 		t.Fatal("navigation lost conversation")
 	}
 }
+
+func TestPluginSettings_ApproveRequiresDisplayedHash(t *testing.T) {
+	env := setupPluginPages(t)
+	in, _ := env.mgr.Store().GetInstance(context.Background(), env.inA.ID)
+	url := "/settings/plugin-pages/instances/" + in.ID + "/approve?project_id=" + env.projA.ID
+	headers := map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"}
+	rec := env.do(t, http.MethodPost, url, "content_hash=sha256-v2:stale", headers)
+	if !strings.Contains(rec.Body.String(), "changed since you loaded Settings") {
+		t.Fatalf("stale approval not reported: %d %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := env.mgr.Store().GetInstance(context.Background(), in.ID); got.ApprovedHash == in.ContentHash {
+		t.Fatal("stale approval recorded")
+	}
+	rec = env.do(t, http.MethodPost, url, "content_hash="+in.ContentHash, headers)
+	if got, _ := env.mgr.Store().GetInstance(context.Background(), in.ID); got.ApprovedHash != in.ContentHash {
+		t.Fatalf("approval of displayed hash failed: %d %s", rec.Code, rec.Body.String())
+	}
+}

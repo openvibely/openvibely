@@ -29,6 +29,7 @@ var (
 	ErrNotFound         = errors.New("plugin page not found")
 	ErrDisabled         = errors.New("plugin page is disabled")
 	ErrApprovalRequired = errors.New("administrator approval required before this plugin's backend can run")
+	ErrApprovalStale    = errors.New("this page changed since you loaded Settings; review the current version and approve again")
 	ErrPackageChanged   = errors.New("plugin page was updated; reload it to use the current version")
 	ErrContentChanged   = errors.New("plugin package content no longer matches the approved hash")
 	ErrVersionConflict  = errors.New("this plugin version is already installed with different content; bump the version")
@@ -288,8 +289,12 @@ func (m *Manager) NeedsApproval(in *models.PagePluginInstance, man *Manifest) bo
 	return man.RunsProcess() && in.ApprovedHash != in.ContentHash
 }
 
-// Approve records administrator approval bound to the package's content hash.
-func (m *Manager) Approve(ctx context.Context, instanceID, approvedBy string) error {
+// Approve records administrator approval for the exact content hash the
+// administrator reviewed; it fails if the page now uses different content.
+func (m *Manager) Approve(ctx context.Context, instanceID, reviewedHash, approvedBy string) error {
+	if reviewedHash == "" {
+		return ErrApprovalStale
+	}
 	in, err := m.store.GetInstance(ctx, instanceID)
 	if err != nil {
 		return err
@@ -297,7 +302,14 @@ func (m *Manager) Approve(ctx context.Context, instanceID, approvedBy string) er
 	if in == nil {
 		return ErrNotFound
 	}
-	return m.store.ApproveInstance(ctx, instanceID, in.ContentHash, approvedBy)
+	ok, err := m.store.ApproveInstanceIfContent(ctx, instanceID, reviewedHash, approvedBy)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrApprovalStale
+	}
+	return nil
 }
 
 // Enable turns an instance on, starting its backend process when it has one.

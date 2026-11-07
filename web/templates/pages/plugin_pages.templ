@@ -238,7 +238,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 						</div>
 						<div class="flex gap-1">
 							if r.NeedsApproval {
-								<button class="btn btn-xs btn-warning" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/approve") } hx-target="#plugin-settings" hx-swap="outerHTML">Approve backend</button>
+								<button class="btn btn-xs btn-warning" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/approve") } hx-vals={ fmt.Sprintf(`{"content_hash":%q}`, r.Instance.ContentHash) } hx-target="#plugin-settings" hx-swap="outerHTML">Approve backend</button>
 							}
 							if r.Instance.Enabled {
 								<button class="btn btn-xs" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button>

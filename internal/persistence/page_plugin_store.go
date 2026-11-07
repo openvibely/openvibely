@@ -24,6 +24,7 @@ type PagePluginStore interface {
 	ListAllInstances(ctx context.Context, enabledOnly bool) ([]models.PagePluginInstance, error)
 	SetInstanceEnabled(ctx context.Context, id string, enabled bool) error
 	ApproveInstance(ctx context.Context, id, contentHash, approvedBy string) error
+	ApproveInstanceIfContent(ctx context.Context, id, contentHash, approvedBy string) (bool, error)
 	UpdateInstanceState(ctx context.Context, id, stateJSON string) error
 	DeleteInstance(ctx context.Context, id string) error
 

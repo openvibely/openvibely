@@ -151,6 +151,18 @@ func (r *PagePluginRepo) ApproveInstance(ctx context.Context, id, contentHash, a
 	return err
 }
 
+// ApproveInstanceIfContent approves only while the instance's package still has
+// contentHash, so a concurrent package swap cannot inherit the approval.
+func (r *PagePluginRepo) ApproveInstanceIfContent(ctx context.Context, id, contentHash, approvedBy string) (bool, error) {
+	res, err := execBoundSQLite(ctx, r.db, `UPDATE page_plugin_instances SET approved_hash = ?, approved_by = ?, approved_at = datetime('now'), updated_at = datetime('now')
+ WHERE id = ? AND (SELECT p.content_hash FROM page_plugin_packages p WHERE p.id = page_plugin_instances.package_id) = ?`, contentHash, approvedBy, id, contentHash)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 func (r *PagePluginRepo) UpdateInstanceState(ctx context.Context, id, stateJSON string) error {
 	_, err := execBoundSQLite(ctx, r.db, `UPDATE page_plugin_instances SET state_json = ?, updated_at = datetime('now') WHERE id = ?`, stateJSON, id)
 	return err

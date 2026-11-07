@@ -103,7 +103,7 @@ func TestNativeReplacementApprovalAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = m.Approve(ctx, in.ID, "admin"); err != nil {
+	if err = approveCurrent(t, m, ctx, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = m.Enable(ctx, in.ID); err != nil {
@@ -150,7 +150,7 @@ func TestNativeReplacementApprovalAndRollback(t *testing.T) {
 	m.StopAll()
 	m = NewManager(m.store, m.root)
 	t.Cleanup(m.StopAll)
-	if err = m.Approve(ctx, in.ID, "admin"); err != nil {
+	if err = approveCurrent(t, m, ctx, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = m.Enable(ctx, in.ID); err == nil || !strings.Contains(err.Error(), "previous package restored") {
@@ -184,7 +184,7 @@ func TestNativeReplacementApprovalAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = m.Approve(ctx, in.ID, "admin"); err != nil {
+	if err = approveCurrent(t, m, ctx, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = m.Enable(ctx, in.ID); err != nil {

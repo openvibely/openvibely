@@ -819,7 +819,7 @@ func (h *Handler) PluginSettingsInstanceAction(c echo.Context) error {
 	notice := ""
 	switch c.Param("action") {
 	case "approve":
-		actionErr, notice = h.pagePlugins.Approve(ctx, in.ID, by), "Approved backend for this package version"
+		actionErr, notice = h.pagePlugins.Approve(ctx, in.ID, c.FormValue("content_hash"), by), "Approved backend for this package version"
 	case "enable":
 		actionErr, notice = h.pagePlugins.Enable(ctx, in.ID), "Enabled"
 	case "disable":
