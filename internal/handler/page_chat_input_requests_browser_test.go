@@ -40,6 +40,16 @@ func TestPageSideChatAnswersQuestion(t *testing.T) {
 		}
 		var event, card = function() { return event && document.querySelector('#page-chat-messages [data-chat-input-request-id="' + event.input_request.id + '"]'); };
 		try {
+            var toggle = document.querySelector('[data-page-chat-toggle]');
+            var panel = document.getElementById('page-side-chat');
+            if (!toggle || !panel || !panel.hidden) throw new Error('shared panel must start collapsed');
+            toggle.click();
+            if (panel.hidden || toggle.getAttribute('aria-expanded') !== 'true') throw new Error('panel did not open');
+            if (!panel.querySelector('form.chat-input-container') || !panel.querySelector('[aria-label="Attach files"]')) throw new Error('shared composer missing');
+            if (panel.textContent.includes('uses page context + tools') || panel.textContent.includes('Chat ·')) throw new Error('unexpected panel header');
+            toggle.click();
+            if (!panel.hidden) throw new Error('panel did not collapse');
+            toggle.click();
 			await waitFor(function() { return document.querySelector('#page-chat-messages [data-exec-id]'); }, 'side chat history missing');
 			await new Promise(function(r) { setTimeout(r, 200); });
 			event = await (await fetch('/make-question')).json();

@@ -103,6 +103,7 @@ func jsStringLength(s string) int {
 // ChatInputFormConfig holds configuration for the shared chat input form.
 type ChatInputFormConfig struct {
 	FormID                 string
+ DraftScope string // optional page identity for isolated drafts and message history
 	InputID                string
 	PostEndpoint           string
 	TargetID               string
@@ -131,12 +132,14 @@ func chatSessionInputID(formID string) string      { return formID + "-session-i
 func chatFileInputID(formID string) string         { return formID + "-file-input" }
 func chatDropOverlayID(formID string) string       { return formID + "-drop-overlay" }
 func chatMessageHistoryStorageKey(config ChatInputFormConfig) string {
+ if config.DraftScope != "" { return "openvibely-page-message-history-" + config.DraftScope }
 	if config.TaskID != "" {
 		return "openvibely-task-thread-message-history-" + config.TaskID
 	}
 	return "openvibely-chat-message-history"
 }
 func chatAttachmentStateKey(config ChatInputFormConfig) string {
+ if config.DraftScope != "" { return "openvibely-page-attachments-" + config.DraftScope }
 	if config.DiscardDraftOnLeave {
 		return ""
 	}

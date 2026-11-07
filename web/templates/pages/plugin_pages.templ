@@ -25,6 +25,8 @@ type PluginPageView struct {
 	ChatExecutions   []models.Execution
 	ChatTask         *models.Task
 	ChatRunningExec  string
+ ChatAgents []models.LLMConfig
+ ChatAttachments map[string][]models.ChatAttachment
 }
 
 func pluginAPI(v PluginPageView, suffix string) string {
@@ -42,7 +44,9 @@ templ PluginPageContent(v PluginPageView) {
 	<div
 		id="plugin-page-root"
 		hx-history="false"
-		class="flex flex-col h-[calc(100vh-6rem)] min-h-0"
+		class="flex flex-col h-full min-h-0"
+ data-page-chat-root
+ data-page-chat-action-url={ pluginAPI(v, "/chat/composer-action") }
 		data-plugin-instance={ v.InstanceID }
 		data-plugin-handle={ v.Handle }
 		data-project-id={ v.OwningProjectID }
@@ -59,7 +63,7 @@ templ PluginPageContent(v PluginPageView) {
 				</div>
 			</div>
 			if v.ChatEnabled {
-				<button type="button" class="btn btn-sm btn-outline" data-plugin-chat-toggle aria-controls="page-side-chat" aria-expanded="false">Chat about this page</button>
+				@components.SidePanelToggle("page-chat-toggle", "page-side-chat", templ.Attributes{"data-page-chat-toggle": ""})
 			}
 		</div>
 		<div id="plugin-startup" class="text-xs mb-2" role="status">Loading page…</div>
@@ -77,7 +81,7 @@ templ PluginPageContent(v PluginPageView) {
 				@components.PageSideChat(components.PageChatView{
  Title: v.Title, ProjectID: v.OwningProjectID,
  SendURL: pluginAPI(v, "/chat"), StopURL: pluginAPI(v, "/chat/stop"),
- ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask,
+ ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, Attachments: v.ChatAttachments, Agents: v.ChatAgents, RunningExec: v.ChatRunningExec,
 })
 			}
 		</div>
@@ -96,6 +100,10 @@ type PluginNavEntry struct {
 }
 
 templ PluginNav(entries []PluginNavEntry, showProject bool) {
+ if len(entries) > 0 {
+  <li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.2;margin:8px 12px" role="separator"></li>
+  <li class="menu-title sidebar-hide-collapsed"><span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Pages</span></li>
+ }
 	for _, e := range entries {
 		<li data-plugin-nav-entry={ e.InstanceID }>
 			<a
@@ -362,14 +370,7 @@ templ pluginHostBridgeScript() {
 		document.addEventListener('htmx:beforeSwap', onSwap);
 		window.addEventListener('pagehide', onPageHide, {once: true});
 		startEvents();
-		var toggle = root.querySelector('[data-plugin-chat-toggle]');
-		var chat = root.querySelector('#page-side-chat');
-		if (toggle && chat) toggle.addEventListener('click', function () {
-			var open = chat.classList.toggle('hidden') === false;
-			chat.classList.toggle('flex', open);
-			toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-			if (open) { var m = chat.querySelector('#page-chat-messages'); if (m) m.scrollTop = m.scrollHeight; }
-		});
+
 	})();
 	</script>
 }

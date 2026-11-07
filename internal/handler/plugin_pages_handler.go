@@ -9,6 +9,8 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+
+	"github.com/a-h/templ"
 	"os"
 	"path"
 	"strings"
@@ -53,6 +55,7 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	api.POST("/handle/retire", h.PluginRetireHandle)
 	api.POST("/chat", h.PluginChatSend)
 	api.POST("/chat/stop", h.PluginChatStop)
+	api.GET("/chat/composer-action", h.PluginChatComposerAction)
 	e.GET("/settings/plugin-pages", h.PluginSettings)
 	e.POST("/settings/plugin-pages/install", h.PluginSettingsInstall)
 	e.POST("/settings/plugin-pages/install-example", h.PluginSettingsInstallExample)
@@ -168,6 +171,14 @@ func (h *Handler) PluginPage(c echo.Context) error {
 	}
 	v := pluginView(r, requested, projectName, hd)
 	if v.ChatEnabled {
+		v.ChatAgents, err = h.llmConfigRepo.ListPickerOptions(ctx)
+		if err != nil {
+			return err
+		}
+		v.ChatRunningExec, err = h.pluginChatRunningExec(ctx, v.InstanceID)
+		if err != nil {
+			return err
+		}
 		if err := h.loadPluginChatHistory(ctx, &v); err != nil {
 			applog.Infof("[plugin-pages] history load failed instance=%s: %v", r.Instance.ID, err)
 		}
@@ -195,6 +206,12 @@ func (h *Handler) loadPluginChatHistory(ctx context.Context, v *pages.PluginPage
 	}
 	if task != nil {
 		v.ChatTaskID, v.ChatTask, v.ChatExecutions = task.ID, task, execs
+		if h.chatAttachmentRepo != nil {
+			v.ChatAttachments, err = h.chatAttachmentRepo.ListByExecutionIDs(ctx, executionIDs(execs))
+			if err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -440,7 +457,7 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 		if err := pageplugins.DecodeStrict(msg.Payload, &p); err != nil || strings.TrimSpace(p.Prompt) == "" || utf8.RuneCountInString(p.Prompt) > maxPluginAnalyzePrompt {
 			return bridgeError(c, http.StatusBadRequest, "analyze.request needs a prompt (max 4000 characters)")
 		}
-		exec, err := h.startPluginChatTurn(c, r, strings.TrimSpace(p.Prompt))
+		exec, _, err := h.startPluginChatTurn(c, r, strings.TrimSpace(p.Prompt), pageChatInput{})
 		if err != nil {
 			return bridgeError(c, pluginChatStatus(err), err.Error())
 		}
@@ -593,20 +610,27 @@ func (h *Handler) PluginChatSend(c echo.Context) error {
 	if message == "" || utf8.RuneCountInString(message) > maxPluginChatMessage {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required (max 8000 characters)")
 	}
-	exec, err := h.startPluginChatTurn(c, r, message)
+	exec, attachments, err := h.startPluginChatTurn(c, r, message, pageChatInput{AgentID: c.FormValue("agent_id"), AttachmentSessionID: strings.TrimSpace(c.FormValue("attachment_session_id"))})
 	if err != nil {
 		if pluginChatStatus(err) == http.StatusConflict {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
 		return err
 	}
-	return render(c, http.StatusOK, components.ChatFollowupResponse(message, exec.ID, "page-chat-messages", "", false, nil, r.Instance.ProjectID, *exec))
+	return render(c, http.StatusOK, templ.Join(
+		components.ChatFollowupResponse(message, exec.ID, components.PageChatMessagesID, "", false, attachments, r.Instance.ProjectID, *exec),
+		components.ChatComposerActionButtonOOB(components.PageChatFormID+"-primary-action", pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/stop"), true, exec.ID),
+	))
 }
 
 // The plugin adapter supplies identity, authorization, storage and lifetime;
 // conversation execution itself is independent of plugins and iframes.
-func (h *Handler) startPluginChatTurn(c echo.Context, r *pageplugins.Resolved, message string) (*models.Execution, error) {
-	return h.startPageChatTurn(c, h.pagePlugins.Conversation(r.Ref()), message)
+func (h *Handler) startPluginChatTurn(c echo.Context, r *pageplugins.Resolved, message string, input pageChatInput) (*models.Execution, []models.ChatAttachment, error) {
+	return h.startPageChatTurn(c, h.pagePlugins.Conversation(r.Ref()), message, input)
+}
+
+func pluginAPI(instanceID, projectID, suffix string) string {
+	return "/api/plugin-pages/" + url.PathEscape(instanceID) + suffix + "?project_id=" + url.QueryEscape(projectID)
 }
 
 // PluginChatStop cancels the running side-chat turn for this page.
@@ -624,21 +648,64 @@ func (h *Handler) PluginChatStop(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.cancelPluginConversation(c.Request().Context(), r.Instance.ID); err != nil {
+	if err := h.cancelPluginConversation(c.Request().Context(), r.Instance.ID, c.QueryParam("expected_turn_id")); err != nil {
 		return err
+	}
+	if isHTMX(c) {
+		return h.PluginChatComposerAction(c)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
+// PluginChatComposerAction renders the side-chat Send/Stop control for the current turn state.
+// @Summary Page side-chat composer action
+// @Tags plugin-pages
+// @Param instanceId path string true "Plugin page instance ID"
+// @Success 200 {string} string "HTML fragment"
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/chat/composer-action [get]
+func (h *Handler) PluginChatComposerAction(c echo.Context) error {
+	r, err := h.resolvePluginForRequest(c, false)
+	if err != nil {
+		return err
+	}
+	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
+		return pluginNotFound()
+	}
+	running, err := h.pluginChatRunningExec(c.Request().Context(), r.Instance.ID)
+	if err != nil {
+		return err
+	}
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB(components.PageChatFormID+"-primary-action", pluginAPI(r.Instance.ID, r.Instance.ProjectID, "/chat/stop"), running != "", running))
+}
+
 // Shared by the Stop button and disable/remove. Inline analysis uses the same
 // conversation task, so it is cancelled through the same execution machinery.
-func (h *Handler) cancelPluginConversation(ctx context.Context, instanceID string) error {
+func (h *Handler) cancelPluginConversation(ctx context.Context, instanceID string, expectedTurn ...string) error {
 	in, err := h.pagePlugins.Store().GetInstance(ctx, instanceID)
 	if err != nil || in == nil {
 		return err
 	}
 	ref := pageintegration.PageRef{Kind: pageplugins.Kind, PageID: in.PageID, InstanceID: in.ID, ProjectID: in.ProjectID, Title: in.Title}
-	return h.cancelPageConversation(ctx, h.pagePlugins.Conversation(ref))
+	return h.cancelPageConversation(ctx, h.pagePlugins.Conversation(ref), expectedTurn...)
+}
+
+func (h *Handler) pluginChatRunningExec(ctx context.Context, instanceID string) (string, error) {
+	in, err := h.pagePlugins.Store().GetInstance(ctx, instanceID)
+	if err != nil || in == nil {
+		return "", err
+	}
+	ref := pageintegration.PageRef{Kind: pageplugins.Kind, PageID: in.PageID, InstanceID: in.ID, ProjectID: in.ProjectID, Title: in.Title}
+	taskID, err := h.pagePlugins.Conversation(ref).Store.TaskID(ctx)
+	if err != nil || taskID == "" {
+		return "", err
+	}
+	exec, err := h.pageChatActiveExecution(ctx, taskID)
+	if err != nil || exec == nil {
+		return "", err
+	}
+	return exec.ID, nil
 }
 
 // requirePluginAdmin enforces administrator access for install/approval actions.

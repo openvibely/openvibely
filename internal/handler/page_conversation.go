@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -17,6 +18,12 @@ import (
 const pageConversationCategory = models.CategoryPageChat
 
 var errPageChatBusy = errors.New("a response is already in progress for this page")
+
+// pageChatInput carries optional composer selections for one side-chat turn.
+type pageChatInput struct {
+	AgentID             string
+	AttachmentSessionID string
+}
 
 // pageConversationTask resumes a persisted page conversation or creates it on first use.
 func (h *Handler) pageConversationTask(ctx context.Context, binding pageintegration.Conversation, message, agentID string) (*models.Task, error) {
@@ -55,61 +62,67 @@ func (h *Handler) pageConversationTask(ctx context.Context, binding pageintegrat
 
 // startPageChatTurn runs one side-chat turn through the shared streaming
 // pipeline with a per-turn page context snapshot and server-resolved page tools.
-func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conversation, message string) (*models.Execution, error) {
+func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conversation, message string, input pageChatInput) (*models.Execution, []models.ChatAttachment, error) {
+	if input.AttachmentSessionID != "" && !isValidPendingAttachmentSessionID(input.AttachmentSessionID) {
+		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
+	}
 	ctx, done, err := binding.Begin(c.Request().Context())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer done()
 	ref := binding.Page
 	integration, err := binding.Resolve(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if integration.Ref().Key() != ref.Key() || integration.Ref().ProjectID != ref.ProjectID {
-		return nil, errors.New("page conversation identity changed")
+		return nil, nil, errors.New("page conversation identity changed")
 	}
 	hasModels, err := h.hasConfiguredModels(c)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !hasModels {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "configure a model before chatting")
+		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "configure a model before chatting")
 	}
 	projectID := binding.Page.ProjectID
-	agent, err := h.selectTaskAgent(ctx, projectID, "", message, false)
+	agent, err := h.selectTaskAgent(ctx, projectID, input.AgentID, message, hasPendingImages(input.AttachmentSessionID))
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if err := h.applyConversationEffort(c, "", agent); err != nil {
+		return nil, nil, err
 	}
 	lock := persistence.LockTaskLifecycle(binding.LockKey())
 	defer lock()
 	task, err := h.pageConversationTask(ctx, binding, message, agent.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	active, err := h.execRepo.HasActiveTaskThreadExecution(ctx, task.ID, "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if active || task.Status == models.StatusRunning || task.Status == models.StatusQueued {
-		return nil, errPageChatBusy
+		return nil, nil, errPageChatBusy
 	}
 	if task.Status != models.StatusPending {
 		if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	claimed, err := h.taskRepo.ClaimTask(ctx, task.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !claimed {
-		return nil, errPageChatBusy
+		return nil, nil, errPageChatBusy
 	}
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: message, IsFollowup: true}
 	if err := h.execRepo.Create(ctx, exec); err != nil {
 		_ = h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed)
-		return nil, err
+		return nil, nil, err
 	}
 	principal := h.authPrincipalID(c)
 	var snap *pageintegration.Snapshot
@@ -118,6 +131,17 @@ func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conv
 		raw, _ := json.Marshal(s)
 		if err := binding.Store.SaveSnapshot(ctx, exec.ID, string(raw)); err != nil {
 			applog.Infof("[page-chat] save turn context exec=%s: %v", exec.ID, err)
+		}
+	}
+	var attachmentContext string
+	var images []models.Attachment
+	var chatAttachments []models.ChatAttachment
+	if input.AttachmentSessionID != "" {
+		var attErr error
+		attachmentContext, images, chatAttachments, attErr = h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, exec.ID)
+		if attErr != nil {
+			applog.Infof("[page-chat] attachments exec=%s: %v", exec.ID, attErr)
+			attachmentContext = fmt.Sprintf("Attachment processing error: %v", attErr)
 		}
 	}
 	pageContext := pageintegration.RenderContextForPrompt(ref, snap, integration.Operations())
@@ -137,6 +161,8 @@ func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conv
 		ProjectID:           projectID,
 		PrincipalID:         principal,
 		SystemContext:       combineContexts(h.getPersonalityContext(ctx, projectID), pageContext),
+		AttachmentContext:   attachmentContext,
+		ImageAttachments:    images,
 		WorkDir:             h.resolveWorkDir(ctx, projectID),
 		IsTaskFollowup:      false,
 		TaskScopedChat:      true,
@@ -144,12 +170,12 @@ func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conv
 		Surface:             chatcontrol.SurfaceWeb,
 		RuntimeTools:        tools,
 	}); err != nil {
-		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+		return nil, nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
-	return exec, nil
+	return exec, chatAttachments, nil
 }
 
-func (h *Handler) cancelPageConversation(ctx context.Context, binding pageintegration.Conversation) error {
+func (h *Handler) cancelPageConversation(ctx context.Context, binding pageintegration.Conversation, expectedTurn ...string) error {
 	lock := persistence.LockTaskLifecycle(binding.LockKey())
 	defer lock()
 	taskID, err := binding.Store.TaskID(ctx)
@@ -158,6 +184,15 @@ func (h *Handler) cancelPageConversation(ctx context.Context, binding pageintegr
 	}
 	if taskID == "" {
 		return nil
+	}
+	if len(expectedTurn) > 0 && expectedTurn[0] != "" {
+		active, err := h.pageChatActiveExecution(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if active == nil || active.ID != expectedTurn[0] {
+			return nil
+		}
 	}
 	observed, cutoff, err := h.taskSvc.ObserveTaskCancellation(ctx, taskID)
 	if err != nil {
@@ -195,4 +230,18 @@ func (h *Handler) loadPageChatHistory(ctx context.Context, binding pageintegrati
 	}
 	executions, err := h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, 50)
 	return task, executions, err
+}
+
+// Page conversations have their own category, outside the task-thread lookup.
+func (h *Handler) pageChatActiveExecution(ctx context.Context, taskID string) (*models.Execution, error) {
+	executions, err := h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, 1)
+	if err != nil {
+		return nil, err
+	}
+	for i := range executions {
+		if executions[i].Status == models.ExecRunning {
+			return &executions[i], nil
+		}
+	}
+	return nil, nil
 }

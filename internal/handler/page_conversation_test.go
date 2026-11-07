@@ -44,7 +44,7 @@ func TestPageConversationWithoutPlugin(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		exec, err := h.startPageChatTurn(c, binding, "summarize")
+		exec, _, err := h.startPageChatTurn(c, binding, "summarize", pageChatInput{})
 		if err != nil {
 			t.Fatal(err)
 		}

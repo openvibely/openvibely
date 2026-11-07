@@ -9,38 +9,56 @@ type PageChatView struct {
  ProjectID string
  SendURL string
  StopURL string
+ Agents []models.LLMConfig
+ RunningExec string
  ChatExecutions []models.Execution
  ChatTask *models.Task
+ Attachments map[string][]models.ChatAttachment
 }
 
+const PageChatFormID = "page-chat-form"
+const PageChatMessagesID = "page-chat-messages"
+
 templ PageSideChat(v PageChatView) {
-	<aside id="page-side-chat" class="hidden w-96 max-w-[45%] flex-col min-h-0 border border-base-300 rounded-lg bg-base-100" data-project-id={ v.ProjectID }>
-		<div class="px-3 py-2 border-b border-base-300 text-sm font-semibold flex items-center justify-between">
-			<span>Chat · { v.Title }</span>
-			<span class="text-xs opacity-60">uses page context + tools</span>
-		</div>
-		<div id="page-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
-			if len(v.ChatExecutions) > 0 {
-				@ChatMessages(v.ChatExecutions, v.ChatTask, nil, "page-chat-messages", "", false, v.ProjectID)
-			}
-		</div>
-		<form
-			id="page-chat-form"
-			class="p-2 border-t border-base-300 flex gap-2 items-end"
-			hx-post={ v.SendURL }
-			hx-target="#page-chat-messages"
-			hx-swap="beforeend"
-			hx-on::after-request="if(event.detail.successful){this.reset();}"
-		>
-			<textarea name="message" rows="2" class="textarea textarea-bordered textarea-sm flex-1" placeholder="Ask about this page…" required></textarea>
-			<div class="flex flex-col gap-1">
-				<button type="submit" class="btn btn-sm btn-primary">Send</button>
-				<button type="button" class="btn btn-sm btn-ghost" hx-post={ v.StopURL } hx-swap="none">Stop</button>
-			</div>
-		</form>
-		@ChatAutoScrollScript()
-		@pageChatInputRequestsScript()
-	</aside>
+ @SidePanel("page-side-chat", "page-chat-divider", "Page chat") {
+  <div id="page-chat-messages" class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4" data-project-id={ v.ProjectID }>
+   @ChatMessages(v.ChatExecutions, v.ChatTask, v.Attachments, PageChatMessagesID, "", false, v.ProjectID)
+  </div>
+  <div class="p-3">
+   @ChatInputForm(ChatInputFormConfig{
+    FormID: PageChatFormID, InputID: "page-chat-input", PostEndpoint: v.SendURL,
+    TargetID: PageChatMessagesID, ProjectID: v.ProjectID, DraftScope: v.SendURL,
+    Agents: v.Agents, ShowModelSelector: true,
+    IsRunning: v.RunningExec != "", ActiveTurnID: v.RunningExec, StopEndpoint: v.StopURL,
+   })
+  </div>
+  @ChatAutoScrollScript()
+  @pageChatInputRequestsScript()
+ }
+ @SidePanelScript()
+ <script>
+ (function() {
+  var panel = document.getElementById('page-side-chat');
+  var root = panel.closest('[data-page-chat-root]');
+  var opener = root.querySelector('[data-page-chat-toggle]');
+  var messages = panel.querySelector('#page-chat-messages');
+  var controller = window.createSidePanel({root:root, panel:panel, opener:opener,
+   storageKey:'page-chat-width', escapeDocked:true,
+   onClose:function() { controller.setOpen(false); opener.focus(); },
+   onLayout:function() { opener.setAttribute('aria-label', panel.hidden ? 'Open page chat' : 'Collapse page chat'); }
+  });
+  opener.addEventListener('click', function() {
+   controller.setOpen(panel.hidden);
+   if (!panel.hidden) { messages.scrollTop = messages.scrollHeight; panel.querySelector('textarea').focus(); }
+  });
+  window.refreshChatComposerAction = function() {
+   if (!panel.isConnected || !window.htmx) return;
+   var endpoint = root.getAttribute('data-page-chat-action-url');
+   return htmx.ajax('GET', endpoint, {target:'#page-chat-form-primary-action', swap:'outerHTML'});
+  };
+  if (window.cleanAssistantMessages) window.cleanAssistantMessages(messages);
+ })();
+ </script>
 }
 
 script pageChatInputRequestsScript() {

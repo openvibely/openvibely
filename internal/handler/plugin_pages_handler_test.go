@@ -211,7 +211,7 @@ func TestPluginBridge_ButtonAndAgentToolShareOperation(t *testing.T) {
 		t.Fatalf("concurrent turn = %d", rec.Code)
 	}
 	rec = env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat/stop?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
-	if rec.Code != http.StatusNoContent {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("stop = %d", rec.Code)
 	}
 	taskID, _ := env.mgr.Store().GetConversationTask(context.Background(), env.inA.ID)
@@ -375,7 +375,7 @@ func TestPluginChat_ConversationScopeSurvivesReopen(t *testing.T) {
 		t.Fatal("page shares project-chat scope")
 	}
 	rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/chat/stop?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
-	if rec.Code != http.StatusNoContent {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("stop: %d", rec.Code)
 	}
 	// Recreate the manager to discard all in-memory page state, as on restart.
@@ -517,5 +517,28 @@ func TestPluginSettings_ApproveRequiresDisplayedHash(t *testing.T) {
 	rec = env.do(t, http.MethodPost, url, "content_hash="+in.ContentHash, headers)
 	if got, _ := env.mgr.Store().GetInstance(context.Background(), in.ID); got.ApprovedHash != in.ContentHash {
 		t.Fatalf("approval of displayed hash failed: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPluginChatComposerStaleStop(t *testing.T) {
+	env := setupPluginPages(t)
+	endpoint := "/api/plugin-pages/" + env.inA.ID
+	query := "?project_id=" + env.projA.ID
+	rec := env.do(t, http.MethodPost, endpoint+"/chat"+query, "message=hello", map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
+	if rec.Code != http.StatusOK {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	turn := env.starts[len(env.starts)-1]
+	rec = env.do(t, http.MethodPost, endpoint+"/chat/stop"+query+"&expected_turn_id=old-turn", "", map[string]string{"HX-Request": "true"})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), turn.ExecID) {
+		t.Fatal("stale stop lost current composer state", rec.Body.String())
+	}
+	active, err := env.h.execRepo.GetByID(context.Background(), turn.ExecID)
+	if err != nil || active.Status != models.ExecRunning {
+		t.Fatal("stale stop cancelled current turn", err)
+	}
+	rec = env.do(t, http.MethodGet, endpoint+"/chat/composer-action?project_id="+env.projB.ID, "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatal("composer state leaked across projects", rec.Code)
 	}
 }

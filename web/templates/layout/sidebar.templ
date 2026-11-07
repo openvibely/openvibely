@@ -938,27 +938,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						<span class="sidebar-text">Analytics</span>
 					</a>
 				</li>
-				<li class="plugin-pages-nav-wrap" style="padding:0;margin:0">
-					<ul
-						id="plugin-pages-nav"
-						class="plugin-pages-nav"
-						style="margin:0;padding:0"
-						data-nav-src="/plugin-pages/nav"
-						hx-get={ fmt.Sprintf("/plugin-pages/nav?project_id=%s", currentProjectID) }
-						hx-trigger="load, plugin-nav-refresh from:body"
-						hx-swap="innerHTML"
-					></ul>
-					<style>.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style>
-					<script>
-						window.openVibelyRefreshPluginNav = function(projectID) {
-							var nav = document.getElementById('plugin-pages-nav');
-							if (!nav || !window.htmx) return;
-							nav.setAttribute('hx-get', nav.getAttribute('data-nav-src') + '?project_id=' + encodeURIComponent(projectID));
-							htmx.process(nav);
-							htmx.trigger(document.body, 'plugin-nav-refresh');
-						};
-					</script>
-				</li>
+
 
 				<!-- Divider -->
 				<li class="my-1 sidebar-divider"><hr class="border-base-300 opacity-30"/></li>
@@ -1008,6 +988,27 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						</svg>
 						<span class="sidebar-text">Reflection</span>
 					</a>
+				</li>
+				<li class="plugin-pages-nav-wrap" style="padding:0;margin:0">
+					<ul
+						id="plugin-pages-nav"
+						class="plugin-pages-nav"
+						style="margin:0;padding:0"
+						data-nav-src="/plugin-pages/nav"
+						hx-get={ fmt.Sprintf("/plugin-pages/nav?project_id=%s", currentProjectID) }
+						hx-trigger="load, plugin-nav-refresh from:body"
+						hx-swap="innerHTML"
+					></ul>
+					<style>.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style>
+					<script>
+						window.openVibelyRefreshPluginNav = function(projectID) {
+							var nav = document.getElementById('plugin-pages-nav');
+							if (!nav || !window.htmx) return;
+							nav.setAttribute('hx-get', nav.getAttribute('data-nav-src') + '?project_id=' + encodeURIComponent(projectID));
+							htmx.process(nav);
+							htmx.trigger(document.body, 'plugin-nav-refresh');
+						};
+					</script>
 				</li>
 			</ul>
 		</div>
