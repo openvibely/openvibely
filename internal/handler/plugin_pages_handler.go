@@ -55,9 +55,6 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	api.POST("/handle/retire", h.PluginRetireHandle)
 	api.POST("/chat", h.PluginChatSend)
 	api.POST("/chat/stop", h.PluginChatStop)
-	api.POST("/chat/steer", h.PluginChatSteer)
-	api.POST("/chat/inputs/:inputId/steer", h.PluginChatQueuedSteer)
-	api.GET("/chat/composer-action", h.PluginChatComposerAction)
 	api.GET("/chat/thread", h.PluginChatThread)
 	api.GET("/chat/thread/pending-inputs", h.PluginChatThreadPending)
 	api.GET("/chat/thread/composer-action", h.PluginChatComposerAction)
@@ -690,7 +687,7 @@ func (h *Handler) PluginChatStop(c echo.Context) error {
 // @Param instanceId path string true "Plugin page instance ID"
 // @Success 200 {string} string "HTML fragment"
 // @Failure 404 {object} ErrorResponse
-// @Router /api/plugin-pages/{instanceId}/chat/composer-action [get]
+// @Router /api/plugin-pages/{instanceId}/chat/thread/composer-action [get]
 func (h *Handler) PluginChatComposerAction(c echo.Context) error {
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {

@@ -21,13 +21,13 @@ func TestPageConversationSharedSteering(t *testing.T) {
 			sendPageTest(t, env, env.inA, "first")
 			first := env.starts[0]
 			sendPageTest(t, env, env.inB, "other-page")
-			endpoint := pluginAPI(env.inA.ID, env.projA.ID, "/chat/steer")
+			endpoint := pluginAPI(env.inA.ID, env.projA.ID, "/chat/thread/steer")
 			if queued {
 				sendPageTest(t, env, env.inA, "adjust")
 				pending, err := env.h.threadInputRepo.ListPendingForTask(t.Context(), first.TaskID)
 				require.NoError(t, err)
 				require.Len(t, pending, 1)
-				endpoint = pluginAPI(env.inA.ID, env.projA.ID, "/chat/inputs/"+pending[0].ID+"/steer")
+				endpoint = pluginAPI(env.inA.ID, env.projA.ID, "/chat/thread/queued/"+pending[0].ID+"/steer")
 				transcript := env.do(t, http.MethodGet, pluginAPI(env.inA.ID, env.projA.ID, "/chat/thread"), "", nil)
 				require.Contains(t, transcript.Body.String(), `aria-label="Edit message"`)
 				require.Contains(t, transcript.Body.String(), `aria-label="Convert queued follow-up to steering"`)
