@@ -119,6 +119,8 @@ By default, Chat may send only to saved outbound targets or each platform's save
 
 Use attachments whenever the answer depends on local file content or visual context.
 
+Pasting 5,000 or more characters into the Chat or task composer creates a compact pasted-text card. Click it to edit the full text, then Save or Cancel; use × to remove it. You can add multiple cards and type instructions alongside them. Sending includes your instructions followed by the full text of each card in paste order. Cards remain in the draft after a failed send.
+
 ## Queueing And Steering
 
 If Chat is already responding, a new prompt can become queued input for the next turn. When the UI offers active-turn steering, a prompt can instead redirect the current response. This keeps the project conversation responsive without forcing users to open another thread just to add context or correct scope.

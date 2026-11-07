@@ -2034,6 +2034,112 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var formId = form.id;
 			var inputId = form.querySelector('textarea[name="message"]').id;
 			var messageInput = document.getElementById(inputId);
+			// Pasted text is draft content, kept separate from uploaded files.
+			var pasteScope = form.getAttribute('data-attachment-state-key');
+			var pasteKey = pasteScope ? pasteScope + '-pasted-text' : '';
+			window._ovPasteDrafts = window._ovPasteDrafts || {};
+			var pastedTexts = pasteKey ? window._ovPasteDrafts[pasteKey] : [];
+			if (!pastedTexts) {
+				try { pastedTexts = JSON.parse(sessionStorage.getItem(pasteKey) || '[]'); } catch (_) {}
+				if (!Array.isArray(pastedTexts)) pastedTexts = [];
+				pastedTexts = pastedTexts.filter(function(item) { return item && typeof item.text === 'string' && typeof item.id === 'string'; });
+			}
+			form.querySelectorAll('[data-pasted-text-cards]').forEach(function(oldCards) { oldCards.remove(); });
+			var pasteCards = document.createElement('div');
+			pasteCards.className = 'flex flex-wrap gap-2 mb-2';
+			pasteCards.setAttribute('data-pasted-text-cards', '');
+			messageInput.parentElement.before(pasteCards);
+			function composerMessage() {
+				return [messageInput.value].concat(pastedTexts.map(function(item) { return item.text; })).filter(function(text) { return text !== ''; }).join('\n\n');
+			}
+			function savePastes() {
+				if (!pasteKey) return;
+				window._ovPasteDrafts[pasteKey] = pastedTexts;
+				try { sessionStorage.setItem(pasteKey, JSON.stringify(pastedTexts)); } catch (_) {}
+			}
+			function renderPastes() {
+				pasteCards.replaceChildren();
+				pasteCards.hidden = pastedTexts.length === 0;
+				pastedTexts.forEach(function(item) {
+					var card = document.createElement('div');
+					card.className = 'flex items-center gap-1 rounded-lg border border-base-content/20 p-2 max-w-full';
+					var edit = document.createElement('button');
+					edit.type = 'button';
+					edit.className = 'text-left text-sm min-w-0';
+					edit.setAttribute('aria-label', 'Edit pasted text');
+					var title = document.createElement('div');
+					title.className = 'truncate max-w-64';
+					title.textContent = item.text.trim().slice(0, 80) || 'Pasted text';
+					var subtitle = document.createElement('div');
+					subtitle.className = 'text-xs opacity-60';
+					subtitle.textContent = 'Pasted text · ' + item.text.length.toLocaleString() + ' characters';
+					edit.append(title, subtitle);
+					edit.onclick = function() { editPaste(item, edit); };
+					var remove = document.createElement('button');
+					remove.type = 'button';
+					remove.className = 'btn btn-ghost btn-xs';
+					remove.textContent = '×';
+					remove.setAttribute('aria-label', 'Remove pasted text');
+					remove.onclick = function() {
+						pastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });
+						pastesChanged();
+						messageInput.focus();
+					};
+					card.append(edit, remove);
+					pasteCards.append(card);
+				});
+			}
+			function pastesChanged() {
+				savePastes();
+				renderPastes();
+				messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+			}
+			function editPaste(item, trigger) {
+				var dialog = document.createElement('dialog');
+				dialog.className = 'rounded-xl bg-base-100 text-base-content p-5 shadow-xl';
+				dialog.style.cssText = 'width:min(800px,92vw);max-height:85vh';
+				dialog.setAttribute('aria-label', 'Edit pasted text');
+				var heading = document.createElement('h2');
+				heading.className = 'font-semibold mb-3';
+				heading.textContent = 'Edit pasted text';
+				var editor = document.createElement('textarea');
+				editor.className = 'w-full rounded-lg border border-base-content/20 bg-base-100 p-3 font-mono text-sm';
+				editor.style.height = '50vh';
+				editor.setAttribute('aria-label', 'Pasted text');
+				editor.value = item.text;
+				var actions = document.createElement('div');
+				actions.className = 'flex justify-end gap-2 mt-3';
+				function action(label, callback) {
+					var button = document.createElement('button');
+					button.type = 'button'; button.className = 'btn btn-sm'; button.textContent = label;
+					button.onclick = callback; actions.append(button);
+				}
+				function closePasteEditor() {
+					dialog.close(); dialog.remove();
+					if (trigger.isConnected) trigger.focus(); else if (messageInput.isConnected) messageInput.focus();
+				}
+				action('Cancel', closePasteEditor);
+				action('Save', function() {
+					pastedTexts = pastedTexts.map(function(value) { return value.id === item.id ? { id: item.id, text: editor.value } : value; }).filter(function(value) { return value.text !== ''; });
+					pastesChanged(); closePasteEditor();
+				});
+				dialog.append(heading, editor, actions);
+				dialog.addEventListener('cancel', function(event) { event.preventDefault(); closePasteEditor(); });
+				document.body.append(dialog);
+				dialog.showModal(); editor.focus();
+			}
+			messageInput.addEventListener('paste', function(event) {
+				if (!event.clipboardData || messageInput.disabled || messageInput.readOnly) return;
+				if (event.clipboardData.files.length) return;
+				var text = event.clipboardData.getData('text/plain');
+				if (text.length < 5000) return;
+				event.preventDefault();
+				messageInput.setRangeText('', messageInput.selectionStart, messageInput.selectionEnd, 'end');
+				pastedTexts = pastedTexts.concat({ id: crypto.randomUUID(), text: text });
+				pastesChanged();
+			});
+			renderPastes();
+
 			if (window.openVibelyRequestComposerFocus) {
 				var requestInitialComposerFocus = function() {
 					var liveForm = document.getElementById(formId);
@@ -2115,7 +2221,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 									var action = document.getElementById(formId + '-primary-action');
 									if (!action) return;
 									var running = action.getAttribute('data-composer-running') === 'true';
-									var hasContent = !!(messageInput && messageInput.value.trim() !== '');
+									var hasContent = !!(messageInput && composerMessage().trim() !== '');
 									var stopEndpoint = primaryActionStopEndpoint(action);
 									var wantStop = running && !hasContent && !!stopEndpoint;
 									var wantLabel = wantStop ? 'Stop response' : 'Send message';
@@ -2174,7 +2280,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								} else parameters[name] = value;
 							});
 							var snapshot = Object.assign({
-								message: messageInput ? messageInput.value : '',
+								message: composerMessage(),
 								attachmentSessionID: sessionInput ? sessionInput.value : '',
 								modelID: fields.has('agent_id') ? fields.get('agent_id') : undefined,
 								reasoningEffort: fields.has('reasoning_effort') ? fields.get('reasoning_effort') : undefined,
@@ -2217,12 +2323,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 							function submitComposer(endpoint, intent, payload) {
 								if (!endpoint) return;
-								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : (messageInput ? messageInput.value : '');
+								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : composerMessage();
 								if (submittedMessage.trim() === '') return;
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
 									var expectedTurnInput = form.querySelector('input[name="expected_turn_id"]');
 									payload = form._captureChatSubmission(payload || {
-										message: messageInput ? messageInput.value : '',
+										message: composerMessage(),
 										attachmentSessionID: sessionInput ? sessionInput.value : '',
 										expectedTurnID: expectedTurnInput ? expectedTurnInput.value : ''
 									}, 'steer');
@@ -2340,9 +2446,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							guard.value = turnID;
 						}
 						function deferSteerWhileSendPending() {
-							if (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !messageInput.value.trim()) return false;
+							if (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !composerMessage().trim()) return false;
 							deferredSteer = {
-								message: messageInput.value,
+								message: composerMessage(),
 								attachmentSessionID: sessionInput ? sessionInput.value : ''
 							};
 							return true;
@@ -3240,7 +3346,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						request._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';
 						request._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();
 						if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;
-								request._chatSubmittedMessage = payload ? payload.message : (messageInput ? messageInput.value : '');
+								request._chatSubmittedMessage = payload ? payload.message : composerMessage();
 								request._chatSubmittedAttachmentSession = payload ? payload.attachmentSessionID : (sessionInput ? sessionInput.value : '');
 								request._chatSubmittedFallbackFromSteer = !!(payload && payload.fallbackFromSteer);					});
 
@@ -3266,7 +3372,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
-									if (messageInput && messageInput.value === submittedMessage) {
+									if (messageInput && composerMessage() === submittedMessage) {
+                                        pastedTexts = []; savePastes(); renderPastes();
 										messageInput.value = '';
 										messageInput.dispatchEvent(new Event('input', { bubbles: true }));
 										refreshPrimaryActionForInput();
