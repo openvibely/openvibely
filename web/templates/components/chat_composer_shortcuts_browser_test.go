@@ -421,7 +421,7 @@ window.htmx = {
     if (input.getAttribute('aria-label') !== 'Message') fail('iOS composer accessible name is missing');
     form.addEventListener('submit', function(event) {
       event.preventDefault();
-      window.__iosComposerRequests.push({ path: form.getAttribute('hx-post'), message: new FormData(form).get('message') });
+      window.__iosComposerRequests.push({ path: form.getAttribute('hx-post'), message: event._chatSubmissionPayload.message });
     });
 
     input.value = 'ctrl normal send'; key(input, {ctrlKey:true});

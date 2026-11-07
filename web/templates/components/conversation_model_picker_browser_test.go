@@ -559,6 +559,34 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  assert(completed[2].message==='third message'&&completed[2].fallback===false,'third send retains independent completion metadata');
  assert(message.value==='unsent newer draft'&&attachment.value==='newer-attachment'&&model.value==='b'&&effort.value==='low','completion preserves newer draft and settings');
  assert(!form._chatNextSubmissionPayload,'no stale snapshot on the form');
+
+ // Send owns the text and cards immediately, even while model settings are saving.
+ function paste(text) {const data=new DataTransfer();data.setData('text/plain',text);message.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));}
+ const cards=()=>form.querySelectorAll('[aria-label="Edit pasted text"]');
+ const large='large paste '.repeat(500),newer='next paste '.repeat(500);
+ message.value='instructions';paste(large);
+ let releaseSettings;picker._ovModelState.pending=new Promise(resolve=>{releaseSettings=resolve;});
+ form.requestSubmit();
+ assert(message.value==='' && cards().length===0,'settings wait left submitted draft editable');
+ message.value='new draft';paste(newer);
+ releaseSettings();await until(()=>completed.length===4);
+ records=await (await fetch('/records')).json();
+ assert(records[3].message==='instructions\n\n'+large,'settings wait lost submitted content');
+ assert(form._captureChatSubmission().message==='new draft\n\n'+newer,'settings completion erased new draft');
+ form.querySelector('[aria-label="Remove pasted text"]').click();
+ message.value='retry instructions';paste(large);
+ let rejectSettings;picker._ovModelState.pending=new Promise((resolve,reject)=>{rejectSettings=reject;});
+ form.requestSubmit();assert(message.value==='' && cards().length===0,'failed attempt did not clear immediately');
+ rejectSettings(Error('settings save failed'));await until(()=>cards().length===1);
+ assert(form._captureChatSubmission().message==='retry instructions\n\n'+large,'settings failure lost recovery snapshot');
+ window.ovModelPicker.close(false);
+ // An abandoned settings wait restores into shared storage for the next mount.
+ picker._ovModelState.pending=new Promise(resolve=>{releaseSettings=resolve;});
+ form.requestSubmit();assert(cards().length===0,'navigation attempt did not clear');
+ const pasteKey=form.getAttribute('data-attachment-state-key')+'-pasted-text';
+ form.remove();releaseSettings();
+ await until(()=>window._ovPasteDrafts[pasteKey]?.length===2);
+ assert(window._ovPasteDrafts[pasteKey].map(item=>item.text).join('\n\n')==='retry instructions\n\n'+large,'navigation lost abandoned submission');
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);await fetch('/release');}
 })();</script></body></html>`)

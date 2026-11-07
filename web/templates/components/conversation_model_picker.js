@@ -1019,6 +1019,7 @@
       const payload = form._captureChatSubmission(
         form._chatNextSubmissionPayload,
       );
+      form._beginChatSubmission?.(payload);
       payload.managedModelSelection = !!form.dataset.conversationTaskId;
       // This attempt owns the captured snapshot while settings load. Do not
       // leave it on the form for a later Send if loading or saving fails.
@@ -1042,7 +1043,10 @@
         .then(() => {
           if (btn.dataset.currentValue === payload.modelID && s.error)
             throw Error(s.error);
-          if (!form.isConnected) return;
+          if (!form.isConnected) {
+            form._chatSubmissionFailed?.(payload);
+            return;
+          }
           const draft = message?.value;
           const draftAttachments = attachment?.value;
           const draftModel = model?.value;
@@ -1085,7 +1089,7 @@
               form._chatNextSubmissionPayload = null;
             btn._ovResubmit = false;
             managedSelection.remove();
-            if (message) message.value = payload.draftState?.cleared && draft === payload.composerText ? "" : draft;
+            if (message) message.value = draft;
             if (attachment) attachment.value = draftAttachments;
             if (model) model.value = draftModel;
             if (effort) effort.value = draftEffort;

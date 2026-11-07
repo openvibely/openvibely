@@ -2080,7 +2080,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				savePastes();
 				refreshPasteComposers();
 			}
-			// Clear at request handoff; completion must never clear a newer draft.
+			// Clear when Send captures the draft, before settings saves or request queues.
 			form._beginChatSubmission = function(payload) {
 				if (!payload || payload.draftState.cleared) return;
 				payload.draftState.cleared = true;
@@ -2397,6 +2397,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						form.addEventListener('submit', function(event) {
 							if (event.target !== form) return;
 							event._chatSubmissionPayload = form._captureChatSubmission(event._chatSubmissionPayload || form._chatNextSubmissionPayload);
+							form._beginChatSubmission(event._chatSubmissionPayload);
 
 							form._chatNextSubmissionPayload = null;
 						}, true);
@@ -2440,10 +2441,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 									if (steerRequestInFlight) {
 										if (signature === steerRequestSignature || queuedSteerSubmissions.some(function(submission) { return submission.signature === signature; })) return;
 
+										form._beginChatSubmission(payload);
 										queuedSteerSubmissions.push({signature: signature, payload: payload});
 										return;
 									}
 
+									form._beginChatSubmission(payload);
 									steerRequestSignature = signature;
 								}
 								var visibleMessageBeforePayload = messageInput ? messageInput.value : '';
@@ -2487,7 +2490,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 									} finally {
 										if (form._chatNextSubmissionPayload === payload) form._chatNextSubmissionPayload = null;
 										if (restorePayloadValues) {
-											if (messageInput) messageInput.value = payload && payload.draftState.cleared && visibleMessageBeforePayload === payload.composerText ? '' : visibleMessageBeforePayload;
+											if (messageInput) messageInput.value = visibleMessageBeforePayload;
 											if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
 										}
 									}
@@ -2498,7 +2501,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								safeSubmit();
 							} finally {
 								if (restorePayloadValues) {
-									if (messageInput) messageInput.value = payload && payload.draftState.cleared && visibleMessageBeforePayload === payload.composerText ? '' : visibleMessageBeforePayload;
+									if (messageInput) messageInput.value = visibleMessageBeforePayload;
 									if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
 								}
 							}
@@ -2557,6 +2560,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							if (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !composerMessage().trim()) return false;
 							restoreSubmittedDraft(deferredSteer);
 							deferredSteer = form._captureChatSubmission(null, 'steer');
+							form._beginChatSubmission(deferredSteer);
 
 							return true;
 						}
