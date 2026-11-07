@@ -30,8 +30,6 @@ import (
 	"github.com/openvibely/openvibely/internal/util"
 )
 
-var hexIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
-
 const (
 	maxMessageLength         = 4096 // Telegram message length limit
 	telegramProcessTimeout   = 5 * time.Minute
@@ -2159,35 +2157,6 @@ func splitMessage(text string, maxLen int) []string {
 	}
 
 	return messages
-}
-
-// escapeTelegramCommands prevents forward slashes in user text from being
-// detected as bot commands by inserting a zero-width space after each slash.
-func escapeTelegramCommands(s string) string {
-	return strings.ReplaceAll(s, "/", "/\u200B")
-}
-
-// getStatusIcon returns an emoji icon for task status
-func getStatusIcon(status models.TaskStatus) string {
-	switch status {
-	case models.StatusPending:
-		return "⏳"
-	case models.StatusRunning:
-		return "🔄"
-	case models.StatusCompleted:
-		return "✅"
-	case models.StatusFailed:
-		return "❌"
-	case models.StatusCancelled:
-		return "🚫"
-	default:
-		return "❓"
-	}
-}
-
-// isHexID returns true if the input looks like a 32-character hex project ID
-func isHexID(s string) bool {
-	return hexIDPattern.MatchString(s)
 }
 
 // ParseTaskID extracts a task ID from various formats (with or without backticks)

@@ -174,27 +174,6 @@ func TestTelegramService_SplitMessage(t *testing.T) {
 	}
 }
 
-func TestTelegramService_GetStatusIcon(t *testing.T) {
-	tests := []struct {
-		status models.TaskStatus
-		want   string
-	}{
-		{models.StatusPending, "⏳"},
-		{models.StatusRunning, "🔄"},
-		{models.StatusCompleted, "✅"},
-		{models.StatusFailed, "❌"},
-		{models.StatusCancelled, "🚫"},
-		{"unknown", "❓"},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.status), func(t *testing.T) {
-			got := getStatusIcon(tt.status)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestTelegramService_GetActiveProject(t *testing.T) {
 	env := teststores.New(t)
 	projectRepo := env.Projects
@@ -231,72 +210,6 @@ func TestTelegramService_GetActiveProject(t *testing.T) {
 	svc.userProjects[userID2] = otherProject.ID
 	projectID2 := svc.getActiveProject(userID2)
 	assert.Equal(t, otherProject.ID, projectID2)
-}
-
-func TestTelegramService_EscapeTelegramCommands(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "no slashes",
-			input: "Hello World",
-			want:  "Hello World",
-		},
-		{
-			name:  "slash command in title",
-			input: "Refactor task chat to reuse /chat implementation",
-			want:  "Refactor task chat to reuse /\u200Bchat implementation",
-		},
-		{
-			name:  "multiple slashes",
-			input: "Add /api/projects endpoint for /chrome extension",
-			want:  "Add /\u200Bapi/\u200Bprojects endpoint for /\u200Bchrome extension",
-		},
-		{
-			name:  "slash at start",
-			input: "/start the process",
-			want:  "/\u200Bstart the process",
-		},
-		{
-			name:  "empty string",
-			input: "",
-			want:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := escapeTelegramCommands(tt.input)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestTelegramService_IsHexID(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  bool
-	}{
-		{"valid 32-char hex", "b184292efa07a415fc59967a5fc328d1", true},
-		{"valid all lowercase", "0123456789abcdef0123456789abcdef", true},
-		{"short string", "abc123", false},
-		{"project name", "openvibely", false},
-		{"mixed case name", "MyProject", false},
-		{"uppercase hex (not valid - IDs are lowercase)", "B184292EFA07A415FC59967A5FC328D1", false},
-		{"too short hex", "b184292efa07a415", false},
-		{"too long hex", "b184292efa07a415fc59967a5fc328d1aa", false},
-		{"empty string", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isHexID(tt.input)
-			assert.Equal(t, tt.want, got)
-		})
-	}
 }
 
 func TestTelegramService_NewTelegramService_EmptyToken(t *testing.T) {

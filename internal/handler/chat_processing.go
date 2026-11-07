@@ -2511,13 +2511,6 @@ func (h *Handler) recordStreamingUsage(ctx context.Context, params streamingResp
 	}, params.Agent, result)
 }
 
-func firstInt(values []int) int {
-	if len(values) == 0 {
-		return 0
-	}
-	return values[0]
-}
-
 func parseCompletionOptions(options ...interface{}) (int, service.ChannelReplyContext) {
 	var telegramMessageID int
 	var channelReply service.ChannelReplyContext
