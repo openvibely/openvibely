@@ -192,6 +192,11 @@ func TestInvitedMemberNeedsExplicitProjectGrant(t *testing.T) {
 		} else {
 			require.Len(t, projects, 1)
 		}
+		if role != "" {
+			board := orgRequest(app, http.MethodGet, "/tasks?project_id="+project.ID, nil, cookie)
+			require.Equal(t, http.StatusOK, board.Code, board.Body.String())
+			require.Contains(t, board.Body.String(), task.Title)
+		}
 		if role != "editor" {
 			created := orgRequest(app, http.MethodPost, "/tasks?project_id="+project.ID, url.Values{"title": {"Forbidden task"}, "prompt": {"No"}, "category": {"backlog"}}, cookie)
 			require.Equal(t, http.StatusNotFound, created.Code, created.Body.String())
