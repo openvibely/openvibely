@@ -2944,7 +2944,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if task == nil {
+	// Page turns require their owning surface's authorization and context.
+	// Never admit them through the ordinary coding-task follow-up path.
+	if task == nil || task.Category == models.CategoryPageChat {
 		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
 			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s for missing task: %v", sessionID, cleanupErr)
 		}

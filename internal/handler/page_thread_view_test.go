@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/models"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,4 +39,44 @@ func TestPageUsesTaskThreadViewAndAuthorizedReaders(t *testing.T) {
 	require.NoError(t, env.h.pagePlugins.Disable(t.Context(), env.inA.ID))
 	denied := env.do(t, http.MethodGet, base, "", nil)
 	require.Equal(t, http.StatusNotFound, denied.Code)
+}
+
+func TestTaskThreadSendRejectsPageConversations(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		name := "enabled"
+		if disabled {
+			name = "disabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			env := setupPluginPages(t)
+			env.openPage(t, env.inA)
+			taskID, err := env.mgr.Store().GetConversationTask(t.Context(), env.inA.ID)
+			require.NoError(t, err)
+			require.NotEmpty(t, taskID)
+			if disabled {
+				require.NoError(t, env.mgr.Disable(t.Context(), env.inA.ID))
+			}
+			before, err := env.h.taskRepo.GetByID(t.Context(), taskID)
+			require.NoError(t, err)
+			rec := env.do(t, http.MethodPost, "/tasks/"+taskID+"/thread?project_id="+env.projA.ID, "message=bypass&agent_id="+env.agent.ID, map[string]string{"HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded"})
+			require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+			require.Empty(t, env.starts, "must not launch a coding response")
+			after, err := env.h.taskRepo.GetByID(t.Context(), taskID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryPageChat, after.Category)
+			require.Equal(t, before.Status, after.Status)
+			require.Equal(t, before.AgentID, after.AgentID)
+			executions, err := env.h.execRepo.ListByTaskChronological(t.Context(), taskID)
+			require.NoError(t, err)
+			require.Empty(t, executions)
+			pending, err := env.h.threadInputRepo.ListPendingForTask(t.Context(), taskID)
+			require.NoError(t, err)
+			require.Empty(t, pending)
+			if !disabled {
+				sendPageTest(t, env, env.inA, "authorized page message")
+				require.Len(t, env.starts, 1)
+				require.NotNil(t, env.starts[0].PageConversation)
+			}
+		})
+	}
 }
