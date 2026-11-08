@@ -55,7 +55,7 @@ templ PluginPageContent(v PluginPageView) {
 			<div class="min-w-0">
 				<h2 class="text-2xl font-bold truncate">{ v.Title }</h2>
 				<div class="text-xs opacity-60">
-					{ v.PluginName } { v.Version } · project <span data-plugin-owning-project>{ v.OwningProject }</span>
+					{ v.PluginName } { v.Version } · project <span>{ v.OwningProject }</span>
 				</div>
 			</div>
 			if v.ChatEnabled {
@@ -155,11 +155,9 @@ type PluginPermission struct {
 }
 
 type PluginSettingsPackage struct {
-	Package     models.PagePluginPackage
-	Pages       []string
-	Permissions []PluginPermission
-	RunsProcess bool
-	InUse       int
+	Package models.PagePluginPackage
+	Pages   []string
+	InUse   int
 }
 
 type PluginSettingsView struct {

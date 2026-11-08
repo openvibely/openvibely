@@ -857,7 +857,7 @@ func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pag
 			continue
 		}
 		n, _ := store.CountInstancesForPackage(ctx, pkgs[i].ID)
-		row := pages.PluginSettingsPackage{Package: pkgs[i], RunsProcess: man.RunsProcess(), InUse: n, Permissions: pluginPermissions(man)}
+		row := pages.PluginSettingsPackage{Package: pkgs[i], InUse: n}
 		for _, p := range man.Pages {
 			row.Pages = append(row.Pages, p.ID)
 		}
