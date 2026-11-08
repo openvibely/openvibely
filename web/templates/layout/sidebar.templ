@@ -537,7 +537,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 										if (data.project_id === currentProjectID || currentProjectID === '__all_projects__') {
 											const terminalStatuses = ['completed', 'failed', 'cancelled'];
 											if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
-												const taskName = data.task_name || 'Task';
+												const rawTaskName = data.task_name || 'Task';
+												const taskName = rawTaskName.startsWith('Page chat: ') ? rawTaskName.replace(/\s+\[plugin:[^\]]+\]$/, '') : rawTaskName;
 												window.showToast(taskName, data.status, data.task_id, {clickURL: '/tasks/' + encodeURIComponent(data.task_id) + '?project_id=' + encodeURIComponent(currentProjectID)});
 											}
 										}
