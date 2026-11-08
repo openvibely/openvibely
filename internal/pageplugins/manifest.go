@@ -33,11 +33,11 @@ const (
 	PermissionBackend = "backend.exec" // run a local backend process when the page is enabled
 )
 
-var knownPermissions = map[string]string{
-	PermissionStorage: "Store per-instance data on this OpenVibely server",
-	PermissionEvents:  "Publish and receive live refresh events",
-	PermissionAgent:   "Ask the project's agent to analyze page data",
-	PermissionBackend: "Run a local executable with your OpenVibely user's OS permissions",
+var knownPermissions = map[string]struct{}{
+	PermissionStorage: {},
+	PermissionEvents:  {},
+	PermissionAgent:   {},
+	PermissionBackend: {},
 }
 
 type Manifest struct {
