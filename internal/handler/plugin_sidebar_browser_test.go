@@ -62,7 +62,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  await wait(()=>document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]'),'Enabled Sales missing at startup');
  const entry=document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]');
  if(!entry.textContent.includes('Sales'))throw Error('Sales label missing');
- if(!entry.querySelector('a').hasAttribute('data-tooltip-disabled'))throw Error('Sales tooltip enabled');
+ if(entry.querySelector('a').hasAttribute('data-tooltip-disabled') || entry.querySelector('a').dataset.tip!=='Sales')throw Error('Sales rail tooltip missing');
  if(!entry.textContent.includes('📊'))throw Error('Sales custom icon missing');
  if(!entry.getClientRects().length)throw Error('Sales entry hidden: '+[entry,...(function*(){let p=entry.parentElement;while(p){yield p;p=p.parentElement}})()].map(e=>e.tagName+'#'+e.id+'.'+e.className+':'+getComputedStyle(e).display).join(' / '));
  const clickAction=async action=>{
@@ -74,6 +74,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  await wait(()=>document.querySelector('#plugin-page-root'),'Page did not open');
  await wait(()=>document.querySelector('#plugin-startup')?.dataset.state==='loaded','Initial frame failed');
  const pageFrame=document.getElementById('plugin-frame');
+ if(!pageFrame.hasAttribute('data-tooltip-disabled'))throw Error('Page frame tooltip enabled');
  await wait(()=>pageFrame.style.getPropertyValue('--superellipse-clip'),'Page corners not shaped');
  const clip=pageFrame.style.getPropertyValue('--superellipse-clip');
  if(!clip.includes(pageFrame.clientWidth.toFixed(2)+'px '+pageFrame.clientHeight.toFixed(2)+'px') || !clip.includes('0.00px '+pageFrame.clientHeight.toFixed(2)+'px'))throw Error('Page bottom corners are not square');
