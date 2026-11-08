@@ -32,7 +32,7 @@ func TestProjectSharingTransferEligibility(t *testing.T) {
 			found := false
 			var walk func(*html.Node)
 			walk = func(n *html.Node) {
-				if n.Type == html.ElementNode && n.Data == "button" && n.FirstChild != nil && n.FirstChild.Data == "Transfer ownership" {
+				if n.Type == html.ElementNode && n.Data == "button" && n.FirstChild != nil && (n.FirstChild.Data == "Transfer ownership…" || n.FirstChild.Data == "Review transfer") {
 					isDisabled := false
 					for _, a := range n.Attr {
 						if a.Key == "disabled" {

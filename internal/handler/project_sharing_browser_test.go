@@ -57,6 +57,17 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
   assert(Math.abs(box.getBoundingClientRect().height-generalHeight)<2,'sharing changed modal height');
   assert(!panel().querySelector('[data-sharing-delete]').hidden,'Sharing must include Delete Project');
   assert(!panel().querySelector('[data-sharing-status]'),'unneeded pending status');
+  const heading=panel().querySelector('h3'), description=heading.nextElementSibling;
+  assert(getComputedStyle(heading).marginBottom==='8px','heading spacing differs from mock');
+  assert(getComputedStyle(description).marginBottom==='20px','description spacing differs from mock');
+  const cell=panel().querySelector('.sharing-members td');
+  assert(getComputedStyle(cell).paddingTop==='14px','row spacing differs from mock');
+  assert(getComputedStyle(cell).borderBottomWidth==='1px','missing row divider');
+  assert(panel().querySelector('[data-sharing-add-role]').getBoundingClientRect().height===36,'control height differs from mock');
+  assert(panel().querySelector('[data-sharing-add-role]').getBoundingClientRect().width===150,'role width differs from mock');
+  assert(panel().textContent.includes('(you)'),'current user label missing');
+  assert(panel().textContent.includes('Organization owner'),'organization role missing');
+
   assert(panel().querySelector('[data-sharing-save]').textContent.trim()==='Save','inconsistent Save label');
   assert(panel().querySelector('[data-sharing-cancel]').className===document.getElementById('edit-project-cancel-button').className,'inconsistent Cancel style');
   assert(document.getElementById('edit-project-save-button').closest('.modal-action').hidden,'general Save must hide on Sharing');
@@ -71,6 +82,7 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
   add.querySelector('[data-sharing-add]').click();
   assert(rows().some(r=>r.textContent.includes('browser-member')),'pending member missing');
   assert(!panel().querySelector('[data-sharing-save]').disabled,'Save not enabled');
+  assert(panel().querySelector('[data-sharing-transfer-toggle]').disabled,'pending changes must block ownership transfer');
   panel().querySelector('[data-sharing-cancel]').click();
   assert(!rows().some(r=>r.textContent.includes('browser-member')),'Cancel retained pending member');
   document.getElementById('edit_project_modal').showModal();
@@ -103,7 +115,11 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
   assert(!rows().some(r=>r.textContent.includes('browser-member')),'removal not persisted');
   const audit=panel().querySelector('details');
   assert(audit&&audit.querySelectorAll('tbody tr').length>=2,'audit rows missing');
-  const transfer=Array.from(panel().querySelectorAll('button')).find(b=>b.textContent.includes('Transfer ownership'));
+  const transferPanel=panel().querySelector('[data-sharing-transfer-panel]');
+  assert(transferPanel.hidden,'transfer controls should start hidden');
+  panel().querySelector('[data-sharing-transfer-toggle]').click();
+  assert(!transferPanel.hidden,'transfer controls did not expand');
+  const transfer=panel().querySelector('[data-sharing-transfer] button');
   assert(transfer&&!transfer.disabled,'owner transfer unavailable');
   transfer.form.querySelector('select[name=user_id]').value='` + member.UserID + `';
   transfer.click();

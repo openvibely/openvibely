@@ -4,9 +4,27 @@ import "github.com/openvibely/openvibely/internal/models"
 
 templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember, users []models.OrgUser, audit []models.ProjectAuditEvent, canManageSharing bool, message string) {
 	<section id="project-sharing">
- <div data-project-sharing-content class="space-y-4">
+ <style>
+ #project-sharing h3 { font-size:16px; font-weight:650; margin:0 0 8px; }
+ #project-sharing .sharing-description { margin:0 0 20px; line-height:1.5; }
+ #project-sharing .sharing-members { width:100%; border-collapse:collapse; }
+ #project-sharing .sharing-members :is(td,th) { padding:14px 0; text-align:left; border-bottom:1px solid color-mix(in srgb,currentColor 18%,transparent); }
+ #project-sharing .sharing-members th { font-size:12px; font-weight:500; opacity:.7; }
+ #project-sharing .sharing-name { font-weight:600; }
+ #project-sharing .sharing-meta { font-size:12px; opacity:.65; margin-top:3px; font-weight:400; }
+ #project-sharing [data-project-sharing-content] :is(.btn,.select) { min-height:36px; height:36px; }
+ #project-sharing .select { font-size:13px; }
+ #project-sharing select[aria-label="Project role"], #project-sharing [data-sharing-add-role] { width:150px; }
+ #project-sharing .sharing-add { display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; }
+ #project-sharing [data-sharing-add-user] { flex:1; min-width:160px; }
+ #project-sharing .sharing-section { border-top:1px solid color-mix(in srgb,currentColor 18%,transparent); margin-top:26px; padding-top:22px; }
+ #project-sharing [data-sharing-transfer-panel] { margin-top:14px; }
+ #project-sharing [hidden] { display:none !important; }
+ @media(max-width:560px) { #project-sharing select[aria-label="Project role"], #project-sharing [data-sharing-add-role] { width:116px; } #project-sharing .sharing-members td { padding:12px 4px; } }
+ </style>
+ <div data-project-sharing-content>
 		<h3 class="text-base font-semibold">Project access</h3>
-		<p class="text-sm opacity-70">Only people granted access and organization admins can access this project.</p>
+		<p class="text-sm opacity-70 sharing-description">Only people granted access and organization admins can access this project.</p>
 		if !canManageSharing {
 			<p class="text-sm opacity-70">Only the project owner and organization admins can change sharing and membership.</p>
 		} else {
@@ -16,13 +34,13 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 			<form data-sharing-form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML">
 				<input type="hidden" name="action" value="members"/>
 				<input type="hidden" name="changes" value="{}"/>
-				<table class="table table-sm">
+				<table class="sharing-members">
 					<thead><tr><th>Member</th><th>Project role</th><th></th></tr></thead>
 					<tbody data-sharing-members>
 						for _, user := range users {
 							if user.UserID == policy.OwnerUserID || user.IsOrgAdmin() {
 								<tr>
-									<td>{ user.Username }</td>
+									<td>@projectSharingIdentity(user.UserID, user.Username, users)</td>
 									<td>
 										<span class="badge badge-outline">
 											if user.UserID == policy.OwnerUserID {
@@ -39,7 +57,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 						for _, member := range members {
 							if !projectSharingInherited(users, policy.OwnerUserID, member.UserID) {
 								<tr data-sharing-user={ member.UserID } data-original-role={ member.Role }>
-									<td>{ member.Username }</td>
+									<td>@projectSharingIdentity(member.UserID, member.Username, users)</td>
 									<td>
 										@projectSharingRole(member.Role)
 									</td>
@@ -49,7 +67,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 						}
 					</tbody>
 				</table>
-				<div class="flex flex-wrap gap-2 mt-4">
+				<div class="sharing-add">
 					<select class="select select-bordered select-sm flex-1" data-sharing-add-user aria-label="Member">
 						<option value="">Select organization member…</option>
 						for _, user := range users {
@@ -62,9 +80,9 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 					<button type="button" class="btn btn-outline btn-sm" data-sharing-add>Add member</button>
 				</div>
 			</form>
-			<div class="border-t border-base-300 pt-4 space-y-3">
+			<div class="sharing-section">
 				<h3 class="text-base font-semibold">Ownership</h3>
-				<p class="text-sm">
+				<p class="text-sm sharing-description">
 					Owner:
 					for _, user := range users {
 						if user.UserID == policy.OwnerUserID {
@@ -72,7 +90,8 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 						}
 					}
 				</p>
-				<p class="text-xs opacity-60">Transfer takes effect immediately after confirmation.</p>
+				<button type="button" class="btn btn-outline btn-sm" data-sharing-transfer-toggle aria-expanded="false" aria-controls="sharing-transfer-panel" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>Transfer ownership…</button>
+ <div id="sharing-transfer-panel" data-sharing-transfer-panel hidden>
 				<form data-sharing-transfer hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" hx-confirm="Transfer ownership of this project?" class="flex flex-wrap gap-2">
 					<input type="hidden" name="action" value="transfer"/>
 					<select name="user_id" class="select select-bordered select-sm" aria-label="New owner" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>
@@ -82,15 +101,16 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 							}
 						}
 					</select>
-					<button type="submit" class="btn btn-outline btn-sm" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>Transfer ownership</button>
+					<button type="submit" class="btn btn-outline btn-sm" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>Review transfer</button>
 				</form>
+ </div>
 				if !projectSharingHasTransferCandidate(users, policy.OwnerUserID) {
 					<p class="text-sm opacity-70" role="status">Add another active organization member before transferring ownership.</p>
 				}
 				<p class="text-xs opacity-60 hidden" data-sharing-transfer-hint>Save or discard membership changes before transferring ownership.</p>
 			</div>
 		}
-		<details>
+		<details class="sharing-section">
 			<summary class="cursor-pointer text-sm font-medium">Recent access and execution audit</summary>
 			<div class="overflow-x-auto">
 				<table class="table table-xs">
@@ -137,6 +157,8 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
    const initial = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.dataset.originalRole]));
    const transfer = root.querySelector('[data-sharing-transfer]');
    const transferDisabled = transfer.querySelector('button').disabled;
+   const transferToggle = root.querySelector('[data-sharing-transfer-toggle]');
+   transferToggle.onclick=()=>{const panel=root.querySelector('[data-sharing-transfer-panel]');panel.hidden=!panel.hidden;transferToggle.setAttribute('aria-expanded',String(!panel.hidden));};
    function update() {
     const current = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.querySelector('select').value]));
     const changes = {};
@@ -146,6 +168,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
     const dirty=Object.keys(changes).length>0;
     save.disabled=!dirty;
     transfer.querySelector('button').disabled=dirty||transferDisabled;
+    transferToggle.disabled=dirty||transferDisabled;
     root.querySelector('[data-sharing-transfer-hint]').classList.toggle('hidden',!dirty);
     for(const option of form.querySelector('[data-sharing-add-user]').options) option.disabled=current.has(option.value);
    }
@@ -154,7 +177,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
    form.querySelector('[data-sharing-add]').onclick=()=>{
     const user=form.querySelector('[data-sharing-add-user]');if(!user.value||user.selectedOptions[0].disabled){user.focus();return;}
     const row=document.createElement('tr');row.dataset.sharingUser=user.value;
-    const name=document.createElement('td');name.textContent=user.selectedOptions[0].textContent;
+    const name=document.createElement('td');name.textContent=user.selectedOptions[0].textContent;name.className="sharing-name";
     const role=document.createElement('td');const select=form.querySelector('[data-sharing-add-role]').cloneNode(true);select.removeAttribute('data-sharing-add-role');select.setAttribute('aria-label','Project role');select.value=form.querySelector('[data-sharing-add-role]').value;role.append(select);
     const actions=document.createElement('td');const remove=document.createElement('button');remove.type='button';remove.className='btn btn-ghost btn-xs text-error';remove.dataset.sharingRemove='';remove.textContent='Remove';actions.append(remove);
     row.append(name,role,actions);body.append(row);user.value='';update();
@@ -193,4 +216,25 @@ func projectSharingInherited(users []models.OrgUser, owner, id string) bool {
 		}
 	}
 	return false
+}
+
+
+templ projectSharingIdentity(id string, name string, users []models.OrgUser) {
+ {{ principal, _ := models.PrincipalFromContext(ctx) }}
+ <div class="sharing-name">{ name }
+ if principal.UserID == id {
+ <span class="sharing-meta"> (you)</span>
+ }
+ </div>
+ for _, user := range users {
+ if user.UserID == id && user.IsOrgAdmin() {
+ <div class="sharing-meta">
+ if user.Role == "owner" {
+ Organization owner
+ } else {
+ Organization admin
+ }
+ </div>
+ }
+ }
 }
