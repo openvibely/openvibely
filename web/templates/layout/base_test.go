@@ -1877,7 +1877,7 @@ global.clearTimeout = () => {};
 global.setInterval = (fn, ms) => { if(ms === 20000) renewal = fn; else expiry = fn; return ms; };
 global.clearInterval = ms => { if(ms === 20000) renewal = null; else expiry = null; };
 global.window = {addEventListener: (n,f) => listeners[n]=f, removeEventListener: n => delete listeners[n], alert: m => {throw Error(m)}};
-const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {getBoundingClientRect:()=>({left:100, right:500, top:100, bottom:400})}, '[role="alert"]': {}, '[type="submit"]': {}};
+const controls = {textarea: {focus(){}}, '[data-cancel]': {}, '[data-pending-editor-close]': {}, form: {getBoundingClientRect:()=>({left:100, right:500, top:100, bottom:400})}, '[role="alert"]': {}, '[type="submit"]': {}};
 let closed = 0;
 let shown = 0;
 const dialogEvents = {};
@@ -2092,7 +2092,7 @@ global.fetch = (url, options) => {
  listeners.pagehide();
  // Dismissal must still work after access is reduced to Viewer. The rejected
  // release is attempted once; local cleanup must not retry or save the draft.
- for (const dismiss of ['cancel', 'escape', 'backdrop']) {
+ for (const dismiss of ['cancel', 'close', 'escape', 'backdrop']) {
   global.fetch = workingFetch;
   opening = window.editPendingThreadInput(button);
   completeHold(); await opening;
@@ -2105,6 +2105,7 @@ global.fetch = (url, options) => {
    return new Response(JSON.stringify({message:'Editor access required'}), {status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
   };
   if (dismiss === 'cancel') await controls['[data-cancel]'].onclick();
+  else if (dismiss === 'close') await controls['[data-pending-editor-close]'].onclick();
   else if (dismiss === 'escape') dialogEvents.cancel({preventDefault(){}});
   else {
    dialogEvents.pointerdown({button:0,target:dialog,clientX:0,clientY:0});
