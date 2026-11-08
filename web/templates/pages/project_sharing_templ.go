@@ -373,17 +373,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<button type=\"button\" class=\"btn\" data-sharing-cancel>Cancel</button> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if canManageSharing {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<button type=\"button\" class=\"btn btn-primary\" data-sharing-save>Save</button>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</div><script>\n  (() => {\n   const root = document.getElementById('project-sharing');\n   const deleteButton = root.querySelector('[data-sharing-delete]');\n   if (deleteButton) deleteButton.hidden = !document.getElementById('delete_project_confirm_modal');\n   const form = root.querySelector('[data-sharing-form]');\n   const cancel = root.querySelector('[data-sharing-cancel]');\n   const save = root.querySelector('[data-sharing-save]');\n   if (!form) { cancel.onclick=()=>root.closest('dialog')?.close(); return; }\n   const body = form.querySelector('[data-sharing-members]');\n   const original = body.innerHTML;\n   const initial = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.dataset.originalRole]));\n   const transfer = root.querySelector('[data-sharing-transfer]');\n   const transferDisabled = transfer.querySelector('button').disabled;\n   const transferToggle = root.querySelector('[data-sharing-transfer-toggle]');\n   transferToggle.onclick=()=>{const panel=root.querySelector('[data-sharing-transfer-panel]');panel.hidden=!panel.hidden;transferToggle.setAttribute('aria-expanded',String(!panel.hidden));};\n   function update() {\n    const current = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.querySelector('select').value]));\n    const changes = {};\n    for (const [id,role] of current) if(initial.get(id)!==role) changes[id]=role;\n    for (const id of initial.keys()) if(!current.has(id)) changes[id]='';\n    form.elements.changes.value=JSON.stringify(changes);\n    const dirty=Object.keys(changes).length>0;\n    save.disabled=false;\n    transfer.querySelector('button').disabled=dirty||transferDisabled;\n    transferToggle.disabled=dirty||transferDisabled;\n    root.querySelector('[data-sharing-transfer-hint]').classList.toggle('hidden',!dirty);\n    for(const option of form.querySelector('[data-sharing-add-user]').options) option.disabled=current.has(option.value);\n   }\n   form.addEventListener('change',update);\n   body.addEventListener('click',event=>{const remove=event.target.closest('[data-sharing-remove]');if(remove){remove.closest('tr').remove();update();}});\n   form.querySelector('[data-sharing-add]').onclick=()=>{\n    const user=form.querySelector('[data-sharing-add-user]');if(!user.value||user.selectedOptions[0].disabled){user.focus();return;}\n    const row=document.createElement('tr');row.dataset.sharingUser=user.value;\n    const name=document.createElement('td');name.textContent=user.selectedOptions[0].textContent;name.className=\"sharing-name\";\n    const role=document.createElement('td');const select=form.querySelector('[data-sharing-add-role]').cloneNode(true);select.removeAttribute('data-sharing-add-role');select.setAttribute('aria-label','Project role');select.value=form.querySelector('[data-sharing-add-role]').value;role.append(select);\n    const actions=document.createElement('td');const remove=document.createElement('button');remove.type='button';remove.className='btn btn-ghost btn-xs text-error';remove.dataset.sharingRemove='';remove.textContent='Remove';actions.append(remove);\n    row.append(name,role,actions);body.append(row);user.value='';update();\n   };\n   let busy=false;\n   save.onclick=()=>{if(!busy)form.requestSubmit();};\n   form.addEventListener('htmx:beforeRequest',()=>{busy=true;root.querySelectorAll('button,select').forEach(control=>control.disabled=true);});\n   cancel.onclick=()=>{body.innerHTML=original;update();root.closest('dialog')?.close();};\n   form.addEventListener('htmx:afterRequest',event=>{\n    busy=false;root.querySelectorAll('button,select').forEach(control=>control.disabled=false);update();\n    if(event.detail.successful && event.detail.xhr.status === 204) { window.showToast?.('Project access saved','completed'); root.closest('dialog')?.close(); return; }\n    if(window.openVibelyPermissionErrors?.htmx(event.detail.xhr))return;\n    window.showToast?.('Could not confirm the save. Reopen settings to check.','failed');\n   });\n   update();\n  })();\n  </script></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<button type=\"button\" class=\"btn\" data-sharing-cancel>Cancel</button> <button type=\"button\" class=\"btn btn-primary\" data-sharing-save>Save</button></div><script>\n  (() => {\n   const root = document.getElementById('project-sharing');\n   const deleteButton = root.querySelector('[data-sharing-delete]');\n   if (deleteButton) deleteButton.hidden = !document.getElementById('delete_project_confirm_modal');\n   const form = root.querySelector('[data-sharing-form]');\n   const cancel = root.querySelector('[data-sharing-cancel]');\n   const save = root.querySelector('[data-sharing-save]');\n   if (!form) { cancel.onclick=()=>root.closest('dialog')?.close(); save.onclick=()=>root.closest('dialog')?.saveProjectSettings?.(); return; }\n   const body = form.querySelector('[data-sharing-members]');\n   const original = body.innerHTML;\n   const initial = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.dataset.originalRole]));\n   const transfer = root.querySelector('[data-sharing-transfer]');\n   const transferDisabled = transfer.querySelector('button').disabled;\n   const transferToggle = root.querySelector('[data-sharing-transfer-toggle]');\n   transferToggle.onclick=()=>{const panel=root.querySelector('[data-sharing-transfer-panel]');panel.hidden=!panel.hidden;transferToggle.setAttribute('aria-expanded',String(!panel.hidden));};\n   function update() {\n    const current = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.querySelector('select').value]));\n    const changes = {};\n    for (const [id,role] of current) if(initial.get(id)!==role) changes[id]=role;\n    for (const id of initial.keys()) if(!current.has(id)) changes[id]='';\n    form.elements.changes.value=JSON.stringify(changes);\n    const dirty=Object.keys(changes).length>0;\n    save.disabled=false;\n    transfer.querySelector('button').disabled=dirty||transferDisabled;\n    transferToggle.disabled=dirty||transferDisabled;\n    root.querySelector('[data-sharing-transfer-hint]').classList.toggle('hidden',!dirty);\n    for(const option of form.querySelector('[data-sharing-add-user]').options) option.disabled=current.has(option.value);\n   }\n   form.addEventListener('change',update);\n   body.addEventListener('click',event=>{const remove=event.target.closest('[data-sharing-remove]');if(remove){remove.closest('tr').remove();update();}});\n   form.querySelector('[data-sharing-add]').onclick=()=>{\n    const user=form.querySelector('[data-sharing-add-user]');if(!user.value||user.selectedOptions[0].disabled){user.focus();return;}\n    const row=document.createElement('tr');row.dataset.sharingUser=user.value;\n    const name=document.createElement('td');name.textContent=user.selectedOptions[0].textContent;name.className=\"sharing-name\";\n    const role=document.createElement('td');const select=form.querySelector('[data-sharing-add-role]').cloneNode(true);select.removeAttribute('data-sharing-add-role');select.setAttribute('aria-label','Project role');select.value=form.querySelector('[data-sharing-add-role]').value;role.append(select);\n    const actions=document.createElement('td');const remove=document.createElement('button');remove.type='button';remove.className='btn btn-ghost btn-xs text-error';remove.dataset.sharingRemove='';remove.textContent='Remove';actions.append(remove);\n    row.append(name,role,actions);body.append(row);user.value='';update();\n   };\n   save.onclick=()=>root.closest('dialog')?.saveProjectSettings?.();\n   form.addEventListener('submit',event=>{event.preventDefault();event.stopImmediatePropagation();root.closest('dialog')?.saveProjectSettings?.();},true);\n   cancel.onclick=()=>{body.innerHTML=original;update();root.closest('dialog')?.close();};\n   update();\n  })();\n  </script></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -408,37 +398,37 @@ func projectSharingRole(role string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<select class=\"select select-bordered select-sm\" aria-label=\"Project role\"><option value=\"viewer\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<select class=\"select select-bordered select-sm\" aria-label=\"Project role\"><option value=\"viewer\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if role == "viewer" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, " selected")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, ">Viewer</option> <option value=\"editor\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if role == "editor" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, " selected")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, ">Viewer</option> <option value=\"editor\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, ">Editor</option> <option value=\"maintainer\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if role == "editor" {
+		if role == "maintainer" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " selected")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, ">Editor</option> <option value=\"maintainer\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if role == "maintainer" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, ">Maintainer</option></select>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, ">Maintainer</option></select>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -476,51 +466,51 @@ func projectSharingIdentity(id string, name string, users []models.OrgUser) temp
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		principal, _ := models.PrincipalFromContext(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<div class=\"sharing-name\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<div class=\"sharing-name\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 224, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 215, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, " ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if principal.UserID == id {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<span class=\"sharing-meta\">(you)</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<span class=\"sharing-meta\">(you)</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, user := range users {
 			if user.UserID == id && user.IsOrgAdmin() {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<div class=\"sharing-meta\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<div class=\"sharing-meta\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if user.Role == "owner" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "Organization owner")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "Organization owner")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "Organization admin")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "Organization admin")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -549,7 +539,7 @@ func ProjectSharingTransferred() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<section id=\"project-sharing\"><div data-project-sharing-content><p role=\"status\">Ownership transferred. You no longer have access to manage sharing for this project.</p></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" data-sharing-close onclick=\"this.closest('dialog').close()\">Close</button></div></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<section id=\"project-sharing\"><div data-project-sharing-content><p role=\"status\">Ownership transferred. You no longer have access to manage sharing for this project.</p></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" data-sharing-close onclick=\"this.closest('dialog').close()\">Close</button></div></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

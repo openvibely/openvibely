@@ -296,3 +296,122 @@ await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':Math.ab
 		require.NotEqual(t, member.UserID, m.UserID, "removed grant persisted")
 	}
 }
+
+func TestProjectSettingsSaveAcrossTabsInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	ctx := t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(stores.ProjectAccess))
+	org := service.NewOrganizationService(stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	project := createProject(t, h, "Browser Sharing")
+	project.RepoPath = t.TempDir()
+	require.NoError(t, h.projectSvc.Update(ctx, project))
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := org.Accept(ctx, token, "browser-member", "long-password-value", "")
+	require.NoError(t, err)
+
+	result := make(chan string, 1)
+	runner := `<script>(async()=>{
+const wait=p=>new Promise((ok,bad)=>{let n=0;const timer=setInterval(()=>{if(p()&&!document.querySelector('.htmx-request,.htmx-settling,.htmx-swapping')){clearInterval(timer);ok()}else if(++n>400){clearInterval(timer);bad(Error('timeout'))}},30)});
+const assert=(v,m)=>{if(!v)throw Error(m)};
+try {
+const phase=Number(sessionStorage.getItem('cross-tab-phase')||0);
+document.getElementById('project-settings-btn').click();await wait(()=>document.querySelector('[data-sharing-save]'));
+const dialog=document.getElementById('edit_project_modal'),form=dialog.querySelector('form[hx-put]'),sharing=dialog.querySelector('[data-sharing-form]');
+if(phase>0){
+assert(form.elements.description.value==='cross-tab-'+(phase-1),'General changes were lost');
+assert(form.elements.read_skills.checked===(phase%2===0),'Skills changes were lost');
+const row=sharing.querySelector('[data-sharing-user="` + member.UserID + `"]');
+assert(row&&row.querySelector('select').value===(phase===2?'maintainer':'viewer'),'Sharing changes were lost');
+}
+if(phase===3){await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'pass'},body:'all three tab saves persisted all changes'});return;}
+form.elements.description.value='cross-tab-'+phase;
+document.getElementById('edit-project-knowledge-tab').click();form.elements.read_skills.checked=phase%2===1;
+document.getElementById('edit-project-sharing-tab').click();
+if(phase===0){sharing.querySelector('[data-sharing-add-user]').value='` + member.UserID + `';sharing.querySelector('[data-sharing-add]').click();}
+else {const select=sharing.querySelector('[data-sharing-user="` + member.UserID + `"] select');select.value=phase===1?'maintainer':'viewer';select.dispatchEvent(new Event('change',{bubbles:true}));}
+if(phase===0){
+const originalName=form.elements.name.value;form.elements.name.value='';
+await dialog.saveProjectSettings();
+assert(dialog.open,'invalid General settings closed modal');
+assert(sharing.querySelector('[data-sharing-user="` + member.UserID + `"]'),'validation lost Sharing draft');
+form.elements.name.value=originalName;
+}
+if(phase===1){
+sharing.elements.changes.value=JSON.stringify({'missing-user':'viewer'});
+await dialog.saveProjectSettings();
+assert(dialog.open,'failed Sharing save closed modal');
+assert(form.elements.description.value==='cross-tab-1','failed save lost General draft');
+assert(sharing.querySelector('[data-sharing-user="` + member.UserID + `"] select').value==='maintainer','failed save lost Sharing draft');
+sharing.dispatchEvent(new Event('change',{bubbles:true}));
+}
+const tab=['general','knowledge','sharing'][phase];document.querySelector('[data-project-tab="'+tab+'"]').click();
+sessionStorage.setItem('cross-tab-phase',String(phase+1));
+(tab==='sharing'?dialog.querySelector('[data-sharing-save]'):document.getElementById('edit-project-save-button')).click();
+await new Promise(r=>setTimeout(r,10000));throw Error('Save did not reload after saving all tabs');
+}catch(e){await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'fail'},body:String(e)})}
+})();</script>`
+
+	owner := models.Principal{UserID: models.BootstrapUserID}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ":" + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, r.WithContext(models.WithPrincipal(r.Context(), owner)))
+		for key, values := range recorder.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorder.Code)
+		body := recorder.Body.String()
+		if r.Header.Get("HX-Request") == "" {
+			body = strings.Replace(body, "</body>", runner+"</body>", 1)
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
+		"--window-size=1280,900", server.URL+"/tasks?project_id="+project.ID,
+	)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(t, cmd)
+		}
+	}()
+	select {
+	case outcome := <-result:
+		stopHandlerBrowserProcess(t, cmd)
+		stopped = true
+		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
+	case <-time.After(60 * time.Second):
+		t.Fatal("project sharing browser test timed out")
+	}
+	members, err := stores.ProjectAccess.Members(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, members, 1)
+	require.Equal(t, "viewer", members[0].Role)
+}

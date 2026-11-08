@@ -100,6 +100,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				<h3 class="font-bold text-lg mb-4 pr-10">Project Settings</h3>
 			<form
 				method="post"
+                novalidate
 				hx-put={ fmt.Sprintf("/projects/%s", project.ID) }
 				hx-swap="none"
                 hx-indicator="#edit-project-save-progress"
@@ -406,6 +407,66 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				repoSourceSelect.addEventListener('change', updateRepoSourceFields);
 				updateRepoSourceFields();
 			}
+            // Both visible Save buttons submit the entire dialog, not just their tab.
+            var savedSettings = new URLSearchParams(new FormData(editForm)).toString();
+            var modalSaving = false;
+            var settingsNeedRefresh = false;
+            m.saveProjectSettings = async function() {
+                if (modalSaving) return;
+                var settings = new URLSearchParams(new FormData(editForm));
+                var settingsChanged = settings.toString() !== savedSettings;
+                if (settingsChanged && !editForm.checkValidity()) {
+                    window.selectProjectSettingsTab(m.querySelector('[data-project-tab="general"]'));
+                    editForm.reportValidity();
+                    return;
+                }
+                var sharing = m.querySelector('[data-sharing-form]');
+                var changes = sharing ? sharing.elements.changes.value : '{}';
+                var sharingChanged = changes !== '{}';
+                var sharingBody = sharing ? new URLSearchParams(new FormData(sharing)) : null;
+                modalSaving = true;
+                var controls = Array.from(m.querySelectorAll('input,textarea,select,button'));
+                var disabled = controls.map(function(control) { return control.disabled; });
+                controls.forEach(function(control) { control.disabled = true; });
+                var savedGeneralThisTime = false;
+                async function accepted(response, general) {
+                    if (await window.openVibelyPermissionErrors?.fetch(response)) return false;
+                    if (response.ok && (general ? response.headers.get('HX-Refresh') === 'true' : response.status === 204)) return true;
+                    var message = '';
+                    try { message = JSON.parse(response.headers.get('HX-Trigger') || '{}').openvibelyToast?.message || ''; } catch (_) {}
+                    if (!message) { try { message = (await response.json()).message || ''; } catch (_) {} }
+                    window.showToast?.((savedGeneralThisTime && !general ? 'General and Skills & Memory saved. Sharing: ' : '') + (message || 'Could not confirm the save. Reopen settings to check.'), 'failed');
+                    return false;
+                }
+                try {
+                    if (settingsChanged) {
+                        var response = await fetch(editForm.getAttribute('hx-put'), {method:'PUT',headers:{'HX-Request':'true'},body:settings});
+                        if (!await accepted(response, true)) return;
+                        savedSettings = settings.toString();
+                        savedGeneralThisTime = true;
+                        settingsNeedRefresh = true;
+                    }
+                    if (sharingChanged) {
+                        var response = await fetch(sharing.getAttribute('hx-post'), {method:'POST',headers:{'HX-Request':'true'},body:sharingBody});
+                        if (!await accepted(response, false)) {
+                            return;
+                        }
+                    }
+                    window.showToast?.('Project settings saved', 'completed');
+                    m.close();
+                    if (settingsNeedRefresh) window.location.reload();
+                } catch (_) {
+                    window.showToast?.(savedGeneralThisTime ? 'General and Skills & Memory saved. Could not confirm Sharing changes. Reopen settings to check.' : 'Could not confirm the save. Reopen settings to check.', 'failed');
+                } finally {
+                    controls.forEach(function(control, index) { control.disabled = disabled[index]; });
+                    modalSaving = false;
+                }
+            };
+            editForm.addEventListener('submit', function(event) {
+                event.preventDefault(); event.stopImmediatePropagation();
+                m.saveProjectSettings();
+            }, true);
+
 		})();
 	</script>
 }

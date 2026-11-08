@@ -139,9 +139,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
  <button type="button" class="btn btn-error btn-outline mr-auto" data-sharing-delete hidden onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')">Delete Project</button>
  }
 			<button type="button" class="btn" data-sharing-cancel>Cancel</button>
-			if canManageSharing {
-				<button type="button" class="btn btn-primary" data-sharing-save>Save</button>
-			}
+			<button type="button" class="btn btn-primary" data-sharing-save>Save</button>
 		</div>
 		<script>
   (() => {
@@ -151,7 +149,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
    const form = root.querySelector('[data-sharing-form]');
    const cancel = root.querySelector('[data-sharing-cancel]');
    const save = root.querySelector('[data-sharing-save]');
-   if (!form) { cancel.onclick=()=>root.closest('dialog')?.close(); return; }
+   if (!form) { cancel.onclick=()=>root.closest('dialog')?.close(); save.onclick=()=>root.closest('dialog')?.saveProjectSettings?.(); return; }
    const body = form.querySelector('[data-sharing-members]');
    const original = body.innerHTML;
    const initial = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.dataset.originalRole]));
@@ -182,16 +180,9 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
     const actions=document.createElement('td');const remove=document.createElement('button');remove.type='button';remove.className='btn btn-ghost btn-xs text-error';remove.dataset.sharingRemove='';remove.textContent='Remove';actions.append(remove);
     row.append(name,role,actions);body.append(row);user.value='';update();
    };
-   let busy=false;
-   save.onclick=()=>{if(!busy)form.requestSubmit();};
-   form.addEventListener('htmx:beforeRequest',()=>{busy=true;root.querySelectorAll('button,select').forEach(control=>control.disabled=true);});
+   save.onclick=()=>root.closest('dialog')?.saveProjectSettings?.();
+   form.addEventListener('submit',event=>{event.preventDefault();event.stopImmediatePropagation();root.closest('dialog')?.saveProjectSettings?.();},true);
    cancel.onclick=()=>{body.innerHTML=original;update();root.closest('dialog')?.close();};
-   form.addEventListener('htmx:afterRequest',event=>{
-    busy=false;root.querySelectorAll('button,select').forEach(control=>control.disabled=false);update();
-    if(event.detail.successful && event.detail.xhr.status === 204) { window.showToast?.('Project access saved','completed'); root.closest('dialog')?.close(); return; }
-    if(window.openVibelyPermissionErrors?.htmx(event.detail.xhr))return;
-    window.showToast?.('Could not confirm the save. Reopen settings to check.','failed');
-   });
    update();
   })();
   </script>
