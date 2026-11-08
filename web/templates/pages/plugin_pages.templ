@@ -156,7 +156,6 @@ type PluginSettingsView struct {
 	Packages    []PluginSettingsPackage
 	Instances   []PluginSettingsRow
 	Error       string
-	Notice      string
 }
 
 templ PluginSettings(projects []models.Project, currentProjectID string, v PluginSettingsView) {
@@ -165,13 +164,23 @@ templ PluginSettings(projects []models.Project, currentProjectID string, v Plugi
 	}
 }
 
-func pluginSettingsURL(projectID, suffix string) string {
-	return "/settings/plugin-pages" + suffix + "?project_id=" + url.QueryEscape(projectID)
+func (v PluginSettingsView) URL(suffix string) string {
+	values := url.Values{"project_id": {v.ProjectID}}
+	if v.Search != "" {
+		values.Set("search", v.Search)
+	}
+	if v.Sort != "" {
+		values.Set("sort", v.Sort)
+	}
+	if v.Enabled != "" {
+		values.Set("enabled", v.Enabled)
+	}
+	return "/settings/plugin-pages" + suffix + "?" + values.Encode()
 }
 
 templ PluginSettingsContent(v PluginSettingsView) {
 	@layout.PageTitle("Plugin pages")
-	<div id="plugin-settings" data-search-container data-card-pagination-root data-card-pagination-list="#plugin-page-cards" data-card-pagination-card-selector="[data-plugin-instance-row]" data-card-pagination-key="data-plugin-instance-row" data-card-pagination-has-more="false" data-card-pagination-url={ pluginSettingsURL(v.ProjectID, "") }>
+	<div id="plugin-settings" data-search-container data-card-pagination-root data-card-pagination-list="#plugin-page-cards" data-card-pagination-card-selector="[data-plugin-instance-row]" data-card-pagination-key="data-plugin-instance-row" data-card-pagination-has-more="false" data-card-pagination-url={ v.URL("") }>
 		<div data-page-header class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Plugin pages</h2>
 			<div class="dropdown dropdown-end">
@@ -185,9 +194,6 @@ templ PluginSettingsContent(v PluginSettingsView) {
 		</div>
 		if v.Error != "" {
 			<div class="alert alert-error text-sm mb-4" role="alert">{ v.Error }</div>
-		}
-		if v.Notice != "" {
-			<div class="alert alert-success text-sm mb-4" role="status">{ v.Notice }</div>
 		}
 		@CardListToolbar(CardListToolbarConfig{PageKey: "plugin-pages", Placeholder: "Search pages...", Action: "/settings/plugin-pages", ProjectID: v.ProjectID, Search: v.Search, Sort: v.Sort, Filters: []CardListFilter{{Key: "enabled", Label: "Status", Value: v.Enabled, Options: cardListOptions("true", "Enabled", "false", "Disabled")}}, SortOptions: cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A")})
 		<div id="plugin-page-cards" class="grid grid-cols-1 gap-4 min-w-0">
@@ -203,9 +209,9 @@ templ PluginSettingsContent(v PluginSettingsView) {
 									<li><a href={ templ.SafeURL("/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(v.ProjectID)) }>Open</a></li>
 								}
 								if r.Instance.Enabled {
-									<li><button hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+r.Instance.ID+"/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button></li>
+									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button></li>
 								} else {
-									<li><button hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+r.Instance.ID+"/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button></li>
+									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button></li>
 								}
 								<li><button onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-details-" + r.Instance.ID + "').showModal()"} }>Details / approval</button></li>
 								<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-delete-" + r.Instance.ID + "').showModal()"} }>Delete</button></li>
@@ -232,19 +238,19 @@ templ PluginSettingsContent(v PluginSettingsView) {
 						<p class="text-sm">Backend: { r.ProcessStatus }</p>
 					}
 					if r.NeedsApproval {
-						<button class="btn btn-warning" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+r.Instance.ID+"/approve") } hx-vals={ fmt.Sprintf(`{"content_hash":%q}`, r.Instance.ContentHash) } hx-target="#plugin-settings" hx-swap="outerHTML">Approve backend</button>
+						<button class="btn btn-warning" hx-post={ v.URL("/instances/" + r.Instance.ID + "/approve") } hx-vals={ fmt.Sprintf(`{"content_hash":%q}`, r.Instance.ContentHash) } hx-target="#plugin-settings" hx-swap="outerHTML">Approve backend</button>
 					}
 				}
 				@pluginSettingsDialog("plugin-delete-"+r.Instance.ID, "Delete "+r.Instance.Title+"?") {
 					<p>This deletes this project's page, saved data, and conversation. Other projects and the installed package are kept.</p>
-					<button class="btn btn-error" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+r.Instance.ID+"/remove") } hx-target="#plugin-settings" hx-swap="outerHTML">Delete page</button>
+					<button class="btn btn-error" hx-post={ v.URL("/instances/" + r.Instance.ID + "/remove") } hx-target="#plugin-settings" hx-swap="outerHTML">Delete page</button>
 				}
 			}
 		</div>
 		@pluginSettingsDialog("plugin-template-modal", "Choose a template") {
 			<p class="font-semibold">Sales</p>
 			<p class="text-sm opacity-70">Explore sales data with filters and a page-aware assistant.</p>
-			<button class="btn btn-primary" hx-post={ pluginSettingsURL(v.ProjectID, "/install-example") } hx-vals='{"create_page":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">Use Sales template</button>
+			<button class="btn btn-primary" hx-post={ v.URL("/install-example") } hx-vals='{"create_page":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">Use Sales template</button>
 		}
 		@pluginSettingsDialog("plugin-describe-modal", "Describe a page") {
 			<p class="text-sm opacity-70">Create a task to build and publish a page in this project. Open the task to run it.</p>
@@ -258,7 +264,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 			</form>
 		}
 		@pluginSettingsDialog("plugin-install-modal", "Install package") {
-			<form class="space-y-3" hx-post={ pluginSettingsURL(v.ProjectID, "/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
+			<form class="space-y-3" hx-post={ v.URL("/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
 				<label class="form-control"><span class="label-text">Package directory</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" required/></label>
 				<button class="btn btn-primary" type="submit">Install</button>
 			</form>
@@ -271,13 +277,13 @@ templ PluginSettingsContent(v PluginSettingsView) {
 							<div class="text-xs opacity-60 break-all">{ p.Package.ContentHash }</div>
 						</div>
 						if p.InUse == 0 {
-							<button class="btn btn-xs btn-ghost text-error" hx-post={ pluginSettingsURL(v.ProjectID, "/packages/"+url.PathEscape(p.Package.ID)+"/remove") } hx-confirm="Uninstall this unused package? Its files will be deleted." hx-target="#plugin-settings" hx-swap="outerHTML">Uninstall package</button>
+							<button class="btn btn-xs btn-ghost text-error" hx-post={ v.URL("/packages/" + url.PathEscape(p.Package.ID) + "/remove") } hx-confirm="Uninstall this unused package? Its files will be deleted." hx-target="#plugin-settings" hx-swap="outerHTML">Uninstall package</button>
 						}
 					</div>
 					@pluginPermissionList(p.Permissions, p.RunsProcess)
 					<div class="flex flex-wrap gap-2">
 						for _, page := range p.Pages {
-							<button class="btn btn-xs btn-outline" hx-post={ pluginSettingsURL(v.ProjectID, "/instances") } hx-vals={ fmt.Sprintf(`{"package_id":%q,"page_id":%q}`, p.Package.ID, page) } hx-target="#plugin-settings" hx-swap="outerHTML">Add "{ page }" to this project</button>
+							<button class="btn btn-xs btn-outline" hx-post={ v.URL("/instances") } hx-vals={ fmt.Sprintf(`{"package_id":%q,"page_id":%q}`, p.Package.ID, page) } hx-target="#plugin-settings" hx-swap="outerHTML">Add "{ page }" to this project</button>
 						}
 					</div>
 				</div>

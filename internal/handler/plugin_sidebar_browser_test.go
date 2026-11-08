@@ -70,6 +70,18 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  await wait(()=>document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]'),'Enabled Sales missing after settings action');
  await wait(()=>document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]').getClientRects().length,'Reenabled Sales hidden');
  checkSettings();
+ const toasts=[];
+ document.body.addEventListener('openvibelyToast',e=>toasts.push(e.detail.message));
+ await htmx.ajax('GET',location.pathname+location.search+'&enabled=true&sort=name_desc',{target:'#main-content',swap:'innerHTML'});
+ await new Promise(r=>setTimeout(r,500));
+ await clickAction('disable');
+ await wait(()=>!document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]'),'Filtered disable failed');
+ await wait(()=>!document.querySelector('#plugin-settings [data-plugin-instance-row]'),'Disabled card remained in enabled filter');
+ if(document.querySelector('#plugin-settings [name="enabled"]').value!=='true')throw Error('Status filter reset');
+ if(document.querySelector('#plugin-settings [name="sort"]').value!=='name_desc')throw Error('Sort reset');
+ if(document.querySelector('#plugin-settings .alert-success'))throw Error('Success banner still rendered');
+ await wait(()=>toasts.includes('Disabled'),'Standard success toast missing');
+ checkSettings();
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}
 })();</script>`

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const source = readFileSync(path.join(__dirname, '../templates/pages/plugin_pages.templ'), 'utf8').split('<script>')[1].split('</script>')[0];
+const source = readFileSync(path.join(__dirname, '../templates/pages/plugin_pages.templ'), 'utf8').split('templ pluginHostBridgeScript()')[1].split('<script>')[1].split('</script>')[0];
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function emitter() {
  const listeners = new Map();

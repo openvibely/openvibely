@@ -899,12 +899,10 @@ func (h *Handler) renderPluginSettings(c echo.Context, projectID, notice string,
 		}
 		return a < b
 	})
-	v.Notice = notice
 	if actionErr != nil {
 		v.Error = actionErr.Error()
-		v.Notice = ""
 	} else if c.Request().Method == http.MethodPost {
-		c.Response().Header().Set("HX-Trigger", "plugin-nav-refresh")
+		setHTMXToastWithOptionsAndTriggers(c, notice, "success", "", "", "", "", "", map[string]any{"plugin-nav-refresh": true})
 	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.PluginSettingsContent(v))
