@@ -1311,6 +1311,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify(body)
 				});
+				if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'install plugin failed');
 					throw new Error(msg);
@@ -1968,6 +1969,7 @@ window.renderSkillDependencyDetails?.(document.getElementById('agent_skill_depen
 						const method = editingAgentSkillOriginalHandle ? 'PUT' : 'POST';
 						try {
 							const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(payload) });
+							if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not save skill'));
 							agentOwnedSkillsState = await response.json();
 							cancelAgentOwnedSkillEdit();
@@ -1984,6 +1986,7 @@ window.renderSkillDependencyDetails?.(document.getElementById('agent_skill_depen
 							const skill = (Array.isArray(agentOwnedSkillsState.routed_skills) ? agentOwnedSkillsState.routed_skills : []).find(item => item.handle === handle) || {};
 							const scopeParam = skill.scope ? ('?scope=' + encodeURIComponent(skill.scope)) : '';
 							const response = await fetch(agentSkillAPIURL('/agents/' + encodeURIComponent(activeAgentID) + '/skills/' + encodeURIComponent(handle) + '/archive' + scopeParam), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ reason: 'Archived from the agent dialog' }) });
+							if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not archive skill'));
 							agentOwnedSkillsState = await response.json();
 							renderAgentOwnedSkills();

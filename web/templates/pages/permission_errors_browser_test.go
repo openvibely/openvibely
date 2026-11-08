@@ -237,6 +237,15 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  agentPluginState={marketplaces:[],installed:[],available:[],runtime:[]};renderPluginCatalog();const pluginState=agentPluginState;
  await loadPluginState(true);
  if(permissionToasts.length!==9||agentPluginState!==pluginState||document.getElementById('plugin_marketplace_action_status').textContent)return 'plugin catalog changed';
+ await installPlugin('example');
+ if(permissionToasts.length!==10||permissionToasts[9].message!=='Admin access required'||agentPluginState!==pluginState||installingPluginIDs.size)return 'plugin install denial changed state';
+ editingAgentSkillOriginalHandle='';document.getElementById('agent_skill_handle').value='keep';document.getElementById('agent_skill_body').value='Keep skill draft';
+ const editor=document.getElementById('agent_skill_editor');editor.classList.remove('hidden');const skillState=agentOwnedSkillsState;
+ for(const action of [()=>saveAgentOwnedSkill(),()=>archiveAgentOwnedSkill('keep')]) {
+ const count=permissionToasts.length;await action();
+ if(permissionToasts.length!==count+1||permissionToasts[count].message!=='Admin access required'||agentOwnedSkillsState!==skillState||skills.textContent!=='Keep skills'||editor.classList.contains('hidden')||document.getElementById('agent_skill_body').value!=='Keep skill draft')return 'skill mutation denial changed draft or state';
+ }
+
  window.fetch=originalFetch;return 'ok';})()`)
 					if result != "ok" {
 						t.Fatal(result)
