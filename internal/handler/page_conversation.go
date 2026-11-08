@@ -254,7 +254,7 @@ func (h *Handler) pageChatParams(ctx context.Context, binding pageintegration.Co
 		}
 		workDir = pageDir
 		runtime = llmcontracts.CompositeRuntimeTools(edits, runtime)
-		editContext = "Edit this custom page directly using the provided coding tools. Its instance-owned files persist across replies and restarts. Successful changes automatically update the page; no apply or reload tool is needed. Do not create a separate task or ask for installation or page approval. Read existing files first. Build backend source with shell as needed; failed commands retain edited files and the existing published page. Group related edits and builds into one shell command when intermediate changes would be invalid. Only claim an update is live when the tool reports success."
+		editContext = "Edit this custom page directly using the provided coding tools. Its instance-owned files persist across replies and restarts. File tools do not publish. After editing and building successfully, call publish_custom_page to validate the current files, restart the backend if present, and refresh the page. Do not create a separate task or ask for installation or page approval. Read existing files first. Build backend source with shell as needed; failed commands retain edited files; there is no backup or rollback guarantee. Group related edits and builds into one shell command when intermediate changes would be invalid. Only claim publication succeeded when publish_custom_page reports success."
 	}
 	return streamingResponseParams{
 		CancellationContext: binding.Lifetime(), ExecID: exec.ID, TaskID: task.ID, Message: message, Agent: *agent,

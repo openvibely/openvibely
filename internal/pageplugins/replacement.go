@@ -3,7 +3,6 @@ package pageplugins
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -36,38 +35,20 @@ func (m *Manager) stageReplacement(ctx context.Context, in *models.PagePluginIns
 	return nil
 }
 
+// Complete an interrupted metadata update, then start the current files. No
+// previous code copy exists to roll back to.
 func (m *Manager) enableReplacementLocked(ctx context.Context, id string) error {
 	previous, err := m.store.GetReplacement(ctx, id)
 	if err != nil {
 		return err
 	}
-	err = m.enableLocked(ctx, id)
-	if previous == nil {
-		return err
-	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	if err != nil {
-		failed, readErr := m.store.GetInstance(cleanupCtx, id)
-		m.releaseInstanceRuntime(id, false)
-		if restoreErr := m.store.FinishReplacement(cleanupCtx, id, true); restoreErr != nil {
-			return errors.Join(err, fmt.Errorf("restoring previous package: %w", restoreErr))
+	if previous != nil {
+		if err := m.store.FinishReplacement(ctx, id, false); err != nil {
+			return err
 		}
-		if previous.Enabled {
-			if restoreErr := m.enableLocked(cleanupCtx, id); restoreErr != nil {
-				return errors.Join(err, fmt.Errorf("previous package restored but startup failed: %w", restoreErr))
-			}
-		}
-		if readErr == nil && failed != nil {
-			m.removeUnusedReplacementPackage(cleanupCtx, failed.PackageID)
-		}
-		return fmt.Errorf("page update failed; previous package restored: %w", err)
+		m.removeUnusedReplacementPackage(context.WithoutCancel(ctx), previous.PackageID)
 	}
-	if err := m.store.FinishReplacement(cleanupCtx, id, false); err != nil {
-		return fmt.Errorf("page started but update finalization needs retry: %w", err)
-	}
-	m.removeUnusedReplacementPackage(cleanupCtx, previous.PackageID)
-	return nil
+	return m.enableLocked(ctx, id)
 }
 
 // finishDisabledReplacement commits an update to a disabled page without starting it.

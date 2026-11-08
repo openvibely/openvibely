@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -227,7 +228,7 @@ func (m *Manager) RemovePackage(ctx context.Context, packageID string) error {
 		return ErrPackageInUse
 	}
 	// Files go first so a failed deletion keeps the record available for retry.
-	if rel, err := filepath.Rel(m.root, pkg.InstallPath); err == nil && rel != "." && !filepath.IsAbs(rel) && rel[:min(2, len(rel))] != ".." {
+	if rel, err := filepath.Rel(m.root, pkg.InstallPath); err == nil && !strings.HasPrefix(rel, "page-sources"+string(filepath.Separator)) && rel != "." && !filepath.IsAbs(rel) && rel[:min(2, len(rel))] != ".." {
 		if err := os.RemoveAll(pkg.InstallPath); err != nil {
 			return fmt.Errorf("remove plugin package files: %w", err)
 		}
@@ -448,6 +449,21 @@ func (m *Manager) load(ctx context.Context, instanceID string) (*models.PagePlug
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// Each instance serves and executes its permanent files directly. Package
+	// records describe the last publication; they are not runtime snapshots.
+	dir := m.pageSourceDir(in.ID)
+	initLock := m.instanceLock("source-init:" + in.ID)
+	initLock.Lock()
+	if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+		err = m.replacePageSources(in.ID, pkg.InstallPath)
+	} else {
+		err = statErr
+	}
+	initLock.Unlock()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	pkg.InstallPath = dir
 	return in, pkg, man, nil
 }
 
@@ -595,6 +611,8 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 			if fresh.PackageID != packageID || fresh.ContentHash != installedHash {
 				return nil, ErrPackageChanged
 			}
+			// A crash must not start unpublished backend edits. Explicit publication
+			// records their hash and restarts the process.
 			onDisk, err := HashTree(os.DirFS(installPath))
 			if err != nil {
 				return nil, err
@@ -602,6 +620,7 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 			if onDisk != installedHash {
 				return nil, ErrContentChanged
 			}
+
 			return map[string]any{
 				"protocol": ProtocolVersion,
 				"instance": map[string]string{"id": fresh.ID, "project_id": fresh.ProjectID, "page_id": fresh.PageID},

@@ -2,8 +2,12 @@ package pageplugins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -102,7 +106,40 @@ func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, 
 	if err != nil {
 		return nil, err
 	}
-	pkg, err := m.InstallFromDir(ctx, source, by)
+	var pkg *models.PagePluginPackage
+	if instance == nil {
+		pkg, err = m.InstallFromDir(ctx, source, by)
+	} else {
+		// Register publication metadata against the permanent files. Do not
+		// create another installed copy of a page being edited.
+		var raw []byte
+		man, _, err = validatePackageFS(os.DirFS(source))
+		if err == nil {
+			raw, err = os.ReadFile(filepath.Join(source, ManifestFile))
+		}
+		if err == nil {
+			var hash string
+			hash, err = HashTree(os.DirFS(source))
+			if err == nil && existing != nil && existing.ContentHash == hash {
+				pkg = existing
+			} else if err == nil {
+				if existing != nil {
+					man.Version = fmt.Sprintf("%s-edit.%d", man.Version, time.Now().UnixNano())
+					raw, err = json.MarshalIndent(man, "", "  ")
+					if err == nil {
+						err = os.WriteFile(filepath.Join(source, ManifestFile), raw, 0644)
+					}
+					if err == nil {
+						hash, err = HashTree(os.DirFS(source))
+					}
+				}
+				if err == nil {
+					pkg = &models.PagePluginPackage{PluginID: man.ID, Version: man.Version, Name: man.Name, ManifestJSON: string(raw), ContentHash: hash, InstallPath: source, InstalledBy: by}
+					err = m.store.CreatePackage(ctx, pkg)
+				}
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +165,12 @@ func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, 
 			discardNew()
 			return nil, err
 		}
+		if err = m.store.FinishReplacement(ctx, instance.ID, false); err != nil {
+			return nil, err
+		}
+		m.removeUnusedReplacementPackage(context.WithoutCancel(ctx), instance.PackageID)
 	}
+	m.releaseInstanceRuntime(instance.ID, false)
 	{
 		if enable {
 			err = m.Enable(ctx, instance.ID)
@@ -136,6 +178,10 @@ func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, 
 			err = m.finishDisabledReplacement(ctx, instance.ID)
 		}
 		if err != nil {
+			// Keep chat reachable so the user can repair the same live files.
+			if enable {
+				_ = m.store.SetInstanceEnabled(context.WithoutCancel(ctx), instance.ID, true)
+			}
 			return nil, err
 		}
 	}

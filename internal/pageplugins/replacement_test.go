@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -93,7 +92,7 @@ func TestPageReplacementPreservesIdentityAndOtherProject(t *testing.T) {
 	}
 }
 
-func TestNativeReplacementStartsAndRollsBack(t *testing.T) {
+func TestNativeReplacementRetainsFailedEditsAndCanRetry(t *testing.T) {
 	m, _, a, _ := newTestManager(t)
 	ctx := t.Context()
 	source := writeProcessPackage(t)
@@ -129,25 +128,23 @@ func TestNativeReplacementStartsAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = m.PublishToInstance(ctx, source, a, in.PageID, "task", in.ID)
-	if err == nil || !strings.Contains(err.Error(), "previous package restored") {
-		t.Fatalf("expected immediate rollback: %v", err)
+	if err == nil {
+		t.Fatal("invalid backend unexpectedly started")
 	}
-	// Restart still loads the restored version, without a new approval.
+	// Failed publication retains the edited files and chat; no code rollback.
 	m.StopAll()
 	m = NewManager(m.store, m.root)
 	t.Cleanup(m.StopAll)
-	if err = m.Enable(ctx, in.ID); err != nil {
-		t.Fatal(err)
-	}
-	restored, err := m.store.GetInstance(ctx, in.ID)
+	failed, err := m.store.GetInstance(ctx, in.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.PackageID != pkg.ID || !restored.Enabled || restored.StateJSON != `{"n":42}` {
-		t.Fatalf("rollback lost state: %+v", restored)
+	if failed.Version != "2.0.0" || !failed.Enabled || failed.StateJSON != `{"n":42}` {
+		t.Fatalf("failed update lost identity/state: %+v", failed)
 	}
-	if p, _ := m.store.GetPackageByVersion(ctx, man.ID, "2.0.0"); p != nil {
-		t.Fatal("failed replacement not cleaned up")
+	body, err := os.ReadFile(filepath.Join(m.pageSourceDir(in.ID), exe))
+	if err != nil || string(body) != "not executable" {
+		t.Fatalf("failed edits lost: %q %v", body, err)
 	}
 	// A valid approved replacement commits and removes the old package.
 	good := writeProcessPackage(t)

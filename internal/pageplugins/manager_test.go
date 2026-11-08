@@ -266,7 +266,7 @@ func TestProcessBackendStartsWithoutSeparateApproval(t *testing.T) {
 	}
 
 	// Tamper with the installed package: the approval no longer matches what would run.
-	os.WriteFile(filepath.Join(pkg.InstallPath, "index.html"), []byte("<html>evil</html>"), 0o644)
+	os.WriteFile(filepath.Join(m.pageSourceDir(inA.ID), "index.html"), []byte("<html>edited</html>"), 0o644)
 	if err := m.Enable(ctx, inA.ID); !errors.Is(err, ErrContentChanged) {
 		t.Fatalf("tampered package started: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestCrashRecoveryVerifiesInstalledPackageBeforeEveryLaunch(t *testing.T) {
 			crash()
 			want := ErrContentChanged
 
-			f, err := os.OpenFile(filepath.Join(pkg.InstallPath, changed), os.O_APPEND|os.O_WRONLY, 0)
+			f, err := os.OpenFile(filepath.Join(m.pageSourceDir(in.ID), changed), os.O_APPEND|os.O_WRONLY, 0)
 			if err != nil {
 				t.Fatal(err)
 			}

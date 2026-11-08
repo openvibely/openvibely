@@ -5,11 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/memory"
-	"github.com/openvibely/openvibely/internal/pageplugins"
-	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -18,9 +14,8 @@ import (
 	"github.com/openvibely/openvibely/pkg/agenttools"
 )
 
-// pageEditTools uses persistent instance-owned files and publishes successful changes automatically.
+// pageEditTools uses persistent instance-owned files and publishes only on an explicit publish_custom_page call.
 func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Conversation, principal string) (*llmcontracts.RuntimeTools, string, error) {
-	var mu sync.Mutex
 	dir, _, err := h.pagePlugins.EditWorkspace(ctx, binding.Page.InstanceID)
 	if err != nil {
 		return nil, "", err
@@ -33,8 +28,13 @@ func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Con
 		if def.Name == "read_file" || def.Name == "list_files" || def.Name == "grep_search" {
 			access = llmcontracts.RuntimeToolAccessRead
 		}
-		rt.Definitions = append(rt.Definitions, llmcontracts.RuntimeToolDefinition{Name: def.Name, Description: def.Description + " Work in the current page files. Successful file changes automatically update the page. Files persist across replies; failed updates retain your edits. Build backend code with shell when needed.", Schema: def.Schema, Access: access})
+		rt.Definitions = append(rt.Definitions, llmcontracts.RuntimeToolDefinition{Name: def.Name, Description: def.Description + " Work in the current page files. Files persist across replies. Edit and build first, then call publish_custom_page to validate and refresh the page. Editing tools do not publish. There is no rollback copy.", Schema: def.Schema, Access: access})
 	}
+	names["publish_custom_page"] = true
+	rt.Definitions = append(rt.Definitions, llmcontracts.RuntimeToolDefinition{
+		Name: "publish_custom_page", Description: "Validate and publish the current page files after editing and building. Restarts its backend and refreshes its frame. Bound to this page; no manual approval. Failed edits remain in place; no rollback.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Access: llmcontracts.RuntimeToolAccessWrite,
+	})
 	rt.Filter = func(name string) (bool, bool) {
 		return names[name], names[name]
 	}
@@ -49,13 +49,22 @@ func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Con
 		if _, err := binding.Resolve(ctx); err != nil {
 			return fail(err)
 		}
-		mu.Lock()
-		defer mu.Unlock()
-		// Resolve the current revision for every tool call: a task may have
-		// updated the same source tree since this conversation began.
-		_, baseHash, err := h.pagePlugins.EditWorkspace(ctx, binding.Page.InstanceID)
-		if err != nil {
-			return fail(err)
+		if name == "publish_custom_page" {
+			var args map[string]json.RawMessage
+			if err := json.Unmarshal(input, &args); err != nil {
+				return fail(err)
+			}
+			if len(args) != 0 {
+				return fail(fmt.Errorf("publish_custom_page uses this page's files and accepts no arguments"))
+			}
+			result, err := h.pagePlugins.PublishEdit(ctx, binding.Page.InstanceID, binding.Page.ProjectID, principal)
+			if err != nil {
+				return fail(fmt.Errorf("publication failed; files remain edited: %w", err))
+			}
+			if h.broadcaster != nil {
+				h.broadcaster.Publish(events.TaskEvent{Type: events.PluginPagesChanged, ProjectID: binding.Page.ProjectID, TaskID: binding.Page.InstanceID})
+			}
+			return fmt.Sprintf("Page published (%s). Frame refresh requested.", result.Instance.Version), true, false, nil
 		}
 		// Reuse standard tool implementations while constraining their file paths.
 		if name != "shell" && name != "process" {
@@ -84,35 +93,7 @@ func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Con
 		if err != nil {
 			return fail(err)
 		}
-		if name == "shell" || name == "process" {
-			// Shell returns its exit status in a terminal trailer, including
-			// failures and sessions still running. Never publish partial builds.
-			index := strings.LastIndex(output, "\n[process]\n")
-			if index < 0 {
-				return output, true, true, nil
-			}
-			status := output[index:]
-			if strings.Contains(status, "status: running\n") {
-				return output, true, false, nil
-			}
-			if !strings.Contains(status, "exit_code: 0\n") {
-				return output + "\nEdited files retained; live page unchanged.", true, true, nil
-			}
-		}
-		after, hashErr := pageplugins.HashTree(os.DirFS(dir))
-		if name != "read_file" && name != "list_files" && name != "grep_search" && (baseHash != after || hashErr != nil) {
-			_, applyErr := h.pagePlugins.ApplyEdit(ctx, binding.Page.InstanceID, binding.Page.ProjectID, baseHash, dir, principal)
-			if applyErr != nil {
-				if strings.Contains(applyErr.Error(), "previous package restored") && h.broadcaster != nil {
-					h.broadcaster.Publish(events.TaskEvent{Type: events.PluginPagesChanged, ProjectID: binding.Page.ProjectID, TaskID: binding.Page.InstanceID})
-				}
-				return fail(fmt.Errorf("files saved; live page update failed (edits retained): %w", applyErr))
-			}
-			if h.broadcaster != nil {
-				h.broadcaster.Publish(events.TaskEvent{Type: events.PluginPagesChanged, ProjectID: binding.Page.ProjectID, TaskID: binding.Page.InstanceID})
-			}
-			output += "\nPage updated."
-		}
+
 		return output, true, false, nil
 	}
 	return rt, dir, nil
