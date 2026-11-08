@@ -13,8 +13,7 @@ import (
 )
 
 type PublishResult struct {
-	Instance         *models.PagePluginInstance
-	ApprovalRequired bool
+	Instance *models.PagePluginInstance
 }
 
 // PublishToInstance installs a task-authored package and registers or updates a
@@ -94,8 +93,8 @@ func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, 
 		}
 	}
 	// Task publications and side chat share one instance-owned source tree.
-	// Import before starting the replacement so failed builds/startups retain
-	// the submitted files while the previous runtime snapshot remains available.
+	// Import before starting the replacement so failed startup retains the
+	// submitted files for repair. There is no previous runtime snapshot.
 	if instance != nil {
 		if err := m.replacePageSources(instance.ID, source); err != nil {
 			return nil, err
@@ -165,7 +164,7 @@ func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, 
 			discardNew()
 			return nil, err
 		}
-		if err = m.store.FinishReplacement(ctx, instance.ID, false); err != nil {
+		if err = m.store.FinishReplacement(ctx, instance.ID); err != nil {
 			return nil, err
 		}
 		m.removeUnusedReplacementPackage(context.WithoutCancel(ctx), instance.PackageID)
@@ -195,5 +194,5 @@ func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, 
 	if err := m.replacePageSources(instance.ID, source); err != nil {
 		return nil, err
 	}
-	return &PublishResult{Instance: instance, ApprovalRequired: false}, nil
+	return &PublishResult{Instance: instance}, nil
 }

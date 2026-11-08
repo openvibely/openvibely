@@ -18,13 +18,12 @@ type PagePluginStore interface {
 
 	StageReplacement(ctx context.Context, instanceID, oldPackageID, newPackageID string) error
 	GetReplacement(ctx context.Context, instanceID string) (*models.PagePluginInstance, error)
-	FinishReplacement(ctx context.Context, instanceID string, restore bool) error
+	FinishReplacement(ctx context.Context, instanceID string) error
 	CreateInstance(ctx context.Context, in *models.PagePluginInstance) error
 	GetInstance(ctx context.Context, id string) (*models.PagePluginInstance, error)
 	ListInstances(ctx context.Context, projectID string, enabledOnly bool) ([]models.PagePluginInstance, error)
 	ListAllInstances(ctx context.Context, enabledOnly bool) ([]models.PagePluginInstance, error)
 	SetInstanceEnabled(ctx context.Context, id string, enabled bool) error
-	ApproveInstanceIfContent(ctx context.Context, id, contentHash, approvedBy string) (bool, error)
 	UpdateInstanceState(ctx context.Context, id, stateJSON string) error
 	DeleteInstance(ctx context.Context, id string) error
 

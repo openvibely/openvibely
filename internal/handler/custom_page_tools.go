@@ -17,7 +17,7 @@ import (
 )
 
 // publishCustomPageTool publishes a bundle authored by the current task. The
-// caller cannot choose a different task/project or execute a backend via this tool.
+// caller cannot choose a different task/project. Publication starts enabled backends.
 func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
 	if h.pagePlugins == nil {
 		return "", errors.New("custom pages are unavailable")
@@ -92,16 +92,15 @@ func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingRes
 		h.broadcaster.Publish(events.TaskEvent{Type: events.PluginPagesChanged, ProjectID: task.ProjectID})
 	}
 	out := struct {
-		InstanceID       string `json:"instance_id"`
-		ProjectID        string `json:"project_id"`
-		URL              string `json:"url"`
-		Enabled          bool   `json:"enabled"`
-		ApprovalRequired bool   `json:"approval_required"`
-		SettingsURL      string `json:"settings_url,omitempty"`
-		Message          string `json:"message"`
-	}{InstanceID: result.Instance.ID, ProjectID: task.ProjectID, Enabled: result.Instance.Enabled, ApprovalRequired: result.ApprovalRequired,
+		InstanceID  string `json:"instance_id"`
+		ProjectID   string `json:"project_id"`
+		URL         string `json:"url"`
+		Enabled     bool   `json:"enabled"`
+		SettingsURL string `json:"settings_url,omitempty"`
+		Message     string `json:"message"`
+	}{InstanceID: result.Instance.ID, ProjectID: task.ProjectID, Enabled: result.Instance.Enabled,
 		URL: "/p/" + url.PathEscape(result.Instance.ID) + "?project_id=" + url.QueryEscape(task.ProjectID), Message: "Page installed and available in the project's left rail. Browser startup has not been verified by publishing. Return the page link; use get_custom_page_status with this instance_id after a browser opens it."}
-	if !result.ApprovalRequired && !result.Instance.Enabled {
+	if !result.Instance.Enabled {
 		out.SettingsURL = "/settings/plugin-pages?project_id=" + url.QueryEscape(task.ProjectID)
 		out.Message = "Page updated but left disabled because an administrator disabled it. Only an administrator can re-enable it in Plugin pages settings; do not claim the page is live."
 	}

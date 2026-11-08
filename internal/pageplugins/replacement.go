@@ -43,7 +43,7 @@ func (m *Manager) enableReplacementLocked(ctx context.Context, id string) error 
 		return err
 	}
 	if previous != nil {
-		if err := m.store.FinishReplacement(ctx, id, false); err != nil {
+		if err := m.store.FinishReplacement(ctx, id); err != nil {
 			return err
 		}
 		m.removeUnusedReplacementPackage(context.WithoutCancel(ctx), previous.PackageID)
@@ -60,7 +60,7 @@ func (m *Manager) finishDisabledReplacement(ctx context.Context, id string) erro
 	if err != nil || previous == nil {
 		return err
 	}
-	if err := m.store.FinishReplacement(ctx, id, false); err != nil {
+	if err := m.store.FinishReplacement(ctx, id); err != nil {
 		return err
 	}
 	m.removeUnusedReplacementPackage(ctx, previous.PackageID)

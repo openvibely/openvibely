@@ -33,7 +33,6 @@ func TestNativePagePublicationStartsWithoutApproval(t *testing.T) {
 	result, err := m.PublishToInstance(t.Context(), writeProcessPackage(t), project, "", "test", "")
 	require.NoError(t, err)
 	require.True(t, result.Instance.Enabled)
-	require.False(t, result.ApprovalRequired)
 	files, _, err := m.EditWorkspace(t.Context(), result.Instance.ID)
 	require.NoError(t, err)
 	defer os.RemoveAll(files)

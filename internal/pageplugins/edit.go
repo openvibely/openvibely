@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// EditWorkspace returns durable, instance-owned source files. Installed packages may
-// be shared between projects, so edits never mutate the shared package in place.
+// EditWorkspace returns the durable, instance-owned files used by both coding
+// tools and the page runtime.
 func (m *Manager) EditWorkspace(ctx context.Context, instanceID string) (string, string, error) {
 	m.publishMu.Lock()
 	defer m.publishMu.Unlock()

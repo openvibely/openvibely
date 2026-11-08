@@ -77,21 +77,16 @@ func (r *PagePluginRepo) CountInstancesForPackage(ctx context.Context, packageID
 }
 
 const pagePluginInstanceSelect = `SELECT i.id, i.project_id, i.package_id, i.page_id, i.title, i.enabled, i.config_json, i.state_json,
-	i.approved_hash, i.approved_by, i.approved_at, i.created_at, i.updated_at, p.plugin_id, p.version, p.content_hash, COALESCE(pr.name, '')
+	i.created_at, i.updated_at, p.plugin_id, p.version, p.content_hash, COALESCE(pr.name, '')
 	FROM page_plugin_instances i
 	JOIN page_plugin_packages p ON p.id = i.package_id
 	LEFT JOIN projects pr ON pr.id = i.project_id`
 
 func scanPagePluginInstance(scan func(...any) error) (*models.PagePluginInstance, error) {
 	var in models.PagePluginInstance
-	var approvedAt sql.NullTime
 	if err := scan(&in.ID, &in.ProjectID, &in.PackageID, &in.PageID, &in.Title, &in.Enabled, &in.ConfigJSON, &in.StateJSON,
-		&in.ApprovedHash, &in.ApprovedBy, &approvedAt, &in.CreatedAt, &in.UpdatedAt, &in.PluginID, &in.Version, &in.ContentHash, &in.ProjectName); err != nil {
+		&in.CreatedAt, &in.UpdatedAt, &in.PluginID, &in.Version, &in.ContentHash, &in.ProjectName); err != nil {
 		return nil, err
-	}
-	if approvedAt.Valid {
-		t := approvedAt.Time
-		in.ApprovedAt = &t
 	}
 	return &in, nil
 }
@@ -144,18 +139,6 @@ func (r *PagePluginRepo) ListAllInstances(ctx context.Context, enabledOnly bool)
 func (r *PagePluginRepo) SetInstanceEnabled(ctx context.Context, id string, enabled bool) error {
 	_, err := execBoundSQLite(ctx, r.db, `UPDATE page_plugin_instances SET enabled = ?, updated_at = datetime('now') WHERE id = ?`, enabled, id)
 	return err
-}
-
-// ApproveInstanceIfContent approves only while the instance's package still has
-// contentHash, so a concurrent package swap cannot inherit the approval.
-func (r *PagePluginRepo) ApproveInstanceIfContent(ctx context.Context, id, contentHash, approvedBy string) (bool, error) {
-	res, err := execBoundSQLite(ctx, r.db, `UPDATE page_plugin_instances SET approved_hash = ?, approved_by = ?, approved_at = datetime('now'), updated_at = datetime('now')
- WHERE id = ? AND (SELECT p.content_hash FROM page_plugin_packages p WHERE p.id = page_plugin_instances.package_id) = ?`, contentHash, approvedBy, id, contentHash)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	return n == 1, err
 }
 
 func (r *PagePluginRepo) UpdateInstanceState(ctx context.Context, id, stateJSON string) error {
@@ -217,12 +200,13 @@ func (r *PagePluginRepo) GetTurnContext(ctx context.Context, executionID string)
 	return raw, err
 }
 
-// StageReplacement retains only the information required to undo an unfinished
-// update. Instance identity, data and conversation associations never change.
+// StageReplacement records the old package for cleanup after an interrupted
+// publication. Instance identity, data and conversation associations never change.
 func (r *PagePluginRepo) StageReplacement(ctx context.Context, id, oldID, newID string) error {
+	// Legacy approval columns remain in existing databases; store empty values.
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		res, err := tx.ExecContext(ctx, `INSERT INTO page_plugin_replacements (instance_id,package_id,approved_hash,approved_by,approved_at,was_enabled)
-   SELECT id,package_id,approved_hash,approved_by,approved_at,enabled FROM page_plugin_instances WHERE id=? AND package_id=?`, id, oldID)
+   SELECT id,package_id,'','',NULL,enabled FROM page_plugin_instances WHERE id=? AND package_id=?`, id, oldID)
 		if err != nil {
 			return err
 		}
@@ -233,7 +217,7 @@ func (r *PagePluginRepo) StageReplacement(ctx context.Context, id, oldID, newID 
 		if n != 1 {
 			return errors.New("page changed during update")
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE page_plugin_instances SET package_id=?,enabled=0,approved_hash='',approved_by='',approved_at=NULL,updated_at=datetime('now') WHERE id=?`, newID, id)
+		_, err = tx.ExecContext(ctx, `UPDATE page_plugin_instances SET package_id=?,enabled=0,updated_at=datetime('now') WHERE id=?`, newID, id)
 		return err
 	})
 }
@@ -245,17 +229,9 @@ func (r *PagePluginRepo) GetReplacement(ctx context.Context, id string) (*models
 	}
 	return &in, err
 }
-func (r *PagePluginRepo) FinishReplacement(ctx context.Context, id string, restore bool) error {
-	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		if restore {
-			_, err := tx.ExecContext(ctx, `UPDATE page_plugin_instances SET package_id=b.package_id, approved_hash=b.approved_hash,approved_by=b.approved_by,approved_at=b.approved_at,enabled=0,updated_at=datetime('now') FROM page_plugin_replacements b WHERE page_plugin_instances.id=b.instance_id AND b.instance_id=?`, id)
-			if err != nil {
-				return err
-			}
-		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM page_plugin_replacements WHERE instance_id=?`, id)
-		return err
-	})
+func (r *PagePluginRepo) FinishReplacement(ctx context.Context, id string) error {
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM page_plugin_replacements WHERE instance_id=?`, id)
+	return err
 }
 
 func (r *PagePluginRepo) SaveQueuedPageContext(ctx context.Context, instanceID, inputID, raw string) error {
