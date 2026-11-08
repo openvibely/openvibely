@@ -203,7 +203,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 					}
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</select> <select class=\"select select-bordered select-sm\" data-sharing-add-role aria-label=\"New member role\"><option value=\"viewer\">Viewer</option><option value=\"editor\">Editor</option><option value=\"maintainer\">Maintainer</option></select> <button type=\"button\" class=\"btn btn-outline btn-sm\" data-sharing-add>Add member</button></div><p class=\"text-xs opacity-60 mt-3\">Viewer: read only · Editor: create, edit and run work<br>Maintainer: Editor access plus project settings</p></form><div class=\"border-t border-base-300 pt-4 space-y-3\"><h3 class=\"text-base font-semibold\">Ownership</h3><p class=\"text-sm\">Owner: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</select> <select class=\"select select-bordered select-sm\" data-sharing-add-role aria-label=\"New member role\"><option value=\"viewer\">Viewer</option><option value=\"editor\">Editor</option><option value=\"maintainer\">Maintainer</option></select> <button type=\"button\" class=\"btn btn-outline btn-sm\" data-sharing-add>Add member</button></div></form><div class=\"border-t border-base-300 pt-4 space-y-3\"><h3 class=\"text-base font-semibold\">Ownership</h3><p class=\"text-sm\">Owner: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -216,7 +216,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 					var templ_7745c5c3_Var10 string
 					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(user.Username)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 72, Col: 30}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 71, Col: 30}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 					if templ_7745c5c3_Err != nil {
@@ -235,7 +235,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/projects/" + policy.ProjectID + "/sharing").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 77, Col: 86}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 76, Col: 86}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 			if templ_7745c5c3_Err != nil {
@@ -264,7 +264,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 					var templ_7745c5c3_Var12 string
 					templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(user.UserID).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 82, Col: 35}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 81, Col: 35}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 					if templ_7745c5c3_Err != nil {
@@ -277,7 +277,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 					var templ_7745c5c3_Var13 string
 					templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(user.Username)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 82, Col: 53}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 81, Col: 53}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 					if templ_7745c5c3_Err != nil {
@@ -326,7 +326,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(event.CreatedAt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 103, Col: 26}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 102, Col: 26}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
@@ -339,7 +339,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(event.ActorUserID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 106, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 105, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 			if templ_7745c5c3_Err != nil {
@@ -352,7 +352,7 @@ func ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(event.Action)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 109, Col: 23}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_sharing.templ`, Line: 108, Col: 23}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
