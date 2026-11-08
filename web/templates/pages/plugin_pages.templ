@@ -53,13 +53,10 @@ templ PluginPageContent(v PluginPageView) {
 		<div data-page-header class="flex items-center justify-between gap-2 mb-3">
 			<div class="min-w-0">
 				<h2 class="text-2xl font-bold truncate">{ v.Title }</h2>
-				<div class="text-xs opacity-60">
-					{ v.PluginName } { v.Version } · project <span>{ v.OwningProject }</span>
-				</div>
 			</div>
 			@components.SidePanelToggle("page-chat-toggle", "page-side-chat", templ.Attributes{"data-page-chat-toggle": ""})
 		</div>
-		<div id="plugin-startup" class="text-xs mb-2" role="status">Loading page…</div>
+		<div id="plugin-startup" class="text-xs mb-2" role="status" hidden data-state="loading"></div>
 		<div id="plugin-notice" class="text-xs mb-2" aria-live="polite"></div>
 		<div class="flex flex-1 min-h-0 gap-3">
 			<iframe
@@ -449,7 +446,11 @@ templ pluginHostBridgeScript() {
 					if (msg.type === 'page.loaded' || msg.type === 'page.failed') {
                         clearTimeout(startupTimer);
                         var status = root.querySelector('#plugin-startup');
-                        if (status && res.result) status.textContent = res.result.state === 'loaded' ? 'Page loaded' : 'Page failed: ' + (res.result.error || 'Reload to retry.');
+                        if (status && res.result) {
+                            status.setAttribute('data-state', res.result.state);
+                            status.hidden = res.result.state !== 'failed';
+                            status.textContent = status.hidden ? '' : 'Page failed: ' + (res.result.error || 'Reload to retry.');
+                        }
                     }
 					if (msg.type === 'events.subscribe') { subscribed = true; startEvents(); post('event', null, {type: 'page.refresh'}); }
 					if (msg.type === 'analyze.request' && res.result && res.result.exec_id) streamAnalysis(res.result.exec_id);

@@ -72,7 +72,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  const pageLink=document.querySelector('#plugin-pages-nav [data-plugin-nav-entry] a');
  pageLink.click();
  await wait(()=>document.querySelector('#plugin-page-root'),'Page did not open');
- await wait(()=>document.querySelector('#plugin-startup')?.textContent==='Page loaded','Initial frame failed');
+ await wait(()=>document.querySelector('#plugin-startup')?.dataset.state==='loaded','Initial frame failed');
  const oldHandle=document.querySelector('#plugin-page-root').getAttribute('data-plugin-handle');
  document.querySelector('#appearance-settings-nav a[data-nav-base="/settings/plugin-pages"]').click();
  await wait(()=>document.querySelector('#plugin-settings'),'Settings did not open');
@@ -86,7 +86,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  checkSettings();
  document.querySelector('#plugin-pages-nav [data-plugin-nav-entry] a').click();
  await wait(()=>document.querySelector('#plugin-page-root'),'Reenabled page did not open');
- await wait(()=>document.querySelector('#plugin-startup')?.textContent==='Page loaded','Reenabled frame failed');
+ await wait(()=>document.querySelector('#plugin-startup')?.dataset.state==='loaded','Reenabled frame failed');
  if(document.querySelector('#plugin-page-root').getAttribute('data-plugin-handle')===oldHandle)throw Error('Reused expired page capability');
  if(document.querySelector('#plugin-notice').textContent.includes('navigated away'))throw Error('Frame disconnected');
  document.querySelector('#appearance-settings-nav a[data-nav-base="/settings/plugin-pages"]').click();
