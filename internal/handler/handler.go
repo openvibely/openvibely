@@ -1106,6 +1106,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/worktree/action-settings", h.GetChangesActionSettings)
 	e.POST("/tasks/:taskId/worktree/action-settings", h.SaveChangesActionSettings)
 	e.GET("/tasks/:taskId/worktree/action-branches", h.GetChangesActionBranches)
+	e.GET("/tasks/:taskId/worktree/action-local", h.GetChangesLocalEligibility)
 	e.POST("/tasks/:taskId/worktree/resolve", h.ResolveTaskConflicts)
 	e.POST("/tasks/:taskId/worktree/abort", h.AbortTaskMerge)
 	e.POST("/tasks/:taskId/worktree/cleanup", h.CleanupTaskWorktree)

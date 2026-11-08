@@ -257,19 +257,19 @@ func TestTaskChangesWorktreeContent_RebaseOnlyWhenAvailable(t *testing.T) {
 	if !strings.Contains(out, "Rebase onto main") {
 		t.Fatal("expected Rebase action label to include target branch")
 	}
-	if !strings.Contains(out, `hx-disabled-elt="#changes-actions-dropdown button"`) {
+	if !strings.Contains(out, `hx-disabled-elt="[data-changes-split] button"`) {
 		t.Fatal("expected Rebase action to disable while request is in flight")
 	}
 }
 
-func TestTaskChangesWorktreeContent_RebaseHiddenWhenUnavailable(t *testing.T) {
+func TestTaskChangesWorktreeContent_RebaseTransportAvailableForTargetChanges(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
 	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
-	if strings.Contains(buf.String(), "/worktree/rebase") {
-		t.Fatal("did not expect Rebase action when task branch is not behind target")
+	if !strings.Contains(buf.String(), "/worktree/rebase") {
+		t.Fatal("expected Rebase transport so another target can enable it")
 	}
 }
 

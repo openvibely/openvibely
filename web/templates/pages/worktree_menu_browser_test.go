@@ -70,7 +70,7 @@ func worktreeActionsFixture(t *testing.T, runner string, results chan string) *h
 			json.NewEncoder(w).Encode(map[string]any{"actions": actions})
 			return
 		}
-		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/worktree/merge") || strings.HasSuffix(r.URL.Path, "/worktree/pull-request")) {
+		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/worktree/rebase") || strings.HasSuffix(r.URL.Path, "/worktree/merge") || strings.HasSuffix(r.URL.Path, "/worktree/pull-request")) {
 			r.ParseForm()
 			mu.Lock()
 			actions = append(actions, map[string]string{"path": r.URL.Path, "base": r.FormValue("base"), "target_repo": r.FormValue("target_repo"), "merge_type": r.FormValue("merge_type"), "changes_target": r.FormValue("changes_target")})
@@ -116,6 +116,11 @@ func worktreeActionsFixture(t *testing.T, runner string, results chan string) *h
 				prefs = json.RawMessage(`{"mode":"pr","repository":"https://github.com/upstream/repo","branch":"main","local_branch":"main","method":"merge"}`)
 			}
 			json.NewEncoder(w).Encode(map[string]any{"preferences": prefs, "repositories": []map[string]any{{"url": "https://github.com/upstream/repo", "name": "upstream/repo", "upstream": true, "default_branch": "main"}, {"url": "https://github.com/me/repo", "name": "me/repo", "default_branch": "main"}}, "local_branches": []string{"main", "develop"}})
+			return
+		}
+		if r.URL.Path == "/tasks/layer-task/worktree/action-local" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"target": r.URL.Query().Get("target"), "rebase_available": r.URL.Query().Get("target") == "develop"})
 			return
 		}
 		if r.URL.Path == "/tasks/layer-task/worktree/action-branches" {

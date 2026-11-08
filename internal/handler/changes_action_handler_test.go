@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -219,5 +221,62 @@ func TestChangesActionForkRemainsAvailableWhenUpstreamFails(t *testing.T) {
 	}
 	if code := save(data.Preferences); code != http.StatusBadRequest {
 		t.Fatalf("unavailable fork accepted: %d", code)
+	}
+}
+
+func TestChangesActionLocalRebaseEligibilityUsesSelectedTarget(t *testing.T) {
+	ctx := context.Background()
+	h, e, _, _ := setupTestHandlerWithStores(t)
+	path := createHandlerTestGitRepo(t)
+	git := func(args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", path}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+	git("branch", "-M", "main")
+	git("checkout", "-b", "develop")
+	git("commit", "--allow-empty", "-m", "Develop change")
+	git("checkout", "main")
+	worktree := filepath.Join(t.TempDir(), "task")
+	git("worktree", "add", "-b", "task/rebase", worktree, "main")
+	out, err := exec.Command("git", "-C", worktree, "commit", "--allow-empty", "-m", "Task change").CombinedOutput()
+	if err != nil {
+		t.Fatalf("task commit: %s: %v", out, err)
+	}
+	project := &models.Project{Name: "Eligibility", RepoPath: path}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Task", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: worktree, WorktreeBranch: "task/rebase", MergeTargetBranch: "main"}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		branch    string
+		available bool
+	}{{"main", false}, {"develop", true}, {"main", false}} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/worktree/action-local?target="+tt.branch, nil))
+		if rec.Code != 200 {
+			t.Fatalf("eligibility: %d %s", rec.Code, rec.Body.String())
+		}
+		var result struct {
+			Available bool `json:"rebase_available"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Available != tt.available {
+			t.Fatalf("%s availability = %v", tt.branch, result.Available)
+		}
+	}
+	saved, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.MergeTargetBranch != "main" {
+		t.Fatal("eligibility check changed the task target")
 	}
 }

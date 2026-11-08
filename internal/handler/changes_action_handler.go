@@ -298,3 +298,22 @@ func (h *Handler) prepareChangesLocalTarget(c echo.Context, preflight *taskBranc
 	}
 	return target, nil
 }
+
+// GetChangesLocalEligibility evaluates the requested destination without changing the task.
+func (h *Handler) GetChangesLocalEligibility(c echo.Context) error {
+	task, project, err := h.changesActionContext(c)
+	if err != nil {
+		return err
+	}
+	target := strings.TrimSpace(c.QueryParam("target"))
+	if target == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Target branch is required")
+	}
+	selected := *task
+	ctx := c.Request().Context()
+	if err := h.selectChangesLocalTarget(ctx, &selected, project, target); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	available := h.taskRebaseAvailable(ctx, &selected, project, taskBranchAlreadyMergedForProject(ctx, &selected, project))
+	return c.JSON(http.StatusOK, map[string]any{"target": target, "rebase_available": available})
+}

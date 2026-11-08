@@ -62,3 +62,32 @@ func TestBrowserFunctional_ChangesSplitActionPartialDiscovery(t *testing.T) {
 		b.waitFor("fork PR submitted", `String(window.partialActions?.actions.length===1&&window.partialActions.actions[0].target_repo==='https://github.com/me/repo')`, "true")
 	})
 }
+
+func TestBrowserFunctional_ChangesSplitActionRebaseTarget(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-rebase-target", func(b *composerFocusCDP) {
+		b.waitFor("settings loaded", `String(document.querySelector('[data-changes-primary]')?.disabled===false)`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.click(`[data-changes-mode="local"]`)
+		b.waitFor("main has no rebase", `String(document.querySelector('[data-changes-method] option[value="rebase"]')?.disabled===true)`, "true")
+		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='develop';el.dispatchEvent(new Event('change'));return 'ok';})()`)
+		b.waitFor("develop allows rebase", `String(document.querySelector('[data-changes-method] option[value="rebase"]')?.disabled===false)`, "true")
+		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-method]');el.value='rebase';el.dispatchEvent(new Event('change'));return 'ok';})()`)
+		b.waitFor("rebase enabled", `String(document.querySelector('[data-changes-primary]').textContent==='Rebase onto develop'&&!document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='main';el.dispatchEvent(new Event('change'));return 'ok';})()`)
+		b.waitFor("main disables saved rebase", `String(document.querySelector('[data-changes-method] option[value="rebase"]').disabled&&document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='develop';el.dispatchEvent(new Event('change'));return 'ok';})()`)
+		b.waitFor("rebase restored", `String(!document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`(()=>{const original=window.fetch;window.fetch=async function(url,options){const response=await original(url,options);if(String(url).endsWith('action-local?target=main'))await new Promise(resolve=>window.releaseMainEligibility=resolve);return response;};const el=document.querySelector('[data-changes-local-branch]');el.value='main';el.dispatchEvent(new Event('change'));return 'ok';})()`)
+		b.waitFor("old request held", `String(typeof window.releaseMainEligibility==='function')`, "true")
+		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='develop';el.dispatchEvent(new Event('change'));return 'ok';})()`)
+		b.waitFor("new selection checked", `String(!document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`window.releaseMainEligibility();'ok'`)
+		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.actionState=s));'ok'`)
+		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
+		b.click(`[data-changes-primary]`)
+		b.waitFor("rebase submitted to develop", `String(window.actionState?.actions.some(a=>a.changes_target==='develop'&&a.merge_type==='rebase'))`, "true")
+	})
+}
