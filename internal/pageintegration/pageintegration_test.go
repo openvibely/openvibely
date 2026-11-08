@@ -118,11 +118,11 @@ func TestRunValidatesInput(t *testing.T) {
 func TestBuildRuntimeToolsSharesOperationPath(t *testing.T) {
 	f := newFake()
 	rt := BuildRuntimeTools(f, func(context.Context) (Integration, error) { return f, nil }, Caller{PrincipalID: "u"})
-	if rt == nil || len(rt.Definitions) != 2 {
-		t.Fatalf("expected 2 tool definitions, got %+v", rt)
+	if rt == nil || len(rt.Definitions) != 3 {
+		t.Fatalf("expected 3 tool definitions, got %+v", rt)
 	}
-	if allowed, handled := rt.Filter(ToolName("hidden")); allowed || handled {
-		t.Fatal("non-tool operation exposed")
+	if allowed, handled := rt.Filter(ToolName("hidden")); !allowed || !handled {
+		t.Fatal("declared operation was not exposed")
 	}
 	out, handled, isErr, err := rt.Executor(context.Background(), ToolName("refresh"), json.RawMessage(`{"region":"west"}`))
 	if err != nil || !handled || isErr || !strings.Contains(out, `"op":"refresh"`) {
@@ -134,6 +134,10 @@ func TestBuildRuntimeToolsSharesOperationPath(t *testing.T) {
 	out, _, isErr, err = rt.Executor(context.Background(), ToolName("set_target"), json.RawMessage(`{}`))
 	if err != nil || isErr || len(f.calls) != 2 || f.calls[1].Via != "agent" {
 		t.Fatalf("action tool did not run directly: %q %v %+v", out, err, f.calls)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), ToolName("hidden"), json.RawMessage(`{}`))
+	if err != nil || !handled || isErr || !strings.Contains(out, `"op":"hidden"`) {
+		t.Fatalf("operation without legacy tool opt-in did not execute: %q %v", out, err)
 	}
 }
 

@@ -95,8 +95,9 @@ type Operation struct {
 	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
 	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
 	Permissions  []string        `json:"permissions,omitempty"`
-	ExposeAsTool bool            `json:"expose_as_tool"`
-	Emits        []string        `json:"emits,omitempty"`
+	// Deprecated: accepted for old packages; all declared operations are tools.
+	ExposeAsTool bool     `json:"expose_as_tool"`
+	Emits        []string `json:"emits,omitempty"`
 }
 
 var operationNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)

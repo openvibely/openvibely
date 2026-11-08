@@ -6,7 +6,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -20,9 +19,6 @@ func (h *Handler) pluginThreadContext(c echo.Context) error {
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
 		return err
-	}
-	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
-		return pluginNotFound()
 	}
 	taskID, err := h.pagePlugins.Conversation(r.Ref()).Store.TaskID(c.Request().Context())
 	if err != nil {

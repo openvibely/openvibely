@@ -22,7 +22,7 @@ type Resolver func(ctx context.Context) (Integration, error)
 
 var emptyObjectSchema = json.RawMessage(`{"type":"object","properties":{}}`)
 
-// BuildRuntimeTools exposes an integration's tool-enabled operations to the
+// BuildRuntimeTools exposes all of an integration's declared operations to the
 // side-chat agent. Definitions come from the server-side manifest, never from
 // the browser.
 func BuildRuntimeTools(base Integration, resolve Resolver, caller Caller) *llmcontracts.RuntimeTools {
@@ -32,9 +32,6 @@ func BuildRuntimeTools(base Integration, resolve Resolver, caller Caller) *llmco
 	ops := map[string]Operation{}
 	var defs []llmcontracts.RuntimeToolDefinition
 	for _, op := range base.Operations() {
-		if !op.ExposeAsTool {
-			continue
-		}
 		ops[ToolName(op.Name)] = op
 		schema := op.InputSchema
 		if len(schema) == 0 {
@@ -91,9 +88,7 @@ func RenderContextForPrompt(ref PageRef, snap *Snapshot, ops []Operation) string
 	fmt.Fprintf(&b, "## Page-aware side chat\nYou are assisting the user on the %q page (page %s, instance %s) in project %s.\n", ref.Title, ref.PageID, ref.InstanceID, ref.ProjectID)
 	var tools []string
 	for _, op := range ops {
-		if op.ExposeAsTool {
-			tools = append(tools, ToolName(op.Name))
-		}
+		tools = append(tools, ToolName(op.Name))
 	}
 	if len(tools) > 0 {
 		fmt.Fprintf(&b, "Page tools available: %s. They run the same server-side operations as the page's buttons.\n", strings.Join(tools, ", "))

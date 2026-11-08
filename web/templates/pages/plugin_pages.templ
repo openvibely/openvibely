@@ -19,7 +19,6 @@ type PluginPageView struct {
 	OwningProject   string
 	Handle          string
 	AssetURL        string
-	ChatEnabled     bool
 	ChatHasEarlier  bool
 	ChatExecutions  []models.Execution
 	ChatTask        *models.Task
@@ -58,9 +57,7 @@ templ PluginPageContent(v PluginPageView) {
 					{ v.PluginName } { v.Version } · project <span>{ v.OwningProject }</span>
 				</div>
 			</div>
-			if v.ChatEnabled {
-				@components.SidePanelToggle("page-chat-toggle", "page-side-chat", templ.Attributes{"data-page-chat-toggle": ""})
-			}
+			@components.SidePanelToggle("page-chat-toggle", "page-side-chat", templ.Attributes{"data-page-chat-toggle": ""})
 		</div>
 		<div id="plugin-startup" class="text-xs mb-2" role="status">Loading page…</div>
 		<div id="plugin-notice" class="text-xs mb-2" aria-live="polite"></div>
@@ -73,12 +70,10 @@ templ PluginPageContent(v PluginPageView) {
 				referrerpolicy="no-referrer"
 				src={ v.AssetURL }
 			></iframe>
-			if v.ChatEnabled {
-				@components.PageSideChat(components.PageChatView{
-					HasEarlier:     v.ChatHasEarlier,
-					ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, PendingInputs: v.ChatPending, Attachments: v.ChatAttachments, Agents: v.ChatAgents,
-				})
-			}
+			@components.PageSideChat(components.PageChatView{
+				HasEarlier:     v.ChatHasEarlier,
+				ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, PendingInputs: v.ChatPending, Attachments: v.ChatAttachments, Agents: v.ChatAgents,
+			})
 		</div>
 		@pluginHostBridgeScript()
 	</div>

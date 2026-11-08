@@ -29,7 +29,7 @@ const (
 const (
 	PermissionStorage = "storage"      // persist instance state
 	PermissionEvents  = "events"       // publish/receive refresh events
-	PermissionAgent   = "agent"        // request agent analysis / side chat
+	PermissionAgent   = "agent"        // legacy declaration; side chat is always available
 	PermissionBackend = "backend.exec" // run a local backend process (requires admin approval)
 )
 

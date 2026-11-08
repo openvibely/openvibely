@@ -146,7 +146,6 @@ func pluginView(r *pageplugins.Resolved, projectName string, hd pageplugins.Hand
 		OwningProject:   projectName,
 		Handle:          hd.Token,
 		AssetURL:        "/plugin-assets/" + url.PathEscape(hd.Token) + "/" + strings.TrimPrefix(r.Page.Entry, "/") + "?handle=" + url.QueryEscape(hd.Token),
-		ChatEnabled:     r.Manifest.HasPermission(pageplugins.PermissionAgent),
 	}
 }
 
@@ -189,23 +188,21 @@ func (h *Handler) PluginPage(c echo.Context) error {
 		projectName = p.Name
 	}
 	v := pluginView(r, projectName, hd)
-	if v.ChatEnabled {
-		v.ChatAgents, err = h.llmConfigRepo.ListPickerOptions(ctx)
-		if err != nil {
-			return err
-		}
-		binding := h.pagePlugins.Conversation(r.Ref())
-		unlock := persistence.LockTaskLifecycle(binding.LockKey())
-		_, err = h.pageConversationTask(ctx, binding, "", "")
-		unlock()
-		if err != nil {
-			return err
-		}
-		if err := h.loadPluginChatHistory(ctx, &v); err != nil {
-			return err
-		}
-		c.SetRequest(c.Request().WithContext(components.WithThreadSurface(ctx, pluginThreadSurface(r.Instance.ID, r.Instance.ProjectID))))
+	v.ChatAgents, err = h.llmConfigRepo.ListPickerOptions(ctx)
+	if err != nil {
+		return err
 	}
+	binding := h.pagePlugins.Conversation(r.Ref())
+	unlock := persistence.LockTaskLifecycle(binding.LockKey())
+	_, err = h.pageConversationTask(ctx, binding, "", "")
+	unlock()
+	if err != nil {
+		return err
+	}
+	if err := h.loadPluginChatHistory(ctx, &v); err != nil {
+		return err
+	}
+	c.SetRequest(c.Request().WithContext(components.WithThreadSurface(ctx, pluginThreadSurface(r.Instance.ID, r.Instance.ProjectID))))
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.PluginPageContent(v))
@@ -512,9 +509,6 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 		}
 		return bridgeResult(c, map[string]bool{"subscribed": true})
 	case pageplugins.BridgeAnalyzeRequest:
-		if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
-			return bridgeError(c, http.StatusForbidden, "plugin lacks the agent permission")
-		}
 		var p pageplugins.AnalyzePayload
 		if err := pageplugins.DecodeStrict(msg.Payload, &p); err != nil || strings.TrimSpace(p.Prompt) == "" || utf8.RuneCountInString(p.Prompt) > maxPluginAnalyzePrompt {
 			return bridgeError(c, http.StatusBadRequest, "analyze.request needs a prompt (max 4000 characters)")
@@ -704,9 +698,6 @@ func (h *Handler) PluginChatSend(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
-		return pluginNotFound()
-	}
 	message := strings.TrimSpace(c.FormValue("message"))
 	if message == "" || utf8.RuneCountInString(message) > maxPluginChatMessage {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required (max 8000 characters)")
@@ -774,9 +765,6 @@ func (h *Handler) PluginChatComposerAction(c echo.Context) error {
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
 		return err
-	}
-	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
-		return pluginNotFound()
 	}
 	running, err := h.pluginChatRunningExec(c.Request().Context(), r.Instance.ID)
 	if err != nil {
@@ -885,6 +873,9 @@ func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pag
 func pluginPermissions(man *pageplugins.Manifest) []pages.PluginPermission {
 	out := make([]pages.PluginPermission, 0, len(man.Permissions))
 	for _, p := range man.Permissions {
+		if p == pageplugins.PermissionAgent {
+			continue
+		} // Legacy declaration; chat is always available.
 		out = append(out, pages.PluginPermission{Name: p, Description: pageplugins.PermissionDescription(p)})
 	}
 	return out
@@ -1104,9 +1095,6 @@ func (h *Handler) pluginSteeringTask(c echo.Context) error {
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
 		return err
-	}
-	if !r.Manifest.HasPermission(pageplugins.PermissionAgent) {
-		return pluginNotFound()
 	}
 	taskID, err := h.pagePlugins.Conversation(r.Ref()).Store.TaskID(c.Request().Context())
 	if err != nil {

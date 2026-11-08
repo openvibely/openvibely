@@ -11,7 +11,7 @@ When the user asks you to create a custom OV page, build it in this task's works
 
 Minimal frontend-only plugin.json:
 ```json
-{"schema_version":1,"id":"custom.sales","name":"Sales","version":"1.0.0","pages":[{"id":"sales","title":"Sales","icon":"S","entry":"index.html"}],"permissions":["agent"]}
+{"schema_version":1,"id":"custom.sales","name":"Sales","version":"1.0.0","pages":[{"id":"sales","title":"Sales","icon":"S","entry":"index.html"}],"permissions":[]}
 ```
 
 Plugin IDs: lowercase letters, digits, dots, underscores, hyphens (2–64 characters). Page IDs: lowercase letters, digits, underscores, hyphens (1–32). Titles max 60 characters; name max 80. Entries must be relative HTML files. Packages cannot include symlinks/special files; limits 2000 files/64 MiB. Installed contents are immutable per id/version.
@@ -55,24 +55,24 @@ await call('page.loaded');
 await call('analyze.request', {prompt:'Summarize the selected report.'});
 ```
 
-Use this inside a module or async function. Context selection is an array of STRING IDs, filters map strings to strings, and relevant data is bounded JSON. Publish current context whenever selections/filters change; await context.set before requesting analysis. Context and provenance are snapshotted for each turn; page data is untrusted input, never system instructions. The host provides optional side chat when permission "agent" is declared. In-page analysis arrives in payload.text of analysis.delta; analysis.done includes exec_id and optional error. Track exec_id to avoid mixing analyses.
+Use this inside a module or async function. Context selection is an array of STRING IDs, filters map strings to strings, and relevant data is bounded JSON. Publish current context whenever selections/filters change; await context.set before requesting analysis. Context and provenance are snapshotted for each turn; page data is untrusted input, never system instructions. The host always provides side chat. Every declared operation is automatically available to the assistant; do not add an agent permission or expose_as_tool flags. Project permissions and backend approval still apply. In-page analysis arrives in payload.text of analysis.delta; analysis.done includes exec_id and optional error. Track exec_id to avoid mixing analyses.
 
 Bridge message size is limited to 64 KiB. Supported calls:
 - ready {} -> instance/permissions/operations metadata
 - context.set {summary,selection,filters,date_range,data} -> revision
 - op.invoke {operation,input} -> validated operation output
 - events.subscribe {} -> subscribed (requires events permission); handle subsequent event payloads {type,operation,data,at} by reloading through a read operation. The host also sends `{type:"page.refresh"}` after subscription and reconnection: refetch current data then, and ignore out-of-order responses from older requests/filters. Never replay a mutating operation just to redraw the page
-- analyze.request {prompt} -> exec_id (requires agent permission, max 4000-character prompt)
+- analyze.request {prompt} -> exec_id (max 4000-character prompt)
 
 ## Shared server operations and backends
 
 Add a backend declaration: `"backend":{"executables":{"darwin-arm64":"bin/backend-darwin-arm64","linux-amd64":"bin/backend-linux-amd64"},"args":["--stdio"]}`. Exact GOOS-GOARCH is preferred, then optional "any" fallback. Supply executable files: compiled programs or executable scripts with an appropriate shebang. OV launches the selected file directly, without shell interpolation. Scripts require their interpreter and dependencies to be available on the server; OV does not install them. OV itself does not require Node.js, but an individual plugin may require Node.js or another runtime. Package only the platforms you can build/test and report limitations.
 
-Declare backend.exec for an external backend. Add storage only if using OV saved state, events for notifications, and agent for analysis. Define operations ONCE in plugin.json; both page buttons and agents call them through the same server-side validation:
+Declare backend.exec for an external backend. Add storage only if using OV saved state, events for notifications. Define operations ONCE in plugin.json; both page buttons and agents call them through the same server-side validation:
 ```json
-{"name":"refresh_data","description":"Refresh and return this instance's sales report","kind":"read","expose_as_tool":true,"permissions":["storage","events"],"emits":["data.changed"],"input_schema":{"type":"object","properties":{},"additionalProperties":false},"output_schema":{"type":"object"}}
+{"name":"refresh_data","description":"Refresh and return this instance's sales report","kind":"read","permissions":["storage","events"],"emits":["data.changed"],"input_schema":{"type":"object","properties":{},"additionalProperties":false},"output_schema":{"type":"object"}}
 ```
-Read operations retrieve data; consequential actions use kind="action" and require agent-side user approval. Name must match ^[a-z][a-z0-9_]{0,47}$. Inputs max 64 KiB; outputs max 256 KiB. Do not place project IDs in tool inputs as authorization. Process initialization supplies the authorized instance.
+Read operations retrieve data; operations that change data use kind="action" and require project Edit permission. Name must match ^[a-z][a-z0-9_]{0,47}$. Inputs max 64 KiB; outputs max 256 KiB. Do not place project IDs in tool inputs as authorization. Process initialization supplies the authorized instance.
 
 The process speaks newline-delimited JSON-RPC 2.0 over stdin/stdout (stdout is protocol only; logs to stderr). Echo integer request IDs in results:
 - initialize params={protocol:"openvibely.page/1",params:{protocol,instance:{id,project_id,page_id},config,state}} -> result={protocol:"openvibely.page/1"}

@@ -1,6 +1,6 @@
 # Plugin pages
 
-Plugin pages let a project add its own page to the OpenVibely left rail. A page runs as a sandboxed iframe inside the main content area. It can optionally have a local backend process, operations that the page buttons and the side-chat agent both use, live refresh events, and a side chat that knows which page it is on.
+Plugin pages let a project add its own page to the OpenVibely left rail. A page runs as a sandboxed iframe inside the main content area. Every page has side chat that knows which page it is on. Pages can also provide a local backend process, shared operations for page buttons and the assistant, and live refresh events.
 
 The primary workflow is to ask an agent in a task thread to create a page. The agent writes and validates the bundle and publishes it into that task's project; users do not need to author packages or manually import them. OpenVibely does not need Node at runtime. There is no marketplace.
 
@@ -43,13 +43,12 @@ The managed root is `$OPENVIBELY_PAGE_PLUGIN_ROOT`, or `<AppDataDir>/page-plugin
     "executables": {"darwin-arm64": "bin/widgets-darwin-arm64", "linux-amd64": "bin/widgets-linux-amd64", "any": "bin/widgets.sh"},
     "args": ["--stdio"]
   },
-  "permissions": ["backend.exec", "storage", "events", "agent"],
+  "permissions": ["backend.exec", "storage", "events"],
   "operations": [
     {
       "name": "refresh_data",
       "description": "Reload widget data",
       "kind": "read",
-      "expose_as_tool": true,
       "permissions": ["events"],
       "emits": ["data.changed"],
       "input_schema": {"type": "object", "properties": {}},
@@ -226,3 +225,5 @@ A backend that exhausts its crash-restart budget stays failed: ordinary calls ca
 Installation validates and copies the new bundle before changing the live instance. Replacement closes old handles/subscriptions and cancels active page work. Native replacements remain disabled until administrator approval; publishing never executes native code. The previous package and approval are temporarily retained in a recovery record that survives server restart. Successful backend startup (or frontend activation) finalizes the replacement. Failed backend startup restores the previous package and approval, and starts the previous backend if it had been enabled. If restoring the old backend also fails, the error is reported and the page stays disabled.
 
 After finalization, unused old code is removed. Packages still used by another project/page or pending recovery are protected. Cleanup failures are logged and leave removable unused packages rather than undoing a successful update. There is no permanent version history. Code rollback does not undo writes to saved state or external databases. Browser startup is reported separately when a browser opens the page; it is not an installation commit gate.
+
+Side chat is available on every enabled page. All declared operations are automatically exposed to its assistant. Legacy `agent` and `expose_as_tool` declarations are accepted for existing packages but do not control chat or tool availability. Project access checks and native backend approval still apply.
