@@ -140,7 +140,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
  }
 			<button type="button" class="btn" data-sharing-cancel>Cancel</button>
 			if canManageSharing {
-				<button type="button" class="btn btn-primary" data-sharing-save disabled>Save</button>
+				<button type="button" class="btn btn-primary" data-sharing-save>Save</button>
 			}
 		</div>
 		<script>
@@ -166,7 +166,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
     for (const id of initial.keys()) if(!current.has(id)) changes[id]='';
     form.elements.changes.value=JSON.stringify(changes);
     const dirty=Object.keys(changes).length>0;
-    save.disabled=!dirty;
+    save.disabled=false;
     transfer.querySelector('button').disabled=dirty||transferDisabled;
     transferToggle.disabled=dirty||transferDisabled;
     root.querySelector('[data-sharing-transfer-hint]').classList.toggle('hidden',!dirty);

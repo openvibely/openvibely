@@ -69,6 +69,7 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
   assert(panel().textContent.includes('Organization owner'),'organization role missing');
 
   assert(panel().querySelector('[data-sharing-save]').textContent.trim()==='Save','inconsistent Save label');
+  assert(!panel().querySelector('[data-sharing-save]').disabled,'Save must be enabled without membership changes');
   assert(panel().querySelector('[data-sharing-cancel]').className===document.getElementById('edit-project-cancel-button').className,'inconsistent Cancel style');
   assert(document.getElementById('edit-project-save-button').closest('.modal-action').hidden,'general Save must hide on Sharing');
   document.getElementById('edit-project-general-tab').click();
