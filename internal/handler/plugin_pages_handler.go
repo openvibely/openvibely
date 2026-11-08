@@ -136,14 +136,11 @@ func (h *Handler) pluginHandleFor(c echo.Context, r *pageplugins.Resolved, token
 	return hd, nil
 }
 
-func pluginView(r *pageplugins.Resolved, projectName string, hd pageplugins.Handle) pages.PluginPageView {
+func pluginView(r *pageplugins.Resolved, hd pageplugins.Handle) pages.PluginPageView {
 	return pages.PluginPageView{
 		InstanceID:      r.Instance.ID,
 		Title:           r.Instance.Title,
-		PluginName:      r.Manifest.Name,
-		Version:         r.Manifest.Version,
 		OwningProjectID: r.Instance.ProjectID,
-		OwningProject:   projectName,
 		Handle:          hd.Token,
 		AssetURL:        "/plugin-assets/" + url.PathEscape(hd.Token) + "/" + strings.TrimPrefix(r.Page.Entry, "/") + "?handle=" + url.QueryEscape(hd.Token),
 	}
@@ -183,11 +180,7 @@ func (h *Handler) PluginPage(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	projectName := r.Instance.ProjectID
-	if p, err := h.projectSvc.GetByID(ctx, r.Instance.ProjectID); err == nil && p != nil {
-		projectName = p.Name
-	}
-	v := pluginView(r, projectName, hd)
+	v := pluginView(r, hd)
 	v.ChatAgents, err = h.llmConfigRepo.ListPickerOptions(ctx)
 	if err != nil {
 		return err
