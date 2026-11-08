@@ -42,6 +42,14 @@ func TestPageChatEditsLivePageWithoutNewTask(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "<h1>After</h1>", string(content))
 	run("edit_file", `{"file_path":"index.html","old_string":"After","new_string":"Again"}`, false)
+	// Keep the same live tool runtime across a task publication. It must read
+	// and edit the new sources without capturing an obsolete editing revision.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"schema_version":1,"id":"test.edit-chat","name":"Edit chat","version":"2.0.0","pages":[{"id":"home","title":"Home","entry":"index.html"}]}`), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>Task update</h1>"), 0600))
+	_, err = env.mgr.PublishToInstance(t.Context(), dir, env.projA.ID, "", "admin", in.ID)
+	require.NoError(t, err)
+	require.Contains(t, run("read_file", `{"file_path":"index.html"}`, false), "Task update")
+	run("edit_file", `{"file_path":"index.html","old_string":"Task update","new_string":"Chat follow-up"}`, false)
 	run("write_file", `{"file_path":"plugin.json","content":"invalid"}`, true)
 	resumed, workDir, err := env.h.pageEditTools(t.Context(), *params.PageConversation, params.PrincipalID)
 	require.NoError(t, err)

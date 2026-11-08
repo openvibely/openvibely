@@ -89,6 +89,15 @@ func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, 
 			enable = pending.Enabled
 		}
 	}
+	// Task publications and side chat share one instance-owned source tree.
+	// Import before starting the replacement so failed builds/startups retain
+	// the submitted files while the previous runtime snapshot remains available.
+	if instance != nil {
+		if err := m.replacePageSources(instance.ID, source); err != nil {
+			return nil, err
+		}
+		source = m.pageSourceDir(instance.ID)
+	}
 	existing, err := m.store.GetPackageByVersion(ctx, man.ID, man.Version)
 	if err != nil {
 		return nil, err
@@ -136,6 +145,9 @@ func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, 
 	}
 	if instance == nil {
 		return nil, ErrNotFound
+	}
+	if err := m.replacePageSources(instance.ID, source); err != nil {
+		return nil, err
 	}
 	return &PublishResult{Instance: instance, ApprovalRequired: false}, nil
 }

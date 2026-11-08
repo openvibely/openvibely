@@ -21,7 +21,7 @@ import (
 // pageEditTools uses persistent instance-owned files and publishes successful changes automatically.
 func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Conversation, principal string) (*llmcontracts.RuntimeTools, string, error) {
 	var mu sync.Mutex
-	dir, baseHash, err := h.pagePlugins.EditWorkspace(ctx, binding.Page.InstanceID)
+	dir, _, err := h.pagePlugins.EditWorkspace(ctx, binding.Page.InstanceID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -51,6 +51,12 @@ func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Con
 		}
 		mu.Lock()
 		defer mu.Unlock()
+		// Resolve the current revision for every tool call: a task may have
+		// updated the same source tree since this conversation began.
+		_, baseHash, err := h.pagePlugins.EditWorkspace(ctx, binding.Page.InstanceID)
+		if err != nil {
+			return fail(err)
+		}
 		// Reuse standard tool implementations while constraining their file paths.
 		if name != "shell" && name != "process" {
 			var args map[string]json.RawMessage
@@ -95,14 +101,13 @@ func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Con
 		}
 		after, hashErr := pageplugins.HashTree(os.DirFS(dir))
 		if name != "read_file" && name != "list_files" && name != "grep_search" && (baseHash != after || hashErr != nil) {
-			result, applyErr := h.pagePlugins.ApplyEdit(ctx, binding.Page.InstanceID, binding.Page.ProjectID, baseHash, dir, principal)
+			_, applyErr := h.pagePlugins.ApplyEdit(ctx, binding.Page.InstanceID, binding.Page.ProjectID, baseHash, dir, principal)
 			if applyErr != nil {
 				if strings.Contains(applyErr.Error(), "previous package restored") && h.broadcaster != nil {
 					h.broadcaster.Publish(events.TaskEvent{Type: events.PluginPagesChanged, ProjectID: binding.Page.ProjectID, TaskID: binding.Page.InstanceID})
 				}
 				return fail(fmt.Errorf("files saved; live page update failed (edits retained): %w", applyErr))
 			}
-			baseHash = result.Instance.ContentHash
 			if h.broadcaster != nil {
 				h.broadcaster.Publish(events.TaskEvent{Type: events.PluginPagesChanged, ProjectID: binding.Page.ProjectID, TaskID: binding.Page.InstanceID})
 			}

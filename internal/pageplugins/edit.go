@@ -22,40 +22,42 @@ func (m *Manager) EditWorkspace(ctx context.Context, instanceID string) (string,
 	if !in.Enabled {
 		return "", "", ErrDisabled
 	}
-	root := filepath.Join(m.root, "page-sources", in.ID)
-	dir := filepath.Join(root, "files")
-	stamp := filepath.Join(root, "base-hash")
-	if hash, err := os.ReadFile(stamp); err == nil {
-		return dir, string(hash), nil
+	dir := m.pageSourceDir(in.ID)
+	// Migrate the former side-chat workspace once. If an external update
+	// already made it stale, keep its unfinished files as a recovery archive
+	// and use the current page. New publications no longer create this marker.
+	stamp := filepath.Join(filepath.Dir(dir), "base-hash")
+	if previous, readErr := os.ReadFile(stamp); readErr == nil {
+		if string(previous) != pkg.ContentHash {
+			archive, err := os.MkdirTemp(filepath.Dir(dir), "recovered-edits-")
+			if err != nil {
+				return "", "", err
+			}
+			if err := copyTree(os.DirFS(dir), archive); err != nil {
+				return "", "", err
+			}
+			if err := m.replacePageSources(in.ID, pkg.InstallPath); err != nil {
+				return "", "", err
+			}
+		}
+		if err := os.Remove(stamp); err != nil && !os.IsNotExist(err) {
+			return "", "", err
+		}
+	} else if !os.IsNotExist(readErr) {
+		return "", "", readErr
+	}
+	if _, err := os.Stat(dir); err == nil {
+		return dir, pkg.ContentHash, nil
 	} else if !os.IsNotExist(err) {
 		return "", "", err
 	}
-	if err := os.MkdirAll(root, 0700); err != nil {
-		return "", "", err
-	}
-	// Initialize atomically; an interrupted copy must never become the working tree.
-	staging, err := os.MkdirTemp(root, ".init-")
-	if err != nil {
-		return "", "", err
-	}
-	defer os.RemoveAll(staging)
-	if err = copyTree(os.DirFS(pkg.InstallPath), staging); err != nil {
-		return "", "", err
-	}
-	if _, err = os.Stat(dir); os.IsNotExist(err) {
-		if err = os.Rename(staging, dir); err != nil {
-			return "", "", err
-		}
-	} else if err != nil {
-		return "", "", err
-	}
-	if err = os.WriteFile(stamp, []byte(pkg.ContentHash), 0600); err != nil {
+	if err := m.replacePageSources(in.ID, pkg.InstallPath); err != nil {
 		return "", "", err
 	}
 	return dir, pkg.ContentHash, nil
 }
 
-// ApplyEdit rejects stale drafts and publishes a new revision without changing
+// ApplyEdit rejects concurrent publication and publishes a new revision without changing
 // the page identity, saved data, or conversation. Startup failure rolls back.
 func (m *Manager) ApplyEdit(ctx context.Context, instanceID, projectID, baseHash, source, by string) (*PublishResult, error) {
 	m.publishMu.Lock()
@@ -100,10 +102,56 @@ func (m *Manager) ApplyEdit(ctx context.Context, instanceID, projectID, baseHash
 	if err != nil {
 		return nil, err
 	}
-	if source == filepath.Join(m.root, "page-sources", in.ID, "files") {
-		if err := os.WriteFile(filepath.Join(m.root, "page-sources", in.ID, "base-hash"), []byte(result.Instance.ContentHash), 0600); err != nil {
-			return nil, err
-		}
-	}
+
 	return result, nil
+}
+
+// pageSourceDir is the single mutable source tree for an instance. Installed
+// packages are immutable runtime snapshots, not a second editing workspace.
+func (m *Manager) pageSourceDir(instanceID string) string {
+	return filepath.Join(m.root, "page-sources", instanceID, "files")
+}
+
+// replacePageSources imports a task publication into the same files used by chat.
+// Callers hold publishMu. Stage first so a copy failure leaves existing files intact.
+func (m *Manager) replacePageSources(instanceID, source string) error {
+	dir := m.pageSourceDir(instanceID)
+	if filepath.Clean(source) == filepath.Clean(dir) {
+		return nil
+	}
+	root := filepath.Dir(dir)
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(root, ".import-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+	if err := copyTree(os.DirFS(source), staging); err != nil {
+		return err
+	}
+	// A prior interrupted import can leave the previous tree here. It is only
+	// removed once a complete replacement has been staged.
+	backup := filepath.Join(root, ".previous")
+	if err := os.RemoveAll(backup); err != nil {
+		return err
+	}
+	hadPrevious := false
+	if err := os.Rename(dir, backup); err == nil {
+		hadPrevious = true
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(staging, dir); err != nil {
+		if hadPrevious {
+			_ = os.Rename(backup, dir)
+		}
+		return err
+	}
+	_ = os.RemoveAll(backup)
+	// Older releases recorded a separate editing revision. There is now only
+	// the instance's installed revision and its authoritative source tree.
+	_ = os.Remove(filepath.Join(root, "base-hash"))
+	return nil
 }
