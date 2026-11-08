@@ -466,6 +466,12 @@
             const live = document.getElementById(id);
             if (!form || !live) return;
             form.setAttribute('hx-preserve', 'true');
+            // Preserve the composer as one subtree. Preserving a child as well
+            // makes HTMX pull it out of the retained form and lose its slot.
+            form.querySelectorAll('[hx-preserve], [data-hx-preserve]').forEach(el => {
+                el.removeAttribute('hx-preserve');
+                el.removeAttribute('data-hx-preserve');
+            });
             composers.push({
                 form: live,
                 regions: ['pending-thread-inputs', id + '-primary-action'].map(regionID => ({
