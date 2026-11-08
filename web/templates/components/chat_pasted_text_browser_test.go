@@ -121,6 +121,11 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
 
  cards()[0].click(); document.querySelector('dialog textarea').value='discard';button('Cancel').click();await wait();
  assert(form._captureChatSubmission().message.endsWith(large),'cancel changed paste');
+ cards()[0].click();document.querySelector('dialog textarea').value='discard via X';
+ document.querySelector('dialog [aria-label="Close pasted text editor"]').click();await wait();
+ assert(!document.querySelector('dialog[open]'),'close X left editor open');
+ assert(document.activeElement===cards()[0],'close X did not restore focus');
+ assert(form._captureChatSubmission().pastedTextSnapshot[0].text===large,'close X saved discarded edits');
  cards()[0].click();document.querySelector('dialog textarea').value='edited text';button('Save').click();await wait();
  assert(form._captureChatSubmission().message==='Explain this\n\nedited text','edit not saved');
  holdSend=true;send();
