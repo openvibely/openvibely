@@ -347,10 +347,65 @@ func (m *Manager) Disable(ctx context.Context, instanceID string) error {
 
 // RemoveInstance first shuts down the instance, then deletes its saved data.
 func (m *Manager) RemoveInstance(ctx context.Context, instanceID string) error {
+	m.publishMu.Lock()
+	defer m.publishMu.Unlock()
 	if err := m.deactivate(ctx, instanceID, true); err != nil {
 		return err
 	}
-	return os.RemoveAll(filepath.Join(m.root, "page-sources", instanceID))
+	m.packageMu.Lock()
+	defer m.packageMu.Unlock()
+	return m.cleanupRemovedPageSources(ctx, instanceID)
+}
+
+// A publication can be reused by another instance before that instance has
+// initialized its files. Keep its source available until the last reference is
+// gone; never leave an installable package pointing at a deleted directory.
+// The caller holds packageMu and publishMu.
+func (m *Manager) cleanupRemovedPageSources(ctx context.Context, removedID string) error {
+	packages, err := m.store.ListPackages(ctx)
+	if err != nil {
+		return err
+	}
+	roots := map[string]bool{removedID: false}
+	for _, pkg := range packages {
+		rel, err := filepath.Rel(filepath.Join(m.root, "page-sources"), pkg.InstallPath)
+		if err != nil {
+			continue
+		}
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) != 2 || parts[0] == ".." || parts[1] != "files" {
+			continue
+		}
+		owner, err := m.store.GetInstance(ctx, parts[0])
+		if err != nil {
+			return err
+		}
+		if owner != nil {
+			continue
+		}
+		n, err := m.store.CountInstancesForPackage(ctx, pkg.ID)
+		if err != nil {
+			return err
+		}
+		roots[parts[0]] = roots[parts[0]] || n > 0
+		if n > 0 {
+			continue
+		}
+		if err := m.store.DeletePackage(ctx, pkg.ID); err != nil {
+			return err
+		}
+		m.mu.Lock()
+		delete(m.manifests, pkg.ID)
+		m.mu.Unlock()
+	}
+	for id, inUse := range roots {
+		if !inUse {
+			if err := os.RemoveAll(filepath.Join(m.root, "page-sources", id)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ReleaseProject stops runtime resources for instances of a deleted project.

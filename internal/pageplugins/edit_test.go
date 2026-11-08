@@ -114,3 +114,46 @@ func TestTaskAndChatUseSamePageSources(t *testing.T) {
 	_, err = os.Stat(filepath.Join(filepath.Dir(dir), "base-hash"))
 	require.True(t, os.IsNotExist(err))
 }
+
+func TestRemoveEditedPageCleansPackageAndPreservesSharedSources(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		name := "unshared"
+		if shared {
+			name = "shared"
+		}
+		t.Run(name, func(t *testing.T) {
+			m, _, project, other := newTestManager(t)
+			ctx := t.Context()
+			first, err := m.PublishToInstance(ctx, replacementBundle(t, "1.0.0"), project, "", "test", "")
+			require.NoError(t, err)
+			dir, _, err := m.EditWorkspace(ctx, first.Instance.ID)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "index.html"), []byte("edited page"), 0600))
+			edited, err := m.PublishEdit(ctx, first.Instance.ID, project, "test")
+			require.NoError(t, err)
+			var secondID string
+			if shared {
+				second, err := m.CreateInstance(ctx, other, edited.Instance.PackageID, edited.Instance.PageID)
+				require.NoError(t, err)
+				secondID = second.ID
+			}
+			require.NoError(t, m.RemoveInstance(ctx, first.Instance.ID))
+			if shared {
+				// The second page has never loaded: enabling must still be able to
+				// initialize from the retained package after the owner is deleted.
+				require.NoError(t, m.Enable(ctx, secondID))
+				secondDir, _, err := m.EditWorkspace(ctx, secondID)
+				require.NoError(t, err)
+				body, err := os.ReadFile(filepath.Join(secondDir, "index.html"))
+				require.NoError(t, err)
+				require.Equal(t, "edited page", string(body))
+				require.NoError(t, m.RemoveInstance(ctx, secondID))
+			}
+			pkg, err := m.store.GetPackage(ctx, edited.Instance.PackageID)
+			require.NoError(t, err)
+			require.Nil(t, pkg)
+			_, err = os.Stat(dir)
+			require.True(t, os.IsNotExist(err))
+		})
+	}
+}
