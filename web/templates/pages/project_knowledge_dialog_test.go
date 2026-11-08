@@ -266,9 +266,11 @@ func TestBrowserFunctional_ProjectSubmitProgress(t *testing.T) {
 				b.waitFor("shell", `String(document.readyState==='complete' && !!window.htmx)`, "true")
 				b.evaluate(`htmx.ajax('GET','/dialog',{target:'#project-settings-container',swap:'innerHTML'});'ok'`)
 				b.waitFor("dialog", `String(!!document.querySelector('dialog[open] form[hx-swap]'))`, "true")
+				// Change a non-repository field even when the remote URL is unchanged.
+				// A no-op edit correctly closes without a request or busy indicator.
 				b.evaluate(fmt.Sprintf(`window.submitForm=document.querySelector('dialog[open] form[hx-swap]');window.submitButton=submitForm.querySelector('[type="submit"]');window.submitSpinner=submitButton.querySelector('.htmx-indicator');window.normalWidth=submitButton.getBoundingClientRect().width;
      submitForm.setAttribute(submitForm.hasAttribute('hx-put')?'hx-put':'hx-post','/submit');htmx.process(submitForm);
-     submitForm.elements.name.value='Test';submitForm.elements.repo_path.value='/tmp/project';submitForm.elements.repo_url.value='https://github.com/acme/new';submitForm.elements.repo_source.value=%q;submitForm.elements.repo_source.dispatchEvent(new Event('change'));'ok'`, tc.source))
+     submitForm.elements.description.value='Updated description';submitForm.elements.name.value='Test';submitForm.elements.repo_path.value='/tmp/project';submitForm.elements.repo_url.value='https://github.com/acme/new';submitForm.elements.repo_source.value=%q;submitForm.elements.repo_source.dispatchEvent(new Event('change'));'ok'`, tc.source))
 				for _, status := range []int{http.StatusBadRequest, http.StatusOK} {
 					b.evaluate(`submitForm.requestSubmit();'ok'`)
 					b.waitFor("busy label and spinner", fmt.Sprintf(`String(submitButton.disabled && submitButton.innerText.trim()===%q && submitSpinner.getBoundingClientRect().width>0 && getComputedStyle(submitSpinner).opacity==='1' && submitForm.querySelector('[id$="-cancel-button"]').disabled)`, tc.label), "true")
