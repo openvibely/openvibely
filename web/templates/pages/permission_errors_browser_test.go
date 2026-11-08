@@ -66,7 +66,8 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 			}))
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "permission-"+tc.name, func(browser *composerFocusCDP) {
-				browser.waitFor("permission helper", `typeof window.openVibelyPermissionErrors`, "object")
+				// The helper script precedes the fixture markup, so it is defined while the parser is still streaming the page.
+				browser.waitFor("parsed permission fixture", `document.readyState+':'+typeof window.openVibelyPermissionErrors`, "complete:object")
 				if result := browser.evaluateAwait(tc.script); result != "ok" {
 					t.Fatal(result)
 				}
