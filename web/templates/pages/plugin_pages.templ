@@ -106,8 +106,7 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID)) }
 				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID) }
 				aria-label={ e.Title + pluginNavProjectSuffix(e, showProject) }
-				data-tip={ e.Title + pluginNavProjectSuffix(e, showProject) }
-				data-tip-side="right"
+				data-tooltip-disabled
 				hx-target="#main-content"
 				hx-push-url="true"
 			>
