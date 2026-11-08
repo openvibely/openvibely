@@ -15,23 +15,14 @@ import (
 func (m *Manager) EditWorkspace(ctx context.Context, instanceID string) (string, error) {
 	m.publishMu.Lock()
 	defer m.publishMu.Unlock()
-	in, pkg, _, err := m.load(ctx, instanceID)
+	in, _, _, err := m.load(ctx, instanceID)
 	if err != nil {
 		return "", err
 	}
 	if !in.Enabled {
 		return "", ErrDisabled
 	}
-	dir := m.pageSourceDir(in.ID)
-	if _, err := os.Stat(dir); err == nil {
-		return dir, nil
-	} else if !os.IsNotExist(err) {
-		return "", err
-	}
-	if err := m.replacePageSources(in.ID, pkg.InstallPath); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return m.pageSourceDir(in.ID), nil
 }
 
 // PublishEdit validates the page's live files and restarts its runtime. It does
