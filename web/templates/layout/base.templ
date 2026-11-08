@@ -839,8 +839,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					.ov-modal-close {
 						position: absolute;
-						top: 0.5rem;
-						right: 0.5rem;
+						/* Match the 1.5rem content inset and center the 1.5rem button
+						   on the title's 1.75rem line box. */
+						top: 1.625rem;
+						right: 1.5rem;
 						z-index: 1210;
 						color: hsl(var(--bc) / 0.7);
 						background-color: transparent;
