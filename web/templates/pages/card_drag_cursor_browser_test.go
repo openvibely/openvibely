@@ -974,7 +974,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
     await waitFor(function(){return permissionToasts.length>0;}, 'permission toast');
     if(permissionToasts.length!==1)fail('duplicate toasts: '+JSON.stringify(permissionToasts));
-    if(permissionToasts[0]!=='Editor access required')fail('wrong permission toast');
+    if(permissionToasts[0]!=='Editor access required')fail('wrong permission toast: '+JSON.stringify(permissionToasts));
     click(first, true); click(second, true);
     drop = await drag(second, target, 32);
     second.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:32,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
@@ -1033,6 +1033,8 @@ window.addEventListener('DOMContentLoaded', function() {
 			attempt := groupAttempts
 			mu.Unlock()
 			if attempt == 1 {
+				// Match the explicit role-denial contract emitted by projectAccessResponse.
+				w.Header().Set("X-OpenVibely-Permission-Denied", "true")
 				http.Error(w, `{"message":"Editor access required"}`, http.StatusForbidden)
 				return
 			}
