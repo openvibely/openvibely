@@ -73,6 +73,10 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  pageLink.click();
  await wait(()=>document.querySelector('#plugin-page-root'),'Page did not open');
  await wait(()=>document.querySelector('#plugin-startup')?.dataset.state==='loaded','Initial frame failed');
+ const pageFrame=document.getElementById('plugin-frame');
+ await wait(()=>pageFrame.style.getPropertyValue('--superellipse-clip'),'Page corners not shaped');
+ const clip=pageFrame.style.getPropertyValue('--superellipse-clip');
+ if(!clip.includes(pageFrame.clientWidth.toFixed(2)+'px '+pageFrame.clientHeight.toFixed(2)+'px') || !clip.includes('0.00px '+pageFrame.clientHeight.toFixed(2)+'px'))throw Error('Page bottom corners are not square');
  const oldHandle=document.querySelector('#plugin-page-root').getAttribute('data-plugin-handle');
  document.querySelector('#appearance-settings-nav a[data-nav-base="/settings/plugin-pages"]').click();
  await wait(()=>document.querySelector('#plugin-settings'),'Settings did not open');

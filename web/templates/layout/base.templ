@@ -3307,6 +3307,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"])::after { top: calc(50% - 5px); }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-5px); }
 
+				#plugin-frame { border-radius: 28px 28px 0 0; }
+				#plugin-frame[style*="--superellipse-clip"] { border-radius: 0; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
 				html[data-shell-frame] #task-list-panel[style*="--superellipse-clip"],
 				html[data-shell-frame]:not([data-tab-style="attached"]) #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
@@ -5632,12 +5634,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									// Attached hover surfaces are inset 2px per side and match detached tabs at 35px tall.
 									if (attachedHover) { w -= 4; h = 35; }
 									var inspector = el.hasAttribute('data-side-panel');
+									var pluginFrame = el.id === 'plugin-frame';
 									var layout = document.documentElement.getAttribute('data-layout');
 									var unified = layout === 'unified';
 									var list = el.id === 'task-list-panel';
 									var joined = unified && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
-									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : 17);
-									var radii = joined ? [0, 0, 0, 0] : list ? (unified ? [0, 0, 0, r] : [r, 0, 0, r]) : el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
+									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list || pluginFrame ? 28 : 17);
+									var radii = pluginFrame ? [r, 0, 0, r] : joined ? [0, 0, 0, 0] : list ? (unified ? [0, 0, 0, r] : [r, 0, 0, r]) : el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
 									corners.forEach(function(c, index) {
@@ -5661,7 +5664,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 										observer.unobserve(el);
 										seen.delete(el);
 									});
-									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, [data-side-panel]').forEach(function(el) {
+									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, [data-side-panel], #plugin-frame').forEach(function(el) {
 										if (seen.has(el)) return;
 										seen.add(el);
 										shape(el);
