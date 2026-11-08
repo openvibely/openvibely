@@ -213,6 +213,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			async function systemUpdateAction(action) {
 				if (window.openVibelyCanManageUpdates !== true) return;
 				var response = await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});
+                if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 				if (action === 'cancel' && response.ok && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();
 				await refreshSystemUpdateCard();
 			}

@@ -63,7 +63,12 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  const details=document.createElement('details');details.open=true;details.dataset.alertDetailUrl='/alerts/example/details';
  details.innerHTML='<div data-alert-detail-container>Keep detail</div>';document.body.append(details);const before=details.innerHTML;
  loadAlertDetail(details);for(let i=0;i<100&&permissionToasts.length===0;i++)await new Promise(r=>setTimeout(r,10));await new Promise(r=>setTimeout(r,20));
- return permissionToasts.length===1&&permissionToasts[0].message==='Access denied'&&details.innerHTML===before?'ok':'alert changed';})()`)
+ if(permissionToasts.length!==1||permissionToasts[0].message!=='Access denied'||details.innerHTML!==before)return 'alert changed';
+ window.openVibelyCanManageUpdates=true;let refreshed=0,cleared=0;
+ refreshSystemUpdateCard=async()=>{refreshed++};window.openVibelyClearSystemUpdatePendingSuccess=()=>{cleared++};
+ const original=document.body.innerHTML;
+ await systemUpdateAction('apply');await systemUpdateAction('cancel');
+ return permissionToasts.length===3&&permissionToasts.every(t=>t.message==='Access denied')&&refreshed===0&&cleared===0&&document.body.innerHTML===original?'ok':'update denial changed UI';})()`)
 					if result != "ok" {
 						t.Fatal(result)
 					}
@@ -196,6 +201,16 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
  discoverOllamaContext();
  for(let i=0;i<100&&permissionToasts.length===count+2;i++)await new Promise(r=>setTimeout(r,10));
  if(permissionToasts.length!==count+3)return 'missing context toast';
+ const anchor=document.createElement('a');anchor.dataset.oauthExternal='true';anchor.textContent='Connect OAuth';document.body.append(anchor);
+ const initial=anchor.outerHTML;
+ for(const phase of ['initiate','status']){
+ let calls=0;const before=permissionToasts.length;
+ window.fetch=async()=>{calls++;return phase==='status'&&calls===1?new Response('{}',{status:200}):new Response(JSON.stringify({message:'Admin access required'}),{status:403});};
+ launchOAuthInSystemBrowser('/models/example/oauth/initiate',anchor);
+ for(let i=0;i<100&&anchor.oauthAttempt;i++)await new Promise(r=>setTimeout(r,10));
+ if(permissionToasts.length!==before+1||permissionToasts[before].message!=='Admin access required'||anchor.outerHTML!==initial||anchor.oauthAttempt||calls!==(phase==='status'?2:1))return 'existing OAuth denial changed control';
+ }
+ anchor.remove();
  window.fetch=originalFetch;return 'ok';})()`)
 					if result != "ok" {
 						t.Fatal(result)

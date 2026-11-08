@@ -1084,6 +1084,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                 async function connect() {
                     try {
                         var response = await fetch(modelMutationURL(path), {headers:{Accept:'application/json'}});
+                        if (await window.openVibelyPermissionErrors?.fetch(response)) return;
                         if (!response.ok) throw Error('Failed to open OAuth in browser');
                         await response.json();
                         if (!current()) return;
@@ -1093,6 +1094,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                         var statusPath = path.replace(/\/initiate$/, '/status');
                         while (current() && Date.now() < deadline) {
                             var result = await fetch(modelMutationURL(statusPath), {cache:'no-store'});
+                            if (await window.openVibelyPermissionErrors?.fetch(result)) return;
                             if (!result.ok) throw Error('Could not check OAuth connection. Try again.');
                             var state = await result.json();
                             if (!current()) return;
