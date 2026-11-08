@@ -16,7 +16,7 @@ import (
 
 // pageEditTools uses persistent instance-owned files and publishes only on an explicit publish_custom_page call.
 func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Conversation, principal string) (*llmcontracts.RuntimeTools, string, error) {
-	dir, _, err := h.pagePlugins.EditWorkspace(ctx, binding.Page.InstanceID)
+	dir, err := h.pagePlugins.EditWorkspace(ctx, binding.Page.InstanceID)
 	if err != nil {
 		return nil, "", err
 	}

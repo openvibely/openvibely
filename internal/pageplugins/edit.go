@@ -12,26 +12,26 @@ import (
 
 // EditWorkspace returns the durable, instance-owned files used by both coding
 // tools and the page runtime.
-func (m *Manager) EditWorkspace(ctx context.Context, instanceID string) (string, string, error) {
+func (m *Manager) EditWorkspace(ctx context.Context, instanceID string) (string, error) {
 	m.publishMu.Lock()
 	defer m.publishMu.Unlock()
 	in, pkg, _, err := m.load(ctx, instanceID)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	if !in.Enabled {
-		return "", "", ErrDisabled
+		return "", ErrDisabled
 	}
 	dir := m.pageSourceDir(in.ID)
 	if _, err := os.Stat(dir); err == nil {
-		return dir, pkg.ContentHash, nil
+		return dir, nil
 	} else if !os.IsNotExist(err) {
-		return "", "", err
+		return "", err
 	}
 	if err := m.replacePageSources(in.ID, pkg.InstallPath); err != nil {
-		return "", "", err
+		return "", err
 	}
-	return dir, pkg.ContentHash, nil
+	return dir, nil
 }
 
 // PublishEdit validates the page's live files and restarts its runtime. It does

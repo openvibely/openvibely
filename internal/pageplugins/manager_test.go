@@ -265,7 +265,7 @@ func TestProcessBackendStartsWithoutSeparateApproval(t *testing.T) {
 		t.Fatalf("process survived disable: %s", st)
 	}
 
-	// Tamper with the installed package: the approval no longer matches what would run.
+	// Change the page files without publishing: the saved content hash no longer matches.
 	os.WriteFile(filepath.Join(m.pageSourceDir(inA.ID), "index.html"), []byte("<html>edited</html>"), 0o644)
 	if err := m.Enable(ctx, inA.ID); !errors.Is(err, ErrContentChanged) {
 		t.Fatalf("tampered package started: %v", err)

@@ -96,7 +96,7 @@ func stagePluginUpload(root string, files []pluginUploadFile, paths []string) er
 		return fmt.Errorf("selected folder must contain plugin.json")
 	}
 	// Browser uploads do not preserve executable bits. Restore them only for
-	// manifest-declared backend files; execution still requires admin approval.
+	// manifest-declared backend files.
 	raw, err := os.ReadFile(filepath.Join(root, "plugin.json"))
 	if err != nil {
 		return err

@@ -802,7 +802,7 @@ func (h *Handler) pluginChatRunningExec(ctx context.Context, instanceID string) 
 	return exec.ID, nil
 }
 
-// requirePluginAdmin enforces administrator access for install/approval actions.
+// requirePluginAdmin enforces administrator access for package-management actions.
 func (h *Handler) requirePluginAdmin(c echo.Context) (string, error) {
 	if err := h.requirePagePlugins(); err != nil {
 		return "", err
