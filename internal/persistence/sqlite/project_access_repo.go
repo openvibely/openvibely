@@ -132,47 +132,61 @@ func (r *ProjectAccessRepo) Update(ctx context.Context, actor string, p models.P
 	})
 }
 func (r *ProjectAccessRepo) SetMember(ctx context.Context, actorID, projectID, userID, role string) error {
-	if role != "" && role != "viewer" && role != "editor" && role != "maintainer" {
-		return persistence.ErrProjectDenied
-	}
+	return r.SetMembers(ctx, actorID, projectID, map[string]string{userID: role})
+}
+
+// SetMembers applies only submitted changes, atomically with their audit entries.
+func (r *ProjectAccessRepo) SetMembers(ctx context.Context, actorID, projectID string, roles map[string]string) error {
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		current, err := projectRole(ctx, tx, actorID, projectID)
-		if err != nil {
-			return err
+		for userID, role := range roles {
+			if role != "" && role != "viewer" && role != "editor" && role != "maintainer" {
+				return persistence.ErrProjectDenied
+			}
+			if err := setProjectMember(ctx, tx, actorID, projectID, userID, role); err != nil {
+				return err
+			}
 		}
-		if current != "owner" {
-			return persistence.ErrProjectDenied
-		}
-		var enabled int
-		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users u JOIN org_memberships m ON m.user_id=u.id JOIN project_organizations p ON p.org_id=m.org_id WHERE u.id=? AND u.disabled=0 AND p.project_id=?`, userID, projectID).Scan(&enabled)
-		if err != nil {
-			return err
-		}
-		if enabled != 1 {
-			return persistence.ErrProjectDenied
-		}
-		// Capture the explicit grant in the same transaction as its replacement.
-		// An empty role means no individual grant, not no effective access.
-		previous := ""
-		err = tx.QueryRowContext(ctx, `SELECT role FROM project_members WHERE project_id=? AND user_id=?`, projectID, userID).Scan(&previous)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if role == "" {
-			_, err = tx.ExecContext(ctx, `DELETE FROM project_members WHERE project_id=? AND user_id=?`, projectID, userID)
-		} else {
-			_, err = tx.ExecContext(ctx, `INSERT INTO project_members(project_id,user_id,role) VALUES(?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role`, projectID, userID, role)
-		}
-		if err != nil {
-			return err
-		}
-		details, err := json.Marshal(map[string]string{"before": previous, "after": role})
-		if err != nil {
-			return err
-		}
-		return projectAudit(ctx, tx, projectID, actorID, "project.member", userID, string(details))
+		return nil
 	})
 }
+func setProjectMember(ctx context.Context, tx sqlExecutor, actorID, projectID, userID, role string) error {
+	current, err := projectRole(ctx, tx, actorID, projectID)
+	if err != nil {
+		return err
+	}
+	if current != "owner" {
+		return persistence.ErrProjectDenied
+	}
+	var enabled int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users u JOIN org_memberships m ON m.user_id=u.id JOIN project_organizations p ON p.org_id=m.org_id WHERE u.id=? AND u.disabled=0 AND p.project_id=?`, userID, projectID).Scan(&enabled)
+	if err != nil {
+		return err
+	}
+	if enabled != 1 {
+		return persistence.ErrProjectDenied
+	}
+	// Capture the explicit grant in the same transaction as its replacement.
+	// An empty role means no individual grant, not no effective access.
+	previous := ""
+	err = tx.QueryRowContext(ctx, `SELECT role FROM project_members WHERE project_id=? AND user_id=?`, projectID, userID).Scan(&previous)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if role == "" {
+		_, err = tx.ExecContext(ctx, `DELETE FROM project_members WHERE project_id=? AND user_id=?`, projectID, userID)
+	} else {
+		_, err = tx.ExecContext(ctx, `INSERT INTO project_members(project_id,user_id,role) VALUES(?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role`, projectID, userID, role)
+	}
+	if err != nil {
+		return err
+	}
+	details, err := json.Marshal(map[string]string{"before": previous, "after": role})
+	if err != nil {
+		return err
+	}
+	return projectAudit(ctx, tx, projectID, actorID, "project.member", userID, string(details))
+}
+
 func (r *ProjectAccessRepo) Audit(ctx context.Context, id string) ([]models.ProjectAuditEvent, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT id,project_id,actor_user_id,action,target_id,details,created_at FROM project_audit_events WHERE project_id=? ORDER BY id DESC LIMIT 200`, id)
 	if err != nil {

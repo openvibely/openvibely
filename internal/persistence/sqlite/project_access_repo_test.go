@@ -198,3 +198,36 @@ func TestProjectMembershipAuditBeforeAndAfter(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, before, after)
 }
+
+func TestProjectAccessBatchMembersAtomic(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('batch-owner','batch-owner'),('batch-a','batch-a'),('batch-b','batch-b'); INSERT INTO org_memberships VALUES('default','batch-owner','member'),('default','batch-a','member'),('default','batch-b','member')`)
+	require.NoError(t, err)
+	owner := models.WithPrincipal(ctx, models.Principal{UserID: "batch-owner", OrgID: models.DefaultOrgID})
+	project := &models.Project{Name: "Batch sharing"}
+	require.NoError(t, NewProjectRepo(db).Create(owner, project))
+	repo := NewProjectAccessRepo(db)
+	require.NoError(t, repo.SetMembers(ctx, "batch-owner", project.ID, map[string]string{"batch-a": "viewer", "batch-b": "editor"}))
+	before, err := repo.Audit(ctx, project.ID)
+	require.NoError(t, err)
+	// Fail the second audit insert regardless of map iteration order.
+	_, err = db.Exec(`CREATE TRIGGER fail_batch_audit BEFORE INSERT ON project_audit_events WHEN NEW.action='project.member' AND (SELECT COUNT(*) FROM project_audit_events WHERE action='project.member')>=3 BEGIN SELECT RAISE(ABORT,'audit failed'); END`)
+	require.NoError(t, err)
+	require.Error(t, repo.SetMembers(ctx, "batch-owner", project.ID, map[string]string{"batch-a": "maintainer", "batch-b": ""}))
+	for user, want := range map[string]string{"batch-a": "viewer", "batch-b": "editor"} {
+		got, err := repo.Role(ctx, user, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	}
+	after, err := repo.Audit(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	_, err = db.Exec(`DROP TRIGGER fail_batch_audit`)
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.SetMembers(ctx, "batch-a", project.ID, map[string]string{"batch-b": "maintainer"}), persistence.ErrProjectDenied)
+	require.NoError(t, repo.SetMembers(ctx, "batch-owner", project.ID, map[string]string{"batch-a": "maintainer", "batch-b": ""}))
+	got, err := repo.Role(ctx, "batch-b", project.ID)
+	require.NoError(t, err)
+	require.Empty(t, got)
+}

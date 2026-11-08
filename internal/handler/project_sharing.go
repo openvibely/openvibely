@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -18,7 +19,7 @@ func (h *Handler) renderProjectSharing(c echo.Context, message string) error {
 	ctx, id := c.Request().Context(), c.Param("id")
 	policy, err := h.projectAccessSvc.Policy(ctx, id)
 	if err != nil {
-		return projectAccessHTTPError(err)
+		return projectAccessResponse(c, err)
 	}
 	members, err := h.projectAccessSvc.Members(ctx, id)
 	if err != nil {
@@ -43,15 +44,21 @@ func (h *Handler) UpdateProjectSharing(c echo.Context) error {
 		return echo.NewHTTPError(404)
 	}
 	if err := h.projectAccessSvc.Require(c.Request().Context(), c.Param("id"), authz.Own); err != nil {
-		return projectAccessHTTPError(err)
+		return projectAccessResponse(c, err)
 	}
 	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 16<<10)
 	ctx, id := c.Request().Context(), c.Param("id")
 	policy, err := h.projectAccessSvc.Policy(ctx, id)
 	if err != nil {
-		return projectAccessHTTPError(err)
+		return projectAccessResponse(c, err)
 	}
 	switch c.FormValue("action") {
+	case "members":
+		var roles map[string]string
+		if err := json.Unmarshal([]byte(c.FormValue("changes")), &roles); err != nil || roles == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid membership changes")
+		}
+		err = h.projectAccessSvc.SetMembers(ctx, id, roles)
 	case "member":
 		err = h.projectAccessSvc.SetMember(ctx, id, c.FormValue("user_id"), c.FormValue("role"))
 	case "transfer":
@@ -63,6 +70,19 @@ func (h *Handler) UpdateProjectSharing(c echo.Context) error {
 		return h.renderProjectSharing(c, "Choose a valid sharing action.")
 	}
 	if err != nil {
+		if c.FormValue("action") == "members" {
+			var denied *authz.InsufficientRole
+			if errors.As(err, &denied) {
+				return projectAccessResponse(c, err)
+			}
+			if !errors.Is(err, authz.ErrDenied) {
+				return err
+			}
+			if accessErr := h.projectAccessSvc.Require(ctx, id, authz.Own); accessErr != nil {
+				return projectAccessResponse(c, accessErr)
+			}
+			return echo.NewHTTPError(http.StatusBadRequest, "Could not save membership changes. Refresh and check the selected members.")
+		}
 		if errors.Is(err, authz.ErrDenied) {
 			return h.renderProjectSharing(c, "This change is not allowed. Check the member and your project role.")
 		}

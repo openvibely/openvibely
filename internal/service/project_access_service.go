@@ -64,6 +64,20 @@ func (s *ProjectAccessService) SetMember(ctx context.Context, projectID, userID,
 	s.changes.notify(AccessChange{UserID: userID, ProjectID: projectID})
 	return nil
 }
+func (s *ProjectAccessService) SetMembers(ctx context.Context, projectID string, roles map[string]string) error {
+	if err := s.Require(ctx, projectID, authz.Own); err != nil {
+		return err
+	}
+	actor, _ := models.PrincipalFromContext(ctx)
+	if err := s.store.SetMembers(ctx, actor.UserID, projectID, roles); err != nil {
+		return err
+	}
+	for userID := range roles {
+		s.changes.notify(AccessChange{UserID: userID, ProjectID: projectID})
+	}
+	return nil
+}
+
 func (s *ProjectAccessService) Audit(ctx context.Context, id string) ([]models.ProjectAuditEvent, error) {
 	if err := s.Require(ctx, id, authz.Manage); err != nil {
 		return nil, err

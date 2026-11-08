@@ -19,6 +19,7 @@ type ProjectAccessStore interface {
 	Role(ctx context.Context, userID, projectID string) (string, error)
 	Members(context.Context, string) ([]models.ProjectMember, error)
 	Update(ctx context.Context, actorID string, policy models.ProjectAccess) error
+	SetMembers(ctx context.Context, actorID, projectID string, roles map[string]string) error
 	SetMember(ctx context.Context, actorID, projectID, userID, role string) error
 	Audit(context.Context, string) ([]models.ProjectAuditEvent, error)
 	Record(ctx context.Context, projectID, actorID, action, targetID, details string) error
