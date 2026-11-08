@@ -12,7 +12,6 @@ import (
 	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -127,18 +126,23 @@ func TestPageInstallationContinuationRetainsPageAcrossRestart(t *testing.T) {
 
 func TestPageQueueRecoveryRejectsRemovedSubmittingUser(t *testing.T) {
 	env := setupPluginPages(t)
+	org := service.NewOrganizationService(env.stores.Organizations, "test-secret")
+	invite, err := org.Invite(t.Context(), models.BootstrapUserID, "admin")
+	require.NoError(t, err)
+	actor, err := org.Accept(t.Context(), invite, "page-sender", "long-password-value", "")
+	require.NoError(t, err)
+	env.h.SetOrganizationService(org)
 	resolved, err := env.mgr.Resolve(t.Context(), env.inA.ID, env.projA.ID)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodPost, "/page/chat", nil)
-	req = req.WithContext(models.WithPrincipal(req.Context(), models.Principal{UserID: "removed-user", Role: "member"}))
+	req = req.WithContext(models.WithPrincipal(req.Context(), actor.Principal))
 	c := env.e.NewContext(req, httptest.NewRecorder())
 	_, _, err = env.h.startPluginChatTurn(c, resolved, "first", pageChatInput{})
 	require.NoError(t, err)
 	_, _, err = env.h.startPluginChatTurn(c, resolved, "queued", pageChatInput{AllowQueue: true})
 	var queued *pageChatQueued
 	require.ErrorAs(t, err, &queued)
-	org := teststores.New(t)
-	env.h.SetOrganizationService(service.NewOrganizationService(org.Organizations, "test-secret"))
+	require.NoError(t, env.stores.Organizations.ChangeMember(t.Context(), models.BootstrapUserID, actor.UserID, "admin", true))
 	restartPageTest(t, env)
 	env.h.RecoverQueuedInputs(t.Context())
 	require.Len(t, env.starts, 1, "removed user started a model turn")

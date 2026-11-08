@@ -1708,6 +1708,7 @@ func snapshotPromotedInputIdentity(ctx context.Context, tx sqlExecutor, input mo
 	}
 	return projectAudit(ctx, tx, input.ProjectID, input.AuthorUserID, "execution.run_as", executionID, `{}`)
 }
+
 // ClaimQueuedForPageExecution shares atomic queue claiming while keeping the page
 // off the task board and bypassing coding-task worker dispatch.
 func (r *ThreadInputRepo) ClaimQueuedForPageExecution(ctx context.Context, inputID string, exec *models.Execution) error {

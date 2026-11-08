@@ -59,21 +59,21 @@ var (
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
 	// CancellationContext binds work to the owning surface lifetime.
-	CancellationContext context.Context
-	ExecID                      string
-	RetrySourceExecutionID      string
-	TaskID                      string
-	Message                     string
-	Agent                       models.LLMConfig
-	AgentDefinition             *models.Agent
-	ChatHistory                 []models.Execution
-	ProjectID                   string
-	GoalID                      string
-	PrincipalID                 string
-	SystemContext               string
-	WorkDir                     string
-	ImageAttachments            []models.Attachment
-	IsTaskFollowup              bool // true = coding agent prompt; false = orchestration prompt
+	CancellationContext    context.Context
+	ExecID                 string
+	RetrySourceExecutionID string
+	TaskID                 string
+	Message                string
+	Agent                  models.LLMConfig
+	AgentDefinition        *models.Agent
+	ChatHistory            []models.Execution
+	ProjectID              string
+	GoalID                 string
+	PrincipalID            string
+	SystemContext          string
+	WorkDir                string
+	ImageAttachments       []models.Attachment
+	IsTaskFollowup         bool // true = coding agent prompt; false = orchestration prompt
 	// TaskScopedChat isolates an orchestration conversation's transport, provider
 	// state, and compaction checkpoints using its persisted conversation task.
 	// It does not select the coding-agent prompt used by task follow-ups.
@@ -1617,7 +1617,7 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 			}
 			ctx = restored
 		}
-}
+	}
 	if completed.PageConversation == nil && completed.TaskID != "" && (completed.IsTaskFollowup || completed.TaskScopedChat) {
 		if h.taskRepo == nil {
 			return
