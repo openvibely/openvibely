@@ -219,6 +219,10 @@ templ TaskListPanel(currentProjectID string) {
                 // A settings page reopened in another project must not retain
                 // the outgoing project's workspace as its return destination.
                 if (destinationProject !== mountedProject) return;
+                // Plugin frames carry per-load capabilities. Moving them into
+                // retained Settings content reloads the frame, and disabling a
+                // page revokes that capability. Return through a fresh request.
+                if (!settingsPane && main.querySelector('#plugin-page-root')) return;
                 if (!settingsPane && inSettings) return;
                 if (!settingsPane) {
                     retainedScroll = [main].concat(Array.from(main.querySelectorAll('*'))).filter(function(el) {
