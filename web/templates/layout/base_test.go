@@ -2090,6 +2090,36 @@ global.fetch = (url, options) => {
  assert.equal(controls.textarea.value,'Keep denied draft');
  global.fetch = workingFetch;
  listeners.pagehide();
+ // Dismissal must still work after access is reduced to Viewer. The rejected
+ // release is attempted once; local cleanup must not retry or save the draft.
+ for (const dismiss of ['cancel', 'escape', 'backdrop']) {
+  global.fetch = workingFetch;
+  opening = window.editPendingThreadInput(button);
+  completeHold(); await opening;
+  controls.textarea.value = 'Discard this draft';
+  const beforeClose = closed;
+  const beforeToast = toasts.length;
+  const deniedRequests = [];
+  global.fetch = async (url, options) => {
+   deniedRequests.push({url, options});
+   return new Response(JSON.stringify({message:'Editor access required'}), {status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
+  };
+  if (dismiss === 'cancel') await controls['[data-cancel]'].onclick();
+  else if (dismiss === 'escape') dialogEvents.cancel({preventDefault(){}});
+  else {
+   dialogEvents.pointerdown({button:0,target:dialog,clientX:0,clientY:0});
+   await dialogEvents.click({target:dialog,clientX:0,clientY:0});
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(closed, beforeClose + 1, dismiss + ' closes the editor');
+  assert.equal(toasts.length, beforeToast + 1);
+  assert.equal(deniedRequests.length, 1);
+  assert.equal(deniedRequests[0].options.body.get('hold'), 'false');
+  assert.equal(deniedRequests[0].options.body.has('content'), false);
+  assert.equal(renewal, null);
+  assert.equal(expiry, null);
+  assert.equal(listeners.pagehide, undefined);
+ }
 })().catch(error => {console.error(error); process.exit(1)});
 `
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {

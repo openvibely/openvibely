@@ -437,7 +437,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     saving = true;
                     try {
                         var response = await timedFetch(holdURL, {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken})});
-                        if (await window.openVibelyPermissionErrors?.fetch(response)) return;
+                        if (await window.openVibelyPermissionErrors?.fetch(response)) {
+                            // Closing the local editor needs no edit permission. Let the
+                            // denied server hold expire without another release attempt.
+                            leaving = true;
+                            dialog.close();
+                            return;
+                        }
                         if (!response.ok && response.status !== 409) throw new Error('Could not release message. Please try again.');
                         released = true;
                         dialog.close();
