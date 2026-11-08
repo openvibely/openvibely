@@ -203,7 +203,7 @@ templ TaskListPanel(currentProjectID string) {
             var settingsRequest = null;
             function isSettingsURL(value) {
                 var path = new URL(value, location.href).pathname;
-                return /^\/(themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(path);
+                return /^\/(themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/plugin-pages)(\/|$)/.test(path);
             }
             window.isSettingsWorkspaceURL = isSettingsURL;
             // Keep the workspace connected: its drafts, live subscriptions and
@@ -333,7 +333,7 @@ templ TaskListPanel(currentProjectID string) {
             var inContextSidebar = false;
             var contextChanges = null;
             var wasCollapsed = false;
-            var workspaceURL = /^\/(themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
+            var workspaceURL = /^\/(themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/plugin-pages)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
             var workspaceURLs = new Map();
             function workspaceProject(value) {
                 return new URL(value, location.href).searchParams.get('project_id') || (document.getElementById('project-selector') || {}).value || '';
@@ -383,7 +383,7 @@ templ TaskListPanel(currentProjectID string) {
                 var reviewing = !settingsPane && !!changes && !changes.classList.contains('hidden');
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
-                var settings = appearance || workers || !!document.querySelector('#main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container');
+                var settings = appearance || workers || !!document.querySelector('#main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container, #main-content #plugin-settings');
                 var active = reviewing || settings;
                 if (active && !inContextSidebar) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');

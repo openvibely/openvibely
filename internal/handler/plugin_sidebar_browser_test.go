@@ -26,6 +26,16 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  const wait=async(fn,label)=>{const until=Date.now()+6000;while(Date.now()<until){if(fn())return;await new Promise(r=>setTimeout(r,30));}throw Error(label);};
  try{
  if(document.readyState==='loading')await new Promise(r=>document.addEventListener('DOMContentLoaded',r,{once:true}));
+ const checkSettings=()=>{
+  if(!document.documentElement.classList.contains('appearance-settings'))throw Error('Settings navigation reverted to tasks');
+  if(document.getElementById('task-list-panel').getAttribute('aria-label')!=='Settings')throw Error('Wrong navigation context');
+ };
+ await wait(()=>document.documentElement.classList.contains('appearance-settings'),'Settings navigation missing on direct load');
+ checkSettings();
+ if(!window.isSettingsWorkspaceURL(location.href))throw Error('Plugin settings route not recognized');
+ document.querySelector('#appearance-settings-nav a[data-nav-base="/settings/plugin-pages"]').click();
+ await new Promise(r=>setTimeout(r,400));
+ checkSettings();
  const sidebar=document.getElementById('sidebar');
  sidebar.classList.add('sidebar-collapsed');
  for(const el of sidebar.querySelectorAll('style,script')){
@@ -44,6 +54,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  await clickAction('enable');
  await wait(()=>document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]'),'Enabled Sales missing after settings action');
  await wait(()=>document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]').getClientRects().length,'Reenabled Sales hidden');
+ checkSettings();
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}
 })();</script>`
