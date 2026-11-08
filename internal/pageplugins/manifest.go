@@ -40,8 +40,6 @@ var knownPermissions = map[string]string{
 	PermissionBackend: "Run a local executable with your OpenVibely user's OS permissions",
 }
 
-func PermissionDescription(p string) string { return knownPermissions[p] }
-
 type Manifest struct {
 	SchemaVersion int                         `json:"schema_version"`
 	ID            string                      `json:"id"`
