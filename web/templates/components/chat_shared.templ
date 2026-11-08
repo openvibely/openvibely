@@ -2147,12 +2147,19 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			}
 			function editPaste(item, trigger) {
 				var dialog = document.createElement('dialog');
-				dialog.className = 'rounded-xl bg-base-100 text-base-content p-5 shadow-xl';
+				dialog.className = 'rounded-xl bg-base-100 text-base-content p-6 shadow-xl';
 				dialog.style.cssText = 'width:min(800px,92vw);max-height:85vh';
 				dialog.setAttribute('aria-label', 'Edit pasted text');
 				var heading = document.createElement('h2');
-				heading.className = 'font-semibold mb-3';
+				heading.className = 'font-semibold text-lg mb-3 pr-10';
 				heading.textContent = 'Edit pasted text';
+				var close = document.createElement('button');
+				close.type = 'button';
+				close.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';
+				close.setAttribute('aria-label', 'Close pasted text editor');
+				close.setAttribute('data-tooltip-disabled', '');
+				close.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>';
+				close.onclick = function() { closePasteEditor(); };
 				var editor = document.createElement('textarea');
 				editor.className = 'w-full rounded-lg border border-base-content/20 bg-base-100 p-3 font-mono text-sm';
 				editor.style.height = '50vh';
@@ -2187,7 +2194,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					pastedTexts = pastedTexts.map(function(value) { return value.id === item.id ? { id: item.id, text: editor.value } : value; }).filter(function(value) { return value.text !== ''; });
 					pastesChanged(); closePasteEditor();
 				});
-				dialog.append(heading, editor, actions);
+				dialog.append(heading, close, editor, actions);
 				var outsidePress = false;
 				function outsideDialog(event) {
 					var bounds = dialog.getBoundingClientRect();
