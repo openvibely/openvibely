@@ -349,13 +349,20 @@ if(phase===1){
 sharing.elements.changes.value=JSON.stringify({'missing-user':'viewer'});
 await dialog.saveProjectSettings();
 assert(dialog.open,'failed Sharing save closed modal');
+assert(getComputedStyle(dialog.querySelector('[data-sharing-save] .loading')).display==='none','spinner remained after failure');
+assert(!dialog.querySelector('[data-sharing-save]').disabled,'Save remained disabled after failure');
 assert(form.elements.description.value==='cross-tab-1','failed save lost General draft');
 assert(sharing.querySelector('[data-sharing-user="` + member.UserID + `"] select').value==='maintainer','failed save lost Sharing draft');
 sharing.dispatchEvent(new Event('change',{bubbles:true}));
 }
 const tab=['general','knowledge','sharing'][phase];document.querySelector('[data-project-tab="'+tab+'"]').click();
 sessionStorage.setItem('cross-tab-phase',String(phase+1));
-(tab==='sharing'?dialog.querySelector('[data-sharing-save]'):document.getElementById('edit-project-save-button')).click();
+const saveButton=tab==='sharing'?dialog.querySelector('[data-sharing-save]'):document.getElementById('edit-project-save-button');
+saveButton.click();
+assert(saveButton.disabled,'Save must be disabled during request');
+assert(getComputedStyle(saveButton.querySelector('.loading')).display!=='none','saving spinner missing');
+assert(getComputedStyle(saveButton.querySelector('.edit-project-save-busy-label')).display!=='none','saving label missing');
+assert(saveButton.querySelector('.edit-project-save-busy-label').textContent==='Saving...','wrong saving label');
 await new Promise(r=>setTimeout(r,10000));throw Error('Save did not reload after saving all tabs');
 }catch(e){await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'fail'},body:String(e)})}
 })();</script>`

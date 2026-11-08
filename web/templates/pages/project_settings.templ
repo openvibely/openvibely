@@ -255,27 +255,21 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			var savedRepoURL = githubInput && githubInput.value;
 			var savedRepoSource = repoSourceSelect && repoSourceSelect.value;
             var editForm = m && m.querySelector('form[hx-put]');
-            var saveButton = m && m.querySelector('#edit-project-save-button');
-            var cancelButton = m && m.querySelector('#edit-project-cancel-button');
             function setSaveBusy(busy) {
-                if (!saveButton) return;
-                var busyLabel = saveButton.querySelector('.edit-project-save-busy-label');
-                if (busy) {
-                    var cloning = repoSourceSelect && repoSourceSelect.value === 'github' &&
-                        (savedRepoSource !== 'github' || (githubInput && githubInput.value.trim() !== (savedRepoURL || '').trim()));
-                    busyLabel.textContent = cloning ? 'Cloning repository...' : 'Saving...';
-                }
-                saveButton.disabled = busy;
-                if (cancelButton) cancelButton.disabled = busy;
-                saveButton.querySelector('.edit-project-save-label').classList.toggle('hidden', busy);
-                busyLabel.classList.toggle('hidden', !busy);
-            }
-            if (editForm) {
-                editForm.addEventListener('htmx:beforeRequest', function() { setSaveBusy(true); });
-                ['htmx:afterRequest', 'htmx:sendError', 'htmx:abort', 'htmx:timeout'].forEach(function(eventName) {
-                    editForm.addEventListener(eventName, function() { setSaveBusy(false); });
+                var cloning = repoSourceSelect && repoSourceSelect.value === 'github' &&
+                    (savedRepoSource !== 'github' || (githubInput && githubInput.value.trim() !== (savedRepoURL || '').trim()));
+                m.querySelectorAll('#edit-project-save-button, [data-sharing-save]').forEach(function(button) {
+                    button.setAttribute('aria-busy', String(busy));
+                    button.querySelector('.edit-project-save-label').classList.toggle('hidden', busy);
+                    var label = button.querySelector('.edit-project-save-busy-label');
+                    label.textContent = cloning ? 'Cloning repository...' : 'Saving...';
+                    label.classList.toggle('hidden', !busy);
+                    var spinner = button.querySelector('.loading');
+                    spinner.classList.toggle('htmx-request', busy);
+                    spinner.style.display = busy ? 'inline-block' : 'none';
                 });
             }
+
 
 			function updateHealthVisibility() {
 				if (!healthStatus) return;
@@ -428,6 +422,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
                 var controls = Array.from(m.querySelectorAll('input,textarea,select,button'));
                 var disabled = controls.map(function(control) { return control.disabled; });
                 controls.forEach(function(control) { control.disabled = true; });
+                setSaveBusy(true);
                 var savedGeneralThisTime = false;
                 async function accepted(response, general) {
                     if (await window.openVibelyPermissionErrors?.fetch(response)) return false;
@@ -458,6 +453,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
                 } catch (_) {
                     window.showToast?.(savedGeneralThisTime ? 'General and Skills & Memory saved. Could not confirm Sharing changes. Reopen settings to check.' : 'Could not confirm the save. Reopen settings to check.', 'failed');
                 } finally {
+                    setSaveBusy(false);
                     controls.forEach(function(control, index) { control.disabled = disabled[index]; });
                     modalSaving = false;
                 }

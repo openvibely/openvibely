@@ -139,7 +139,11 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
  <button type="button" class="btn btn-error btn-outline mr-auto" data-sharing-delete hidden onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')">Delete Project</button>
  }
 			<button type="button" class="btn" data-sharing-cancel>Cancel</button>
-			<button type="button" class="btn btn-primary" data-sharing-save>Save</button>
+			<button type="button" class="btn btn-primary" data-sharing-save>
+ <span class="loading loading-spinner loading-sm htmx-indicator" style="display:none" aria-hidden="true"></span>
+ <span class="edit-project-save-label">Save</span>
+ <span class="edit-project-save-busy-label hidden" role="status"></span>
+ </button>
 		</div>
 		<script>
   (() => {
