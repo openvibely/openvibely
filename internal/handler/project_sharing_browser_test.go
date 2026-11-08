@@ -193,3 +193,105 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
 		require.NotEqual(t, member.UserID, m.UserID, "removed grant persisted")
 	}
 }
+
+func TestProjectSharingTransferPreservesModalInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	ctx := t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(stores.ProjectAccess))
+	org := service.NewOrganizationService(stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	project := createProject(t, h, "Browser Sharing")
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := org.Accept(ctx, token, "browser-member", "long-password-value", "")
+	require.NoError(t, err)
+
+	policyBefore, err := stores.ProjectAccess.Get(ctx, project.ID)
+	require.NoError(t, err)
+	policyBefore.OwnerUserID = member.UserID
+	require.NoError(t, h.projectAccessSvc.Update(models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID}), *policyBefore))
+	result := make(chan string, 1)
+	runner := `<script>(async()=>{const wait=p=>new Promise((ok,bad)=>{let n=0;const t=setInterval(()=>{if(p()){clearInterval(t);ok()}else if(++n>300){clearInterval(t);bad(Error('timeout'))}},30)});try{
+window.openVibelyConfirm=()=>Promise.resolve(true);
+document.getElementById('project-settings-btn').click();await wait(()=>document.querySelector('[data-sharing-transfer-toggle]'));
+document.getElementById('edit-project-sharing-tab').click();
+const box=document.querySelector('#edit_project_modal > .modal-box');const before=box.getBoundingClientRect().height;
+document.querySelector('[data-sharing-transfer-toggle]').click();
+document.querySelector('[data-sharing-transfer] select').value='local-owner';document.querySelector('[data-sharing-transfer] button').click();
+await wait(()=>document.querySelector('#project-sharing [role=status]'));
+const after=box.getBoundingClientRect().height;
+if(Math.abs(before-after)>=2)throw Error('modal resized: '+before+' -> '+after);
+if(document.querySelector('#project-sharing form, #project-sharing [data-sharing-save], #project-sharing [data-sharing-delete]'))throw Error('sharing controls remained');
+const close=document.querySelector('[data-sharing-close]');if(!close)throw Error('Close missing');
+close.click();if(document.getElementById('edit_project_modal').open)throw Error('Close did not dismiss modal');
+await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':Math.abs(before-after)<2?'pass':'fail'},body:JSON.stringify({before,after})});
+}catch(e){await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'fail'},body:String(e)})}})();</script>`
+
+	owner := member.Principal
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ":" + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, r.WithContext(models.WithPrincipal(r.Context(), owner)))
+		for key, values := range recorder.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorder.Code)
+		body := recorder.Body.String()
+		if r.Header.Get("HX-Request") == "" {
+			body = strings.Replace(body, "</body>", runner+"</body>", 1)
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
+		"--window-size=1280,900", server.URL+"/tasks?project_id="+project.ID,
+	)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(t, cmd)
+		}
+	}()
+	select {
+	case outcome := <-result:
+		stopHandlerBrowserProcess(t, cmd)
+		stopped = true
+		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
+	case <-time.After(60 * time.Second):
+		t.Fatal("project sharing browser test timed out")
+	}
+	policy, err := stores.ProjectAccess.Get(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "org", policy.Visibility)
+	require.Equal(t, "editor", policy.OrgRole)
+	require.Equal(t, models.BootstrapUserID, policy.OwnerUserID)
+	members, err := stores.ProjectAccess.Members(ctx, project.ID)
+	require.NoError(t, err)
+	for _, m := range members {
+		require.NotEqual(t, member.UserID, m.UserID, "removed grant persisted")
+	}
+}
