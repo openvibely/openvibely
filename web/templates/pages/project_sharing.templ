@@ -3,7 +3,8 @@ package pages
 import "github.com/openvibely/openvibely/internal/models"
 
 templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember, users []models.OrgUser, audit []models.ProjectAuditEvent, canManageSharing bool, message string) {
-	<section id="project-sharing" class="space-y-4">
+	<section id="project-sharing">
+ <div data-project-sharing-content class="space-y-4">
 		<h3 class="text-base font-semibold">Project access</h3>
 		<p class="text-sm opacity-70">Only people granted access and organization admins can access this project.</p>
 		if !canManageSharing {
@@ -72,7 +73,7 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 						}
 					}
 				</p>
-				<p class="text-xs opacity-60">Ownership grants full access. Transfer is a separate action and takes effect immediately after confirmation.</p>
+				<p class="text-xs opacity-60">Transfer takes effect immediately after confirmation.</p>
 				<form data-sharing-transfer hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" hx-confirm="Transfer ownership of this project?" class="flex flex-wrap gap-2">
 					<input type="hidden" name="action" value="transfer"/>
 					<select name="user_id" class="select select-bordered select-sm" aria-label="New owner" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>
@@ -113,16 +114,21 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
 				</table>
 			</div>
 		</details>
-		<div class="modal-action sticky bottom-0 bg-base-100 border-t border-base-300 pt-4 items-center">
-			<span class="text-xs opacity-60 mr-auto" data-sharing-status>No unsaved changes</span>
+		</div>
+ <div class="modal-action">
+ if canManageSharing {
+ <button type="button" class="btn btn-error btn-outline mr-auto" data-sharing-delete hidden onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')">Delete Project</button>
+ }
 			<button type="button" class="btn" data-sharing-cancel>Cancel</button>
 			if canManageSharing {
-				<button type="button" class="btn btn-primary" data-sharing-save disabled>Save changes</button>
+				<button type="button" class="btn btn-primary" data-sharing-save disabled>Save</button>
 			}
 		</div>
 		<script>
   (() => {
    const root = document.getElementById('project-sharing');
+   const deleteButton = root.querySelector('[data-sharing-delete]');
+   if (deleteButton) deleteButton.hidden = !document.getElementById('delete_project_confirm_modal');
    const form = root.querySelector('[data-sharing-form]');
    const cancel = root.querySelector('[data-sharing-cancel]');
    const save = root.querySelector('[data-sharing-save]');
@@ -140,7 +146,6 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
     form.elements.changes.value=JSON.stringify(changes);
     const dirty=Object.keys(changes).length>0;
     save.disabled=!dirty;
-    root.querySelector('[data-sharing-status]').textContent=dirty?'Unsaved membership changes':'No unsaved changes';
     transfer.querySelector('button').disabled=dirty||transferDisabled;
     root.querySelector('[data-sharing-transfer-hint]').classList.toggle('hidden',!dirty);
     for(const option of form.querySelector('[data-sharing-add-user]').options) option.disabled=current.has(option.value);

@@ -47,9 +47,18 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
   document.getElementById('project-settings-btn').click();
   await wait(()=>document.getElementById('edit-project-sharing-tab')&&panel(),'sharing panel load');
   assert(document.getElementById('edit-project-sharing').hidden,'sharing should start hidden');
+  const box=document.querySelector('#edit_project_modal > .modal-box');
+  const generalHeight=box.getBoundingClientRect().height;
+  document.getElementById('edit-project-knowledge-tab').click();
+  assert(Math.abs(box.getBoundingClientRect().height-generalHeight)<2,'knowledge changed modal height');
   document.getElementById('edit-project-sharing-tab').click();
   assert(!document.getElementById('edit-project-sharing').hidden,'sharing tab did not open');
   assert(!panel().closest('form'),'sharing forms must not nest in settings form');
+  assert(Math.abs(box.getBoundingClientRect().height-generalHeight)<2,'sharing changed modal height');
+  assert(!panel().querySelector('[data-sharing-delete]').hidden,'Sharing must include Delete Project');
+  assert(!panel().querySelector('[data-sharing-status]'),'unneeded pending status');
+  assert(panel().querySelector('[data-sharing-save]').textContent.trim()==='Save','inconsistent Save label');
+  assert(panel().querySelector('[data-sharing-cancel]').className===document.getElementById('edit-project-cancel-button').className,'inconsistent Cancel style');
   assert(document.getElementById('edit-project-save-button').closest('.modal-action').hidden,'general Save must hide on Sharing');
   document.getElementById('edit-project-general-tab').click();
   assert(document.getElementById('edit-project-sharing').hidden,'sharing did not hide on General');
