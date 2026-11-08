@@ -13,6 +13,7 @@ import (
 	"github.com/a-h/templ"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -877,6 +878,27 @@ func (h *Handler) renderPluginSettings(c echo.Context, projectID, notice string,
 	if err != nil {
 		return err
 	}
+	c.Response().Header().Set("X-OpenVibely-Card-Page-Has-More", "false")
+	v.Search = strings.TrimSpace(c.QueryParam("search"))
+	v.Sort = c.QueryParam("sort")
+	v.Enabled = c.QueryParam("enabled")
+	v.OpenInstall = c.FormValue("open_install") == "true"
+	if v.Search != "" || v.Enabled != "" {
+		filtered := v.Instances[:0]
+		for _, row := range v.Instances {
+			if strings.Contains(strings.ToLower(row.Instance.Title+" "+row.Instance.PluginID), strings.ToLower(v.Search)) && (v.Enabled == "" || v.Enabled == fmt.Sprint(row.Instance.Enabled)) {
+				filtered = append(filtered, row)
+			}
+		}
+		v.Instances = filtered
+	}
+	sort.SliceStable(v.Instances, func(i, j int) bool {
+		a, b := strings.ToLower(v.Instances[i].Instance.Title), strings.ToLower(v.Instances[j].Instance.Title)
+		if v.Sort == "name_desc" {
+			return a > b
+		}
+		return a < b
+	})
 	v.Notice = notice
 	if actionErr != nil {
 		v.Error = actionErr.Error()
@@ -934,6 +956,13 @@ func (h *Handler) PluginSettingsInstallExample(c echo.Context) error {
 	pkg, err := h.pagePlugins.InstallExample(c.Request().Context(), by)
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
+	}
+	if c.FormValue("create_page") == "true" {
+		_, createErr := h.pagePlugins.CreateInstance(c.Request().Context(), projectID, pkg.ID, "sales")
+		if createErr != nil {
+			return h.renderPluginSettings(c, projectID, "", createErr)
+		}
+		return h.renderPluginSettings(c, projectID, "Added Sales. Enable it from its card when ready.", nil)
 	}
 	return h.renderPluginSettings(c, projectID, fmt.Sprintf("Installed %s %s", pkg.Name, pkg.Version), nil)
 }

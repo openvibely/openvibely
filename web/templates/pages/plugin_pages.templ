@@ -11,21 +11,21 @@ import (
 
 // PluginPageView is everything the host shell needs to render one plugin page instance.
 type PluginPageView struct {
-	InstanceID       string
-	Title            string
-	PluginName       string
-	Version          string
-	OwningProjectID  string
-	OwningProject    string
-	Handle           string
-	AssetURL         string
-	ChatEnabled      bool
- ChatHasEarlier bool
-	ChatExecutions   []models.Execution
-	ChatTask         *models.Task
- ChatAgents []models.LLMConfig
- ChatAttachments map[string][]models.ChatAttachment
- ChatPending []models.ThreadInput
+	InstanceID      string
+	Title           string
+	PluginName      string
+	Version         string
+	OwningProjectID string
+	OwningProject   string
+	Handle          string
+	AssetURL        string
+	ChatEnabled     bool
+	ChatHasEarlier  bool
+	ChatExecutions  []models.Execution
+	ChatTask        *models.Task
+	ChatAgents      []models.LLMConfig
+	ChatAttachments map[string][]models.ChatAttachment
+	ChatPending     []models.ThreadInput
 }
 
 func pluginAPI(v PluginPageView, suffix string) string {
@@ -44,7 +44,7 @@ templ PluginPageContent(v PluginPageView) {
 		id="plugin-page-root"
 		hx-history="false"
 		class="flex flex-col h-full min-h-0"
- data-page-chat-root
+		data-page-chat-root
 		data-plugin-handle={ v.Handle }
 		data-project-id={ v.OwningProjectID }
 		data-bridge-url={ pluginAPI(v, "/bridge") }
@@ -75,16 +75,14 @@ templ PluginPageContent(v PluginPageView) {
 			></iframe>
 			if v.ChatEnabled {
 				@components.PageSideChat(components.PageChatView{
- HasEarlier:v.ChatHasEarlier,
- ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, PendingInputs:v.ChatPending, Attachments: v.ChatAttachments, Agents: v.ChatAgents,
-})
+					HasEarlier:     v.ChatHasEarlier,
+					ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, PendingInputs: v.ChatPending, Attachments: v.ChatAttachments, Agents: v.ChatAgents,
+				})
 			}
 		</div>
 		@pluginHostBridgeScript()
 	</div>
 }
-
-
 
 // PluginNavEntry is one enabled page instance in the left rail.
 type PluginNavEntry struct {
@@ -95,10 +93,10 @@ type PluginNavEntry struct {
 }
 
 templ PluginNav(entries []PluginNavEntry, showProject bool) {
- if len(entries) > 0 {
-  <li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.2;margin:8px 12px" role="separator"></li>
-  <li class="menu-title sidebar-hide-collapsed"><span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Pages</span></li>
- }
+	if len(entries) > 0 {
+		<li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.2;margin:8px 12px" role="separator"></li>
+		<li class="menu-title sidebar-hide-collapsed"><span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Pages</span></li>
+	}
 	for _, e := range entries {
 		<li data-plugin-nav-entry={ e.InstanceID }>
 			<a
@@ -117,15 +115,14 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 			</a>
 		</li>
 	}
- if len(entries) > 0 {
-  <li data-plugin-nav-overflow hidden>
-   <button type="button" aria-label="More pages" aria-haspopup="menu" aria-expanded="false" aria-controls="plugin-pages-overflow-menu">
-    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
-    <span class="sidebar-text">More pages</span>
-   </button>
-  </li>
- }
-
+	if len(entries) > 0 {
+		<li data-plugin-nav-overflow hidden>
+			<button type="button" aria-label="More pages" aria-haspopup="menu" aria-expanded="false" aria-controls="plugin-pages-overflow-menu">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
+				<span class="sidebar-text">More pages</span>
+			</button>
+		</li>
+	}
 }
 
 // PluginSettingsRow is one project instance shown in settings.
@@ -151,11 +148,15 @@ type PluginSettingsPackage struct {
 }
 
 type PluginSettingsView struct {
-	ProjectID string
-	Packages  []PluginSettingsPackage
-	Instances []PluginSettingsRow
-	Error     string
-	Notice    string
+	Search      string
+	Sort        string
+	OpenInstall bool
+	Enabled     string
+	ProjectID   string
+	Packages    []PluginSettingsPackage
+	Instances   []PluginSettingsRow
+	Error       string
+	Notice      string
 }
 
 templ PluginSettings(projects []models.Project, currentProjectID string, v PluginSettingsView) {
@@ -170,30 +171,98 @@ func pluginSettingsURL(projectID, suffix string) string {
 
 templ PluginSettingsContent(v PluginSettingsView) {
 	@layout.PageTitle("Plugin pages")
-	<div id="plugin-settings" class="space-y-6 max-w-4xl">
-		<div data-page-header>
+	<div id="plugin-settings" data-search-container data-card-pagination-root data-card-pagination-list="#plugin-page-cards" data-card-pagination-card-selector="[data-plugin-instance-row]" data-card-pagination-key="data-plugin-instance-row" data-card-pagination-has-more="false" data-card-pagination-url={ pluginSettingsURL(v.ProjectID, "") }>
+		<div data-page-header class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Plugin pages</h2>
-			<p class="text-sm opacity-70">To create a page, ask an agent in a task thread to build it for this project. It publishes the page here automatically. Manage enabled pages and review backend approvals below.</p>
+			<div class="dropdown dropdown-end">
+				<button type="button" tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Add page" data-tooltip-disabled onclick="handleDropdownToggle(event)">@pageCreateIcon()</button>
+				<ul tabindex="0" class="ov-menu ov-menu-actions dropdown-content z-[100] menu w-48">
+					<li><button onclick="document.activeElement.blur();document.getElementById('plugin-template-modal').showModal()">Template</button></li>
+					<li><button onclick="document.activeElement.blur();document.getElementById('plugin-describe-modal').showModal()">Describe</button></li>
+					<li><button onclick="document.activeElement.blur();document.getElementById('plugin-install-modal').showModal()">Install package</button></li>
+				</ul>
+			</div>
 		</div>
 		if v.Error != "" {
-			<div class="alert alert-error text-sm" role="alert">{ v.Error }</div>
+			<div class="alert alert-error text-sm mb-4" role="alert">{ v.Error }</div>
 		}
 		if v.Notice != "" {
-			<div class="alert alert-success text-sm" role="status">{ v.Notice }</div>
+			<div class="alert alert-success text-sm mb-4" role="status">{ v.Notice }</div>
 		}
-		<section class="card bg-base-100 border border-base-300"><div class="card-body gap-3">
-			<h3 class="font-semibold">Advanced: install an existing package</h3>
-			<form class="flex gap-2" hx-post={ pluginSettingsURL(v.ProjectID, "/install") } hx-target="#plugin-settings" hx-swap="outerHTML">
-				<input name="path" class="input input-bordered input-sm flex-1" placeholder="/path/to/prebuilt/plugin (directory containing plugin.json)" required/>
-				<button class="btn btn-sm btn-primary" type="submit">Install</button>
-			</form>
-			<button class="btn btn-sm btn-outline w-fit" hx-post={ pluginSettingsURL(v.ProjectID, "/install-example") } hx-target="#plugin-settings" hx-swap="outerHTML">Install Sales example</button>
-		</div></section>
-		<section class="card bg-base-100 border border-base-300"><div class="card-body gap-3">
-			<h3 class="font-semibold">Installed packages</h3>
-			if len(v.Packages) == 0 {
-				<p class="text-sm opacity-60">No packages installed.</p>
+		@CardListToolbar(CardListToolbarConfig{PageKey: "plugin-pages", Placeholder: "Search pages...", Action: "/settings/plugin-pages", ProjectID: v.ProjectID, Search: v.Search, Sort: v.Sort, Filters: []CardListFilter{{Key: "enabled", Label: "Status", Value: v.Enabled, Options: cardListOptions("true", "Enabled", "false", "Disabled")}}, SortOptions: cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A")})
+		<div id="plugin-page-cards" class="grid grid-cols-1 gap-4 min-w-0">
+			if len(v.Instances) == 0 {
+				<p class="text-sm opacity-60 py-8 text-center">No pages found. Use + to add a page.</p>
 			}
+			for _, r := range v.Instances {
+				<div class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 transition-all min-w-0" data-plugin-instance-row={ r.Instance.ID } data-search-card data-search-text={ r.Instance.Title + " " + r.Instance.PluginID }>
+					<div class="card-body relative">
+						<div class="absolute top-4 right-4">
+							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + r.Instance.Title}) {
+								if r.Instance.Enabled {
+									<li><a href={ templ.SafeURL("/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(v.ProjectID)) }>Open</a></li>
+								}
+								if r.Instance.Enabled {
+									<li><button hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+r.Instance.ID+"/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button></li>
+								} else {
+									<li><button hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+r.Instance.ID+"/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button></li>
+								}
+								<li><button onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-details-" + r.Instance.ID + "').showModal()"} }>Details / approval</button></li>
+								<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-delete-" + r.Instance.ID + "').showModal()"} }>Delete</button></li>
+							}
+						</div>
+						<h3 class="card-title pr-12">{ r.Instance.Title }</h3>
+						<p class="text-sm opacity-60">{ r.Instance.PluginID } · { r.Instance.Version }</p>
+						<div class="flex gap-2">
+							if r.Instance.Enabled {
+								<span class="badge badge-success badge-sm">Enabled</span>
+							} else {
+								<span class="badge badge-ghost badge-sm">Disabled</span>
+							}
+							if r.NeedsApproval {
+								<span class="badge badge-warning badge-sm">Approval required</span>
+							}
+						</div>
+					</div>
+				</div>
+				@pluginSettingsDialog("plugin-details-"+r.Instance.ID, r.Instance.Title) {
+					<p class="text-sm break-all opacity-60">{ r.Instance.ContentHash }</p>
+					@pluginPermissionList(r.Permissions, r.RunsProcess)
+					if r.RunsProcess {
+						<p class="text-sm">Backend: { r.ProcessStatus }</p>
+					}
+					if r.NeedsApproval {
+						<button class="btn btn-warning" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+r.Instance.ID+"/approve") } hx-vals={ fmt.Sprintf(`{"content_hash":%q}`, r.Instance.ContentHash) } hx-target="#plugin-settings" hx-swap="outerHTML">Approve backend</button>
+					}
+				}
+				@pluginSettingsDialog("plugin-delete-"+r.Instance.ID, "Delete "+r.Instance.Title+"?") {
+					<p>This deletes this project's page, saved data, and conversation. Other projects and the installed package are kept.</p>
+					<button class="btn btn-error" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+r.Instance.ID+"/remove") } hx-target="#plugin-settings" hx-swap="outerHTML">Delete page</button>
+				}
+			}
+		</div>
+		@pluginSettingsDialog("plugin-template-modal", "Choose a template") {
+			<p class="font-semibold">Sales</p>
+			<p class="text-sm opacity-70">Explore sales data with filters and a page-aware assistant.</p>
+			<button class="btn btn-primary" hx-post={ pluginSettingsURL(v.ProjectID, "/install-example") } hx-vals='{"create_page":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">Use Sales template</button>
+		}
+		@pluginSettingsDialog("plugin-describe-modal", "Describe a page") {
+			<p class="text-sm opacity-70">Create a task to build and publish a page in this project. Open the task to run it.</p>
+			<form method="post" action={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } class="space-y-4" onsubmit="this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
+				<input type="hidden" name="category" value="backlog"/>
+				<input type="hidden" name="priority" value="2"/>
+				<input type="hidden" name="prompt"/>
+				<label class="form-control"><span class="label-text">Name</span><input name="title" class="input input-bordered" required maxlength="200"/></label>
+				<label class="form-control"><span class="label-text">What should this page do?</span><textarea name="description" class="textarea textarea-bordered" rows="5" required></textarea></label>
+				<button type="submit" class="btn btn-primary">Create task</button>
+			</form>
+		}
+		@pluginSettingsDialog("plugin-install-modal", "Install package") {
+			<form class="space-y-3" hx-post={ pluginSettingsURL(v.ProjectID, "/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
+				<label class="form-control"><span class="label-text">Package directory</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" required/></label>
+				<button class="btn btn-primary" type="submit">Install</button>
+			</form>
+			<h4 class="font-semibold">Installed packages</h4>
 			for _, p := range v.Packages {
 				<div class="border border-base-300 rounded-lg p-3 space-y-2" data-plugin-package={ p.Package.PluginID }>
 					<div class="flex justify-between gap-2">
@@ -202,7 +271,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 							<div class="text-xs opacity-60 break-all">{ p.Package.ContentHash }</div>
 						</div>
 						if p.InUse == 0 {
-							<button class="btn btn-xs btn-ghost text-error" hx-post={ pluginSettingsURL(v.ProjectID, "/packages/"+url.PathEscape(p.Package.ID)+"/remove") } hx-target="#plugin-settings" hx-swap="outerHTML">Remove package</button>
+							<button class="btn btn-xs btn-ghost text-error" hx-post={ pluginSettingsURL(v.ProjectID, "/packages/"+url.PathEscape(p.Package.ID)+"/remove") } hx-confirm="Uninstall this unused package? Its files will be deleted." hx-target="#plugin-settings" hx-swap="outerHTML">Uninstall package</button>
 						}
 					</div>
 					@pluginPermissionList(p.Permissions, p.RunsProcess)
@@ -213,48 +282,22 @@ templ PluginSettingsContent(v PluginSettingsView) {
 					</div>
 				</div>
 			}
-		</div></section>
-		<section class="card bg-base-100 border border-base-300"><div class="card-body gap-3">
-			<h3 class="font-semibold">Pages in this project</h3>
-			if len(v.Instances) == 0 {
-				<p class="text-sm opacity-60">No plugin pages in this project yet.</p>
-			}
-			for _, r := range v.Instances {
-				<div class="border border-base-300 rounded-lg p-3 space-y-2" data-plugin-instance-row={ r.Instance.ID }>
-					<div class="flex justify-between items-center gap-2">
-						<div>
-							<div class="font-medium">{ r.Instance.Title } <span class="text-xs opacity-60">{ r.Instance.PluginID } { r.Instance.Version }</span></div>
-							<div class="text-xs opacity-60">
-								if r.Instance.Enabled {
-									Enabled
-								} else {
-									Disabled
-								}
-								if r.RunsProcess {
-									· backend { r.ProcessStatus }
-								}
-							</div>
-						</div>
-						<div class="flex gap-1">
-							if r.NeedsApproval {
-								<button class="btn btn-xs btn-warning" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/approve") } hx-vals={ fmt.Sprintf(`{"content_hash":%q}`, r.Instance.ContentHash) } hx-target="#plugin-settings" hx-swap="outerHTML">Approve backend</button>
-							}
-							if r.Instance.Enabled {
-								<button class="btn btn-xs" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button>
-							} else {
-								<button class="btn btn-xs btn-primary" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button>
-							}
-							<button class="btn btn-xs btn-ghost text-error" hx-post={ pluginSettingsURL(v.ProjectID, "/instances/"+url.PathEscape(r.Instance.ID)+"/remove") } hx-confirm="Remove this page from the project? Its stored state and side chat are deleted." hx-target="#plugin-settings" hx-swap="outerHTML">Remove</button>
-						</div>
-					</div>
-					if r.NeedsApproval {
-						<div class="text-xs text-warning">This page runs a local executable. An administrator must approve this exact package content before it can be enabled.</div>
-						@pluginPermissionList(r.Permissions, r.RunsProcess)
-					}
-				</div>
-			}
-		</div></section>
+		}
+		if v.OpenInstall {
+			<script>document.getElementById('plugin-install-modal').showModal();</script>
+		}
 	</div>
+}
+
+templ pluginSettingsDialog(id, title string) {
+	<dialog id={ id } class="modal">
+		<div class="modal-box space-y-4">
+			@ModalCloseButton("document.getElementById('"+id+"')", "Close dialog")
+			<h3 class="pr-10 text-lg font-bold">{ title }</h3>
+			{ children... }
+		</div>
+		<form method="dialog" class="modal-backdrop"><button>Close</button></form>
+	</dialog>
 }
 
 templ pluginPermissionList(perms []PluginPermission, runsProcess bool) {

@@ -36,6 +36,21 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  document.querySelector('#appearance-settings-nav a[data-nav-base="/settings/plugin-pages"]').click();
  await new Promise(r=>setTimeout(r,400));
  checkSettings();
+ for (const id of ['plugin-template-modal','plugin-describe-modal','plugin-install-modal']) {
+  const button=Array.from(document.querySelectorAll('#plugin-settings button')).find(b=>(b.getAttribute('onclick')||'').includes(id));
+  if(!button)throw Error('Missing add menu entry '+id);
+  button.click();
+  if(!document.getElementById(id).open)throw Error('Dialog did not open '+id);
+  document.getElementById(id).close();
+ }
+ const details=document.querySelector('[id^="plugin-details-"]');
+ details.showModal();details.close();
+ const search=document.querySelector('#plugin-settings [data-card-search]');
+ search.value='not-a-page';search.dispatchEvent(new Event('input',{bubbles:true}));
+ await wait(()=>!Array.from(document.querySelectorAll('[data-plugin-instance-row]')).some(e=>e.getClientRects().length),'Search did not hide Sales');
+ await new Promise(r=>setTimeout(r,500));
+ search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));
+ await wait(()=>Array.from(document.querySelectorAll('[data-plugin-instance-row]')).some(e=>e.getClientRects().length),'Clearing search did not restore Sales');
  const sidebar=document.getElementById('sidebar');
  sidebar.classList.add('sidebar-collapsed');
  for(const el of sidebar.querySelectorAll('style,script')){
