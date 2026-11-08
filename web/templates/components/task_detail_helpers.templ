@@ -776,6 +776,23 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				document.body.addEventListener('htmx:beforeSwap', function(event) {
                     if (event.detail.shouldSwap === false) return;
 					var target = event.detail.target;
+                    // A live-start fragment and the send response can arrive in either order.
+                    // Keep one execution row without suppressing composer OOB updates.
+                    var source = event.detail.requestConfig && event.detail.requestConfig.elt;
+                    var swapOwner = source && source.closest('[hx-swap]');
+                    var swap = event.detail.swapOverride || (swapOwner && swapOwner.getAttribute('hx-swap')) || '';
+                    if (target && target.id === 'task-thread-messages' && swap.split(' ')[0] === 'beforeend') {
+                        var incoming = document.createElement('template');
+                        incoming.innerHTML = event.detail.serverResponse || '';
+                        var pairs = Array.from(incoming.content.children).filter(function(el) { return el.matches('[data-execution-pair]'); });
+                        if (pairs.length) {
+                            target.querySelectorAll('[data-chat-empty-state]').forEach(function(el) { el.remove(); });
+                            pairs.forEach(function(pair) {
+                                if (Array.from(target.querySelectorAll('[data-execution-pair]')).some(function(existing) { return existing.dataset.execId === pair.dataset.execId; })) pair.remove();
+                            });
+                            event.detail.serverResponse = incoming.innerHTML;
+                        }
+                    }
 					if (target && target.id === 'task-thread-view') {
 						var attachmentSession = document.getElementById('task-thread-form-session-id');
 						if (attachmentSession && attachmentSession.value) {
