@@ -652,6 +652,21 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 	      if (c.acceptText && document.getElementById('system-update-accept').textContent !== c.acceptText) fail(c.name + ' accept copy was not rendered from normalized state');
 	      if (c.cancel !== undefined && !hidden('system-update-cancel') !== c.cancel) fail(c.name + ' cancel visibility mismatch');
 	    }
+        window.openVibelyCanManageUpdates = false;
+        window.openVibelyHandleSystemUpdateSnapshot(snapshot);
+        if (!hidden('system-update-accept') || !hidden('system-update-cancel')) fail('member sees update actions');
+        if (hidden('system-update-permission')) fail('member missing permission explanation');
+        var originalFetch = window.fetch, mutationCalls = 0;
+        window.fetch = function(url, options) {
+          if (String(url).indexOf('/api/system/update/') === 0 && options && options.method === 'POST') mutationCalls++;
+          return originalFetch.apply(this, arguments);
+        };
+        await systemUpdateAction('apply');
+        await systemUpdateAction('cancel');
+        await wait(40);
+        window.fetch = originalFetch;
+        if (mutationCalls !== 0) fail('member triggered update mutation');
+
 	    await report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
@@ -668,6 +683,7 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-OpenVibely-Can-Manage-Updates", "true")
 			_, _ = w.Write([]byte(getSnapshot()))
 		case r.URL.Path == "/browser-scenario" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
@@ -1024,15 +1040,16 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 	    if (!selectedCount || selectedCount.textContent.trim() !== '1 selected') fail('live refresh did not remove stale selected alert IDs');
 	    var selectLoaded = document.querySelector('[data-card-select-loaded]');
 	    if (!selectLoaded || !selectLoaded.indeterminate) fail('live refresh did not reconcile the loaded selection master');
-	    newSelection.click();
-	    if (selectedCount.textContent.trim() !== '2 selected') fail('new alert selection control is not functional after live refresh');
-	    newSelection.click();
 	    filterButton = document.querySelector('[data-card-filters-button]');
 	    filterDropdown = filterButton && filterButton.closest('.dropdown');
 	    if (!filterDropdown || !filterDropdown.classList.contains('dropdown-open')) fail('live refresh closed the Alerts filter menu');
 	    if (filterButton.getAttribute('aria-expanded') !== 'true') fail('restored Alerts filter menu is not exposed as expanded');
 	    if (document.getElementById('alerts-page-header').textContent === headerBeforeLiveRefresh) fail('live refresh left the Alerts page unread count stale');
 	    filterButton.click();
+	    // Selection controls become interactive after dismissing the filter menu.
+	    newSelection.click();
+	    if (selectedCount.textContent.trim() !== '2 selected') fail('new alert selection control is not functional after live refresh');
+	    newSelection.click();
 	    survivingSelection.click();
 	    if (selectedCount.textContent.trim() !== '0 selected') fail('surviving Alerts selection could not be cleared after live refresh');
 

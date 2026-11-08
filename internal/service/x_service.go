@@ -18,6 +18,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/rivo/uniseg"
 	"golang.org/x/net/idna"
@@ -60,7 +61,10 @@ type XAPI interface {
 	Post(context.Context, string, string) (string, error)
 }
 
+const XSettingRunAsUserID = "x_run_as_user_id"
+
 type XService struct {
+	workerSvc                *WorkerService
 	mu                       sync.RWMutex
 	api                      XAPI
 	credentials              XCredentials
@@ -101,6 +105,26 @@ func NewXService(credentials XCredentials, settings persistence.SettingsStore, p
 	ctx, cancel := context.WithCancel(context.Background())
 	return &XService{api: NewXAPIClient(credentials), credentials: credentials, settingsRepo: settings, projectRepo: projects, llmConfigRepo: configs, taskRepo: tasks, execRepo: execs, scheduleRepo: schedules, taskSvc: taskSvc, ctx: ctx, cancel: cancel, pollInterval: 30 * time.Second, now: time.Now}
 }
+func (s *XService) SetCredentialAuthorization(worker *WorkerService) { s.workerSvc = worker }
+
+func (s *XService) startupPrincipal(ctx context.Context) (context.Context, error) {
+	if s.workerSvc == nil || s.workerSvc.runOrganizations == nil {
+		return ctx, nil
+	}
+	if s.settingsRepo == nil {
+		return ctx, fmt.Errorf("X settings repository not configured")
+	}
+	userID, err := s.settingsRepo.Get(ctx, XSettingRunAsUserID)
+	if err != nil {
+		return ctx, err
+	}
+	if strings.TrimSpace(userID) == "" && s.workerSvc.runAuthOff {
+		userID = models.BootstrapUserID
+	}
+	// Always replace the incoming identity: startup belongs to the saved installer.
+	return channelCredentialPrincipalContext(models.WithPrincipal(ctx, models.Principal{UserID: userID}), s.workerSvc)
+}
+
 func (s *XService) SetRepositories(auth persistence.XAuthStore, selections persistence.XUserProjectStore, contexts persistence.XTaskContextStore, receipts persistence.XInboundReceiptStore, inputs persistence.ThreadInputStore) {
 	s.authRepo = auth
 	s.userProjectRepo = selections
@@ -119,7 +143,6 @@ func (s *XService) SetRuntime(agent persistence.AgentStore, personalities persis
 	s.queuedTaskThreadPromoter = taskPromoter
 	s.channelMessageRouter = router
 }
-func (s *XService) setAPI(api XAPI) { s.api = api }
 
 // SetAPI replaces the provider transport before the service starts. It is used
 // by settings reconfiguration so verification and the running service share one
@@ -133,6 +156,14 @@ func (s *XService) SetConfigurationID(id string) { s.configurationID = strings.T
 // PrepareConnection verifies both authenticated identity and mention-read
 // capability, returning the newest current mention as the safe initial cursor.
 func (s *XService) PrepareConnection(ctx context.Context) (XUser, string, error) {
+	ctx, err := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if err != nil {
+		return XUser{}, "", err
+	}
+	return s.prepareConnection(ctx)
+}
+
+func (s *XService) prepareConnection(ctx context.Context) (XUser, string, error) {
 	if !s.credentials.Ready() {
 		return XUser{}, "", fmt.Errorf("X OAuth 1.0a credentials are incomplete")
 	}
@@ -148,7 +179,11 @@ func (s *XService) PrepareConnection(ctx context.Context) (XUser, string, error)
 }
 
 func (s *XService) Start() error {
-	me, _, err := s.PrepareConnection(s.ctx)
+	ctx, err := s.startupPrincipal(s.ctx)
+	if err != nil {
+		return err
+	}
+	me, _, err := s.prepareConnection(ctx)
 	if err != nil {
 		s.mu.Lock()
 		s.lastError = err.Error()
@@ -156,7 +191,7 @@ func (s *XService) Start() error {
 		return err
 	}
 	if s.settingsRepo != nil {
-		values, err := s.settingsRepo.GetMany(s.ctx, []string{XSettingAccountID, XSettingConfigurationID})
+		values, err := s.settingsRepo.GetMany(ctx, []string{XSettingAccountID, XSettingConfigurationID})
 		if err != nil {
 			return fmt.Errorf("load X configuration identity: %w", err)
 		}
@@ -172,7 +207,7 @@ func (s *XService) Start() error {
 			configurationID = persistence.NewID()
 			updates[XSettingConfigurationID] = configurationID
 		}
-		if err := s.settingsRepo.SetMany(s.ctx, updates); err != nil {
+		if err := s.settingsRepo.SetMany(ctx, updates); err != nil {
 			return fmt.Errorf("save X configuration identity: %w", err)
 		}
 		s.SetConfigurationID(configurationID)
@@ -184,6 +219,9 @@ func (s *XService) Start() error {
 // no provider call, so a settings transaction can commit before activation
 // without a second verification race.
 func (s *XService) StartVerified(me XUser) error {
+	if _, err := s.startupPrincipal(s.ctx); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.running {
@@ -309,7 +347,44 @@ type xMentionPaginationState struct {
 	NextToken       string `json:"next_token"`
 }
 
+// Keep the identity captured at poll admission; never adopt a later installer.
+func (s *XService) checkPollIdentity(ctx context.Context) error {
+	_, err := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	return err
+}
+
+func (s *XService) watchPollIdentity(ctx context.Context, cancel context.CancelFunc) {
+	if s.workerSvc == nil || s.workerSvc.runOrganizations == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if s.checkPollIdentity(ctx) != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+}
+
 func (s *XService) pollOnce(ctx context.Context) error {
+	ctx, accessErr := s.startupPrincipal(ctx)
+	if accessErr != nil {
+		return accessErr
+	}
+	if s.workerSvc != nil && s.workerSvc.runOrganizations != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		s.watchPollIdentity(ctx, cancel)
+	}
 	if s.receiptRepo == nil || s.authRepo == nil || s.projectRepo == nil {
 		return fmt.Errorf("X channel persistence is not configured")
 	}
@@ -338,8 +413,14 @@ func (s *XService) pollOnce(ctx context.Context) error {
 	var mentions []XTweet
 	users := map[string]XUser{}
 	for pageNumber := 0; pageNumber < xMaxMentionPages; pageNumber++ {
+		if err := s.checkPollIdentity(ctx); err != nil {
+			return err
+		}
 		page, err := s.api.Mentions(ctx, s.me.ID, sinceID, pagination)
 		if err != nil {
+			return err
+		}
+		if err := s.checkPollIdentity(ctx); err != nil {
 			return err
 		}
 		if !targetKnown {
@@ -358,6 +439,9 @@ func (s *XService) pollOnce(ctx context.Context) error {
 
 	sort.SliceStable(mentions, func(i, j int) bool { return xTweetIDLess(mentions[i].ID, mentions[j].ID) })
 	for _, tweet := range mentions {
+		if err := s.checkPollIdentity(ctx); err != nil {
+			return err
+		}
 		if strings.TrimSpace(tweet.AuthorID) == "" {
 			return fmt.Errorf("X mention %s is missing immutable author_id", tweet.ID)
 		}
@@ -394,6 +478,9 @@ func (s *XService) pollOnce(ctx context.Context) error {
 	expected := map[string]string{
 		XSettingSinceID:         sinceID,
 		XSettingPaginationState: paginationStateRaw,
+	}
+	if err := s.checkPollIdentity(ctx); err != nil {
+		return err
 	}
 	updated, err := s.settingsRepo.CompareAndSetMany(ctx, expected, values, s.configurationGuards())
 	if err != nil {
@@ -473,6 +560,9 @@ func isXHandleCharacter(b byte) bool {
 }
 
 func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser) (bool, error) {
+	if s.workerSvc != nil && s.workerSvc.runOrganizations != nil && (user.ID == "" || user.ID != tweet.AuthorID) {
+		return false, persistence.ErrProjectDenied
+	}
 	projectID, err := s.projectForUser(ctx, user.ID)
 	if err != nil {
 		return false, err
@@ -480,6 +570,37 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 	if projectID == "" {
 		applog.Infof("[x] ignored unauthorized user id=%s", user.ID)
 		return true, nil
+	}
+	if s.workerSvc != nil && s.workerSvc.runOrganizations != nil {
+		if user.ID == "" || user.ID != tweet.AuthorID {
+			return false, persistence.ErrProjectDenied
+		}
+		installer, ok := models.PrincipalFromContext(ctx)
+		if !ok {
+			return false, persistence.ErrProjectDenied
+		}
+		mappedID, err := s.authRepo.ResolveApplicationUser(ctx, projectID, tweet.AuthorID)
+		if err != nil {
+			if !s.workerSvc.runAuthOff {
+				return false, err
+			}
+			// Local auth-off retains the historical owner-backed allowlist behavior.
+			mappedID = models.BootstrapUserID
+		}
+		sender, err := s.workerSvc.runOrganizations.UserByID(ctx, mappedID)
+		if err != nil {
+			return false, err
+		}
+		if sender == nil || sender.Disabled {
+			return false, persistence.ErrProjectDenied
+		}
+		ctx = models.WithPrincipal(ctx, sender.Principal)
+		if err := (&authz.Authorizer{Store: s.workerSvc.runAccess}).Require(ctx, projectID, authz.Edit); err != nil {
+			return false, err
+		}
+		if !s.workerSvc.runAuthOff || mappedID != models.BootstrapUserID {
+			ctx = models.WithXIngressIdentity(ctx, models.XIngressIdentity{InstallerUserID: installer.UserID, ExternalUserID: tweet.AuthorID, ProjectID: projectID, UserID: mappedID})
+		}
 	}
 	claim, err := s.receiptRepo.Claim(ctx, tweet.ID, projectID, s.now(), xReceiptLease)
 	if err != nil {
@@ -760,6 +881,11 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 		if !ok {
 			return "", false, false, nil
 		}
+		if s.workerSvc != nil && s.workerSvc.runOrganizations != nil && !s.workerSvc.runAuthOff {
+			if err := requireRuntimeToolRole(ctx, s.workerSvc.runAccess, s.workerSvc.runOrganizations, projectID, name, input); err != nil {
+				return "", true, true, err
+			}
+		}
 		out, err := handler(ctx, input)
 		return out, true, err != nil, err
 	}}
@@ -955,11 +1081,6 @@ domainComplete:
 		length += xUTF16Length("https://")
 	}
 	return length <= xMaxURLLength
-}
-
-func xURLIDNADomainValid(domain string) bool {
-	_, ok := xURLIDNAEncodedDomain(domain)
-	return ok
 }
 
 func xURLIDNAEncodedDomain(domain string) (string, bool) {

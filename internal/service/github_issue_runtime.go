@@ -14,6 +14,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 type GitHubIssueRuntimeProvider interface {
@@ -46,6 +47,9 @@ const (
 )
 
 type githubIssueRuntimeOptions struct {
+	TaskID                   string
+	ExecutionID              string
+	WorkerSvc                *WorkerService
 	ProjectID                string
 	ProjectRepo              persistence.ProjectStore
 	TaskRepo                 persistence.TaskStore
@@ -107,6 +111,9 @@ func runtimeToolDefinitionSet(defs []llmcontracts.RuntimeToolDefinition) map[str
 }
 
 func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]chatcontrol.RuntimeActionHandler {
+	if opts.GitHub != nil && opts.WorkerSvc != nil && opts.WorkerSvc.runOrganizations != nil {
+		opts.GitHub = guardGitHubRuntimeProvider(opts)
+	}
 	core := NewGitHubIssueActionCore(opts.GitHub, opts.GitHubAuthRepo, opts.ProjectID, chatcontrol.DecodeRuntimeToolInput,
 		func(ctx context.Context, repoURL string) (*GitHubRepoRef, error) {
 			return resolveGitHubRepoForRuntimeToolURL(ctx, opts, repoURL)
@@ -121,7 +128,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 		}
 		return filtered, nil
 	}
-	return map[string]chatcontrol.RuntimeActionHandler{
+	handlers := map[string]chatcontrol.RuntimeActionHandler{
 		"github_create_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req githubCreateIssueRuntimeInput
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
@@ -138,9 +145,6 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			requiredLabels := []string(nil)
 			if automationBound && len(req.Labels) > 0 {
 				requiredLabels = append(requiredLabels, req.Labels...)
-				if err := opts.GitHub.EnsureIssueLabels(ctx, repo, requiredLabels); err != nil {
-					return "", fmt.Errorf("ensuring GitHub issue labels: %w", err)
-				}
 			}
 			activityKey := githubIssueCreationActivityKey(ctx, repo, req)
 			automationContext, hasAutomationContext := AutomationContextFromContext(ctx)
@@ -207,46 +211,60 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					dedupOwner, persistence.AutomationGitHubIssueDedupSource{Context: dedupSourceContext, TaskID: taskID, ExecutionID: executionID},
 					time.Now().UTC(), automationGitHubIssueDedupLeaseDuration)
 				if err != nil {
-					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey); releaseErr != nil {
+					if releaseErr := releaseGitHubIssueActivityReservationsDetached(ctx, opts, reservedBindings, activityKey); releaseErr != nil {
 						return "", releaseErr
 					}
 					return "", err
 				}
+				if len(requiredLabels) > 0 {
+					if err := opts.GitHub.EnsureIssueLabels(ctx, repo, requiredLabels); err != nil {
+						releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), automationGitHubIssueDedupPersistenceTimeout)
+						if dedupClaim.IssueNumber == 0 {
+							_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(releaseCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
+						}
+						_ = releaseGitHubIssueActivityReservations(releaseCtx, opts, reservedBindings, activityKey)
+						cancel()
+						return "", fmt.Errorf("ensuring GitHub issue labels: %w", err)
+					}
+				}
 				if dedupClaim.IssueNumber > 0 {
 					issue := githubIssueFromCanonicalResource(githubIssueResourceID(repo, dedupClaim.IssueNumber))
 					if len(requiredLabels) > 0 {
-						issue, err = ensureReusedGitHubIssueLabels(ctx, opts.GitHub, repo, dedupClaim.IssueNumber, requiredLabels)
+						issue, err = ensureReusedGitHubIssueLabels(ctx, opts.GitHub, repo, dedupClaim.IssueNumber, requiredLabels, func(ctx context.Context) error {
+							_, err := opts.AutomationRepo.AcquireGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner, dedupClaim.Source, time.Now().UTC(), automationGitHubIssueDedupLeaseDuration)
+							return err
+						})
 						if err != nil {
-							_ = releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey)
+							_ = releaseGitHubIssueActivityReservationsDetached(ctx, opts, reservedBindings, activityKey)
 							return "", fmt.Errorf("%w: verifying reused GitHub issue #%d labels: %v",
 								persistence.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, err)
 						}
 					}
 					_, projectionErr := repairAutomationGitHubIssueProjection(opts, repo, req.Title, dedupClaim)
 					if projectionErr != nil {
-						_ = releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey)
+						_ = releaseGitHubIssueActivityReservationsDetached(ctx, opts, reservedBindings, activityKey)
 						return "", fmt.Errorf("%w: repairing created GitHub issue #%d projection: %v", persistence.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, projectionErr)
 					}
 					cleanupBindings := append(reservedBindings, reconciliationBindings...)
-					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, cleanupBindings, activityKey); releaseErr != nil {
+					if releaseErr := releaseGitHubIssueActivityReservationsDetached(ctx, opts, cleanupBindings, activityKey); releaseErr != nil {
 						return "", releaseErr
 					}
 					return githubIssueJSON(map[string]any{"ok": true, "issue": issue, "reused": true})
 				}
 				if reservationNeedsReconciliation {
-					releaseCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
+					releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), automationGitHubIssueDedupPersistenceTimeout)
 					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(releaseCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
 					cancel()
-					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey); releaseErr != nil {
+					if releaseErr := releaseGitHubIssueActivityReservationsDetached(ctx, opts, reservedBindings, activityKey); releaseErr != nil {
 						return "", releaseErr
 					}
 					return "", persistence.ErrAutomationExternalReconciliation
 				}
 				if err := opts.AutomationRepo.MarkGitHubIssueDedupDispatched(ctx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner); err != nil {
-					releaseCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
+					releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), automationGitHubIssueDedupPersistenceTimeout)
 					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(releaseCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
 					cancel()
-					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey); releaseErr != nil {
+					if releaseErr := releaseGitHubIssueActivityReservationsDetached(ctx, opts, reservedBindings, activityKey); releaseErr != nil {
 						return "", releaseErr
 					}
 					return "", err
@@ -270,7 +288,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					persistence.ErrAutomationExternalReconciliation, issue.Number, strings.Join(missing, ", "))
 			}
 			if dedupFingerprint != "" {
-				persistenceCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
+				persistenceCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), automationGitHubIssueDedupPersistenceTimeout)
 				completeErr := opts.AutomationRepo.CompleteGitHubIssueDedupLease(persistenceCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner, issue.Number)
 				cancel()
 				if completeErr != nil {
@@ -538,7 +556,22 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			result, err := NewGitHubPRFeedbackForwarder(opts.GitHub, opts.TaskPullRequestRepo, opts.GitHubPRFeedbackRepo, opts.GitHubAuthRepo).ForwardAuthorizedFeedback(ctx, opts.ProjectID, repo)
+			forwarder := NewGitHubPRFeedbackForwarder(opts.GitHub, opts.TaskPullRequestRepo, opts.GitHubPRFeedbackRepo, opts.GitHubAuthRepo)
+			forwarder.authorize = func(ctx context.Context) error {
+				_, err := authorizeGitHubRuntime(ctx, opts, authz.Manage)
+				return err
+			}
+			feedbackTask, feedbackExecution := opts.TaskID, opts.ExecutionID
+			if feedbackTask == "" && feedbackExecution == "" {
+				feedbackTask, feedbackExecution, _ = AutomationExecutionFromContext(ctx)
+			}
+			if feedbackTask != "" || feedbackExecution != "" {
+				ctx = models.WithGitHubFeedbackExecution(ctx, models.GitHubFeedbackExecution{
+					TaskID: feedbackTask, ExecutionID: feedbackExecution,
+					RequireIdentity: opts.WorkerSvc != nil && opts.WorkerSvc.runOrganizations != nil && !opts.WorkerSvc.runAuthOff,
+				})
+			}
+			result, err := forwarder.ForwardAuthorizedFeedback(ctx, opts.ProjectID, repo)
 			if err != nil {
 				return "", err
 			}
@@ -555,6 +588,8 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			return githubIssueJSON(map[string]any{"ok": true, "result": result})
 		},
 	}
+	guardGitHubRuntimeActions(handlers, opts)
+	return handlers
 }
 
 func missingGitHubIssueLabels(required, actual []string) []string {
@@ -575,7 +610,7 @@ func missingGitHubIssueLabels(required, actual []string) []string {
 	return missing
 }
 
-func ensureReusedGitHubIssueLabels(ctx context.Context, provider GitHubIssueRuntimeProvider, repo *GitHubRepoRef, issueNumber int, requiredLabels []string) (*GitHubIssue, error) {
+func ensureReusedGitHubIssueLabels(ctx context.Context, provider GitHubIssueRuntimeProvider, repo *GitHubRepoRef, issueNumber int, requiredLabels []string, authorize func(context.Context) error) (*GitHubIssue, error) {
 	issue, err := provider.GetIssue(ctx, repo, issueNumber)
 	if err != nil {
 		return nil, fmt.Errorf("reading reused GitHub issue: %w", err)
@@ -586,6 +621,9 @@ func ensureReusedGitHubIssueLabels(ctx context.Context, provider GitHubIssueRunt
 	missing := missingGitHubIssueLabels(requiredLabels, issue.Labels)
 	if len(missing) == 0 {
 		return issue, nil
+	}
+	if err := authorize(ctx); err != nil {
+		return nil, err
 	}
 	if err := provider.AddLabelsToIssue(ctx, repo, issueNumber, missing); err != nil {
 		return nil, fmt.Errorf("restoring required category labels: %w", err)
@@ -1040,8 +1078,8 @@ func releaseGitHubIssueActivityReservations(ctx context.Context, opts githubIssu
 	return nil
 }
 
-func releaseGitHubIssueActivityReservationsDetached(opts githubIssueRuntimeOptions, bindings []models.AutomationBinding, activityKey string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
+func releaseGitHubIssueActivityReservationsDetached(parent context.Context, opts githubIssueRuntimeOptions, bindings []models.AutomationBinding, activityKey string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), automationGitHubIssueDedupPersistenceTimeout)
 	defer cancel()
 	return releaseGitHubIssueActivityReservations(ctx, opts, bindings, activityKey)
 }
@@ -1223,6 +1261,11 @@ func filterGitHubAssignedIssuesForAutomationInbox(_ context.Context, _ githubIss
 }
 
 func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issues []GitHubIssue) error {
+	var err error
+	ctx, err = authorizeGitHubRuntime(ctx, opts, authz.Manage)
+	if err != nil {
+		return err
+	}
 	if opts.AutomationRepo == nil || len(issues) == 0 {
 		return nil
 	}

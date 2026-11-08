@@ -6,7 +6,10 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/stretchr/testify/require"
 )
 
@@ -129,4 +132,46 @@ func TestChatProjectToolDefinitions(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestChatProjectSelectionRechecksSelectedProjectBeforeCache(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	h := tc.handler
+	h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	invite, err := org.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	bob, err := org.Accept(t.Context(), invite, "selector", "long-test-password", "")
+	require.NoError(t, err)
+	ctx := models.WithPrincipal(t.Context(), bob.Principal)
+	project := createProject(t, h, "Selected private project")
+	policy, err := tc.stores.ProjectAccess.Get(t.Context(), project.ID)
+	require.NoError(t, err)
+	policy.Visibility = "private"
+	require.NoError(t, tc.stores.ProjectAccess.Update(t.Context(), models.BootstrapUserID, *policy))
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, project.ID, bob.UserID, "viewer"))
+	input, err := json.Marshal(map[string]string{"project_id": project.ID})
+	require.NoError(t, err)
+	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+		executor := h.chatActionExecutor(streamingResponseParams{ProjectID: models.AllProjectsID}, nil, models.ChatModeOrchestrate, surface)
+		_, handled, failed, err := executor(ctx, "list_tasks", input)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, failed)
+		require.NoError(t, tc.stores.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, project.ID, bob.UserID, ""))
+		_, _, failed, err = executor(ctx, "list_tasks", input)
+		require.ErrorIs(t, err, authz.ErrDenied)
+		require.True(t, failed)
+		require.NoError(t, tc.stores.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, project.ID, bob.UserID, "viewer"))
+	}
+	frame := liveFrame{Data: events.TaskEvent{ProjectID: project.ID, TaskName: "private event"}}
+	visible := liveProjectVisibility{}
+	require.NoError(t, h.refreshLiveVisibility(ctx, visible))
+	require.True(t, h.liveEventVisible(ctx, visible, frame))
+	require.NoError(t, tc.stores.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, project.ID, bob.UserID, ""))
+	require.True(t, h.liveEventVisible(ctx, visible, frame), "per-frame delivery uses the cached decision")
+	require.NoError(t, h.refreshLiveVisibility(ctx, visible))
+	require.False(t, h.liveEventVisible(ctx, visible, frame), "an access change clears the cached decision")
+	require.False(t, h.liveEventVisible(ctx, visible, liveFrame{Data: events.TaskEvent{TaskName: "no project"}}))
+	require.True(t, h.liveEventVisible(ctx, visible, liveFrame{Event: "ready"}))
 }

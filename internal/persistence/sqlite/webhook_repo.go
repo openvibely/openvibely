@@ -40,7 +40,7 @@ func scanWebhookEndpoint(row interface{ Scan(dest ...any) error }) (*models.Webh
 	var enabled int
 	err := row.Scan(&w.ID, &w.ProjectID, &w.Name, &enabled, &w.PathToken, &w.Secret,
 		&w.SystemInstructions, &w.TitleTemplate, &w.PromptTemplate, &w.DefaultPriority,
-		&w.CreatedAt, &w.UpdatedAt)
+		&w.CreatedAt, &w.UpdatedAt, &w.RunAsUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func scanWebhookEndpoint(row interface{ Scan(dest ...any) error }) (*models.Webh
 	return &w, nil
 }
 
-const webhookColumns = `id, project_id, name, enabled, path_token, secret, system_instructions, title_template, prompt_template, default_priority, created_at, updated_at`
+const webhookColumns = `id, project_id, name, enabled, path_token, secret, system_instructions, title_template, prompt_template, default_priority, created_at, updated_at, run_as_user_id`
 const webhookCardColumns = `id, project_id, name, enabled, path_token, default_priority, created_at, updated_at`
 
 func (r *WebhookRepo) Create(ctx context.Context, w *models.WebhookEndpoint) error {
@@ -70,17 +70,35 @@ func (r *WebhookRepo) Create(ctx context.Context, w *models.WebhookEndpoint) err
 	if w.Enabled {
 		enabled = 1
 	}
-	err := queryRowBoundSQLite(ctx, r.db,
-		`INSERT INTO webhook_endpoints (project_id, name, enabled, path_token, secret, system_instructions, title_template, prompt_template, default_priority)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 RETURNING id, created_at, updated_at`,
-		w.ProjectID, w.Name, enabled, w.PathToken, w.Secret,
-		w.SystemInstructions, w.TitleTemplate, w.PromptTemplate, w.DefaultPriority,
-	).Scan(&w.ID, &w.CreatedAt, &w.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("creating webhook endpoint: %w", err)
+	w.RunAsUserID = ""
+	if principal, ok := models.PrincipalFromContext(ctx); ok {
+		w.RunAsUserID = principal.UserID
 	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if w.RunAsUserID != "" {
+			role, err := projectRole(ctx, tx, w.RunAsUserID, w.ProjectID)
+			if err != nil {
+				return err
+			}
+			if role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+		err := tx.QueryRowContext(ctx,
+			`INSERT INTO webhook_endpoints (project_id, name, enabled, path_token, secret, system_instructions, title_template, prompt_template, default_priority, run_as_user_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 RETURNING id, created_at, updated_at`,
+			w.ProjectID, w.Name, enabled, w.PathToken, w.Secret,
+			w.SystemInstructions, w.TitleTemplate, w.PromptTemplate, w.DefaultPriority, w.RunAsUserID,
+		).Scan(&w.ID, &w.CreatedAt, &w.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("creating webhook endpoint: %w", err)
+		}
+		if w.RunAsUserID != "" {
+			return projectAudit(ctx, tx, w.ProjectID, w.RunAsUserID, "webhook.run_as", w.ID, `{}`)
+		}
+		return nil
+	})
 }
 
 func (r *WebhookRepo) GetByID(ctx context.Context, id string) (*models.WebhookEndpoint, error) {
@@ -165,7 +183,7 @@ func (r *WebhookRepo) ListCardsByProjectPage(ctx context.Context, projectID stri
 
 func (r *WebhookRepo) ListCardsByProjectPageFiltered(ctx context.Context, projectID string, limit, offset int, filter persistence.WebhookCardFilter) ([]models.WebhookEndpoint, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
-	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE ` + analyticsProjectPredicate("project_id", projectID)
+	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE ` + analyticsProjectPredicate(ctx, "project_id", projectID)
 	args := []any{projectID}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		query += ` AND INSTR(LOWER('webhook ' || COALESCE(name, '')), ?) > 0`
@@ -234,13 +252,13 @@ func (r *WebhookRepo) DeleteBulk(ctx context.Context, projectID string, ids []st
 		args = append(args, id)
 	}
 	var count int
-	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
 		return err
 	}
 	if count != len(ids) {
 		return persistence.ErrWebhookNotFound
 	}
-	if _, err := conn.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
 		return err
 	}
 	_, err = conn.ExecContext(ctx, `COMMIT`)

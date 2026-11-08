@@ -24,13 +24,7 @@ func TestPreparedSteeringBatchHelpers(t *testing.T) {
 	}
 }
 
-func TestChatProcessingSmallHelpers(t *testing.T) {
-	if got := firstInt(nil); got != 0 {
-		t.Fatalf("firstInt(nil) = %d", got)
-	}
-	if got := firstInt([]int{4, 9}); got != 4 {
-		t.Fatalf("firstInt = %d", got)
-	}
+func TestParseCompletionOptions(t *testing.T) {
 	messageID, reply := parseCompletionOptions(
 		service.ChannelReplyContext{Source: models.TaskOriginSlack, SlackChannelID: "C1"},
 		17,

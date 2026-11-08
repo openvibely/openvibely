@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type TaskGoalRepo struct {
@@ -17,7 +18,7 @@ func NewTaskGoalRepo(db *sql.DB) *TaskGoalRepo {
 	return &TaskGoalRepo{db: db}
 }
 
-const taskGoalSelectColumns = `task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at, created_at, updated_at`
+const taskGoalSelectColumns = `task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at, created_at, updated_at, run_as_user_id`
 
 type taskGoalScanner interface {
 	Scan(dest ...any) error
@@ -44,6 +45,7 @@ func scanTaskGoal(scanner taskGoalScanner) (*models.TaskGoal, error) {
 		&achievedAt,
 		&createdAt,
 		&updatedAt,
+		&g.RunAsUserID,
 	); err != nil {
 		return nil, err
 	}
@@ -81,11 +83,33 @@ func (r *TaskGoalRepo) CreateOrReplace(ctx context.Context, goal *models.TaskGoa
 	if goal.Status == "" {
 		goal.Status = models.TaskGoalStatusActive
 	}
-	row := queryRowBoundSQLite(ctx, r.db, `
-		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
-		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
+	goal.RunAsUserID = ""
+	if principal, ok := models.PrincipalFromContext(ctx); ok {
+		goal.RunAsUserID = principal.UserID
+	}
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := authorizeSlackTaskMutation(ctx, tx, goal.TaskID); err != nil {
+			return err
+		}
+		var projectID string
+		if err := tx.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id=?`, goal.TaskID).Scan(&projectID); err != nil {
+			return err
+		}
+		if goal.RunAsUserID != "" {
+			role, err := projectRole(ctx, tx, goal.RunAsUserID, projectID)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+		row := tx.QueryRowContext(ctx, `
+		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at, run_as_user_id)
+		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
 			goal_id = excluded.goal_id,
+			run_as_user_id = excluded.run_as_user_id,
 			objective = excluded.objective,
 			status = excluded.status,
 			reason = excluded.reason,
@@ -97,13 +121,17 @@ func (r *TaskGoalRepo) CreateOrReplace(ctx context.Context, goal *models.TaskGoa
 			achieved_at = NULL,
 			updated_at = datetime('now')
 		RETURNING `+taskGoalSelectColumns,
-		goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason)
-	created, err := scanTaskGoal(row)
-	if err != nil {
-		return fmt.Errorf("creating task goal: %w", err)
-	}
-	*goal = *created
-	return nil
+			goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason, goal.RunAsUserID)
+		created, err := scanTaskGoal(row)
+		if err != nil {
+			return fmt.Errorf("creating task goal: %w", err)
+		}
+		*goal = *created
+		if goal.RunAsUserID != "" {
+			return projectAudit(ctx, tx, projectID, goal.RunAsUserID, "goal.run_as", goal.GoalID, `{}`)
+		}
+		return nil
+	})
 }
 
 func (r *TaskGoalRepo) GetByTaskID(ctx context.Context, taskID string) (*models.TaskGoal, error) {
@@ -119,14 +147,14 @@ func (r *TaskGoalRepo) GetByTaskID(ctx context.Context, taskID string) (*models.
 
 func (r *TaskGoalRepo) UpdateStatus(ctx context.Context, taskID string, goalID string, status models.TaskGoalStatus, reason string, clearAudit bool) (*models.TaskGoal, error) {
 	if clearAudit {
-		return r.updateReturning(ctx, `
+		return r.updateReturning(ctx, taskID, `
 			UPDATE task_goals
 			SET status = ?, reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '', blocker_last_seen_at = NULL,
 				last_checked_at = datetime('now'), achieved_at = NULL, updated_at = datetime('now')
 			WHERE task_id = ? AND goal_id = ?
 			RETURNING `+taskGoalSelectColumns, status, reason, taskID, goalID)
 	}
-	return r.updateReturning(ctx, `
+	return r.updateReturning(ctx, taskID, `
 		UPDATE task_goals
 		SET status = ?, reason = ?, last_checked_at = datetime('now'), updated_at = datetime('now')
 		WHERE task_id = ? AND goal_id = ?
@@ -134,7 +162,7 @@ func (r *TaskGoalRepo) UpdateStatus(ctx context.Context, taskID string, goalID s
 }
 
 func (r *TaskGoalRepo) ReactivateAchieved(ctx context.Context, taskID string, reason string) (*models.TaskGoal, error) {
-	return r.updateReturning(ctx, `
+	return r.updateReturning(ctx, taskID, `
 		UPDATE task_goals
 		SET status = 'active', reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '', blocker_last_seen_at = NULL,
 			last_checked_at = datetime('now'), achieved_at = NULL, updated_at = datetime('now')
@@ -143,7 +171,7 @@ func (r *TaskGoalRepo) ReactivateAchieved(ctx context.Context, taskID string, re
 }
 
 func (r *TaskGoalRepo) MarkAchieved(ctx context.Context, taskID string, goalID string, reason string) (*models.TaskGoal, error) {
-	return r.updateReturning(ctx, `
+	return r.updateReturning(ctx, taskID, `
 		UPDATE task_goals
 		SET status = 'achieved', reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '', blocker_last_seen_at = NULL,
 			last_checked_at = datetime('now'), achieved_at = datetime('now'), updated_at = datetime('now')
@@ -152,7 +180,7 @@ func (r *TaskGoalRepo) MarkAchieved(ctx context.Context, taskID string, goalID s
 }
 
 func (r *TaskGoalRepo) RecordBlockedReport(ctx context.Context, taskID string, goalID string, blockerKey string, reason string) (*models.TaskGoal, error) {
-	return r.updateReturning(ctx, `
+	return r.updateReturning(ctx, taskID, `
 		UPDATE task_goals
 		SET blocker_key = ?,
 			blocker_count = CASE WHEN blocker_key = ? THEN blocker_count + 1 ELSE 1 END,
@@ -167,7 +195,7 @@ func (r *TaskGoalRepo) RecordBlockedReport(ctx context.Context, taskID string, g
 }
 
 func (r *TaskGoalRepo) ClearBlockedReport(ctx context.Context, taskID string, blockerKey string, reason string) (*models.TaskGoal, error) {
-	return r.updateReturning(ctx, `
+	return r.updateReturning(ctx, taskID, `
 		UPDATE task_goals
 		SET status = 'active', reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '', blocker_last_seen_at = NULL,
 			last_checked_at = datetime('now'), achieved_at = NULL, updated_at = datetime('now')
@@ -175,27 +203,42 @@ func (r *TaskGoalRepo) ClearBlockedReport(ctx context.Context, taskID string, bl
 		RETURNING `+taskGoalSelectColumns, reason, taskID, blockerKey)
 }
 
+func (r *TaskGoalRepo) withSlackMutation(ctx context.Context, taskID, action string, apply func(sqlExecutor) error) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := authorizeSlackTaskMutation(ctx, tx, taskID); err != nil {
+			return err
+		}
+		if err := apply(tx); err != nil {
+			return err
+		}
+		if identity, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+			return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, action, taskID, `{}`)
+		}
+		return nil
+	})
+}
+
 func (r *TaskGoalRepo) Clear(ctx context.Context, taskID string, reason string) error {
-	_, err := execBoundSQLite(ctx, r.db, `
-		UPDATE task_goals
-		SET status = 'cleared', reason = ?, updated_at = datetime('now')
-		WHERE task_id = ?`, reason, taskID)
-	if err != nil {
-		return fmt.Errorf("clearing task goal: %w", err)
-	}
-	return nil
+	return r.withSlackMutation(ctx, taskID, "slack.goal_cleared", func(tx sqlExecutor) error {
+		_, err := tx.ExecContext(ctx, `UPDATE task_goals SET status='cleared', reason=?, updated_at=datetime('now') WHERE task_id=?`, reason, taskID)
+		return err
+	})
 }
 
 func (r *TaskGoalRepo) Delete(ctx context.Context, taskID string) error {
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM task_goals WHERE task_id = ?`, taskID)
-	if err != nil {
-		return fmt.Errorf("deleting task goal: %w", err)
-	}
-	return nil
+	return r.withSlackMutation(ctx, taskID, "slack.goal_deleted", func(tx sqlExecutor) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM task_goals WHERE task_id=?`, taskID)
+		return err
+	})
 }
 
-func (r *TaskGoalRepo) updateReturning(ctx context.Context, query string, args ...any) (*models.TaskGoal, error) {
-	goal, err := scanTaskGoal(queryRowBoundSQLite(ctx, r.db, query, args...))
+func (r *TaskGoalRepo) updateReturning(ctx context.Context, taskID, query string, args ...any) (*models.TaskGoal, error) {
+	var goal *models.TaskGoal
+	err := r.withSlackMutation(ctx, taskID, "slack.goal_updated", func(tx sqlExecutor) error {
+		var err error
+		goal, err = scanTaskGoal(tx.QueryRowContext(ctx, query, args...))
+		return err
+	})
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -203,4 +246,25 @@ func (r *TaskGoalRepo) updateReturning(ctx context.Context, query string, args .
 		return nil, fmt.Errorf("updating task goal: %w", err)
 	}
 	return goal, nil
+}
+
+func auditTaskGoalIdentity(ctx context.Context, exec sqlExecutor, goal *models.TaskGoal) error {
+	if err := authorizeSlackTaskMutation(ctx, exec, goal.TaskID); err != nil {
+		return err
+	}
+	if goal.RunAsUserID == "" {
+		return nil
+	}
+	var projectID string
+	if err := exec.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id=?`, goal.TaskID).Scan(&projectID); err != nil {
+		return err
+	}
+	role, err := projectRole(ctx, exec, goal.RunAsUserID, projectID)
+	if err != nil {
+		return err
+	}
+	if role != "editor" && role != "maintainer" && role != "owner" {
+		return persistence.ErrProjectDenied
+	}
+	return projectAudit(ctx, exec, projectID, goal.RunAsUserID, "goal.run_as", goal.GoalID, `{}`)
 }

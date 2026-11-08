@@ -388,7 +388,7 @@ func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *test
 	}
 	html := buf.String()
 	start := strings.Index(html, "window._tabVisibility = (function() {")
-	end := strings.Index(html[start:], "// Track which element was focused before mousedown")
+	end := strings.Index(html[start:], "function closestDropdownScrollBoundary")
 	if start < 0 || end < 0 {
 		t.Fatal("tab visibility manager boundaries are missing")
 	}
@@ -409,12 +409,14 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 		t.Fatalf("failed to render Base: %v", err)
 	}
 	html := buf.String()
-	start := strings.Index(html, "let focusedBeforeClick")
-	end := strings.Index(html[start:], "function handleTaskSelect(event)")
-	if start < 0 || end < 0 {
-		t.Fatal("base layout must define shared dropdown positioning before task-card click handling")
+	start := strings.Index(html, "function closestDropdownScrollBoundary")
+	end := strings.Index(html, "function menuDropdownForTarget")
+	positionStart := strings.Index(html, "function positionDropdownForViewport")
+	positionEnd := strings.Index(html, "function finishKanbanMenuPosition")
+	if start < 0 || end < start || positionStart < 0 || positionEnd < positionStart {
+		t.Fatal("base layout must define shared dropdown positioning")
 	}
-	dropdownScript := html[start : start+end]
+	dropdownScript := html[start:end] + html[positionStart:positionEnd]
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required to execute the rendered dropdown positioning script")
@@ -469,32 +471,16 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 	}
 	` + dropdownScript + `
 	const bottom = makeDropdown(230, 254, 100);
-	handleDropdownToggle({ currentTarget: bottom.label, stopPropagation: function() {} });
+	positionDropdownForViewport(bottom.label);
 	if (!bottom.dropdown.classList.contains('dropdown-top')) throw new Error('near-bottom dropdown did not open upward: ' + bottom.dropdown.classList.toString());
 	const roomy = makeDropdown(80, 104, 100);
-	handleDropdownToggle({ currentTarget: roomy.label, stopPropagation: function() {} });
+	positionDropdownForViewport(roomy.label);
 	if (roomy.dropdown.classList.contains('dropdown-top')) throw new Error('roomy dropdown should stay downward: ' + roomy.dropdown.classList.toString());
 	const originalTop = makeDropdown(80, 104, 40);
 	originalTop.dropdown.classList.add('dropdown-top');
-	handleDropdownToggle({ currentTarget: originalTop.label, stopPropagation: function() {} });
+	positionDropdownForViewport(originalTop.label);
 	if (!originalTop.dropdown.classList.contains('dropdown-top')) throw new Error('original dropdown-top class should be preserved');
 
-	runtime = 'desktop';
-	const startupFocusedChat = makeDropdown(80, 104, 100);
-	document.activeElement = startupFocusedChat.label;
-	listeners['mousedown']({});
-	const startupActivation = {
-	  currentTarget: startupFocusedChat.label,
-	  defaultPrevented: false,
-	  stopPropagation: function() {},
-	  preventDefault: function() { this.defaultPrevented = true; }
-	};
-	startupFocusedChat.dropdown.getAttribute = function(name) {
-	  return name === 'data-chat-actions-open' ? null : null;
-	};
-	startupFocusedChat.label.closest = function(selector) { return selector === '[data-chat-actions-dropdown]' || selector === '.dropdown' ? startupFocusedChat.dropdown : null; };
-	handleDropdownToggle(startupActivation);
-	if (startupActivation.defaultPrevented) throw new Error('desktop startup focus was treated as an already-open Chat menu');
 	`
 
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
@@ -1870,6 +1856,10 @@ func TestPendingEditorReleasesOnPageExit(t *testing.T) {
 	if err := Base("Chat", nil, "").Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
+	helper, err := os.ReadFile("../../assets/permission-errors.js")
+	if err != nil {
+		t.Fatal(err)
+	}
 	html := buf.String()
 	start := strings.Index(html, "window.editPendingThreadInput = async")
 	end := strings.Index(html[start:], "</script>")
@@ -1887,7 +1877,7 @@ global.clearTimeout = () => {};
 global.setInterval = (fn, ms) => { if(ms === 20000) renewal = fn; else expiry = fn; return ms; };
 global.clearInterval = ms => { if(ms === 20000) renewal = null; else expiry = null; };
 global.window = {addEventListener: (n,f) => listeners[n]=f, removeEventListener: n => delete listeners[n], alert: m => {throw Error(m)}};
-const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {}, '[role="alert"]': {}, '[type="submit"]': {}};
+const controls = {textarea: {focus(){}}, '[data-cancel]': {}, '[data-pending-editor-close]': {}, form: {getBoundingClientRect:()=>({left:100, right:500, top:100, bottom:400})}, '[role="alert"]': {}, '[type="submit"]': {}};
 let closed = 0;
 let shown = 0;
 const dialogEvents = {};
@@ -1902,11 +1892,41 @@ global.fetch = (url, options) => {
  if (!options.body.get('renew') && !options.body.get('hold')) return new Promise(resolve => completeHold = () => resolve({ok:true, json:async()=>({content:'original'})}));
  return Promise.resolve({ok:true});
 };
-` + html[start:start+end] + `
+` + string(helper) + html[start:start+end] + `
 (async () => {
  let opening = window.editPendingThreadInput(button);
  completeHold(); await opening;
  assert.equal(shown, 1);
+ // Clicking inside, or dragging from the editor onto the backdrop, keeps it open.
+ dialogEvents.pointerdown({button:0, target:controls.textarea});
+ await dialogEvents.click({target:controls.textarea});
+ dialogEvents.pointerdown({button:0, target:controls.textarea});
+ await dialogEvents.click({target:dialog});
+ assert.equal(closed, 0);
+ assert.equal(requests.length, 1);
+ // A drag into the editor can produce a click targeted at the common ancestor (dialog).
+ controls.textarea.value = 'unsaved draft';
+ dialogEvents.pointerdown({button:0, target:dialog, clientX:50, clientY:50});
+ await dialogEvents.click({target:dialog, clientX:200, clientY:200});
+ assert.equal(closed, 0);
+ assert.equal(requests.length, 1);
+ assert.equal(controls.textarea.value, 'unsaved draft');
+ // Cancelled pointer gestures must not leave a dismissal armed.
+ dialogEvents.pointerdown({button:0, target:dialog, clientX:50, clientY:50});
+ dialogEvents.pointercancel();
+ await dialogEvents.click({target:dialog, clientX:50, clientY:50});
+ assert.equal(closed, 0);
+ // A backdrop click cancels through the hold-release path without saving the draft.
+ dialogEvents.pointerdown({button:0, target:dialog, clientX:50, clientY:50});
+ await dialogEvents.click({target:dialog, clientX:50, clientY:50});
+ assert.equal(closed, 1);
+ assert.equal(requests.length, 2);
+ assert.equal(requests[1].options.body.get('hold'), 'false');
+ assert.equal(requests[1].options.body.get('edit_token'), requests[0].options.body.get('edit_token'));
+ assert.equal(requests[1].options.body.has('content'), false);
+ requests = []; closed = 0;
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
  controls.textarea.value = 'draft';
  listeners['htmx:afterSwap']({detail:{target:{id:'pending-thread-inputs', contains:()=>true}}});
  assert.equal(closed, 0);
@@ -2025,6 +2045,82 @@ global.fetch = (url, options) => {
  finishSave({ok:true, json:async()=>({content:largeDraft})});
  await savingNow;
  assert.equal(saveRequests.length, 1);
+ // Permission denials only toast: acquisition never opens a dialog.
+ const toasts = [];
+ window.showToast = message => toasts.push(message);
+ global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
+ const shownBeforeDenied = shown;
+ await window.editPendingThreadInput(button);
+ assert.equal(shown, shownBeforeDenied);
+ assert.equal(toasts.length, 1);
+ assert.equal(button.disabled, false);
+ assert.equal(listeners.pagehide, undefined);
+ // An unmarked 403 follows the existing error path and retains its message.
+ const ordinaryErrors=[];
+ window.alert=message=>ordinaryErrors.push(message);
+ global.fetch=async()=>new Response(JSON.stringify({message:'Request origin rejected'}),{status:403});
+ await window.editPendingThreadInput(button);
+ assert.deepEqual(ordinaryErrors,['Request origin rejected']);
+ assert.equal(toasts.length,1);
+ assert.equal(shown,shownBeforeDenied);
+ // A denied save preserves the draft and leaves the editor usable.
+ global.fetch = workingFetch;
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
+ controls.textarea.value = 'Keep denied draft';
+ global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
+ const closedBeforeDenied = closed;
+ controls['[role="alert"]'].textContent='';controls['[type="submit"]'].disabled=false;
+ await renewal();
+ assert.equal(toasts.length, 2);
+ assert.equal(renewal, null);assert.equal(expiry, null);
+ assert.equal(controls['[role="alert"]'].textContent, '');
+ assert.equal(controls['[type="submit"]'].disabled, false);
+ now += 120000;
+ await controls.form.onsubmit({preventDefault(){}});
+ assert.equal(toasts.length, 3);
+ assert.equal(closed, closedBeforeDenied);
+ assert.equal(controls.textarea.value, 'Keep denied draft');
+ assert.equal(controls.textarea.disabled, false);
+ assert.equal(controls['[role="alert"]'].textContent, '');
+ global.fetch=async()=>new Response(JSON.stringify({message:'Request origin rejected'}),{status:403});
+ await controls.form.onsubmit({preventDefault(){}});
+ assert.equal(controls['[role="alert"]'].textContent,'Request origin rejected');
+ assert.equal(toasts.length,3);
+ assert.equal(controls.textarea.value,'Keep denied draft');
+ global.fetch = workingFetch;
+ listeners.pagehide();
+ // Dismissal must still work after access is reduced to Viewer. The rejected
+ // release is attempted once; local cleanup must not retry or save the draft.
+ for (const dismiss of ['cancel', 'close', 'escape', 'backdrop']) {
+  global.fetch = workingFetch;
+  opening = window.editPendingThreadInput(button);
+  completeHold(); await opening;
+  controls.textarea.value = 'Discard this draft';
+  const beforeClose = closed;
+  const beforeToast = toasts.length;
+  const deniedRequests = [];
+  global.fetch = async (url, options) => {
+   deniedRequests.push({url, options});
+   return new Response(JSON.stringify({message:'Editor access required'}), {status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
+  };
+  if (dismiss === 'cancel') await controls['[data-cancel]'].onclick();
+  else if (dismiss === 'close') await controls['[data-pending-editor-close]'].onclick();
+  else if (dismiss === 'escape') dialogEvents.cancel({preventDefault(){}});
+  else {
+   dialogEvents.pointerdown({button:0,target:dialog,clientX:0,clientY:0});
+   await dialogEvents.click({target:dialog,clientX:0,clientY:0});
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(closed, beforeClose + 1, dismiss + ' closes the editor');
+  assert.equal(toasts.length, beforeToast + 1);
+  assert.equal(deniedRequests.length, 1);
+  assert.equal(deniedRequests[0].options.body.get('hold'), 'false');
+  assert.equal(deniedRequests[0].options.body.has('content'), false);
+  assert.equal(renewal, null);
+  assert.equal(expiry, null);
+  assert.equal(listeners.pagehide, undefined);
+ }
 })().catch(error => {console.error(error); process.exit(1)});
 `
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {

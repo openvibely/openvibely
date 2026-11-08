@@ -100,7 +100,7 @@ func TestAllProjectsOutboundTargetsRequireOwner(t *testing.T) {
 	require.ErrorContains(t, err, "Choose a project")
 }
 
-func TestAllProjectsAuthorizedUsersKeepOwnerAndCombinedList(t *testing.T) {
+func TestAllProjectsAuthorizedUsersShareOneGlobalMapping(t *testing.T) {
 	h, app, _, stores := setupTestHandlerWithStores(t)
 	projects := []*models.Project{createProject(t, h, "Authorization Alpha"), createProject(t, h, "Authorization Beta")}
 	for _, p := range projects {
@@ -115,7 +115,7 @@ func TestAllProjectsAuthorizedUsersKeepOwnerAndCombinedList(t *testing.T) {
 	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/channels/slack/authorized-users?project_id="+models.AllProjectsID, nil))
 	require.Equal(t, 200, rec.Code, rec.Body.String())
 	for _, p := range projects {
-		require.Contains(t, rec.Body.String(), `data-project-label>`+p.Name+`</span>`)
+		require.NotContains(t, rec.Body.String(), `data-project-label`)
 		users, err := stores.SlackAuth.ListByProject(t.Context(), p.ID)
 		require.NoError(t, err)
 		require.Len(t, users, 1)
@@ -125,10 +125,10 @@ func TestAllProjectsAuthorizedUsersKeepOwnerAndCombinedList(t *testing.T) {
 	rec = httptest.NewRecorder()
 	app.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/channels/slack/authorized-users/"+users[0].ID+"?project_id="+projects[0].ID+"&return_project_id="+models.AllProjectsID, nil))
 	require.Equal(t, 200, rec.Code, rec.Body.String())
-	require.Contains(t, rec.Body.String(), `data-project-label>`+projects[1].Name+`</span>`)
+	require.NotContains(t, rec.Body.String(), `data-project-label`)
 	remaining, err := stores.SlackAuth.ListByProject(t.Context(), projects[1].ID)
 	require.NoError(t, err)
-	require.Len(t, remaining, 1)
+	require.Empty(t, remaining)
 }
 
 func TestAllProjectsAgentEditorPreservesOwner(t *testing.T) {

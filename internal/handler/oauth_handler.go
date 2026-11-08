@@ -56,6 +56,7 @@ const (
 
 // oauthPendingFlow stores the PKCE verifier and model config ID for an in-progress OAuth flow.
 type oauthPendingFlow struct {
+	ActorUserID    string
 	SetupID        string
 	ConfigID       string
 	ConnectionID   string
@@ -161,6 +162,11 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 }
 
 func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig, setupID string) error {
+	actorCtx := h.projectRuntimePrincipalContext(c.Request().Context())
+	actor, _ := models.PrincipalFromContext(actorCtx)
+	if err := h.requireOAuthActor(actorCtx, actor.UserID); err != nil {
+		return projectAccessHTTPError(err)
+	}
 	id := agent.ID
 
 	redirectMode := resolveOAuthRedirectMode()
@@ -351,6 +357,7 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		}
 	}
 	oauthFlows[state] = &oauthPendingFlow{
+		ActorUserID:    actor.UserID,
 		SetupID:        setupID,
 		ConfigID:       id,
 		ConnectionID:   agent.OAuthConnectionID,
@@ -664,6 +671,14 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 }
 
 func (h *Handler) exchangeOAuthCodeAndSaveTokensContext(ctx context.Context, flow *oauthPendingFlow, code, state string) (int64, error) {
+	if err := h.requireOAuthActor(ctx, flow.ActorUserID); err != nil {
+		return 0, err
+	}
+	if flow.SetupID != "" {
+		if _, err := h.modelOAuthSetupConfig(flow.SetupID, false, models.WithPrincipal(ctx, models.Principal{UserID: flow.ActorUserID})); err != nil {
+			return 0, err
+		}
+	}
 	if flow.Provider == models.ProviderOpenAICompatible {
 		return h.exchangeCustomOAuthCodeAndSaveTokens(flow, code)
 	}
@@ -728,10 +743,13 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokensContext(ctx context.Context, flo
 		}
 	}
 
+	if err := h.requireOAuthActor(ctx, flow.ActorUserID); err != nil {
+		return 0, err
+	}
 	if flow.SetupID != "" {
 		return expiresAt, h.finishModelOAuthSetup(flow.SetupID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, "", accountID, profileDisplayName, principalHash)
 	}
-	bgCtx := context.Background()
+	bgCtx := oauthActorContext(context.Background(), flow.ActorUserID)
 	var updated bool
 	if flow.ConnectionID != "" {
 		updated, err = h.llmConfigRepo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(
@@ -756,6 +774,9 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokensContext(ctx context.Context, flo
 }
 
 func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code string) (int64, error) {
+	if err := h.requireOAuthActor(context.Background(), flow.ActorUserID); err != nil {
+		return 0, err
+	}
 	if err := h.ensureCustomOAuthFlowCurrent(context.Background(), flow); err != nil {
 		return 0, err
 	}
@@ -857,12 +878,15 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 	if err := llmcustomauth.ValidateRequestHeaderValues(cfg, customState, tokens.AccessToken); err != nil {
 		return 0, err
 	}
+	if err := h.requireOAuthActor(context.Background(), flow.ActorUserID); err != nil {
+		return 0, err
+	}
 	if flow.SetupID != "" {
 		return tokens.ExpiresAt, h.finishModelOAuthSetup(flow.SetupID, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, llmcustomauth.MarshalState(customState))
 	}
 
 	updated, err := h.llmConfigRepo.UpdateCustomOAuthConnectionIfRevision(
-		context.Background(), flow.ConfigID, flow.ConfigRevision,
+		oauthActorContext(context.Background(), flow.ActorUserID), flow.ConfigID, flow.ConfigRevision,
 		tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, llmcustomauth.MarshalState(customState),
 	)
 	if err != nil {
@@ -969,7 +993,7 @@ func (h *Handler) ensureCustomOAuthFlowCurrent(ctx context.Context, flow *oauthP
 		return fmt.Errorf("custom OAuth authorization flow is missing")
 	}
 	if flow.SetupID != "" {
-		_, err := h.modelOAuthSetupConfig(flow.SetupID, false)
+		_, err := h.modelOAuthSetupConfig(flow.SetupID, false, models.WithPrincipal(ctx, models.Principal{UserID: flow.ActorUserID}))
 		return err
 	}
 

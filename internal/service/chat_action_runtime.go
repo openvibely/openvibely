@@ -936,6 +936,7 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		ProjectID: opts.ProjectID, CallerTaskID: opts.CallerTaskID, Source: "agent", AlertSvc: opts.AlertSvc, TaskRepo: opts.TaskRepo,
 		PrepareImplementationTask: opts.PrepareImplementationTask,
 	}))
+	guardChannelGlobalActions(handlers, opts.WorkerSvc, opts.ProjectID)
 	return handlers
 }
 
@@ -3450,13 +3451,6 @@ func mergeChannelRuntimeActionHandlers(dst, src map[string]chatcontrol.RuntimeAc
 	return dst
 }
 
-func newChannelActionSummaryCollector() *channelActionSummaryCollector {
-	return &channelActionSummaryCollector{
-		createdLines: []string{},
-		editedLines:  []string{},
-	}
-}
-
 func (c *channelActionSummaryCollector) addCreated(summary string) {
 	c.addMarkerLines(summary, "[TASK_ID:", &c.createdLines)
 }
@@ -3491,34 +3485,6 @@ func containsChannelSummaryLine(items []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func (c *channelActionSummaryCollector) appendToOutput(output string) string {
-	if c == nil {
-		return output
-	}
-	var blocks []string
-	if len(c.createdLines) > 0 {
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Created %d task(s):\n", len(c.createdLines)))
-		b.WriteString(strings.Join(c.createdLines, "\n"))
-		blocks = append(blocks, b.String())
-	}
-	if len(c.editedLines) > 0 {
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Edited %d task(s):\n", len(c.editedLines)))
-		b.WriteString(strings.Join(c.editedLines, "\n"))
-		blocks = append(blocks, b.String())
-	}
-	if len(blocks) == 0 {
-		return output
-	}
-
-	summary := "\n\n---\n" + strings.Join(blocks, "\n\n")
-	if strings.Contains(output, summary) {
-		return output
-	}
-	return output + summary
 }
 
 // actionToolDefinitions returns tool definitions from the canonical registry

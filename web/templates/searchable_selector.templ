@@ -94,7 +94,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 27;
+			var controllerVersion = 30;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -153,13 +153,17 @@ templ searchableSelectorScript() {
 				var left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));
 				var belowTop = trigger.bottom + gap, below = window.innerHeight - belowTop - margin, above = trigger.top - gap - margin;
 				var top = belowTop, available = below;
-				if (below < Math.min(height, 160) && above > below) {
+				var openAbove = below < Math.min(height, 160) && above > below;
+				if (openAbove) {
 					available = above;
 					top = Math.max(margin, trigger.top - gap - Math.min(height, available));
 				}
 				dialog.style.left = left + 'px';
-				dialog.style.top = top + 'px';
 				dialog.style.maxHeight = Math.max(0, available) + 'px';
+                // Measure after applying the constraint: replacing the CSS max-height
+                // can change the panel height when a local filter is cleared.
+                if (openAbove) top = Math.max(margin, trigger.top - gap - dialog.offsetHeight);
+				dialog.style.top = top + 'px';
 			}
 			function applyLocalFilter(root) {
 				if (!root || !root.hasAttribute('data-searchable-selector-local')) return;
@@ -193,7 +197,28 @@ templ searchableSelectorScript() {
 				var label = root.querySelector('[data-searchable-selector-current-label]'); if (label && name) label.textContent = name;
 				applyLocalFilter(root);
 			}
-			function close(root, restore) {
+            const selectorMenus = new WeakMap();
+            function selectorMenu(root) {
+                let menu = selectorMenus.get(root);
+                if (!menu) {
+                    menu = window.ovMenuController.create({
+                        trigger: () => nodes(root).button,
+                        panels: () => [nodes(root).dialog?.firstElementChild],
+                        isOpen: () => !!nodes(root).dialog?.open,
+                        open: event => showSelector(root, event),
+                        close: () => hideSelector(root),
+                        dismiss: event => {
+                            root.__selectorKeyboard = false;
+                            trackBreadcrumbHover(event);
+                        },
+                    });
+                    selectorMenus.set(root, menu);
+                }
+                return menu;
+            }
+            function close(root, restore) { if (root) selectorMenu(root).close(restore); }
+            function open(root, event) { if (root) selectorMenu(root).open(event); }
+			function hideSelector(root) {
 				var state = nodes(root);
                 // Native dialog closure restores focus synchronously. Suppress the
                 // return outline before that focus event, not afterward.
@@ -206,9 +231,8 @@ templ searchableSelectorScript() {
 					delete root.__openVibelySearchableSelectorAnchorX;
 				}
 				if (state.button) state.button.setAttribute('aria-expanded', 'false');
-                if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});
 			}
-			function open(root, event) {
+			function showSelector(root, event) {
 				var state = nodes(root); if (!state.button || !state.dialog || !state.search || state.button.disabled || state.dialog.open) return;
 				if (root.hasAttribute('data-searchable-selector-pointer-x-anchor') && event && typeof event.clientX === 'number' && event.clientX > 0) root.__openVibelySearchableSelectorAnchorX = event.clientX;
 				else delete root.__openVibelySearchableSelectorAnchorX;
@@ -224,7 +248,7 @@ templ searchableSelectorScript() {
 			}
 			listen(document, 'click', function(event) {
 				var root = rootFor(event.target); if (!root) return;
-				var trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { if (nodes(root).dialog.open) close(root, true); else open(root, event); return; }
+				var trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { selectorMenu(root).toggle(event); return; }
 				var option = event.target.closest && event.target.closest('[data-searchable-selector-option]');
 				if (option) {
 					if (root.hasAttribute('data-searchable-selector-local')) {
@@ -339,12 +363,11 @@ templ searchableSelectorScript() {
             });
 
 			listen(document, 'keydown', function(event) {
-				if (event.defaultPrevented || event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return;
+				if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey) return;
 				var root = rootFor(event.target); if (!root) return; var state = nodes(root);
                 root.__selectorKeyboard = true;
-				if (event.target === state.button && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) { event.preventDefault(); open(root); return; }
+				if (event.target === state.button && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) { event.preventDefault(); if (event.key === 'ArrowDown') open(root); else selectorMenu(root).toggle(event); return; }
 				if (!state.dialog || !state.dialog.open) return;
-				if (event.key === 'Escape') { event.preventDefault(); close(root, true); return; }
 				var list = visibleOptions(root);
                 var index = list.indexOf(root.__selectorActive);
                 if (event.key === 'Enter' || (event.key === ' ' && event.target !== state.search)) {
@@ -398,7 +421,7 @@ templ searchableSelectorScript() {
             listen(document, 'focusout', function(event) {
                 if (event.target.matches('[data-searchable-selector-trigger]')) event.target.removeAttribute('data-selector-return-focus');
             });
-			listen(document, 'cancel', function(event) { var root = rootFor(event.target); if (!root || event.target !== nodes(root).dialog) return; event.preventDefault(); close(root, true); }, true);
+
 			listen(document, 'close', function(event) { var root = rootFor(event.target), button = nodes(root).button; if (button) button.setAttribute('aria-expanded', 'false'); }, true);
 			listen(document, 'htmx:responseError', function(event) {
 				var root = rootFor(event.detail && event.detail.elt); if (!root || root.hasAttribute('data-searchable-selector-local')) return;

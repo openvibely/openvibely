@@ -1218,7 +1218,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
 					body: formData.toString()
 				})
-				.then(function(resp) {
+				.then(async function(resp) {
+					if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 					if (!resp.ok) throw new Error('failed to save comment');
 					var lineRow = findLineRowForComment(formRow);
 					var existingRows = findInlineCommentRows(lineRow);
@@ -1265,7 +1266,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					method: 'DELETE',
 					headers: { 'HX-Request': 'true' }
 				})
-				.then(function(resp) {
+				.then(async function(resp) {
+					if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 					if (!resp.ok) throw new Error('failed to delete comment');
 					row.remove();
 					if (lineRow) lineRow.classList.remove('diff-review-line-open');
@@ -1294,11 +1296,13 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
 					body: formData.toString()
 				})
-				.then(function(resp) {
+				.then(async function(resp) {
+					if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 					if (!resp.ok) throw new Error('failed to add review comment');
 					return resp.text();
 				})
 				.then(function(html) {
+					if (html === null) return;
 					var row = findLineRowForComment(formRow);
 					var comment = extractCreatedComment(html, filePath, lineNum, lineType, text);
 					var layout = formRow.dataset.reviewLayout || (row && row.dataset ? row.dataset.reviewLayout : '') || 'inline';

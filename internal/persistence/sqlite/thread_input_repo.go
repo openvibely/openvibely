@@ -45,7 +45,7 @@ func defaultThreadTaskJSON(raw string) string {
 	return raw
 }
 
-const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), reasoning_effort, service_tier, COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(retry_source_execution_id, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), COALESCE(x_account_id, ''), COALESCE(x_conversation_id, ''), COALESCE(x_reply_to_tweet_id, ''), COALESCE(x_user_id, ''), COALESCE(x_username, ''), created_at, updated_at, applied_at, author_user_id, author_name`
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), reasoning_effort, service_tier, COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(retry_source_execution_id, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), COALESCE(x_account_id, ''), COALESCE(x_conversation_id, ''), COALESCE(x_reply_to_tweet_id, ''), COALESCE(x_user_id, ''), COALESCE(x_username, ''), created_at, updated_at, applied_at, author_user_id, author_name, goal_id, telegram_user_id`
 
 func scanThreadInput(scanner interface {
 	Scan(dest ...interface{}) error
@@ -92,7 +92,7 @@ func scanThreadInput(scanner interface {
 		&input.CreatedAt,
 		&input.UpdatedAt,
 		&input.AppliedAt,
-		&input.AuthorUserID, &input.AuthorName,
+		&input.AuthorUserID, &input.AuthorName, &input.GoalID, &input.TelegramUserID,
 	)
 	return input, err
 }
@@ -136,14 +136,20 @@ func (r *ThreadInputRepo) CreateQueuedWithAutomationContext(ctx context.Context,
 }
 
 func bindAutomationThreadInputWithExecutor(ctx context.Context, exec sqlExecutor, inputID string, automationContext models.AutomationContext, bindingKey string) error {
-	var inputProjectID string
-	if err := exec.QueryRowContext(ctx, `SELECT project_id FROM thread_inputs WHERE id = ?`, inputID).Scan(&inputProjectID); err != nil {
+	var inputProjectID, authorID string
+	if err := exec.QueryRowContext(ctx, `SELECT project_id,COALESCE(author_user_id,'') FROM thread_inputs WHERE id = ?`, inputID).Scan(&inputProjectID, &authorID); err != nil {
 		return fmt.Errorf("loading automation thread input: %w", err)
 	}
 	if inputProjectID != automationContext.ProjectID {
 		return errors.New("automation thread input project mismatch")
 	}
+	if err := requireAutomationContinuationAuthor(ctx, exec, inputProjectID, authorID); err != nil {
+		return err
+	}
 	for i, binding := range automationContext.Bindings {
+		if err := requireAutomationContinuationBinding(ctx, exec, inputProjectID, binding.AutomationID, binding.VersionID, binding.InvocationID); err != nil {
+			return err
+		}
 		key := fmt.Sprintf("%s:%d", bindingKey, i)
 		if _, err := exec.ExecContext(ctx, `INSERT INTO automation_thread_input_bindings
 			(thread_input_id, project_id, automation_id, version_id, node_id, invocation_id, work_item_id, binding_key)
@@ -184,6 +190,21 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 		return persistence.ErrActiveTurnChanged
 	}
 	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if actor, identified := models.PrincipalFromContext(ctx); identified {
+			if actor.UserID == "" {
+				return persistence.ErrProjectDenied
+			}
+			if err := authorizeSteeringSender(ctx, tx, activeExecutionID, actor.UserID, input.ProjectID); err != nil {
+				return err
+			}
+		}
+		var allowed bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM executions e WHERE e.id=? AND "+workspaceExecutionPredicate(ctx)+")", activeExecutionID).Scan(&allowed); err != nil {
+			return err
+		}
+		if !allowed {
+			return persistence.ErrProjectDenied
+		}
 		input.RunExecutionID = activeExecutionID
 		input.TurnID = activeExecutionID
 		input.InputMode = models.ThreadInputModeSteering
@@ -204,9 +225,9 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 					source, origin_agent, retry_source_execution_id, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
 					email_from, email_message_id, email_references, email_subject, email_session_key,
 					discord_channel_id, discord_thread_id, discord_message_id, discord_user_id,
-					x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username
+					x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username, goal_id
 				)
-				SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+				SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 				WHERE EXISTS (					SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
 					WHERE e.id = ? AND e.status = 'running'
 					  AND (
@@ -251,6 +272,7 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			input.XReplyToTweetID,
 			input.XUserID,
 			input.XUsername,
+			input.GoalID,
 			activeExecutionID, input.Scope,
 			models.ThreadInputScopeTask,
 			input.TaskID,
@@ -266,7 +288,16 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			return fmt.Errorf("creating steering input: %w", err)
 		}
 		*input = created
-		return saveInputAuthor(ctx, tx, input)
+		if err := saveInputAuthor(ctx, tx, input); err != nil {
+			return err
+		}
+		if err := snapshotTelegramInput(ctx, tx, input); err != nil {
+			return err
+		}
+		if err := snapshotDiscordInput(ctx, tx, input); err != nil {
+			return err
+		}
+		return snapshotSlackInput(ctx, tx, input)
 	})
 	if err == nil {
 		r.notifySteeringWakeups(activeExecutionID)
@@ -346,6 +377,16 @@ func (r *ThreadInputRepo) notifySteeringWakeups(activeExecutionID string) {
 }
 
 func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, input *models.ThreadInput) error {
+	if input.ProjectID == models.AllProjectsID && input.RunExecutionID != "" {
+		var allowed bool
+		if err := exec.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM executions e WHERE e.id=? AND "+workspaceExecutionPredicate(ctx)+")", input.RunExecutionID).Scan(&allowed); err != nil {
+			return err
+		}
+		if !allowed {
+			return persistence.ErrProjectDenied
+		}
+	}
+
 	if input.QueuePosition == 0 {
 		var next sql.NullInt64
 		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(queue_position), 0) + 1 FROM thread_inputs WHERE scope = ? AND project_id = ? AND COALESCE(task_id, '') = ?`, input.Scope, input.ProjectID, input.TaskID).Scan(&next); err != nil {
@@ -362,8 +403,8 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 			source, origin_agent, retry_source_execution_id, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
 			email_from, email_message_id, email_references, email_subject, email_session_key,
 			discord_channel_id, discord_thread_id, discord_message_id, discord_user_id,
-			x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username
-		) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username, goal_id
+		) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING `+threadInputSelectColumns, input.Scope,
 		input.ProjectID,
 		input.TaskID,
@@ -400,17 +441,27 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		input.XReplyToTweetID,
 		input.XUserID,
 		input.XUsername,
+		input.GoalID,
 	)
 	created, err := scanThreadInput(row)
 	if err != nil {
 		return fmt.Errorf("creating thread input: %w", err)
 	}
 	*input = created
-	return saveInputAuthor(ctx, exec, input)
+	if err := saveInputAuthor(ctx, exec, input); err != nil {
+		return err
+	}
+	if err := snapshotTelegramInput(ctx, exec, input); err != nil {
+		return err
+	}
+	if err := snapshotDiscordInput(ctx, exec, input); err != nil {
+		return err
+	}
+	return snapshotSlackInput(ctx, exec, input)
 }
 
 func (r *ThreadInputRepo) GetByID(ctx context.Context, id string) (*models.ThreadInput, error) {
-	input, err := scanThreadInput(r.db.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
+	input, err := scanThreadInput(r.db.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -459,7 +510,7 @@ func (r *ThreadInputRepo) ListPendingForTask(ctx context.Context, taskID string)
 func (r *ThreadInputRepo) ListPendingForChat(ctx context.Context, projectID string) ([]models.ThreadInput, error) {
 	// Exclude prepared/in-flight steering rows for the same reason as ListPendingForTask, while
 	// surfacing ambiguous deliveries after their execution stops.
-	inputs, err := r.list(ctx, `WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (
+	inputs, err := r.list(ctx, `WHERE `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id")+` AND scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (
 		input_mode = 'steering' AND COALESCE(expected_turn_id, '') = ''
 		AND NOT (
 			EXISTS (SELECT 1 FROM thread_input_provider_steering ps WHERE ps.thread_input_id = thread_inputs.id AND ps.delivery_state = 'accepted_ambiguous')
@@ -534,6 +585,24 @@ func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecuti
 			return nil
 		}
 		for _, input := range inputs {
+			{
+				err := requireInputProvenance(ctx, tx, input.ID)
+				if err == nil && input.AuthorUserID != "" {
+					err = authorizeSteeringSender(ctx, tx, runExecutionID, input.AuthorUserID, input.ProjectID)
+				}
+				if err != nil && !errors.Is(err, persistence.ErrProjectDenied) {
+					return err
+				}
+				if errors.Is(err, persistence.ErrProjectDenied) {
+					if _, err := tx.ExecContext(ctx, `UPDATE thread_inputs SET input_status='cancelled',updated_at=datetime('now') WHERE id=? AND input_status='pending'`, input.ID); err != nil {
+						return err
+					}
+					if err := projectAudit(ctx, tx, input.ProjectID, input.AuthorUserID, "steering.access_revoked", input.ID, `{}`); err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			res, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
 				SET expected_turn_id = NULL, updated_at = datetime('now')
@@ -579,6 +648,7 @@ const listRecoverableQueuedChatProjectIDsAfterSQL = `
 	    JOIN tasks active_task ON active_task.id = active.task_id
 	    WHERE active_task.project_id = ti.project_id
 	      AND active_task.category = 'chat'
+ AND (ti.project_id != '__all_projects__' OR active_task.chat_owner_user_id=ti.chat_owner_user_id)
 	      AND active.status = 'running'
 	  )
 	GROUP BY ti.project_id
@@ -670,6 +740,7 @@ func (r *ThreadInputRepo) findOldestQueued(ctx context.Context, scope models.Thr
 		query += ` AND task_id = ?`
 		args = append(args, taskID)
 	}
+	query += " AND " + workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id")
 	query += ` ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`
 	query = `SELECT ` + threadInputSelectColumns + ` FROM thread_inputs WHERE edit_hold = 0 AND id = (SELECT id FROM (` + query + `))`
 	input, err := scanThreadInput(r.db.QueryRowContext(ctx, query, args...))
@@ -693,7 +764,7 @@ func retargetRemainingQueuedInputGuards(ctx context.Context, exec sqlExecutor, p
 	args := []interface{}{newExecutionID, promoted.Scope, promoted.RunExecutionID}
 	switch promoted.Scope {
 	case models.ThreadInputScopeChat:
-		query += ` AND project_id = ? AND COALESCE(task_id, '') = ''`
+		query += ` AND project_id = ? AND COALESCE(task_id, '') = '' AND ` + workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id")
 		args = append(args, promoted.ProjectID)
 	case models.ThreadInputScopeTask:
 		query += ` AND task_id = ?`
@@ -754,6 +825,24 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 		if activeID != runExecutionID || expectedTurnID != activeID {
 			return persistence.ErrActiveTurnChanged
 		}
+		if actor, identified := models.PrincipalFromContext(ctx); identified {
+			if actor.UserID == "" {
+				return persistence.ErrProjectDenied
+			}
+			if err := authorizeSteeringSender(ctx, tx, activeID, actor.UserID, queued.ProjectID); err != nil {
+				return err
+			}
+		}
+		// Conversion does not transfer authorship or lend the caller's privileges
+		// to the original sender.
+		if err := requireInputProvenance(ctx, tx, queued.ID); err != nil {
+			return err
+		}
+		if queued.AuthorUserID != "" {
+			if err := authorizeSteeringSender(ctx, tx, activeID, queued.AuthorUserID, queued.ProjectID); err != nil {
+				return err
+			}
+		}
 		res, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
 				SET input_mode = 'steering', run_execution_id = ?, turn_id = ?, expected_turn_id = ?, updated_at = datetime('now')
@@ -784,6 +873,11 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 		if err != nil {
 			return fmt.Errorf("loading converted queued input: %w", err)
 		}
+		if actor, identified := models.PrincipalFromContext(ctx); identified {
+			if err := projectAudit(ctx, tx, queued.ProjectID, actor.UserID, "steering.converted", id, `{}`); err != nil {
+				return err
+			}
+		}
 		converted = &input
 		return nil
 	})
@@ -796,6 +890,33 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 
 func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, turnID string) error {
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := copyDiscordConsumedInput(ctx, tx, id, runExecutionID); err != nil {
+			return err
+		}
+		// This callback records consumption that may already have happened. Keep
+		// reviewer evidence even if trust was revoked during provider delivery,
+		// but never attach it to an unrelated execution supplied by the caller.
+		var hasReviewer bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM github_reviewer_input_provenance WHERE input_id=?)`, id).Scan(&hasReviewer); err != nil {
+			return err
+		}
+		if hasReviewer {
+			var sameScope bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM thread_inputs i JOIN executions e ON e.id=? JOIN tasks t ON t.id=e.task_id
+ WHERE i.id=? AND i.project_id=t.project_id
+ AND (COALESCE(i.task_id,'')='' OR i.task_id=e.task_id)
+ AND (COALESCE(i.run_execution_id,'')='' OR i.run_execution_id=e.id))`, runExecutionID, id).Scan(&sameScope); err != nil {
+				return err
+			}
+			if !sameScope {
+				return persistence.ErrProjectDenied
+			}
+			if err := copyReviewerInput(ctx, tx, id, runExecutionID); err != nil {
+				return err
+			}
+		}
+
 		res, err := tx.ExecContext(ctx, `
 			UPDATE thread_inputs
 			SET input_status = 'applied', run_execution_id = NULLIF(?, ''), turn_id = NULLIF(?, ''), applied_at = datetime('now'), updated_at = datetime('now')
@@ -859,6 +980,17 @@ func (r *ThreadInputRepo) RecordProviderSteering(ctx context.Context, inputIDs [
 			changed, _ := res.RowsAffected()
 			if changed == 0 {
 				return fmt.Errorf("recording provider steering delivery for input %s: %w", inputID, persistence.ErrInputNotPending)
+			}
+			if err := copyDiscordConsumedInput(ctx, tx, inputID, ""); err != nil {
+				return err
+			}
+			// The provider may already have accepted the instruction. Preserve its
+			// reviewer evidence even after revocation so the execution watcher can
+			// stop further work without hiding the provider outcome.
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO github_reviewer_execution_provenance(execution_id,reviewer_login)
+ SELECT i.run_execution_id,p.reviewer_login FROM thread_inputs i
+ JOIN github_reviewer_input_provenance p ON p.input_id=i.id WHERE i.id=?`, inputID); err != nil {
+				return fmt.Errorf("recording provider steering reviewer evidence: %w", err)
 			}
 			if deliveryState == ProviderSteeringAcceptedConfirmed {
 				confirmed, confirmErr := tx.ExecContext(ctx, `
@@ -1129,6 +1261,9 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 					RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup, promoted.AuthorUserID, promoted.AuthorName).Scan(&exec.ID, &exec.StartedAt); err != nil {
 			return fmt.Errorf("creating promoted task execution: %w", err)
 		}
+		if err := snapshotPromotedInputIdentity(ctx, dbexec, promoted, exec.ID); err != nil {
+			return err
+		}
 		if exec.IsFollowup {
 			if err := bumpSwarmParentStopRevision(ctx, dbexec, exec.TaskID); err != nil {
 				return err
@@ -1144,6 +1279,14 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 		for bindingRows.Next() {
 			var automationID, versionID, nodeID, invocationID, workItemID, bindingKey string
 			if err := bindingRows.Scan(&automationID, &versionID, &nodeID, &invocationID, &workItemID, &bindingKey); err != nil {
+				_ = bindingRows.Close()
+				return err
+			}
+			if err := requireAutomationContinuationAuthor(ctx, dbexec, promoted.ProjectID, promoted.AuthorUserID); err != nil {
+				_ = bindingRows.Close()
+				return err
+			}
+			if err := requireAutomationContinuationBinding(ctx, dbexec, promoted.ProjectID, automationID, versionID, invocationID); err != nil {
 				_ = bindingRows.Close()
 				return err
 			}
@@ -1198,7 +1341,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 		return fmt.Errorf("task and execution are required")
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
+		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), inputID))
 		if err == sql.ErrNoRows {
 			return persistence.ErrInputNotPending
 		}
@@ -1229,6 +1372,9 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 			return fmt.Errorf("creating queued chat task: %w", err)
 		}
 		task.DisplayOrder = displayOrder
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET chat_owner_user_id=(SELECT chat_owner_user_id FROM thread_inputs WHERE id=?) WHERE id=?`, inputID, task.ID); err != nil {
+			return err
+		}
 
 		if slackContext != nil {
 			slackContext.TaskID = task.ID
@@ -1266,6 +1412,9 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 			VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
 			RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup, promoted.AuthorUserID, promoted.AuthorName).Scan(&exec.ID, &exec.StartedAt); err != nil {
 			return fmt.Errorf("creating queued chat execution: %w", err)
+		}
+		if err := snapshotPromotedInputIdentity(ctx, tx, promoted, exec.ID); err != nil {
+			return err
 		}
 
 		res, err := tx.ExecContext(ctx, `
@@ -1399,7 +1548,7 @@ func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID st
 	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
-		WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending'
+		WHERE `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id")+` AND scope = 'chat' AND project_id = ? AND input_status = 'pending'
 			  AND NOT (
 			    input_mode = 'steering'
 			    AND COALESCE(expected_turn_id, '') = ''
@@ -1438,6 +1587,7 @@ func currentActiveExecutionIDForInput(ctx context.Context, exec sqlExecutor, inp
 			FROM executions e
 			WHERE e.task_project_id = ? AND e.task_category = 'chat' AND e.status = 'running'
 			ORDER BY e.started_at DESC, e.history_order DESC LIMIT 1`
+		query = scopeWorkspaceExecutions(ctx, query)
 		args = []interface{}{input.ProjectID}
 	default:
 		return "", nil
@@ -1527,4 +1677,28 @@ func (r *ThreadInputRepo) ReleaseExpiredEditHolds(ctx context.Context) ([]models
 // Its ordering describes steering delivery, not positions within assistant output.
 func (r *ThreadInputRepo) ListAppliedSteeringByExecution(ctx context.Context, executionID string) ([]models.ThreadInput, error) {
 	return r.list(ctx, `WHERE run_execution_id = ? AND input_mode = 'steering' AND input_status = 'applied' ORDER BY applied_at ASC, created_at ASC, rowid ASC`, executionID)
+}
+
+// Snapshot the queue's immutable identity in the same transaction as its execution.
+func snapshotPromotedInputIdentity(ctx context.Context, tx sqlExecutor, input models.ThreadInput, executionID string) error {
+	if err := requireInputProvenance(ctx, tx, input.ID); err != nil {
+		return err
+	}
+	if err := copyReviewerInput(ctx, tx, input.ID, executionID); err != nil {
+		return err
+	}
+	if err := promoteSlackInput(ctx, tx, input, executionID); err != nil {
+		return err
+	}
+	goal := input.Source == models.TaskOriginSystemAgent && input.OriginAgent == models.AgentSystemKindGoal
+	if _, err := tx.ExecContext(ctx, `INSERT INTO execution_run_identities(execution_id,user_id,goal_id,goal_continuation) VALUES(?,?,?,?)`, executionID, input.AuthorUserID, input.GoalID, goal); err != nil {
+		return err
+	}
+	if err := promoteTelegramInput(ctx, tx, input, executionID); err != nil {
+		return err
+	}
+	if err := promoteDiscordInput(ctx, tx, input, executionID); err != nil {
+		return err
+	}
+	return projectAudit(ctx, tx, input.ProjectID, input.AuthorUserID, "execution.run_as", executionID, `{}`)
 }

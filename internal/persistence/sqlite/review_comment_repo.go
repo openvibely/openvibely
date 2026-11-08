@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -21,12 +22,15 @@ func NewReviewCommentRepo(db *sql.DB) *ReviewCommentRepo {
 
 // Create adds a new review comment.
 func (r *ReviewCommentRepo) Create(ctx context.Context, c *models.ReviewComment) error {
-	return queryRowBoundSQLite(ctx, r.db,
-		`INSERT INTO review_comments (task_id, file_path, line_number, line_type, comment_text, reviewed_by)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 RETURNING id, created_at`,
-		c.TaskID, c.FilePath, c.LineNumber, c.LineType, c.CommentText, c.ReviewedBy).
-		Scan(&c.ID, &c.CreatedAt)
+	saved := *c
+	err := r.mutateTaskComments(ctx, c.TaskID, "review.comment.created", func(tx sqlExecutor) (string, error) {
+		err := tx.QueryRowContext(ctx, `INSERT INTO review_comments (task_id,file_path,line_number,line_type,comment_text,reviewed_by) VALUES(?,?,?,?,?,?) RETURNING id,created_at`, c.TaskID, c.FilePath, c.LineNumber, c.LineType, c.CommentText, c.ReviewedBy).Scan(&saved.ID, &saved.CreatedAt)
+		return saved.ID, err
+	})
+	if err == nil {
+		*c = saved
+	}
+	return err
 }
 
 // ListByTask returns all review comments for a task, ordered by file and line number.
@@ -93,24 +97,26 @@ func (r *ReviewCommentRepo) Delete(ctx context.Context, id string) error {
 
 // DeleteByTask removes all review comments for a task.
 func (r *ReviewCommentRepo) DeleteByTask(ctx context.Context, taskID string) error {
-	_, err := execBoundSQLite(ctx, r.db,
-		`DELETE FROM review_comments WHERE task_id = ?`, taskID)
-	if err != nil {
-		return fmt.Errorf("delete review comments by task: %w", err)
-	}
-	return nil
+	return r.mutateTaskComments(ctx, taskID, "review.comments.cleared", func(tx sqlExecutor) (string, error) {
+		_, err := tx.ExecContext(ctx, `DELETE FROM review_comments WHERE task_id=?`, taskID)
+		return taskID, err
+	})
 }
 
 // UpdateTextForProject updates only comments owned by the request project.
 func (r *ReviewCommentRepo) UpdateTextForProject(ctx context.Context, projectID, id, text string) error {
-	result, err := execBoundSQLite(ctx, r.db, `UPDATE review_comments SET comment_text = ? WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, text, id, projectID)
-	return reviewCommentMutationResult(result, err)
+	return r.mutateProjectComment(ctx, projectID, id, "review.comment.updated", func(tx sqlExecutor) error {
+		result, err := tx.ExecContext(ctx, `UPDATE review_comments SET comment_text = ? WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, text, id, projectID)
+		return reviewCommentMutationResult(result, err)
+	})
 }
 
 // DeleteForProject deletes only comments owned by the request project.
 func (r *ReviewCommentRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
-	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM review_comments WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id, projectID)
-	return reviewCommentMutationResult(result, err)
+	return r.mutateProjectComment(ctx, projectID, id, "review.comment.deleted", func(tx sqlExecutor) error {
+		result, err := tx.ExecContext(ctx, `DELETE FROM review_comments WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id, projectID)
+		return reviewCommentMutationResult(result, err)
+	})
 }
 
 func reviewCommentMutationResult(result sql.Result, err error) error {
@@ -125,4 +131,68 @@ func reviewCommentMutationResult(result sql.Result, err error) error {
 		return persistence.ErrNotFound
 	}
 	return nil
+}
+
+func (r *ReviewCommentRepo) mutateProjectComment(ctx context.Context, projectID, id, action string, mutate func(sqlExecutor) error) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		var actualProject string
+		err := tx.QueryRowContext(ctx, `SELECT t.project_id FROM review_comments c JOIN tasks t ON t.id=c.task_id WHERE c.id=?`, id).Scan(&actualProject)
+		if errors.Is(err, sql.ErrNoRows) {
+			return persistence.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if actualProject != projectID {
+			return persistence.ErrNotFound
+		}
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			role, err := projectRole(ctx, tx, actor.UserID, projectID)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+		if err := mutate(tx); err != nil {
+			return err
+		}
+		if identified {
+			return projectAudit(ctx, tx, projectID, actor.UserID, action, id, `{}`)
+		}
+		return nil
+	})
+}
+
+func (r *ReviewCommentRepo) mutateTaskComments(ctx context.Context, taskID, action string, mutate func(sqlExecutor) (string, error)) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		var projectID string
+		if identified {
+			err := tx.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id=?`, taskID).Scan(&projectID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return persistence.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			role, err := projectRole(ctx, tx, actor.UserID, projectID)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+		target, err := mutate(tx)
+		if err != nil {
+			return err
+		}
+		if identified {
+			return projectAudit(ctx, tx, projectID, actor.UserID, action, target, `{}`)
+		}
+		return nil
+	})
 }

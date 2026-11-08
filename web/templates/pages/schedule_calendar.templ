@@ -246,13 +246,14 @@ templ ScheduleCalendarScript() {
    if (wasSelected) selection.delete(key); else selection.add(key);
    paintDates(); window.updateScheduleSelection();
   }
-  function closeMenus() { root.querySelector('#schedule-project-menu').open = false; root.querySelector('#schedule-context-menu').classList.add('hidden'); }
+  function closeMenus() { if(projectController)projectController.close(false); if(window.closeScheduleContextMenu)window.closeScheduleContextMenu(false); }
   async function apply(request, isUndo) {
    if (busy) return;
    busy = true; root.dataset.calendarBusy = 'true'; closeMenus();
    root.querySelectorAll('[data-calendar-action]').forEach(function(button) { button.disabled = true; });
    try {
     var response = await fetch('/schedule/calendar-action?project_id=' + encodeURIComponent(project), {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(request)});
+    if (await window.openVibelyPermissionErrors?.fetch(response)) return;
     if (!response.ok) { var error = await response.json().catch(function() { return {}; }); throw new Error(error.message || 'Could not update schedules'); }
     var result = await response.json();
     var inverse = result.undo;
@@ -302,18 +303,12 @@ templ ScheduleCalendarScript() {
    if (day && (event.key === ' ' || event.key === 'Enter')) { event.preventDefault(); selectDay(day,event); }
   }, {signal: signal});
   document.addEventListener('keydown', function(event) {
-   if (event.key === 'Escape') { cancelGesture(); closeMenus(); window.clearScheduleDates(); clearScheduleSelection(); }
+   if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && event.keyCode!==229) { cancelGesture(); closeMenus(); window.clearScheduleDates(); clearScheduleSelection(); }
   }, {signal: signal});
-  function dismissOutsideProjectMenu(event) {
-   if(event.type==='pointerdown'&&event.button!==0)return;
-   var menu=root.querySelector('#schedule-project-menu');
-   if(!menu.open||menu.contains(event.target))return;
-   var modal=document.querySelector('dialog:modal');if(modal&&!modal.contains(menu))return;
-   event.preventDefault();event.stopImmediatePropagation();
-   if(event.type==='click')menu.open=false;
-  }
-  window.addEventListener('pointerdown',dismissOutsideProjectMenu,{capture:true,signal:signal});
-  window.addEventListener('click',dismissOutsideProjectMenu,{capture:true,signal:signal});
+  var projectMenu=root.querySelector('#schedule-project-menu');
+  var projectController=window.ovMenuController.create({trigger:projectMenu.querySelector('summary'),panels:[projectMenu.querySelector('.ov-menu')],isOpen:function(){return projectMenu.open;},open:function(){projectMenu.open=true;},close:function(){projectMenu.open=false;}});
+  projectMenu.addEventListener('toggle',function(){projectController.sync();},{signal:signal});
+  projectMenu.querySelector('summary').addEventListener('click',function(event){event.preventDefault();projectController.toggle(event);},{signal:signal});
   root.addEventListener('pointerdown', function(event) {
    if (busy || event.button !== 0 || event.target.closest('[data-schedule-card]')) return;
    var day = event.target.closest('[data-calendar-day], [data-calendar-hour]');

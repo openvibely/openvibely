@@ -14,6 +14,7 @@ const (
 )
 
 type TaskGoal struct {
+	RunAsUserID       string         `json:"run_as_user_id"`
 	TaskID            string         `json:"task_id"`
 	GoalID            string         `json:"goal_id"`
 	Objective         string         `json:"objective"`

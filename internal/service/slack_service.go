@@ -25,6 +25,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/slack-go/slack"
@@ -385,6 +386,10 @@ func (s *SlackService) GetConnectionStatus(ctx context.Context) (SlackConnection
 }
 
 func (s *SlackService) ConnectURL(ctx context.Context, redirectURI string) (string, error) {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return "", accessErr
+	}
 	clientID := strings.TrimSpace(s.getSetting(ctx, SlackSettingClientID))
 	clientSecret := strings.TrimSpace(s.getSetting(ctx, SlackSettingClientSecret))
 	if clientID == "" || clientSecret == "" {
@@ -408,6 +413,10 @@ func (s *SlackService) ConnectURL(ctx context.Context, redirectURI string) (stri
 }
 
 func (s *SlackService) HandleOAuthCallback(ctx context.Context, code, state, redirectURI string) error {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return accessErr
+	}
 	code = strings.TrimSpace(code)
 	state = strings.TrimSpace(state)
 	if code == "" || state == "" {
@@ -498,19 +507,32 @@ func (s *SlackService) HandleOAuthCallback(ctx context.Context, code, state, red
 }
 
 func (s *SlackService) Disconnect(ctx context.Context) error {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return accessErr
+	}
+	if s.settingsRepo == nil {
+		return fmt.Errorf("settings repository not configured")
+	}
+	if err := s.settingsRepo.SetMany(ctx, map[string]string{SlackSettingBotToken: "",
+		SlackSettingBotTokenOverride: "",
+		SlackSettingBotTokenSource:   SlackBotTokenSourceOAuth,
+		SlackSettingBotUserID:        "",
+		SlackSettingTeamID:           "",
+		SlackSettingTeamName:         "",
+		SlackSettingConnectedAt:      "",
+		SlackSettingOAuthState:       ""}); err != nil {
+		return err
+	}
 	s.Stop()
-	_ = s.setSetting(ctx, SlackSettingBotToken, "")
-	_ = s.setSetting(ctx, SlackSettingBotTokenOverride, "")
-	_ = s.setSetting(ctx, SlackSettingBotTokenSource, SlackBotTokenSourceOAuth)
-	_ = s.setSetting(ctx, SlackSettingBotUserID, "")
-	_ = s.setSetting(ctx, SlackSettingTeamID, "")
-	_ = s.setSetting(ctx, SlackSettingTeamName, "")
-	_ = s.setSetting(ctx, SlackSettingConnectedAt, "")
-	_ = s.setSetting(ctx, SlackSettingOAuthState, "")
 	return nil
 }
 
 func (s *SlackService) TestConnection(ctx context.Context) error {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return accessErr
+	}
 	botToken := strings.TrimSpace(s.resolveBotToken(ctx))
 	if botToken == "" {
 		return fmt.Errorf("slack bot token is not configured")
@@ -810,6 +832,13 @@ func firstSlackAck(ackFns []func()) func() {
 }
 
 func (s *SlackService) processIncoming(ctx context.Context, msg slackIncomingMessage, ack func()) {
+	var err error
+	ctx, err = s.senderPrincipalContext(ctx, msg)
+	if err != nil {
+		applog.Infof("[slack] sender identity denied: %v", err)
+		return
+	}
+
 	claimed, durableDuplicate := s.claimIncomingMessage(msg)
 	if durableDuplicate {
 		ack()
@@ -1185,7 +1214,11 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx := parent
+	ctx, identityErr := s.senderPrincipalContext(parent, msg)
+	if identityErr != nil {
+		applog.Infof("[slack] sender identity denied: %v", identityErr)
+		return
+	}
 	durableHandoff := onDurableHandoff
 	notifyPreACKFailure := func(notify func()) {
 		if notify == nil {
@@ -1221,6 +1254,9 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 		return
 	}
 
+	if identity, ok := models.SlackIngressIdentityFromContext(ctx); ok && identity.ProjectID != projectID {
+		return
+	}
 	msg.Files = s.resolveSlackIncomingFilesForRouting(ctx, msg.Files)
 	var recordAttachmentFailure func(context.Context, string, string)
 	if !asyncPreACKFailures {
@@ -1426,17 +1462,9 @@ type slackActionContext struct {
 	UserID    string
 }
 
-func (s *SlackService) buildSlackActionToolRuntime(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	return s.buildSlackActionToolRuntimeForTask(projectID, "", actionCtx, collector)
-}
-
 func (s *SlackService) buildSlackActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.slackActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
 	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceSlack, handlers)
-}
-
-func (s *SlackService) slackActionHandlers(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
-	return s.slackActionHandlersForTask(projectID, "", actionCtx, collector)
 }
 
 func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
@@ -1538,6 +1566,11 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
 		},
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
+			var identityErr error
+			ctx, identityErr = s.authorizeSenderAction(ctx, project.ID, actionCtx)
+			if identityErr != nil {
+				return identityErr
+			}
 			authorized, err := s.checkAuthorizationResult(ctx, project.ID, actionCtx.UserID)
 			if err != nil {
 				return fmt.Errorf("check Slack authorization: %w", err)
@@ -1553,6 +1586,21 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		ProjectID:          projectID,
 		ProjectRepo:        s.projectRepo,
 	}))
+	// Guard every domain, including read-only and cached actions, before dispatch.
+	for name, handler := range handlers {
+		handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
+			authorized, err := s.authorizeSenderAction(ctx, projectID, actionCtx)
+			if err != nil {
+				return "", err
+			}
+			if s.workerSvc != nil && s.workerSvc.runOrganizations != nil {
+				if err := requireRuntimeToolRole(authorized, s.workerSvc.runAccess, s.workerSvc.runOrganizations, projectID, name, input); err != nil {
+					return "", err
+				}
+			}
+			return handler(authorized, input)
+		}
+	}
 	return handlers
 }
 
@@ -2506,4 +2554,94 @@ func (s *SlackService) SendChatResponse(ctx context.Context, task models.Task, o
 	if err := s.sendSlackMessage(ctxRecord.SlackChannelID, ctxRecord.SlackThreadTS, message); err != nil {
 		applog.Infof("[slack] send chat response failed for task=%s: %v", task.ID, err)
 	}
+}
+
+// Resolve the provider's immutable workspace/user pair before dedupe or work.
+// Existing transport principals never grant authority to an external sender.
+func (s *SlackService) senderPrincipalContext(ctx context.Context, msg slackIncomingMessage) (context.Context, error) {
+	if s.workerSvc == nil || s.workerSvc.runOrganizations == nil {
+		return ctx, nil
+	}
+	if s.workerSvc.runAuthOff {
+		user, err := s.workerSvc.runOrganizations.UserByID(ctx, models.BootstrapUserID)
+		if err != nil {
+			return ctx, err
+		}
+		if user == nil || user.Disabled {
+			return ctx, authz.ErrDenied
+		}
+		return models.WithPrincipal(ctx, user.Principal), nil
+	}
+	if s.slackAuthRepo == nil || strings.TrimSpace(msg.TeamID) == "" || strings.TrimSpace(msg.UserID) == "" {
+		return ctx, authz.ErrDenied
+	}
+	projectID, err := s.getActiveProject(ctx, msg.TeamID, msg.UserID)
+	if err != nil {
+		return ctx, err
+	}
+	mapped, err := s.slackAuthRepo.ResolveApplicationUser(ctx, projectID, msg.TeamID, msg.UserID)
+	if err != nil {
+		return ctx, err
+	}
+	if original, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+		if original.UserID != mapped || original.ProjectID != projectID || original.TeamID != msg.TeamID || original.ExternalUserID != msg.UserID || original.EventKey != msg.EventKey {
+			return ctx, authz.ErrDenied
+		}
+	}
+	user, err := s.workerSvc.runOrganizations.UserByID(ctx, mapped)
+	if err != nil {
+		return ctx, err
+	}
+	if user == nil || user.Disabled {
+		return ctx, authz.ErrDenied
+	}
+	ctx = models.WithPrincipal(ctx, user.Principal)
+	if err := (&authz.Authorizer{Store: s.workerSvc.runAccess}).Require(ctx, projectID, authz.Edit); err != nil {
+		return ctx, err
+	}
+	return models.WithSlackIngressIdentity(ctx, models.SlackIngressIdentity{TeamID: msg.TeamID, ExternalUserID: msg.UserID, ProjectID: projectID, UserID: mapped, EventKey: msg.EventKey}), nil
+}
+
+// Recheck the captured sender at each runtime boundary; never replace its
+// principal with the connection owner or a newly rebound application user.
+func (s *SlackService) authorizeSenderAction(ctx context.Context, projectID string, sender slackActionContext) (context.Context, error) {
+	if s.workerSvc == nil || s.workerSvc.runOrganizations == nil {
+		return ctx, nil
+	}
+	principal, ok := models.PrincipalFromContext(ctx)
+	if !ok || principal.UserID == "" {
+		if !s.workerSvc.runAuthOff {
+			return ctx, authz.ErrDenied
+		}
+		principal.UserID = models.BootstrapUserID
+	}
+	if !s.workerSvc.runAuthOff {
+		if s.slackAuthRepo == nil || sender.TeamID == "" || sender.UserID == "" {
+			return ctx, authz.ErrDenied
+		}
+		mapped, err := s.slackAuthRepo.ResolveApplicationUser(ctx, projectID, sender.TeamID, sender.UserID)
+		if err != nil {
+			return ctx, err
+		}
+		if mapped != principal.UserID {
+			return ctx, authz.ErrDenied
+		}
+	}
+	user, err := s.workerSvc.runOrganizations.UserByID(ctx, principal.UserID)
+	if err != nil {
+		return ctx, err
+	}
+	if user == nil || user.Disabled {
+		return ctx, authz.ErrDenied
+	}
+	ctx = models.WithPrincipal(ctx, user.Principal)
+	if err := (&authz.Authorizer{Store: s.workerSvc.runAccess}).Require(ctx, projectID, authz.Edit); err != nil {
+		return ctx, err
+	}
+	if !s.workerSvc.runAuthOff {
+		if _, captured := models.SlackIngressIdentityFromContext(ctx); !captured {
+			ctx = models.WithSlackIngressIdentity(ctx, models.SlackIngressIdentity{ProjectID: projectID, TeamID: sender.TeamID, ExternalUserID: sender.UserID, UserID: principal.UserID})
+		}
+	}
+	return ctx, nil
 }

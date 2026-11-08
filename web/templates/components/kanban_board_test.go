@@ -83,7 +83,7 @@ func TestActiveColumnContent_GroupsOnlyRunningTasksInProgress(t *testing.T) {
 	}
 }
 
-func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *testing.T) {
+func TestKanbanColumn_DropdownTriggersUseNativeButtons(t *testing.T) {
 	var buf bytes.Buffer
 	err := KanbanColumn([]models.Task{}, "project-1", models.CategoryBacklog, "", "", nil, nil).Render(context.Background(), &buf)
 	if err != nil {
@@ -92,18 +92,18 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	html := buf.String()
 
 	for _, want := range []string{
-		`<label tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square"`,
+		`<button type="button" tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square"`,
 		`onclick="handleDropdownToggle(event)"`,
 		`data-kanban-menu-trigger`,
 		`aria-label="More actions"`,
 		`aria-expanded="false"`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("expected backlog kebab trigger to contain %q for stable dropdown focus behavior", want)
+			t.Fatalf("expected backlog kebab trigger to contain %q for explicit dropdown activation", want)
 		}
 	}
-	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {
-		t.Fatal("unexpected <button> dropdown trigger in backlog column")
+	if strings.Contains(html, `<label tabindex="0"`) {
+		t.Fatal("unexpected focus-driven label dropdown trigger in backlog column")
 	}
 
 	buf.Reset()
@@ -113,18 +113,18 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	}
 	html = buf.String()
 	for _, want := range []string{
-		`<label tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square"`,
+		`<button type="button" tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square"`,
 		`onclick="handleDropdownToggle(event)"`,
 		`data-kanban-menu-trigger`,
 		`aria-label="More actions"`,
 		`aria-expanded="false"`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("expected completed kebab trigger to contain %q for stable dropdown focus behavior", want)
+			t.Fatalf("expected completed kebab trigger to contain %q for explicit dropdown activation", want)
 		}
 	}
-	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {
-		t.Fatal("unexpected <button> dropdown trigger in completed column")
+	if strings.Contains(html, `<label tabindex="0"`) {
+		t.Fatal("unexpected focus-driven label dropdown trigger in completed column")
 	}
 }
 

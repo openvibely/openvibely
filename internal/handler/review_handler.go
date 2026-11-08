@@ -100,6 +100,9 @@ func (h *Handler) UpdateReviewComment(c echo.Context) error {
 		return err
 	}
 	if err := h.reviewCommentRepo.UpdateTextForProject(c.Request().Context(), projectID, id, commentText); err != nil {
+		if errors.Is(err, persistence.ErrProjectDenied) {
+			return projectAccessHTTPError(err)
+		}
 		if errors.Is(err, persistence.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "review comment not found")
 		}
@@ -122,6 +125,9 @@ func (h *Handler) DeleteReviewComment(c echo.Context) error {
 		return err
 	}
 	if err := h.reviewCommentRepo.DeleteForProject(c.Request().Context(), projectID, id); err != nil {
+		if errors.Is(err, persistence.ErrProjectDenied) {
+			return projectAccessHTTPError(err)
+		}
 		if errors.Is(err, persistence.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "review comment not found")
 		}

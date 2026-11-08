@@ -1583,9 +1583,9 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t 
 		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
-	page = strings.Replace(page, "</head>", `<style>
+	page = strings.Replace(page, "</head>", `<script src="`+static.URL("panel-scroll.js")+`"></script><style>
 	.dropdown-content { visibility: hidden; opacity: 0; }
-	.dropdown:focus-within > .dropdown-content { visibility: visible; opacity: 1; }
+	.dropdown[data-menu-open="true"] > .dropdown-content { visibility: visible; opacity: 1; }
 	</style></head>`, 1)
 	page = strings.Replace(page, "</body>", `<script>
 (function() {
@@ -1615,7 +1615,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t 
     var deletion = null;
     for (var i = 0; i < actions.length; i++) if (actions[i].textContent.trim() === 'Delete') deletion = actions[i];
     if (!toggle || !deletion) return fail('fixed selected card actions were not rendered');
-    toggle.focus();
+    toggle.click();
     deletion.focus();
     if (document.activeElement !== deletion || !visibleEnabled(deletion)) return fail('fixed selected delete action could not be focused while open');
     window.replaceSearchableCardContainer(root, `+string(replacementHTMLJSON)+`);
@@ -1699,9 +1699,9 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *tes
 		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
-	page = strings.Replace(page, "</head>", `<style>
+	page = strings.Replace(page, "</head>", `<script src="`+static.URL("panel-scroll.js")+`"></script><style>
 	.dropdown-content { visibility: hidden; opacity: 0; }
-	.dropdown:focus-within > .dropdown-content { visibility: visible; opacity: 1; }
+	.dropdown[data-menu-open="true"] > .dropdown-content { visibility: visible; opacity: 1; }
 	</style></head>`, 1)
 	page = strings.Replace(page, "</body>", `<script>
 (function() {
@@ -1831,9 +1831,9 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
-	page = strings.Replace(page, "</head>", `<style>
+	page = strings.Replace(page, "</head>", `<script src="`+static.URL("panel-scroll.js")+`"></script><style>
 .dropdown-content { visibility: hidden; opacity: 0; }
-.dropdown:focus-within > .dropdown-content { visibility: visible; opacity: 1; }
+.dropdown[data-menu-open="true"] > .dropdown-content { visibility: visible; opacity: 1; }
 </style></head>`, 1)
 	page = strings.Replace(page, "</body>", `<script>
 (function() {
@@ -1881,7 +1881,7 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
     var toggle = card && card.querySelector('.dropdown > [tabindex="0"]');
     var action = cardButton(id, label);
     if (!toggle || !action) return null;
-    toggle.focus();
+    toggle.click();
     action.focus();
     return document.activeElement === action && isVisibleEnabled(action) ? action : null;
   }

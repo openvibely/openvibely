@@ -648,7 +648,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     await window.openVibelyNavigate(rows[next].href);
                     syncActiveRow();
                     var selected = groups.querySelector('[aria-current="page"]');
-                    if (selected) selected.scrollIntoView({block:'nearest'});
+                    if (selected) window.openVibelyScrollIntoPanel(selected);
                 } catch (_) {
                     if (window.showToast) window.showToast('Could not open task', 'error');
                 } finally { taskListNavigating = false; }
@@ -1047,6 +1047,9 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
             // Keep the shared card menu outside the scrolling sidebar.
             var contextMenu = document.createElement('div');
             contextMenu.className = 'dropdown';
+            // A body-level host in normal flow lets the hidden menu extend the
+            // overflow-hidden body's scroll area, so anchor scrolling could shift the shell.
+            contextMenu.style.cssText = 'position:fixed;top:0;left:0';
             contextMenu.setAttribute('data-menu-dropdown', '');
             contextMenu.setAttribute('data-task-list-context-menu', '');
             contextMenu.setAttribute('data-kanban-menu-key', 'task-list-context');

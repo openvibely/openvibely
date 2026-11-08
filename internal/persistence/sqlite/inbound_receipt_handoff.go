@@ -8,6 +8,7 @@ import (
 )
 
 type inboundReceiptHandoffSpec struct {
+	authorize            func(sqlExecutor) error
 	notConfiguredError   string
 	persistRequiredError string
 	insertSQL            string
@@ -24,6 +25,11 @@ func inboundReceiptHandoff(ctx context.Context, db *sql.DB, spec inboundReceiptH
 		return false, errors.New(spec.persistRequiredError)
 	}
 	err = withImmediateTx(ctx, db, func(exec sqlExecutor) error {
+		if spec.authorize != nil {
+			if err := spec.authorize(exec); err != nil {
+				return err
+			}
+		}
 		result, err := exec.ExecContext(ctx, spec.insertSQL, spec.insertArgs...)
 		if err != nil {
 			return fmt.Errorf("%s: %w", spec.recordError, err)

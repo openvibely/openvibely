@@ -7,9 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	llmrecovery "github.com/openvibely/openvibely/internal/llm/recovery"
-	"github.com/openvibely/openvibely/internal/llm/requestjson"
-	"github.com/openvibely/openvibely/internal/transcript"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -20,6 +17,10 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+
+	llmrecovery "github.com/openvibely/openvibely/internal/llm/recovery"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/transcript"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -47,7 +48,7 @@ Return only the summary text.`
 	openAIOriginalImagePatchSize                       = 32
 	openAIOriginalImageMaxPatches                      = 10000
 	// Mirrors Codex truncation policy defaults in models_cache.json.
-	openAIToolOutputTokenLimitDefault = 10000
+	openAIToolOutputTokenLimitDefault = tokenestimate.DefaultToolOutputTokenLimit
 	// OpenAI native web search tool type for the Responses API.
 	openAIWebSearchToolType = "web_search"
 )
@@ -1703,22 +1704,7 @@ func normalizedToolOutputTokenLimit(limit int) int {
 }
 
 func truncateToolOutputForModelInput(output string, tokenLimit int) string {
-	if output == "" {
-		return output
-	}
-
-	limit := normalizedToolOutputTokenLimit(tokenLimit)
-	if limit <= 0 {
-		return output
-	}
-
-	maxBytes := tokenestimate.ByteBudget(limit)
-	if len(output) <= maxBytes {
-		return output
-	}
-
-	const truncationNote = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	return tokenestimate.TruncateMiddle(output, maxBytes, truncationNote)
+	return tokenestimate.ToolOutputForModelInput(output, tokenLimit)
 }
 
 func openAIAutoCompactionTokenLimit(model string) int {
@@ -2067,9 +2053,6 @@ func compactionInstructions(opts *AgenticOptions) string {
 	return openAICompactionInstructions
 }
 
-func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string, configuredContextWindow ...int) ([]any, error) {
-	return trimCompactionInputWithOverhead(inputItems, compactionRequestFixedTokenOverhead(tools, instructions), model, configuredContextWindow...)
-}
 func trimCompactionInputWithOverhead(inputItems []any, overhead int, model string, configuredContextWindow ...int) ([]any, error) {
 	contextWindow := 0
 	if len(configuredContextWindow) > 0 {
@@ -2820,6 +2803,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 			wsPayload = buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
 		}
 		openStream := func(useWebsocket bool) (*responsesEventIterator, error) {
+			if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+				return nil, err
+			}
 			if useWebsocket {
 				wsOptions := responsesWebsocketStreamOptions{Model: opts.Model}
 				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth, wsOptions)
@@ -2877,6 +2863,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 	}
 
 	buildReq := func() (*http.Request, error) {
+		if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+			return nil, err
+		}
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, err

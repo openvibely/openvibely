@@ -25,7 +25,8 @@ func (h *Handler) AddTelegramAuthorizedUser(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "User ID or username is required")
 		}
 
-		user := &models.TelegramAuthorizedUser{ProjectID: projectID, AddedBy: "web"}
+		user := &models.TelegramAuthorizedUser{ChannelSenderMapping: senderMappingForm(c),
+			ProjectID: projectID, AddedBy: "web"}
 		if telegramUserID, err := strconv.ParseInt(userIDOrUsername, 10, 64); err == nil {
 			user.TelegramUserID = telegramUserID
 		} else {
@@ -50,6 +51,7 @@ func (h *Handler) RemoveTelegramAuthorizedUser(c echo.Context) error {
 
 func (h *Handler) telegramAuthorizedUserCRUD() authorizedUserCRUD[models.TelegramAuthorizedUser] {
 	crud := authorizedUserCRUD[models.TelegramAuthorizedUser]{
+		authorize:            h.prepareChannelSenderOptions,
 		render:               components.TelegramAuthorizedUsersList,
 		notConfiguredMessage: "Telegram auth not configured",
 		configured:           h.telegramAuthRepo != nil,

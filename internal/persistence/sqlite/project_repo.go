@@ -244,26 +244,77 @@ func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
 	if err := models.ValidateProjectWorkerLimit(p.MaxWorkers, 0); err != nil {
 		return err
 	}
-	return queryRowBoundSQLite(ctx, r.db,
-		`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers, skill_memory_permissions)
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		err := tx.QueryRowContext(ctx,
+			`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers, skill_memory_permissions)
 			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, COALESCE(?, '{"read_skills":true,"write_skills":false,"read_memories":true,"write_memories":true}'))
 			 RETURNING id, repo_path, repo_url, created_at, updated_at`,
-		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, projectPermissionJSON(p)).
-		Scan(&p.ID, &p.RepoPath, &p.RepoURL, &p.CreatedAt, &p.UpdatedAt)
+			p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, projectPermissionJSON(p)).
+			Scan(&p.ID, &p.RepoPath, &p.RepoURL, &p.CreatedAt, &p.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		if principal, ok := models.PrincipalFromContext(ctx); ok {
+			result, err := tx.ExecContext(ctx, `UPDATE project_organizations SET owner_user_id=?,org_id=? WHERE project_id=? AND EXISTS (SELECT 1 FROM org_memberships m JOIN users u ON u.id=m.user_id WHERE m.user_id=? AND m.org_id=? AND u.disabled=0)`, principal.UserID, principal.OrgID, p.ID, principal.UserID, principal.OrgID)
+			if err != nil {
+				return err
+			}
+			count, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if count != 1 {
+				return persistence.ErrOrgDenied
+			}
+		}
+		return nil
+	})
 }
 
 func (r *ProjectRepo) Update(ctx context.Context, p *models.Project) error {
 	if err := models.ValidateProjectWorkerLimit(p.MaxWorkers, 0); err != nil {
 		return err
 	}
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE projects SET name = ?, description = ?, repo_path = ?, repo_url = ?, default_agent_config_id = ?, max_workers = ?, skill_memory_permissions = COALESCE(?, skill_memory_permissions), updated_at = datetime('now')
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := requireProjectMutation(ctx, tx, p.ID, false); err != nil {
+			return err
+		}
+		principal, identified := models.PrincipalFromContext(ctx)
+		var previousLimit *int
+		if identified {
+			if err := tx.QueryRowContext(ctx, `SELECT max_workers FROM projects WHERE id = ?`, p.ID).Scan(&previousLimit); err != nil {
+				return err
+			}
+		}
+
+		_, err := tx.ExecContext(ctx,
+			`UPDATE projects SET name = ?, description = ?, repo_path = ?, repo_url = ?, default_agent_config_id = ?, max_workers = ?, skill_memory_permissions = COALESCE(?, skill_memory_permissions), updated_at = datetime('now')
 			 WHERE id = ?`,
-		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, projectPermissionJSON(p), p.ID)
-	if err != nil {
-		return fmt.Errorf("updating project: %w", err)
-	}
-	return nil
+			p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, projectPermissionJSON(p), p.ID)
+		if err != nil {
+			return fmt.Errorf("updating project: %w", err)
+		}
+		if identified {
+			changed := (previousLimit == nil) != (p.MaxWorkers == nil)
+			if previousLimit != nil && p.MaxWorkers != nil {
+				changed = *previousLimit != *p.MaxWorkers
+			}
+			if changed {
+				details, err := json.Marshal(struct {
+					Before *int `json:"before"`
+					After  *int `json:"after"`
+				}{previousLimit, p.MaxWorkers})
+				if err != nil {
+					return err
+				}
+				if err := projectAudit(ctx, tx, p.ID, principal.UserID, "project.worker_limit", p.ID, string(details)); err != nil {
+					return err
+				}
+			}
+			return projectAudit(ctx, tx, p.ID, principal.UserID, "project.settings", p.ID, "")
+		}
+		return nil
+	})
 }
 
 func (r *ProjectRepo) Delete(ctx context.Context, id string) error {
@@ -280,6 +331,20 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 		return manifest, false, fmt.Errorf("beginning project deletion: %w", err)
 	}
 	defer cleanup()
+
+	if err := requireProjectMutation(ctx, tx, id, true); err != nil {
+		return manifest, false, err
+	}
+	auditDetails := ""
+	if principal, ok := models.PrincipalFromContext(ctx); ok {
+		override, err := orgAdminOverride(ctx, tx, principal.UserID, id)
+		if err != nil {
+			return manifest, false, err
+		}
+		if override {
+			auditDetails = `{"org_admin_override":true}`
+		}
+	}
 
 	var isDefault bool
 	if err = tx.QueryRowContext(ctx, `SELECT is_default FROM projects WHERE id = ?`, id).Scan(&isDefault); err != nil {
@@ -411,6 +476,11 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 	}
 	if rows == 0 {
 		return manifest, false, fmt.Errorf("project not found or is the default project")
+	}
+	if principal, ok := models.PrincipalFromContext(ctx); ok {
+		if err = projectAudit(ctx, tx, id, principal.UserID, "project.deleted", id, auditDetails); err != nil {
+			return manifest, false, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return manifest, false, fmt.Errorf("committing project deletion: %w", err)

@@ -93,7 +93,8 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/edit?project_id="+project.ID, "automation-node-panel", func(b *composerFocusCDP) {
-		b.waitFor("builder ready", `String(typeof document.getElementById('automation-builder')?.hasUnsavedAutomationChanges==='function')`, "true")
+		// htmx binds forms on DOMContentLoaded; earlier Graph clicks fall back to a native navigating POST.
+		b.waitFor("builder ready", `String(document.readyState==='complete'&&typeof document.getElementById('automation-builder')?.hasUnsavedAutomationChanges==='function')`, "true")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("footer layout", `String((function(){var f=document.querySelector('[data-automation-footer]').getBoundingClientRect(),add=document.querySelector('[data-automation-add-node-open]').getBoundingClientRect(),zoom=document.querySelector('[data-automation-graph-tool]').getBoundingClientRect(),save=document.querySelector('[data-automation-builder-save]').getBoundingClientRect();return Math.abs((add.left+add.right)/2-(f.left+f.right)/2)<2&&zoom.right<add.left&&save.left>add.right&&Math.abs((zoom.top+zoom.bottom)/2-(save.top+save.bottom)/2)<2&&!document.querySelector('[data-automation-builder-toolbar]');})())`, "true")
 
@@ -174,7 +175,7 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		b.waitFor("validation rerender preserves edits", `document.querySelector('[name="node_first_prompt"]').value`, "Preserve this edited prompt")
 		b.waitFor("settled response keeps header outside inspector", `String(window.validationSettled && document.getElementById('automation-details-opener').getBoundingClientRect().right <= document.getElementById('automation-node-panel').getBoundingClientRect().left)`, "true")
 		b.click("[data-automation-node-close]")
-		b.click("[data-automation-builder-actions] > label")
+		b.click("[data-automation-builder-actions] > button")
 		b.evaluate(`var reference=document.createElement('div');reference.id='menu-color-reference';reference.className='ov-menu';reference.style.cssText='position:fixed;left:-1000px';reference.innerHTML='<a data-breadcrumb-selector-option aria-selected="true">Selected</a><a data-breadcrumb-selector-option data-selector-active>Hover</a>';document.body.appendChild(reference);'ready'`)
 		var menuPoint struct{ X, Y float64 }
 		fmt.Sscan(b.evaluate(`(function(){var r=document.querySelector('[data-automation-view-yaml]').getBoundingClientRect();return (r.left+r.width/2)+' '+(r.top+r.height/2)})()`), &menuPoint.X, &menuPoint.Y)
@@ -184,7 +185,7 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		b.click("[data-automation-view-yaml]")
 		b.waitFor("view choice closes kebab", `String(document.querySelector("[data-automation-builder-actions]").hasAttribute("data-menu-dismissed"))`, "true")
 		b.waitFor("YAML retains save and hides graph tools", `String(document.querySelector('[data-automation-graph-tool]').hidden&&document.querySelector('[data-automation-node-tool]').hidden&&document.querySelector('[data-automation-builder-save]').getBoundingClientRect().width>0)`, "true")
-		b.click("[data-automation-builder-actions] > label")
+		b.click("[data-automation-builder-actions] > button")
 		b.click("[data-automation-view-graph]")
 		b.click("[data-automation-add-node-open]")
 		b.evaluate(`document.querySelector('[name="node_kind"]').value='task';document.querySelector('[name="node_name"]').value='Validate work';'named'`)

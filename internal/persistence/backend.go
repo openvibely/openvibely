@@ -23,6 +23,8 @@ type AgentMutationStore interface {
 // Stores is the full set of stores a backend provides to the application.
 type Stores struct {
 	Organizations        OrganizationStore
+	ProjectAccess        ProjectAccessStore
+	RunIdentities        RunIdentityStore
 	Agents               AgentStore
 	AgentMutations       AgentMutationStore
 	Alerts               AlertStore

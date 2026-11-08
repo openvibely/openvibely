@@ -166,3 +166,18 @@ func RecordResponsesRecovery(ctx context.Context, items []any) {
 // provider tool exchange is completed before sampling again.
 const SkillInputResultPrefix = "openvibely:skill-input-result\n"
 const PendingSkillInputPrefix = "skill_view awaiting user input: "
+
+// BeforeModelSend revalidates prepared inputs and saved execution provenance at
+// the provider transport boundary. An absent callback preserves embedded usage.
+type beforeModelSendKey struct{}
+
+func WithBeforeModelSend(ctx context.Context, check func(context.Context) error) context.Context {
+	return context.WithValue(ctx, beforeModelSendKey{}, check)
+}
+
+func CheckBeforeModelSend(ctx context.Context) error {
+	if check, _ := ctx.Value(beforeModelSendKey{}).(func(context.Context) error); check != nil {
+		return check(ctx)
+	}
+	return nil
+}

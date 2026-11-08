@@ -863,6 +863,9 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 		return fmt.Errorf("begin create model config tx: %w", err)
 	}
 	defer cleanup()
+	if err := requireCredentialActor(ctx, tx); err != nil {
+		return err
+	}
 
 	name, err := validateLLMConfigNameAvailableTx(ctx, tx, a.Name, "")
 	if err != nil {
@@ -942,6 +945,9 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		return fmt.Errorf("begin update model config tx: %w", err)
 	}
 	defer cleanup()
+	if err := requireCredentialActor(ctx, tx); err != nil {
+		return err
+	}
 
 	name, err := validateLLMConfigNameAvailableTx(ctx, tx, a.Name, a.ID)
 	if err != nil {
@@ -1067,22 +1073,24 @@ func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, access
 }
 
 func (r *LLMConfigRepo) UpdateStandardOAuthConnectionIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID string) (bool, error) {
-	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE oauth_connections
+	return authorizedCredentialWrite(ctx, r.db, func(tx sqlExecutor) (bool, error) {
+		result, err := tx.ExecContext(ctx,
+			`UPDATE oauth_connections
 			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
 			     oauth_provider_display_name = '', oauth_principal_hash = '', oauth_principal_verified = 0,
 			     oauth_needs_reauth = 0, oauth_revision = oauth_revision + 1, updated_at = datetime('now')
 		 WHERE id = (SELECT oauth_connection_id FROM agent_configs WHERE id = ? AND provider = ? AND auth_method = ?)
 		   AND provider = ? AND oauth_revision = ?`,
-		accessToken, refreshToken, expiresAt, accountID, id, provider, models.AuthMethodOAuth, provider, expectedRevision)
-	if err != nil {
-		return false, fmt.Errorf("conditionally updating OAuth connection: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("checking conditional OAuth connection update: %w", err)
-	}
-	return changed == 1, nil
+			accessToken, refreshToken, expiresAt, accountID, id, provider, models.AuthMethodOAuth, provider, expectedRevision)
+		if err != nil {
+			return false, fmt.Errorf("conditionally updating OAuth connection: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return false, fmt.Errorf("checking conditional OAuth connection update: %w", err)
+		}
+		return changed == 1, nil
+	})
 }
 
 func (r *LLMConfigRepo) UpdateStandardOAuthTokensIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID ...string) (bool, error) {
@@ -1163,21 +1171,23 @@ func (r *LLMConfigRepo) UpdateCustomOAuthConnection(ctx context.Context, id, acc
 }
 
 func (r *LLMConfigRepo) UpdateCustomOAuthConnectionIfRevision(ctx context.Context, id string, expectedRevision int64, accessToken, refreshToken string, expiresAt int64, stateJSON string) (bool, error) {
-	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE agent_configs
+	return authorizedCredentialWrite(ctx, r.db, func(tx sqlExecutor) (bool, error) {
+		result, err := tx.ExecContext(ctx,
+			`UPDATE agent_configs
 		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?,
 		     custom_auth_state_json = ?, updated_at = datetime('now')
 		 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
-		accessToken, refreshToken, expiresAt, stateJSON, id, expectedRevision,
-		models.ProviderOpenAICompatible, models.AuthMethodOAuth)
-	if err != nil {
-		return false, fmt.Errorf("conditionally updating custom OAuth connection: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("checking conditional custom OAuth connection update: %w", err)
-	}
-	return changed == 1, nil
+			accessToken, refreshToken, expiresAt, stateJSON, id, expectedRevision,
+			models.ProviderOpenAICompatible, models.AuthMethodOAuth)
+		if err != nil {
+			return false, fmt.Errorf("conditionally updating custom OAuth connection: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return false, fmt.Errorf("checking conditional custom OAuth connection update: %w", err)
+		}
+		return changed == 1, nil
+	})
 }
 
 // AdvanceCustomOAuthRevision assigns a new generation to a custom OAuth

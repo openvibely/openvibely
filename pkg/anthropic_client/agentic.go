@@ -7,10 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/llm/jsonview"
-	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
-	"github.com/openvibely/openvibely/internal/llm/requestjson"
-	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
 	"math"
 	"net"
@@ -18,6 +14,11 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -71,9 +72,8 @@ const (
 	// Prefer the direct-call web tool versions for URL retrieval flows.
 	// Newer web tool versions can route through provider code_execution,
 	// which may hit per-turn tool budgets and cause fetch failures.
-	anthropicWebSearchToolType    = "web_search_20250305"
-	anthropicWebFetchToolType     = "web_fetch_20250910"
-	anthropicToolOutputTokenLimit = 10000
+	anthropicWebSearchToolType = "web_search_20250305"
+	anthropicWebFetchToolType  = "web_fetch_20250910"
 )
 
 // AgenticOptions configures an agentic send with tool use.
@@ -302,9 +302,6 @@ type nativeCompactionState struct {
 	Messages []agenticMessage `json:"messages"`
 }
 
-func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
-	return decodeNativeCompactionReplay(models.ExecutionReplayMessage{TranscriptJSON: raw})
-}
 func decodeNativeCompactionReplay(replay models.ExecutionReplayMessage) ([]agenticMessage, error) {
 	raw := replay.TranscriptJSON
 	var state nativeCompactionState
@@ -997,18 +994,7 @@ func anthropicProviderToolResultName(block agenticBlock) string {
 }
 
 func truncateAnthropicToolOutputForModelInput(output string, tokenLimit int) string {
-	if output == "" {
-		return output
-	}
-	if tokenLimit <= 0 {
-		tokenLimit = anthropicToolOutputTokenLimit
-	}
-	byteLimit := tokenestimate.ByteBudget(tokenLimit)
-	if len(output) <= byteLimit {
-		return output
-	}
-	const marker = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	return tokenestimate.TruncateMiddle(output, byteLimit, marker)
+	return tokenestimate.ToolOutputForModelInput(output, tokenLimit)
 }
 
 func anthropicStringContentRaw(s string) json.RawMessage {
@@ -1692,6 +1678,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	}
 
 	buildReq := func() (*http.Request, error) {
+		if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+			return nil, err
+		}
 		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -1751,23 +1740,6 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	return result, nil
 }
 
-// parseAgenticStream parses a streaming response, handling text, tool_use, and compaction blocks.
-func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThinking func(string)) (*turnResult, error) {
-	return c.parseAgenticStreamWithCallbacks(body, onText, onThinking, nil, nil)
-}
-
-// parseAgenticStreamWithCallbacks parses a streaming response, handling text,
-// tool use, and compaction blocks while optionally emitting tool callbacks.
-func (c *Client) parseAgenticStreamWithCallbacks(
-	body io.Reader,
-	onText func(string),
-	onThinking func(string),
-	onToolUse func(string, json.RawMessage),
-	onToolResult func(string, string, bool),
-	compactionCallbacks ...func(llmcontracts.CompactionProgress),
-) (*turnResult, error) {
-	return c.parseAgenticStreamCapturing(body, onText, onThinking, onToolUse, onToolResult, nil, compactionCallbacks...)
-}
 func (c *Client) parseAgenticStreamCapturing(
 	body io.Reader, onText func(string), onThinking func(string),
 	onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool),

@@ -1494,7 +1494,7 @@ func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Use either a saved model or a sign-in session.")
 		}
 		var err error
-		configured, err = h.modelOAuthSetupConfig(key, true)
+		configured, err = h.modelOAuthSetupConfig(key, true, c.Request().Context())
 		if err != nil {
 			return err
 		}
@@ -1787,7 +1787,7 @@ func (h *Handler) fetchCustomOpenAICompatibleModels(ctx context.Context, client 
 
 func (h *Handler) currentCustomOAuthConfig(ctx context.Context, snapshot models.LLMConfig) (*models.LLMConfig, error) {
 	if key, ok := ctx.Value(modelOAuthSetupContextKey{}).(string); ok && snapshot.ID == "" {
-		return h.modelOAuthSetupConfig(key, true)
+		return h.modelOAuthSetupConfig(key, true, ctx)
 	}
 	current, err := h.llmConfigRepo.GetByID(ctx, snapshot.ID)
 	if err != nil {

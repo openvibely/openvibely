@@ -330,8 +330,10 @@ func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	db := teststores.New(t, teststores.WithIOCounting())
 	counter := db.IO
 	repo := db.LLMConfigs
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	model := seedChannelRichModel(t, ctx, repo, "Channel Text Default", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, true)
+	ctx = models.WithPrincipal(ctx, models.Principal{UserID: "sender"})
 	counter.SetEnabled(true)
 
 	var runnerRequest ChannelChatRunRequest
@@ -353,7 +355,15 @@ func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 				execution.TaskID = task.ID
 				return false, nil
 			},
-			ChannelChatRunner: func(_ context.Context, request ChannelChatRunRequest) {
+			PrepareRunner: func(context.Context, string, string) int { cancel(); return 0 },
+			ChannelChatRunner: func(runCtx context.Context, request ChannelChatRunRequest) {
+				principal, ok := models.PrincipalFromContext(runCtx)
+				if !ok || principal.UserID != "sender" {
+					t.Fatal("channel handoff lost initiating principal")
+				}
+				if runCtx.Err() != nil {
+					t.Fatal("durable channel run inherited completed ingress cancellation")
+				}
 				runnerRequest = request
 			},
 		},

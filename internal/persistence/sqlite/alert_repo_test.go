@@ -1020,7 +1020,7 @@ func TestAlertRepo_AutomationOwnedSummaryQueryStartsFromMailboxOwners(t *testing
 	insertAlertListOwnerAutomation(t, db, project.ID, targetAutomation)
 	insertAlertListOwnerAlert(t, db, project.ID, "owned-plan-alert", "owned", targetAutomation, "2026-01-01 00:00:01", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
 
-	query, args := buildAlertSummaryListQuery(project.ID, normalizeAlertListFilter(models.AlertListFilter{
+	query, args := buildAlertSummaryListQuery(t.Context(), project.ID, normalizeAlertListFilter(models.AlertListFilter{
 		DecisionState:           models.AlertDecisionApproved,
 		ProcessingState:         models.AlertProcessingUnclaimed,
 		AutomationInboxBindings: []models.AutomationBinding{{AutomationID: targetAutomation}},
@@ -1039,7 +1039,7 @@ func TestAlertRepo_AutomationOwnedSummaryQueryStartsFromMailboxOwners(t *testing
 		t.Fatalf("plan = %s, want no correlated ownership subquery", plan)
 	}
 
-	unscopedQuery, _ := buildAlertSummaryListQuery(project.ID, normalizeAlertListFilter(models.AlertListFilter{Limit: 10}))
+	unscopedQuery, _ := buildAlertSummaryListQuery(t.Context(), project.ID, normalizeAlertListFilter(models.AlertListFilter{Limit: 10}))
 	if strings.Contains(unscopedQuery, "automation_artifact_mailbox_owners") {
 		t.Fatalf("unscoped summary query unexpectedly uses mailbox owners: %s", unscopedQuery)
 	}

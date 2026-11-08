@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"github.com/labstack/echo/v4"
 	"net/http"
+	"time"
 )
 
 // GetUsageResetCredits returns available provider-owned usage reset credits.
@@ -53,9 +56,41 @@ func (h *Handler) ConsumeUsageReset(c echo.Context) error {
 	if input.AccountKey == "" || input.CreditID == "" || input.IdempotencyKey == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "account_key, credit_id and idempotency_key are required")
 	}
-	result, err := h.usageAnalyticsSvc.ConsumeUsageReset(c.Request().Context(), input.AccountKey, input.CreditID, input.IdempotencyKey)
+	result, err := h.auditedUsageReset(c, input, func() (map[string]any, error) {
+		return h.usageAnalyticsSvc.ConsumeUsageReset(c.Request().Context(), input.AccountKey, input.CreditID, input.IdempotencyKey)
+	})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
 	return c.JSON(http.StatusOK, result)
+}
+
+// Keep an intent record even if the provider succeeds but the response or final
+// audit write fails. Retry reconciliation uses the same idempotency key.
+func (h *Handler) auditedUsageReset(c echo.Context, input ConsumeUsageResetRequest, consume func() (map[string]any, error)) (map[string]any, error) {
+	if h.projectAccessSvc == nil {
+		return consume()
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return nil, err
+	}
+	details, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.projectAccessSvc.RecordAction(c.Request().Context(), projectID, "usage_reset.requested", input.AccountKey, string(details)); err != nil {
+		return nil, err
+	}
+	result, providerErr := consume()
+	action := "usage_reset.succeeded"
+	if providerErr != nil {
+		action = "usage_reset.failed_or_unknown"
+	}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
+	defer cancel()
+	if err := h.projectAccessSvc.RecordAction(auditCtx, projectID, action, input.AccountKey, string(details)); err != nil {
+		return nil, err
+	}
+	return result, providerErr
 }

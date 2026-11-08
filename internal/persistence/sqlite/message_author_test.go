@@ -11,6 +11,8 @@ import (
 func TestMessageAuthorsSurviveReloadAndQueuePromotion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('alice-id','alice'),('bob-id','testuser1'); INSERT INTO org_memberships VALUES('default','alice-id','member'),('default','bob-id','member'); INSERT INTO project_members VALUES('default','alice-id','editor'),('default','bob-id','editor')`)
+	require.NoError(t, err)
 	alice := models.WithPrincipal(ctx, models.Principal{UserID: "alice-id", Username: "alice"})
 	bob := models.WithPrincipal(ctx, models.Principal{UserID: "bob-id", Username: "testuser1"})
 	agent := createThreadInputLLMConfig(t, ctx, db)
@@ -23,6 +25,10 @@ func TestMessageAuthorsSurviveReloadAndQueuePromotion(t *testing.T) {
 	// Starting Alice's task as Bob must not relabel Alice's original prompt.
 	require.NoError(t, executions.Create(bob, original))
 	require.Equal(t, "alice", original.AuthorName)
+	runUser, found, err := NewRunIdentityRepo(db).ExecutionUser(ctx, original.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "bob-id", runUser, "executor identity is independent of original prompt author")
 	followup := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "Bob's message", IsFollowup: true}
 	require.NoError(t, executions.Create(bob, followup))
 	loaded, err := executions.GetByID(alice, followup.ID)
@@ -51,6 +57,8 @@ func TestMessageAuthorsSurviveReloadAndQueuePromotion(t *testing.T) {
 func TestMessageAuthorsDirectFollowupAndSteering(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
+	_, err := db.Exec(`INSERT INTO users(id,username) VALUES('bob-id','testuser1'); INSERT INTO org_memberships VALUES('default','bob-id','member'); INSERT INTO project_members VALUES('default','bob-id','editor')`)
+	require.NoError(t, err)
 	sender := models.WithPrincipal(ctx, models.Principal{UserID: "bob-id", Username: "testuser1"})
 	agent := createThreadInputLLMConfig(t, ctx, db)
 	task := &models.Task{ProjectID: "default", Title: "Direct attribution", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "original", AgentID: &agent.ID}

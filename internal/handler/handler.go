@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -27,14 +28,17 @@ import (
 
 type Handler struct {
 	diffChunks                 diffChunkCache
+	channelOAuthMu             sync.Mutex
+	channelOAuthFlows          map[string]channelOAuthFlow
+	runIdentities              persistence.RunIdentityStore
 	organizationSvc            *service.OrganizationService
+	projectAccessSvc           *service.ProjectAccessService
 	projectSvc                 *service.ProjectService
 	taskSvc                    *service.TaskService
 	swarmSvc                   *service.SwarmService
 	taskGoalSvc                *service.TaskGoalService
 	llmSvc                     *service.LLMService
 	workerSvc                  *service.WorkerService
-	schedulerSvc               *service.SchedulerService
 	alertSvc                   *service.AlertService
 	upcomingSvc                *service.UpcomingService
 	insightsSvc                *service.InsightsService
@@ -308,7 +312,6 @@ func New(
 		swarmSvc:               swarmSvc,
 		llmSvc:                 llmSvc,
 		workerSvc:              workerSvc,
-		schedulerSvc:           schedulerSvc,
 		alertSvc:               alertSvc,
 		upcomingSvc:            upcomingSvc,
 		insightsSvc:            insightsSvc,
@@ -692,10 +695,10 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 			applog.Debugf("[handler] failed to load selected project preference: %v", err)
 		} else if selectedProjectID = strings.TrimSpace(selectedProjectID); selectedProjectID != "" && selectedProjectID != models.AllProjectsID {
 			p, err := h.projectSvc.GetByID(ctx, selectedProjectID)
-			if err != nil {
+			if err != nil && !errors.Is(err, persistence.ErrProjectDenied) {
 				return "", err
 			}
-			if p != nil {
+			if err == nil && p != nil {
 				return selectedProjectID, nil
 			}
 		}
@@ -707,7 +710,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	if len(projects) > 0 {
 		return projects[0].ID, nil
 	}
-	return "", nil
+	return models.AllProjectsID, nil
 }
 
 // isHTMX returns true for ordinary HTMX fragment requests. History cache misses
@@ -742,7 +745,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	})
 	// Resolve the virtual workspace to the item owner before enforcing project consistency.
 	e.Use(h.allProjectsScope)
-	e.Use(h.taskProjectBoundary, h.threadInputProjectBoundary)
+	e.Use(h.projectAccessBoundary, h.taskProjectBoundary, h.threadInputProjectBoundary)
 	e.GET("/files", h.ListFilesPanel)
 	e.GET("/files/:id", h.GeneratedFileContent)
 	e.POST("/files/:id", h.saveDesktopFile(h.GeneratedFileContent))
@@ -810,6 +813,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.PUT("/projects/:id", h.UpdateProject)
 	e.DELETE("/projects/:id", h.DeleteProject)
 	e.GET("/projects/:id/edit", h.EditProjectDialog)
+	e.GET("/projects/:id/sharing", h.ProjectSharing)
+	e.POST("/projects/:id/sharing", h.UpdateProjectSharing)
 	e.POST("/projects/:id/reclone", h.RecoverProjectRepo)
 
 	// Automations (project-scoped via ?project_id= query param)
@@ -1052,10 +1057,12 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// GitHub runtime trust and inbox settings
 	e.POST("/channels/github/authorized-actors", h.AddGitHubAuthorizedActor)
+	e.POST("/channels/github/authorized-actors/:id/identity", h.BindGitHubReviewerIdentity)
 	e.DELETE("/channels/github/authorized-actors/:id", h.RemoveGitHubAuthorizedActor)
 	e.POST("/channels/github/project-inbox", h.SaveGitHubProjectInbox)
 
 	// Telegram authorized users
+	e.POST("/channels/:channel/senders/:id", h.BindChannelSender)
 	e.GET("/channels/telegram/authorized-users", h.ListTelegramAuthorizedUsers)
 	e.POST("/channels/telegram/authorized-users", h.AddTelegramAuthorizedUser)
 	e.DELETE("/channels/telegram/authorized-users/:id", h.RemoveTelegramAuthorizedUser)
@@ -1063,6 +1070,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Slack authorized users
 	e.GET("/channels/slack/authorized-users", h.ListSlackAuthorizedUsers)
 	e.POST("/channels/slack/authorized-users", h.AddSlackAuthorizedUser)
+	e.POST("/channels/slack/authorized-users/:id/identity", h.BindSlackApplicationUser)
 	e.DELETE("/channels/slack/authorized-users/:id", h.RemoveSlackAuthorizedUser)
 
 	// Email authorized senders
@@ -1073,6 +1081,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Discord authorized users
 	e.GET("/channels/discord/authorized-users", h.ListDiscordAuthorizedUsers)
 	e.POST("/channels/discord/authorized-users", h.AddDiscordAuthorizedUser)
+	e.POST("/channels/discord/authorized-users/:id/identity", h.BindDiscordApplicationUser)
 	e.DELETE("/channels/discord/authorized-users/:id", h.RemoveDiscordAuthorizedUser)
 
 	// Webhooks
@@ -1186,3 +1195,5 @@ func (h *Handler) AppIconICO(c echo.Context) error {
 func (h *Handler) SetLiveLimits(limits livelimits.Limits) {
 	h.liveLimits = limits.WithDefaults()
 }
+
+func (h *Handler) SetRunIdentityStore(store persistence.RunIdentityStore) { h.runIdentities = store }

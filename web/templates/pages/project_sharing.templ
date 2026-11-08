@@ -1,0 +1,249 @@
+package pages
+
+import "github.com/openvibely/openvibely/internal/models"
+
+templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMember, users []models.OrgUser, audit []models.ProjectAuditEvent, canManageSharing bool, message string) {
+	<section id="project-sharing">
+ <style>
+ #project-sharing h3 { font-size:16px; font-weight:650; margin:0 0 8px; }
+ #project-sharing .sharing-description { margin:0 0 20px; line-height:1.5; }
+ #project-sharing .sharing-members { width:100%; border-collapse:collapse; }
+ #project-sharing .sharing-members :is(td,th) { padding:14px 0; text-align:left; border-bottom:1px solid color-mix(in srgb,currentColor 18%,transparent); }
+ #project-sharing .sharing-members th { font-size:12px; font-weight:500; opacity:.7; }
+ #project-sharing .sharing-name { font-weight:600; }
+ #project-sharing .sharing-meta { font-size:12px; opacity:.65; margin-top:3px; font-weight:400; }
+ #project-sharing [data-project-sharing-content] :is(.btn,.select) { min-height:36px; height:36px; }
+ #project-sharing .select { font-size:13px; }
+ #project-sharing select[aria-label="Project role"], #project-sharing [data-sharing-add-role] { width:150px; }
+ #project-sharing .sharing-add { display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; }
+ #project-sharing [data-sharing-add-user] { flex:1; min-width:160px; }
+ #project-sharing .sharing-section { border-top:1px solid color-mix(in srgb,currentColor 18%,transparent); margin-top:26px; padding-top:22px; }
+ #project-sharing [data-sharing-transfer-panel] { margin-top:14px; }
+ #project-sharing [hidden] { display:none !important; }
+ @media(max-width:560px) { #project-sharing select[aria-label="Project role"], #project-sharing [data-sharing-add-role] { width:116px; } #project-sharing .sharing-members td { padding:12px 4px; } }
+ </style>
+ <div data-project-sharing-content>
+		<h3 class="text-base font-semibold">Project access</h3>
+		<p class="text-sm opacity-70 sharing-description">Only people granted access and organization admins can access this project.</p>
+		if !canManageSharing {
+			<p class="text-sm opacity-70">Only the project owner and organization admins can change sharing and membership.</p>
+		} else {
+			if message != "" {
+				<p class="text-sm text-error" role="alert">{ message }</p>
+			}
+			<form data-sharing-form hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML">
+				<input type="hidden" name="action" value="members"/>
+				<input type="hidden" name="changes" value="{}"/>
+				<table class="sharing-members">
+					<thead><tr><th>Member</th><th>Project role</th><th></th></tr></thead>
+					<tbody data-sharing-members>
+						for _, user := range users {
+							if user.UserID == policy.OwnerUserID || user.IsOrgAdmin() {
+								<tr>
+									<td>@projectSharingIdentity(user.UserID, user.Username, users)</td>
+									<td>
+										<span class="badge badge-outline">
+											if user.UserID == policy.OwnerUserID {
+												Owner
+											} else {
+												Organization admin
+											}
+										</span>
+									</td>
+									<td></td>
+								</tr>
+							}
+						}
+						for _, member := range members {
+							if !projectSharingInherited(users, policy.OwnerUserID, member.UserID) {
+								<tr data-sharing-user={ member.UserID } data-original-role={ member.Role }>
+									<td>@projectSharingIdentity(member.UserID, member.Username, users)</td>
+									<td>
+										@projectSharingRole(member.Role)
+									</td>
+									<td><button type="button" class="btn btn-ghost btn-xs text-error" data-sharing-remove>Remove</button></td>
+								</tr>
+							}
+						}
+					</tbody>
+				</table>
+				<div class="sharing-add">
+					<select class="select select-bordered select-sm flex-1" data-sharing-add-user aria-label="Member">
+						<option value="">Select organization member…</option>
+						for _, user := range users {
+							if !user.Disabled && !projectSharingInherited(users, policy.OwnerUserID, user.UserID) {
+								<option value={ user.UserID }>{ user.Username }</option>
+							}
+						}
+					</select>
+					<select class="select select-bordered select-sm" data-sharing-add-role aria-label="New member role"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="maintainer">Maintainer</option></select>
+					<button type="button" class="btn btn-outline btn-sm" data-sharing-add>Add member</button>
+				</div>
+			</form>
+			<div class="sharing-section">
+				<h3 class="text-base font-semibold">Ownership</h3>
+				<p class="text-sm sharing-description">
+					Owner:
+					for _, user := range users {
+						if user.UserID == policy.OwnerUserID {
+							<strong>{ user.Username }</strong>
+						}
+					}
+				</p>
+				<button type="button" class="btn btn-outline btn-sm" data-sharing-transfer-toggle aria-expanded="false" aria-controls="sharing-transfer-panel" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>Transfer ownership…</button>
+ <div id="sharing-transfer-panel" data-sharing-transfer-panel hidden>
+				<form data-sharing-transfer hx-post={ "/projects/" + policy.ProjectID + "/sharing" } hx-target="#project-sharing" hx-swap="outerHTML" hx-confirm="Transfer ownership of this project?" class="flex flex-wrap gap-2">
+					<input type="hidden" name="action" value="transfer"/>
+					<select name="user_id" class="select select-bordered select-sm" aria-label="New owner" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>
+						for _, user := range users {
+							if !user.Disabled && user.UserID != policy.OwnerUserID {
+								<option value={ user.UserID }>{ user.Username }</option>
+							}
+						}
+					</select>
+					<button type="submit" class="btn btn-outline btn-sm" disabled?={ !projectSharingHasTransferCandidate(users, policy.OwnerUserID) }>Review transfer</button>
+				</form>
+ </div>
+				if !projectSharingHasTransferCandidate(users, policy.OwnerUserID) {
+					<p class="text-sm opacity-70" role="status">Add another active organization member before transferring ownership.</p>
+				}
+				<p class="text-xs opacity-60 hidden" data-sharing-transfer-hint>Save or discard membership changes before transferring ownership.</p>
+			</div>
+		}
+		<details class="sharing-section">
+			<summary class="cursor-pointer text-sm font-medium">Recent access and execution audit</summary>
+			<div class="overflow-x-auto">
+				<table class="table table-xs">
+					<thead><tr><th>Time</th><th>Actor</th><th>Action</th></tr></thead>
+					<tbody>
+						for _, event := range audit {
+							<tr>
+								<td>
+									{ event.CreatedAt }
+								</td>
+								<td>
+									{ event.ActorUserID }
+								</td>
+								<td>
+									{ event.Action }
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</details>
+		</div>
+ <div class="modal-action">
+ if canManageSharing {
+ <button type="button" class="btn btn-error btn-outline mr-auto" data-sharing-delete hidden onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')">Delete Project</button>
+ }
+			<button type="button" class="btn" data-sharing-cancel>Cancel</button>
+			<button type="button" class="btn btn-primary" data-sharing-save>
+ <span class="loading loading-spinner loading-sm htmx-indicator" style="display:none" aria-hidden="true"></span>
+ <span class="edit-project-save-label">Save</span>
+ <span class="edit-project-save-busy-label hidden" role="status"></span>
+ </button>
+		</div>
+		<script>
+  (() => {
+   const root = document.getElementById('project-sharing');
+   const deleteButton = root.querySelector('[data-sharing-delete]');
+   if (deleteButton) deleteButton.hidden = !document.getElementById('delete_project_confirm_modal');
+   const form = root.querySelector('[data-sharing-form]');
+   const cancel = root.querySelector('[data-sharing-cancel]');
+   const save = root.querySelector('[data-sharing-save]');
+   if (!form) { cancel.onclick=()=>root.closest('dialog')?.close(); save.onclick=()=>root.closest('dialog')?.saveProjectSettings?.(); return; }
+   const body = form.querySelector('[data-sharing-members]');
+   const original = body.innerHTML;
+   const initial = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.dataset.originalRole]));
+   const transfer = root.querySelector('[data-sharing-transfer]');
+   const transferDisabled = transfer.querySelector('button').disabled;
+   const transferToggle = root.querySelector('[data-sharing-transfer-toggle]');
+   transferToggle.onclick=()=>{const panel=root.querySelector('[data-sharing-transfer-panel]');panel.hidden=!panel.hidden;transferToggle.setAttribute('aria-expanded',String(!panel.hidden));};
+   function update() {
+    const current = new Map(Array.from(body.querySelectorAll('[data-sharing-user]')).map(row=>[row.dataset.sharingUser,row.querySelector('select').value]));
+    const changes = {};
+    for (const [id,role] of current) if(initial.get(id)!==role) changes[id]=role;
+    for (const id of initial.keys()) if(!current.has(id)) changes[id]='';
+    form.elements.changes.value=JSON.stringify(changes);
+    const dirty=Object.keys(changes).length>0;
+    save.disabled=false;
+    transfer.querySelector('button').disabled=dirty||transferDisabled;
+    transferToggle.disabled=dirty||transferDisabled;
+    root.querySelector('[data-sharing-transfer-hint]').classList.toggle('hidden',!dirty);
+    for(const option of form.querySelector('[data-sharing-add-user]').options) option.disabled=current.has(option.value);
+   }
+   form.addEventListener('change',update);
+   body.addEventListener('click',event=>{const remove=event.target.closest('[data-sharing-remove]');if(remove){remove.closest('tr').remove();update();}});
+   form.querySelector('[data-sharing-add]').onclick=()=>{
+    const user=form.querySelector('[data-sharing-add-user]');if(!user.value||user.selectedOptions[0].disabled){user.focus();return;}
+    const row=document.createElement('tr');row.dataset.sharingUser=user.value;
+    const name=document.createElement('td');name.textContent=user.selectedOptions[0].textContent;name.className="sharing-name";
+    const role=document.createElement('td');const select=form.querySelector('[data-sharing-add-role]').cloneNode(true);select.removeAttribute('data-sharing-add-role');select.setAttribute('aria-label','Project role');select.value=form.querySelector('[data-sharing-add-role]').value;role.append(select);
+    const actions=document.createElement('td');const remove=document.createElement('button');remove.type='button';remove.className='btn btn-ghost btn-xs text-error';remove.dataset.sharingRemove='';remove.textContent='Remove';actions.append(remove);
+    row.append(name,role,actions);body.append(row);user.value='';update();
+   };
+   save.onclick=()=>root.closest('dialog')?.saveProjectSettings?.();
+   form.addEventListener('submit',event=>{event.preventDefault();event.stopImmediatePropagation();root.closest('dialog')?.saveProjectSettings?.();},true);
+   cancel.onclick=()=>{body.innerHTML=original;update();root.closest('dialog')?.close();};
+   update();
+  })();
+  </script>
+	</section>
+}
+
+templ projectSharingRole(role string) {
+	<select class="select select-bordered select-sm" aria-label="Project role">
+		<option value="viewer" selected?={ role == "viewer" }>Viewer</option>
+		<option value="editor" selected?={ role == "editor" }>Editor</option>
+		<option value="maintainer" selected?={ role == "maintainer" }>Maintainer</option>
+	</select>
+}
+
+func projectSharingInherited(users []models.OrgUser, owner, id string) bool {
+	if id == owner {
+		return true
+	}
+	for _, user := range users {
+		if user.UserID == id {
+			return user.IsOrgAdmin()
+		}
+	}
+	return false
+}
+
+
+templ projectSharingIdentity(id string, name string, users []models.OrgUser) {
+ {{ principal, _ := models.PrincipalFromContext(ctx) }}
+ <div class="sharing-name">{ name }
+ if principal.UserID == id {
+ <span class="sharing-meta"> (you)</span>
+ }
+ </div>
+ for _, user := range users {
+ if user.UserID == id && user.IsOrgAdmin() {
+ <div class="sharing-meta">
+ if user.Role == "owner" {
+ Organization owner
+ } else {
+ Organization admin
+ }
+ </div>
+ }
+ }
+}
+
+
+// ProjectSharingTransferred preserves the settings layout without exposing controls
+// after an ownership transfer removes the caller's sharing access.
+templ ProjectSharingTransferred() {
+ <section id="project-sharing">
+  <div data-project-sharing-content>
+   <p role="status">Ownership transferred. You no longer have access to manage sharing for this project.</p>
+  </div>
+  <div class="modal-action">
+   <button type="button" class="btn" data-sharing-close onclick="this.closest('dialog').close()">Close</button>
+  </div>
+ </section>
+}

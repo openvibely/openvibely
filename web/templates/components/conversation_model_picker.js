@@ -80,6 +80,7 @@
     const token = ++favoritesLoadToken;
     favoritesLoading = true;
     favoritesError = "";
+    panel.setAttribute("aria-busy", "true");
     render();
     try {
       await favoriteWrites.catch(() => {});
@@ -101,6 +102,7 @@
     } finally {
       if (token === favoritesLoadToken) {
         favoritesLoading = false;
+        panel.removeAttribute("aria-busy");
         render();
         renderSub();
       }
@@ -191,6 +193,33 @@
     return url.pathname + url.search;
   }
 
+  async function settingsError(response, fallback) {
+    let message = fallback;
+    const permissionDenied = response.status === 403 && response.headers.get("X-OpenVibely-Permission-Denied") === "true";
+    if (permissionDenied) {
+      message = "You do not have permission to change these model settings. Ask the project owner or an organization admin for access.";
+      let toast;
+      try {
+        toast = JSON.parse(response.headers.get("HX-Trigger") || "{}").openvibelyToast;
+      } catch (_) {}
+      if (typeof toast?.message === "string" && toast.message) {
+        message = toast.message;
+      } else {
+        try {
+          const body = await response.json();
+          if (typeof body.message === "string" && body.message) message = body.message;
+        } catch (_) {}
+      }
+      if (window.showToast) window.showToast(message, "failed");
+    }
+    const error = Error(message);
+    error.toastOnly = permissionDenied;
+    return error;
+  }
+  function inlineSettingsError(s) {
+    return s.permissionError ? "" : s.error;
+  }
+
   async function importLegacyPreferences(btn) {
     const form = btn.closest("form");
     if (form.dataset.conversationTaskId) return;
@@ -214,7 +243,7 @@
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({agent_id: selected, import_only: true, overrides}),
     });
-    if (!response.ok) throw Error("Could not migrate model settings. Reopen the picker to retry.");
+    if (!response.ok) throw await settingsError(response, "Could not migrate model settings. Reopen the picker to retry.");
     try { keys.forEach(k => localStorage.removeItem(k)); } catch (_) {}
   }
   function save(btn) {
@@ -229,13 +258,14 @@
       service_tier: tierField(btn)?.value || "",
     });
     const request = () =>
-      fetch(settingsEndpoint(btn), { method: "POST", body }).then((r) => {
-        if (!r.ok) throw Error("Could not save model settings. Try again.");
+      fetch(settingsEndpoint(btn), { method: "POST", body }).then(async (r) => {
+        if (!r.ok) throw await settingsError(r, "Could not save model settings. Try again.");
       });
     s.pending = (s.pending || Promise.resolve()).catch(() => {}).then(request);
     s.pending.then(
       () => {
         s.error = "";
+        s.permissionError = false;
         s.failedSave = false;
         if (s.selectionPending === body.get("agent_id"))
           s.selectionPending = null;
@@ -246,9 +276,10 @@
       },
       (err) => {
         s.error = err.message;
+        s.permissionError = !!err.toastOnly;
         s.failedSave = true;
         if (active === btn) {
-          status.textContent = s.error;
+          status.textContent = inlineSettingsError(s);
           renderEffort();
         }
       },
@@ -295,16 +326,20 @@
       s.efforts[key(m)] = effort;
       s.tiers[key(m)] = tier;
       s.error = "";
+      s.permissionError = false;
       return { effort, tier, modelID: m.id };
     } catch (e) {
-      if (token === s.loadToken) s.error = e.message;
+      if (token === s.loadToken) {
+        s.error = e.message;
+        s.permissionError = !!e.toastOnly;
+      }
     } finally {
       if (token === s.loadToken) {
         s.loading = false;
         sync(btn);
         if (active === btn) {
           renderEffort();
-          status.textContent = s.error;
+          status.textContent = inlineSettingsError(s);
         }
       }
     }
@@ -354,7 +389,24 @@
       });
     }
   }
-  function close(focus) {
+  const modelMenus = new WeakMap();
+  function modelMenu(btn) {
+    let menu = modelMenus.get(btn);
+    if (!menu) {
+      menu = window.ovMenuController.create({
+        trigger: btn,
+        panels: () => [panel, sub],
+        isOpen: () => active === btn && !panel.hidden,
+        open: () => showModelPicker(btn),
+        close: hideModelPicker,
+        escape: () => { if (provider) { back.click(); return false; } },
+      });
+      modelMenus.set(btn, menu);
+    }
+    return menu;
+  }
+  function close(focus) { if (active) modelMenu(active).close(focus); }
+  function hideModelPicker() {
     ownerObserver.disconnect();
     const btn = active;
     closeSub();
@@ -362,7 +414,6 @@
     active = null;
     if (btn) {
       btn.setAttribute("aria-expanded", "false");
-      if (focus && btn.isConnected) btn.focus();
     }
   }
   function choose(m) {
@@ -617,7 +668,7 @@
         (Number(slider.value) / Math.max(1, levels.length - 1)) * 100 + "%",
       );
     updateTrack();
-    slider.disabled = s.loading || !!s.error;
+    slider.disabled = s.loading || !!inlineSettingsError(s);
     slider.setAttribute("aria-label", "Reasoning effort");
     slider.setAttribute(
       "aria-valuetext",
@@ -668,7 +719,7 @@
     const reset = el("button", "ov-mp-reset", "Use default");
     reset.type = "button";
     reset.hidden = !override;
-    reset.disabled = s.loading || !!s.error;
+    reset.disabled = s.loading || !!inlineSettingsError(s);
     reset.onclick = () => {
       delete s.tiers[key(m)];
       save(active);
@@ -682,7 +733,7 @@
       "aria-checked",
       String((override || m.defaultTier) === "priority"),
     );
-    toggle.disabled = s.loading || !!s.error;
+    toggle.disabled = s.loading || !!inlineSettingsError(s);
     toggle.onclick = () => {
       s.tiers[key(m)] =
         (override || m.defaultTier) === "priority" ? "default" : "priority";
@@ -700,7 +751,7 @@
       list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
     renderList();
     renderEffort();
-    status.textContent = state(active).error || favoritesError || "";
+    status.textContent = inlineSettingsError(state(active)) || favoritesError || "";
     position();
     if (atEnd) list.scrollTop = list.scrollHeight;
   }
@@ -801,11 +852,7 @@
       })
       .catch(() => {});
   }
-  window.ovModelPicker = {
-    init,
-    save,
-    close,
-    open(btn) {
+  function showModelPicker(btn) {
       if (!ownerVisible(btn)) return;
       init(btn);
       active = btn;
@@ -827,7 +874,13 @@
             ? loadSelection(btn)
             : load(btn);
       }
-    },
+  }
+  window.ovModelPicker = {
+    init,
+    save,
+    close,
+    open(btn) { if (ownerVisible(btn)) modelMenu(btn).open(); },
+    toggle(btn, event) { if (ownerVisible(btn)) modelMenu(btn).toggle(event); },
     changed(btn) {
       init(btn);
       const s = state(btn);
@@ -835,6 +888,7 @@
       s.initialLoad = false;
       s.loading = false;
       s.error = "";
+      s.permissionError = false;
       s.failedSave = false;
       sync(btn);
       // Fetch an existing task/model preference before persisting a newly selected model.
@@ -879,35 +933,6 @@
       .find((b) => b.dataset.provider === old)
       ?.focus();
   };
-  function outsidePicker(target) {
-    return (
-      active &&
-      !panel.contains(target) &&
-      !sub.contains(target) &&
-      !active.contains(target)
-    );
-  }
-  // Window capture runs before document-level navigation handlers, including
-  // handlers that stop propagation. The first outside click only dismisses.
-  window.addEventListener(
-    "pointerdown",
-    (e) => {
-      if (e.button !== 0 || !outsidePicker(e.target)) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    },
-    true,
-  );
-  window.addEventListener(
-    "click",
-    (e) => {
-      if (!outsidePicker(e.target)) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      close(false);
-    },
-    true,
-  );
   document.addEventListener(
     "keydown",
     (e) => {
@@ -951,14 +976,7 @@
         else window.ovModelPicker.open(btn);
         return;
       }
-      if (!active) return;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (provider) back.click();
-        else close(true);
-        return;
-      }
+      if (!active || e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
       if (e.key === "ArrowLeft" && provider && e.target !== search) {
         e.preventDefault();
         back.click();
@@ -986,8 +1004,8 @@
             : i <= 0
               ? rows.length - 1
               : i - 1;
-      rows[next].focus();
-      rows[next].scrollIntoView({ block: "nearest" });
+      rows[next].focus({ preventScroll: true });
+      window.openVibelyScrollIntoPanel(rows[next]);
     },
     true,
   );
@@ -1056,8 +1074,11 @@
           return pending;
         })
         .then(() => {
-          if (btn.dataset.currentValue === payload.modelID && s.error)
-            throw Error(s.error);
+          if (btn.dataset.currentValue === payload.modelID && s.error) {
+            const error = Error(s.error);
+            error.toastOnly = s.permissionError;
+            throw error;
+          }
           if (!form.isConnected) return;
           const draft = message?.value;
           const draftAttachments = attachment?.value;
@@ -1109,8 +1130,10 @@
           }
         })
         .catch((err) => {
-          window.ovModelPicker.open(btn);
-          status.textContent = err.message;
+          if (!err.toastOnly) {
+            window.ovModelPicker.open(btn);
+            status.textContent = err.message;
+          }
           form._chatSubmissionFailed?.(payload);
         });
     },

@@ -19,6 +19,9 @@ func TestDeletionRequestsVacuumOnlyAfterCommit(t *testing.T) {
 			// Production's split reader/writer mapping must deliver the trigger to the
 			// writer worker. Observer sees actual cleanup SQL, not a mocked notifier.
 			reader, writer, counter := testutil.NewFileBackedSplitStatementCountingTestDB(t)
+			if _, err := writer.Exec(`VACUUM`); err != nil {
+				t.Fatal(err)
+			}
 			unregister := RegisterDedicatedWriter(reader, writer)
 			defer unregister()
 			ctx, cancel := context.WithCancel(context.Background())

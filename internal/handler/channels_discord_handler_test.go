@@ -218,8 +218,8 @@ func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 		t.Fatalf("expected discord authorized users cleared for deleted project, got %d err=%v", len(users), err)
 	}
 	otherUsers, err := h.discordAuthRepo.ListByProject(context.Background(), otherProject.ID)
-	if err != nil || len(otherUsers) != 1 || otherUsers[0].DiscordUserID != "67890" {
-		t.Fatalf("expected other-project discord authorized users preserved, got %#v err=%v", otherUsers, err)
+	if err != nil || len(otherUsers) != 0 {
+		t.Fatalf("expected global discord authorized users cleared, got %#v err=%v", otherUsers, err)
 	}
 }
 
@@ -296,7 +296,7 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	listReq := httptest.NewRequest(http.MethodGet, "/channels/discord/authorized-users?project_id="+project.ID, nil)
 	listRec := httptest.NewRecorder()
 	e.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK || !strings.Contains(listRec.Body.String(), `data-project-id="`+project.ID+`"`) || strings.Contains(listRec.Body.String(), "Other Discord User") {
+	if listRec.Code != http.StatusOK || strings.Contains(listRec.Body.String(), `data-project-id=`) || !strings.Contains(listRec.Body.String(), "Other Discord User") {
 		t.Fatalf("selected-project list did not expose only owned rows: %d %q", listRec.Code, listRec.Body.String())
 	}
 
@@ -325,7 +325,7 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	if strings.Contains(delRec.Body.String(), "ID: 12345") {
 		t.Fatalf("expected removed user to disappear from response, got %q", delRec.Body.String())
 	}
-	if strings.Contains(delRec.Body.String(), "Other Discord User") {
+	if !strings.Contains(delRec.Body.String(), "Other Discord User") {
 		t.Fatalf("foreign user appeared in selected-project response, got %q", delRec.Body.String())
 	}
 	deleted, err := h.discordAuthRepo.GetByID(context.Background(), user.ID)
@@ -346,14 +346,14 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	foreignReq := httptest.NewRequest(http.MethodDelete, "/channels/discord/authorized-users/"+otherUser.ID+"?project_id="+project.ID, nil)
 	foreignRec := httptest.NewRecorder()
 	e.ServeHTTP(foreignRec, foreignReq)
-	if foreignRec.Code != http.StatusNotFound {
-		t.Fatalf("expected foreign delete status 404, got %d %q", foreignRec.Code, foreignRec.Body.String())
+	if foreignRec.Code != http.StatusOK {
+		t.Fatalf("expected global delete status 200, got %d %q", foreignRec.Code, foreignRec.Body.String())
 	}
 	remaining, err = h.discordAuthRepo.GetByID(context.Background(), otherUser.ID)
 	if err != nil {
 		t.Fatalf("get foreign discord user after rejected delete: %v", err)
 	}
-	if remaining == nil {
-		t.Fatal("foreign delete removed another project's user")
+	if remaining != nil {
+		t.Fatal("global delete did not remove sender")
 	}
 }

@@ -15,8 +15,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 const maxWebhookBodySize = 1 << 20 // 1 MB
@@ -79,6 +81,9 @@ func (h *Handler) HandleWebhookInbound(c echo.Context) error {
 	summary := extractStringField(payload, "summary", "description", "message", "text", "title")
 
 	task, err := h.createWebhookTaskFromEndpoint(c.Request().Context(), endpoint, eventType, summary, string(body))
+	if errors.Is(err, authz.ErrDenied) {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "endpoint access revoked"})
+	}
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create task"})
 	}
@@ -130,6 +135,20 @@ func (h *Handler) createWebhookTaskFromEndpoint(ctx context.Context, endpoint *m
 	}
 	if h.webhookRepo == nil {
 		return nil, fmt.Errorf("webhook repository not configured")
+	}
+
+	if h.projectAccessSvc != nil {
+		userID := endpoint.RunAsUserID
+		if userID == "" && h.authMode == auth.AuthModeDisabled {
+			userID = models.BootstrapUserID
+		}
+		if userID == "" {
+			return nil, authz.ErrDenied
+		}
+		ctx = models.WithPrincipal(ctx, models.Principal{UserID: userID})
+		if err := h.projectAccessSvc.Require(ctx, endpoint.ProjectID, authz.Manage); err != nil {
+			return nil, err
+		}
 	}
 
 	task := &models.Task{

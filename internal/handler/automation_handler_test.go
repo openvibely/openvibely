@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/auth"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -3883,14 +3884,31 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 }
 
 func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *testing.T) {
+	for _, mode := range []auth.AuthMode{auth.AuthModeDisabled, auth.AuthModeLocal} {
+		t.Run(string(mode), func(t *testing.T) { testGoalAgentAutomationContinuation(t, mode) })
+	}
+}
+
+func testGoalAgentAutomationContinuation(t *testing.T, mode auth.AuthMode) {
 	tc := NewStoreTestContext(t)
+	// Exercise the production authorization wiring, including auth-off's explicit
+	// owner identity. Without it, the fixture queues an empty goal snapshot.
+	access := service.NewProjectAccessService(tc.stores.ProjectAccess)
+	tc.handler.SetProjectAccessService(access)
+	tc.handler.SetAuthMode(mode)
+	tc.handler.SetOrganizationService(service.NewOrganizationService(tc.stores.Organizations, "secret"))
+	tc.handler.SetRunIdentityStore(tc.stores.RunIdentities)
+	tc.handler.taskGoalSvc.SetProjectAuthorization(access, mode == auth.AuthModeDisabled)
 	ctx := context.Background()
+	if mode != auth.AuthModeDisabled {
+		ctx = models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+	}
 	project := tc.CreateProject().WithName("Goal continuation Automation projection").Build()
 	agent := tc.CreateLLMConfig().Build()
 	task := models.Task{ProjectID: project.ID, Title: "Automation implementation", Category: models.CategoryCompleted,
 		Status: models.StatusCompleted, Priority: 2, Prompt: "Implement the approved work", AgentID: &agent.ID}
 	require.NoError(t, tc.taskRepo.Create(ctx, &task))
-	_, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Finish implementation and validation", service.GoalOptions{})
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Finish implementation and validation", service.GoalOptions{})
 	require.NoError(t, err)
 
 	producerTask := models.Task{ProjectID: project.ID, Title: "Automation producer", Category: models.CategoryScheduled,
@@ -3946,7 +3964,7 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	}
 	tc.handler.llmSvc.SetLLMCaller(mock)
 
-	goalContext := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "goal-agent", SystemKind: models.AgentSystemKindGoal})
+	goalContext := lifecycle.WithHookAgent(ctx, lifecycle.HookAgent{AgentID: "goal-agent", SystemKind: models.AgentSystemKindGoal})
 	output, err := tc.handler.executeSendToTaskTool(goalContext, streamingResponseParams{
 		ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true,
 	}, json.RawMessage(`{"task_id":"current","message":"Continue the Automation implementation task."}`))
@@ -3956,6 +3974,11 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	}
 	require.NoError(t, json.Unmarshal([]byte(output), &result))
 	require.NotEmpty(t, result.QueuedMessageID)
+	queued, err := tc.handler.threadInputRepo.GetByID(ctx, result.QueuedMessageID)
+	require.NoError(t, err)
+	require.Equal(t, goal.GoalID, queued.GoalID)
+	require.Equal(t, models.BootstrapUserID, queued.AuthorUserID)
+	require.Equal(t, models.BootstrapUserID, goal.RunAsUserID)
 
 	queuedContext, err := automationRepo.ContextForThreadInput(ctx, project.ID, result.QueuedMessageID)
 	require.NoError(t, err)
@@ -3989,6 +4012,11 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 		require.NoError(t, listErr)
 		t.Fatalf("timed out waiting for queued Automation continuation to start (input status=%s run_exec=%s mock_calls=%d task_execs=%d)", promoted.InputStatus, promoted.RunExecutionID, mock.CallCount(), len(execs))
 	}
+	executor, found, err := tc.stores.RunIdentities.ExecutionUser(ctx, promotedExecID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, goal.RunAsUserID, executor)
+	require.NoError(t, tc.stores.RunIdentities.CheckExecutionGoal(ctx, promotedExecID, task.ID))
 	counts, _, _, err = automationRepo.LiveNodeCounts(ctx, project.ID, definition.Automation.ID, definition.Version.ID, time.Now().UTC().Add(-time.Hour))
 	require.NoError(t, err)
 	require.Equal(t, 1, counts[implementation.ID].Running)
@@ -4007,6 +4035,13 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 		updatedTask, getErr := tc.taskRepo.GetByID(ctx, task.ID)
 		return getErr == nil && updatedTask != nil && updatedTask.Status == models.StatusCompleted
 	}, 2*time.Second, 10*time.Millisecond)
+	// Recovery of this execution must remain tied to this exact goal, even when
+	// the same user replaces the task's goal after completion.
+	replacement, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "A different objective", service.GoalOptions{})
+	require.NoError(t, err)
+	require.NotEqual(t, goal.GoalID, replacement.GoalID)
+	require.ErrorIs(t, tc.stores.RunIdentities.CheckExecutionGoal(ctx, promotedExecID, task.ID), persistence.ErrProjectDenied)
+
 }
 
 func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T) {

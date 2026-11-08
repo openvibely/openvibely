@@ -69,14 +69,12 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 		}
 	})
 
-	t.Run("list validates project and maps repository failure", func(t *testing.T) {
+	t.Run("list is global and maps repository failure", func(t *testing.T) {
 		c, _ := newContext()
-		crud := newCRUD(func(context.Context, string) ([]string, error) {
-			t.Fatal("list should not run without a project")
-			return nil, nil
-		})
-		assertHTTPError(t, crud.listUsers(c, ""), http.StatusBadRequest, "project_id is required")
-
+		crud := newCRUD(func(context.Context, string) ([]string, error) { return nil, nil })
+		if err := crud.listUsers(c, ""); err != nil {
+			t.Fatal(err)
+		}
 		crud = newCRUD(func(context.Context, string) ([]string, error) { return nil, errors.New("database unavailable") })
 		assertHTTPError(t, crud.listUsers(c, "project-1"), http.StatusInternalServerError, "Failed to load authorized users")
 	})
@@ -104,10 +102,9 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 	t.Run("create validates and maps mutation and reload failures", func(t *testing.T) {
 		c, _ := newContext()
 		crud := newCRUD(func(context.Context, string) ([]string, error) { return nil, nil })
-		assertHTTPError(t, crud.createUser(c, "", func(context.Context) error {
-			t.Fatal("create should not run without a project")
-			return nil
-		}), http.StatusBadRequest, "project_id is required")
+		if err := crud.createUser(c, "", func(context.Context) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
 		assertHTTPError(t, crud.createUser(c, "project-1", func(context.Context) error {
 			return errors.New("insert failed")
 		}), http.StatusInternalServerError, "Failed to add authorized user: insert failed")
@@ -116,7 +113,7 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 		assertHTTPError(t, crud.createUser(c, "project-1", func(context.Context) error { return nil }), http.StatusInternalServerError, "Failed to load authorized users")
 	})
 
-	t.Run("delete requires selected project ownership then reloads", func(t *testing.T) {
+	t.Run("delete reloads global list", func(t *testing.T) {
 		c, rec := newContext()
 		deleted := false
 		crud := newCRUD(func(_ context.Context, projectID string) ([]string, error) {
@@ -141,10 +138,7 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 			deleted = true
 			return nil
 		}
-		assertHTTPError(t, crud.deleteUser(c, "user-1", "", lookup, deleteUser), http.StatusBadRequest, "project_id is required")
-		if deleted {
-			t.Fatal("missing project deleted a user")
-		}
+
 		if err := crud.deleteUser(c, "user-1", "record-project", lookup, deleteUser); err != nil {
 			t.Fatalf("deleteUser failed: %v", err)
 		}
@@ -162,12 +156,9 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 		assertHTTPError(t, crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) {
 			return "", false, nil
 		}, func(context.Context, string, string) error { return nil }), http.StatusNotFound, "User not found")
-		assertHTTPError(t, crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) {
-			return "foreign-project", true, nil
-		}, func(context.Context, string, string) error {
-			t.Fatal("foreign user reached delete")
-			return nil
-		}), http.StatusNotFound, "User not found")
+		if err := crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) { return "foreign-project", true, nil }, func(context.Context, string, string) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
 		assertHTTPError(t, crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) {
 			return "project-1", true, nil
 		}, func(context.Context, string, string) error { return errors.New("delete failed") }), http.StatusInternalServerError, "Failed to remove user: delete failed")
@@ -238,7 +229,7 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 		}
 	})
 
-	t.Run("adapter wires selected-project owner-checked deletion", func(t *testing.T) {
+	t.Run("adapter wires global deletion", func(t *testing.T) {
 		type authRecord struct{ ProjectID string }
 		e := echo.New()
 		rec := httptest.NewRecorder()

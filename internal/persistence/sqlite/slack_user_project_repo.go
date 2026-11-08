@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // SlackUserProjectRepo persists active project selection per Slack team/user.
@@ -21,16 +23,39 @@ func NewSlackUserProjectRepo(db *sql.DB) *SlackUserProjectRepo {
 }
 
 func (r *SlackUserProjectRepo) SetUserProject(ctx context.Context, teamID, userID, projectID string) error {
-	_, err := execBoundSQLite(ctx, r.db,
-		`INSERT INTO slack_user_projects (slack_team_id, slack_user_id, project_id, updated_at)
-		 VALUES (?, ?, ?, datetime('now'))
-		 ON CONFLICT(slack_team_id, slack_user_id) DO UPDATE
-		 SET project_id = excluded.project_id, updated_at = datetime('now')`,
-		teamID, userID, projectID)
-	if err != nil {
-		return fmt.Errorf("set slack user project: %w", err)
-	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identity, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+			if identity.TeamID != teamID || identity.ExternalUserID != userID {
+				return persistence.ErrProjectDenied
+			}
+			if err := authorizeSlackHandoff(ctx, tx, identity.EventKey); err != nil {
+				return err
+			}
+			mapped, err := resolveSlackApplicationUser(ctx, tx, projectID, teamID, userID)
+			if err != nil || mapped != actor.UserID {
+				return persistence.ErrProjectDenied
+			}
+		}
+		if identified {
+			role, err := projectRole(ctx, tx, actor.UserID, projectID)
+			if err != nil {
+				return err
+			}
+			if role != "editor" && role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO slack_user_projects (slack_team_id, slack_user_id, project_id, updated_at)
+   VALUES (?, ?, ?, datetime('now')) ON CONFLICT(slack_team_id,slack_user_id) DO UPDATE SET project_id=excluded.project_id,updated_at=datetime('now')`, teamID, userID, projectID)
+		if err != nil {
+			return fmt.Errorf("set slack user project: %w", err)
+		}
+		if identified {
+			return projectAudit(ctx, tx, projectID, actor.UserID, "slack.project_selected", projectID, `{}`)
+		}
+		return nil
+	})
 }
 
 func (r *SlackUserProjectRepo) GetUserProject(ctx context.Context, teamID, userID string) (string, error) {

@@ -68,7 +68,7 @@ func (r *UsageRepo) RecordUsageEvent(ctx context.Context, event *models.LLMUsage
 }
 
 func (r *UsageRepo) GetUsageTotals(ctx context.Context, filter persistence.UsageFilter) (*models.UsageTotals, error) {
-	where, args := usageWhere(filter)
+	where, args := usageWhere(ctx, filter)
 	var totals models.UsageTotals
 	var cost sql.NullFloat64
 	var costCount int
@@ -96,7 +96,7 @@ func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter persistence.UsageF
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getDailyUsageFromScan(ctx, filter, false)
 	}
-	where, args := usageWhere(filter)
+	where, args := usageWhere(ctx, filter)
 	periodExpr := usagePeriodExpression("day")
 	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
@@ -132,7 +132,7 @@ func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter persistence
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getDailyUsageFromScan(ctx, filter, true)
 	}
-	where, args := usageWhere(filter)
+	where, args := usageWhere(ctx, filter)
 	periodExpr := usagePeriodExpression("day")
 	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
@@ -168,7 +168,7 @@ func (r *UsageRepo) GetUsageRateBuckets(ctx context.Context, filter persistence.
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getUsageRateBucketsFromScan(ctx, filter, false)
 	}
-	where, args := usageWhere(filter)
+	where, args := usageWhere(ctx, filter)
 	periodExpr := usagePeriodExpression(filter.GroupBy)
 	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
@@ -197,7 +197,7 @@ func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter persi
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getUsageRateBucketsFromScan(ctx, filter, true)
 	}
-	where, args := usageWhere(filter)
+	where, args := usageWhere(ctx, filter)
 	periodExpr := usagePeriodExpression(filter.GroupBy)
 	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
@@ -223,7 +223,7 @@ func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter persi
 }
 
 func (r *UsageRepo) GetLatestUsageEventTime(ctx context.Context, filter persistence.UsageFilter) (*time.Time, error) {
-	where, args := usageWhere(filter)
+	where, args := usageWhere(ctx, filter)
 	var occurredRaw string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT occurred_at
@@ -244,7 +244,7 @@ func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter persisten
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getModelUsageBreakdownFromScan(ctx, filter)
 	}
-	where, args := usageWhere(filter)
+	where, args := usageWhere(ctx, filter)
 	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT provider, model, COALESCE(SUM(total_tokens), 0), COALESCE(SUM(input_tokens), 0),
@@ -438,7 +438,7 @@ func (r *UsageRepo) getModelUsageBreakdownFromScan(ctx context.Context, filter p
 }
 
 func (r *UsageRepo) forEachUsageAggregateEvent(ctx context.Context, filter persistence.UsageFilter, handle func(usageAggregateEvent)) error {
-	source, where, args := usageAggregateScanSource(filter)
+	source, where, args := usageAggregateScanSource(ctx, filter)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
 		       total_tokens, cost_usd, occurred_at, cache_creation_input_tokens, cache_read_input_tokens, COALESCE(agent_config_id,'')
@@ -469,8 +469,8 @@ func (r *UsageRepo) forEachUsageAggregateEvent(ctx context.Context, filter persi
 	return nil
 }
 
-func usageAggregateScanSource(filter persistence.UsageFilter) (string, string, []any) {
-	where, args := usageWhere(filter)
+func usageAggregateScanSource(ctx context.Context, filter persistence.UsageFilter) (string, string, []any) {
+	where, args := usageWhere(ctx, filter)
 	return "llm_usage_events", where, args
 }
 
@@ -535,7 +535,7 @@ func (r *UsageRepo) GetEvidence(ctx context.Context, filter persistence.UsageFil
 	if strings.TrimSpace(filter.ProjectID) == "" {
 		return nil, 0, fmt.Errorf("usage Analytics evidence project_id is required")
 	}
-	where, args := usageWhere(filter)
+	where, args := usageWhere(ctx, filter)
 	if filter.EvidencePeriod != "" {
 		where += " AND " + usagePeriodExpression(filter.GroupBy) + " = ?"
 		args = append(args, filter.EvidencePeriod)
@@ -580,8 +580,11 @@ func (r *UsageRepo) GetEvidence(ctx context.Context, filter persistence.UsageFil
 	return out, total, rows.Err()
 }
 
-func usageWhere(filter persistence.UsageFilter) (string, []any) {
+func usageWhere(ctx context.Context, filter persistence.UsageFilter) (string, []any) {
 	clauses := []string{"1=1"}
+	if filter.ProjectID == models.AllProjectsID {
+		clauses = append(clauses, accessibleProjectPredicate(ctx, "project_id", false))
+	}
 	args := []any{}
 	if filter.ProjectID != "" && filter.ProjectID != models.AllProjectsID {
 		clauses = append(clauses, "project_id = ?")

@@ -364,7 +364,7 @@ func TestUsageRepo_ProjectDateBoundedAggregatePlansAvoidTempBTree(t *testing.T) 
 		DateTo:    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 		GroupBy:   "day",
 	}
-	source, where, args := usageAggregateScanSource(filter)
+	source, where, args := usageAggregateScanSource(t.Context(), filter)
 	assertNoTempBTree(t, db, "project/date-bounded usage aggregate scan", `
 		SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
 		       total_tokens, cost_usd, occurred_at

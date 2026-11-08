@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
@@ -626,6 +627,47 @@ func TestHostedExchangeHonorsShorterParentDeadlineBeforeRetry(t *testing.T) {
 	}
 	if attempts.Load() != 1 {
 		t.Fatalf("attempts=%d", attempts.Load())
+	}
+}
+
+func TestHostedExchangeCancellationDuringDefaultWait(t *testing.T) {
+	for _, nilSleeper := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nil sleeper=%t", nilSleeper), func(t *testing.T) {
+			var attempts atomic.Int32
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				attempts.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", "2")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = io.WriteString(w, `{"error":"slow_down"}`)
+			}))
+			defer provider.Close()
+
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			waits := 0
+			ctx := httpretry.WithRetryTimer(parent, func(delay time.Duration) <-chan time.Time {
+				waits++
+				if delay != 2*time.Second {
+					t.Errorf("delay=%s want=2s", delay)
+				}
+				// Cancel once the shared wait starts; the timer never fires.
+				cancel()
+				return make(chan time.Time)
+			})
+			client := NewHostedSSOClient(provider.URL, "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
+			if nilSleeper {
+				client.Sleep = nil
+			}
+			identity, err := client.Exchange(ctx, canonicalAuthTestValue("c"), canonicalAuthTestValue("v"))
+			var exchangeErr *ExchangeError
+			if identity != nil || !errors.As(err, &exchangeErr) || exchangeErr.Status != http.StatusTooManyRequests || exchangeErr.Category != "slow_down" {
+				t.Fatalf("identity=%v err=%v", identity, err)
+			}
+			if attempts.Load() != 1 || waits != 1 {
+				t.Fatalf("attempts=%d waits=%d", attempts.Load(), waits)
+			}
+		})
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestAnalyticsContent_OmitsSubtitle(t *testing.T) {
@@ -741,7 +742,7 @@ func TestBrowserFunctional_AnalyticsContent_KPIsFunnelsAndChartsAreDisplayOnlyIn
   history.replaceState({},'',location.pathname+'?project_id=project-1&view=overview');
   var result=document.getElementById('reconnect-result'),charts={},destroyed=0,scrollCalls=0,dashboardRequests=0;
   function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
-  Element.prototype.scrollIntoView=function(){scrollCalls++;};
+  window.openVibelyScrollIntoPanel=function(){scrollCalls++;};
   window.Chart=function(ctx,config){var id=ctx&&ctx.canvas?ctx.canvas.id:'';this.config=config;this.destroy=function(){destroyed++;};if(id)charts[id]=this;};
   function dashboard(){return {definitions:[],current:{technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{numerator:1,denominator:1,percent:100},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0},tasks_evaluated:1},outcome_trend:[{period:'2026-01-10',technical_completion:{percent:100,denominator:1},goal_achievement:{percent:100,denominator:1},first_pass:{percent:100,denominator:1},follow_up:{percent:0,denominator:1}}],funnel:[{key:'created',label:'Created',count:1,denominator:1}],cycle_distribution:[],follow_up_distribution:[],agents:[],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:1,evidence_limit:20,evidence_offset:0,recent_outcomes:[{task_id:'task-1',task_title:'Task One',technical_result:'completed',goal_result:'achieved',merge_state:'',agent_name:'Agent',model:'Model',model_config_ids:[],terminal_period_statuses:['2026-01-10|completed'],category:'completed',created_in_period:true,started_in_period:true,first_pass_eligible:true,first_pass_completed:true,goal_achievement_eligible:true,goal_achieved_in_period:true,cycle_eligible:true,cycle_time_ms:1000,execution_count:1,period_completed_count:1,period_failed_count:0,period_cancelled_count:0,follow_up_count:0}],insights:[]};}
   window.fetch=function(url){var value=String(url),payload=[];if(value.indexOf('/api/analytics/dashboard')>=0){dashboardRequests++;payload=dashboard();}if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};if(value.indexOf('/api/analytics/execution-trends-by-hour')>=0)payload=[{Hour:10,Count:1}];return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
@@ -1478,6 +1479,9 @@ func TestAnalyticsContent_FocusedViewsPreserveExistingMetrics(t *testing.T) {
 
 func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
 	var rendered bytes.Buffer
+	if err := layout.ModalInitialFocus().Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
 	if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project One"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
@@ -1536,7 +1540,8 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(close.parentElement===header&&Math.abs(closeRect.top+closeRect.height/2-fullHeaderRect.top-fullHeaderRect.height/2)<1&&Math.abs(fullHeaderRect.right-closeRect.right)<1,'exit icon is not inline at header right');
    check(dialog.querySelector('select')===select,'model filter was replaced');
    check(dialog.querySelector('canvas')===canvas&&resized>0,'chart was replaced or not resized');
-   check(document.activeElement===dialog,'mouse opening left focus on exit button');
+   check(document.activeElement===card.querySelector('h4'),'mouse opening did not focus the heading');
+   check(getComputedStyle(document.activeElement).outlineStyle==='none','mouse opening highlighted the heading');
    const help=card.querySelector('[data-model-help]'),tip=document.getElementById('ov-shared-tooltip'),tipParent=tip.parentElement;
    help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450)); await tick();
    check(tip.matches(':popover-open')&&tip.textContent===help.dataset.modelHelp,'preview info hover did not show tooltip');
@@ -1565,7 +1570,8 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await new Promise(resolve=>setTimeout(resolve,150));
    check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-preview-plot'),'plot sizing not restored');
    button.click(); await tick();
-   check(document.activeElement===close,'keyboard opening did not focus exit button');
+   check(document.activeElement===card.querySelector('h4'),'keyboard opening did not focus the heading');
+   check(getComputedStyle(document.activeElement).outlineStyle==='none','keyboard opening highlighted the heading');
    let outerEscapes=0;
    const outerEscape=event=>{if(event.key==='Escape')outerEscapes++;};
    window.addEventListener('keydown',outerEscape);
@@ -1862,5 +1868,83 @@ func TestBrowserFunctional_AnalyticsAccountAlerts(t *testing.T) {
  if(!document.getElementById('usage-account-account').classList.contains('ring-primary'))throw Error('target account not highlighted');
  result.dataset.testResult='pass';}catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}});
  </script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_AnalyticsMemberSkipsAccounts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}, false).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<!doctype html><html><body><main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+ window.Chart=function(){this.destroy=function(){};};
+ let forbidden=0;
+ window.fetch=async function(url){
+  const u=new URL(url,location.href), projection=u.searchParams.get('projection');
+  if(projection==='accounts'||projection==='account_limits'||u.pathname.includes('/resets'))forbidden++;
+  return {ok:true,json:async()=>({totals:{},models:[],configuration_breakdown:[],usage_rate:[],accounts:[]})};
+ };
+ window.addEventListener('load',async()=>{
+  const result=document.getElementById('reconnect-result');
+  try {
+   for(let i=0;i<100&&!document.getElementById('accountUsageCards').textContent.includes('organization admins');i++)await new Promise(r=>setTimeout(r,20));
+   if(!document.getElementById('accountUsageCards').textContent.includes('organization admins'))throw new Error('missing permission explanation');
+   document.getElementById('refreshBtn').click();
+   await new Promise(r=>setTimeout(r,100));
+   if(forbidden)throw new Error('member requested account data');
+   result.dataset.testResult='pass';
+  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+ });</script>` + rendered.String() + `</body></html>`
+	runReconnectChromeFixture(t, fixture)
+}
+
+// A usage-alert deep link must reveal the account without scrolling hidden shell
+// ancestors. In the desktop app those ancestors also contain the native title bar.
+func TestBrowserFunctional_AnalyticsAccountLinkPreservesShellPosition(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	content := rendered.String()
+	start := strings.Index(content, "async function loadUsageAccounts(refreshUsage)")
+	end := strings.Index(content, "// Load Success/Failure Rates")
+	if start < 0 || end <= start {
+		t.Fatal("account loading script missing")
+	}
+	fixture := `<!doctype html><html><head><style>
+html,body { margin:0; height:100%; overflow:hidden; }
+#shell { height:400px; overflow:hidden; }
+#titlebar { height:54px; }
+#main-content { height:400px; overflow:auto; border-top:2px solid transparent; }
+.card { height:220px; }
+</style></head><body><div id="shell"><header id="titlebar">Project tabs</header><main id="main-content"><div style="height:300px">Analytics</div><div id="accountUsageCards"></div><div style="height:500px"></div></main></div><div id="reconnect-result"></div><script>
+history.replaceState({},'',location.pathname+'?account_key=anthropic');
+const dataGeneration=1;
+function usageEvidenceParams(){return new URLSearchParams();}
+function escapeHTML(s){return s;}
+async function fetchJSON(url){return {accounts:[{key:'first',provider:'openai'},{key:'second',provider:'openai'},{key:'anthropic',provider:'anthropic'}]};}
+function renderAccountUsageCards(){}
+` + content[start:end] + `
+(async()=>{
+ const result=document.getElementById('reconnect-result');
+ try {
+  const panel=document.getElementById('main-content');
+  const title=document.getElementById('titlebar');
+  const originalTop=title.getBoundingClientRect().top;
+  for(let attempt=0;attempt<2;attempt++) {
+   panel.scrollTop=0;
+   await loadUsageAccounts(false);
+   const card=document.getElementById('usage-account-anthropic');
+   if(!card.classList.contains('ring-primary'))throw Error('linked account not highlighted');
+   if(panel.scrollTop<=0)throw Error('account was not revealed');
+   if(title.getBoundingClientRect().top!==originalTop)throw Error('title bar moved');
+   if(document.getElementById('shell').scrollTop||document.documentElement.scrollTop||document.body.scrollTop)throw Error('outer shell scrolled');
+   const bounds=card.getBoundingClientRect(), viewport=panel.getBoundingClientRect();
+   if(bounds.top<viewport.top+panel.clientTop||bounds.bottom>viewport.bottom)throw Error('linked account outside content viewport');
+  }
+  result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+})();</script></body></html>`
 	runReconnectChromeFixture(t, fixture)
 }

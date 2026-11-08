@@ -1,0 +1,27 @@
+package layout
+
+// Keep native dialog autofocus off the close button without removing it from keyboard navigation.
+templ ModalInitialFocus() {
+ <style>
+  dialog [data-modal-initial-focus]:focus { outline: none !important; box-shadow: none !important; }
+ </style>
+ <script>
+ (function() {
+  var initialized = new WeakSet();
+  document.addEventListener('focusin', function(event) {
+   var dialog = event.target.closest && event.target.closest('dialog[open]');
+   if (!dialog || initialized.has(dialog)) return;
+   initialized.add(dialog);
+   if (!event.target.matches('.ov-modal-close')) return;
+   var heading = dialog.querySelector('h1, h2, h3, h4, h5, h6, [data-editor-title], [data-result-title]');
+   if (!heading) return;
+   heading.setAttribute('tabindex', '-1');
+   heading.setAttribute('data-modal-initial-focus', '');
+   heading.focus({preventScroll: true});
+  });
+  document.addEventListener('close', function(event) {
+   if (event.target.matches('dialog')) initialized.delete(event.target);
+  }, true);
+ })();
+ </script>
+}

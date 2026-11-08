@@ -1,14 +1,15 @@
 package pages
 
 import (
-	"github.com/openvibely/openvibely/internal/models"
+	"fmt"
+ "github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
  templateui "github.com/openvibely/openvibely/web/templates"
 )
 
-templ Analytics(projects []models.Project, currentProject *models.Project) {
+templ Analytics(projects []models.Project, currentProject *models.Project, accountAccess ...bool) {
 	@layout.Base("Analytics", projects, projectID(currentProject)) {
-		@analyticsContent(currentProject)
+		@analyticsContent(currentProject, accountAccess...)
 	}
 }
 
@@ -102,11 +103,11 @@ templ analyticsChartCard(title, description, canvasID, heightClass string) {
 }
 
 // AnalyticsContent renders just the analytics content for HTMX requests
-templ AnalyticsContent(currentProject *models.Project) {
-	@analyticsContent(currentProject)
+templ AnalyticsContent(currentProject *models.Project, accountAccess ...bool) {
+	@analyticsContent(currentProject, accountAccess...)
 }
 
-templ analyticsContent(currentProject *models.Project) {
+templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
 	<div data-page-header class="flex justify-between items-center mb-6">
  @templateui.Tooltips()
 		@layout.PageTitle("Analytics")
@@ -263,7 +264,7 @@ templ analyticsContent(currentProject *models.Project) {
 							@analyticsKPICard(label, "usage")
 						}
 					</div>
-					<div><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
+					<div><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" data-account-access={ fmt.Sprint(len(accountAccess) == 0 || accountAccess[0]) } style="min-height:12rem">
 						<p class="text-center opacity-50 py-12 lg:col-span-2">Loading analytics…</p>
 					</div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div data-analytics-chart-controls>@analyticsChartHeading("Token Usage", "Recorded tokens by usage date. Includes task and other project activity. Colors identify the same provider/model across charts.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Total recorded tokens per configuration. Aliases stay separate; usage without a linked configuration remains included.", "modelTokenBreakdownChart", "h-64")</div>
@@ -333,7 +334,7 @@ templ analyticsContent(currentProject *models.Project) {
 						 dialog.setAttribute('data-analytics-preview', '');
 						 dialog.tabIndex = -1;
 						 const close = document.createElement('button');
-						 close.type = 'button'; close.className = 'btn btn-ghost btn-circle btn-xs shrink-0';
+						 close.type = 'button'; close.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';
 						 close.setAttribute('aria-label', 'Close graph preview'); close.setAttribute('data-tooltip-disabled', '');
 						 close.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>';
 						 dialog.appendChild(close); document.body.appendChild(dialog);
@@ -383,11 +384,13 @@ templ analyticsContent(currentProject *models.Project) {
 						   active = {card, placeholder, button, plot, region};
 						   plot.setAttribute('data-analytics-preview-plot', '');
 						   region.setAttribute('data-analytics-preview-region', '');
-						   dialog.setAttribute('aria-label', card.querySelector('h4').textContent + ' preview');
+						   const title = card.querySelector('h4');
+						   dialog.setAttribute('aria-label', title.textContent + ' preview');
+						   title.setAttribute('tabindex', '-1');
+						   title.setAttribute('data-modal-initial-focus', '');
 						   button.before(close);
 						   dialog.appendChild(card); dialog.showModal(); resize(card);
-						   if (event.detail > 0) dialog.focus({preventScroll:true});
-						   else close.focus({preventScroll:true});
+						   title.focus({preventScroll:true});
 						  }, {signal:eventSignal});
 						 });
 						 eventSignal.addEventListener('abort', () => { restore(); dialog.close(); dialog.remove(); }, {once:true});
@@ -1902,6 +1905,11 @@ templ analyticsContent(currentProject *models.Project) {
                                     }
 									async function loadUsageAccounts(refreshUsage) {
 										const target=document.getElementById('accountUsageCards'), generation=dataGeneration;
+                                        if(target.dataset.accountAccess==='false'){
+                                            target.removeAttribute('aria-busy');
+                                            target.textContent='Account limits and usage resets are available to organization admins and owners.';
+                                            return;
+                                        }
 										try {
 											const params=usageEvidenceParams();params.set('projection','accounts');
 											const inventory=await fetchJSON('/api/analytics/usage?'+params.toString());
@@ -1917,7 +1925,7 @@ templ analyticsContent(currentProject *models.Project) {
                                                 target.appendChild(card);
                                                 if (new URLSearchParams(window.location.search).get('account_key') === account.key) {
                                                     card.classList.add('ring-2', 'ring-primary');
-                                                    card.scrollIntoView({block: 'center'});
+                                                    window.openVibelyScrollIntoPanel(card, {container: card.closest('#main-content'), block: 'center'});
                                                 }
                                                 return card;
 											});

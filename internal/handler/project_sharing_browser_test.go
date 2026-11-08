@@ -1,0 +1,443 @@
+package handler
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/stretchr/testify/require"
+)
+
+func TestProjectSharingPanelInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	ctx := t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(stores.ProjectAccess))
+	org := service.NewOrganizationService(stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	project := createProject(t, h, "Browser Sharing")
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := org.Accept(ctx, token, "browser-member", "long-password-value", "")
+	require.NoError(t, err)
+
+	result := make(chan string, 1)
+	runner := `<script>(async function(){
+ const wait=(p,label)=>new Promise((resolve,reject)=>{const end=Date.now()+15000;(function poll(){let v=null;try{v=p()}catch(e){}if(v&&!document.querySelector('.htmx-request,.htmx-settling,.htmx-swapping'))return resolve(v);if(Date.now()>end)return reject(Error('timeout: '+label));setTimeout(poll,30)})();});
+ const assert=(ok,msg)=>{if(!ok)throw Error(msg)};
+ const panel=()=>document.getElementById('project-sharing');
+ const reopen=async()=>{const previous=panel();document.getElementById('project-settings-btn').click();await wait(()=>panel()!==previous&&panel(),'reopen settings');document.getElementById('edit-project-sharing-tab').click();};
+ const rows=()=>Array.from(panel().querySelectorAll('tbody tr')).filter(r=>r.closest('details')===null);
+ let confirmQuestion='';
+ try {
+  window.openVibelyConfirm=q=>{confirmQuestion=q;return Promise.resolve(true)};
+  document.getElementById('project-settings-btn').click();
+  await wait(()=>document.getElementById('edit-project-sharing-tab')&&panel(),'sharing panel load');
+  assert(document.getElementById('edit-project-sharing').hidden,'sharing should start hidden');
+  const box=document.querySelector('#edit_project_modal > .modal-box');
+  const generalHeight=box.getBoundingClientRect().height;
+  document.getElementById('edit-project-knowledge-tab').click();
+  assert(Math.abs(box.getBoundingClientRect().height-generalHeight)<2,'knowledge changed modal height');
+  document.getElementById('edit-project-sharing-tab').click();
+  assert(!document.getElementById('edit-project-sharing').hidden,'sharing tab did not open');
+  assert(!panel().closest('form'),'sharing forms must not nest in settings form');
+  assert(Math.abs(box.getBoundingClientRect().height-generalHeight)<2,'sharing changed modal height');
+  assert(!panel().querySelector('[data-sharing-delete]').hidden,'Sharing must include Delete Project');
+  assert(!panel().querySelector('[data-sharing-status]'),'unneeded pending status');
+  const heading=panel().querySelector('h3'), description=heading.nextElementSibling;
+  assert(getComputedStyle(heading).marginBottom==='8px','heading spacing differs from mock');
+  assert(getComputedStyle(description).marginBottom==='20px','description spacing differs from mock');
+  const cell=panel().querySelector('.sharing-members td');
+  assert(getComputedStyle(cell).paddingTop==='14px','row spacing differs from mock');
+  assert(getComputedStyle(cell).borderBottomWidth==='1px','missing row divider');
+  assert(panel().querySelector('[data-sharing-add-role]').getBoundingClientRect().height===36,'control height differs from mock');
+  assert(panel().querySelector('[data-sharing-add-role]').getBoundingClientRect().width===150,'role width differs from mock');
+  assert(panel().textContent.includes('(you)'),'current user label missing');
+  assert(panel().textContent.includes('Organization owner'),'organization role missing');
+
+  assert(panel().querySelector('[data-sharing-save]').textContent.trim()==='Save','inconsistent Save label');
+  assert(!panel().querySelector('[data-sharing-save]').disabled,'Save must be enabled without membership changes');
+  assert(panel().querySelector('[data-sharing-cancel]').className===document.getElementById('edit-project-cancel-button').className,'inconsistent Cancel style');
+  assert(document.getElementById('edit-project-save-button').closest('.modal-action').hidden,'general Save must hide on Sharing');
+  document.getElementById('edit-project-general-tab').click();
+  assert(document.getElementById('edit-project-sharing').hidden,'sharing did not hide on General');
+  assert(!document.getElementById('edit-project-save-button').closest('.modal-action').hidden,'general Save was not restored');
+  document.getElementById('edit-project-sharing-tab').click();
+  assert(!panel().querySelector('select[name=org_role]'),'organization-wide access must not be offered');
+  const add=panel().querySelector('[data-sharing-form]');
+  add.querySelector('[data-sharing-add-user]').value='` + member.UserID + `';
+  add.querySelector('[data-sharing-add-role]').value='maintainer';
+  add.querySelector('[data-sharing-add]').click();
+  assert(rows().some(r=>r.textContent.includes('browser-member')),'pending member missing');
+  assert(!panel().querySelector('[data-sharing-save]').disabled,'Save not enabled');
+  assert(panel().querySelector('[data-sharing-transfer-toggle]').disabled,'pending changes must block ownership transfer');
+  panel().querySelector('[data-sharing-cancel]').click();
+  assert(!rows().some(r=>r.textContent.includes('browser-member')),'Cancel retained pending member');
+  document.getElementById('edit_project_modal').showModal();
+  add.querySelector('[data-sharing-add-user]').value='` + member.UserID + `';
+  add.querySelector('[data-sharing-add]').click();
+  // The real endpoint rejects an invalid member without partially saving the draft.
+  add.elements.changes.value=JSON.stringify({'` + member.UserID + `':'maintainer','missing-member':'viewer'});
+  panel().querySelector('[data-sharing-save]').click();
+  await wait(()=>!panel().querySelector('[data-sharing-save]').disabled,'failed save preserves draft');
+  assert(document.getElementById('edit_project_modal').open,'failed save closed modal');
+  assert(panel().querySelector('[data-sharing-form]')===add,'failed save replaced the form');
+  assert(rows().some(r=>r.textContent.includes('browser-member')),'failed save lost draft');
+  add.dispatchEvent(new Event('change',{bubbles:true}));
+  panel().querySelector('[data-sharing-save]').click();
+  await wait(()=>!document.getElementById('edit_project_modal').open,'save closes modal');
+  await reopen();
+  const memberRow=rows().find(r=>r.textContent.includes('browser-member'));
+  assert(memberRow.querySelector('select').value==='maintainer','saved role wrong');
+  memberRow.querySelector('select').value='viewer';
+  memberRow.querySelector('select').dispatchEvent(new Event('change',{bubbles:true}));
+  panel().querySelector('[data-sharing-save]').click();
+  await wait(()=>!document.getElementById('edit_project_modal').open,'role save closes modal');
+  await reopen();
+  assert(rows().find(r=>r.textContent.includes('browser-member')).querySelector('select').value==='viewer','role edit not persisted');
+  rows().find(r=>r.textContent.includes('browser-member')).querySelector('button').click();
+  assert(!panel().querySelector('[data-sharing-save]').disabled,'removal not pending');
+  panel().querySelector('[data-sharing-save]').click();
+  await wait(()=>!document.getElementById('edit_project_modal').open,'removal save closes modal');
+  await reopen();
+  assert(!rows().some(r=>r.textContent.includes('browser-member')),'removal not persisted');
+  const audit=panel().querySelector('details');
+  assert(audit&&audit.querySelectorAll('tbody tr').length>=2,'audit rows missing');
+  const transferPanel=panel().querySelector('[data-sharing-transfer-panel]');
+  assert(transferPanel.hidden,'transfer controls should start hidden');
+  panel().querySelector('[data-sharing-transfer-toggle]').click();
+  assert(!transferPanel.hidden,'transfer controls did not expand');
+  const transfer=panel().querySelector('[data-sharing-transfer] button');
+  assert(transfer&&!transfer.disabled,'owner transfer unavailable');
+  transfer.form.querySelector('select[name=user_id]').value='` + member.UserID + `';
+  transfer.click();
+  await wait(()=>panel()&&Array.from(panel().querySelectorAll('p strong')).some(n=>n.textContent.trim()==='browser-member'),'transfer completes');
+  assert(!panel().querySelector('select[aria-label="New owner"] option[value="` + member.UserID + `"]'),'new owner still offered as transfer target');
+  assert(confirmQuestion.includes('Transfer ownership'),'transfer was not confirmed');
+  await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'pass'},body:'ok',keepalive:true});
+ } catch(e) {
+  await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'fail'},body:String(e&&e.stack||e)+'\n'+'confirm='+confirmQuestion+' '+(panel()?panel().outerHTML.slice(-1800):'no panel'),keepalive:true});
+ }
+})();</script>`
+
+	owner := models.Principal{UserID: models.BootstrapUserID}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ":" + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, r.WithContext(models.WithPrincipal(r.Context(), owner)))
+		for key, values := range recorder.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorder.Code)
+		body := recorder.Body.String()
+		if r.Header.Get("HX-Request") == "" {
+			body = strings.Replace(body, "</body>", runner+"</body>", 1)
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
+		"--window-size=1280,900", server.URL+"/tasks?project_id="+project.ID,
+	)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(t, cmd)
+		}
+	}()
+	select {
+	case outcome := <-result:
+		stopHandlerBrowserProcess(t, cmd)
+		stopped = true
+		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
+	case <-time.After(60 * time.Second):
+		t.Fatal("project sharing browser test timed out")
+	}
+	policy, err := stores.ProjectAccess.Get(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "org", policy.Visibility)
+	require.Equal(t, "editor", policy.OrgRole)
+	require.Equal(t, member.UserID, policy.OwnerUserID)
+	members, err := stores.ProjectAccess.Members(ctx, project.ID)
+	require.NoError(t, err)
+	for _, m := range members {
+		require.NotEqual(t, member.UserID, m.UserID, "removed grant persisted")
+	}
+}
+
+func TestProjectSharingTransferPreservesModalInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	ctx := t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(stores.ProjectAccess))
+	org := service.NewOrganizationService(stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	project := createProject(t, h, "Browser Sharing")
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := org.Accept(ctx, token, "browser-member", "long-password-value", "")
+	require.NoError(t, err)
+
+	policyBefore, err := stores.ProjectAccess.Get(ctx, project.ID)
+	require.NoError(t, err)
+	policyBefore.OwnerUserID = member.UserID
+	require.NoError(t, h.projectAccessSvc.Update(models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID}), *policyBefore))
+	result := make(chan string, 1)
+	// Wait for HTMX to finish processing swapped markup before submitting its
+	// forms. Element presence alone can race initialization and cause a native
+	// navigation instead of the fragment request this test expects.
+	runner := `<script>(async()=>{const wait=(p,label)=>new Promise((ok,bad)=>{const end=Date.now()+15000;(function poll(){try{if(p()&&!document.querySelector('.htmx-request,.htmx-settling,.htmx-swapping'))return ok()}catch(e){return bad(e)}if(Date.now()>end)return bad(Error('timeout: '+label));setTimeout(poll,30)})()});try{
+window.openVibelyConfirm=()=>Promise.resolve(true);
+document.getElementById('project-settings-btn').click();await wait(()=>document.querySelector('[data-sharing-transfer-toggle]'),'sharing panel initialized');
+document.getElementById('edit-project-sharing-tab').click();
+const box=document.querySelector('#edit_project_modal > .modal-box');const before=box.getBoundingClientRect().height;
+document.querySelector('[data-sharing-transfer-toggle]').click();
+document.querySelector('[data-sharing-transfer] select').value='local-owner';document.querySelector('[data-sharing-transfer] button').click();
+await wait(()=>document.querySelector('#project-sharing [data-sharing-close]'),'ownership transfer completed');
+const after=box.getBoundingClientRect().height;
+if(Math.abs(before-after)>=2)throw Error('modal resized: '+before+' -> '+after);
+if(document.querySelector('#project-sharing form, #project-sharing [data-sharing-save], #project-sharing [data-sharing-delete]'))throw Error('sharing controls remained');
+const close=document.querySelector('[data-sharing-close]');if(!close)throw Error('Close missing');
+close.click();if(document.getElementById('edit_project_modal').open)throw Error('Close did not dismiss modal');
+await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':Math.abs(before-after)<2?'pass':'fail'},body:JSON.stringify({before,after})});
+}catch(e){await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'fail'},body:String(e)})}})();</script>`
+
+	owner := member.Principal
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ":" + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, r.WithContext(models.WithPrincipal(r.Context(), owner)))
+		for key, values := range recorder.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorder.Code)
+		body := recorder.Body.String()
+		if r.Header.Get("HX-Request") == "" {
+			body = strings.Replace(body, "</body>", runner+"</body>", 1)
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
+		"--window-size=1280,900", server.URL+"/tasks?project_id="+project.ID,
+	)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(t, cmd)
+		}
+	}()
+	select {
+	case outcome := <-result:
+		stopHandlerBrowserProcess(t, cmd)
+		stopped = true
+		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
+	case <-time.After(60 * time.Second):
+		t.Fatal("project sharing browser test timed out")
+	}
+	policy, err := stores.ProjectAccess.Get(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "org", policy.Visibility)
+	require.Equal(t, "editor", policy.OrgRole)
+	require.Equal(t, models.BootstrapUserID, policy.OwnerUserID)
+	members, err := stores.ProjectAccess.Members(ctx, project.ID)
+	require.NoError(t, err)
+	for _, m := range members {
+		require.NotEqual(t, member.UserID, m.UserID, "removed grant persisted")
+	}
+}
+
+func TestProjectSettingsSaveAcrossTabsInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	ctx := t.Context()
+	h.SetProjectAccessService(service.NewProjectAccessService(stores.ProjectAccess))
+	org := service.NewOrganizationService(stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	h.SetGitHubService(&fakeGitHubService{recloneFn: func(context.Context, string, string, string) (string, string, error) {
+		return "", "", errors.New("github personal access token is not configured")
+	}})
+	project := createProject(t, h, "Browser Sharing")
+	project.RepoPath = t.TempDir()
+	require.NoError(t, h.projectSvc.Update(ctx, project))
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := org.Accept(ctx, token, "browser-member", "long-password-value", "")
+	require.NoError(t, err)
+
+	result := make(chan string, 1)
+	runner := `<script>(async()=>{
+const wait=p=>new Promise((ok,bad)=>{let n=0;const timer=setInterval(()=>{if(p()&&!document.querySelector('.htmx-request,.htmx-settling,.htmx-swapping')){clearInterval(timer);ok()}else if(++n>400){clearInterval(timer);bad(Error('timeout'))}},30)});
+const assert=(v,m)=>{if(!v)throw Error(m)};
+try {
+const phase=Number(sessionStorage.getItem('cross-tab-phase')||0);
+document.getElementById('project-settings-btn').click();await wait(()=>document.querySelector('[data-sharing-save]'));
+const dialog=document.getElementById('edit_project_modal'),form=dialog.querySelector('form[hx-put]'),sharing=dialog.querySelector('[data-sharing-form]');
+if(phase===0){
+const originalSource=form.elements.repo_source.value, originalURL=form.elements.repo_url.value;
+form.elements.repo_source.value='github';form.elements.repo_source.dispatchEvent(new Event('change',{bubbles:true}));
+form.elements.repo_url.value='https://github.com/openvibely/openvibely';
+await dialog.saveProjectSettings();
+assert(dialog.open,'failed clone closed settings');
+const links=document.querySelectorAll('#toast-container .toast-action-link');
+assert(links.length===1&&links[0].getAttribute('href')==='/channels'&&links[0].textContent==='Open Channels','missing GitHub setup toast link');
+assert(!dialog.querySelector('[data-sharing-save]').disabled,'failed clone left Save disabled');
+form.elements.repo_source.value=originalSource;form.elements.repo_source.dispatchEvent(new Event('change',{bubbles:true}));form.elements.repo_url.value=originalURL;
+}
+if(phase>0){
+assert(form.elements.description.value==='cross-tab-'+(phase-1),'General changes were lost');
+assert(form.elements.read_skills.checked===(phase%2===0),'Skills changes were lost');
+const row=sharing.querySelector('[data-sharing-user="` + member.UserID + `"]');
+assert(row&&row.querySelector('select').value===(phase===2?'maintainer':'viewer'),'Sharing changes were lost');
+}
+if(phase===3){await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'pass'},body:'all three tab saves persisted all changes'});return;}
+form.elements.description.value='cross-tab-'+phase;
+document.getElementById('edit-project-knowledge-tab').click();form.elements.read_skills.checked=phase%2===1;
+document.getElementById('edit-project-sharing-tab').click();
+if(phase===0){sharing.querySelector('[data-sharing-add-user]').value='` + member.UserID + `';sharing.querySelector('[data-sharing-add]').click();}
+else {const select=sharing.querySelector('[data-sharing-user="` + member.UserID + `"] select');select.value=phase===1?'maintainer':'viewer';select.dispatchEvent(new Event('change',{bubbles:true}));}
+if(phase===0){
+const originalName=form.elements.name.value;form.elements.name.value='';
+await dialog.saveProjectSettings();
+assert(dialog.open,'invalid General settings closed modal');
+assert(sharing.querySelector('[data-sharing-user="` + member.UserID + `"]'),'validation lost Sharing draft');
+form.elements.name.value=originalName;
+}
+if(phase===1){
+sharing.elements.changes.value=JSON.stringify({'missing-user':'viewer'});
+await dialog.saveProjectSettings();
+assert(dialog.open,'failed Sharing save closed modal');
+assert(getComputedStyle(dialog.querySelector('[data-sharing-save] .loading')).display==='none','spinner remained after failure');
+assert(!dialog.querySelector('[data-sharing-save]').disabled,'Save remained disabled after failure');
+assert(form.elements.description.value==='cross-tab-1','failed save lost General draft');
+assert(sharing.querySelector('[data-sharing-user="` + member.UserID + `"] select').value==='maintainer','failed save lost Sharing draft');
+sharing.dispatchEvent(new Event('change',{bubbles:true}));
+}
+const tab=['general','knowledge','sharing'][phase];document.querySelector('[data-project-tab="'+tab+'"]').click();
+sessionStorage.setItem('cross-tab-phase',String(phase+1));
+const saveButton=tab==='sharing'?dialog.querySelector('[data-sharing-save]'):document.getElementById('edit-project-save-button');
+saveButton.click();
+assert(saveButton.disabled,'Save must be disabled during request');
+assert(getComputedStyle(saveButton.querySelector('.loading')).display!=='none','saving spinner missing');
+assert(getComputedStyle(saveButton.querySelector('.edit-project-save-busy-label')).display!=='none','saving label missing');
+assert(saveButton.querySelector('.edit-project-save-busy-label').textContent==='Saving...','wrong saving label');
+await new Promise(r=>setTimeout(r,10000));throw Error('Save did not reload after saving all tabs');
+}catch(e){await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'fail'},body:String(e)})}
+})();</script>`
+
+	owner := models.Principal{UserID: models.BootstrapUserID}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ":" + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, r.WithContext(models.WithPrincipal(r.Context(), owner)))
+		for key, values := range recorder.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorder.Code)
+		body := recorder.Body.String()
+		if r.Header.Get("HX-Request") == "" {
+			body = strings.Replace(body, "</body>", runner+"</body>", 1)
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
+		"--window-size=1280,900", server.URL+"/tasks?project_id="+project.ID,
+	)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(t, cmd)
+		}
+	}()
+	select {
+	case outcome := <-result:
+		stopHandlerBrowserProcess(t, cmd)
+		stopped = true
+		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
+	case <-time.After(60 * time.Second):
+		t.Fatal("project sharing browser test timed out")
+	}
+	members, err := stores.ProjectAccess.Members(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, members, 1)
+	require.Equal(t, "viewer", members[0].Role)
+}

@@ -490,6 +490,38 @@ window.addEventListener('DOMContentLoaded', function() {
         location.href = '/schedule?project_id=project-card-drag-cursor';
         return;
       }
+      // Exercise real selection controls after replacement but before HTMX settle.
+      // The pending snapshot must not undo newer user input at afterSettle.
+      for (var selectionChange of ['checkbox', 'clear', 'modifier']) {
+        var selectionCard = document.querySelector('#task-task-drag-cursor');
+        selectionCard.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+        if (!window.kanbanSelection.has('task-drag-cursor')) fail('selection race setup failed');
+        var selectionChanged = false, selectionSettled = false, selectionError = '';
+        var changeAfterSwap = function(event) {
+          if (!event.detail.target || event.detail.target.id !== 'kanban-board') return;
+          document.removeEventListener('htmx:afterSwap', changeAfterSwap);
+          var card = document.querySelector('#task-task-drag-cursor');
+          var checkbox = card.querySelector('[data-kanban-checkbox] input');
+          if (!checkbox.checked) selectionError = 'selection was not restored at swap';
+          if (selectionChange === 'checkbox') checkbox.click();
+          else if (selectionChange === 'clear') window.kanbanClearSelection();
+          else card.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+          if (window.kanbanSelection.has('task-drag-cursor')) selectionError = 'selection change did not apply';
+          selectionChanged = true;
+        };
+        var selectionAfterSettle = function(event) {
+          if (!event.detail.target || event.detail.target.id !== 'kanban-board') return;
+          document.removeEventListener('htmx:afterSettle', selectionAfterSettle);
+          selectionSettled = true;
+        };
+        document.addEventListener('htmx:afterSwap', changeAfterSwap);
+        document.addEventListener('htmx:afterSettle', selectionAfterSettle);
+        await htmx.ajax('GET', '/refresh-kanban?state=persisted', {target:'#kanban-board', swap:'outerHTML settle:100ms'});
+        await waitFor(function() { return selectionSettled; }, selectionChange + ' selection settle');
+        if (!selectionChanged || selectionError) fail(selectionChange + ': ' + (selectionError || 'missing swap'));
+        selectionCard = document.querySelector('#task-task-drag-cursor');
+        if (window.kanbanSelection.has('task-drag-cursor') || selectionCard.classList.contains('task-selected') || selectionCard.querySelector('[data-kanban-checkbox] input').checked) fail(selectionChange + ' deselection was overwritten during settle');
+      }
       var selectedTask = document.querySelector('#task-task-drag-cursor');
       var selectedActiveTask = document.querySelector('#task-task-active-status-drag');
       selectedTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
@@ -898,6 +930,7 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
+    var permissionToasts=[];
     var first = document.querySelector('[data-schedule-id="schedule-multi-a"]');
     var second = document.querySelector('[data-schedule-id="schedule-multi-b"]');
     var single = document.querySelector('[data-schedule-id="schedule-single-c"]');
@@ -924,6 +957,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (firstSelectionStroke.left !== '-2px') fail('schedule selection must cover the card own left accent border: left=' + firstSelectionStroke.left);
     var firstRect = first.getBoundingClientRect(), secondRect = second.getBoundingClientRect();
     if (firstRect.bottom > secondRect.top) fail('selected schedules in one time block must not overlap');
+    window.showToast=function(message){permissionToasts.push(message);};
     var source = first.closest('.drop-zone');
     var targetHour = Number(source.dataset.hour) + 4;
     var target = document.querySelector('.drop-zone[data-date="' + source.dataset.date + '"][data-hour="' + targetHour + '"]');
@@ -938,6 +972,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (first.classList.contains('schedule-selected') || second.classList.contains('schedule-selected')) fail('drag completion must clear schedule selection');
     await new Promise(function(resolve) { setTimeout(resolve, 20); });
 
+    await waitFor(function(){return permissionToasts.length>0;}, 'permission toast');
+    if(permissionToasts.length!==1)fail('duplicate toasts: '+JSON.stringify(permissionToasts));
+    if(permissionToasts[0]!=='Editor access required')fail('wrong permission toast: '+JSON.stringify(permissionToasts));
     click(first, true); click(second, true);
     drop = await drag(second, target, 32);
     second.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:32,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
@@ -961,6 +998,8 @@ window.addEventListener('DOMContentLoaded', function() {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
+		case "/ui/preferences":
+			w.WriteHeader(http.StatusNoContent)
 		case "/htmx-2.0.11.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
@@ -994,7 +1033,9 @@ window.addEventListener('DOMContentLoaded', function() {
 			attempt := groupAttempts
 			mu.Unlock()
 			if attempt == 1 {
-				http.Error(w, "forced grouped failure", http.StatusInternalServerError)
+				// Match the explicit role-denial contract emitted by projectAccessResponse.
+				w.Header().Set("X-OpenVibely-Permission-Denied", "true")
+				http.Error(w, `{"message":"Editor access required"}`, http.StatusForbidden)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)

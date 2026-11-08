@@ -20,6 +20,16 @@ func (h *Handler) Analytics(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	applog.Debugf("[handler] Analytics requested, project_id=%s, htmx=%v", c.QueryParam("project_id"), isHTMX)
 
+	accountAccess := false
+	if h.organizationSvc != nil {
+		if principal, ok := models.PrincipalFromContext(c.Request().Context()); ok {
+			user, err := h.organizationSvc.Store.UserByID(c.Request().Context(), principal.UserID)
+			if err != nil {
+				return err
+			}
+			accountAccess = user != nil && !user.Disabled && user.IsOrgAdmin()
+		}
+	}
 	projectID := c.QueryParam("project_id")
 
 	// For HTMX requests, we still need to get projects for the current project lookup.
@@ -49,10 +59,10 @@ func (h *Handler) Analytics(c echo.Context) error {
 
 	// For HTMX requests, return just the analytics content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.AnalyticsContent(currentProject))
+		return render(c, http.StatusOK, pages.AnalyticsContent(currentProject, accountAccess))
 	}
 
-	return render(c, http.StatusOK, pages.Analytics(projects, currentProject))
+	return render(c, http.StatusOK, pages.Analytics(projects, currentProject, accountAccess))
 }
 
 // GetAnalyticsUsage returns detailed LLM usage analytics.

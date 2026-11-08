@@ -550,7 +550,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					data-card-sort-name="Telegram Bot"
 					data-card-select-id="channel:telegram"
 					data-card-select-eligible="true"
-					hidden?={ !channelCardMatchesFilters(view, "telegram", strings.TrimSpace(view.TelegramToken) != "", view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) }
+					hidden?={ !channelCardMatchesFilters(view, "telegram", view.HasTelegramChannel, view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) }
 					data-channel-token={ view.TelegramToken }
 					data-channel-running={ templ.JSONString(view.IsBotRunning) }
 					data-search-card
@@ -834,7 +834,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 			<dialog id="x_config_modal" class="modal">
 				<div class="modal-box max-w-2xl">
-					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration">×</button>
+					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
 					<h3 class="font-bold text-lg mb-2">Configure X (formerly Twitter)</h3>
 					<div class="alert alert-info text-sm mb-4"><span>Requires an X developer app with OAuth 1.0a user authentication and read/write permissions. Mention polling and posting remain subject to your X API access tier. OpenVibely cannot create or upgrade provider credentials.</span></div>
 					<form method="post" action="/channels/x/configure" hx-post="/channels/x/configure" hx-swap="none" class="space-y-3">
@@ -850,6 +850,7 @@ templ settingsContent(view ChannelsSettingsView) {
 						<div class="flex items-center justify-between"><div><button type="button" class="btn btn-outline btn-sm" hx-post="/channels/x/test" hx-target="#x-test-feedback" hx-swap="innerHTML">Test connection</button><span id="x-test-feedback" class="ml-2"></span></div><div class="flex gap-2"><button type="button" class="btn btn-ghost" onclick="closeXConfigModal()">Cancel</button><button type="submit" class="btn btn-primary">Save X</button></div></div>
 					</form>
 					<div class="divider">Authorized mention authors for this project</div>
+<p class="text-sm opacity-70">An administrator must verify the numeric X account ID before binding it to an application user. Authenticated runs use that user’s project permissions. Existing unbound entries must be replaced.</p>
 					<form method="post" action="/channels/x/authorized-users" hx-post="/channels/x/authorized-users" hx-swap="none" class="flex gap-2">
 						if view.CurrentProjectID == models.AllProjectsID {
  <select name="project_id" class="select select-bordered" required aria-label="Project">
@@ -861,7 +862,7 @@ templ settingsContent(view ChannelsSettingsView) {
  } else {
  <input type="hidden" name="project_id" value={ view.CurrentProjectID }/>
  }
- <input class="input input-bordered flex-1" name="x_user_id" inputmode="numeric" placeholder="Numeric X user ID" required/><input class="input input-bordered flex-1" name="x_username" placeholder="Username (optional)"/><button class="btn btn-secondary" type="submit">Add</button>
+ <input class="input input-bordered flex-1" name="x_user_id" inputmode="numeric" placeholder="Numeric X user ID" required/><input class="input input-bordered flex-1" name="x_username" placeholder="Username (optional)"/><input class="input input-bordered flex-1" name="application_user_id" aria-label="Verified application user ID" placeholder="Application user ID (required with authentication)"/><button class="btn btn-secondary" type="submit">Add</button>
 					</form>
 					<div class="mt-3 space-y-2">
 						for _, user := range view.XAuthorizedUsers {
@@ -872,6 +873,11 @@ templ settingsContent(view ChannelsSettingsView) {
 								}
 								<span class="opacity-60">ID { user.XUserID }</span>
  @components.ProjectBadge(user.ProjectID)
+ if user.ApplicationUserID != "" {
+ <span class="ml-2 text-xs">Application user: { user.ApplicationUserID }</span>
+ } else {
+ <span class="ml-2 text-xs">Unbound (auth-off only)</span>
+ }
 							</span>
 							<button class="btn btn-ghost btn-xs text-error" hx-delete={ "/channels/x/authorized-users/" + user.ID + "?project_id=" + user.ProjectID } hx-swap="none">Delete</button>
 						</div>
@@ -1235,7 +1241,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 		<dialog id="discord_config_modal" class="modal" onclose="resetDiscordConfigForm()">
 			<div class="modal-box max-w-2xl">
-				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('discord_config_modal')" aria-label="Close Discord configuration">×</button>
+				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('discord_config_modal')" aria-label="Close Discord configuration"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Discord</h3>
 					<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none">
 						<div class="alert alert-info mb-4 text-sm">
@@ -1782,7 +1788,11 @@ templ settingsContent(view ChannelsSettingsView) {
 					var requestGeneration = ++webhookEditRequestGeneration;
 					fetch('/channels/webhooks/' + encodeURIComponent(id) + '?project_id=' + encodeURIComponent(pid), {
 						headers: { 'Accept': 'application/json' }
-					}).then(function(response) {
+					}).then(async function(response) {
+                        if (await window.openVibelyPermissionErrors?.fetch(response)) {
+                            if (requestGeneration === webhookEditRequestGeneration) modal.close();
+                            return null;
+                        }
 						if (!response.ok) throw new Error('Failed to load webhook');
 						return response.json();
 					}).then(function(detail) {

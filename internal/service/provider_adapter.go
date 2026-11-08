@@ -1581,6 +1581,9 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 
 func (s *LLMService) compactionScopeForRequest(req llmcontracts.AgentRequest) (compactionScope, bool) {
 	if scope, ok := parseCompactionTransportScope(req.TransportScope); ok {
+		if scope.Type == "chat_project" {
+			scope.ID = models.WorkspaceChatScope(req.Ctx, scope.ID)
+		}
 		return scope, true
 	}
 	if req.Followup && strings.TrimSpace(req.ExecID) != "" && s != nil && s.execRepo != nil {
@@ -1589,7 +1592,7 @@ func (s *LLMService) compactionScopeForRequest(req llmcontracts.AgentRequest) (c
 		}
 	}
 	if strings.TrimSpace(req.ProjectID) != "" && req.Operation == llmcontracts.OperationStreaming && !req.Followup {
-		return compactionScope{Type: "chat_project", ID: strings.TrimSpace(req.ProjectID)}, true
+		return compactionScope{Type: "chat_project", ID: models.WorkspaceChatScope(req.Ctx, strings.TrimSpace(req.ProjectID))}, true
 	}
 	return compactionScope{}, false
 }

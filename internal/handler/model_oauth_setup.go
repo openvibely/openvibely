@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -11,16 +12,18 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 // Setup sessions hold credentials in memory until the user creates a complete
 // model configuration. The random capability is never sent to the OAuth provider.
 type modelOAuthSetup struct {
-	owner    *Handler
-	targetID string
-	config   models.LLMConfig
-	expires  time.Time
-	failure  string
+	actorUserID string
+	owner       *Handler
+	targetID    string
+	config      models.LLMConfig
+	expires     time.Time
+	failure     string
 }
 
 var modelOAuthSetups = struct {
@@ -32,12 +35,25 @@ type modelOAuthSetupContextKey struct{}
 
 const modelOAuthSetupHeader = "X-Model-OAuth-Setup"
 
-func (h *Handler) modelOAuthSetupConfig(key string, connected bool) (*models.LLMConfig, error) {
+func (h *Handler) modelOAuthSetupConfig(key string, connected bool, contexts ...context.Context) (*models.LLMConfig, error) {
 	modelOAuthSetups.Lock()
 	defer modelOAuthSetups.Unlock()
 	session := modelOAuthSetups.sessions[key]
 	if session == nil || session.owner != h || time.Now().After(session.expires) {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "Sign-in session expired. Connect OAuth again.")
+	}
+	if h.projectAccessSvc != nil {
+		if len(contexts) != 1 {
+			return nil, authz.ErrDenied
+		}
+		ctx := h.projectRuntimePrincipalContext(contexts[0])
+		actor, ok := models.PrincipalFromContext(ctx)
+		if !ok || actor.UserID == "" || actor.UserID != session.actorUserID {
+			return nil, authz.ErrDenied
+		}
+		if err := h.requireOAuthActor(ctx, session.actorUserID); err != nil {
+			return nil, err
+		}
 	}
 	if connected && session.failure != "" {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, session.failure)
@@ -54,6 +70,12 @@ func (h *Handler) modelOAuthSetupConfig(key string, connected bool) (*models.LLM
 }
 
 func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
+	actorCtx := h.projectRuntimePrincipalContext(c.Request().Context())
+	actor, _ := models.PrincipalFromContext(actorCtx)
+	if err := h.requireOAuthActor(actorCtx, actor.UserID); err != nil {
+		return projectAccessHTTPError(err)
+	}
+
 	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 1<<20)
 	provider, auth := resolveProviderAndAuth(c.FormValue("provider"), c.FormValue("anthropic_auth_type"), c.FormValue("openai_auth_type"), c.FormValue("auth_method"))
 	if provider == models.ProviderOpenAICompatible {
@@ -115,7 +137,7 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 	}
 	key := base64.RawURLEncoding.EncodeToString(keyBytes)
 	modelOAuthSetups.Lock()
-	modelOAuthSetups.sessions[key] = &modelOAuthSetup{owner: h, targetID: targetID, config: *config, expires: time.Now().Add(oauthFlowLifetime)}
+	modelOAuthSetups.sessions[key] = &modelOAuthSetup{actorUserID: actor.UserID, owner: h, targetID: targetID, config: *config, expires: time.Now().Add(oauthFlowLifetime)}
 	modelOAuthSetups.Unlock()
 	time.AfterFunc(oauthFlowLifetime, func() { removeModelOAuthSetup(key) })
 	if err := h.initiateOAuthForConfig(c, config, key); err != nil {
@@ -134,7 +156,7 @@ func removeModelOAuthSetup(key string) {
 
 func (h *Handler) ModelOAuthSetupStatus(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
-	config, err := h.modelOAuthSetupConfig(c.Request().Header.Get(modelOAuthSetupHeader), false)
+	config, err := h.modelOAuthSetupConfig(c.Request().Header.Get(modelOAuthSetupHeader), false, c.Request().Context())
 	if err != nil {
 		return err
 	}
@@ -156,7 +178,7 @@ func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig
 	if key == "" {
 		return "", nil
 	}
-	signedIn, err := h.modelOAuthSetupConfig(key, true)
+	signedIn, err := h.modelOAuthSetupConfig(key, true, c.Request().Context())
 	if err != nil {
 		return "", err
 	}
@@ -196,6 +218,9 @@ func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int
 	if session == nil || session.owner != h || time.Now().After(session.expires) {
 		return fmt.Errorf("sign-in session expired; connect OAuth again")
 	}
+	if err := h.requireOAuthActor(context.Background(), session.actorUserID); err != nil {
+		return err
+	}
 	session.config.OAuthAccessToken = access
 	session.config.OAuthRefreshToken = refresh
 	session.config.OAuthExpiresAt = expires
@@ -215,7 +240,7 @@ func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int
 
 func (h *Handler) CancelModelOAuthSetup(c echo.Context) error {
 	key := c.Request().Header.Get(modelOAuthSetupHeader)
-	if _, err := h.modelOAuthSetupConfig(key, false); err != nil {
+	if _, err := h.modelOAuthSetupConfig(key, false, c.Request().Context()); err != nil {
 		return err
 	}
 	removeModelOAuthSetup(key)

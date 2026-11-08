@@ -24,6 +24,7 @@ const (
 
 // ChatEvent represents a chat event for real-time updates
 type ChatEvent struct {
+	AudienceUserID  string                 `json:"-"`
 	Type            ChatEventType          `json:"type"`
 	ProjectID       string                 `json:"project_id"`
 	ExecID          string                 `json:"exec_id"`

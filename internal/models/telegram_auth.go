@@ -4,6 +4,7 @@ import "time"
 
 // TelegramAuthorizedUser represents a Telegram user authorized to interact with a project's bot.
 type TelegramAuthorizedUser struct {
+	ChannelSenderMapping
 	ID               string    `json:"id"`
 	ProjectID        string    `json:"project_id"`
 	TelegramUserID   int64     `json:"telegram_user_id"`

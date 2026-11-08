@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -42,6 +43,77 @@ func (r *GitHubPRFeedbackRepo) RecordForwardedAndQueue(ctx context.Context, feed
 	threadInputRepo := NewThreadInputRepo(r.db)
 	var recorded bool
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		if feedback == nil || input.Scope != models.ThreadInputScopeTask || input.TaskID != feedback.TaskID {
+			return persistence.ErrProjectDenied
+		}
+		var projectID, taskID, prURL string
+		var prNumber int
+		if err := exec.QueryRowContext(ctx, `SELECT t.project_id,p.task_id,p.pr_number,p.pr_url FROM task_pull_requests p JOIN tasks t ON t.id=p.task_id WHERE p.id=?`, feedback.TaskPullRequestID).Scan(&projectID, &taskID, &prNumber, &prURL); err != nil {
+			return err
+		}
+		if projectID != input.ProjectID || taskID != input.TaskID || prNumber != feedback.PRNumber {
+			return persistence.ErrProjectDenied
+		}
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if err := requireAutomationContinuationAuthor(ctx, exec, projectID, actor.UserID); err != nil {
+				return err
+			}
+		}
+		if source, captured := models.GitHubFeedbackExecutionFromContext(ctx); captured {
+			if source.TaskID == "" || source.ExecutionID == "" {
+				return persistence.ErrProjectDenied
+			}
+			var sourceProject, sourceTask, savedUser string
+			if err := exec.QueryRowContext(ctx, `SELECT t.project_id,e.task_id,COALESCE(r.user_id,'') FROM executions e JOIN tasks t ON t.id=e.task_id LEFT JOIN execution_run_identities r ON r.execution_id=e.id WHERE e.id=?`, source.ExecutionID).Scan(&sourceProject, &sourceTask, &savedUser); err != nil {
+				if err == sql.ErrNoRows {
+					return persistence.ErrProjectDenied
+				}
+				return err
+			}
+			if sourceProject != projectID || sourceTask != source.TaskID || (savedUser != "" && (!identified || savedUser != actor.UserID)) || (source.RequireIdentity && savedUser == "") {
+				return persistence.ErrProjectDenied
+			}
+			if err := checkExecutionGoal(ctx, exec, source.ExecutionID, source.TaskID); err != nil {
+				return err
+			}
+			// Copy database-owned sender evidence into the queued input snapshot,
+			// even when recovery no longer has the original channel context.
+			var sender models.SlackIngressIdentity
+			err := exec.QueryRowContext(ctx, `SELECT project_id,team_id,external_user_id,user_id FROM slack_execution_provenance WHERE execution_id=?`, source.ExecutionID).Scan(&sender.ProjectID, &sender.TeamID, &sender.ExternalUserID, &sender.UserID)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			if err == nil {
+				if supplied, ok := models.SlackIngressIdentityFromContext(ctx); ok && (supplied.ProjectID != sender.ProjectID || supplied.TeamID != sender.TeamID || supplied.ExternalUserID != sender.ExternalUserID || supplied.UserID != sender.UserID) {
+					return persistence.ErrProjectDenied
+				}
+				ctx = models.WithSlackIngressIdentity(ctx, sender)
+			}
+		}
+		var reviewerAllowed bool
+		if err := exec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM github_authorized_actors WHERE lower(github_login)=?)`, persistence.NormalizeGitHubLogin(feedback.AuthorLogin)).Scan(&reviewerAllowed); err != nil {
+			return err
+		}
+		if !reviewerAllowed {
+			return persistence.ErrProjectDenied
+		}
+		var reviewer *models.GitHubReviewerIdentity
+		source, _ := models.GitHubFeedbackExecutionFromContext(ctx)
+		if source.RequireIdentity {
+			parsed, err := url.Parse(prURL)
+			if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Host, feedback.ProviderHost) {
+				return persistence.ErrProjectDenied
+			}
+
+			reviewer, err = resolveReviewerIdentity(ctx, exec, projectID, feedback.ProviderHost, feedback.AuthorUserID, feedback.AuthorLogin)
+			if err != nil {
+				return err
+			}
+			if _, err = authorizeExecutionActor(ctx, exec, taskID, reviewer.ApplicationUserID); err != nil {
+				return err
+			}
+		}
 		ok, err := r.recordForwardedWithExecutor(ctx, exec, feedback)
 		if err != nil || !ok {
 			recorded = ok
@@ -50,9 +122,22 @@ func (r *GitHubPRFeedbackRepo) RecordForwardedAndQueue(ctx context.Context, feed
 		if err := threadInputRepo.createQueuedWithExecutor(ctx, exec, input); err != nil {
 			return err
 		}
+		if _, err := exec.ExecContext(ctx, `INSERT INTO github_reviewer_input_provenance(input_id,reviewer_login) VALUES(?,?)`, input.ID, persistence.NormalizeGitHubLogin(feedback.AuthorLogin)); err != nil {
+			return err
+		}
+		if reviewer != nil {
+			if _, err := exec.ExecContext(ctx, `INSERT INTO github_reviewer_input_identities(input_id,project_id,actor_id,host,external_user_id,application_user_id) VALUES(?,?,?,?,?,?)`, input.ID, reviewer.ProjectID, reviewer.ActorID, reviewer.Host, reviewer.ExternalUserID, reviewer.ApplicationUserID); err != nil {
+				return err
+			}
+		}
 		feedback.QueuedThreadInputID = input.ID
 		if _, err := exec.ExecContext(ctx, `UPDATE github_pr_feedback_forwarded SET queued_thread_input_id = ? WHERE id = ?`, input.ID, feedback.ID); err != nil {
 			return fmt.Errorf("linking github pr feedback queued input: %w", err)
+		}
+		if identified {
+			if err := projectAudit(ctx, exec, projectID, actor.UserID, "github.feedback_queued", input.ID, `{}`); err != nil {
+				return err
+			}
 		}
 		recorded = true
 		return nil

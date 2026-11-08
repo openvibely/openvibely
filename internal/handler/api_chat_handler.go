@@ -3,8 +3,6 @@ package handler
 import (
 	"crypto/rand"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/pkg/filecontent"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -13,12 +11,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/filecontent"
+
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -188,6 +190,12 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 
 	applog.Debugf("[handler] APIChatMessage message=%q project_id=%s", message, projectID)
 
+	if h.projectAccessSvc != nil {
+		if err := h.projectAccessSvc.Require(c.Request().Context(), projectID, authz.Edit); err != nil {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
+		}
+	}
+
 	// Validate project exists
 	project, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	if err != nil || project == nil {
@@ -286,7 +294,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to queue chat message"})
 		}
 		if h.chatBroadcaster != nil {
-			h.chatBroadcaster.Publish(events.ChatEvent{
+			h.publishChatEvent(events.ChatEvent{
 				Type:           events.ChatNewMessage,
 				ProjectID:      projectID,
 				ExecID:         queued.ID,
@@ -312,7 +320,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	}
 
 	// Create a task record for the chat message
-	chatTitle := fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), message[:min(50, len(message))])
+	chatTitle := fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), chatTitlePreview(message))
 	agentID := agent.ID
 	task := &models.Task{
 		ProjectID: projectID,
@@ -346,7 +354,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	applog.Infof("[handler] APIChatMessage created exec=%s task=%s status=%s", exec.ID, task.ID, exec.Status)
 	// Broadcast new message event
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:      events.ChatNewMessage,
 			ProjectID: projectID,
 			ExecID:    exec.ID,

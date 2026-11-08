@@ -17,9 +17,12 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 type UpcomingService struct {
+	projectAccess      *ProjectAccessService
+	authOff            bool
 	upcomingRepo       persistence.UpcomingStore
 	projectRepo        persistence.ProjectStore
 	taskCommitStatRepo persistence.TaskCommitStatStore
@@ -29,6 +32,25 @@ type UpcomingService struct {
 
 func NewUpcomingService(upcomingRepo persistence.UpcomingStore) *UpcomingService {
 	return &UpcomingService{upcomingRepo: upcomingRepo}
+}
+
+// SetProjectAuthorization enables checks for HTTP, runtime and background callers.
+func (s *UpcomingService) SetProjectAuthorization(access *ProjectAccessService, authOff bool) {
+	s.projectAccess, s.authOff = access, authOff
+}
+
+func (s *UpcomingService) authorizeActivity(ctx context.Context, projectID string, permission authz.Permission) (context.Context, error) {
+	if s.projectAccess == nil {
+		return ctx, nil
+	}
+	principal, ok := models.PrincipalFromContext(ctx)
+	if !ok || principal.UserID == "" {
+		if !s.authOff {
+			return ctx, authz.ErrDenied
+		}
+		ctx = models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID, OrgID: models.DefaultOrgID})
+	}
+	return ctx, s.projectAccess.Require(ctx, projectID, permission)
 }
 
 // SetProjectRepo sets the project repository for git change summaries
@@ -53,6 +75,10 @@ func (s *UpcomingService) SetLLMConfigRepo(llmConfigRepo persistence.LLMConfigSt
 
 // GenerateUpcoming creates a summary of upcoming planned work for a project
 func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string) (*models.Upcoming, error) {
+	ctx, authErr := s.authorizeActivity(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	now := time.Now().UTC()
 
 	running, err := s.upcomingRepo.ListRunningTasks(ctx, projectID)
@@ -302,6 +328,10 @@ func pulseRepeatLabel(repeatType models.RepeatType, interval int) string {
 
 // GenerateHistory creates a summary of recently completed work for a project
 func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string, timeRange models.TimeRange) (*models.History, error) {
+	ctx, authErr := s.authorizeActivity(ctx, projectID, authz.View)
+	if authErr != nil {
+		return nil, authErr
+	}
 	now := time.Now().UTC()
 	since := computeSince(now, timeRange)
 
@@ -692,6 +722,10 @@ func skipJSONWhitespace(s string, i int) int {
 
 // GeneratePulseSummary generates an AI summary of the current project state
 func (s *UpcomingService) GeneratePulseSummary(ctx context.Context, projectID string, upcoming *models.Upcoming) (string, error) {
+	ctx, authErr := s.authorizeActivity(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return "", authErr
+	}
 	if s.llmSvc == nil || s.llmConfigRepo == nil {
 		return "", fmt.Errorf("LLM service not configured")
 	}
@@ -760,6 +794,10 @@ Respond with ONLY the summary text, no formatting or labels.`, sb.String())
 
 // GenerateReflectionSummary generates an AI summary of recent project history
 func (s *UpcomingService) GenerateReflectionSummary(ctx context.Context, projectID string, history *models.History) (string, error) {
+	ctx, authErr := s.authorizeActivity(ctx, projectID, authz.Edit)
+	if authErr != nil {
+		return "", authErr
+	}
 	if s.llmSvc == nil || s.llmConfigRepo == nil {
 		return "", fmt.Errorf("LLM service not configured")
 	}
@@ -839,12 +877,6 @@ Respond with ONLY the summary text, no formatting or labels.`, sb.String())
 
 func formatGitSince(since time.Time) string {
 	return since.UTC().Format(time.RFC3339)
-}
-
-// getProjectChanges runs git commands against a project's repo to gather change data
-func (s *UpcomingService) getProjectChanges(repoPath string, since time.Time) (*models.ProjectChanges, error) {
-	pc, _, err := s.getProjectChangesInRangeWithFiles(repoPath, since, time.Time{})
-	return pc, err
 }
 
 func (s *UpcomingService) getProjectChangesInRangeWithFiles(repoPath string, since, before time.Time) (*models.ProjectChanges, []string, error) {

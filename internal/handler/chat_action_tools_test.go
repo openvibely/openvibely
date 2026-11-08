@@ -1767,24 +1767,15 @@ func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	})
 }
 
-func TestChatActionSummaryCollector_AppendsCreatedAndEdited(t *testing.T) {
+func TestChatActionSummaryCollector_CollectsCreatedAndEdited(t *testing.T) {
 	collector := newChatActionSummaryCollector()
 	collector.addCreated("\n---\nCreated 1 task(s):\n- \"Fix login\" (active) [TASK_ID:abc123]")
 	collector.addEdited("\n---\nEdited 1 task(s):\n- \"Fix login\" (backlog, updated: category) [TASK_EDITED:abc123]")
 
-	out := collector.appendToOutput("Done.")
-	if !strings.Contains(out, "Created 1 task(s):") {
-		t.Fatalf("expected created summary, got %q", out)
-	}
-	if !strings.Contains(out, "[TASK_ID:abc123]") {
-		t.Fatalf("expected task id marker, got %q", out)
-	}
-	if !strings.Contains(out, "Edited 1 task(s):") {
-		t.Fatalf("expected edited summary, got %q", out)
-	}
-	if !strings.Contains(out, "[TASK_EDITED:abc123]") {
-		t.Fatalf("expected task edited marker, got %q", out)
-	}
+	require.Len(t, collector.createdLines, 1)
+	require.Contains(t, collector.createdLines[0], "[TASK_ID:abc123]")
+	require.Len(t, collector.editedLines, 1)
+	require.Contains(t, collector.editedLines[0], "[TASK_EDITED:abc123]")
 }
 
 func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {

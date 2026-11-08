@@ -3,9 +3,13 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/persistence"
+	"sort"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type SettingsRepo struct {
@@ -97,12 +101,23 @@ func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) er
 		return nil
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		keys := channelCredentialKeys(values)
+		if identified && len(keys) > 0 {
+			if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+				return err
+			}
+		}
 		for key, value := range values {
 			if _, err := tx.ExecContext(ctx,
 				"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 				key, value); err != nil {
 				return err
 			}
+		}
+		if identified && len(keys) > 0 {
+			details, _ := json.Marshal(keys)
+			return projectAudit(ctx, tx, "default", actor.UserID, "channel.credentials_changed", "instance", string(details))
 		}
 		return nil
 	})
@@ -112,10 +127,36 @@ func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) er
 // webhooks. Discord authorization is system-wide and is cleared only when the
 // Discord provider is part of the same removal request.
 func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string, values map[string]string, webhookIDs []string, removeDiscordAuthorization bool) error {
+	return r.removeChannels(ctx, projectID, values, webhookIDs, removeDiscordAuthorization)
+}
+
+func (r *SettingsRepo) RemoveDiscordChannel(ctx context.Context, projectID string, values map[string]string) error {
+	return r.removeChannels(ctx, projectID, values, nil, true)
+}
+
+func (r *SettingsRepo) removeChannels(ctx context.Context, projectID string, values map[string]string, webhookIDs []string, removeDiscordAuthorization bool) error {
 	if len(values) == 0 && len(webhookIDs) == 0 {
 		return fmt.Errorf("at least one channel is required")
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		if identified {
+			if len(values) > 0 || removeDiscordAuthorization {
+				if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+					return err
+				}
+			}
+			if len(webhookIDs) > 0 {
+				role, err := projectRole(ctx, tx, actor.UserID, projectID)
+				if err != nil {
+					return err
+				}
+				if role != "maintainer" && role != "owner" {
+					return persistence.ErrProjectDenied
+				}
+			}
+		}
+
 		if len(webhookIDs) > 0 {
 			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(webhookIDs)), ",")
 			args := make([]any, 0, len(webhookIDs)+1)
@@ -124,13 +165,13 @@ func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string,
 				args = append(args, id)
 			}
 			var count int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
 				return err
 			}
 			if count != len(webhookIDs) {
 				return persistence.ErrWebhookNotFound
 			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
 				return err
 			}
 		}
@@ -146,6 +187,14 @@ func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string,
 				return err
 			}
 		}
+		if identified {
+			details, _ := json.Marshal(struct {
+				Keys     []string `json:"credential_keys"`
+				Webhooks []string `json:"webhook_ids"`
+				Discord  bool     `json:"discord_authorization_removed"`
+			}{channelCredentialKeys(values), webhookIDs, removeDiscordAuthorization})
+			return projectAudit(ctx, tx, projectID, actor.UserID, "channels.removed", "", string(details))
+		}
 		return nil
 	})
 }
@@ -154,33 +203,21 @@ func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string,
 // still match. The immediate transaction makes the read/guard/write decision
 // atomic with concurrent coherent settings replacement.
 func (r *SettingsRepo) CompareAndSet(ctx context.Context, key, expected, value string, guards map[string]string) (bool, error) {
-	updated := false
-	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		matches, err := matchesSettingsWithExecutor(ctx, tx, map[string]string{key: expected})
-		if err != nil || !matches {
-			return err
-		}
-		matches, err = matchesSettingsWithExecutor(ctx, tx, guards)
-		if err != nil || !matches {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-			key, value); err != nil {
-			return err
-		}
-		updated = true
-		return nil
-	})
-	return updated, err
+	return r.CompareAndSetMany(ctx, map[string]string{key: expected}, map[string]string{key: value}, guards)
 }
 
-// CompareAndSetMany updates a coherent settings group only when every expected
-// value and guard still matches. The immediate transaction prevents concurrent
-// pollers or configuration replacement from splitting related cursor state.
+// CompareAndSetMany validates identity before reading guards, and records an
+// audit only when the comparison succeeds and the change commits.
 func (r *SettingsRepo) CompareAndSetMany(ctx context.Context, expected, values, guards map[string]string) (bool, error) {
 	updated := false
 	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		actor, identified := models.PrincipalFromContext(ctx)
+		keys := channelCredentialKeys(values)
+		if identified && len(keys) > 0 {
+			if _, err := orgActor(ctx, tx, actor.UserID); err != nil {
+				return err
+			}
+		}
 		matches, err := matchesSettingsWithExecutor(ctx, tx, expected)
 		if err != nil || !matches {
 			return err
@@ -190,16 +227,20 @@ func (r *SettingsRepo) CompareAndSetMany(ctx context.Context, expected, values, 
 			return err
 		}
 		for key, value := range values {
-			if _, err := tx.ExecContext(ctx,
-				"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-				key, value); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value); err != nil {
+				return err
+			}
+		}
+		if identified && len(keys) > 0 {
+			details, _ := json.Marshal(keys)
+			if err := projectAudit(ctx, tx, "default", actor.UserID, "channel.credentials_changed", "instance", string(details)); err != nil {
 				return err
 			}
 		}
 		updated = true
 		return nil
 	})
-	return updated, err
+	return updated && err == nil, err
 }
 
 // MatchesInTx checks an expected settings snapshot using the caller's store
@@ -228,8 +269,29 @@ func matchesSettingsWithExecutor(ctx context.Context, exec sqlExecutor, expected
 
 // Set upserts a setting value.
 func (r *SettingsRepo) Set(ctx context.Context, key, value string) error {
+	if len(channelCredentialKeys(map[string]string{key: value})) > 0 {
+		return r.SetMany(ctx, map[string]string{key: value})
+	}
 	_, err := execBoundSQLite(ctx, r.db,
 		"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 		key, value)
 	return err
+}
+
+// Audit only setting names, never tokens, state, secrets or credential values.
+func channelCredentialKeys(values map[string]string) []string {
+	var keys []string
+	for key := range values {
+		switch key {
+		case "github_app_id", "github_app_slug", "github_app_private_key", "github_auth_mode", "github_pat", "github_pat_user_login", "github_api_endpoint", "github_app_installation_id", "github_app_account_login", "github_app_account_type", "github_app_connected_at",
+			"slack_client_id", "slack_client_secret", "slack_app_token", "slack_bot_token", "slack_bot_token_override", "slack_bot_token_source", "slack_bot_user_id", "slack_team_id", "slack_team_name", "slack_connected_at", "slack_oauth_state", "slack_send_responses",
+			"telegram_bot_token", "telegram_send_responses", "telegram_rich_messages_v2",
+			"discord_bot_token", "discord_bot_user_id", "discord_send_responses",
+			"x_consumer_key", "x_consumer_secret", "x_access_token", "x_access_token_secret", "x_poll_interval_seconds", "x_send_responses", "x_account_id", "x_configuration_id", "x_run_as_user_id",
+			"email_provider", "email_address", "email_password", "email_imap_host", "email_imap_port", "email_smtp_host", "email_smtp_port", "email_poll_interval_seconds", "email_send_responses", "email_skip_attachments", "email_mark_existing_seen_on_start":
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }

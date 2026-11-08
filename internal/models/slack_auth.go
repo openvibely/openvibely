@@ -4,6 +4,7 @@ import "time"
 
 // SlackAuthorizedUser represents a Slack user authorized to interact with a project's Slack integration.
 type SlackAuthorizedUser struct {
+	ChannelSenderMapping
 	ID          string    `json:"id"`
 	ProjectID   string    `json:"project_id"`
 	SlackUserID string    `json:"slack_user_id"`

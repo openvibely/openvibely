@@ -36,7 +36,7 @@ func SlackAuthorizedUsersList(users []models.SlackAuthorizedUser, projectID stri
 		templ_7745c5c3_Err = channelAuthorizationList(
 			channelAuthorizationListConfig{
 				ContainerID:        "slack-authorized-users",
-				Description:        "Authorized Slack users are scoped to this project. Outbound Message Targets remain project-specific.",
+				Description:        "Global sender list. Map each sender once; their OV user’s project permissions apply.",
 				EmptyState:         "No authorized users configured.",
 				RemoveConfirmation: "Remove this authorized user?",
 			},
@@ -62,7 +62,10 @@ func slackAuthorizationRows(users []models.SlackAuthorizedUser, projectID string
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       slackAuthorizedUserIdentity(user),
 			ProjectID:      user.ProjectID,
-			DeleteEndpoint: fmt.Sprintf("/channels/slack/authorized-users/%s?project_id=%s", user.ID, user.ProjectID),
+			ID:             user.ID,
+			Mapping:        user.ChannelSenderMapping,
+			Channel:        "slack",
+			DeleteEndpoint: fmt.Sprintf("/channels/slack/authorized-users/%s", user.ID),
 		})
 	}
 	return rows
@@ -85,14 +88,14 @@ func slackAuthorizedUserIdentity(user models.SlackAuthorizedUser) templ.Componen
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 opacity-50\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z\"></path></svg> <span class=\"text-sm font-medium\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-2\"><div class=\"flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 opacity-50\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z\"></path></svg> <span class=\"text-sm font-medium\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(user.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 46, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 50, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -105,13 +108,13 @@ func slackAuthorizedUserIdentity(user models.SlackAuthorizedUser) templ.Componen
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("ID: %s", user.SlackUserID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 47, Col: 76}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 51, Col: 76}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</span></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</span></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

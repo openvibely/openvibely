@@ -77,7 +77,7 @@ func (h *Handler) publishThreadInputCancelledEvent(input *models.ThreadInput) {
 		})
 	}
 	if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:           events.ChatThreadInputCancelled,
 			ProjectID:      input.ProjectID,
 			ExecID:         input.RunExecutionID,
@@ -147,7 +147,7 @@ func (h *Handler) ChatQueuedInputSteer(c echo.Context) error {
 		return err
 	}
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:           events.ChatTurnSteered,
 			ProjectID:      steering.ProjectID,
 			ExecID:         steering.ID,

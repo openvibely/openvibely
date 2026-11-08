@@ -191,7 +191,7 @@ func (r *AlertRepo) GetByIdempotencyKey(ctx context.Context, projectID, key stri
 }
 
 func (r *AlertRepo) GetByIDForProject(ctx context.Context, projectID, id string) (*models.Alert, error) {
-	a, err := scanAlert(r.db.QueryRowContext(ctx, `SELECT `+alertSelectColumns+` FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ?`, projectID, id))
+	a, err := scanAlert(r.db.QueryRowContext(ctx, `SELECT `+alertSelectColumns+` FROM alerts WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND id = ?`, projectID, id))
 	return alertResult(a, err)
 }
 
@@ -271,7 +271,7 @@ func (r *AlertRepo) RebindAlertToAutomationInbox(ctx context.Context, projectID,
 
 func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
 	filter = normalizeAlertListFilter(filter)
-	query, args := buildAlertListQuery(alertSelectColumns, projectID, filter)
+	query, args := buildAlertListQuery(ctx, alertSelectColumns, projectID, filter)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing alerts: %w", err)
@@ -290,7 +290,7 @@ func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter m
 
 func (r *AlertRepo) ListFilteredSummaries(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
 	filter = normalizeAlertListFilter(filter)
-	query, args := buildAlertSummaryListQuery(projectID, filter)
+	query, args := buildAlertSummaryListQuery(ctx, projectID, filter)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing alert summaries: %w", err)
@@ -320,8 +320,8 @@ func normalizeAlertListFilter(filter models.AlertListFilter) models.AlertListFil
 	return filter
 }
 
-func buildAlertListQuery(columns, projectID string, filter models.AlertListFilter) (string, []any) {
-	query := `SELECT ` + columns + ` FROM alerts WHERE ` + analyticsProjectPredicate("project_id", projectID) + ``
+func buildAlertListQuery(ctx context.Context, columns, projectID string, filter models.AlertListFilter) (string, []any) {
+	query := `SELECT ` + columns + ` FROM alerts WHERE ` + analyticsProjectPredicate(ctx, "project_id", projectID) + ``
 	args := []any{projectID}
 	query, args = appendAlertListPredicates(query, args, filter, "alerts")
 	if len(filter.AutomationInboxBindings) > 0 {
@@ -345,9 +345,9 @@ func buildAlertListQuery(columns, projectID string, filter models.AlertListFilte
 	return query, args
 }
 
-func buildAlertSummaryListQuery(projectID string, filter models.AlertListFilter) (string, []any) {
+func buildAlertSummaryListQuery(ctx context.Context, projectID string, filter models.AlertListFilter) (string, []any) {
 	if len(filter.AutomationInboxBindings) == 0 {
-		return buildAlertListQuery(alertSummarySelectColumns, projectID, filter)
+		return buildAlertListQuery(ctx, alertSummarySelectColumns, projectID, filter)
 	}
 	return buildAutomationOwnedAlertSummaryListQuery(projectID, filter)
 }
@@ -508,7 +508,7 @@ func alertListOrderBy(filter models.AlertListFilter, alias string) string {
 
 func (r *AlertRepo) CountPending(ctx context.Context, projectID string) (int, error) {
 	var count int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND decision_state = 'pending'`, projectID).Scan(&count); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND decision_state = 'pending'`, projectID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting pending alerts: %w", err)
 	}
 	return count, nil
@@ -516,7 +516,7 @@ func (r *AlertRepo) CountPending(ctx context.Context, projectID string) (int, er
 
 func (r *AlertRepo) CountUnread(ctx context.Context, projectID string) (int, error) {
 	var count int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND is_read = 0`, projectID).Scan(&count); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND is_read = 0`, projectID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting unread alerts: %w", err)
 	}
 	return count, nil
@@ -559,7 +559,7 @@ func (r *AlertRepo) withImmediateAlertMutation(ctx context.Context, mutate func(
 }
 
 func (r *AlertRepo) MarkRead(ctx context.Context, projectID, id string) error {
-	result, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ?`, projectID, id)
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id = ?`, projectID, id)
 	if err != nil {
 		return fmt.Errorf("marking alert read: %w", err)
 	}
@@ -578,13 +578,13 @@ func (r *AlertRepo) MarkReadBulk(ctx context.Context, projectID string, ids []st
 	}
 	return r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
 		var count int
-		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
 			return err
 		}
 		if count != len(ids) {
 			return persistence.ErrAlertNotFound
 		}
-		_, err := conn.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...)
+		_, err := conn.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...)
 		if err != nil {
 			return fmt.Errorf("marking alerts read: %w", err)
 		}
@@ -593,7 +593,7 @@ func (r *AlertRepo) MarkReadBulk(ctx context.Context, projectID string, ids []st
 }
 
 func (r *AlertRepo) MarkAllRead(ctx context.Context, projectID string) error {
-	_, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND is_read = 0`, projectID)
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND is_read = 0`, projectID)
 	if err != nil {
 		return fmt.Errorf("marking all alerts read: %w", err)
 	}
@@ -601,7 +601,7 @@ func (r *AlertRepo) MarkAllRead(ctx context.Context, projectID string) error {
 }
 
 func (r *AlertRepo) Delete(ctx context.Context, projectID, id string) error {
-	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ?`, projectID, id)
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM alerts WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id = ?`, projectID, id)
 	if err != nil {
 		return fmt.Errorf("deleting alert: %w", err)
 	}
@@ -620,13 +620,13 @@ func (r *AlertRepo) DeleteBulk(ctx context.Context, projectID string, ids []stri
 	}
 	return r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
 		var count int
-		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
 			return err
 		}
 		if count != len(ids) {
 			return persistence.ErrAlertNotFound
 		}
-		if _, err := conn.ExecContext(ctx, `DELETE FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
+		if _, err := conn.ExecContext(ctx, `DELETE FROM alerts WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
 			return fmt.Errorf("deleting alerts: %w", err)
 		}
 		return nil
@@ -634,7 +634,7 @@ func (r *AlertRepo) DeleteBulk(ctx context.Context, projectID string, ids []stri
 }
 
 func (r *AlertRepo) DeleteAll(ctx context.Context, projectID string) error {
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+``, projectID)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM alerts WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+``, projectID)
 	if err != nil {
 		return fmt.Errorf("deleting all alerts: %w", err)
 	}
@@ -648,14 +648,14 @@ func (r *AlertRepo) SetDecision(ctx context.Context, projectID, id string, state
 	return r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
 		result, err := conn.ExecContext(ctx, `UPDATE alerts
 			SET decision_state = ?, decided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-			WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ? AND decision_state = 'pending'`, state, projectID, id)
+			WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id = ? AND decision_state = 'pending'`, state, projectID, id)
 		if err != nil {
 			return fmt.Errorf("setting alert decision: %w", err)
 		}
 		changed, _ := result.RowsAffected()
 		if changed == 0 {
 			var current models.AlertDecisionState
-			if err := conn.QueryRowContext(ctx, `SELECT decision_state FROM alerts WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ?`, projectID, id).Scan(&current); err != nil {
+			if err := conn.QueryRowContext(ctx, `SELECT decision_state FROM alerts WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND id = ?`, projectID, id).Scan(&current); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return persistence.ErrAlertNotFound
 				}
@@ -883,7 +883,7 @@ func (r *AlertRepo) MarkProcessing(ctx context.Context, projectID, id, claimant 
 }
 
 func (r *AlertRepo) ListOwnerProjectIDs(ctx context.Context, projectID string, ids []string) ([]string, error) {
-	query := `SELECT DISTINCT project_id FROM alerts WHERE ` + analyticsProjectPredicate("project_id", projectID)
+	query := `SELECT DISTINCT project_id FROM alerts WHERE ` + analyticsProjectPredicate(ctx, "project_id", projectID)
 	args := []any{projectID}
 	if len(ids) > 0 {
 		query += ` AND id IN (` + strings.TrimRight(strings.Repeat("?,", len(ids)), ",") + `)`

@@ -2,11 +2,13 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -28,6 +30,17 @@ func (h *Handler) renderGitHubRuntimeSettings(c echo.Context, projectID string) 
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load GitHub authorized actors")
 	}
+	bindings, err := h.githubAuthRepo.ListReviewerIdentities(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
+	for i := range actors {
+		for j := range bindings {
+			if actors[i].ID == bindings[j].ActorID {
+				actors[i].ReviewerIdentity = &bindings[j]
+			}
+		}
+	}
 	var inbox *models.GitHubProjectInbox
 	if strings.TrimSpace(projectID) != "" {
 		inbox, err = h.githubAuthRepo.GetProjectInbox(c.Request().Context(), projectID)
@@ -41,6 +54,9 @@ func (h *Handler) renderGitHubRuntimeSettings(c echo.Context, projectID string) 
 // GitHubRuntimeSettingsFragment returns generic GitHub runtime trust/inbox settings.
 func (h *Handler) GitHubRuntimeSettingsFragment(c echo.Context) error {
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if err := h.authorizeChannelTrustOperation(c, projectID, false); err != nil {
+		return err
+	}
 	if projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
@@ -50,6 +66,9 @@ func (h *Handler) GitHubRuntimeSettingsFragment(c echo.Context) error {
 // AddGitHubAuthorizedActor adds or updates a system-level GitHub authorized actor.
 func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
+	if err := h.authorizeChannelTrustOperation(c, projectID, true); err != nil {
+		return err
+	}
 	authRepo, err := h.githubRuntimeSettingsPreflight(projectID)
 	if err != nil {
 		return err
@@ -83,6 +102,9 @@ func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
 // RemoveGitHubAuthorizedActor removes a system-level GitHub authorized actor.
 func (h *Handler) RemoveGitHubAuthorizedActor(c echo.Context) error {
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if err := h.authorizeChannelTrustOperation(c, projectID, true); err != nil {
+		return err
+	}
 	authRepo, err := h.githubRuntimeSettingsPreflight(projectID)
 	if err != nil {
 		return err
@@ -96,6 +118,13 @@ func (h *Handler) RemoveGitHubAuthorizedActor(c echo.Context) error {
 // SaveGitHubProjectInbox stores the project-scoped authorized GitHub inbox assignee for runtime prompts/tools.
 func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
+	if h.projectAccessSvc != nil {
+		ctx := h.projectRuntimePrincipalContext(c.Request().Context())
+		if err := h.projectAccessSvc.Require(ctx, projectID, authz.Manage); err != nil {
+			return err
+		}
+		c.SetRequest(c.Request().WithContext(ctx))
+	}
 	authRepo, err := h.githubRuntimeSettingsPreflight(projectID)
 	if err != nil {
 		return err
@@ -121,6 +150,27 @@ func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 	}
 	if err := authRepo.UpsertProjectInbox(c.Request().Context(), inbox); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
+	}
+	return h.renderGitHubRuntimeSettings(c, projectID)
+}
+
+// BindGitHubReviewerIdentity requires explicit administrator attestation of the
+// provider host, immutable numeric identity, and project application user.
+func (h *Handler) BindGitHubReviewerIdentity(c echo.Context) error {
+	projectID := strings.TrimSpace(c.FormValue("project_id"))
+	if err := h.authorizeChannelTrustOperation(c, projectID, true); err != nil {
+		return err
+	}
+	repo, err := h.githubRuntimeSettingsPreflight(projectID)
+	if err != nil {
+		return err
+	}
+	externalID, err := strconv.ParseInt(c.FormValue("external_user_id"), 10, 64)
+	if err != nil || externalID <= 0 || c.FormValue("attested") != "true" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Confirm the numeric GitHub user ID and application user binding")
+	}
+	if err := repo.BindReviewerIdentity(c.Request().Context(), models.GitHubReviewerIdentity{ProjectID: projectID, ActorID: c.Param("id"), Host: c.FormValue("host"), ExternalUserID: externalID, ApplicationUserID: strings.TrimSpace(c.FormValue("application_user_id"))}); err != nil {
+		return err
 	}
 	return h.renderGitHubRuntimeSettings(c, projectID)
 }

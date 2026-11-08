@@ -4,6 +4,7 @@ import "time"
 
 // EmailAuthorizedSender represents an email address authorized to use a project's email channel.
 type EmailAuthorizedSender struct {
+	ChannelSenderMapping
 	ID           string    `json:"id"`
 	ProjectID    string    `json:"project_id"`
 	EmailAddress string    `json:"email_address"`

@@ -1553,6 +1553,15 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 templ ChatInputForm(config ChatInputFormConfig) {
 	@templateui.MenuStyles()
 	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
+	<style>
+		.ov-paste-card { position:relative; display:flex; align-items:center; gap:10px; padding:8px 32px 8px 8px; width:260px; cursor:pointer; max-width:100%; border:1px solid oklch(var(--bc)/.14); border-radius:10px; }
+		.ov-paste-icon { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:36px; height:40px; border-radius:8px; background:oklch(var(--bc)/.04); color:oklch(var(--bc)/.55); }
+		.ov-paste-copy { min-width:0; flex:1; }
+		.ov-paste-title { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; font-size:13px; line-height:20px; font-weight:500; }
+		.ov-paste-show.btn { font-size:12px; margin-top:2px; margin-left:-8px; color:oklch(var(--bc)/.8); text-decoration:none; }
+		.ov-paste-show:hover { text-decoration:none; }
+		.ov-paste-card .ov-modal-close { position:absolute; top:4px; right:4px; }
+	</style>
 	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2">
 		<form
 			id={ config.FormID }
@@ -1875,8 +1884,28 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 			var _csActiveBtn = null;
 
-			function _csClose() {
-				if (window.ovModelPicker) window.ovModelPicker.close(false);
+            var customSelectMenus = new WeakMap();
+            function customSelectMenu(btn) {
+                var menu = customSelectMenus.get(btn);
+                if (!menu) {
+                    menu = window.ovMenuController.create({
+                        trigger: btn, panels: [_cspanel],
+                        isOpen: function() { return _csActiveBtn === btn && _cspanel.style.display !== 'none'; },
+                        open: function() { _csShow(btn); }, close: _csHide,
+                    });
+                    customSelectMenus.set(btn, menu);
+                }
+                return menu;
+            }
+            function _csClose() {
+                if (window.ovModelPicker) window.ovModelPicker.close(false);
+                if (_csActiveBtn) customSelectMenu(_csActiveBtn).close(false);
+            }
+            function _csOpen(btn) {
+                if (btn.classList.contains('chat-model-select') && window.ovModelPicker) window.ovModelPicker.open(btn);
+                else customSelectMenu(btn).open();
+            }
+			function _csHide() {
 				if (_csActiveBtn) {
 					_csActiveBtn.setAttribute('aria-expanded', 'false');
 					_csActiveBtn = null;
@@ -1885,12 +1914,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				_cspanel.innerHTML = '';
 			}
 
-			function _csOpen(btn) {
-				_csClose();
-				if (btn.classList.contains("chat-model-select") && window.ovModelPicker) {
-					window.ovModelPicker.open(btn);
-					return;
-				}
+			function _csShow(btn) {
 				var optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');
 				if (!optList) return;
 				var currentValue = btn.dataset.currentValue || '';
@@ -1958,27 +1982,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			window._openChatCustomSelectPanel = _csOpen;
 			window._closeChatCustomSelectPanel = _csClose;
 
-			// The first outside click dismisses without activating the underlying UI.
-			function dismissOutsideCustomSelect(e) {
-				if (e.type === 'pointerdown' && e.button !== 0) return;
-				if (_cspanel.style.display === 'none') return;
-				if (_csActiveBtn && _csActiveBtn.contains(e.target)) return;
-				if (_cspanel.contains(e.target)) return;
-				e.preventDefault();
-				e.stopImmediatePropagation();
-				if (e.type === 'click') _csClose();
-			}
-			window.addEventListener('pointerdown', dismissOutsideCustomSelect, true);
-			window.addEventListener('click', dismissOutsideCustomSelect, true);
-
-			// Close on Escape
-			document.addEventListener('keydown', function(e) {
-				if (e.key === 'Escape') _csClose();
-			});
-
 			// Reposition on resize so the panel stays near the trigger
 			window.addEventListener('resize', function() {
-				if (_csActiveBtn) _csOpen(_csActiveBtn);
+				if (_csActiveBtn) _csShow(_csActiveBtn);
 			});
 		}
 
@@ -2000,11 +2006,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				btn.addEventListener('click', function(e) {
 					e.preventDefault();
 					e.stopPropagation();
-					if (btn.getAttribute('aria-expanded') === 'true') {
-						if (window._closeChatCustomSelectPanel) window._closeChatCustomSelectPanel();
-					} else {
-						if (window._openChatCustomSelectPanel) window._openChatCustomSelectPanel(btn);
-					}
+					if (btn.classList.contains('chat-model-select') && window.ovModelPicker) window.ovModelPicker.toggle(btn, e);
+                    else if (btn.getAttribute('aria-expanded') === 'true') window._closeChatCustomSelectPanel();
+                    else window._openChatCustomSelectPanel(btn);
 				});
 			}
 		};
@@ -2039,6 +2043,213 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var formId = form.id;
 			var inputId = form.querySelector('textarea[name="message"]').id;
 			var messageInput = document.getElementById(inputId);
+			// Pasted text is draft content, kept separate from uploaded files.
+			var pasteScope = form.getAttribute('data-attachment-state-key');
+			var pasteKey = pasteScope ? pasteScope + '-pasted-text' : '';
+			window._ovPasteDrafts = window._ovPasteDrafts || {};
+			var pastedTexts = pasteKey ? window._ovPasteDrafts[pasteKey] : [];
+			if (!pastedTexts) {
+				try { pastedTexts = JSON.parse(sessionStorage.getItem(pasteKey) || '[]'); } catch (_) {}
+				if (!Array.isArray(pastedTexts)) pastedTexts = [];
+				pastedTexts = pastedTexts.filter(function(item) { return item && typeof item.text === 'string' && typeof item.id === 'string'; });
+			}
+			form.querySelectorAll('[data-pasted-text-cards]').forEach(function(oldCards) { oldCards.remove(); });
+			if (pasteKey) window._ovPasteDrafts[pasteKey] = pastedTexts;
+			var pasteCards = document.createElement('div');
+			pasteCards.className = 'flex flex-wrap gap-2 mb-2';
+			pasteCards.setAttribute('data-pasted-text-cards', '');
+			messageInput.parentElement.before(pasteCards);
+			function composerMessage() {
+				return [messageInput.value].concat(pastedTexts.map(function(item) { return item.text; })).filter(function(text) { return text !== ''; }).join('\n\n');
+			}
+			function savePastes() {
+				if (!pasteKey) return;
+				window._ovPasteDrafts[pasteKey] = pastedTexts;
+				try { sessionStorage.setItem(pasteKey, JSON.stringify(pastedTexts)); } catch (_) {}
+			}
+			form._refreshPastedTextDraft = function() {
+				if (pasteKey) pastedTexts = window._ovPasteDrafts[pasteKey] || [];
+				renderPastes();
+				refreshPrimaryActionForInput();
+			};
+			function refreshPasteComposers() {
+				form._refreshPastedTextDraft();
+				if (!pasteKey) return;
+				document.querySelectorAll('form[data-attachment-state-key]').forEach(function(current) {
+					if (current !== form && current.getAttribute('data-attachment-state-key') === pasteScope && current._refreshPastedTextDraft) current._refreshPastedTextDraft();
+				});
+			}
+			function acceptSubmittedPastes(payload) {
+				if (!payload || !payload.pastedTextSnapshot) return;
+				// A detached sender must reconcile the latest draft, not its old copy.
+				var latest = pasteKey ? (window._ovPasteDrafts[pasteKey] || []) : pastedTexts;
+				pastedTexts = latest.filter(function(item) {
+					return !payload.pastedTextSnapshot.some(function(sent) { return sent.id === item.id && sent.text === item.text; });
+				});
+				savePastes();
+				refreshPasteComposers();
+			}
+			function renderPastes() {
+				pasteCards.replaceChildren();
+				pasteCards.hidden = pastedTexts.length === 0;
+				pastedTexts.forEach(function(item) {
+					var card = document.createElement('div');
+					card.className = 'ov-paste-card bg-base-100';
+					var icon = document.createElement('button');
+					icon.type = 'button';
+					icon.className = 'ov-paste-icon';
+					icon.setAttribute('aria-label', 'Open pasted text editor');
+					icon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3M14 4h2a2 2 0 0 1 2 2v2"/><rect x="8" y="2" width="6" height="4" rx="1"/><rect x="11" y="10" width="10" height="12" rx="1"/><path d="M14 14h4m-4 4h4"/></svg>';
+					icon.onclick = function() { editPaste(item, icon); };
+					var content = document.createElement('div');
+					content.className = 'ov-paste-copy';
+					var edit = document.createElement('button');
+					edit.type = 'button';
+					edit.className = 'ov-paste-title';
+					edit.setAttribute('aria-label', 'Edit pasted text');
+					edit.textContent = item.text.trim().slice(0, 80) || 'Pasted text';
+					edit.onclick = function() { editPaste(item, edit); };
+					card.onclick = function(event) {
+						if (!event.target.closest('button')) editPaste(item, edit);
+					};
+					var show = document.createElement('button');
+					show.type = 'button';
+					show.className = 'ov-paste-show btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';
+					show.textContent = 'Show in composer';
+					show.onclick = function() {
+						messageInput.value += (messageInput.value ? '\n\n' : '') + item.text;
+						pastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });
+						pastesChanged();
+						messageInput.focus();
+						messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
+						messageInput.scrollTop = messageInput.scrollHeight;
+					};
+					var remove = document.createElement('button');
+					remove.type = 'button';
+					remove.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';
+					remove.setAttribute('data-tooltip-disabled', '');
+					remove.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+					remove.setAttribute('aria-label', 'Remove pasted text');
+					remove.onclick = function() {
+						pastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });
+						pastesChanged();
+						messageInput.focus();
+					};
+					content.append(edit, show);
+					card.append(icon, content, remove);
+					pasteCards.append(card);
+				});
+			}
+			function pastesChanged() {
+				savePastes();
+				renderPastes();
+				messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+			}
+			function editPaste(item, trigger) {
+				var dialog = document.createElement('dialog');
+				dialog.className = 'rounded-xl bg-base-100 text-base-content p-6 shadow-xl';
+				dialog.style.cssText = 'width:min(800px,92vw);max-height:85vh';
+				dialog.setAttribute('aria-label', 'Edit pasted text');
+				var heading = document.createElement('h2');
+				heading.className = 'font-semibold text-lg mb-3 pr-10';
+				heading.textContent = 'Edit pasted text';
+				var close = document.createElement('button');
+				close.type = 'button';
+				close.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';
+				close.setAttribute('aria-label', 'Close pasted text editor');
+				close.setAttribute('data-tooltip-disabled', '');
+				close.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>';
+				close.onclick = function() { closePasteEditor(); };
+				var editor = document.createElement('textarea');
+				editor.className = 'w-full rounded-lg border border-base-content/20 bg-base-100 p-3 font-mono text-sm';
+				editor.style.height = '50vh';
+				editor.setAttribute('aria-label', 'Pasted text');
+				editor.value = item.text;
+				var actions = document.createElement('div');
+				actions.className = 'flex justify-end gap-2 mt-3';
+				function action(label, callback) {
+					var button = document.createElement('button');
+					button.type = 'button'; button.className = 'btn btn-sm'; button.textContent = label;
+					button.onclick = callback; actions.append(button);
+				}
+				var disposed = false;
+				var lifecycle = new AbortController();
+				var observer = new MutationObserver(function() {
+					if (!form.isConnected || !dialog.isConnected || !dialog.open) closePasteEditor(false);
+				});
+				function closePasteEditor(restoreFocus) {
+					if (disposed) return;
+					disposed = true;
+					observer.disconnect();
+					lifecycle.abort();
+					dialog.close(); dialog.remove();
+					if (restoreFocus !== false && form.isConnected) {
+						if (trigger.isConnected) trigger.focus(); else if (messageInput.isConnected) messageInput.focus();
+					}
+				}
+				action('Cancel', closePasteEditor);
+				action('Save', function() {
+					if (disposed || !form.isConnected) { closePasteEditor(false); return; }
+					if (!pastedTexts.some(function(value) { return value.id === item.id; }) && editor.value) pastedTexts.push({ id: item.id, text: editor.value });
+					pastedTexts = pastedTexts.map(function(value) { return value.id === item.id ? { id: item.id, text: editor.value } : value; }).filter(function(value) { return value.text !== ''; });
+					pastesChanged(); closePasteEditor();
+				});
+				dialog.append(heading, close, editor, actions);
+				var outsidePress = false;
+				function outsideDialog(event) {
+					var bounds = dialog.getBoundingClientRect();
+					return event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom);
+				}
+				dialog.addEventListener('pointerdown', function(event) { outsidePress = event.button === 0 && outsideDialog(event); });
+				dialog.addEventListener('click', function(event) {
+					if (outsidePress && outsideDialog(event)) closePasteEditor();
+					outsidePress = false;
+				});
+				dialog.addEventListener('cancel', function(event) { event.preventDefault(); closePasteEditor(); });
+				dialog.addEventListener('close', function() { closePasteEditor(false); }, { signal: lifecycle.signal });
+				window.addEventListener('popstate', function() { closePasteEditor(false); }, { signal: lifecycle.signal });
+				window.addEventListener('pagehide', function() { closePasteEditor(false); }, { signal: lifecycle.signal });
+				document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
+					var element = event.detail && event.detail.elt;
+					if (element && (element === form || element.contains(form))) closePasteEditor(false);
+				}, { signal: lifecycle.signal });
+				document.body.append(dialog);
+				observer.observe(document.body, { childList: true, subtree: true });
+				observer.observe(dialog, { attributes: true, attributeFilter: ['open'] });
+				dialog.showModal(); editor.focus();
+			}
+			function pastedTextID() {
+				var cryptoAPI = window.crypto;
+				if (!cryptoAPI) return null;
+				if (typeof cryptoAPI.randomUUID === 'function') return cryptoAPI.randomUUID();
+				// getRandomValues is also available on plain HTTP origins.
+				if (typeof cryptoAPI.getRandomValues !== 'function') return null;
+				var bytes = cryptoAPI.getRandomValues(new Uint8Array(16));
+				bytes[6] = (bytes[6] & 15) | 64;
+				bytes[8] = (bytes[8] & 63) | 128;
+				var hex = Array.from(bytes, function(byte) { return byte.toString(16).padStart(2, '0'); }).join('');
+				return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+			}
+			messageInput.addEventListener('paste', function(event) {
+				if (!event.clipboardData || messageInput.disabled || messageInput.readOnly) return;
+				if (event.clipboardData.files.length) return;
+				var text = event.clipboardData.getData('text/plain');
+				if (text.length < 5000) return;
+				var nextPastes;
+				try {
+					var id = pastedTextID();
+					if (!id) return;
+					nextPastes = pastedTexts.concat({ id: id, text: text });
+				} catch (_) {
+					// Leave the selection and default paste intact if preparation fails.
+					return;
+				}
+				event.preventDefault();
+				messageInput.setRangeText('', messageInput.selectionStart, messageInput.selectionEnd, 'end');
+				pastedTexts = nextPastes;
+				pastesChanged();
+			});
+			renderPastes();
 			if (window.openVibelyRequestComposerFocus) {
 				var requestInitialComposerFocus = function() {
 					var liveForm = document.getElementById(formId);
@@ -2120,7 +2331,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 									var action = document.getElementById(formId + '-primary-action');
 									if (!action) return;
 									var running = action.getAttribute('data-composer-running') === 'true';
-									var hasContent = !!(messageInput && messageInput.value.trim() !== '');
+									var hasContent = !!(messageInput && composerMessage().trim() !== '');
 									var stopEndpoint = primaryActionStopEndpoint(action);
 									var wantStop = running && !hasContent && !!stopEndpoint;
 									var wantLabel = wantStop ? 'Stop response' : 'Send message';
@@ -2179,7 +2390,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								} else parameters[name] = value;
 							});
 							var snapshot = Object.assign({
-								message: messageInput ? messageInput.value : '',
+								message: composerMessage(),
+								composerText: messageInput.value,
+								pastedTextSnapshot: pastedTexts.map(function(item) { return { id: item.id, text: item.text }; }),
 								attachmentSessionID: sessionInput ? sessionInput.value : '',
 								modelID: fields.has('agent_id') ? fields.get('agent_id') : undefined,
 								reasoningEffort: fields.has('reasoning_effort') ? fields.get('reasoning_effort') : undefined,
@@ -2222,12 +2435,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 							function submitComposer(endpoint, intent, payload) {
 								if (!endpoint) return;
-								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : (messageInput ? messageInput.value : '');
+								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : composerMessage();
 								if (submittedMessage.trim() === '') return;
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
 									var expectedTurnInput = form.querySelector('input[name="expected_turn_id"]');
 									payload = form._captureChatSubmission(payload || {
-										message: messageInput ? messageInput.value : '',
+										message: composerMessage(),
 										attachmentSessionID: sessionInput ? sessionInput.value : '',
 										expectedTurnID: expectedTurnInput ? expectedTurnInput.value : ''
 									}, 'steer');
@@ -2345,11 +2558,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							guard.value = turnID;
 						}
 						function deferSteerWhileSendPending() {
-							if (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !messageInput.value.trim()) return false;
-							deferredSteer = {
-								message: messageInput.value,
-								attachmentSessionID: sessionInput ? sessionInput.value : ''
-							};
+							if (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !composerMessage().trim()) return false;
+							deferredSteer = form._captureChatSubmission(null, 'steer');
 							return true;
 						}
 						function flushDeferredSteer() {
@@ -2828,6 +3038,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							body: formData
 						});
 						if (!response.ok) {
+							if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 							var error = await response.text();
 							alert('Upload failed: ' + error);
 							return;
@@ -2873,17 +3084,39 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			}
 
 
+			// The Linux native bridge uses WebKit's chooser API for genuine OS drops
+			// because affected WebKitGTK versions hide DataTransfer File objects.
+			form._ovAcceptNativeFileDrop = function() {
+				dragCounter = 0;
+				if (dropOverlay) dropOverlay.classList.add('hidden');
+				if (fileInput && !fileInput.disabled) fileInput.click();
+			};
+			window.ovAcceptNativeFileDrop = function(x, y) {
+				var target = document.elementFromPoint(x, y);
+				var targetForm = target && target.closest('form');
+				if (targetForm && targetForm._ovAcceptNativeFileDrop) targetForm._ovAcceptNativeFileDrop();
+			};
+			// File drags may expose items before the FileList becomes available.
+			function isFileDrag(transfer) {
+				return transfer && (window._ovNativeFileDrag || Array.from(transfer.types || []).indexOf('Files') !== -1 ||
+					Array.from(transfer.items || []).some(function(item) { return item.kind === 'file'; }) ||
+					(transfer.files && transfer.files.length > 0));
+			}
 			// Drag-and-drop
 			var dragCounter = 0;
 			form.addEventListener('dragenter', function(e) {
+				if (!isFileDrag(e.dataTransfer)) return;
 				e.preventDefault();
 				e.stopPropagation();
 				dragCounter++;
 				if (dropOverlay) dropOverlay.classList.remove('hidden');
 			});
 			form.addEventListener('dragover', function(e) {
+				if (!isFileDrag(e.dataTransfer)) return;
 				e.preventDefault();
 				e.stopPropagation();
+				// Negotiate a copy with native file managers, including Linux/WebKit.
+				e.dataTransfer.dropEffect = 'copy';
 			});
 			form.addEventListener('dragleave', function(e) {
 				e.preventDefault();
@@ -2899,7 +3132,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				e.stopPropagation();
 				dragCounter = 0;
 				if (dropOverlay) dropOverlay.classList.add('hidden');
-				var files = Array.from(e.dataTransfer.files);
+				var transfer = e.dataTransfer;
+				if (!transfer) return;
+				// Snapshot File objects synchronously: the drag data is protected after
+				// this event returns, while uploads run on an asynchronous queue.
+				var files = Array.from(transfer.files || []);
+				if (files.length === 0) {
+					files = Array.from(transfer.items || []).filter(function(item) {
+						return item.kind === 'file';
+					}).map(function(item) { return item.getAsFile(); }).filter(Boolean);
+				}
 				if (files.length > 0) handleFiles(files);
 			});
 
@@ -3207,14 +3449,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					form.addEventListener('htmx:beforeRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
 						var triggeringEvent = event.detail.requestConfig && event.detail.requestConfig.triggeringEvent;
-						var payload = (triggeringEvent && triggeringEvent._chatSubmissionPayload) || form._chatNextSubmissionPayload || null;
+						var payload = (triggeringEvent && triggeringEvent._chatSubmissionPayload) || form._chatNextSubmissionPayload || form._captureChatSubmission();
 						form._chatNextSubmissionPayload = null;
 						var request = event.detail.xhr || {};
 						request._chatSubmittedPayload = payload;
 						request._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';
 						request._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();
 						if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;
-								request._chatSubmittedMessage = payload ? payload.message : (messageInput ? messageInput.value : '');
+								request._chatSubmittedMessage = payload ? payload.message : composerMessage();
 								request._chatSubmittedAttachmentSession = payload ? payload.attachmentSessionID : (sessionInput ? sessionInput.value : '');
 								request._chatSubmittedFallbackFromSteer = !!(payload && payload.fallbackFromSteer);					});
 
@@ -3240,11 +3482,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
-									if (messageInput && messageInput.value === submittedMessage) {
+									var submittedText = request._chatSubmittedPayload ? request._chatSubmittedPayload.composerText : submittedMessage;
+									if (messageInput && (messageInput.value === submittedText || messageInput.value === submittedMessage)) {
 										messageInput.value = '';
 										messageInput.dispatchEvent(new Event('input', { bubbles: true }));
 										refreshPrimaryActionForInput();
 									}
+									acceptSubmittedPastes(request._chatSubmittedPayload);
 									if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
 								}
 						} else if (completedIntent === 'steer' && !request._chatSubmittedFallbackFromSteer && submittedMessage.trim() !== '' && request.status === 409) {

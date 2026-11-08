@@ -28,10 +28,11 @@ func (h *Handler) AddEmailAuthorizedSender(c echo.Context) error {
 			displayName = emailAddress
 		}
 		sender := &models.EmailAuthorizedSender{
-			ProjectID:    projectID,
-			EmailAddress: emailAddress,
-			DisplayName:  displayName,
-			AddedBy:      "web",
+			ChannelSenderMapping: senderMappingForm(c),
+			ProjectID:            projectID,
+			EmailAddress:         emailAddress,
+			DisplayName:          displayName,
+			AddedBy:              "web",
 		}
 		return h.emailAuthRepo.Create(ctx, sender)
 	})
@@ -44,6 +45,7 @@ func (h *Handler) RemoveEmailAuthorizedSender(c echo.Context) error {
 
 func (h *Handler) emailAuthorizedUserCRUD() authorizedUserCRUD[models.EmailAuthorizedSender] {
 	crud := authorizedUserCRUD[models.EmailAuthorizedSender]{
+		authorize:            h.prepareChannelSenderOptions,
 		render:               components.EmailAuthorizedSendersList,
 		notConfiguredMessage: "Email auth not configured",
 		configured:           h.emailAuthRepo != nil,

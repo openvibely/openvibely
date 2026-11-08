@@ -13,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 const SendMessageAllowExplicitTargetsSetting = "send_message_allow_explicit_targets"
@@ -92,6 +93,8 @@ type ChannelMessageRouter struct {
 	newID        func() string
 	auditSurface string
 	auditUser    string
+	access       *ProjectAccessService
+	authOff      bool
 }
 
 // ChannelTarget is the send_message tool view of a saved outbound target.
@@ -161,6 +164,26 @@ func (r *ChannelMessageRouter) SetEmailAuthStore(store outboundAuthorizedUserSto
 func (r *ChannelMessageRouter) SetDiscordAuthStore(store outboundAuthorizedUserStore) {
 	r.discordAuth = store
 }
+
+// SetProjectAuthorization makes every list/send re-check the caller's current
+// project role, so HTTP, chat and background task runtimes share one gate.
+func (r *ChannelMessageRouter) SetProjectAuthorization(access *ProjectAccessService, authOff bool) {
+	r.access, r.authOff = access, authOff
+}
+
+func (r *ChannelMessageRouter) requireProject(ctx context.Context, projectID string, permission authz.Permission) error {
+	if r.access == nil {
+		return nil
+	}
+	if p, ok := models.PrincipalFromContext(ctx); !ok || p.UserID == "" {
+		if !r.authOff {
+			return authz.ErrDenied
+		}
+		ctx = models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+	}
+	return r.access.Require(ctx, projectID, permission)
+}
+
 func (r *ChannelMessageRouter) WithAuditContext(surface, user string) *ChannelMessageRouter {
 	if r == nil {
 		return nil
@@ -178,6 +201,9 @@ func (r *ChannelMessageRouter) ListTargets(ctx context.Context, projectID string
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
 		return ChannelTargetListPage{}, fmt.Errorf("project id is required")
+	}
+	if err := r.requireProject(ctx, projectID, authz.View); err != nil {
+		return ChannelTargetListPage{}, fmt.Errorf("project not found")
 	}
 	limit, offset = normalizeSendMessageListPagination(limit, offset)
 	stored, err := r.targets.ListByProjectPage(ctx, projectID, limit+1, offset)
@@ -233,6 +259,9 @@ func (r *ChannelMessageRouter) Send(ctx context.Context, projectID string, req S
 		b, _ := json.Marshal(page)
 		return SendMessageResult{OK: true, MessageID: string(b)}
 	}
+	if err := r.requireProject(ctx, projectID, authz.Edit); err != nil {
+		return sendMessageError("project not found")
+	}
 	if action != "send" {
 		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("unsupported send_message action"))
 	}
@@ -257,6 +286,9 @@ func (r *ChannelMessageRouter) SendDirectTarget(ctx context.Context, projectID s
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
 		return sendMessageError("project id is required")
+	}
+	if err := r.requireProject(ctx, projectID, authz.Edit); err != nil {
+		return sendMessageError("project not found")
 	}
 	if strings.TrimSpace(req.Message) == "" {
 		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("send_message requires message"))

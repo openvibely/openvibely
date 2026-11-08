@@ -33,11 +33,11 @@ func (r *AutomationRepo) ListBreadcrumbSelector(ctx context.Context, projectID, 
 		FROM automations a
 		JOIN automation_versions v ON v.id = a.published_version_id
 			AND v.project_id = a.project_id AND v.automation_id = a.id AND v.state = 'published'
-			WHERE (? = '__all_projects__' OR a.project_id = ?) AND (? = '' OR INSTR(LOWER(a.name), ?) > 0)
+			WHERE `+analyticsProjectPredicate(ctx, "a.project_id", projectID)+` AND (? = '' OR INSTR(LOWER(a.name), ?) > 0)
 		ORDER BY CASE WHEN a.id = ? THEN 0 ELSE 1 END,
 			CASE WHEN LOWER(a.name) = ? THEN 0 WHEN LOWER(a.name) LIKE ? || '%' THEN 1 ELSE 2 END,
 			a.updated_at DESC, a.id ASC
-		LIMIT ?`, projectID, projectID, search, search, currentID, search, search, limit)
+		LIMIT ?`, projectID, search, search, currentID, search, search, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing automation breadcrumb selector: %w", err)
 	}
@@ -262,7 +262,7 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 		WHERE a.project_id = ? AND v.state = 'published'`
 	args := []any{projectID}
 	if projectID == models.AllProjectsID {
-		query = strings.Replace(query, "a.project_id = ? AND ", "", 1)
+		query = strings.Replace(query, "a.project_id = ?", accessibleProjectPredicate(ctx, "a.project_id", false), 1)
 		args = nil
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
@@ -338,7 +338,7 @@ func (r *AutomationRepo) GetDefinition(ctx context.Context, projectID, automatio
 	var a models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
 		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
-		created_via, created_at, updated_at, archived_at FROM automations WHERE (? = '__all_projects__' OR project_id = ?) AND id = ?`, projectID, projectID, automationID), &a)
+		created_via, created_at, updated_at, archived_at FROM automations WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND id = ?`, projectID, automationID), &a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -357,12 +357,39 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		return nil, false, fmt.Errorf("beginning automation publication: %w", err)
 	}
 	defer finishImmediate()
+	actor, identified := models.PrincipalFromContext(ctx)
+	if identified {
+		role, err := projectRole(ctx, conn, actor.UserID, in.ProjectID)
+		if err != nil {
+			return nil, false, err
+		}
+		if role != "maintainer" && role != "owner" {
+			return nil, false, persistence.ErrProjectDenied
+		}
+	}
+	if identity, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+		if identity.ProjectID != in.ProjectID {
+			return nil, false, persistence.ErrProjectDenied
+		}
+		if err := authorizeSlackHandoff(ctx, conn, identity.EventKey); err != nil {
+			return nil, false, err
+		}
+	}
+	if err := authorizeDiscordTask(ctx, conn, models.Task{ProjectID: in.ProjectID, AutoMerge: true}); err != nil {
+		return nil, false, err
+	}
 
 	a, err := getAutomationByStableKeyQuery(ctx, conn, in.ProjectID, in.StableKey)
 	if err != nil {
 		return nil, false, err
 	}
 	if a != nil && a.PublishedVersionID != nil {
+		if err := requireAutomationPublisher(ctx, conn, in.ProjectID, *a.PublishedVersionID); err != nil {
+			return nil, false, err
+		}
+		if err := archiveAutomationLaunchAuthority(ctx, conn, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+			return nil, false, err
+		}
 		var publishedAdapter string
 		if err := conn.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
 			WHERE id = ? AND automation_id = ? AND project_id = ?`, *a.PublishedVersionID, a.ID, in.ProjectID).Scan(&publishedAdapter); err != nil {
@@ -385,6 +412,11 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		def, err := r.loadDefinition(ctx, conn, *a, *a.PublishedVersionID)
 		if err != nil {
 			return nil, false, err
+		}
+		if identified {
+			if err := projectAudit(ctx, conn, in.ProjectID, actor.UserID, "automation.registration_reused", a.ID, `{}`); err != nil {
+				return nil, false, err
+			}
 		}
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
@@ -491,6 +523,9 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		WHERE id = ? AND project_id = ?`, effectiveLifecycle, versionID, effectiveLifecycle, a.ID, in.ProjectID); err != nil {
 		return nil, false, err
 	}
+	if err := archiveAutomationLaunchAuthority(ctx, conn, in.ProjectID, a.ID, versionID); err != nil {
+		return nil, false, err
+	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE project_id = ? AND automation_id = ? AND id <> ?`, in.ProjectID, a.ID, versionID); err != nil {
 		return nil, false, err
 	}
@@ -506,6 +541,20 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	}
 	def, err := r.loadDefinition(ctx, conn, *updated, versionID)
 	if err != nil {
+		return nil, false, err
+	}
+	if identified {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_version_publishers(version_id,user_id) VALUES(?,?)`, versionID, actor.UserID); err != nil {
+			return nil, false, err
+		}
+		if err := projectAudit(ctx, conn, in.ProjectID, actor.UserID, "automation.registered", a.ID, `{}`); err != nil {
+			return nil, false, err
+		}
+	}
+	if err := snapshotSlackPublisher(ctx, conn, versionID); err != nil {
+		return nil, false, err
+	}
+	if err := snapshotDiscordPublisher(ctx, conn, versionID); err != nil {
 		return nil, false, err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {

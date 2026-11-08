@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/stretchr/testify/require"
 )
 
 func createServiceGoalTestProject(t *testing.T, ctx context.Context, db *teststores.Env) *models.Project {
@@ -309,5 +311,27 @@ func TestTaskGoalService_ResumeBlockedGoalResetsBlockerCount(t *testing.T) {
 	// A second ResumeGoal on the now-active goal must return ErrTaskGoalNotPaused.
 	if err := svc.ResumeGoal(ctx, task.ID, "user"); !errors.Is(err, ErrTaskGoalNotPaused) {
 		t.Fatalf("expected ErrTaskGoalNotPaused resuming active goal, got %v", err)
+	}
+}
+
+func TestTaskGoalEventIncludesProject(t *testing.T) {
+	env := teststores.New(t)
+	ctx := t.Context()
+	project := createServiceGoalTestProject(t, ctx, env)
+	task := &models.Task{ProjectID: project.ID, Title: "Goal event", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, env.Tasks.Create(ctx, task))
+	broadcaster := events.NewBroadcaster()
+	sub, err := broadcaster.SubscribeProject(project.ID)
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
+	svc := NewTaskGoalService(env.TaskGoals, env.Tasks, broadcaster)
+	_, err = svc.SetGoal(ctx, task.ID, "Finish", GoalOptions{})
+	require.NoError(t, err)
+	select {
+	case event := <-sub:
+		require.Equal(t, project.ID, event.ProjectID)
+		require.Equal(t, task.ID, event.TaskID)
+	default:
+		t.Fatal("goal event did not reach its project's subscribers")
 	}
 }

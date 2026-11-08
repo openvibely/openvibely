@@ -50,6 +50,7 @@ type ChannelTaskRunRequest struct {
 
 type ChannelReplyContext struct {
 	Source           string
+	TelegramUserID   int64
 	TelegramChatID   int64
 	SlackTeamID      string
 	SlackChannelID   string

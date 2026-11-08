@@ -470,6 +470,20 @@ func layoutStyleBlocks(t *testing.T, html string) string {
 	return styles.String()
 }
 
+func extractChatLayoutInteractions(t *testing.T, html string) string {
+	t.Helper()
+	marker := strings.Index(html, "function handleDropdownToggle(event)")
+	if marker < 0 {
+		t.Fatal("could not find production dropdown controller")
+	}
+	start := strings.LastIndex(html[:marker], "<script>")
+	end := strings.Index(html[marker:], "</script>")
+	if start < 0 || end < 0 {
+		t.Fatal("could not isolate production layout interaction script")
+	}
+	return html[start+len("<script>") : marker+end]
+}
+
 func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, runtime string) {
 	t.Helper()
 
@@ -487,15 +501,7 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 	if err := layout.ConfirmationDialog().Render(context.Background(), &confirmation); err != nil {
 		t.Fatal(err)
 	}
-	navStart := strings.Index(baseHTML, "// One owner for full-page fragment navigation")
-	if navStart < 0 {
-		t.Fatal("could not isolate production HTMX navigation helper")
-	}
-	navEndOffset := strings.Index(baseHTML[navStart:], "// Scroll position restoration for drop zones")
-	if navEndOffset < 0 {
-		t.Fatal("could not find end of production HTMX navigation helper")
-	}
-	navigationScript := baseHTML[navStart : navStart+navEndOffset]
+	navigationScript := extractChatLayoutInteractions(t, baseHTML)
 	performanceScripts := `<script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
 
 	var renderedChat bytes.Buffer
@@ -567,7 +573,10 @@ window.addEventListener('DOMContentLoaded', function() {
     if (currentTrigger.getAttribute('aria-expanded') !== 'true') fail(stage + ' did not update aria-expanded');
   }
   function key(target, value) {
-    target.dispatchEvent(new KeyboardEvent('keydown', {key: value, bubbles: true, cancelable: true}));
+    var event = new KeyboardEvent('keydown', {key: value, bubbles: true, cancelable: true});
+    target.dispatchEvent(event);
+    // Untrusted key events do not perform the browser's native button activation.
+    if (!event.defaultPrevented && target.matches('button') && (value === 'Enter' || value === ' ')) target.click();
   }
   function mouseClick(target) {
     if (!target) fail('mouse click target is missing');
@@ -691,7 +700,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	fixtureStyle := `<style>
 html, body, #main-content { height: 100%; margin: 0; }
 .dropdown-content { display: none; visibility: hidden; opacity: 0; pointer-events: none; }
-.dropdown:focus-within > .dropdown-content { display: block; }
+.dropdown:focus-within > .dropdown-content, .dropdown.dropdown-open > .dropdown-content { display: block; }
 .hidden { display: none !important; }
 </style>`
 

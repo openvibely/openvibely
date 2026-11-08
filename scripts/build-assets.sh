@@ -91,8 +91,14 @@ tailwind=$(fetch "$TAILWIND_URL" "$tw_sha")
 chmod +x "$tailwind"
 daisyui=$(fetch "$DAISYUI_URL" "$DAISYUI_SHA256")
 
-rm -rf "$dist"
+# Build in isolation so a failed download or CSS compilation preserves the
+# previous embedded bundle.
+output_dist="$dist"
+dist=$(mktemp -d "$root/web/static/.dist-build.XXXXXX")
+trap 'rm -rf "$dist"' EXIT
 mkdir -p "$dist/vendor"
+cp "$assets/panel-scroll.js" "$dist/panel-scroll.js"
+cp "$assets/permission-errors.js" "$dist/permission-errors.js"
 cp "$assets/kanban.js" "$dist/kanban.js"
 cp "$assets/thread-navigation.js" "$dist/thread-navigation.js"
 cp "$assets/thread-output-window.js" "$dist/thread-output-window.js"
@@ -121,9 +127,17 @@ cp -R "$assets/files/." "$dist/"
 printf '@tailwind base;\n@tailwind utilities;\n' >"$cache/app-utilities.input.css"
 
 cd "$assets"
-"$tailwind" -c tailwind.config.js -i "$cache/app.input.css" -o "$dist/app.css" --minify 2>/dev/null &
+# pipefail preserves compilation failures while labeling parallel build output.
+build_css() {
+  local name=$1
+  "$tailwind" -c tailwind.config.js -i "$cache/$name.input.css" -o "$dist/$name.css" --minify 2>&1 |
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" ]] || printf '[%s.css] %s\n' "$name" "$line" >&2
+    done
+}
+build_css app &
 app_pid=$!
-"$tailwind" -c tailwind.config.js -i "$cache/app-utilities.input.css" -o "$dist/app-utilities.css" --minify 2>/dev/null &
+build_css app-utilities &
 utilities_pid=$!
 app_status=0
 utilities_status=0
@@ -134,6 +148,15 @@ if [[ "$app_status" -ne 0 || "$utilities_status" -ne 0 ]]; then
   exit 1
 fi
 
+for stylesheet in app.css app-utilities.css; do
+  if [[ ! -s "$dist/$stylesheet" ]]; then
+    echo "Asset build did not produce $stylesheet." >&2
+    exit 1
+  fi
+done
+rm -rf "$output_dist"
+mv "$dist" "$output_dist"
+
 if [[ "$mode" == "--check" ]]; then
   if [[ -n "$(git -C "$root" status --porcelain -- web/static/dist)" ]]; then
     echo "web/static/dist is out of date; run scripts/build-assets.sh and commit the result." >&2
@@ -141,4 +164,4 @@ if [[ "$mode" == "--check" ]]; then
     exit 1
   fi
 fi
-echo "built $(du -sh "$dist" | cut -f1) of assets in web/static/dist"
+echo "built $(du -sh "$output_dist" | cut -f1) of assets in web/static/dist"

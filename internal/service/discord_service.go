@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -287,10 +289,19 @@ func (s *DiscordService) ReloadFromSettings(ctx context.Context) error {
 }
 
 func (s *DiscordService) Disconnect(ctx context.Context) error {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return accessErr
+	}
+	if s.settingsRepo == nil {
+		return fmt.Errorf("settings repository not configured")
+	}
+	if err := s.settingsRepo.SetMany(ctx, map[string]string{DiscordSettingBotToken: "",
+		DiscordSettingBotUserID:     "",
+		DiscordSettingSendResponses: ""}); err != nil {
+		return err
+	}
 	s.Stop()
-	_ = s.setSetting(ctx, DiscordSettingBotToken, "")
-	_ = s.setSetting(ctx, DiscordSettingBotUserID, "")
-	_ = s.setSetting(ctx, DiscordSettingSendResponses, "")
 	return nil
 }
 
@@ -310,6 +321,10 @@ func (s *DiscordService) GetConnectionStatus(ctx context.Context) (DiscordConnec
 }
 
 func (s *DiscordService) TestConnection(ctx context.Context) error {
+	ctx, accessErr := channelCredentialPrincipalContext(ctx, s.workerSvc)
+	if accessErr != nil {
+		return accessErr
+	}
 	botToken := strings.TrimSpace(s.getSetting(ctx, DiscordSettingBotToken))
 	if botToken == "" {
 		return fmt.Errorf("discord bot token is not configured")
@@ -323,7 +338,9 @@ func (s *DiscordService) TestConnection(ctx context.Context) error {
 		return fmt.Errorf("auth test failed: %w", err)
 	}
 	if user != nil && strings.TrimSpace(user.ID) != "" {
-		_ = s.setSetting(ctx, DiscordSettingBotUserID, user.ID)
+		if err := s.setSetting(ctx, DiscordSettingBotUserID, user.ID); err != nil {
+			return fmt.Errorf("save discord bot identity: %w", err)
+		}
 	}
 	return nil
 }
@@ -414,6 +431,11 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 	ctx, cancel := context.WithTimeout(context.Background(), discordProcessTimeout)
 	defer cancel()
 	start := time.Now()
+	ctx, identityErr := s.senderPrincipalContext(ctx, msg.UserID)
+	if identityErr != nil {
+		applog.Infof("[discord] sender identity denied: %v", identityErr)
+		return
+	}
 	projectID := s.getActiveProject(ctx, msg.UserID)
 	if projectID == "" {
 		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "No active project found. Please create a project first in the web UI.")
@@ -642,6 +664,10 @@ func (s *DiscordService) SendChatResponse(ctx context.Context, task models.Task,
 }
 
 func (s *DiscordService) checkAuthorization(ctx context.Context, projectID, discordUserID string) bool {
+	if s.requiresVerifiedDiscordIdentity() {
+		_, err := s.authorizeSenderAction(ctx, projectID, discordUserID)
+		return err == nil
+	}
 	if s.discordAuthRepo == nil {
 		return true
 	}
@@ -687,6 +713,12 @@ func (s *DiscordService) getActiveProject(ctx context.Context, userID string) st
 			return ""
 		}
 		selected := fallbackProjectID(projects)
+		if s.requiresVerifiedDiscordIdentity() {
+			selected = s.boundFallbackProject(ctx, key, projects)
+			if selected == "" {
+				return ""
+			}
+		}
 		if cached, ok := s.populateActiveProject(key, selected, generation); ok {
 			return cached
 		}
@@ -731,10 +763,6 @@ func (s *DiscordService) populateActiveProject(key, projectID string, expectedGe
 	return projectID, true
 }
 
-func (s *DiscordService) buildDiscordActionToolRuntime(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	return s.buildDiscordActionToolRuntimeForTask(projectID, "", actionCtx, collector)
-}
-
 func (s *DiscordService) buildDiscordActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.discordActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
 	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceDiscord, handlers)
@@ -745,10 +773,6 @@ type discordActionContext struct {
 	ThreadID  string
 	MessageID string
 	UserID    string
-}
-
-func (s *DiscordService) discordActionHandlers(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
-	return s.discordActionHandlersForTask(projectID, "", actionCtx, collector)
 }
 
 func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
@@ -852,10 +876,27 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		ProjectID:          projectID,
 		ProjectRepo:        s.projectRepo,
 	}))
+	for name, handler := range handlers {
+		handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
+			authorized, err := s.authorizeSenderAction(ctx, projectID, actionCtx.UserID)
+			if err != nil {
+				return "", err
+			}
+			if s.workerSvc != nil && s.workerSvc.runOrganizations != nil {
+				if err := requireRuntimeToolRole(authorized, s.workerSvc.runAccess, s.workerSvc.runOrganizations, projectID, name, input); err != nil {
+					return "", err
+				}
+			}
+			return handler(authorized, input)
+		}
+	}
 	return handlers
 }
 
 func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID string) error {
+	if _, err := s.authorizeSenderAction(ctx, projectID, userID); err != nil {
+		return err
+	}
 	key := strings.TrimSpace(userID)
 	s.projectSelectionMutationMu.Lock()
 	defer s.projectSelectionMutationMu.Unlock()
@@ -1405,4 +1446,118 @@ func (s *DiscordService) setSetting(ctx context.Context, key, value string) erro
 		return nil
 	}
 	return s.settingsRepo.Set(ctx, key, value)
+}
+
+// Discord's installation-wide allowlist is not application identity. In
+// authenticated mode only an admin-attested project binding identifies a sender.
+func (s *DiscordService) requiresVerifiedDiscordIdentity() bool {
+	return s.workerSvc != nil && s.workerSvc.runOrganizations != nil && !s.workerSvc.runAuthOff
+}
+
+// Authenticated senders default only to a project where they hold a binding,
+// so fallback selection never discloses or admits an unbound project.
+func (s *DiscordService) boundFallbackProject(ctx context.Context, externalID string, projects []models.Project) string {
+	if s.discordAuthRepo == nil {
+		return ""
+	}
+	ordered := append([]models.Project(nil), projects...)
+	if preferred := fallbackProjectID(projects); preferred != "" {
+		for i, project := range ordered {
+			if project.ID == preferred {
+				ordered[0], ordered[i] = ordered[i], ordered[0]
+				break
+			}
+		}
+	}
+	for _, project := range ordered {
+		if _, err := s.discordAuthRepo.ResolveApplicationUser(ctx, project.ID, externalID); err == nil {
+			return project.ID
+		}
+	}
+	return ""
+}
+
+// senderPrincipalContext resolves the sender's binding for their selected
+// project before any reply, dedupe or persistence. Transport principals never
+// grant authority to an external sender.
+func (s *DiscordService) senderPrincipalContext(ctx context.Context, externalID string) (context.Context, error) {
+	if s.workerSvc == nil || s.workerSvc.runOrganizations == nil {
+		return ctx, nil
+	}
+	if s.workerSvc.runAuthOff {
+		user, err := s.workerSvc.runOrganizations.UserByID(ctx, models.BootstrapUserID)
+		if err != nil {
+			return ctx, err
+		}
+		if user == nil || user.Disabled {
+			return ctx, authz.ErrDenied
+		}
+		return models.WithPrincipal(ctx, user.Principal), nil
+	}
+	if s.discordAuthRepo == nil || strings.TrimSpace(externalID) == "" {
+		return ctx, authz.ErrDenied
+	}
+	projectID := s.getActiveProject(ctx, externalID)
+	if projectID == "" {
+		return ctx, authz.ErrDenied
+	}
+	mapped, err := s.discordAuthRepo.ResolveApplicationUser(ctx, projectID, externalID)
+	if err != nil {
+		return ctx, err
+	}
+	return s.discordPrincipal(models.WithPrincipal(ctx, models.Principal{UserID: mapped}), projectID, externalID, mapped)
+}
+
+// authorizeSenderAction rechecks the captured sender at each runtime boundary;
+// a rebinding or the connection owner cannot replace the admitted principal.
+func (s *DiscordService) authorizeSenderAction(ctx context.Context, projectID, externalID string) (context.Context, error) {
+	if s.workerSvc == nil || s.workerSvc.runOrganizations == nil {
+		return ctx, nil
+	}
+	principal, ok := models.PrincipalFromContext(ctx)
+	if !ok || principal.UserID == "" {
+		if !s.workerSvc.runAuthOff {
+			return ctx, authz.ErrDenied
+		}
+		principal.UserID = models.BootstrapUserID
+	}
+	if s.workerSvc.runAuthOff {
+		user, err := s.workerSvc.runOrganizations.UserByID(ctx, principal.UserID)
+		if err != nil {
+			return ctx, err
+		}
+		if user == nil || user.Disabled {
+			return ctx, authz.ErrDenied
+		}
+		return models.WithPrincipal(ctx, user.Principal), nil
+	}
+	if s.discordAuthRepo == nil || strings.TrimSpace(externalID) == "" {
+		return ctx, authz.ErrDenied
+	}
+	mapped, err := s.discordAuthRepo.ResolveApplicationUser(ctx, projectID, externalID)
+	if err != nil {
+		return ctx, err
+	}
+	if mapped != principal.UserID {
+		return ctx, authz.ErrDenied
+	}
+	return s.discordPrincipal(ctx, projectID, externalID, mapped)
+}
+
+func (s *DiscordService) discordPrincipal(ctx context.Context, projectID, externalID, userID string) (context.Context, error) {
+	if original, ok := models.DiscordIngressIdentityFromContext(ctx); ok && (original.UserID != userID || original.ExternalUserID != externalID) {
+		return ctx, authz.ErrDenied
+	}
+	user, err := s.workerSvc.runOrganizations.UserByID(ctx, userID)
+	if err != nil {
+		return ctx, err
+	}
+	if user == nil || user.Disabled {
+		return ctx, authz.ErrDenied
+	}
+	ctx = models.WithPrincipal(ctx, user.Principal)
+	if err := (&authz.Authorizer{Store: s.workerSvc.runAccess}).Require(ctx, projectID, authz.Edit); err != nil {
+		return ctx, err
+	}
+	return models.WithDiscordIngressIdentity(ctx, models.DiscordIngressIdentity{ProjectID: projectID, ExternalUserID: externalID, UserID: userID}), nil
 }

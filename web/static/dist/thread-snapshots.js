@@ -133,7 +133,7 @@
                 run.stream = null;
                 return;
             }
-            if (type === 'error' && /^(execution not found|subscription denied)$/.test(event.data)) {
+            if (type === 'error' && /^(execution not found|subscription denied|access blocked)$/.test(event.data)) {
                 window.releaseToolOutputState?.(run.id);
                 run.output = ''; run.offset = 0; run.version++;
                 pages.forEach((page, id) => { if (page.runKeys?.includes(run.key)) pages.delete(id); });

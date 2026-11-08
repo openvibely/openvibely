@@ -16,6 +16,7 @@ func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, 
 	var parent *models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		var live, clear bool
+		var scheduleID, runUser string
 		if err := exec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_dispatch_admissions a JOIN tasks t ON t.id = a.task_id
    WHERE a.task_id = ? AND a.execution_id IS NULL AND t.swarm_role = 'swarm_parent' AND t.status = 'pending' AND t.category IN ('active','scheduled'))`, parentID).Scan(&live); err != nil {
 			return err
@@ -23,10 +24,27 @@ func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, 
 		if !live {
 			return nil
 		}
-		if err := exec.QueryRowContext(ctx, `SELECT starts_new_context FROM schedule_dispatch_admissions WHERE task_id = ?`, parentID).Scan(&clear); err != nil {
+		if err := exec.QueryRowContext(ctx, `SELECT starts_new_context,schedule_id,run_as_user_id FROM schedule_dispatch_admissions WHERE task_id = ?`, parentID).Scan(&clear, &scheduleID, &runUser); err != nil {
 			return err
 		}
+		if caller, ok := models.PrincipalFromContext(ctx); ok && runUser != "" && caller.UserID != runUser {
+			return persistence.ErrProjectDenied
+		}
+		if runUser != "" {
+			ctx = models.WithPrincipal(ctx, models.Principal{UserID: runUser})
+			if _, err := authorizeExecutionActor(ctx, exec, parentID, runUser); err != nil {
+				return err
+			}
+		}
 		var err error
+		ctx, err = slackScheduleContext(ctx, exec, scheduleID, runUser)
+		if err != nil {
+			return err
+		}
+		ctx, err = discordScheduleContext(ctx, exec, scheduleID, runUser)
+		if err != nil {
+			return err
+		}
 		parent, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, parentID)
 		if err != nil {
 			return err
@@ -39,6 +57,9 @@ func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, 
 			planner, err = makePlanner(parent)
 			if err != nil {
 				return err
+			}
+			if planner == nil || planner.ProjectID != parent.ProjectID || planner.ParentTaskID == nil || *planner.ParentTaskID != parent.ID || planner.SwarmRole != models.SwarmRolePlanner {
+				return persistence.ErrProjectDenied
 			}
 			title := planner.Title
 			for attempt := 0; ; attempt++ {
@@ -57,6 +78,9 @@ func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, 
 				return err
 			}
 		} else {
+			if planner.ProjectID != parent.ProjectID {
+				return persistence.ErrProjectDenied
+			}
 			var busy bool
 			if err := exec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM executions WHERE task_id = ? AND status IN ('queued','running')) OR EXISTS(SELECT 1 FROM automation_task_run_reservations WHERE task_id = ?)`, planner.ID, planner.ID).Scan(&busy); err != nil {
 				return err
@@ -78,11 +102,16 @@ func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, 
 			agent = *planner.AgentID
 		}
 		execution := models.Execution{TaskID: planner.ID, AgentConfigID: agent, Status: models.ExecQueued, PromptSent: planner.Prompt, StartsNewContext: clear}
-		if err := createExecutionWithExecutor(ctx, exec, &execution); err != nil {
+		if err := createIdentifiedExecution(ctx, exec, &execution); err != nil {
 			return err
 		}
 		if _, err := exec.ExecContext(ctx, `UPDATE schedule_dispatch_admissions SET task_id = ?, execution_id = ? WHERE task_id = ? AND execution_id IS NULL`, planner.ID, execution.ID, parentID); err != nil {
 			return err
+		}
+		if runUser != "" {
+			if err := projectAudit(ctx, exec, parent.ProjectID, runUser, "schedule.planner_admitted", planner.ID, `{}`); err != nil {
+				return err
+			}
 		}
 		planner.StartsNewContext = clear
 		admission = &persistence.ActiveLaneTaskAdmission{Task: *planner, ExecutionID: execution.ID}

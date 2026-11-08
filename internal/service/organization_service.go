@@ -34,14 +34,14 @@ type OrganizationService struct {
 	secret         string
 	dummyHash      []byte
 	mu             sync.Mutex
-	changes        chan struct{}
+	changes        accessHub
 	attempts       map[string]orgLoginWindow
 	trustedProxies []netip.Prefix
 }
 
 func NewOrganizationService(store persistence.OrganizationStore, secret string) *OrganizationService {
 	dummy, _ := bcrypt.GenerateFromPassword([]byte("invalid-account-comparison"), bcrypt.DefaultCost)
-	return &OrganizationService{Store: store, secret: secret, dummyHash: dummy, changes: make(chan struct{}), attempts: map[string]orgLoginWindow{}}
+	return &OrganizationService{Store: store, secret: secret, dummyHash: dummy, attempts: map[string]orgLoginWindow{}}
 }
 func (s *OrganizationService) Bootstrap(ctx context.Context, username, password string, authEnabled bool) error {
 	if authEnabled && username != "" {
@@ -252,9 +252,14 @@ func (s *OrganizationService) Session(ctx context.Context, token string) (*model
 	return s.Store.SessionUser(ctx, s.tokenHash(token), time.Now().Unix())
 }
 func (s *OrganizationService) Logout(ctx context.Context, token string) error {
-	err := s.Store.RevokeSession(ctx, s.tokenHash(token))
-	if err == nil {
-		s.Notify()
+	hash := s.tokenHash(token)
+	user, err := s.Store.SessionUser(ctx, hash, time.Now().Unix())
+	if err != nil {
+		return err
+	}
+	err = s.Store.RevokeSession(ctx, hash)
+	if err == nil && user != nil {
+		s.changes.notify(AccessChange{UserID: user.UserID, CloseConnections: true})
 	}
 	return err
 }
@@ -316,16 +321,13 @@ func (s *OrganizationService) Accept(ctx context.Context, token, username, passw
 	}
 	return s.Store.AcceptInvitation(ctx, s.tokenHash(token), time.Now().Unix(), user, existingID)
 }
-func (s *OrganizationService) Changes() <-chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.changes
+func (s *OrganizationService) Watch(userID string) *AccessWatch {
+	return s.changes.watch(userID)
 }
-func (s *OrganizationService) Notify() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	close(s.changes)
-	s.changes = make(chan struct{})
+
+// NotifyUser tells that user's watchers to recheck their session and every project.
+func (s *OrganizationService) NotifyUser(userID string) {
+	s.changes.notify(AccessChange{UserID: userID})
 }
 
 // RegisterHostedSession makes a verified SSO login revocable locally. Signed

@@ -167,7 +167,7 @@ func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Executi
 		columns = modelHistoryQuery(ctx, columns, false)
 	}
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+columns+` FROM executions WHERE id = ?`, id))
+		`SELECT `+columns+` FROM executions WHERE id = ? AND EXISTS (SELECT 1 FROM tasks ct WHERE ct.id=executions.task_id AND `+workspaceChatPredicate(ctx, "ct.project_id", "ct.chat_owner_user_id")+`)`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -212,7 +212,7 @@ func (r *ExecutionRepo) GetByIDForProject(ctx context.Context, id, projectID str
 		`SELECT `+executionSelectColumnsAlias+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
-		 WHERE e.id = ? AND `+analyticsProjectPredicate("t.project_id", projectID)+``, id, projectID))
+		 WHERE e.id = ? AND `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND `+workspaceChatPredicate(ctx, "t.project_id", "t.chat_owner_user_id"), id, projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -241,13 +241,16 @@ func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 		return err
 	}
 	defer unlockParent()
-	if e.IsFollowup {
+	_, identified := models.PrincipalFromContext(ctx)
+	_, slack := models.SlackIngressIdentityFromContext(ctx)
+	_, discord := models.DiscordIngressIdentityFromContext(ctx)
+	if e.IsFollowup || identified || slack || discord {
 		return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
-			return createExecutionWithExecutor(ctx, exec, e)
+			return createIdentifiedExecution(ctx, exec, e)
 		})
 	}
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		return createExecutionWithExecutor(ctx, conn, e)
+		return createIdentifiedExecution(ctx, conn, e)
 	})
 }
 
@@ -257,7 +260,81 @@ func (r *ExecutionRepo) CreateInTx(ctx context.Context, tx persistence.Tx, e *mo
 	if err != nil {
 		return err
 	}
-	return createExecutionWithExecutor(ctx, exec, e)
+	return createIdentifiedExecution(ctx, exec, e)
+}
+
+// Ordinary and channel-created executions retain their admitting user independently
+// of later task submissions. Queue promotion and schedules save their own snapshots.
+func createIdentifiedExecution(ctx context.Context, exec sqlExecutor, e *models.Execution) error {
+	actor, identified := models.PrincipalFromContext(ctx)
+	if !identified {
+		if _, discord := models.DiscordIngressIdentityFromContext(ctx); discord {
+			return persistence.ErrProjectDenied
+		}
+		if _, slack := models.SlackIngressIdentityFromContext(ctx); slack {
+			return persistence.ErrProjectDenied
+		}
+		var channelBound bool
+		if err := exec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM slack_task_provenance WHERE task_id=?) OR EXISTS(SELECT 1 FROM discord_task_provenance WHERE task_id=?)`, e.TaskID, e.TaskID).Scan(&channelBound); err != nil {
+			return err
+		}
+		if channelBound {
+			return persistence.ErrProjectDenied
+		}
+		return createExecutionWithExecutor(ctx, exec, e)
+	}
+	if _, captured := models.SlackIngressIdentityFromContext(ctx); !captured {
+		saved, _, err := slackTaskContext(ctx, exec, e.TaskID, actor.UserID)
+		if err != nil {
+			return err
+		}
+		ctx = saved
+	}
+	var discordErr error
+	ctx, discordErr = discordExecutionAdmissionContext(ctx, exec, e.TaskID, actor.UserID)
+	if discordErr != nil {
+		return discordErr
+	}
+	projectID, err := authorizeExecutionActor(ctx, exec, e.TaskID, actor.UserID)
+	if err != nil {
+		return err
+	}
+	if err := createExecutionWithExecutor(ctx, exec, e); err != nil {
+		return err
+	}
+	if _, err := exec.ExecContext(ctx, `INSERT INTO execution_run_identities(execution_id,user_id) VALUES(?,?)`, e.ID, actor.UserID); err != nil {
+		return err
+	}
+	if err := snapshotDiscordExecution(ctx, exec, e.ID); err != nil {
+		return err
+	}
+	if err := snapshotSlackExecution(ctx, exec, e.ID); err != nil {
+		return err
+	}
+	return projectAudit(ctx, exec, projectID, actor.UserID, "execution.run_as", e.ID, `{}`)
+}
+
+func authorizeExecutionActor(ctx context.Context, exec sqlExecutor, taskID, userID string) (string, error) {
+	if err := authorizeSlackTaskMutation(ctx, exec, taskID); err != nil {
+		return "", err
+	}
+	var projectID, origin string
+	var manage bool
+	if err := exec.QueryRowContext(ctx, `SELECT project_id,created_via,(auto_merge OR auto_merge_on_goal_achieved) FROM tasks WHERE id=?`, taskID).Scan(&projectID, &origin, &manage); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", persistence.ErrProjectDenied
+		}
+		return "", err
+	}
+	role, err := projectRole(ctx, exec, userID, projectID)
+	if err != nil {
+		return "", err
+	}
+	manage = manage || origin == models.TaskOriginWebhook || persistence.IsAutomationTaskCreatedVia(origin)
+	if role != "owner" && role != "maintainer" && (role != "editor" || manage) {
+		return "", persistence.ErrProjectDenied
+	}
+	return projectID, nil
 }
 
 func createExecutionWithExecutor(ctx context.Context, exec sqlExecutor, e *models.Execution) error {
@@ -311,22 +388,59 @@ func (r *ExecutionRepo) MarkRunning(ctx context.Context, id string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	res, err := execBoundSQLite(ctx, r.db,
-		`UPDATE executions
-		 SET status = ?, started_at = datetime('now'), completed_at = NULL
-		 WHERE id = ? AND status IN (?, ?)`,
-		models.ExecRunning, id, models.ExecQueued, models.ExecRunning)
-	if err != nil {
-		return fmt.Errorf("marking execution running: %w", err)
-	}
-	changed, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("marking execution running rows affected: %w", err)
-	}
-	if changed == 0 {
-		return fmt.Errorf("execution is not queued/running: %s", id)
-	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		var taskID, userID, goalID string
+		var goal bool
+		if err := tx.QueryRowContext(ctx, `SELECT e.task_id,COALESCE(r.user_id,''),COALESCE(r.goal_id,''),COALESCE(r.goal_continuation,0) FROM executions e LEFT JOIN execution_run_identities r ON r.execution_id=e.id WHERE e.id=?`, id).Scan(&taskID, &userID, &goalID, &goal); err != nil {
+			return err
+		}
+		if actor, identified := models.PrincipalFromContext(ctx); identified {
+			if userID != "" && actor.UserID != userID {
+				return persistence.ErrProjectDenied
+			}
+			if userID == "" {
+				userID = actor.UserID
+			}
+		}
+		if userID != "" {
+			if _, err := authorizeExecutionActor(ctx, tx, taskID, userID); err != nil {
+				return err
+			}
+		}
+		if goal {
+			var valid bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_goals WHERE task_id=? AND goal_id=? AND goal_id<>'' AND run_as_user_id=? AND status='active')`, taskID, goalID, userID).Scan(&valid); err != nil {
+				return err
+			}
+			if !valid {
+				return persistence.ErrProjectDenied
+			}
+		}
+		if err := requireReviewerExecution(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := requireDiscordExecution(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := requireSlackExecution(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := requireAutomationExecution(ctx, tx, id); err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE executions SET status=?,started_at=datetime('now'),completed_at=NULL WHERE id=? AND status IN (?,?)`, models.ExecRunning, id, models.ExecQueued, models.ExecRunning)
+		if err != nil {
+			return fmt.Errorf("marking execution running: %w", err)
+		}
+		changed, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed == 0 {
+			return fmt.Errorf("execution is not queued/running: %s", id)
+		}
+		return nil
+	})
 }
 
 // CreateDirectTaskFollowupOrQueue atomically either starts a direct follow-up or
@@ -360,6 +474,20 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 		} else if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
 			return fmt.Errorf("loading task for follow-up admission: %w", err)
 		}
+		if actor, identified := models.PrincipalFromContext(ctx); identified {
+			if _, err := authorizeExecutionActor(ctx, dbexec, e.TaskID, actor.UserID); err != nil {
+				return err
+			}
+			if input.Source == models.TaskOriginSystemAgent && input.OriginAgent == models.AgentSystemKindGoal {
+				var valid bool
+				if err := dbexec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_goals WHERE task_id=? AND goal_id=? AND goal_id<>'' AND run_as_user_id=? AND status='active')`, e.TaskID, input.GoalID, actor.UserID).Scan(&valid); err != nil {
+					return err
+				}
+				if !valid {
+					return persistence.ErrProjectDenied
+				}
+			}
+		}
 		var protected int
 		if err := dbexec.QueryRowContext(ctx, `SELECT EXISTS (
 			SELECT 1 FROM executions WHERE task_id = ? AND status = 'running'
@@ -383,23 +511,12 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 				updated_at = datetime('now') WHERE id = ?`, e.TaskID); err != nil {
 			return fmt.Errorf("reactivating task for direct follow-up: %w", err)
 		}
-		isFollowup := 0
-		if e.IsFollowup {
-			isFollowup = 1
-		}
 		e.Status = models.ExecQueued
-		if err := resolveExecutionAuthor(ctx, dbexec, e); err != nil {
+		if err := createIdentifiedExecution(ctx, dbexec, e); err != nil {
 			return err
 		}
-		if err := dbexec.QueryRowContext(ctx, `INSERT INTO executions
-			(id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context, author_user_id, author_name)
-			VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
-			RETURNING id, started_at, rowid`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext, e.AuthorUserID, e.AuthorName).
-			Scan(&e.ID, &e.StartedAt, &e.HistoryOrder); err != nil {
-			return fmt.Errorf("creating direct task follow-up execution: %w", err)
-		}
-		if e.IsFollowup {
-			if err := bumpSwarmParentStopRevision(ctx, dbexec, e.TaskID); err != nil {
+		if _, identified := models.PrincipalFromContext(ctx); identified && input.Source == models.TaskOriginSystemAgent && input.OriginAgent == models.AgentSystemKindGoal {
+			if _, err := dbexec.ExecContext(ctx, `UPDATE execution_run_identities SET goal_id=?,goal_continuation=1 WHERE execution_id=?`, input.GoalID, e.ID); err != nil {
 				return err
 			}
 		}
@@ -927,7 +1044,7 @@ func (r *ExecutionRepo) hasActiveTaskExecution(ctx context.Context, taskID, excl
 }
 
 func (r *ExecutionRepo) FindLatestActiveChatExecution(ctx context.Context, projectID string) (*models.Execution, error) {
-	e, err := scanExecutionRow(r.db.QueryRowContext(ctx, latestActiveChatExecutionSQL(), projectID))
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx, scopeWorkspaceExecutions(ctx, latestActiveChatExecutionSQL()), projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -991,6 +1108,7 @@ func (r *ExecutionRepo) ListChatModelHistoryBefore(ctx context.Context, projectI
  WHERE e.task_project_id = ? AND e.task_category = 'chat'
  AND (NOT EXISTS (SELECT 1 FROM email_task_context ec JOIN executions current ON current.task_id = ec.task_id WHERE current.id = ?)
  OR EXISTS (SELECT 1 FROM email_task_context ec JOIN email_task_context current_ec ON current_ec.email_session_key = ec.email_session_key JOIN executions current ON current.task_id = current_ec.task_id WHERE ec.task_id = e.task_id AND current.id = ?))`
+	query += " AND " + workspaceExecutionPredicate(ctx)
 	args := []any{projectID, currentExecID, currentExecID}
 	if beforeExecID != "" {
 		query += ` AND (e.started_at < (SELECT started_at FROM executions WHERE id = ?) OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.history_order < (SELECT history_order FROM executions WHERE id = ?)))`
@@ -1032,6 +1150,7 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 		return []models.Execution{}, nil
 	}
 	query, args := chatHistoryPageSQL(projectID, beforeExecID, limit)
+	query = scopeWorkspaceExecutions(ctx, query)
 
 	rows, err := r.db.QueryContext(ctx, modelHistoryQuery(ctx, query, true), args...)
 	if err != nil {
@@ -1295,7 +1414,7 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 			SUM(CASE WHEN e.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status IN ('completed', 'failed', 'cancelled')
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ` AND e.status IN ('completed', 'failed', 'cancelled')
 	`
 	args := []interface{}{dateFormat, projectID}
 
@@ -1343,7 +1462,7 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID
 			MAX(e.duration_ms) as max_ms
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1381,7 +1500,7 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectI
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
 		JOIN agent_configs ac ON ac.id = e.agent_config_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1442,7 +1561,7 @@ func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID 
 			COUNT(*) as count
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + `
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + `
 	`
 	args := []interface{}{projectID}
 
@@ -1496,7 +1615,7 @@ func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID st
 	args := []interface{}{}
 
 	if projectID != "" {
-		query += ` AND ` + analyticsProjectPredicate("t.project_id", projectID) + ``
+		query += ` AND ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ``
 		args = append(args, projectID)
 	}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
@@ -1536,7 +1655,7 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 			MAX(e.started_at) as last_executed_at
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ``
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ``
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1603,7 +1722,7 @@ func queryFailedTaskPatterns(ctx context.Context, db *sql.DB, projectID string, 
 
 	query := failedTaskPatternsQuery
 	if projectID == models.AllProjectsID {
-		query = strings.Replace(query, "t.project_id = ?", "? = '__all_projects__' AND t.category != 'chat'", 1)
+		query = strings.Replace(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID)+" AND t.category != 'chat'", 1)
 	}
 	rows, err := db.QueryContext(ctx, query, projectID, minFailures, limit)
 	if err != nil {
@@ -1650,7 +1769,7 @@ func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projec
 			COUNT(*) OVER(PARTITION BY t.id) failure_count,
 			ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY e.started_at DESC,e.rowid DESC) rn
 		FROM executions e JOIN tasks t ON t.id=e.task_id
-		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status='failed'`
+		WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", projectID) + ` AND e.status='failed'`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1699,7 +1818,7 @@ func (r *ExecutionRepo) ListLiveExecutions(ctx context.Context) ([]models.LiveEx
 // GetDisplayExecution loads a complete public response for UI fragments without
 // loading reasoning_content or diff_output. History paging remains per execution.
 func (r *ExecutionRepo) GetDisplayExecution(ctx context.Context, id string) (*models.Execution, error) {
-	execution, err := scanExecutionRow(r.db.QueryRowContext(ctx, `SELECT `+executionSelectColumnsLight+` FROM executions WHERE id=?`, id))
+	execution, err := scanExecutionRow(r.db.QueryRowContext(ctx, `SELECT `+executionSelectColumnsLight+` FROM executions WHERE id=? AND EXISTS (SELECT 1 FROM tasks ct WHERE ct.id=executions.task_id AND `+workspaceChatPredicate(ctx, "ct.project_id", "ct.chat_owner_user_id")+`)`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

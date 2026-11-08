@@ -13,6 +13,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 // A subscription ID belongs to one view generation, not to an execution. Late
@@ -38,7 +40,8 @@ type liveFrame struct {
 }
 
 type liveSubscription struct {
-	stop context.CancelFunc
+	command liveCommand
+	stop    context.CancelFunc
 }
 
 // dispatchLiveFrame runs only on the socket loop. Completion shares the output
@@ -59,6 +62,48 @@ func dispatchLiveFrame(subscriptions map[string]*liveSubscription, frame liveFra
 		return true
 	}
 	return write(frame)
+}
+
+// liveProjectVisibility is loaded at subscription admission and access changes.
+type liveProjectVisibility map[string]bool
+
+func (h *Handler) liveEventVisible(ctx context.Context, cache liveProjectVisibility, frame liveFrame) bool {
+	if h.projectAccessSvc == nil {
+		return true
+	}
+	var projectID string
+	switch event := frame.Data.(type) {
+	case events.TaskEvent:
+		projectID = event.ProjectID
+	case events.ChatEvent:
+		if event.ProjectID == models.AllProjectsID {
+			p, ok := models.PrincipalFromContext(ctx)
+			return !ok || (event.AudienceUserID != "" && event.AudienceUserID == p.UserID)
+		}
+		projectID = event.ProjectID
+	default:
+		return true
+	}
+	if projectID == "" {
+		return false
+	}
+	return cache[projectID]
+}
+
+// Refresh only on subscription admission or an access-change notification.
+func (h *Handler) refreshLiveVisibility(ctx context.Context, visible liveProjectVisibility) error {
+	clear(visible)
+	if h.projectAccessSvc == nil {
+		return nil
+	}
+	projects, err := h.projectRepo.ListSelectorOptions(ctx)
+	if err != nil {
+		return err
+	}
+	for _, project := range projects {
+		visible[project.ID] = h.projectAccessSvc.Require(ctx, project.ID, authz.View) == nil
+	}
+	return nil
 }
 
 // LiveWebSocket uses the normal session middleware and additionally checks the
@@ -97,7 +142,18 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 	conn.SetReadLimit(4096)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	authorized := func() bool {
+		if !h.authEnabled() {
+			return true
+		}
+		session := h.recognizeSession(r, time.Now())
+		return session.localUser != nil || session.hostedClaims != nil
+	}
+	visible := liveProjectVisibility{}
 	writeFrame := func(f liveFrame) bool {
+		if !h.liveEventVisible(ctx, visible, f) {
+			return true
+		}
 		writeCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 		defer stop()
 		if wsjson.Write(writeCtx, conn, f) != nil {
@@ -157,31 +213,94 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 	defer ticker.Stop()
 	lastUpdate := ""
 	ticks := 0
-	authorized := func() bool {
-		if !h.authEnabled() {
-			return true
-		}
-		session := h.recognizeSession(r, time.Now())
-		return session.localUser != nil || session.hostedClaims != nil
+	// Access is checked when a subscription starts and again only when a change
+	// names this user (or a project policy). Frames are never rechecked.
+	principal, _ := models.PrincipalFromContext(ctx)
+	var projectWatch, userWatch *service.AccessWatch
+	var projectChanges, userChanges <-chan struct{}
+	if h.projectAccessSvc != nil {
+		projectWatch = h.projectAccessSvc.Watch(principal.UserID)
+		defer projectWatch.Close()
+		projectChanges = projectWatch.C()
 	}
-	var membershipChanges <-chan struct{}
 	if h.organizationSvc != nil {
-		membershipChanges = h.organizationSvc.Changes()
+		userWatch = h.organizationSvc.Watch(principal.UserID)
+		defer userWatch.Close()
+		userChanges = userWatch.C()
+	}
+	updateWatchProjects := func() {
+		if projectWatch == nil {
+			return
+		}
+		projects := map[string]bool{}
+		all := false
+		for _, sub := range subscriptions {
+			projects[sub.command.ProjectID] = true
+			all = all || sub.command.ProjectID == models.AllProjectsID
+		}
+		projectWatch.SetProjects(projects, all)
+	}
+	updateWatchProjects()
+	reauthorize := func(changes []service.AccessChange) {
+		if len(changes) == 0 {
+			return
+		}
+		all := false
+		projects := map[string]bool{}
+		for _, change := range changes {
+			if change.ProjectID == "" {
+				all = true
+			}
+			projects[change.ProjectID] = true
+		}
+		if all {
+			if err := h.refreshLiveVisibility(ctx, visible); err != nil {
+				cancel()
+				return
+			}
+		} else {
+			for id := range projects {
+				visible[id] = h.projectAccessSvc.Require(ctx, id, authz.View) == nil
+			}
+		}
+		for id, subscription := range subscriptions {
+			cmd := subscription.command
+			if !all && !projects[cmd.ProjectID] && cmd.ProjectID != models.AllProjectsID {
+				continue
+			}
+			if !h.liveSubscriptionAllowed(ctx, cmd) {
+				subscription.stop()
+				delete(subscriptions, id)
+				writeFrame(liveFrame{ID: id, Event: "error", Data: "access blocked"})
+			}
+		}
+		updateWatchProjects()
+	}
+	if !authorized() {
+		return nil
 	}
 	writeFrame(liveFrame{Event: "ready"})
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-membershipChanges:
-			membershipChanges = h.organizationSvc.Changes()
+		case <-projectChanges:
+			reauthorize(projectWatch.Drain())
+		case <-userChanges:
+			changes := userWatch.Drain()
+			if len(changes) == 0 {
+				continue
+			}
+			for _, change := range changes {
+				if change.CloseConnections {
+					return nil
+				}
+			}
 			if !authorized() {
 				return nil
 			}
+			reauthorize([]service.AccessChange{{UserID: principal.UserID}})
 		case cmd := <-commands:
-			if !authorized() {
-				return nil
-			}
 			if cmd.ID == "" || len(cmd.ID) > 128 {
 				return nil
 			}
@@ -189,6 +308,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				if subscription := subscriptions[cmd.ID]; subscription != nil {
 					subscription.stop()
 					delete(subscriptions, cmd.ID)
+					updateWatchProjects()
 				}
 				continue
 			}
@@ -202,13 +322,45 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 			if cmd.Op != "execution" && cmd.Op != "live" {
 				return nil
 			}
+			if !authorized() {
+				return nil
+			}
+			// Register interest before admission so a concurrent revocation is queued.
+			// Existing subscriptions remain registered throughout this check.
+			if projectWatch != nil {
+				projects := map[string]bool{cmd.ProjectID: true}
+				all := cmd.ProjectID == models.AllProjectsID
+				for _, sub := range subscriptions {
+					projects[sub.command.ProjectID] = true
+					all = all || sub.command.ProjectID == models.AllProjectsID
+				}
+				projectWatch.SetProjects(projects, all)
+			}
 			if cmd.Offset < 0 || !h.liveSubscriptionAllowed(ctx, cmd) {
+				updateWatchProjects()
 				writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription denied"})
 				continue
 			}
+			if cmd.ProjectID == models.AllProjectsID {
+				if err := h.refreshLiveVisibility(ctx, visible); err != nil {
+					updateWatchProjects()
+					writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription denied"})
+					continue
+				}
+			} else {
+				visible[cmd.ProjectID] = true
+			}
 			subctx, stop := context.WithCancel(ctx)
-			subscription := &liveSubscription{stop: stop}
+			subscription := &liveSubscription{stop: stop, command: cmd}
 			subscriptions[cmd.ID] = subscription
+			updateWatchProjects()
+			// Apply changes queued during admission before starting any output.
+			if projectWatch != nil {
+				reauthorize(projectWatch.Drain())
+				if subscriptions[cmd.ID] != subscription {
+					continue
+				}
+			}
 			go func(cmd liveCommand) {
 				defer func() {
 					// Use the connection queue even after subctx is cancelled.
@@ -230,11 +382,12 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				}
 			}(cmd)
 		case f := <-out:
-			if h.organizationSvc != nil && !authorized() {
-				return nil
-			}
+			// Frames from a subscription retired by revocation are discarded here.
 			if !dispatchLiveFrame(subscriptions, f, writeFrame) {
 				return nil
+			}
+			if f.finished || f.Event == "done" || f.Event == "error" || f.Event == "retry" {
+				updateWatchProjects()
 			}
 		case <-ticker.C:
 			ticks++
@@ -267,15 +420,14 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 	}
 }
 
-// Authentication is instance-wide in OpenVibely. Project/task membership is
-// checked here on every subscription, rather than trusting browser filters.
+// Check project access and ownership at subscription admission and access changes.
 func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) bool {
 	if cmd.ProjectID == "" || h.projectRepo == nil {
 		return false
 	}
 	if cmd.ProjectID == models.AllProjectsID && cmd.Op == "live" {
-		// Authentication is instance-wide. The virtual scope receives project
-		// notifications, but execution streams still require their real owner.
+		// The virtual scope receives notifications filtered by current project access
+		// at delivery. Execution streams still require their real project.
 		if cmd.TaskID == "" {
 			return true
 		}
@@ -283,7 +435,10 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 			return false
 		}
 		task, err := h.taskRepo.GetByID(ctx, cmd.TaskID)
-		return err == nil && task != nil
+		return err == nil && task != nil && (h.projectAccessSvc == nil || h.projectAccessSvc.Require(ctx, task.ProjectID, authz.View) == nil)
+	}
+	if h.projectAccessSvc != nil && h.projectAccessSvc.Require(ctx, cmd.ProjectID, authz.View) != nil {
+		return false
 	}
 	project, err := h.projectRepo.GetByID(ctx, cmd.ProjectID)
 	if err != nil || project == nil {
@@ -304,7 +459,7 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 		if h.taskRepo == nil {
 			return false
 		}
-		task, err := h.taskRepo.GetByID(ctx, taskID)
+		task, err := h.taskRepo.GetThreadRenderMetadata(ctx, taskID)
 		return err == nil && task != nil && task.ProjectID == cmd.ProjectID
 	}
 	return cmd.Op == "live"
@@ -519,9 +674,25 @@ func clampOffsetToUTF8Boundary(offset int, s string) int {
 // RunningExecutions uses the same instance-wide session authentication as the
 // WebSocket. Subscription authorization still checks each execution's project.
 func (h *Handler) RunningExecutions(c echo.Context) error {
-	items, err := h.execRepo.ListLiveExecutions(c.Request().Context())
+	ctx := c.Request().Context()
+	items, err := h.execRepo.ListLiveExecutions(ctx)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Could not list running executions")
+	}
+	if h.projectAccessSvc != nil {
+		visible := items[:0]
+		allowed := map[string]bool{}
+		for _, item := range items {
+			ok, checked := allowed[item.ProjectID]
+			if !checked {
+				ok = h.projectAccessSvc.Require(ctx, item.ProjectID, authz.View) == nil
+				allowed[item.ProjectID] = ok
+			}
+			if ok {
+				visible = append(visible, item)
+			}
+		}
+		items = visible
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, items)

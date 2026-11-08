@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,10 +26,9 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/util"
 )
-
-var hexIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 const (
 	maxMessageLength         = 4096 // Telegram message length limit
@@ -294,10 +294,21 @@ func (s *TelegramService) SetTaskGoalService(svc *TaskGoalService) {
 	s.taskGoalSvc = svc
 }
 
+// Authenticated Telegram resolves numeric sender IDs through global OV-user mappings.
+func (s *TelegramService) requiresVerifiedSender() bool {
+	return s.workerSvc != nil && s.workerSvc.runOrganizations != nil && !s.workerSvc.runAuthOff
+}
+
+const telegramIdentityUnavailable = "Telegram sender identity is not linked to an application user. Ask an organization administrator to map your numeric Telegram ID to your OV user."
+
 // checkAuthorization verifies that a Telegram user is authorized for the given project.
 // Deny-by-default: if the auth repo is configured, the user must be explicitly listed.
 // If projectID is empty, checks authorization across all projects.
 func (s *TelegramService) checkAuthorization(userID int64, username string, projectID string) bool {
+	if s.requiresVerifiedSender() {
+		_, err := s.senderPrincipalContext(context.Background(), userID)
+		return err == nil
+	}
 	if s.telegramAuthRepo == nil {
 		applog.Infof("[telegram] auth check: no auth repo configured, allowing user %d (%s)", userID, username)
 		return true // No auth repo configured, allow all
@@ -513,7 +524,11 @@ func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbot
 	if !s.checkAuthorization(userID, username, projectID) {
 		applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
 			userID, username, projectID)
-		s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
+		if s.requiresVerifiedSender() {
+			s.sendMessage(s.ctx, chatID, telegramIdentityUnavailable)
+		} else {
+			s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
+		}
 		return true
 	}
 
@@ -553,7 +568,11 @@ func isTelegramConflictError(err error) bool {
 
 // handleStart welcomes the user and sets the default project
 func (s *TelegramService) handleStart(userID int64) string {
-	projects, err := s.projectRepo.List(context.Background())
+	ctx, err := s.senderPrincipalContext(context.Background(), userID)
+	if err != nil {
+		return telegramIdentityUnavailable
+	}
+	projects, err := s.projectRepo.List(ctx)
 	if err != nil {
 		return fmt.Sprintf("Error loading projects: %v", err)
 	}
@@ -585,7 +604,10 @@ func (s *TelegramService) handleStart(userID int64) string {
 
 // handleProject shows the current project or switches to a new one
 func (s *TelegramService) handleProject(userID int64, args string) string {
-	ctx := context.Background()
+	ctx, err := s.senderPrincipalContext(context.Background(), userID)
+	if err != nil {
+		return telegramIdentityUnavailable
+	}
 	targetName := strings.TrimSpace(args)
 	currentProjectID := ""
 	if targetName == "" {
@@ -636,11 +658,6 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 	return fmt.Sprintf("✅ Switched to project: *%s*", selection.Target.Name)
 }
 
-// handleChatMessage forwards a Telegram message to the chat orchestrator.
-func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
-	s.handleChatMessageWithDurableHandoff(context.Background(), message, nil)
-}
-
 func (s *TelegramService) handleChatMessageUntilDurable(ctx context.Context, message *tgbotapi.Message) bool {
 	result := make(chan bool, 1)
 	var reportOnce sync.Once
@@ -659,6 +676,9 @@ func (s *TelegramService) handleChatMessageUntilDurable(ctx context.Context, mes
 }
 
 func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.Context, message *tgbotapi.Message, onDurableHandoff func()) bool {
+	if message == nil || message.From == nil {
+		return true
+	}
 	userID := message.From.ID
 	chatID := message.Chat.ID
 
@@ -690,6 +710,11 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 		return true
 	}
 
+	parentCtx, identityErr := s.senderProjectContext(parentCtx, userID, projectID, authz.Edit)
+	if identityErr != nil {
+		s.sendMessage(context.Background(), chatID, "Access denied. Check your OV user mapping and project permissions.")
+		return true
+	}
 	ctx, cancel := context.WithTimeout(parentCtx, telegramProcessTimeout)
 	defer cancel()
 
@@ -751,7 +776,8 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 			s.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
 		},
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task: &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
+			ReplyContext: ChannelReplyContext{Source: models.TaskOriginTelegram, TelegramChatID: chatID, TelegramUserID: userID},
+			Task:         &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
 			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
 				return s.buildTelegramActionToolRuntimeForTask(projectID, taskID, chatID, userID, nil)
 			},
@@ -1309,17 +1335,9 @@ func telegramStreamingDisplay(cleaned string, terminal bool) string {
 	return cleaned + "\n\n⏳ _Generating..._"
 }
 
-func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	return s.buildTelegramActionToolRuntimeForTask(projectID, "", chatID, userID, collector)
-}
-
 func (s *TelegramService) buildTelegramActionToolRuntimeForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.telegramActionHandlersForTask(projectID, callerTaskID, chatID, userID, collector)
 	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceTelegram, handlers)
-}
-
-func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
-	return s.telegramActionHandlersForTask(projectID, "", chatID, userID, collector)
 }
 
 func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
@@ -1366,7 +1384,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,
-		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginTelegram, TelegramChatID: chatID},
+		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginTelegram, TelegramChatID: chatID, TelegramUserID: userID},
 		NewQueuedInput: func(_ *models.Task, runExecutionID, agentID string) *models.ThreadInput {
 			return &models.ThreadInput{TelegramChatID: chatID}
 		},
@@ -1444,6 +1462,26 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		ProjectID:          projectID,
 		ProjectRepo:        s.projectRepo,
 	}))
+	for name, handler := range handlers {
+		handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
+			original, identified := models.PrincipalFromContext(ctx)
+			var err error
+			ctx, err = s.senderProjectContext(ctx, userID, projectID, authz.Edit)
+			resolved, _ := models.PrincipalFromContext(ctx)
+			if s.requiresVerifiedSender() && (!identified || original.UserID != resolved.UserID) {
+				return "", authz.ErrDenied
+			}
+			if err != nil {
+				return "", err
+			}
+			if s.workerSvc != nil && s.workerSvc.runAccess != nil {
+				if err := requireRuntimeToolRole(ctx, s.workerSvc.runAccess, s.workerSvc.runOrganizations, projectID, name, input); err != nil {
+					return "", err
+				}
+			}
+			return handler(ctx, input)
+		}
+	}
 	return handlers
 }
 
@@ -1455,6 +1493,11 @@ func telegramSendToTaskActionResult(result string) (string, error) {
 }
 
 func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID int64, projectID string) error {
+	var err error
+	ctx, err = s.senderProjectContext(ctx, userID, projectID, authz.View)
+	if err != nil {
+		return err
+	}
 	// Serialize explicit switches so an older persistence operation cannot finish
 	// after and overwrite a newer successful switch. Cache locks remain short-held.
 	s.userProjectSwitchMu.Lock()
@@ -1536,45 +1579,11 @@ func extractProjectSwitchTarget(lower string) string {
 	return ""
 }
 
-// selectDefaultAgent retrieves the default model or falls back to the first available.
-func (s *TelegramService) selectDefaultAgent(ctx context.Context) (*models.LLMConfig, error) {
-	agents, err := s.llmConfigRepo.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list agents: %w", err)
-	}
-	if len(agents) == 0 {
-		return nil, fmt.Errorf("no agents configured")
-	}
-	for i := range agents {
-		if agents[i].IsDefault {
-			return &agents[i], nil
-		}
-	}
-	return &agents[0], nil
-}
-
 // telegramMaxThreadTranscriptBytes is the total size budget for a Telegram thread transcript (80KB).
 const telegramMaxThreadTranscriptBytes = 80 * 1024
 
 // telegramMaxPerMessageBytes is a safety limit for a single message within Telegram transcripts (50KB).
 const telegramMaxPerMessageBytes = 50 * 1024
-
-// formatThreadTranscript formats a task's execution history as a readable thread transcript.
-// offset/limit control pagination: offset is the execution index to start from (0-based),
-// limit is the max number of executions to include (0 = all that fit).
-func formatThreadTranscript(task *models.Task, executions []models.Execution, offset, limit int) string {
-	total := len(executions)
-	if offset > 0 {
-		if offset >= total {
-			return formatThreadTranscriptPage(task, nil, total, offset).transcript
-		}
-		executions = executions[offset:]
-	}
-	if limit > 0 && limit < len(executions) {
-		executions = executions[:limit]
-	}
-	return formatThreadTranscriptWithTotal(task, executions, total, offset)
-}
 
 // formatThreadTranscriptWithTotal formats a page that has already been bounded
 // by the repository. total is the full execution count used for pagination
@@ -1707,7 +1716,7 @@ func (s *TelegramService) getActiveProject(userID int64) string {
 		if s.projectRepo == nil {
 			return ""
 		}
-		projects, err := s.projectRepo.List(context.Background())
+		projects, err := s.telegramVisibleProjects(userID)
 		if err != nil || len(projects) == 0 {
 			return ""
 		}
@@ -1738,11 +1747,6 @@ func (s *TelegramService) InvalidateProjectSelection(projectID string) {
 			s.userProjectVersions[userID]++
 		}
 	}
-}
-
-func (s *TelegramService) cachedTelegramActiveProject(userID int64) (string, bool, uint64) {
-	projectID, ok, version, _ := s.cachedTelegramActiveProjectWithGeneration(userID)
-	return projectID, ok, version
 }
 
 func (s *TelegramService) cachedTelegramActiveProjectWithGeneration(userID int64) (string, bool, uint64, uint64) {
@@ -2101,35 +2105,6 @@ func splitMessage(text string, maxLen int) []string {
 	}
 
 	return messages
-}
-
-// escapeTelegramCommands prevents forward slashes in user text from being
-// detected as bot commands by inserting a zero-width space after each slash.
-func escapeTelegramCommands(s string) string {
-	return strings.ReplaceAll(s, "/", "/\u200B")
-}
-
-// getStatusIcon returns an emoji icon for task status
-func getStatusIcon(status models.TaskStatus) string {
-	switch status {
-	case models.StatusPending:
-		return "⏳"
-	case models.StatusRunning:
-		return "🔄"
-	case models.StatusCompleted:
-		return "✅"
-	case models.StatusFailed:
-		return "❌"
-	case models.StatusCancelled:
-		return "🚫"
-	default:
-		return "❓"
-	}
-}
-
-// isHexID returns true if the input looks like a 32-character hex project ID
-func isHexID(s string) bool {
-	return hexIDPattern.MatchString(s)
 }
 
 // ParseTaskID extracts a task ID from various formats (with or without backticks)

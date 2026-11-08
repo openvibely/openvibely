@@ -100,6 +100,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				<h3 class="font-bold text-lg mb-4 pr-10">Project Settings</h3>
 			<form
 				method="post"
+                novalidate
 				hx-put={ fmt.Sprintf("/projects/%s", project.ID) }
 				hx-swap="none"
                 hx-indicator="#edit-project-save-progress"
@@ -216,6 +217,9 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
  </button>
 				</div>
 			</form>
+ <section id="edit-project-sharing" role="tabpanel" aria-labelledby="edit-project-sharing-tab" data-project-panel="sharing" hidden>
+ <div hx-get={ "/projects/"+project.ID+"/sharing" } hx-trigger="load" hx-swap="outerHTML"></div>
+ </section>
 		</div>
 		<form method="dialog" class="modal-backdrop">
 			<button>close</button>
@@ -251,27 +255,21 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			var savedRepoURL = githubInput && githubInput.value;
 			var savedRepoSource = repoSourceSelect && repoSourceSelect.value;
             var editForm = m && m.querySelector('form[hx-put]');
-            var saveButton = m && m.querySelector('#edit-project-save-button');
-            var cancelButton = m && m.querySelector('#edit-project-cancel-button');
             function setSaveBusy(busy) {
-                if (!saveButton) return;
-                var busyLabel = saveButton.querySelector('.edit-project-save-busy-label');
-                if (busy) {
-                    var cloning = repoSourceSelect && repoSourceSelect.value === 'github' &&
-                        (savedRepoSource !== 'github' || (githubInput && githubInput.value.trim() !== (savedRepoURL || '').trim()));
-                    busyLabel.textContent = cloning ? 'Cloning repository...' : 'Saving...';
-                }
-                saveButton.disabled = busy;
-                if (cancelButton) cancelButton.disabled = busy;
-                saveButton.querySelector('.edit-project-save-label').classList.toggle('hidden', busy);
-                busyLabel.classList.toggle('hidden', !busy);
-            }
-            if (editForm) {
-                editForm.addEventListener('htmx:beforeRequest', function() { setSaveBusy(true); });
-                ['htmx:afterRequest', 'htmx:sendError', 'htmx:abort', 'htmx:timeout'].forEach(function(eventName) {
-                    editForm.addEventListener(eventName, function() { setSaveBusy(false); });
+                var cloning = repoSourceSelect && repoSourceSelect.value === 'github' &&
+                    (savedRepoSource !== 'github' || (githubInput && githubInput.value.trim() !== (savedRepoURL || '').trim()));
+                m.querySelectorAll('#edit-project-save-button, [data-sharing-save]').forEach(function(button) {
+                    button.setAttribute('aria-busy', String(busy));
+                    button.querySelector('.edit-project-save-label').classList.toggle('hidden', busy);
+                    var label = button.querySelector('.edit-project-save-busy-label');
+                    label.textContent = cloning ? 'Cloning repository...' : 'Saving...';
+                    label.classList.toggle('hidden', !busy);
+                    var spinner = button.querySelector('.loading');
+                    spinner.classList.toggle('htmx-request', busy);
+                    spinner.style.display = busy ? 'inline-block' : 'none';
                 });
             }
+
 
 			function updateHealthVisibility() {
 				if (!healthStatus) return;
@@ -295,6 +293,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					var response = await fetch(recoverButton.form.getAttribute('hx-put') + '/reclone', {
 						method: 'POST', headers: {'HX-Request': 'true'}
 					});
+					if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 					var payload = await response.json();
 					if (!response.ok || payload.status !== 'healthy') throw new Error(payload.error || 'Re-clone failed. Please retry.');
 					healthStatus.dataset.repoPathHealth = 'healthy';
@@ -402,6 +401,69 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				repoSourceSelect.addEventListener('change', updateRepoSourceFields);
 				updateRepoSourceFields();
 			}
+            // Both visible Save buttons submit the entire dialog, not just their tab.
+            var savedSettings = new URLSearchParams(new FormData(editForm)).toString();
+            var modalSaving = false;
+            var settingsNeedRefresh = false;
+            m.saveProjectSettings = async function() {
+                if (modalSaving) return;
+                var settings = new URLSearchParams(new FormData(editForm));
+                var settingsChanged = settings.toString() !== savedSettings;
+                if (settingsChanged && !editForm.checkValidity()) {
+                    window.selectProjectSettingsTab(m.querySelector('[data-project-tab="general"]'));
+                    editForm.reportValidity();
+                    return;
+                }
+                var sharing = m.querySelector('[data-sharing-form]');
+                var changes = sharing ? sharing.elements.changes.value : '{}';
+                var sharingChanged = changes !== '{}';
+                var sharingBody = sharing ? new URLSearchParams(new FormData(sharing)) : null;
+                modalSaving = true;
+                var controls = Array.from(m.querySelectorAll('input,textarea,select,button'));
+                var disabled = controls.map(function(control) { return control.disabled; });
+                controls.forEach(function(control) { control.disabled = true; });
+                setSaveBusy(true);
+                var savedGeneralThisTime = false;
+                async function accepted(response, general) {
+                    if (await window.openVibelyPermissionErrors?.fetch(response)) return false;
+                    if (response.ok && (general ? response.headers.get('HX-Refresh') === 'true' : response.status === 204)) return true;
+                    var toast = {};
+                    try { toast = JSON.parse(response.headers.get('HX-Trigger') || '{}').openvibelyToast || {}; } catch (_) {}
+                    var message = toast.message || '';
+                    if (!message) { try { message = (await response.json()).message || ''; } catch (_) {} }
+                    window.showToast?.((savedGeneralThisTime && !general ? 'General and Skills & Memory saved. Sharing: ' : '') + (message || 'Could not confirm the save. Reopen settings to check.'), 'failed', '', {linkURL:toast.linkURL || toast.link_url || '', linkText:toast.linkText || toast.link_text || ''});
+                    return false;
+                }
+                try {
+                    if (settingsChanged) {
+                        var response = await fetch(editForm.getAttribute('hx-put'), {method:'PUT',headers:{'HX-Request':'true'},body:settings});
+                        if (!await accepted(response, true)) return;
+                        savedSettings = settings.toString();
+                        savedGeneralThisTime = true;
+                        settingsNeedRefresh = true;
+                    }
+                    if (sharingChanged) {
+                        var response = await fetch(sharing.getAttribute('hx-post'), {method:'POST',headers:{'HX-Request':'true'},body:sharingBody});
+                        if (!await accepted(response, false)) {
+                            return;
+                        }
+                    }
+                    window.showToast?.('Project settings saved', 'completed');
+                    m.close();
+                    if (settingsNeedRefresh) window.location.reload();
+                } catch (_) {
+                    window.showToast?.(savedGeneralThisTime ? 'General and Skills & Memory saved. Could not confirm Sharing changes. Reopen settings to check.' : 'Could not confirm the save. Reopen settings to check.', 'failed');
+                } finally {
+                    setSaveBusy(false);
+                    controls.forEach(function(control, index) { control.disabled = disabled[index]; });
+                    modalSaving = false;
+                }
+            };
+            editForm.addEventListener('submit', function(event) {
+                event.preventDefault(); event.stopImmediatePropagation();
+                m.saveProjectSettings();
+            }, true);
+
 		})();
 	</script>
 }
@@ -691,10 +753,11 @@ templ ProjectSettingsTabs(prefix string) {
   #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }
   :is(#edit_project_modal, #new_project_modal) .modal-action { flex-wrap: wrap; gap: 0.5rem; }
   :is(#edit_project_modal, #new_project_modal) .modal-action > button { margin-left: 0; }
-  :is(#edit_project_modal, #new_project_modal) .modal-action > button[type="submit"] { min-width: 6rem; }
+  :is(#edit_project_modal, #new_project_modal) .modal-action > :is(button[type="submit"], [data-sharing-save]) { min-width: 6rem; }
   :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }
   :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }
-  [data-project-tab-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; padding-right: 1rem; }
+  [data-project-tab-content], [data-project-sharing-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; padding-right: 1rem; }
+  [data-project-panel][hidden], [data-project-tab-content][hidden], .modal-action[hidden] { display: none !important; }
   [data-project-repo-fields][hidden] { display: none !important; }
   [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
   [data-project-panel="general"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }
@@ -715,17 +778,23 @@ templ ProjectSettingsTabs(prefix string) {
  <div role="tablist" aria-label="Project settings" class="tabs tabs-bordered mb-4" onkeydown="window.projectSettingsTabKey(event)">
   <button type="button" role="tab" id={ prefix + "-general-tab" } aria-controls={ prefix + "-general" } aria-selected="true" tabindex="0" class="tab tab-active" data-project-tab="general" onclick="window.selectProjectSettingsTab(this)">General</button>
   <button type="button" role="tab" id={ prefix + "-knowledge-tab" } aria-controls={ prefix + "-knowledge" } aria-selected="false" tabindex="-1" class="tab" data-project-tab="knowledge" onclick="window.selectProjectSettingsTab(this)">Skills &amp; Memory</button>
+  if prefix == "edit-project" {
+   <button type="button" role="tab" id="edit-project-sharing-tab" aria-controls="edit-project-sharing" aria-selected="false" tabindex="-1" class="tab" data-project-tab="sharing" onclick="window.selectProjectSettingsTab(this)">Sharing</button>
+  }
  </div>
  <script>
  window.selectProjectSettingsTab = function(button) {
   var form = button.closest('form');
-  form.querySelectorAll('[data-project-tab]').forEach(function(tab) {
+  var dialog = form.closest('dialog');
+  dialog.querySelectorAll('[data-project-tab]').forEach(function(tab) {
    var active = tab === button;
    tab.classList.toggle('tab-active', active);
    tab.setAttribute('aria-selected', String(active));
    tab.tabIndex = active ? 0 : -1;
   });
-  form.querySelectorAll('[data-project-panel]').forEach(function(panel) { panel.hidden = panel.dataset.projectPanel !== button.dataset.projectTab; });
+  dialog.querySelectorAll('[data-project-panel]').forEach(function(panel) { panel.hidden = panel.dataset.projectPanel !== button.dataset.projectTab; });
+  form.querySelector('[data-project-tab-content]').hidden = button.dataset.projectTab === 'sharing';
+  form.querySelector('.modal-action').hidden = button.dataset.projectTab === 'sharing';
  };
  window.projectSettingsTabKey = function(event) {
   var tabs = Array.from(event.currentTarget.querySelectorAll('[role="tab"]'));

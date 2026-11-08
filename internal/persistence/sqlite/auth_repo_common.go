@@ -4,53 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/models"
 	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
 )
 
-// deleteByID deletes a single row identified by id from table and returns a
-// not-found error (naming entityLabel) when no row matched.
-func deleteByID(ctx context.Context, db *sql.DB, table, entityLabel, id string) error {
-	result, err := execBoundSQLite(ctx, db, fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, table), id)
-	if err != nil {
-		return fmt.Errorf("delete %s: %w", entityLabel, err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("%s not found", entityLabel)
-	}
-	return nil
-}
-
-// deleteByIDForProject deletes a single row only when both its ID and persisted
-// project owner match. A foreign ID is deliberately indistinguishable from a
-// missing row to avoid exposing cross-project authorization metadata.
-func deleteByIDForProject(ctx context.Context, db *sql.DB, table, entityLabel, projectID, id string) error {
-	result, err := execBoundSQLite(ctx, db, fmt.Sprintf(`DELETE FROM %s WHERE id = ? AND project_id = ?`, table), id, projectID)
-	if err != nil {
-		return fmt.Errorf("delete %s: %w", entityLabel, err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("%s not found", entityLabel)
-	}
-	return nil
-}
-
-// countAny reports whether table contains any rows. errLabel is used only in
+// countRows returns the number of rows in table. errLabel is used only in
 // the wrapped error message on query failure.
 func countRows(ctx context.Context, db *sql.DB, table, errLabel string) (int, error) {
 	var count int
 	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s`, table)).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count %s: %w", errLabel, err)
-	}
-	return count, nil
-}
-
-func countRowsByProject(ctx context.Context, db *sql.DB, table, errLabel, projectID string) (int, error) {
-	var count int
-	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE project_id = ?`, table), projectID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count %s: %w", errLabel, err)
 	}
 	return count, nil
@@ -181,43 +145,13 @@ func deleteByTaskID(ctx context.Context, db *sql.DB, table, taskID, errLabel str
 // listErrLabel and scanErrLabel are used only in wrapped error messages.
 func authorizedUsersListQuery(table, userCol string) string {
 	return fmt.Sprintf(
-		`SELECT id, project_id, %s, display_name, added_at, added_by
+		`SELECT id, project_id, %s, display_name, added_at, added_by, application_user_id, mapping_review, team_id
 		 FROM %s
-		 ORDER BY added_at ASC`, userCol, table)
-}
-
-func authorizedUsersListByProjectQuery(table, userCol string) string {
-	return fmt.Sprintf(
-		`SELECT id, project_id, %s, display_name, added_at, added_by
-		 FROM %s
-		 WHERE project_id = ?
 		 ORDER BY added_at ASC`, userCol, table)
 }
 
 func listAuthorizedUsers[T any](ctx context.Context, db *sql.DB, table, userCol, listErrLabel, scanErrLabel string, scan func(rows *sql.Rows) (T, error)) ([]T, error) {
 	rows, err := db.QueryContext(ctx, authorizedUsersListQuery(table, userCol))
-	if err != nil {
-		return nil, fmt.Errorf("list %s: %w", listErrLabel, err)
-	}
-	defer rows.Close()
-
-	var items []T
-	for rows.Next() {
-		v, err := scan(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan %s: %w", scanErrLabel, err)
-		}
-		items = append(items, v)
-	}
-	return items, rows.Err()
-}
-
-func listAuthorizedUsersByProject[T any](ctx context.Context, db *sql.DB, table, userCol, listErrLabel, scanErrLabel, projectID string, scan func(rows *sql.Rows) (T, error)) ([]T, error) {
-	query := authorizedUsersListByProjectQuery(table, userCol)
-	if projectID == models.AllProjectsID {
-		query = strings.Replace(query, "project_id = ?", "? = '__all_projects__'", 1)
-	}
-	rows, err := db.QueryContext(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", listErrLabel, err)
 	}
@@ -240,7 +174,7 @@ func listAuthorizedUsersByProject[T any](ctx context.Context, db *sql.DB, table,
 // errLabel is used only in the wrapped error message on query failure.
 func getAuthorizedUserByID[T any](ctx context.Context, db *sql.DB, table, userCol, errLabel, id string, scan func(row *sql.Row) (T, error)) (*T, error) {
 	query := fmt.Sprintf(
-		`SELECT id, project_id, %s, display_name, added_at, added_by
+		`SELECT id, project_id, %s, display_name, added_at, added_by, application_user_id, mapping_review, team_id
 		 FROM %s WHERE id = ?`, userCol, table)
 	v, err := scan(db.QueryRowContext(ctx, query, id))
 	if err == sql.ErrNoRows {
@@ -272,10 +206,8 @@ type singleIdentifierAllowlist[T any] struct {
 	listErrLabel                string
 	scanErrLabel                string
 	getErrLabel                 string
-	deleteEntityLabel           string
 	countAnyErrLabel            string
 	checkAnywhereErrLabel       string
-	checkProjectErrLabel        string
 	updateAddedByOnEmptyDisplay bool
 	normalize                   func(string) string
 	scan                        func(taskContextScanner) (T, error)
@@ -296,10 +228,7 @@ func (h singleIdentifierAllowlist[T]) List(ctx context.Context) ([]T, error) {
 }
 
 func (h singleIdentifierAllowlist[T]) ListByProject(ctx context.Context, projectID string) ([]T, error) {
-	return listAuthorizedUsersByProject(ctx, h.db, h.table, h.identityColumn, h.listErrLabel, h.scanErrLabel, projectID,
-		func(rows *sql.Rows) (T, error) {
-			return h.scan(rows)
-		})
+	return h.List(ctx)
 }
 
 func (h singleIdentifierAllowlist[T]) GetByID(ctx context.Context, id string) (*T, error) {
@@ -310,11 +239,11 @@ func (h singleIdentifierAllowlist[T]) GetByID(ctx context.Context, id string) (*
 }
 
 func (h singleIdentifierAllowlist[T]) Delete(ctx context.Context, id string) error {
-	return deleteByID(ctx, h.db, h.table, h.deleteEntityLabel, id)
+	return deleteChannelAllowlist(ctx, h.db, h.table, "", id)
 }
 
 func (h singleIdentifierAllowlist[T]) DeleteForProject(ctx context.Context, projectID, id string) error {
-	return deleteByIDForProject(ctx, h.db, h.table, h.deleteEntityLabel, projectID, id)
+	return deleteChannelAllowlist(ctx, h.db, h.table, projectID, id)
 }
 
 func (h singleIdentifierAllowlist[T]) HasAny(ctx context.Context) (bool, error) {
@@ -330,28 +259,57 @@ func (h singleIdentifierAllowlist[T]) IsAuthorizedAnywhere(ctx context.Context, 
 }
 
 func (h singleIdentifierAllowlist[T]) IsAuthorizedForProject(ctx context.Context, projectID, identity string) (bool, error) {
-	return countWhere(ctx, h.db, h.table, h.checkProjectErrLabel, `project_id = ? AND `+h.matchClause, projectID, h.normalizedIdentity(identity))
+	return h.IsAuthorizedAnywhere(ctx, identity)
 }
 
-func (h singleIdentifierAllowlist[T]) Create(ctx context.Context, projectID, identity, displayName, addedBy string) (string, string, time.Time, error) {
+func (h singleIdentifierAllowlist[T]) Create(ctx context.Context, projectID, identity, displayName, addedBy string, mapping models.ChannelSenderMapping) (string, string, time.Time, error) {
 	identity = h.normalizedIdentity(identity)
-	addedByUpdate := "added_by = excluded.added_by"
-	if !h.updateAddedByOnEmptyDisplay {
-		addedByUpdate = fmt.Sprintf("added_by = CASE WHEN excluded.display_name != '' THEN excluded.added_by ELSE %s.added_by END", h.table)
-	}
-	query := fmt.Sprintf(
-		`INSERT INTO %s (project_id, %s, display_name, added_by)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(%s) DO UPDATE SET
-			display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE %s.display_name END,
-			%s
-		 RETURNING id, added_at`,
-		h.table, h.identityColumn, h.conflictTarget, h.table, addedByUpdate)
-
 	var id string
 	var addedAt time.Time
-	if err := queryRowBoundSQLite(ctx, h.db, query, projectID, identity, displayName, addedBy).Scan(&id, &addedAt); err != nil {
-		return identity, "", time.Time{}, err
-	}
-	return identity, id, addedAt, nil
+	err := withImmediateTx(ctx, h.db, func(tx sqlExecutor) error {
+		var oldUser string
+		lookup := tx.QueryRowContext(ctx, `SELECT id, application_user_id FROM `+h.table+` WHERE `+h.matchClause, identity).Scan(&id, &oldUser)
+		if lookup != nil && lookup != sql.ErrNoRows {
+			return lookup
+		}
+		actor, err := authorizeSenderMutation(ctx, tx, oldUser, mapping.ApplicationUserID, lookup == nil)
+		if err != nil {
+			return err
+		}
+		if actor != "" {
+			addedBy = actor
+		}
+		if lookup == nil && displayName == "" && !h.updateAddedByOnEmptyDisplay {
+			if err := tx.QueryRowContext(ctx, `SELECT added_by FROM `+h.table+` WHERE id=?`, id).Scan(&addedBy); err != nil {
+				return err
+			}
+		}
+		query := fmt.Sprintf(`INSERT INTO %s (%s,display_name,added_by,application_user_id,team_id) VALUES(?,?,?,?,?) ON CONFLICT(%s) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE %s.display_name END, added_by=excluded.added_by,application_user_id=excluded.application_user_id,team_id=excluded.team_id,mapping_review=0 RETURNING id,added_at`, h.table, h.identityColumn, h.conflictTarget, h.table)
+		if err := tx.QueryRowContext(ctx, query, identity, displayName, addedBy, mapping.ApplicationUserID, mapping.TeamID).Scan(&id, &addedAt); err != nil {
+			return err
+		}
+		if err := syncSenderBinding(ctx, tx, h.table, id, mapping, actor); err != nil {
+			return err
+		}
+		return senderAudit(ctx, tx, h.table, id, actor, "saved", oldUser, mapping.ApplicationUserID)
+	})
+	return identity, id, addedAt, err
+}
+
+// Table names are repository constants, never request input.
+func deleteChannelAllowlist(ctx context.Context, db *sql.DB, table, projectID, id string) error {
+	return withImmediateTx(ctx, db, func(tx sqlExecutor) error {
+		var old string
+		if err := tx.QueryRowContext(ctx, `SELECT application_user_id FROM `+table+` WHERE id=?`, id).Scan(&old); err != nil {
+			return err
+		}
+		actor, err := authorizeSenderMutation(ctx, tx, old, "", true)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE id=?`, id); err != nil {
+			return err
+		}
+		return senderAudit(ctx, tx, table, id, actor, "removed", old, "")
+	})
 }

@@ -112,6 +112,8 @@
             const text = !term ? '' : matched ? matched + (matched === 1 ? ' task matches' : ' tasks match') : 'No matching tasks';
             if (status.textContent !== text) status.textContent = text;
         }
+        // Checkbox, select-all and filter/search changes share this reconciliation.
+        if (window.kanbanSyncSelection) window.kanbanSyncSelection();
     }
     window.kanbanRefresh = refresh;
     function closeChoiceMenu(button) {
@@ -148,6 +150,7 @@
     async function request(path, options) {
         const response = await fetch(path, options);
         if (response.redirected) throw new Error('Session changed. Reload the page.');
+        if (await window.openVibelyPermissionErrors?.fetch(response)) { const error = new Error('Permission denied'); error.toastOnly = true; throw error; }
         const html = await response.text();
         let toast;
         try { toast = JSON.parse(response.headers.get('HX-Trigger') || '{}').openvibelyToast; } catch (_) {}
@@ -204,7 +207,7 @@
                         const result = await request(path + '?project_id=' + encodeURIComponent(project), { method: action === 'delete' ? 'DELETE' : 'POST', headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(values) });
                         batch.success++; batch.lines.push(task.title + ': ' + (result.toast ? result.toast.message : 'Done'));
                     }
-                } catch (error) { batch.failed++; batch.lines.push(task.title + ': ' + error.message); if (['merge', 'squash', 'rebase'].includes(action)) batch.stop = true; }
+                } catch (error) { batch.failed++; if (!error.toastOnly) batch.lines.push(task.title + ': ' + error.message); if (['merge', 'squash', 'rebase'].includes(action)) batch.stop = true; }
                 batch.done++; renderProgress(currentColumn(batchKey));
             }
         } finally {

@@ -1770,7 +1770,7 @@ func TestSummarizeWorktreeCommitDiff_UsesActualDiffHunks(t *testing.T) {
 	}
 }
 
-func TestParseWorktreeCommitSummaryOutputRequiresExactJSONShape(t *testing.T) {
+func TestCommitSubjectParsingRequiresExactJSONShape(t *testing.T) {
 	tests := []struct {
 		name   string
 		output string
@@ -1791,8 +1791,8 @@ func TestParseWorktreeCommitSummaryOutputRequiresExactJSONShape(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseWorktreeCommitSummaryOutput(tt.output); got != tt.want {
-				t.Fatalf("parseWorktreeCommitSummaryOutput() = %q, want %q", got, tt.want)
+			if got := cleanCommitSubject(parseGeneratedName(tt.output, 72)); got != tt.want {
+				t.Fatalf("commit subject parsing = %q, want %q", got, tt.want)
 			}
 		})
 	}

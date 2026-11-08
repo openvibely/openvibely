@@ -29,10 +29,14 @@ type preparedAutomationDispatch struct {
 }
 
 type WorkerService struct {
-	llmSvc        *LLMService
-	projectRepo   persistence.ProjectStore
-	taskRepo      persistence.TaskStore
-	llmConfigRepo persistence.LLMConfigStore
+	runIdentities    persistence.RunIdentityStore
+	runOrganizations persistence.OrganizationStore
+	runAccess        persistence.ProjectAccessStore
+	runAuthOff       bool
+	llmSvc           *LLMService
+	projectRepo      persistence.ProjectStore
+	taskRepo         persistence.TaskStore
+	llmConfigRepo    persistence.LLMConfigStore
 
 	mu         sync.Mutex
 	numWorkers int                                   // max parallel tasks (global limit)
@@ -632,6 +636,26 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		w.dispatchNext()
 	}()
 
+	if w.runIdentities != nil {
+		authorizationExecutionID := reservedExecutionID
+		if isPrepared {
+			authorizationExecutionID = prepared.ExecutionID
+		}
+		var authorizedCtx context.Context
+		var err error
+		if isPrepared {
+			authorizedCtx, err = w.automationPrincipalContext(taskCtx, prepared.Envelope, authorizationExecutionID)
+		} else {
+			authorizedCtx, err = w.executionPrincipalContext(taskCtx, task, authorizationExecutionID)
+		}
+		if err != nil {
+			executionErr = fmt.Errorf("task execution authorization: %w", err)
+			completionAttempted = false
+			return
+		}
+		taskCtx = authorizedCtx
+	}
+
 	// Claim the task BEFORE running lifecycle hooks so the kanban board
 	// reflects the task as "running" while route_task/before_run hooks
 	// execute. Without this pre-claim the task would stay visually stuck in
@@ -662,6 +686,14 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		task = claim.Task
 		taskCtx = withPreparedAutomationExecution(taskCtx, claim.Execution.ID)
 		taskCtx = withTaskPreClaimed(taskCtx)
+		if w.runIdentities != nil {
+			authorizedCtx, err := w.executionPrincipalContext(taskCtx, claim.Task, claim.Execution.ID)
+			if err != nil {
+				executionErr = err
+				return
+			}
+			taskCtx = authorizedCtx
+		}
 
 		// Capacity was reserved from the queue refresh. If the Task assignment
 		// changed before the atomic claim, transfer the model reservation before

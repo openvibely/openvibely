@@ -42,7 +42,7 @@ func TestBrowserFunctional_SidebarProjectSelectorSearchAndSwitchInChrome(t *test
 	var selectorScripts strings.Builder
 	for _, match := range scriptPattern.FindAllStringSubmatch(sidebarHTML, -1) {
 		body := match[1]
-		if strings.Contains(body, "window.openVibelySearchableSelectorInstalled") || strings.Contains(body, "function persistSelectedProject") {
+		if strings.Contains(body, "window.ovMenuController") || strings.Contains(body, "window.openVibelySearchableSelectorInstalled") || strings.Contains(body, "function persistSelectedProject") {
 			selectorScripts.WriteString("<script>")
 			selectorScripts.WriteString(body)
 			selectorScripts.WriteString("</script>")
@@ -192,7 +192,18 @@ window.addEventListener('DOMContentLoaded', function() {
     var rootRect = root.getBoundingClientRect();
     var unconstrainedTriggerRect = trigger.getBoundingClientRect();
     var triggerOffset = unconstrainedTriggerRect.top - rootRect.top;
-    var desiredTriggerTop = window.innerHeight - 80 - unconstrainedTriggerRect.height;
+    // Equal room above and below still prefers below, just as it does when
+    // the trigger is slightly above the midpoint in this constrained viewport.
+    for (var midpointOffset of [-1, 0]) {
+      root.style.top = ((window.innerHeight - unconstrainedTriggerRect.height) / 2 - triggerOffset + midpointOffset) + 'px';
+      window.dispatchEvent(new Event('resize'));
+      await wait(0);
+      triggerRect = trigger.getBoundingClientRect();
+      dialogRect = dialog.getBoundingClientRect();
+      if (midpointOffset === 0 && triggerRect.top !== window.innerHeight - triggerRect.bottom) fail('midpoint fixture must have equal room on both sides');
+      if (Math.abs(dialogRect.top - (triggerRect.bottom + 4)) > 2) fail('midpoint selector must prefer below its trigger: ' + JSON.stringify({offset:midpointOffset,trigger:triggerRect,dialog:dialogRect,style:dialog.getAttribute('style'),viewport:innerHeight}));
+    }
+    var desiredTriggerTop = window.innerHeight - 24 - unconstrainedTriggerRect.height;
     root.style.top = Math.max(8, desiredTriggerTop - triggerOffset) + 'px';
     window.dispatchEvent(new Event('resize'));
     await wait(0);
@@ -200,7 +211,7 @@ window.addEventListener('DOMContentLoaded', function() {
     dialogRect = dialog.getBoundingClientRect();
     var panel = dialog.firstElementChild;
     var results = document.querySelector('[data-project-selector-results]');
-    if (dialogRect.bottom > triggerRect.top - 2) fail('constrained selector did not open upward above its trigger');
+    if (dialogRect.bottom > triggerRect.top - 2) fail('constrained selector did not open upward above its trigger: '+JSON.stringify({trigger:triggerRect,dialog:dialogRect,style:dialog.getAttribute('style'),viewport:[innerWidth,innerHeight]}));
     if (dialogRect.top < 7 || dialogRect.height > triggerRect.top - 10) fail('upward selector escaped its available viewport height');
     if (!panel || !results) fail('constrained selector sizing fixture is incomplete');
     if (panel.getBoundingClientRect().height > dialogRect.height + 1) fail('shared selector panel exceeded the dialog dynamic max height');
@@ -342,8 +353,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	defer stderrFile.Close()
 
+	// --test-type suppresses the --no-sandbox warning infobar, which can appear mid-test and resize the viewport.
 	cmd := exec.Command(chrome,
-		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--headless=new", "--no-sandbox", "--test-type", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
 		"--no-first-run", "--no-default-browser-check", "--window-size=390,360",
 		server.URL+"/analytics?project_id=default",

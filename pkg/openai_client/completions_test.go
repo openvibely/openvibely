@@ -401,7 +401,7 @@ func TestSendCompletionsBoundsDurableToolOutputWhenReplayingLaterTurn(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(replayed) > tokenestimate.ByteBudget(512) || len(replayed) <= 512 || !strings.Contains(replayed, "truncated") {
+	if replayed != tokenestimate.ToolOutputForModelInput(full, 512) {
 		t.Fatalf("durable replay was not bounded for model input: bytes=%d", len(replayed))
 	}
 }
@@ -443,7 +443,7 @@ func TestSendCompletionsBoundsDenseToolOutputForModelButPreservesTranscript(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(modelToolResult) > tokenestimate.ByteBudget(512) || len(modelToolResult) <= 512 || !strings.Contains(modelToolResult, "truncated") {
+	if modelToolResult != tokenestimate.ToolOutputForModelInput(full, 512) {
 		t.Fatalf("model tool result was not bounded: bytes=%d", len(modelToolResult))
 	}
 	transcript := client.LastCompletionsTranscript()

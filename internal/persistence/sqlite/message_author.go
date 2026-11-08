@@ -22,6 +22,9 @@ func resolveExecutionAuthor(ctx context.Context, db sqlExecutor, e *models.Execu
 	return nil
 }
 func saveInputAuthor(ctx context.Context, db sqlExecutor, input *models.ThreadInput) error {
+	if err := stampWorkspaceChatOwner(ctx, db, "thread_inputs", input.ID, input.ProjectID); err != nil {
+		return err
+	}
 	if p, ok := models.PrincipalFromContext(ctx); ok {
 		input.AuthorUserID, input.AuthorName = p.UserID, p.Username
 		_, err := db.ExecContext(ctx, `UPDATE thread_inputs SET author_user_id=?, author_name=? WHERE id=?`, input.AuthorUserID, input.AuthorName, input.ID)

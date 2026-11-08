@@ -26,11 +26,15 @@ import (
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 type UsageAnalyticsService struct {
+	projectAccess           *ProjectAccessService
+	organizations           persistence.OrganizationStore
+	authOff                 bool
 	accountReads            singleflight.Group
 	usageRepo               persistence.UsageStore
 	llmConfigRepo           persistence.LLMConfigStore
@@ -55,6 +59,39 @@ func NewUsageAnalyticsService(usageRepo persistence.UsageStore, llmConfigRepo pe
 	s.openAIOAuthRefresher = s.defaultOpenAIAccountUsageRefreshFunc()
 	s.accountFetcher = s.fetchOAuthAccountUsage
 	return s
+}
+
+// SetProjectAuthorization enables runtime checks for every caller, including channel runtimes.
+func (s *UsageAnalyticsService) SetProjectAuthorization(access *ProjectAccessService, organizations persistence.OrganizationStore, authOff bool) {
+	s.projectAccess, s.organizations, s.authOff = access, organizations, authOff
+}
+
+func (s *UsageAnalyticsService) runtimeUsageContext(ctx context.Context, projectID string) (context.Context, bool, error) {
+	if s.projectAccess == nil {
+		return ctx, true, nil
+	}
+	principal, ok := models.PrincipalFromContext(ctx)
+	if !ok || principal.UserID == "" {
+		if !s.authOff {
+			return ctx, false, authz.ErrDenied
+		}
+		principal = models.Principal{UserID: models.BootstrapUserID}
+		ctx = models.WithPrincipal(ctx, principal)
+	}
+	if err := s.projectAccess.Require(ctx, projectID, authz.View); err != nil {
+		return ctx, false, err
+	}
+	if s.organizations == nil {
+		return ctx, false, authz.ErrDenied
+	}
+	user, err := s.organizations.UserByID(ctx, principal.UserID)
+	if err != nil {
+		return ctx, false, err
+	}
+	if user == nil || user.Disabled {
+		return ctx, false, authz.ErrDenied
+	}
+	return ctx, user.IsOrgAdmin(), nil
 }
 
 func (s *UsageAnalyticsService) SetAccountUsageFetcher(fetcher accountUsageFetcher) {
@@ -414,7 +451,17 @@ func ExecuteViewUsageAnalyticsTool(ctx context.Context, usageAnalyticsSvc *Usage
 		return "", fmt.Errorf("recent_bucket_limit must be between 0 and 24")
 	}
 	filter, filterSummary := usageAnalyticsActionFilterFromInput(projectID, req)
-	view, err := usageAnalyticsSvc.BuildLiveAnalyticsUsage(ctx, filter)
+	ctx, accountAccess, err := usageAnalyticsSvc.runtimeUsageContext(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	var view *models.AnalyticsUsageViewModel
+	if accountAccess {
+		view, err = usageAnalyticsSvc.BuildLiveAnalyticsUsage(ctx, filter)
+	} else {
+		// This projection never loads account inventory or cached provider limits.
+		view, err = usageAnalyticsSvc.BuildUsagePage(ctx, filter)
+	}
 	if err != nil {
 		return "", err
 	}

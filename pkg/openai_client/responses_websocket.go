@@ -410,6 +410,9 @@ type responsesWebsocketStreamOptions struct {
 }
 
 func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any, isChatGPTOAuth bool, opts responsesWebsocketStreamOptions) (*responsesEventIterator, error) {
+	if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+		return nil, err
+	}
 	state := c.responsesTransportState
 	state.mu.Lock()
 	endpoint, err := c.responsesWebsocketEndpoint(isChatGPTOAuth)
@@ -498,6 +501,11 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		state.resetConnectionLocked()
 		state.mu.Unlock()
 		return nil, fmt.Errorf("marshal websocket request: %w", err)
+	}
+	if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+		state.resetConnectionLocked()
+		state.mu.Unlock()
+		return nil, err
 	}
 	writeCtx, cancelWrite := context.WithTimeout(ctx, httpclient.ModelHeaderTimeout)
 	writeErr := conn.Write(writeCtx, websocket.MessageText, body)
@@ -776,6 +784,9 @@ func (c *Client) openResponsesHTTPStream(ctx context.Context, websocketPayload m
 		return nil, err
 	}
 	buildReq := func() (*http.Request, error) {
+		if err := llmcontracts.CheckBeforeModelSend(ctx); err != nil {
+			return nil, err
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, err

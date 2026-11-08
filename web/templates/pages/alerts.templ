@@ -25,30 +25,8 @@ templ Alerts(projects []models.Project, currentProjectID string, alerts []models
 	}
 }
 
-// AlertsPage renders the initial bounded alert page with its page boundary.
-templ AlertsPage(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool) {
-	@AlertsPageWithFilters(projects, currentProjectID, alerts, unreadCount, hasMore, "", "")
-}
-
-// AlertsPageWithFilters renders the initial alert page with its active workflow filters.
-templ AlertsPageWithFilters(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState) {
-	@AlertsPageWithFiltersAndSearch(projects, currentProjectID, alerts, unreadCount, hasMore, decisionState, processingState, "")
-}
-
-// AlertsPageWithFiltersAndSearch renders the initial alert page with active workflow filters and search.
-templ AlertsPageWithFiltersAndSearch(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) {
-	@layout.Base("Alerts", projects, currentProjectID) {
-		@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState, search, alertCardListState(currentProjectID, decisionState, processingState, search))
-	}
-}
-
 templ AlertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
 	@alertsContent(alerts, currentProjectID, unreadCount, false, "", "", "", alertCardListState(currentProjectID, "", "", ""))
-}
-
-// AlertsContentPage renders a bounded alert page with its page boundary.
-templ AlertsContentPage(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool) {
-	@AlertsContentPageWithFilters(alerts, currentProjectID, unreadCount, hasMore, "", "")
 }
 
 // AlertsContentPageWithFilters renders a bounded alert page with its active workflow filters.
@@ -151,6 +129,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					<p id="system-update-digest" class="text-xs font-mono break-all hidden"></p>
 					<a id="system-update-notes" class="link link-primary text-sm hidden" target="_blank" rel="noopener noreferrer">Release notes</a>
 					<p id="system-update-error" class="text-error text-sm hidden"></p>
+					<p id="system-update-permission" class="text-sm hidden">Only organization admins and owners can manage updates.</p>
 					<div class="card-actions justify-end">
 						<button id="system-update-accept" class="btn btn-sm btn-primary" onclick="systemUpdateAction('apply')">Update OpenVibely</button>
 						<button id="system-update-cancel" class="btn btn-sm btn-ghost" onclick="systemUpdateAction('cancel')">Cancel</button>
@@ -206,15 +185,20 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				var error = document.getElementById('system-update-error'); error.textContent = view.errorText; error.classList.toggle('hidden', !view.errorText);
 				var accept = document.getElementById('system-update-accept');
 				accept.textContent = view.acceptText;
-				accept.classList.toggle('hidden', !view.actionable);
+				var canManage = window.openVibelyCanManageUpdates === true;
+				accept.disabled = !canManage;
+				accept.classList.toggle('hidden', !view.actionable || !canManage);
+				document.getElementById('system-update-permission').classList.toggle('hidden', canManage);
 				document.getElementById('system-update-acceptance').classList.toggle('hidden', !view.showAcceptance);
-				document.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel);
+				document.getElementById('system-update-cancel').disabled = !canManage;
+				document.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel || !canManage);
 			}
 		async function refreshSystemUpdateCard() {
 				var card = document.getElementById('system-update-card');
 				if (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;
 				try {
 					var response = await fetch('/api/system/update', {headers: {'Accept': 'application/json'}});
+					window.openVibelyCanManageUpdates = response.headers.get('X-OpenVibely-Can-Manage-Updates') === 'true';
 					if (response.status === 204) {
 						if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(null);
 						else renderSystemUpdateCard(null);
@@ -227,6 +211,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				} catch (_) {}
 			}
 			async function systemUpdateAction(action) {
+				if (window.openVibelyCanManageUpdates !== true) return;
 				var response = await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});
 				if (action === 'cancel' && response.ok && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();
 				await refreshSystemUpdateCard();
@@ -504,29 +489,6 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			});
 		})();
 		</script>
-	</div>
-}
-
-// alertSearchInput keeps the Alerts search control's established max-w-xs sizing while
-// allowing a direct search query to seed the visible input and session state.
-templ alertSearchInput(search string) {
-	<div class="mb-4 max-w-xs">
-		<div class="card bg-base-100 shadow-sm border border-base-300">
-			<input
-				type="text"
-				name="search"
-				value={ search }
-				data-card-search="alerts"
-				if search != "" {
-					data-card-search-initial={ search }
-				}
-				class="w-full bg-transparent px-4 py-2 text-sm border-0 focus:outline-none focus:ring-0"
-				placeholder="Search alerts..."
-			/>
-		</div>
-	</div>
-	<div data-search-no-results class="text-center py-8" style="display:none">
-		<p class="opacity-50">No results match your search.</p>
 	</div>
 }
 

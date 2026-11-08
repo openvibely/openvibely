@@ -3,6 +3,7 @@ package pages
 import (
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/web/static"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +22,9 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 	state := "pending"
 	decisions := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/approval.js" {
 			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 			w.Write(script)
@@ -63,7 +67,7 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`<html><body><main id="task-thread" data-project-id="project"><div data-execution-pair data-exec-id="execution"></div></main><script>window.showToast=function(a,b,c,options){window.approvalToast=options;};</script><script src="/approval.js"></script></body></html>`))
+		w.Write([]byte(`<html><head><script src="/static/panel-scroll.js"></script><script src="/static/permission-errors.js"></script></head><body><main id="task-thread" data-project-id="project"><div data-execution-pair data-exec-id="execution"></div></main><script>window.showToast=function(a,b,c,options){window.approvalToast=options;};</script><script src="/approval.js"></script></body></html>`))
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/?project_id=project#chat-input-request-request", "dependency-approval", func(browser *composerFocusCDP) {
@@ -95,6 +99,17 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 		browser.waitFor("navigable toast", `window.approvalToast?.clickURL || ''`, "/chat/input-requests/request/open?project_id=project")
 		// Clicking while the refresh swaps the card splits press and release across nodes.
 		browser.waitFor("refreshed card", `document.getElementById('chat-input-request-request')?.dataset.beforeRefresh === undefined ? 'ready' : 'waiting'`, "ready")
+		result := browser.evaluateAwait(`(async()=>{
+ const originalFetch=window.fetch,originalToast=window.showToast;
+ const card=document.getElementById('chat-input-request-request');const before=card.innerHTML;window.denialToasts=[];
+ window.showToast=m=>denialToasts.push(m);window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
+ card.querySelector('[data-option-label="Not now"]').click();
+ for(let i=0;i<100 && card.dataset.submitted==='true';i++)await new Promise(r=>setTimeout(r,10));
+ window.fetch=originalFetch;window.showToast=originalToast;
+ return denialToasts.length===1&&denialToasts[0]==='Editor access required'&&card.isConnected&&card.innerHTML===before&&!card.dataset.submitted?'ok':'approval UI changed';})()`)
+		if result != "ok" {
+			t.Fatal(result)
+		}
 		browser.click(`#chat-input-request-request [data-option-label="Not now"]`)
 		browser.waitFor("answered card removed", `document.getElementById('chat-input-request-request') ? 'waiting' : 'removed'`, "removed")
 		// The old document already satisfies the answered-state predicate. Mark it
@@ -104,6 +119,7 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 		browser.waitFor("persistent answer after reload", `document.readyState === 'complete' && document.documentElement && !document.documentElement.dataset.beforeApprovalReload && typeof window.previewImportedSkillDependencies === 'function' && document.querySelector('[data-execution-pair]')?.dataset.skillApprovalsLoaded === 'project' && !document.getElementById('chat-input-request-request') ? 'ready' : 'waiting'`, "ready")
 		browser.evaluate(`document.body.insertAdjacentHTML('beforeend','<section id="skill_import_dependency_details"></section><button id="skill_import_submit_btn">Import</button>'); window.previewImportedSkillDependencies({files:[new File(['---\ndependencies: []\n---'],'SKILL.md')]}); 'preview'`)
 		browser.waitFor("import dependency preview", `document.getElementById('skill_import_dependency_details').textContent.includes('preview-tool') && !document.getElementById('skill_import_submit_btn').disabled ? 'ready' : 'waiting'`, "ready")
+
 		mu.Lock()
 		state = "pending" // A new missing-dependency question; no revocation endpoint.
 		mu.Unlock()

@@ -99,7 +99,8 @@ func TestBrowserFunctional_SkillEditModalCloseDoesNotLeaveCardFocusOutline(t *te
 
 	runComposerFocusCDP(t, chrome, server.URL, "skill-modal-focus", func(browser *composerFocusCDP) {
 		cardSelector := `[data-skill-handle="focus_skill"]`
-		browser.waitFor("skill card", fmt.Sprintf(`document.querySelector(%q) ? 'ready' : 'waiting'`, cardSelector), "ready")
+		// Layout scripts reflow the shell on load; measuring earlier misses the card.
+		browser.waitFor("skill card", fmt.Sprintf(`document.readyState === 'complete' && document.querySelector(%q) ? 'ready' : 'waiting'`, cardSelector), "ready")
 		browser.click(cardSelector + ` .card-body > .pr-12`)
 		browser.waitFor("skill edit modal", `document.getElementById('skill_modal') && document.getElementById('skill_modal').open ? 'open' : 'closed'`, "open")
 		browser.click(`#skill_modal .ov-modal-close`)

@@ -395,10 +395,7 @@ func TestChatContent_ClearActionsUseExplicitAccessibleTrigger(t *testing.T) {
 		`hx-delete="/chat/history?project_id=project-1"`,
 		`hx-confirm="Clear all chat history? This cannot be undone."`,
 		`window.toggleChatActionsDropdown = function(event)`,
-		`restoreChatActionsFocus = function(dropdown)`,
-		`trigger.focus({preventScroll: true})`,
-		`closeChatActions(dropdown, true)`,
-		`event.key !== 'Escape'`,
+		`handleDropdownToggle(event);`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Fatalf("Chat clear-actions startup/accessibility contract is missing %q", required)

@@ -106,17 +106,18 @@ type GitHubIssueWithPullRequest struct {
 }
 
 type GitHubPullRequestFeedback struct {
-	Kind        string    `json:"kind"`
-	ID          string    `json:"id"`
-	NodeID      string    `json:"node_id"`
-	AuthorLogin string    `json:"author_login"`
-	AuthorType  string    `json:"author_type,omitempty"`
-	Body        string    `json:"body"`
-	URL         string    `json:"url"`
-	State       string    `json:"state,omitempty"`
-	Path        string    `json:"path,omitempty"`
-	Line        int       `json:"line,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	AuthorUserID int64     `json:"author_user_id"`
+	Kind         string    `json:"kind"`
+	ID           string    `json:"id"`
+	NodeID       string    `json:"node_id"`
+	AuthorLogin  string    `json:"author_login"`
+	AuthorType   string    `json:"author_type,omitempty"`
+	Body         string    `json:"body"`
+	URL          string    `json:"url"`
+	State        string    `json:"state,omitempty"`
+	Path         string    `json:"path,omitempty"`
+	Line         int       `json:"line,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type GitHubAuthenticatedUser struct {
@@ -220,18 +221,26 @@ type githubAppConfig struct {
 }
 
 type GitHubService struct {
-	projectCloneLocks sync.Map // project ID -> *semaphore.Weighted
-	settingsRepo      persistence.SettingsStore
-	appID             string
-	appSlug           string
-	appPrivateKey     string
-	projectRepoRoot   string
-	httpClient        *http.Client
-	retryPolicy       httpretry.Policy
-	apiBaseURL        string
-	webBaseURL        string
-	runGit            runGitFunc
-	nowFn             func() time.Time
+	credentialOrganizations persistence.OrganizationStore
+	credentialAuthOff       bool
+	projectCloneLocks       sync.Map // project ID -> *semaphore.Weighted
+	settingsRepo            persistence.SettingsStore
+	appID                   string
+	appSlug                 string
+	appPrivateKey           string
+	projectRepoRoot         string
+	httpClient              *http.Client
+	retryPolicy             httpretry.Policy
+	apiBaseURL              string
+	webBaseURL              string
+	runGit                  runGitFunc
+	nowFn                   func() time.Time
+}
+
+// SetCredentialAuthorization enables fresh identity checks on connection lifecycle calls.
+// Configure once before serving requests.
+func (s *GitHubService) SetCredentialAuthorization(organizations persistence.OrganizationStore, authOff bool) {
+	s.credentialOrganizations, s.credentialAuthOff = organizations, authOff
 }
 
 func NewGitHubService(settingsRepo persistence.SettingsStore, appID, appSlug, appPrivateKey, projectRepoRoot string) *GitHubService {
@@ -373,6 +382,10 @@ func (s *GitHubService) GetConnectionStatus(ctx context.Context) (GitHubConnecti
 }
 
 func (s *GitHubService) ConnectURL(ctx context.Context) (string, error) {
+	ctx, accessErr := credentialPrincipalContext(ctx, s.credentialOrganizations, s.credentialAuthOff)
+	if accessErr != nil {
+		return "", accessErr
+	}
 	appCfg, err := s.getAppConfig(ctx)
 	if err != nil {
 		return "", err
@@ -391,6 +404,10 @@ func (s *GitHubService) ConnectURL(ctx context.Context) (string, error) {
 }
 
 func (s *GitHubService) HandleInstallCallback(ctx context.Context, installationID string) error {
+	ctx, accessErr := credentialPrincipalContext(ctx, s.credentialOrganizations, s.credentialAuthOff)
+	if accessErr != nil {
+		return accessErr
+	}
 	appCfg, err := s.getAppConfig(ctx)
 	if err != nil {
 		return err
@@ -409,25 +426,27 @@ func (s *GitHubService) HandleInstallCallback(ctx context.Context, installationI
 		return fmt.Errorf("invalid installation id")
 	}
 
-	if err := s.settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp); err != nil {
-		return err
+	values := map[string]string{
+		GitHubSettingAuthMode:       GitHubAuthModeApp,
+		githubSettingInstallationID: installationID,
+		githubSettingConnectedAt:    s.nowFn().UTC().Format(time.RFC3339),
+		githubSettingAccountLogin:   "", githubSettingAccountType: "",
 	}
-	if err := s.settingsRepo.Set(ctx, githubSettingInstallationID, installationID); err != nil {
-		return err
-	}
-	if err := s.settingsRepo.Set(ctx, githubSettingConnectedAt, s.nowFn().UTC().Format(time.RFC3339)); err != nil {
-		return err
-	}
-
 	accountLogin, accountType, err := s.fetchInstallationAccountMetadata(ctx, installationID)
 	if err == nil {
-		_ = s.settingsRepo.Set(ctx, githubSettingAccountLogin, accountLogin)
-		_ = s.settingsRepo.Set(ctx, githubSettingAccountType, accountType)
+		values[githubSettingAccountLogin] = accountLogin
+		values[githubSettingAccountType] = accountType
 	}
-	return nil
+	// Persist one coherent connection after network work, rechecking the actor in
+	// the settings transaction instead of committing partial connection metadata.
+	return s.settingsRepo.SetMany(ctx, values)
 }
 
 func (s *GitHubService) Disconnect(ctx context.Context) error {
+	ctx, accessErr := credentialPrincipalContext(ctx, s.credentialOrganizations, s.credentialAuthOff)
+	if accessErr != nil {
+		return accessErr
+	}
 	if s.settingsRepo == nil {
 		return nil
 	}
@@ -440,27 +459,9 @@ func (s *GitHubService) Disconnect(ctx context.Context) error {
 		return err
 	}
 	if mode == GitHubAuthModePAT {
-		if err := s.settingsRepo.Set(ctx, GitHubSettingPAT, ""); err != nil {
-			return err
-		}
-		if err := s.settingsRepo.Set(ctx, GitHubSettingPATUserLogin, ""); err != nil {
-			return err
-		}
-		return nil
+		return s.settingsRepo.SetMany(ctx, map[string]string{GitHubSettingPAT: "", GitHubSettingPATUserLogin: ""})
 	}
-	if err := s.settingsRepo.Set(ctx, githubSettingInstallationID, ""); err != nil {
-		return err
-	}
-	if err := s.settingsRepo.Set(ctx, githubSettingAccountLogin, ""); err != nil {
-		return err
-	}
-	if err := s.settingsRepo.Set(ctx, githubSettingAccountType, ""); err != nil {
-		return err
-	}
-	if err := s.settingsRepo.Set(ctx, githubSettingConnectedAt, ""); err != nil {
-		return err
-	}
-	return nil
+	return s.settingsRepo.SetMany(ctx, map[string]string{githubSettingInstallationID: "", githubSettingAccountLogin: "", githubSettingAccountType: "", githubSettingConnectedAt: ""})
 }
 
 // lockProjectClone serializes checkout creation, recovery, replacement and cleanup
@@ -1441,24 +1442,6 @@ func pathEscapeGitRef(ref string) string {
 		parts[i] = url.PathEscape(part)
 	}
 	return strings.Join(parts, "/")
-}
-
-func localCommitSHA(ctx context.Context, dir, ref string) (string, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return "", fmt.Errorf("ref is required")
-	}
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", ref+"^{commit}")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
-	}
-	sha := strings.TrimSpace(string(out))
-	if sha == "" {
-		return "", fmt.Errorf("git rev-parse %s returned empty sha", ref)
-	}
-	return sha, nil
 }
 
 const gitHubModeLookupChunkArgBytes = 64 * 1024
@@ -2544,6 +2527,7 @@ type githubIssueCommentAPI struct {
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 	User      struct {
+		ID    int64  `json:"id"`
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
@@ -2551,14 +2535,15 @@ type githubIssueCommentAPI struct {
 
 func (c githubIssueCommentAPI) toFeedback() GitHubPullRequestFeedback {
 	return GitHubPullRequestFeedback{
-		Kind:        "issue_comment",
-		ID:          strconv.FormatInt(c.ID, 10),
-		NodeID:      strings.TrimSpace(c.NodeID),
-		AuthorLogin: strings.TrimSpace(c.User.Login),
-		AuthorType:  strings.TrimSpace(c.User.Type),
-		Body:        c.Body,
-		URL:         strings.TrimSpace(c.URL),
-		CreatedAt:   c.CreatedAt,
+		Kind:         "issue_comment",
+		ID:           strconv.FormatInt(c.ID, 10),
+		NodeID:       strings.TrimSpace(c.NodeID),
+		AuthorUserID: c.User.ID,
+		AuthorLogin:  strings.TrimSpace(c.User.Login),
+		AuthorType:   strings.TrimSpace(c.User.Type),
+		Body:         c.Body,
+		URL:          strings.TrimSpace(c.URL),
+		CreatedAt:    c.CreatedAt,
 	}
 }
 
@@ -2570,6 +2555,7 @@ type githubPullRequestReviewAPI struct {
 	State       string    `json:"state"`
 	SubmittedAt time.Time `json:"submitted_at"`
 	User        struct {
+		ID    int64  `json:"id"`
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
@@ -2577,12 +2563,13 @@ type githubPullRequestReviewAPI struct {
 
 func (r githubPullRequestReviewAPI) toFeedback() GitHubPullRequestFeedback {
 	return GitHubPullRequestFeedback{
-		Kind:        "review",
-		ID:          strconv.FormatInt(r.ID, 10),
-		NodeID:      strings.TrimSpace(r.NodeID),
-		AuthorLogin: strings.TrimSpace(r.User.Login),
-		AuthorType:  strings.TrimSpace(r.User.Type),
-		Body:        r.Body, URL: strings.TrimSpace(r.URL),
+		Kind:         "review",
+		ID:           strconv.FormatInt(r.ID, 10),
+		NodeID:       strings.TrimSpace(r.NodeID),
+		AuthorUserID: r.User.ID,
+		AuthorLogin:  strings.TrimSpace(r.User.Login),
+		AuthorType:   strings.TrimSpace(r.User.Type),
+		Body:         r.Body, URL: strings.TrimSpace(r.URL),
 		State:     strings.TrimSpace(r.State),
 		CreatedAt: r.SubmittedAt,
 	}
@@ -2597,6 +2584,7 @@ type githubPullRequestReviewCommentAPI struct {
 	Line      int       `json:"line"`
 	CreatedAt time.Time `json:"created_at"`
 	User      struct {
+		ID    int64  `json:"id"`
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"user"`
@@ -2604,14 +2592,15 @@ type githubPullRequestReviewCommentAPI struct {
 
 func (c githubPullRequestReviewCommentAPI) toFeedback() GitHubPullRequestFeedback {
 	return GitHubPullRequestFeedback{
-		Kind:        "review_comment",
-		ID:          strconv.FormatInt(c.ID, 10),
-		NodeID:      strings.TrimSpace(c.NodeID),
-		AuthorLogin: strings.TrimSpace(c.User.Login),
-		AuthorType:  strings.TrimSpace(c.User.Type),
-		Body:        c.Body,
-		URL:         strings.TrimSpace(c.URL),
-		Path:        strings.TrimSpace(c.Path), Line: c.Line,
+		Kind:         "review_comment",
+		ID:           strconv.FormatInt(c.ID, 10),
+		NodeID:       strings.TrimSpace(c.NodeID),
+		AuthorUserID: c.User.ID,
+		AuthorLogin:  strings.TrimSpace(c.User.Login),
+		AuthorType:   strings.TrimSpace(c.User.Type),
+		Body:         c.Body,
+		URL:          strings.TrimSpace(c.URL),
+		Path:         strings.TrimSpace(c.Path), Line: c.Line,
 		CreatedAt: c.CreatedAt,
 	}
 }

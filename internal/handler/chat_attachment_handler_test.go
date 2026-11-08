@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -745,4 +746,88 @@ func TestUploadChatAttachment_MaxFilesLimit(t *testing.T) {
 	httpErr, ok := err.(*echo.HTTPError)
 	assert.True(t, ok)
 	assert.Equal(t, http.StatusBadRequest, httpErr.Code)
+}
+
+func TestUploadChatAttachment_RollsBackSecondFileFailure(t *testing.T) {
+	for _, existingSession := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_session=%t", existingSession), func(t *testing.T) {
+			useTempUploadsDir(t)
+			stores := teststores.New(t)
+			h := &Handler{threadInputRepo: stores.ThreadInputs}
+			e := echo.New()
+			sessionID := ""
+			before := map[string]string{}
+			if existingSession {
+				sessionID = uploadChatAttachmentForTest(t, e, h, "first.txt", []byte("original"), "text/plain", "")
+				before["first.txt"] = "original"
+			}
+			newRequest := func() (echo.Context, *httptest.ResponseRecorder) {
+				body := &bytes.Buffer{}
+				writer := multipart.NewWriter(body)
+				for _, name := range []string{"first.txt", "second.txt"} {
+					part, err := writer.CreateFormFile("files", name)
+					require.NoError(t, err)
+					_, err = io.WriteString(part, "new "+name)
+					require.NoError(t, err)
+				}
+				require.NoError(t, writer.WriteField("attachment_session_id", sessionID))
+				require.NoError(t, writer.Close())
+				req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+				req.Header.Set("Content-Type", writer.FormDataContentType())
+				require.NoError(t, req.ParseMultipartForm(1<<20))
+				t.Cleanup(func() { req.MultipartForm.RemoveAll() })
+				rec := httptest.NewRecorder()
+				return e.NewContext(req, rec), rec
+			}
+			readSession := func() map[string]string {
+				dir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+				entries, err := os.ReadDir(dir)
+				require.NoError(t, err)
+				contents := map[string]string{}
+				for _, entry := range entries {
+					data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+					require.NoError(t, err)
+					contents[entry.Name()] = string(data)
+				}
+				return contents
+			}
+			c, rec := newRequest()
+			h.pendingPublicationHook = func(id string) {
+				sessionID = id
+				// Validation has succeeded. Simulate the second multipart source
+				// disappearing before it can be opened for publication.
+				c.Request().MultipartForm.File["files"][1] = &multipart.FileHeader{Filename: "second.txt"}
+			}
+			err := h.UploadChatAttachment(c)
+			require.Error(t, err)
+			e.HTTPErrorHandler(err, c)
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			assert.NotContains(t, rec.Body.String(), `"attachments"`)
+			assert.Equal(t, before, readSession(), "failed upload must preserve exactly the files available on send")
+			count, err := countPendingAttachmentFiles(filepath.Join(uploadsDir, "chat", "pending", sessionID))
+			require.NoError(t, err)
+			assert.Equal(t, len(before), count)
+
+			h.pendingPublicationHook = nil
+			c, rec = newRequest()
+			require.NoError(t, h.UploadChatAttachment(c))
+			require.Equal(t, http.StatusOK, rec.Code)
+			var response struct {
+				Attachments []struct {
+					Filename string `json:"filename"`
+				} `json:"attachments"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+			require.Len(t, response.Attachments, 2)
+			firstName := "first.txt"
+			if existingSession {
+				firstName = "first-1.txt"
+			}
+			assert.Equal(t, firstName, response.Attachments[0].Filename)
+			assert.Equal(t, "second.txt", response.Attachments[1].Filename)
+			before[firstName] = "new first.txt"
+			before["second.txt"] = "new second.txt"
+			assert.Equal(t, before, readSession(), "retry must not leave duplicates or consume hidden slots")
+		})
+	}
 }

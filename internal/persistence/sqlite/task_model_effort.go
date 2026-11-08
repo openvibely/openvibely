@@ -94,7 +94,7 @@ func (r *TaskRepo) TaskModelSettings(ctx context.Context, taskID, selectedID str
  WHEN ?='default' THEN COALESCE(p.default_agent_config_id,
      (SELECT id FROM agent_configs ORDER BY is_default DESC,name ASC,id ASC LIMIT 1))
  WHEN ?='' THEN COALESCE(t.agent_id,p.default_agent_config_id,
-     (SELECT id FROM agent_configs WHERE is_default=1 ORDER BY name,id LIMIT 1)) ELSE ? END`+taskOverrideJoins+` WHERE t.id=?`, selectedID, selectedID, selectedID, taskID).Scan(
+     (SELECT id FROM agent_configs WHERE is_default=1 ORDER BY name,id LIMIT 1)) ELSE ? END`+taskOverrideJoins+` WHERE t.id=? AND `+workspaceChatPredicate(ctx, "t.project_id", "t.chat_owner_user_id"), selectedID, selectedID, selectedID, taskID).Scan(
 		&out.ProjectID, &out.Config.ID, &out.Config.Provider, &out.Config.Model, &out.Config.ReasoningEffort, &out.Config.ServiceTier, &out.Effort, &out.ServiceTier)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

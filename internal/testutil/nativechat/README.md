@@ -19,6 +19,24 @@ Run on a graphical desktop (macOS, Windows, or Linux):
 OPENVIBELY_RUN_NATIVE_UI=1 go test ./internal/handler -run '^TestTaskNativeWheelPagingInWails$' -count=1 -timeout 300s
 ```
 
+The same host also checks automatic scrolling and desktop shell isolation:
+
+```
+OPENVIBELY_RUN_NATIVE_UI=1 go test ./internal/handler -run '^TestNativePanelScrollIsolationInWails$' -count=1 -v -timeout 300s
+```
+
+This scenario renders the production desktop layout, Analytics, approval thread,
+and task sidebar against isolated HTTP data. It clicks the real usage toast,
+opens an approval link, switches away and restores the saved project tab, and
+uses sidebar keyboard navigation to reveal a row through nested panels. It
+samples titlebar/tab positions and shell scroll offsets throughout navigation,
+and checks that each target becomes visible. Clicks and key events are dispatched
+by the fixture JavaScript; layout and scrolling run in the native Wails engine
+(WKWebView, WebKitGTK, or WebView2), not Chrome. It does not validate physical
+pointer delivery or the packaged application's custom native titlebar controls.
+The short-sidebar case constrains the sidebar height without resizing the native
+window. CI runs this test in the existing OS/architecture matrix.
+
 PowerShell: set `$env:OPENVIBELY_RUN_NATIVE_UI='1'` before the `go test` command.
 Linux needs GTK3/WebKitGTK 4.1 development packages and a display/window manager
 (Xvfb and Openbox work in CI). The test builds its helper with `gtk3` on Linux.
@@ -69,6 +87,34 @@ phase, hit-test target, coordinates, and window activation/visibility). These
 lines are included in the native process output when a scenario fails. This
 separates a missing DOM event from malformed native input or inactive routing;
 a successful HTTP response alone still does not prove browser delivery.
+
+## Desktop task-list alignment
+
+The same host also runs the real desktop shell in each OS's webview:
+
+```sh
+OPENVIBELY_RUN_NATIVE_UI=1 go test ./internal/handler -run '^TestNativeDesktopTaskListAlignment$' -count=1 -timeout 420s
+```
+
+CI runs this on the existing Linux, Windows, and macOS architecture matrix.
+The fixture uses frameless 500px and 1280px windows and checks floating/unified
+layouts, attached/detached tabs, and expanded/collapsed task lists. It compares
+actual toggle and rail geometry, checks the toggle's hit target and header action
+positions, verifies keyboard tab navigation does not scroll the surrounding shell,
+and preserves macOS's 80px traffic-light reservation. Linux also checks
+right-side and left-side caption insets, including grouped left controls.
+
+This tests real WebKitGTK/WebView2/WKWebView rendering. Caption geometry is supplied
+by the fixture through the production CSS attributes/properties; the host does
+not install the production native caption overlay. Native caption tests cover
+that integration separately. `OPENVIBELY_NATIVE_LAYOUT_WIDTH` selects the
+frameless viewport for this test and leaves the scrolling host's defaults intact.
+
+For a quicker check in Chrome on the current OS:
+
+```sh
+go test ./internal/handler -run '^TestDesktopTaskListAlignmentInChrome$' -count=1 -timeout 240s
+```
 
 ## Visible host and streaming memory measurements (macOS)
 
@@ -155,3 +201,38 @@ Native test hosts watch a shutdown request file under the test directory and cal
 Cleanup retries transient deletion errors; it does not infer browser shutdown
 from a fixed period without filesystem writes. Wails does not explicitly promise
 that every OS-managed browser service has exited when the host exits.
+
+## Native composer file drops
+
+The OS/architecture CI matrix runs attachment-drop checks on Linux, macOS, and
+Windows (amd64 and arm64). macOS and Windows reuse this Wails host:
+
+```sh
+OPENVIBELY_RUN_NATIVE_UI=1 go test ./internal/handler -run '^TestNativeComposerFileDropsInWails$' -count=1 -timeout 300s
+```
+
+The scenarios drop a PNG and a text file into the production composer and a PNG
+outside it. They require trusted native DOM drag/drop events, the original file
+bytes in a real multipart HTTP request, exactly one visible preview and a saved
+attachment session. Outside drops must not upload or navigate away. The upload
+endpoint is a fixture; these tests do not exercise backend attachment storage.
+
+- macOS sends an AppKit `NSDraggingInfo` carrying a native file pasteboard through
+  the Wails WKWebView's drag destination methods. It covers native file import,
+  WebKit IPC and upload, without global pointer injection or Accessibility
+  permission. It does not simulate Finder or a physical mouse gesture.
+- Windows launches a separate WinForms source with a shell-format file list and
+  performs an OLE drag into Wails' composition-hosted WebView2. This moves the
+  pointer in the opted-in test desktop; run it in CI or a dedicated GUI session.
+  The helper requires Windows PowerShell, WinForms and WebView2 (available on the
+  Windows runners). Paths are passed as process arguments, not shell code.
+- Linux keeps `TestNativeLinuxComposerPNGDrop` in `cmd/desktop`, exercising the
+  production GTK file-chooser bridge in a private Xvfb display. It also checks
+  rejection of same-process URI drags; its native GTK workaround differs from
+  the macOS/Windows browser File path.
+
+The `/drop` input endpoint is test-only, origin-restricted and serialized with
+wheel input. Its sole allowed file is supplied by the parent test in
+`OPENVIBELY_NATIVE_DROP_FILE`; the page cannot submit filesystem paths. Opted-in
+failures are failures, not skips. macOS/Windows need their native CI runners to
+execute these tests; cross-compilation alone does not validate file-drop behavior.

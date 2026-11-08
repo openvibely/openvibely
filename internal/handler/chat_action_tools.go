@@ -230,73 +230,11 @@ func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streami
 	return summary, nil
 }
 
-func (c *chatActionSummaryCollector) appendToOutput(output string) string {
-	if c == nil {
-		return output
-	}
-	var blocks []string
-	if len(c.createdLines) > 0 {
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Created %d task(s):\n", len(c.createdLines)))
-		b.WriteString(strings.Join(c.createdLines, "\n"))
-		blocks = append(blocks, b.String())
-	}
-	if len(c.editedLines) > 0 {
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Edited %d task(s):\n", len(c.editedLines)))
-		b.WriteString(strings.Join(c.editedLines, "\n"))
-		blocks = append(blocks, b.String())
-	}
-	if len(blocks) == 0 {
-		return output
-	}
-
-	summary := "\n\n---\n" + strings.Join(blocks, "\n\n")
-	if strings.Contains(output, summary) {
-		return output
-	}
-	return output + summary
-}
-
-// buildChatActionToolRuntime creates request-scoped runtime tools using the
-// canonical registry and direct typed action handlers.
-func (h *Handler) buildChatActionToolRuntime(params streamingResponseParams, collector *chatActionSummaryCollector) *llmcontracts.RuntimeTools {
-	surface := chatcontrol.SurfaceWeb
-	mode := params.ChatMode
-	if mode == "" {
-		mode = models.ChatModeOrchestrate
-	}
-	// Web handler includes thread tools for orchestrate mode
-	includeThread := mode == models.ChatModeOrchestrate
-	defs := chatToolDefsForProject(params, mode, surface, includeThread)
-
-	return &llmcontracts.RuntimeTools{
-		Definitions: defs,
-		Executor:    h.chatActionExecutor(params, collector, mode, surface),
-	}
-}
-
-// buildAPIChatActionToolRuntime creates a RuntimeTools for the API surface.
-func (h *Handler) buildAPIChatActionToolRuntime(params streamingResponseParams, collector *chatActionSummaryCollector) *llmcontracts.RuntimeTools {
-	surface := chatcontrol.SurfaceAPI
-	mode := params.ChatMode
-	if mode == "" {
-		mode = models.ChatModeOrchestrate
-	}
-	includeThread := mode == models.ChatModeOrchestrate
-	defs := chatToolDefsForProject(params, mode, surface, includeThread)
-
-	return &llmcontracts.RuntimeTools{
-		Definitions: defs,
-		Executor:    h.chatActionExecutor(params, collector, mode, surface),
-	}
-}
-
 // chatActionExecutor returns a RuntimeToolExecutor that uses the canonical
 // chatcontrol execution engine with a surface-aware action handler map.
 func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) llmcontracts.RuntimeToolExecutor {
 	handlers := h.projectSelectedChatHandlers(params, collector, mode, surface)
-	return chatcontrol.BuildRuntimeToolExecutor(mode, surface, handlers)
+	return h.authorizeSelectedProjectRuntimeExecutor(params, surface, chatcontrol.BuildRuntimeToolExecutor(mode, surface, handlers))
 }
 
 func (h *Handler) runtimeAgentMaterializationProjectRoot(ctx context.Context, projectID string, agent *models.Agent) string {
@@ -749,6 +687,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 	for name, handler := range goalHandlers {
 		handlers[name] = handler
 	}
+	h.authorizeProjectRuntimeHandlers(params.ProjectID, handlers)
 	return handlers
 }
 
@@ -1038,43 +977,6 @@ func (h *Handler) executeGetCurrentProject(ctx context.Context, projectID string
 	return fmt.Sprintf("Current project: %s (id: %s)%s%s", project.Name, project.ID, desc, repo)
 }
 
-func (h *Handler) executeGetAlert(ctx context.Context, projectID string, input json.RawMessage) string {
-	var req struct {
-		AlertID string `json:"alert_id"`
-	}
-	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
-		return "Invalid input for get_alert."
-	}
-	if req.AlertID == "" {
-		return "get_alert requires alert_id."
-	}
-
-	if h.alertSvc == nil {
-		return "Alert service not available."
-	}
-
-	alert, err := h.alertSvc.GetByID(ctx, projectID, req.AlertID)
-	if err != nil {
-		applog.Infof("[handler] executeGetAlert error: %v", err)
-		return fmt.Sprintf("Error retrieving alert %q: %v", req.AlertID, err)
-	}
-	if alert == nil {
-		return fmt.Sprintf("Alert %q not found.", req.AlertID)
-	}
-
-	readStr := "unread"
-	if alert.IsRead {
-		readStr = "read"
-	}
-	taskStr := ""
-	if alert.TaskID != nil {
-		taskStr = fmt.Sprintf("\nTask: %s", *alert.TaskID)
-	}
-	return fmt.Sprintf("Alert: %s\n  ID: %s\n  Type: %s\n  Severity: %s\n  Status: %s\n  Message: %s%s\n  Created: %s",
-		alert.Title, alert.ID, alert.Type, alert.Severity, readStr,
-		alert.Message, taskStr, alert.CreatedAt.Format("Jan 2, 2006 3:04 PM"))
-}
-
 func formatCapabilities(summaries []chatcontrol.ActionSummary, selectedMemoryHandles []string) string {
 	if len(summaries) == 0 {
 		return "No capabilities available in the current mode."
@@ -1127,14 +1029,8 @@ func (h *Handler) buildLifecycleChatActionToolRuntimeFromDefs(params streamingRe
 	handlers := h.chatActionHandlers(params, collector, mode, surface)
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor:    chatcontrol.BuildLifecycleRuntimeToolExecutor(mode, surface, handlers),
+		Executor:    h.authorizeProjectRuntimeExecutor(params.ProjectID, chatcontrol.BuildLifecycleRuntimeToolExecutor(mode, surface, handlers)),
 	}
-}
-
-// chatActionToolDefinitions returns tool definitions from the canonical registry.
-// Kept for backward compatibility with existing tests.
-func chatActionToolDefinitions() []llmcontracts.RuntimeToolDefinition {
-	return chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 }
 
 type sendToTaskToolInput struct {
@@ -1548,5 +1444,5 @@ func (h *Handler) initialTaskRuntimeTools(ctx context.Context, task models.Task,
 	}
 	params := streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, Task: &task, ExecID: executionID, IsTaskFollowup: true, ChatMode: models.ChatModeOrchestrate}
 	defs := filterRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), missing)
-	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), missing)}
+	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: h.authorizeProjectRuntimeExecutor(params.ProjectID, chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), missing))}
 }

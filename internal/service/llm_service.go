@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/skilldeps"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/skilldeps"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/applog"
@@ -262,7 +263,13 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 		return nil
 	}
 	_, automationBound := AutomationContextFromContext(ctx)
+	githubExecutionID := ""
+	if len(executionIDs) > 0 {
+		githubExecutionID = executionIDs[0]
+	}
 	githubTools := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
+		TaskID: task.ID, ExecutionID: githubExecutionID,
+		WorkerSvc:                workerFromTaskService(s.taskSvc),
 		ProjectID:                task.ProjectID,
 		ProjectRepo:              s.projectRepo,
 		TaskRepo:                 s.taskRepo,
@@ -348,7 +355,10 @@ func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task mode
 	for _, def := range defs {
 		allowed[strings.ToLower(strings.TrimSpace(def.Name))] = true
 	}
+	_, executionID, _ := AutomationExecutionFromContext(ctx)
 	runtime := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
+		TaskID: task.ID, ExecutionID: executionID,
+		WorkerSvc:                workerFromTaskService(s.taskSvc),
 		ProjectID:                task.ProjectID,
 		ProjectRepo:              s.projectRepo,
 		TaskRepo:                 s.taskRepo,
@@ -505,6 +515,9 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	var usageAnalyticsSvc *UsageAnalyticsService
 	if s.usageRepo != nil {
 		usageAnalyticsSvc = NewUsageAnalyticsService(s.usageRepo, s.llmConfigRepo)
+		if worker := workerFromTaskService(s.taskSvc); worker != nil && worker.runOrganizations != nil {
+			usageAnalyticsSvc.SetProjectAuthorization(NewProjectAccessService(worker.runAccess), worker.runOrganizations, worker.runAuthOff)
+		}
 	}
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             task.ProjectID,
@@ -568,6 +581,19 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		}
 	}
 
+	if worker := workerFromTaskService(s.taskSvc); worker != nil && worker.runOrganizations != nil {
+		for name, handler := range handlers {
+			handlers[name] = func(ctx context.Context, input json.RawMessage) (string, error) {
+				if _, ok := models.PrincipalFromContext(ctx); !ok && worker.runAuthOff {
+					ctx = models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID})
+				}
+				if err := requireRuntimeToolRole(ctx, worker.runAccess, worker.runOrganizations, task.ProjectID, name, input); err != nil {
+					return "", err
+				}
+				return handler(ctx, input)
+			}
+		}
+	}
 	return &llmcontracts.RuntimeTools{
 		Definitions: filtered,
 		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, allowed),
@@ -898,7 +924,7 @@ func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID
 	}
 	if created {
 		if goal != nil && s.taskSvc.goalSvc != nil {
-			s.taskSvc.goalSvc.publishGoalEvent(events.TaskGoalUpdated, goal)
+			s.taskSvc.goalSvc.publishGoalEvent(ctx, events.TaskGoalUpdated, goal)
 		}
 		s.taskSvc.SubmitSavedAutomationTask(*canonical)
 	}
@@ -1487,6 +1513,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	var preparedSteering []models.ThreadInput
 	var unsubscribeSteeringWakeup func()
 	if s.threadInputRepo != nil {
+		callCtx = llmcontracts.WithBeforeModelSend(callCtx, func(sendCtx context.Context) error {
+			return s.threadInputRepo.CheckSteeringDelivery(sendCtx, exec.ID, threadInputIDs(preparedSteering))
+		})
 		steeringWakeup, unsubscribe := s.threadInputRepo.SubscribeSteeringWakeups(exec.ID)
 		unsubscribeSteeringWakeup = unsubscribe
 		callCtx = llmcontracts.WithMidTurnSteeringWakeup(callCtx, steeringWakeup)
@@ -2108,10 +2137,6 @@ func (s *LLMService) SummarizeWorktreeCommitDiff(ctx context.Context, worktreePa
 	}
 	prompt := buildWorktreeCommitSummaryPrompt(diffContext, commitCtx)
 	return cleanCommitSubject(s.generateName(ctx, prompt, agent, worktreePath, 72))
-}
-
-func parseWorktreeCommitSummaryOutput(output string) string {
-	return cleanCommitSubject(parseGeneratedName(output, 72))
 }
 
 func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeCommitMessageContext) string {

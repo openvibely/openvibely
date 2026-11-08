@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,7 @@ func main() {
 	stage("after application.New")
 	endpoint := "http://" + listener.Addr().String() + "/wheel"
 	bridge := fmt.Sprintf(`window.nativeTestInput={postMessage(data){return fetch(%q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,scale:window.devicePixelRatio||1})}).then(r=>{if(!r.ok)return r.text().then(message=>{throw Error('Native input failed: '+r.status+' '+message)});if(data.count)window._nativeBurstDone=true}).catch(e=>{fetch('/browser-result?status='+encodeURIComponent(String(e)));throw e})}};`, endpoint)
+	bridge += fmt.Sprintf(`window.nativeTestDrop={postMessage(data){return fetch(%q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,scale:window.devicePixelRatio||1})}).then(async r=>{if(!r.ok)throw Error(await r.text())})}};`, "http://"+listener.Addr().String()+"/drop")
 	// URL-backed Wails windows do not consistently apply Options.JS (WebView2
 	// only uses it for HTML-backed windows). Register it with the fixture before
 	// navigating, so every engine receives the identical script in its document.
@@ -66,6 +68,15 @@ func main() {
 		options.AlwaysOnTop = true
 		options.Mac.CollectionBehavior = application.MacWindowCollectionBehaviorCanJoinAllSpaces | application.MacWindowCollectionBehaviorFullScreenAuxiliary
 	}
+	// Layout regressions use the desktop's frameless surface at narrow and wide sizes.
+	if value := os.Getenv("OPENVIBELY_NATIVE_LAYOUT_WIDTH"); value != "" {
+		width, err := strconv.Atoi(value)
+		if err != nil || width < 400 || width > 2000 {
+			log.Fatal("invalid OPENVIBELY_NATIVE_LAYOUT_WIDTH")
+		}
+		options.Width = width
+		options.Frameless = true
+	}
 	window := app.Window.NewWithOptions(options)
 	stage("after window creation")
 	var input sync.Mutex
@@ -79,6 +90,22 @@ func main() {
 		w.Header().Set("Access-Control-Allow-Methods", "POST")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(204)
+			return
+		}
+		if r.Method == "POST" && r.URL.Path == "/drop" {
+			var event fileDrop
+			path := os.Getenv("OPENVIBELY_NATIVE_DROP_FILE")
+			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&event) != nil || validateFileDrop(event, path) != nil {
+				http.Error(w, "invalid native drop fixture or coordinates", 400)
+				return
+			}
+			input.Lock()
+			defer input.Unlock()
+			if err := nativeFileDrop(r.Context(), window, event, path); err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if r.Method != "POST" || r.URL.Path != "/wheel" {

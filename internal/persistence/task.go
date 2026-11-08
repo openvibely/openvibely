@@ -112,6 +112,7 @@ func ActiveLaneExpectedState(ctx context.Context, taskID string) (ActiveLaneTask
 }
 
 type ActiveLaneTaskAdmission struct {
+	RunAsUserID string
 	Task        models.Task
 	ExecutionID string
 }

@@ -120,7 +120,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     await wait(() => menu.getAttribute('data-kanban-menu-positioning') !== 'true');
   }
   const sort = Array.from(menu.querySelectorAll('button')).find(b => b.textContent.includes('Sort by'));
-  sort.focus();
+  sort.click();
   const panel = document.querySelector('[data-menu-submenu-portaled="true"]');
   check(panel, 'Sort submenu opens');
   check(Array.from(panel.querySelectorAll('button[hx-post]')).every(b => b.querySelector('[data-filter-check]') && !b.classList.contains('active')), 'sort uses checkmarks without persistent highlights');
@@ -144,7 +144,9 @@ window.addEventListener('DOMContentLoaded', async function() {
   const currentMenu = col('completed').querySelector('[data-kanban-menu-key="column-completed"]');
   currentMenu.querySelector('[data-kanban-menu-trigger]').click();
   await wait(() => currentMenu.getAttribute('data-kanban-menu-positioning') !== 'true');
-  Array.from(currentMenu.querySelectorAll('button')).find(b => b.textContent.trim().startsWith('Filter')).focus();
+  const filterTrigger = Array.from(currentMenu.querySelectorAll('button')).find(b => b.textContent.trim().startsWith('Filter'));
+  filterTrigger.focus();
+  filterTrigger.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
   const filterPanel = document.querySelector('[data-menu-submenu-portaled="true"]');
   check(!filterPanel.querySelector('details'), 'filters must not use accordions');
   if (window.innerWidth < 640) {
@@ -154,20 +156,22 @@ window.addEventListener('DOMContentLoaded', async function() {
   }
   const outcome = Array.from(filterPanel.querySelectorAll('button')).find(b => b.textContent.trim() === 'Outcome›');
   outcome.focus();
+  outcome.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
   const choices = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(p => p !== filterPanel);
   check(choices && choices.getClientRects().length, 'Outcome opens a nested submenu');
   if (window.innerWidth >= 640) {
     const parentRect = filterPanel.getBoundingClientRect(), choicesRect = choices.getBoundingClientRect();
     check(Math.min(parentRect.right, choicesRect.right) - Math.max(parentRect.left, choicesRect.left) <= 5, 'desktop choices open beside Filter');
     const mergeTrigger = Array.from(filterPanel.querySelectorAll('button')).find(b => b.textContent.trim() === 'Merge status›');
-    mergeTrigger.dispatchEvent(new MouseEvent('mouseenter'));
     mergeTrigger.focus();
+    mergeTrigger.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
     check(!choices.isConnected, 'switching filters closes sibling choices');
     const mergePanel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(p => p !== filterPanel);
     const firstChoice = mergePanel.querySelector('button'); firstChoice.focus();
     firstChoice.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true}));
     check(!mergePanel.isConnected && document.activeElement === mergeTrigger, 'ArrowLeft returns to parent');
     outcome.focus();
+    outcome.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
   }
   if (window.innerWidth < 640) {
     await new Promise(resolve => requestAnimationFrame(resolve));
@@ -177,7 +181,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     check(choices.getBoundingClientRect().width >= 200, 'mobile choices keep readable width');
     choices.querySelector('[data-submenu-back] button').click();
     check(getComputedStyle(filterPanel).visibility !== 'hidden', 'Back restores Filter');
-    outcome.click();
+    outcome.focus();
     outcome.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
   }
   const currentChoices = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(p => p !== filterPanel);
@@ -286,6 +290,16 @@ window.addEventListener('DOMContentLoaded', async function() {
   dismiss.click();
   check(!completedHost.textContent, 'dismiss clears completed status');
   window.fetch = originalFetch; window.htmx.ajax = originalAjax;
+  const originalToast=window.showToast;const deniedToasts=[];
+  window.showToast=message=>deniedToasts.push(message);
+  window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
+  window.htmx.ajax=()=>Promise.resolve();
+  try {
+  await window.kanbanBatch(action('ff'), [{id:'one',title:'One',status:'completed',merge:''}]);
+  check(deniedToasts.length===1&&deniedToasts[0]==='Editor access required','bulk denial emits one permission toast');
+  const deniedProgress=col('completed').querySelector('[data-kanban-progress]').textContent;
+  check(deniedProgress.includes('1 failed')&&!deniedProgress.includes('Editor access required'),'bulk failure count without inline permission error');
+  } finally {window.fetch=originalFetch;window.htmx.ajax=originalAjax;window.showToast=originalToast;}
   await fetch('/result?status=pass', {method:'POST'});
  } catch(error) { await fetch('/result?status='+encodeURIComponent(error.stack), {method:'POST'}); }
 });
