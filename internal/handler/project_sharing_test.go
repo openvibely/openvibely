@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"errors"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -151,4 +154,36 @@ func TestProjectSharingRoleMatrixRemovalAndAudit(t *testing.T) {
 	targetRole, err = tc.stores.ProjectAccess.Role(ctx, target.UserID, project.ID)
 	require.NoError(t, err)
 	require.Empty(t, targetRole)
+}
+
+// Saving membership must not depend on rendering the audit panel afterward.
+type sharingAuditReadFailure struct{ persistence.ProjectAccessStore }
+
+func (s sharingAuditReadFailure) Audit(context.Context, string) ([]models.ProjectAuditEvent, error) {
+	return nil, errors.New("audit read unavailable")
+}
+func TestProjectSharingSaveDoesNotReloadPanel(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	h, ctx := tc.handler, t.Context()
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	project := createProject(t, h, "Save without reload")
+	token, err := org.Invite(ctx, models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	user, err := org.Accept(ctx, token, "save-member", "long-password-value", "")
+	require.NoError(t, err)
+	h.SetProjectAccessService(service.NewProjectAccessService(sharingAuditReadFailure{tc.stores.ProjectAccess}))
+	e := echo.New()
+	e.POST("/projects/:id/sharing", h.UpdateProjectSharing)
+	values := url.Values{"action": {"members"}, "changes": {"{\"" + user.UserID + "\":\"viewer\"}"}}
+	req := httptest.NewRequest("POST", "/projects/"+project.ID+"/sharing", strings.NewReader(values.Encode())).WithContext(models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID}))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://example.com")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, 204, rec.Code)
+	require.Empty(t, rec.Body.String())
+	role, err := tc.stores.ProjectAccess.Role(ctx, user.UserID, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "viewer", role)
 }

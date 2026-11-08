@@ -91,6 +91,9 @@ func (h *Handler) UpdateProjectSharing(c echo.Context) error {
 		}
 		return err
 	}
+	if c.FormValue("action") == "members" {
+		return c.NoContent(http.StatusNoContent)
+	}
 	if h.projectAccessSvc.Require(ctx, id, authz.Own) != nil {
 		return c.HTML(http.StatusOK, `<section id="project-sharing" role="status">Sharing updated. You no longer have access to manage this project.</section>`)
 	}

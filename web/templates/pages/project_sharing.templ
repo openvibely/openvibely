@@ -161,9 +161,9 @@ templ ProjectSharing(policy *models.ProjectAccess, members []models.ProjectMembe
    cancel.onclick=()=>{body.innerHTML=original;update();root.closest('dialog')?.close();};
    form.addEventListener('htmx:afterRequest',event=>{
     busy=false;root.querySelectorAll('button,select').forEach(control=>control.disabled=false);update();
-    if(event.detail.successful) { window.showToast?.('Project access saved','completed'); return; }
+    if(event.detail.successful && event.detail.xhr.status === 204) { window.showToast?.('Project access saved','completed'); root.closest('dialog')?.close(); return; }
     if(window.openVibelyPermissionErrors?.htmx(event.detail.xhr))return;
-    window.showToast?.('Could not save project access. Your changes have not been applied.','failed');
+    window.showToast?.('Could not confirm the save. Reopen settings to check.','failed');
    });
    update();
   })();

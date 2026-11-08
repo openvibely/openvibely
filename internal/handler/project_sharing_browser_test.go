@@ -39,6 +39,7 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
  const wait=(p,label)=>new Promise((resolve,reject)=>{const end=Date.now()+15000;(function poll(){let v=null;try{v=p()}catch(e){}if(v&&!document.querySelector('.htmx-request,.htmx-settling,.htmx-swapping'))return resolve(v);if(Date.now()>end)return reject(Error('timeout: '+label));setTimeout(poll,30)})();});
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)};
  const panel=()=>document.getElementById('project-sharing');
+ const reopen=async()=>{const previous=panel();document.getElementById('project-settings-btn').click();await wait(()=>panel()!==previous&&panel(),'reopen settings');document.getElementById('edit-project-sharing-tab').click();};
  const rows=()=>Array.from(panel().querySelectorAll('tbody tr')).filter(r=>r.closest('details')===null);
  let confirmQuestion='';
  try {
@@ -70,21 +71,27 @@ func TestProjectSharingPanelInChrome(t *testing.T) {
   add.elements.changes.value=JSON.stringify({'` + member.UserID + `':'maintainer','missing-member':'viewer'});
   panel().querySelector('[data-sharing-save]').click();
   await wait(()=>!panel().querySelector('[data-sharing-save]').disabled,'failed save preserves draft');
+  assert(document.getElementById('edit_project_modal').open,'failed save closed modal');
   assert(panel().querySelector('[data-sharing-form]')===add,'failed save replaced the form');
   assert(rows().some(r=>r.textContent.includes('browser-member')),'failed save lost draft');
   add.dispatchEvent(new Event('change',{bubbles:true}));
   panel().querySelector('[data-sharing-save]').click();
-  await wait(()=>panel().querySelector('[data-sharing-save]').disabled&&rows().some(r=>r.textContent.includes('browser-member')),'saved grant');
+  await wait(()=>!document.getElementById('edit_project_modal').open,'save closes modal');
+  await reopen();
   const memberRow=rows().find(r=>r.textContent.includes('browser-member'));
   assert(memberRow.querySelector('select').value==='maintainer','saved role wrong');
   memberRow.querySelector('select').value='viewer';
   memberRow.querySelector('select').dispatchEvent(new Event('change',{bubbles:true}));
   panel().querySelector('[data-sharing-save]').click();
-  await wait(()=>panel().querySelector('[data-sharing-save]').disabled&&rows().find(r=>r.textContent.includes('browser-member')).dataset.originalRole==='viewer','saved role edit');
+  await wait(()=>!document.getElementById('edit_project_modal').open,'role save closes modal');
+  await reopen();
+  assert(rows().find(r=>r.textContent.includes('browser-member')).querySelector('select').value==='viewer','role edit not persisted');
   rows().find(r=>r.textContent.includes('browser-member')).querySelector('button').click();
   assert(!panel().querySelector('[data-sharing-save]').disabled,'removal not pending');
   panel().querySelector('[data-sharing-save]').click();
-  await wait(()=>panel().querySelector('[data-sharing-save]').disabled&&!rows().some(r=>r.textContent.includes('browser-member')),'grant removal');
+  await wait(()=>!document.getElementById('edit_project_modal').open,'removal save closes modal');
+  await reopen();
+  assert(!rows().some(r=>r.textContent.includes('browser-member')),'removal not persisted');
   const audit=panel().querySelector('details');
   assert(audit&&audit.querySelectorAll('tbody tr').length>=2,'audit rows missing');
   const transfer=Array.from(panel().querySelectorAll('button')).find(b=>b.textContent.includes('Transfer ownership'));
