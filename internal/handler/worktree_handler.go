@@ -209,6 +209,7 @@ type taskBranchMutationPreflight struct {
 }
 
 type taskBranchMutationOptions struct {
+	selectedTarget string // Immutable destination supplied by this action request.
 	taskID         string
 	projectID      string
 	fromTaskCard   bool
@@ -303,6 +304,9 @@ func (h *Handler) revalidateTaskBranchMutation(ctx context.Context, preflight *t
 		return fmt.Errorf("%w: project repository context changed", service.ErrMergeEligibilityChanged)
 	}
 
+	if err := h.selectChangesLocalTarget(ctx, freshTask, freshProject, options.selectedTarget); err != nil {
+		return fmt.Errorf("%w: %v", service.ErrMergeEligibilityChanged, err)
+	}
 	preflight.task = freshTask
 	preflight.project = freshProject
 	h.refreshTaskBranchMutation(ctx, preflight, options)
@@ -318,6 +322,11 @@ func (h *Handler) revalidateTaskBranchMutation(ctx context.Context, preflight *t
 			reason = "task branch is no longer eligible for this operation"
 		}
 		return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
+	}
+	if options.selectedTarget != "" {
+		if err := h.taskRepo.UpdateMergeTargetBranch(ctx, freshTask.ID, options.selectedTarget); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -391,9 +400,6 @@ func (h *Handler) rebaseTaskBranchOptions(taskID, projectID string, fromTaskCard
 
 // MergeTaskBranch manually merges a task's worktree branch to target.
 func (h *Handler) MergeTaskBranch(c echo.Context) error {
-	if err := h.applyChangesLocalTarget(c); err != nil {
-		return err
-	}
 	taskID := c.Param("taskId")
 	fromTaskCard := c.FormValue("merge_source") == "task_card"
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
@@ -416,6 +422,10 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	}
 
 	options := h.mergeTaskBranchOptions(taskID, projectID, fromTaskCard, mergeType)
+	options.selectedTarget, err = h.prepareChangesLocalTarget(c, preflight)
+	if err != nil {
+		return err
+	}
 	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
 	if fromTaskCard {
 		if preflight.cardReason != "" {
@@ -535,9 +545,6 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 
 // RebaseTaskBranch rebases a task's worktree branch onto its target branch.
 func (h *Handler) RebaseTaskBranch(c echo.Context) error {
-	if err := h.applyChangesLocalTarget(c); err != nil {
-		return err
-	}
 	taskID := c.Param("taskId")
 	fromTaskCard := c.FormValue("merge_source") == "task_card"
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
@@ -548,6 +555,10 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	}
 	task := preflight.task
 	project := preflight.project
+	options.selectedTarget, err = h.prepareChangesLocalTarget(c, preflight)
+	if err != nil {
+		return err
+	}
 	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
 	if fromTaskCard {
 		if preflight.cardReason != "" {

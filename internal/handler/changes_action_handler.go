@@ -260,50 +260,41 @@ func (h *Handler) GetChangesActionBranches(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"branches": branches, "has_more": more})
 }
 
-// Only an explicit action request updates this task's local target. Saving a
-// project preference must never silently retarget running tasks or auto-merges.
-func (h *Handler) applyChangesLocalTarget(c echo.Context) error {
-	target := strings.TrimSpace(c.FormValue("changes_target"))
+// selectChangesLocalTarget validates a request's destination on an in-memory
+// task. It never persists the choice; the mutation callback does that only
+// after revalidation, while holding the same lease as the Git operation.
+func (h *Handler) selectChangesLocalTarget(ctx context.Context, task *models.Task, project *models.Project, target string) error {
 	if target == "" {
 		return nil
 	}
-	task, project, err := h.changesActionContext(c)
-	if err != nil {
+	if task.Status == models.StatusRunning || task.MergeStatus == models.MergeStatusConflict {
+		return fmt.Errorf("task cannot select a merge target while running or resolving conflicts")
+	}
+	if target == task.WorktreeBranch {
+		return fmt.Errorf("target cannot be the task branch")
+	}
+	prefs := changesActionPreferences{Mode: "local", Method: "merge", LocalBranch: target}
+	if err := h.validateChangesPreferences(ctx, project, prefs); err != nil {
 		return err
 	}
-	return service.WithRepositoryMutation(project.RepoPath, func() error {
-		current, err := h.taskSvc.GetByID(c.Request().Context(), task.ID)
-		if err != nil {
-			return err
-		}
-		if current == nil || current.ProjectID != project.ID {
-			return echo.NewHTTPError(http.StatusNotFound, "Task not found")
-		}
-		if target == current.MergeTargetBranch {
-			return nil
-		}
-		if current.Status == models.StatusRunning || current.MergeStatus == models.MergeStatusConflict {
-			return echo.NewHTTPError(http.StatusConflict, "Task cannot change merge target while running or resolving conflicts")
-		}
-		currentProject, err := h.projectRepo.GetByID(c.Request().Context(), current.ProjectID)
-		if err != nil {
-			return err
-		}
-		if currentProject == nil || !service.SameRepositoryMutationScope(project.RepoPath, currentProject.RepoPath) {
-			return echo.NewHTTPError(http.StatusConflict, "Project repository changed")
-		}
-		preflight := &taskBranchMutationPreflight{task: current, project: currentProject}
-		h.refreshTaskBranchMutation(c.Request().Context(), preflight, taskBranchMutationOptions{})
-		if !preflight.eligibility.MergeAvailable {
-			return echo.NewHTTPError(http.StatusConflict, "Task is not currently eligible to change merge target")
-		}
-		if target == current.WorktreeBranch {
-			return echo.NewHTTPError(http.StatusBadRequest, "Target cannot be the task branch")
-		}
-		prefs := changesActionPreferences{Mode: "local", Method: "merge", LocalBranch: target}
-		if err = h.validateChangesPreferences(c.Request().Context(), project, prefs); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return h.taskRepo.UpdateMergeTargetBranch(c.Request().Context(), current.ID, target)
-	})
+	task.MergeTargetBranch = target
+	return nil
+}
+
+func (h *Handler) prepareChangesLocalTarget(c echo.Context, preflight *taskBranchMutationPreflight) (string, error) {
+	target := strings.TrimSpace(c.FormValue("changes_target"))
+	if target == "" {
+		return "", nil
+	}
+	task, project, err := h.changesActionContext(c)
+	if err != nil {
+		return "", err
+	}
+	if task.ID != preflight.task.ID || project.ID != preflight.project.ID {
+		return "", echo.NewHTTPError(http.StatusConflict, "Task project changed")
+	}
+	if err := h.selectChangesLocalTarget(c.Request().Context(), preflight.task, preflight.project, target); err != nil {
+		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return target, nil
 }
