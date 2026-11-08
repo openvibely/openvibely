@@ -221,14 +221,17 @@ func TestProjectSharingTransferPreservesModalInChrome(t *testing.T) {
 	policyBefore.OwnerUserID = member.UserID
 	require.NoError(t, h.projectAccessSvc.Update(models.WithPrincipal(ctx, models.Principal{UserID: models.BootstrapUserID}), *policyBefore))
 	result := make(chan string, 1)
-	runner := `<script>(async()=>{const wait=p=>new Promise((ok,bad)=>{let n=0;const t=setInterval(()=>{if(p()){clearInterval(t);ok()}else if(++n>300){clearInterval(t);bad(Error('timeout'))}},30)});try{
+	// Wait for HTMX to finish processing swapped markup before submitting its
+	// forms. Element presence alone can race initialization and cause a native
+	// navigation instead of the fragment request this test expects.
+	runner := `<script>(async()=>{const wait=(p,label)=>new Promise((ok,bad)=>{const end=Date.now()+15000;(function poll(){try{if(p()&&!document.querySelector('.htmx-request,.htmx-settling,.htmx-swapping'))return ok()}catch(e){return bad(e)}if(Date.now()>end)return bad(Error('timeout: '+label));setTimeout(poll,30)})()});try{
 window.openVibelyConfirm=()=>Promise.resolve(true);
-document.getElementById('project-settings-btn').click();await wait(()=>document.querySelector('[data-sharing-transfer-toggle]'));
+document.getElementById('project-settings-btn').click();await wait(()=>document.querySelector('[data-sharing-transfer-toggle]'),'sharing panel initialized');
 document.getElementById('edit-project-sharing-tab').click();
 const box=document.querySelector('#edit_project_modal > .modal-box');const before=box.getBoundingClientRect().height;
 document.querySelector('[data-sharing-transfer-toggle]').click();
 document.querySelector('[data-sharing-transfer] select').value='local-owner';document.querySelector('[data-sharing-transfer] button').click();
-await wait(()=>document.querySelector('#project-sharing [role=status]'));
+await wait(()=>document.querySelector('#project-sharing [data-sharing-close]'),'ownership transfer completed');
 const after=box.getBoundingClientRect().height;
 if(Math.abs(before-after)>=2)throw Error('modal resized: '+before+' -> '+after);
 if(document.querySelector('#project-sharing form, #project-sharing [data-sharing-save], #project-sharing [data-sharing-delete]'))throw Error('sharing controls remained');
