@@ -69,12 +69,6 @@ templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, loca
   .ov-changes-split > .btn { transition:background-color 100ms ease; }
   [data-color-theme][data-theme] .ov-changes-split > .btn:active { transform:none; }
   .ov-changes-split:has(> .btn:active:not(:disabled)) { transform:scale(var(--btn-focus-scale,.97)); }
-  @media(hover:hover) {
-   [data-color-theme][data-theme] .ov-changes-split > .btn-primary:hover:not(:disabled) {
-    background-color:color-mix(in srgb,var(--ov-primary-action-color,oklch(var(--p))) 88%,white) !important;
-    border-color:var(--ov-primary-action-color,oklch(var(--p))) !important;
-   }
-  }
   .ov-changes-settings { width:320px;max-width:calc(100vw - 16px);padding:16px;overflow:auto; }
   .ov-changes-settings label { display:block;font-size:12px;opacity:.75;margin:14px 0 6px; }
   [data-changes-split] [hidden] { display:none !important; }
