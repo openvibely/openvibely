@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -310,6 +312,9 @@ func TestProjectSettingsSaveAcrossTabsInChrome(t *testing.T) {
 	h.SetProjectAccessService(service.NewProjectAccessService(stores.ProjectAccess))
 	org := service.NewOrganizationService(stores.Organizations, "secret")
 	h.SetOrganizationService(org)
+	h.SetGitHubService(&fakeGitHubService{recloneFn: func(context.Context, string, string, string) (string, string, error) {
+		return "", "", errors.New("github personal access token is not configured")
+	}})
 	project := createProject(t, h, "Browser Sharing")
 	project.RepoPath = t.TempDir()
 	require.NoError(t, h.projectSvc.Update(ctx, project))
@@ -326,6 +331,17 @@ try {
 const phase=Number(sessionStorage.getItem('cross-tab-phase')||0);
 document.getElementById('project-settings-btn').click();await wait(()=>document.querySelector('[data-sharing-save]'));
 const dialog=document.getElementById('edit_project_modal'),form=dialog.querySelector('form[hx-put]'),sharing=dialog.querySelector('[data-sharing-form]');
+if(phase===0){
+const originalSource=form.elements.repo_source.value, originalURL=form.elements.repo_url.value;
+form.elements.repo_source.value='github';form.elements.repo_source.dispatchEvent(new Event('change',{bubbles:true}));
+form.elements.repo_url.value='https://github.com/openvibely/openvibely';
+await dialog.saveProjectSettings();
+assert(dialog.open,'failed clone closed settings');
+const links=document.querySelectorAll('#toast-container .toast-action-link');
+assert(links.length===1&&links[0].getAttribute('href')==='/channels'&&links[0].textContent==='Open Channels','missing GitHub setup toast link');
+assert(!dialog.querySelector('[data-sharing-save]').disabled,'failed clone left Save disabled');
+form.elements.repo_source.value=originalSource;form.elements.repo_source.dispatchEvent(new Event('change',{bubbles:true}));form.elements.repo_url.value=originalURL;
+}
 if(phase>0){
 assert(form.elements.description.value==='cross-tab-'+(phase-1),'General changes were lost');
 assert(form.elements.read_skills.checked===(phase%2===0),'Skills changes were lost');

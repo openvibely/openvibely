@@ -427,10 +427,11 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
                 async function accepted(response, general) {
                     if (await window.openVibelyPermissionErrors?.fetch(response)) return false;
                     if (response.ok && (general ? response.headers.get('HX-Refresh') === 'true' : response.status === 204)) return true;
-                    var message = '';
-                    try { message = JSON.parse(response.headers.get('HX-Trigger') || '{}').openvibelyToast?.message || ''; } catch (_) {}
+                    var toast = {};
+                    try { toast = JSON.parse(response.headers.get('HX-Trigger') || '{}').openvibelyToast || {}; } catch (_) {}
+                    var message = toast.message || '';
                     if (!message) { try { message = (await response.json()).message || ''; } catch (_) {} }
-                    window.showToast?.((savedGeneralThisTime && !general ? 'General and Skills & Memory saved. Sharing: ' : '') + (message || 'Could not confirm the save. Reopen settings to check.'), 'failed');
+                    window.showToast?.((savedGeneralThisTime && !general ? 'General and Skills & Memory saved. Sharing: ' : '') + (message || 'Could not confirm the save. Reopen settings to check.'), 'failed', '', {linkURL:toast.linkURL || toast.link_url || '', linkText:toast.linkText || toast.link_text || ''});
                     return false;
                 }
                 try {

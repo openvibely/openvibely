@@ -525,7 +525,7 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<script>\n\t\t(function() {\n\t\t\tvar m = document.getElementById('edit_project_modal');\n\t\t\tif (m) m.showModal();\n\n\t\t\tvar input = document.getElementById('edit-project-repo-path');\n\t\t\tvar githubInput = document.getElementById('edit-project-repo-url');\n\t\t\tvar browseBtn = document.getElementById('edit-project-browse-btn');\n\t\t\tvar pickerFeedback = document.getElementById('edit-project-picker-feedback');\n\t\t\tvar repoSourceSelect = document.getElementById('edit-project-repo-source');\n\t\t\tvar localFields = document.getElementById('edit-project-local-fields');\n\t\t\tvar githubFields = document.getElementById('edit-project-github-fields');\n\t\t\tvar localRepoPathEnabled = !!m && m.dataset.localRepoPathEnabled === 'true';\n\t\t\tvar healthStatus = m && m.querySelector('[data-repo-path-health]');\n\t\t\tvar savedRepoPath = input && input.value;\n\t\t\tvar savedRepoURL = githubInput && githubInput.value;\n\t\t\tvar savedRepoSource = repoSourceSelect && repoSourceSelect.value;\n            var editForm = m && m.querySelector('form[hx-put]');\n            function setSaveBusy(busy) {\n                var cloning = repoSourceSelect && repoSourceSelect.value === 'github' &&\n                    (savedRepoSource !== 'github' || (githubInput && githubInput.value.trim() !== (savedRepoURL || '').trim()));\n                m.querySelectorAll('#edit-project-save-button, [data-sharing-save]').forEach(function(button) {\n                    button.setAttribute('aria-busy', String(busy));\n                    button.querySelector('.edit-project-save-label').classList.toggle('hidden', busy);\n                    var label = button.querySelector('.edit-project-save-busy-label');\n                    label.textContent = cloning ? 'Cloning repository...' : 'Saving...';\n                    label.classList.toggle('hidden', !busy);\n                    var spinner = button.querySelector('.loading');\n                    spinner.classList.toggle('htmx-request', busy);\n                    spinner.style.display = busy ? 'inline-block' : 'none';\n                });\n            }\n\n\n\t\t\tfunction updateHealthVisibility() {\n\t\t\t\tif (!healthStatus) return;\n\t\t\t\thealthStatus.classList.toggle('hidden',\n\t\t\t\t\t(repoSourceSelect && repoSourceSelect.value !== savedRepoSource) ||\n\t\t\t\t\t(input && input.value !== savedRepoPath) ||\n\t\t\t\t\t(githubInput && githubInput.value !== savedRepoURL));\n\t\t\t}\n\t\t\tif (input) input.addEventListener('input', updateHealthVisibility);\n\t\t\tif (githubInput) githubInput.addEventListener('input', updateHealthVisibility);\n\t\t\tif (repoSourceSelect) repoSourceSelect.addEventListener('change', updateHealthVisibility);\n\n\t\t\tvar recoverButton = m && m.querySelector('[data-recover-repo]');\n\t\t\tif (recoverButton) recoverButton.addEventListener('click', async function() {\n\t\t\t\tif (recoverButton.disabled) return;\n\t\t\t\tvar feedback = healthStatus.querySelector('[data-recovery-feedback]');\n\t\t\t\trecoverButton.disabled = true;\n\t\t\t\trecoverButton.textContent = 'Re-cloning...';\n\t\t\t\tfeedback.classList.add('hidden');\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch(recoverButton.form.getAttribute('hx-put') + '/reclone', {\n\t\t\t\t\t\tmethod: 'POST', headers: {'HX-Request': 'true'}\n\t\t\t\t\t});\n\t\t\t\t\tif (await window.openVibelyPermissionErrors?.fetch(response)) return;\n\t\t\t\t\tvar payload = await response.json();\n\t\t\t\t\tif (!response.ok || payload.status !== 'healthy') throw new Error(payload.error || 'Re-clone failed. Please retry.');\n\t\t\t\t\thealthStatus.dataset.repoPathHealth = 'healthy';\n\t\t\t\t\thealthStatus.classList.replace('text-warning', 'text-success');\n\t\t\t\t\thealthStatus.textContent = 'Repository folder found';\n\t\t\t\t\tupdateHealthVisibility();\n\t\t\t\t} catch (err) {\n\t\t\t\t\tfeedback.textContent = err.message || 'Re-clone failed. Please retry.';\n\t\t\t\t\tfeedback.classList.remove('hidden');\n\t\t\t\t} finally {\n\t\t\t\t\trecoverButton.disabled = false;\n\t\t\t\t\trecoverButton.textContent = 'Re-clone';\n\t\t\t\t}\n\t\t\t});\n\n\n\n\t\t\tfunction isAbsolutePath(pathValue) {\n\t\t\t\treturn !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\\\') || /^[a-zA-Z]:[\\\\/]/.test(pathValue) || pathValue.startsWith('\\\\\\\\'));\n\t\t\t}\n\n\t\t\tfunction applySelectedDirectoryPath(selectedPath) {\n\t\t\t\tif (!input || !isAbsolutePath(selectedPath)) return;\n\t\t\t\tinput.value = selectedPath;\n\t\t\t\tinput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\n\t\t\tfunction setPickerFeedback(message, isError) {\n\t\t\t\tif (!pickerFeedback) return;\n\t\t\t\tpickerFeedback.textContent = message || '';\n\t\t\t\tpickerFeedback.classList.remove('hidden');\n\t\t\t\tpickerFeedback.classList.toggle('text-error', !!isError);\n\t\t\t}\n\n\t\t\tasync function chooseDirectoryNative() {\n\t\t\t\tif (!browseBtn || !localRepoPathEnabled) return;\n\t\t\t\tbrowseBtn.disabled = true;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/projects/pick-folder', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar payload = {};\n\t\t\t\t\ttry {\n\t\t\t\t\t\tpayload = await response.json();\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tpayload = {};\n\t\t\t\t\t}\n\n\t\t\t\t\tif (response.status === 501) {\n\t\t\t\t\t\tvar unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(unavailableMessage, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (response.status === 403) {\n\t\t\t\t\t\tsetPickerFeedback('Local repository path mode is disabled in this environment.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\tvar message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(message, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!payload.selected) {\n\t\t\t\t\t\tif (pickerFeedback) {\n\t\t\t\t\t\t\tpickerFeedback.textContent = '';\n\t\t\t\t\t\t\tpickerFeedback.classList.add('hidden');\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!isAbsolutePath(payload.path)) {\n\t\t\t\t\t\tsetPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tapplySelectedDirectoryPath(payload.path);\n\t\t\t\t\tsetPickerFeedback('Folder selected from native picker.', false);\n\t\t\t\t} catch (err) {\n\t\t\t\t\tsetPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);\n\t\t\t\t} finally {\n\t\t\t\t\tbrowseBtn.disabled = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction updateRepoSourceFields() {\n\t\t\t\tif (!repoSourceSelect || !localFields || !githubFields) return;\n\t\t\t\tvar source = repoSourceSelect.value === 'github' ? 'github' : 'local';\n\t\t\t\tlocalFields.hidden = source !== 'local';\n\t\t\t\tgithubFields.hidden = source !== 'github';\n\t\t\t\tif (localRepoPathEnabled) {\n\t\t\t\t\tif (input) input.required = (source === 'local');\n\t\t\t\t}\n\t\t\t\tif (githubInput) githubInput.required = (source === 'github');\n\t\t\t\tif (pickerFeedback) pickerFeedback.classList.add('hidden');\n\t\t\t}\n\n\t\t\tif (browseBtn && localRepoPathEnabled) {\n\t\t\t\tbrowseBtn.addEventListener('click', function() {\n\t\t\t\t\tchooseDirectoryNative();\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (repoSourceSelect) {\n\t\t\t\trepoSourceSelect.addEventListener('change', updateRepoSourceFields);\n\t\t\t\tupdateRepoSourceFields();\n\t\t\t}\n            // Both visible Save buttons submit the entire dialog, not just their tab.\n            var savedSettings = new URLSearchParams(new FormData(editForm)).toString();\n            var modalSaving = false;\n            var settingsNeedRefresh = false;\n            m.saveProjectSettings = async function() {\n                if (modalSaving) return;\n                var settings = new URLSearchParams(new FormData(editForm));\n                var settingsChanged = settings.toString() !== savedSettings;\n                if (settingsChanged && !editForm.checkValidity()) {\n                    window.selectProjectSettingsTab(m.querySelector('[data-project-tab=\"general\"]'));\n                    editForm.reportValidity();\n                    return;\n                }\n                var sharing = m.querySelector('[data-sharing-form]');\n                var changes = sharing ? sharing.elements.changes.value : '{}';\n                var sharingChanged = changes !== '{}';\n                var sharingBody = sharing ? new URLSearchParams(new FormData(sharing)) : null;\n                modalSaving = true;\n                var controls = Array.from(m.querySelectorAll('input,textarea,select,button'));\n                var disabled = controls.map(function(control) { return control.disabled; });\n                controls.forEach(function(control) { control.disabled = true; });\n                setSaveBusy(true);\n                var savedGeneralThisTime = false;\n                async function accepted(response, general) {\n                    if (await window.openVibelyPermissionErrors?.fetch(response)) return false;\n                    if (response.ok && (general ? response.headers.get('HX-Refresh') === 'true' : response.status === 204)) return true;\n                    var message = '';\n                    try { message = JSON.parse(response.headers.get('HX-Trigger') || '{}').openvibelyToast?.message || ''; } catch (_) {}\n                    if (!message) { try { message = (await response.json()).message || ''; } catch (_) {} }\n                    window.showToast?.((savedGeneralThisTime && !general ? 'General and Skills & Memory saved. Sharing: ' : '') + (message || 'Could not confirm the save. Reopen settings to check.'), 'failed');\n                    return false;\n                }\n                try {\n                    if (settingsChanged) {\n                        var response = await fetch(editForm.getAttribute('hx-put'), {method:'PUT',headers:{'HX-Request':'true'},body:settings});\n                        if (!await accepted(response, true)) return;\n                        savedSettings = settings.toString();\n                        savedGeneralThisTime = true;\n                        settingsNeedRefresh = true;\n                    }\n                    if (sharingChanged) {\n                        var response = await fetch(sharing.getAttribute('hx-post'), {method:'POST',headers:{'HX-Request':'true'},body:sharingBody});\n                        if (!await accepted(response, false)) {\n                            return;\n                        }\n                    }\n                    window.showToast?.('Project settings saved', 'completed');\n                    m.close();\n                    if (settingsNeedRefresh) window.location.reload();\n                } catch (_) {\n                    window.showToast?.(savedGeneralThisTime ? 'General and Skills & Memory saved. Could not confirm Sharing changes. Reopen settings to check.' : 'Could not confirm the save. Reopen settings to check.', 'failed');\n                } finally {\n                    setSaveBusy(false);\n                    controls.forEach(function(control, index) { control.disabled = disabled[index]; });\n                    modalSaving = false;\n                }\n            };\n            editForm.addEventListener('submit', function(event) {\n                event.preventDefault(); event.stopImmediatePropagation();\n                m.saveProjectSettings();\n            }, true);\n\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<script>\n\t\t(function() {\n\t\t\tvar m = document.getElementById('edit_project_modal');\n\t\t\tif (m) m.showModal();\n\n\t\t\tvar input = document.getElementById('edit-project-repo-path');\n\t\t\tvar githubInput = document.getElementById('edit-project-repo-url');\n\t\t\tvar browseBtn = document.getElementById('edit-project-browse-btn');\n\t\t\tvar pickerFeedback = document.getElementById('edit-project-picker-feedback');\n\t\t\tvar repoSourceSelect = document.getElementById('edit-project-repo-source');\n\t\t\tvar localFields = document.getElementById('edit-project-local-fields');\n\t\t\tvar githubFields = document.getElementById('edit-project-github-fields');\n\t\t\tvar localRepoPathEnabled = !!m && m.dataset.localRepoPathEnabled === 'true';\n\t\t\tvar healthStatus = m && m.querySelector('[data-repo-path-health]');\n\t\t\tvar savedRepoPath = input && input.value;\n\t\t\tvar savedRepoURL = githubInput && githubInput.value;\n\t\t\tvar savedRepoSource = repoSourceSelect && repoSourceSelect.value;\n            var editForm = m && m.querySelector('form[hx-put]');\n            function setSaveBusy(busy) {\n                var cloning = repoSourceSelect && repoSourceSelect.value === 'github' &&\n                    (savedRepoSource !== 'github' || (githubInput && githubInput.value.trim() !== (savedRepoURL || '').trim()));\n                m.querySelectorAll('#edit-project-save-button, [data-sharing-save]').forEach(function(button) {\n                    button.setAttribute('aria-busy', String(busy));\n                    button.querySelector('.edit-project-save-label').classList.toggle('hidden', busy);\n                    var label = button.querySelector('.edit-project-save-busy-label');\n                    label.textContent = cloning ? 'Cloning repository...' : 'Saving...';\n                    label.classList.toggle('hidden', !busy);\n                    var spinner = button.querySelector('.loading');\n                    spinner.classList.toggle('htmx-request', busy);\n                    spinner.style.display = busy ? 'inline-block' : 'none';\n                });\n            }\n\n\n\t\t\tfunction updateHealthVisibility() {\n\t\t\t\tif (!healthStatus) return;\n\t\t\t\thealthStatus.classList.toggle('hidden',\n\t\t\t\t\t(repoSourceSelect && repoSourceSelect.value !== savedRepoSource) ||\n\t\t\t\t\t(input && input.value !== savedRepoPath) ||\n\t\t\t\t\t(githubInput && githubInput.value !== savedRepoURL));\n\t\t\t}\n\t\t\tif (input) input.addEventListener('input', updateHealthVisibility);\n\t\t\tif (githubInput) githubInput.addEventListener('input', updateHealthVisibility);\n\t\t\tif (repoSourceSelect) repoSourceSelect.addEventListener('change', updateHealthVisibility);\n\n\t\t\tvar recoverButton = m && m.querySelector('[data-recover-repo]');\n\t\t\tif (recoverButton) recoverButton.addEventListener('click', async function() {\n\t\t\t\tif (recoverButton.disabled) return;\n\t\t\t\tvar feedback = healthStatus.querySelector('[data-recovery-feedback]');\n\t\t\t\trecoverButton.disabled = true;\n\t\t\t\trecoverButton.textContent = 'Re-cloning...';\n\t\t\t\tfeedback.classList.add('hidden');\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch(recoverButton.form.getAttribute('hx-put') + '/reclone', {\n\t\t\t\t\t\tmethod: 'POST', headers: {'HX-Request': 'true'}\n\t\t\t\t\t});\n\t\t\t\t\tif (await window.openVibelyPermissionErrors?.fetch(response)) return;\n\t\t\t\t\tvar payload = await response.json();\n\t\t\t\t\tif (!response.ok || payload.status !== 'healthy') throw new Error(payload.error || 'Re-clone failed. Please retry.');\n\t\t\t\t\thealthStatus.dataset.repoPathHealth = 'healthy';\n\t\t\t\t\thealthStatus.classList.replace('text-warning', 'text-success');\n\t\t\t\t\thealthStatus.textContent = 'Repository folder found';\n\t\t\t\t\tupdateHealthVisibility();\n\t\t\t\t} catch (err) {\n\t\t\t\t\tfeedback.textContent = err.message || 'Re-clone failed. Please retry.';\n\t\t\t\t\tfeedback.classList.remove('hidden');\n\t\t\t\t} finally {\n\t\t\t\t\trecoverButton.disabled = false;\n\t\t\t\t\trecoverButton.textContent = 'Re-clone';\n\t\t\t\t}\n\t\t\t});\n\n\n\n\t\t\tfunction isAbsolutePath(pathValue) {\n\t\t\t\treturn !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\\\') || /^[a-zA-Z]:[\\\\/]/.test(pathValue) || pathValue.startsWith('\\\\\\\\'));\n\t\t\t}\n\n\t\t\tfunction applySelectedDirectoryPath(selectedPath) {\n\t\t\t\tif (!input || !isAbsolutePath(selectedPath)) return;\n\t\t\t\tinput.value = selectedPath;\n\t\t\t\tinput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\n\t\t\tfunction setPickerFeedback(message, isError) {\n\t\t\t\tif (!pickerFeedback) return;\n\t\t\t\tpickerFeedback.textContent = message || '';\n\t\t\t\tpickerFeedback.classList.remove('hidden');\n\t\t\t\tpickerFeedback.classList.toggle('text-error', !!isError);\n\t\t\t}\n\n\t\t\tasync function chooseDirectoryNative() {\n\t\t\t\tif (!browseBtn || !localRepoPathEnabled) return;\n\t\t\t\tbrowseBtn.disabled = true;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/projects/pick-folder', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar payload = {};\n\t\t\t\t\ttry {\n\t\t\t\t\t\tpayload = await response.json();\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tpayload = {};\n\t\t\t\t\t}\n\n\t\t\t\t\tif (response.status === 501) {\n\t\t\t\t\t\tvar unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(unavailableMessage, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (response.status === 403) {\n\t\t\t\t\t\tsetPickerFeedback('Local repository path mode is disabled in this environment.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\tvar message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(message, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!payload.selected) {\n\t\t\t\t\t\tif (pickerFeedback) {\n\t\t\t\t\t\t\tpickerFeedback.textContent = '';\n\t\t\t\t\t\t\tpickerFeedback.classList.add('hidden');\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!isAbsolutePath(payload.path)) {\n\t\t\t\t\t\tsetPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tapplySelectedDirectoryPath(payload.path);\n\t\t\t\t\tsetPickerFeedback('Folder selected from native picker.', false);\n\t\t\t\t} catch (err) {\n\t\t\t\t\tsetPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);\n\t\t\t\t} finally {\n\t\t\t\t\tbrowseBtn.disabled = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction updateRepoSourceFields() {\n\t\t\t\tif (!repoSourceSelect || !localFields || !githubFields) return;\n\t\t\t\tvar source = repoSourceSelect.value === 'github' ? 'github' : 'local';\n\t\t\t\tlocalFields.hidden = source !== 'local';\n\t\t\t\tgithubFields.hidden = source !== 'github';\n\t\t\t\tif (localRepoPathEnabled) {\n\t\t\t\t\tif (input) input.required = (source === 'local');\n\t\t\t\t}\n\t\t\t\tif (githubInput) githubInput.required = (source === 'github');\n\t\t\t\tif (pickerFeedback) pickerFeedback.classList.add('hidden');\n\t\t\t}\n\n\t\t\tif (browseBtn && localRepoPathEnabled) {\n\t\t\t\tbrowseBtn.addEventListener('click', function() {\n\t\t\t\t\tchooseDirectoryNative();\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (repoSourceSelect) {\n\t\t\t\trepoSourceSelect.addEventListener('change', updateRepoSourceFields);\n\t\t\t\tupdateRepoSourceFields();\n\t\t\t}\n            // Both visible Save buttons submit the entire dialog, not just their tab.\n            var savedSettings = new URLSearchParams(new FormData(editForm)).toString();\n            var modalSaving = false;\n            var settingsNeedRefresh = false;\n            m.saveProjectSettings = async function() {\n                if (modalSaving) return;\n                var settings = new URLSearchParams(new FormData(editForm));\n                var settingsChanged = settings.toString() !== savedSettings;\n                if (settingsChanged && !editForm.checkValidity()) {\n                    window.selectProjectSettingsTab(m.querySelector('[data-project-tab=\"general\"]'));\n                    editForm.reportValidity();\n                    return;\n                }\n                var sharing = m.querySelector('[data-sharing-form]');\n                var changes = sharing ? sharing.elements.changes.value : '{}';\n                var sharingChanged = changes !== '{}';\n                var sharingBody = sharing ? new URLSearchParams(new FormData(sharing)) : null;\n                modalSaving = true;\n                var controls = Array.from(m.querySelectorAll('input,textarea,select,button'));\n                var disabled = controls.map(function(control) { return control.disabled; });\n                controls.forEach(function(control) { control.disabled = true; });\n                setSaveBusy(true);\n                var savedGeneralThisTime = false;\n                async function accepted(response, general) {\n                    if (await window.openVibelyPermissionErrors?.fetch(response)) return false;\n                    if (response.ok && (general ? response.headers.get('HX-Refresh') === 'true' : response.status === 204)) return true;\n                    var toast = {};\n                    try { toast = JSON.parse(response.headers.get('HX-Trigger') || '{}').openvibelyToast || {}; } catch (_) {}\n                    var message = toast.message || '';\n                    if (!message) { try { message = (await response.json()).message || ''; } catch (_) {} }\n                    window.showToast?.((savedGeneralThisTime && !general ? 'General and Skills & Memory saved. Sharing: ' : '') + (message || 'Could not confirm the save. Reopen settings to check.'), 'failed', '', {linkURL:toast.linkURL || toast.link_url || '', linkText:toast.linkText || toast.link_text || ''});\n                    return false;\n                }\n                try {\n                    if (settingsChanged) {\n                        var response = await fetch(editForm.getAttribute('hx-put'), {method:'PUT',headers:{'HX-Request':'true'},body:settings});\n                        if (!await accepted(response, true)) return;\n                        savedSettings = settings.toString();\n                        savedGeneralThisTime = true;\n                        settingsNeedRefresh = true;\n                    }\n                    if (sharingChanged) {\n                        var response = await fetch(sharing.getAttribute('hx-post'), {method:'POST',headers:{'HX-Request':'true'},body:sharingBody});\n                        if (!await accepted(response, false)) {\n                            return;\n                        }\n                    }\n                    window.showToast?.('Project settings saved', 'completed');\n                    m.close();\n                    if (settingsNeedRefresh) window.location.reload();\n                } catch (_) {\n                    window.showToast?.(savedGeneralThisTime ? 'General and Skills & Memory saved. Could not confirm Sharing changes. Reopen settings to check.' : 'Could not confirm the save. Reopen settings to check.', 'failed');\n                } finally {\n                    setSaveBusy(false);\n                    controls.forEach(function(control, index) { control.disabled = disabled[index]; });\n                    modalSaving = false;\n                }\n            };\n            editForm.addEventListener('submit', function(event) {\n                event.preventDefault(); event.stopImmediatePropagation();\n                m.saveProjectSettings();\n            }, true);\n\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -557,7 +557,7 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glob
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%t", localRepoPathEnabled)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 471, Col: 116}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 472, Col: 116}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -653,7 +653,7 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-general-tab").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 778, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 779, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
@@ -666,7 +666,7 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		var templ_7745c5c3_Var20 string
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-general").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 778, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 779, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
@@ -679,7 +679,7 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge-tab").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 779, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 780, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -692,7 +692,7 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 779, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 780, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -740,7 +740,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		var templ_7745c5c3_Var24 string
 		templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 825, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 826, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 		if templ_7745c5c3_Err != nil {
@@ -753,7 +753,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		var templ_7745c5c3_Var25 string
 		templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge-tab").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 825, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 826, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
@@ -846,7 +846,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectGlobalSkillWriteValue(permissions)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 835, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 836, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 		if templ_7745c5c3_Err != nil {
@@ -891,7 +891,7 @@ func projectPermissionHelp(label, help string) templ.Component {
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templruntime.NewAttributeExpression(help).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 845, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 846, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 		if templ_7745c5c3_Err != nil {
@@ -904,7 +904,7 @@ func projectPermissionHelp(label, help string) templ.Component {
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templruntime.NewAttributeExpression("About " + label).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 845, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 846, Col: 126}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 		if templ_7745c5c3_Err != nil {
@@ -942,7 +942,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-default-model").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 854, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 855, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 		if templ_7745c5c3_Err != nil {
@@ -963,7 +963,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-default-model").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 857, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 858, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
@@ -981,7 +981,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 860, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 861, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 			if templ_7745c5c3_Err != nil {
@@ -1004,7 +1004,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 861, Col: 19}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 862, Col: 19}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -1017,7 +1017,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.Provider))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 861, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 862, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -1030,7 +1030,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 861, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 862, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -1058,7 +1058,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-max-workers").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 871, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
@@ -1079,7 +1079,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-max-workers").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 874, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 875, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 		if templ_7745c5c3_Err != nil {
@@ -1092,7 +1092,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectMaxWorkersValue(project)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 874, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 875, Col: 114}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
@@ -1110,7 +1110,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", globalMaxWorkers)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 874, Col: 192}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 875, Col: 192}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 			if templ_7745c5c3_Err != nil {
@@ -1133,7 +1133,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", globalMaxWorkers))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 876, Col: 133}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 877, Col: 133}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
