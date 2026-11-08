@@ -90,7 +90,16 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  checkSettings();
  const install=document.getElementById('plugin-install-modal');install.showModal();
  install.querySelector('details').open=true;const form=install.querySelector('form[hx-post*="/install?"]');const badPath='/nonexistent/plugin-browser-test';
+ let installSettled=false;
+ const onInstallSettled=e=>{
+  if(e.detail.elt && e.detail.elt.id==='plugin-settings'){
+   installSettled=true;
+   document.body.removeEventListener('htmx:afterSettle',onInstallSettled);
+  }
+ };
+ document.body.addEventListener('htmx:afterSettle',onInstallSettled);
  form.elements.path.value=badPath;form.requestSubmit();
+ await wait(()=>installSettled,'Installation response did not finish settling');
  await wait(()=>document.getElementById('plugin-install-error'),'Installation error missing');
  const reopened=document.getElementById('plugin-install-modal');
  await wait(()=>reopened.open,'Install modal did not remain open');
