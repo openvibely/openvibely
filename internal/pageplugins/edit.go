@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-// EditWorkspace copies the installed bundle, never handing an editor the live files.
+// EditWorkspace returns durable, instance-owned source files. Installed packages may
+// be shared between projects, so edits never mutate the shared package in place.
 func (m *Manager) EditWorkspace(ctx context.Context, instanceID string) (string, string, error) {
 	m.publishMu.Lock()
 	defer m.publishMu.Unlock()
@@ -21,12 +22,34 @@ func (m *Manager) EditWorkspace(ctx context.Context, instanceID string) (string,
 	if !in.Enabled {
 		return "", "", ErrDisabled
 	}
-	dir, err := os.MkdirTemp("", "ov-page-edit-")
+	root := filepath.Join(m.root, "page-sources", in.ID)
+	dir := filepath.Join(root, "files")
+	stamp := filepath.Join(root, "base-hash")
+	if hash, err := os.ReadFile(stamp); err == nil {
+		return dir, string(hash), nil
+	} else if !os.IsNotExist(err) {
+		return "", "", err
+	}
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return "", "", err
+	}
+	// Initialize atomically; an interrupted copy must never become the working tree.
+	staging, err := os.MkdirTemp(root, ".init-")
 	if err != nil {
 		return "", "", err
 	}
-	if err = copyTree(os.DirFS(pkg.InstallPath), dir); err != nil {
-		os.RemoveAll(dir)
+	defer os.RemoveAll(staging)
+	if err = copyTree(os.DirFS(pkg.InstallPath), staging); err != nil {
+		return "", "", err
+	}
+	if _, err = os.Stat(dir); os.IsNotExist(err) {
+		if err = os.Rename(staging, dir); err != nil {
+			return "", "", err
+		}
+	} else if err != nil {
+		return "", "", err
+	}
+	if err = os.WriteFile(stamp, []byte(pkg.ContentHash), 0600); err != nil {
 		return "", "", err
 	}
 	return dir, pkg.ContentHash, nil
@@ -73,5 +96,14 @@ func (m *Manager) ApplyEdit(ctx context.Context, instanceID, projectID, baseHash
 	if err = os.WriteFile(filepath.Join(source, ManifestFile), raw, 0644); err != nil {
 		return nil, err
 	}
-	return m.publishLocked(ctx, source, projectID, in.PageID, by, instanceID)
+	result, err := m.publishLocked(ctx, source, projectID, in.PageID, by, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if source == filepath.Join(m.root, "page-sources", in.ID, "files") {
+		if err := os.WriteFile(filepath.Join(m.root, "page-sources", in.ID, "base-hash"), []byte(result.Instance.ContentHash), 0600); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }

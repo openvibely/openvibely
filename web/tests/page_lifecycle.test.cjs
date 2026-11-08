@@ -15,12 +15,13 @@ function setup() {
  const frame={...emitter(),contentWindow:{postMessage(m){posts.push(m)}}};
  const approvals={innerHTML:''};
  const attrs={'data-plugin-handle':'handle','data-bridge-url':'/bridge','data-events-url':'/events?project_id=p','data-retire-url':'/retire?project_id=p','data-approvals-url':'/approvals','data-project-id':'p'};
- const root={getAttribute(k){return attrs[k]},querySelector(k){return k==='#plugin-frame'?frame:k==='#plugin-approvals'?approvals:null}};
+ const root={setAttribute(k,v){attrs[k]=v},getAttribute(k){return attrs[k]},querySelector(k){return k==='#plugin-frame'?frame:k==='#plugin-approvals'?approvals:null}};
  const window={...emitter(),openVibelyLive:{execution(){const s={...emitter(),close(){s.closed=true}};streams.push(s);return s}}};
  const document={...emitter(),currentScript:{closest(){return root}}};
  const fetch=(url,opts)=>new Promise(resolve=>requests.push({url,opts,resolve}));
  function EventSource(){const s={...emitter(),close(){s.closed=true}};events.push(s);return s;}
- vm.runInNewContext(source,{window,document,fetch,EventSource,AbortController,console,setTimeout:(fn)=>{timers.push(fn);return timers.length-1},clearTimeout:(id)=>{timers[id]=null}});
+ class DOMParser { parseFromString() { return {querySelector(){return {getAttribute(k){return k === "data-plugin-handle" ? "new-handle" : attrs[k]},querySelector(k){return k === "#plugin-frame" ? {getAttribute(){return "/new-frame"}} : null}}}}} }
+ vm.runInNewContext(source,{DOMParser,window,document,fetch,EventSource,AbortController,console,setTimeout:(fn)=>{timers.push(fn);return timers.length-1},clearTimeout:(id)=>{timers[id]=null}});
  const send=(type,id='m')=>window.emit('message',{source:frame.contentWindow,data:{v:1,handle:'handle',id,type,payload:{}}});
  const respond=(req,result)=>req.resolve({ok:true,json:async()=>({ok:true,result}),text:async()=>result});
  return {posts,requests,events,streams,timers,frame,window,document,root,approvals,send,respond};
@@ -95,14 +96,18 @@ test('Sales ignores old report responses and publishes context before Analyze',a
  });
 
 
-test('page update refreshes only its own page and detaches on navigation',()=>{
+test('page update refreshes only the frame and leaves chat mounted',async()=>{
  const h=setup(); let reloads=0;
- h.window.location={pathname:'/p/current',reload(){reloads++}};
+ h.window.location={pathname:'/p/current',href:'/p/current',reload(){reloads++}};
  h.window.emit('plugin-page-updated',{detail:{task_id:'other'}});
+ assert.equal(h.requests.length,0);
+ h.window.emit('plugin-page-updated',{detail:{task_id:'current'}});
+ h.respond(h.requests[0],'<html>updated</html>'); await flush();
+ assert.equal(h.frame.src,'/new-frame');
+ assert.equal(h.root.getAttribute('data-plugin-handle'),'new-handle');
  assert.equal(reloads,0);
- h.window.emit('plugin-page-updated',{detail:{task_id:'current'}});
- assert.equal(reloads,1);
  h.window.emit('pagehide',{});
+ const count=h.requests.length;
  h.window.emit('plugin-page-updated',{detail:{task_id:'current'}});
- assert.equal(reloads,1);
+ assert.equal(h.requests.length,count);
 });

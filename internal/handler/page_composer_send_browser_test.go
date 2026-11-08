@@ -57,6 +57,14 @@ func testPageComposerSingleSendBrowser(t *testing.T, liveFirst bool) {
  if(pairs.length!==1)throw Error('Expected one pair, got '+pairs.length+' ids='+Array.from(pairs,p=>p.dataset.execId));
  if(!document.querySelector('#task-thread-form-primary-action[data-composer-running="true"]'))throw Error('Stop control missing');
  if(document.getElementById('task-thread-messages').textContent.includes('Ask a question about this page.'))throw Error('Empty placeholder remains');
+ const frame=document.getElementById('plugin-frame');
+ const priorSrc=frame.src;
+ input.value='unsent follow-up';
+ window.dispatchEvent(new CustomEvent('plugin-page-updated',{detail:{task_id:window.location.pathname.split('/').pop()}}));
+ await wait(()=>frame.src!==priorSrc,'updated frame was not refreshed');
+ if(document.getElementById('task-thread-form')!==form)throw Error('page update replaced the chat');
+ if(input.value!=='unsent follow-up')throw Error('page update lost unsent composer text');
+ if(document.querySelectorAll('#task-thread-messages [data-execution-pair]').length!==1)throw Error('page update lost chat turn');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}
 })();</script>`

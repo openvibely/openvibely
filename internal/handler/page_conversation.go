@@ -207,9 +207,6 @@ func (h *Handler) launchPageChat(ctx context.Context, binding pageintegration.Co
 		h.broadcaster.Publish(events.TaskEvent{Type: events.TaskThreadExecutionStarted, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: exec.ID, Message: message})
 	}
 	if err := h.startStreamingResponse(params); err != nil {
-		if params.RuntimeCleanup != nil {
-			params.RuntimeCleanup()
-		}
 		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
 	return chatAttachments, nil
@@ -248,21 +245,18 @@ func (h *Handler) pageChatParams(ctx context.Context, binding pageintegration.Co
 		return streamingResponseParams{}, err
 	}
 	runtime := pageintegration.BuildRuntimeTools(integration, binding.Resolve, pageintegration.Caller{PrincipalID: turn.Principal})
-	var cleanup func()
 	editContext := ""
 	workDir := h.resolveWorkDir(ctx, binding.Page.ProjectID)
 	if binding.Page.Kind == pageplugins.Kind && h.pagePlugins != nil {
-		edits, release, draftDir, err := h.pageEditTools(ctx, binding, turn.Principal)
+		edits, pageDir, err := h.pageEditTools(ctx, binding, turn.Principal)
 		if err != nil {
 			return streamingResponseParams{}, err
 		}
-		workDir = draftDir
+		workDir = pageDir
 		runtime = llmcontracts.CompositeRuntimeTools(edits, runtime)
-		cleanup = release
-		editContext = "For changes to this custom page, use the provided coding tools directly in its draft bundle, then call apply_page_changes. Do not create a separate task or ask the user to install or approve the page. Read the existing files first. Compile changed backend source with shell and run relevant checks before applying. Versioning is automatic. Only claim an update is live after apply_page_changes succeeds."
+		editContext = "Edit this custom page directly using the provided coding tools. Its instance-owned files persist across replies and restarts. Successful changes automatically update the page; no apply or reload tool is needed. Do not create a separate task or ask for installation or page approval. Read existing files first. Build backend source with shell as needed; failed commands retain edited files and the existing published page. Group related edits and builds into one shell command when intermediate changes would be invalid. Only claim an update is live when the tool reports success."
 	}
 	return streamingResponseParams{
-		RuntimeCleanup:      cleanup,
 		CancellationContext: binding.Lifetime(), ExecID: exec.ID, TaskID: task.ID, Message: message, Agent: *agent,
 		ChatHistory: filterChatHistory(history, exec.ID), ProjectID: binding.Page.ProjectID, PrincipalID: turn.Principal,
 		SystemContext: combineContexts(editContext, combineContexts(h.getPersonalityContext(ctx, binding.Page.ProjectID), pageintegration.RenderContextForPrompt(binding.Page, turn.Snapshot, integration.Operations()))),

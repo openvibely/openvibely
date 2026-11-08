@@ -416,9 +416,41 @@ templ pluginHostBridgeScript() {
  window.removeEventListener('plugin-page-updated', onPageUpdated);
 			window.removeEventListener('pagehide', onPageHide);
 		}
-		function onPageUpdated(e) {
- if (e.detail && e.detail.task_id && window.location.pathname === '/p/' + e.detail.task_id) window.location.reload();
- }
+        var refreshGeneration = 0;
+        async function onPageUpdated(e) {
+            if (!e.detail || !e.detail.task_id || window.location.pathname !== '/p/' + e.detail.task_id || dead) return;
+            var generation = ++refreshGeneration;
+            try {
+                var response = await fetch(window.location.href, {credentials: 'same-origin', signal: requests.signal});
+                if (!response.ok) throw new Error('Could not refresh updated page');
+                var html = await response.text();
+                if (dead || generation !== refreshGeneration) return;
+                var updated = new DOMParser().parseFromString(html, 'text/html').querySelector('#plugin-page-root');
+                var nextFrame = updated && updated.querySelector('#plugin-frame');
+                if (!nextFrame) throw new Error('Updated page is unavailable');
+                clearTimeout(startupTimer);
+                if (events) { events.close(); events = null; }
+                handle = updated.getAttribute('data-plugin-handle');
+                root.setAttribute('data-plugin-handle', handle);
+                bridgeURL = updated.getAttribute('data-bridge-url');
+                eventsURL = updated.getAttribute('data-events-url');
+                retireURL = updated.getAttribute('data-retire-url');
+                loads = 0;
+                subscribed = false;
+                frame.src = nextFrame.getAttribute('src');
+                var header = root.querySelector('[data-page-header] .min-w-0');
+                var nextHeader = updated.querySelector('[data-page-header] .min-w-0');
+                if (header && nextHeader) header.replaceChildren.apply(header, Array.from(nextHeader.childNodes));
+                startupTimer = setTimeout(function () {
+                    onMessage({source: frame.contentWindow, data: {v: 1, handle: handle, id: 'startup-timeout', type: 'page.failed', payload: {error: 'Page did not confirm startup within 30 seconds.'}}});
+                }, 30000);
+            } catch (error) {
+                if (!dead && generation === refreshGeneration) {
+                    var notice = root.querySelector('#plugin-notice');
+                    if (notice) notice.textContent = 'Page saved, but refresh failed. Reload to retry.';
+                }
+            }
+        }
  window.addEventListener('plugin-page-updated', onPageUpdated);
 		function onPageHide(e) {
 			cleanup();

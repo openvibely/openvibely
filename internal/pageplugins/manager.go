@@ -346,7 +346,10 @@ func (m *Manager) Disable(ctx context.Context, instanceID string) error {
 
 // RemoveInstance first shuts down the instance, then deletes its saved data.
 func (m *Manager) RemoveInstance(ctx context.Context, instanceID string) error {
-	return m.deactivate(ctx, instanceID, true)
+	if err := m.deactivate(ctx, instanceID, true); err != nil {
+		return err
+	}
+	return os.RemoveAll(filepath.Join(m.root, "page-sources", instanceID))
 }
 
 // ReleaseProject stops runtime resources for instances of a deleted project.

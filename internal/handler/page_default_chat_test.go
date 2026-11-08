@@ -28,7 +28,8 @@ func TestPluginChatAndToolsWithoutOptIn(t *testing.T) {
 	require.NotNil(t, env.starts[0].RuntimeTools)
 	require.True(t, env.starts[0].RuntimeTools.HasDefinition("page_get_report"))
 	require.True(t, env.starts[0].RuntimeTools.HasDefinition("page_set_target"))
-	require.True(t, env.starts[0].RuntimeTools.HasDefinition("apply_page_changes"))
+	require.False(t, env.starts[0].RuntimeTools.HasDefinition("apply_page_changes"))
+	require.True(t, env.starts[0].RuntimeTools.HasDefinition("edit_file"))
 	require.Contains(t, env.starts[0].SystemContext, "page_get_report")
 	for _, suffix := range []string{"/chat/thread", "/chat/thread/composer-action"} {
 		rec = env.do(t, http.MethodGet, pluginAPI(in.ID, in.ProjectID, suffix), "", nil)

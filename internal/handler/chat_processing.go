@@ -96,7 +96,6 @@ type streamingResponseParams struct {
 	// runtime, so switch_project and other channel-sensitive tools execute through
 	// the channel service handler rather than the informational web/API path.
 	RuntimeTools      *llmcontracts.RuntimeTools
-	RuntimeCleanup    func()
 	AutomationContext *models.AutomationContext
 
 	// DeferHistoryLoad signals processStreamingResponse to load ChatHistory,
@@ -322,9 +321,6 @@ func (h *Handler) startStreamingResponse(params streamingResponseParams) error {
 }
 
 func (h *Handler) processStreamingResponse(params streamingResponseParams) {
-	if params.RuntimeCleanup != nil {
-		defer params.RuntimeCleanup()
-	}
 	if params.ProjectID == models.AllProjectsID && !params.IsTaskFollowup {
 		params.SystemContext = combineContexts(params.SystemContext, llmprompt.AllProjectsChatContext)
 	}
