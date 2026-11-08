@@ -139,7 +139,7 @@ func TestBrowserFunctional_PublishedDocumentSurvivesStreaming(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/test", "audit-document-stream", func(b *composerFocusCDP) {
-		b.waitFor("renderer", `typeof window.renderLiveChatContent`, "function")
+		b.waitFor("parsed renderer fixture", `document.readyState+':'+typeof window.renderLiveChatContent`, "complete:function")
 		b.evaluateAwait(`(async()=>{window.source='[report.md](/files/abc123)';await renderLiveChatContent(document.querySelector('#published-message'),source);return 'ready'})()`)
 		b.waitFor("published document link", `String(!!document.querySelector('#published-message [data-file-preview]'))`, "true")
 		b.click("#published-message a")

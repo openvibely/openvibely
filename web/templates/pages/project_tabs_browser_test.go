@@ -388,6 +388,8 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.evaluate(`document.querySelector('[data-project-tab="p00"]').scrollIntoView({block:'nearest',inline:'start'}); 'ready'`)
 				browser.waitFor("wall drag settled", `String(Array.from(document.querySelectorAll(".desktop-project-tab")).every(t=>t.getAnimations().length===0))`, "true")
 				browser.click(`[data-project-tab="p00"]`)
+				// Finishing this navigation saves history, which closes open menus such as the context menu below.
+				browser.waitFor("wall drag project navigation", `new URLSearchParams(location.search).get('project_id')`, "p00")
 				var point struct{ X, Y float64 }
 				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p00"]').getBoundingClientRect();return {X:r.x+40,Y:r.y+15};})())`)), &point); err != nil {
 					t.Fatal(err)
