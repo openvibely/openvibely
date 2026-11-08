@@ -89,7 +89,7 @@ func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingRes
 		return "", err
 	}
 	if h.broadcaster != nil {
-		h.broadcaster.Publish(events.TaskEvent{Type: events.PluginPagesChanged, ProjectID: task.ProjectID})
+		h.broadcaster.Publish(events.TaskEvent{Type: events.PluginPagesChanged, ProjectID: task.ProjectID, TaskID: result.Instance.ID})
 	}
 	out := struct {
 		InstanceID  string `json:"instance_id"`

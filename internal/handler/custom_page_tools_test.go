@@ -78,8 +78,8 @@ func TestCustomPagePublishFromInitialTaskAndFollowup(t *testing.T) {
 	}
 	select {
 	case ev := <-sub:
-		if ev.Type != events.PluginPagesChanged {
-			t.Fatalf("wrong event: %v", ev)
+		if ev.Type != events.PluginPagesChanged || ev.TaskID != first.InstanceID || ev.ProjectID != task.ProjectID {
+			t.Fatalf("publication event must identify the page to refresh: %v", ev)
 		}
 	default:
 		t.Fatal("missing navigation event")
@@ -102,6 +102,16 @@ func TestCustomPagePublishFromInitialTaskAndFollowup(t *testing.T) {
 	updated, handled, bad, err := followup.Executor(ctx, "publish_custom_page", json.RawMessage(`{"package_path":"custom-pages/report","instance_id":"`+first.InstanceID+`"}`))
 	if err != nil || bad || !handled || !strings.Contains(updated, first.InstanceID) {
 		t.Fatalf("update duplicated page: %s %v", updated, err)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case ev := <-sub:
+			if ev.Type != events.PluginPagesChanged || ev.TaskID != first.InstanceID || ev.ProjectID != task.ProjectID {
+				t.Fatalf("follow-up publication must identify the page to refresh: %v", ev)
+			}
+		default:
+			t.Fatal("missing follow-up publication event")
+		}
 	}
 	instance, err := env.mgr.Store().GetInstance(ctx, first.InstanceID)
 	if err != nil || instance.Version != "1.1.0" {
