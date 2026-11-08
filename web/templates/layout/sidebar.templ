@@ -991,7 +991,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						data-nav-src="/plugin-pages/nav"
 						hx-get={ fmt.Sprintf("/plugin-pages/nav?project_id=%s", currentProjectID) }
 						hx-trigger="load, plugin-nav-refresh from:body"
-						hx-swap="innerHTML"
+						hx-swap="innerHTML settle:0"
+						data-plugin-project={ currentProjectID }
 					></ul>
 				</li>
 			</ul>
@@ -999,13 +1000,27 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 		<style>#sidebar #plugin-pages-nav [hidden]{display:none!important}.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style>
 		<script>
-			window.openVibelyRefreshPluginNav = function(projectID) {
-				var nav = document.getElementById('plugin-pages-nav');
-				if (!nav || !window.htmx) return;
-				nav.setAttribute('hx-get', nav.getAttribute('data-nav-src') + '?project_id=' + encodeURIComponent(projectID));
-				htmx.process(nav);
-				htmx.trigger(document.body, 'plugin-nav-refresh');
-			};
+            (function() {
+                var nav = document.getElementById('plugin-pages-nav');
+                if (!nav) return;
+                // Resolve scope at request time; reprocessing hx-get also fires
+                // its load trigger and used to request the same rail twice.
+                nav.addEventListener('htmx:configRequest', function(event) {
+                    if (event.detail.elt !== nav) return;
+                    event.detail.path = nav.dataset.navSrc + '?project_id=' + encodeURIComponent(nav.dataset.pluginProject);
+                });
+                nav.addEventListener('htmx:beforeSwap', function(event) {
+                    var path = event.detail.xhr && event.detail.xhr.responseURL;
+                    if (path && new URL(path, location.href).searchParams.get('project_id') !== nav.dataset.pluginProject) event.detail.shouldSwap = false;
+                });
+                window.openVibelyRefreshPluginNav = function(projectID) {
+                    if (!window.htmx || nav.dataset.pluginProject === projectID) return;
+                    htmx.trigger(nav, 'htmx:abort');
+                    nav.dataset.pluginProject = projectID;
+                    nav.replaceChildren();
+                    htmx.trigger(document.body, 'plugin-nav-refresh');
+                };
+            })();
 		</script>
 
 			<!-- Footer: user info + settings pinned to bottom of sidebar -->

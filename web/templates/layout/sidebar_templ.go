@@ -333,33 +333,46 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-trigger=\"load, plugin-nav-refresh from:body\" hx-swap=\"innerHTML\"></ul></li></ul></div><style>#sidebar #plugin-pages-nav [hidden]{display:none!important}.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style><script>\n\t\t\twindow.openVibelyRefreshPluginNav = function(projectID) {\n\t\t\t\tvar nav = document.getElementById('plugin-pages-nav');\n\t\t\t\tif (!nav || !window.htmx) return;\n\t\t\t\tnav.setAttribute('hx-get', nav.getAttribute('data-nav-src') + '?project_id=' + encodeURIComponent(projectID));\n\t\t\t\thtmx.process(nav);\n\t\t\t\thtmx.trigger(document.body, 'plugin-nav-refresh');\n\t\t\t};\n\t\t</script><!-- Footer: user info + settings pinned to bottom of sidebar --><div class=\"sidebar-footer border-t border-base-300 p-3 flex items-center justify-between gap-2\"><div id=\"sidebar-auth-user\" class=\"hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto\"><div class=\"dropdown dropdown-top w-full\"><button id=\"sidebar-user-menu-trigger\" type=\"button\" class=\"sidebar-user-trigger btn btn-ghost w-full flex-nowrap justify-start items-center gap-2 normal-case\" aria-haspopup=\"menu\" aria-label=\"Open user menu\"><div class=\"avatar placeholder\"><div class=\"bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center\"><span id=\"sidebar-auth-avatar\" class=\"text-xs font-semibold leading-none\">U</span></div></div><div id=\"sidebar-auth-name\" class=\"min-w-0 text-xs font-medium truncate leading-none\">User</div></button><ul id=\"sidebar-user-menu\" tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu w-44 z-[120]\" role=\"menu\" aria-label=\"User menu\"><li role=\"none\"><form method=\"POST\" action=\"/logout\" class=\"w-full\" role=\"none\"><button id=\"sidebar-logout-label\" type=\"submit\" class=\"ov-menu-option w-full\" role=\"menuitem\">Logout</button></form></li></ul></div></div><ul class=\"menu menu-sm p-0 sidebar-footer-menu\"><li><a data-nav-base=\"/themes\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-trigger=\"load, plugin-nav-refresh from:body\" hx-swap=\"innerHTML settle:0\" data-plugin-project=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(fmt.Sprintf("/themes?project_id=%s", currentProjectID))).ResolveURL(ctx)
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(currentProjectID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1042, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 995, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\"></ul></li></ul></div><style>#sidebar #plugin-pages-nav [hidden]{display:none!important}.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style><script>\n            (function() {\n                var nav = document.getElementById('plugin-pages-nav');\n                if (!nav) return;\n                // Resolve scope at request time; reprocessing hx-get also fires\n                // its load trigger and used to request the same rail twice.\n                nav.addEventListener('htmx:configRequest', function(event) {\n                    if (event.detail.elt !== nav) return;\n                    event.detail.path = nav.dataset.navSrc + '?project_id=' + encodeURIComponent(nav.dataset.pluginProject);\n                });\n                nav.addEventListener('htmx:beforeSwap', function(event) {\n                    var path = event.detail.xhr && event.detail.xhr.responseURL;\n                    if (path && new URL(path, location.href).searchParams.get('project_id') !== nav.dataset.pluginProject) event.detail.shouldSwap = false;\n                });\n                window.openVibelyRefreshPluginNav = function(projectID) {\n                    if (!window.htmx || nav.dataset.pluginProject === projectID) return;\n                    htmx.trigger(nav, 'htmx:abort');\n                    nav.dataset.pluginProject = projectID;\n                    nav.replaceChildren();\n                    htmx.trigger(document.body, 'plugin-nav-refresh');\n                };\n            })();\n\t\t</script><!-- Footer: user info + settings pinned to bottom of sidebar --><div class=\"sidebar-footer border-t border-base-300 p-3 flex items-center justify-between gap-2\"><div id=\"sidebar-auth-user\" class=\"hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto\"><div class=\"dropdown dropdown-top w-full\"><button id=\"sidebar-user-menu-trigger\" type=\"button\" class=\"sidebar-user-trigger btn btn-ghost w-full flex-nowrap justify-start items-center gap-2 normal-case\" aria-haspopup=\"menu\" aria-label=\"Open user menu\"><div class=\"avatar placeholder\"><div class=\"bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center\"><span id=\"sidebar-auth-avatar\" class=\"text-xs font-semibold leading-none\">U</span></div></div><div id=\"sidebar-auth-name\" class=\"min-w-0 text-xs font-medium truncate leading-none\">User</div></button><ul id=\"sidebar-user-menu\" tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu w-44 z-[120]\" role=\"menu\" aria-label=\"User menu\"><li role=\"none\"><form method=\"POST\" action=\"/logout\" class=\"w-full\" role=\"none\"><button id=\"sidebar-logout-label\" type=\"submit\" class=\"ov-menu-option w-full\" role=\"menuitem\">Logout</button></form></li></ul></div></div><ul class=\"menu menu-sm p-0 sidebar-footer-menu\"><li><a data-nav-base=\"/themes\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 string
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/themes?project_id=%s", currentProjectID)).Resolve(ctx)
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(fmt.Sprintf("/themes?project_id=%s", currentProjectID))).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1043, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1057, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z\"></path> <path d=\"m9.5 3-.6 2.2-1.5.9-2.2-.6-2.5 4.3 1.6 1.6v1.8l-1.6 1.6 2.5 4.3 2.2-.6 1.5.9.6 2.2h5l.6-2.2 1.5-.9 2.2.6 2.5-4.3-1.6-1.6v-1.8l1.6-1.6-2.5-4.3-2.2.6-1.5-.9-.6-2.2Z\"></path></svg> <span class=\"sidebar-text\">Settings</span></a></li></ul></div><style>\n            /* Section labels do not participate in menu hover/active states. */\n            #sidebar .menu-title {\n                pointer-events: none;\n                cursor: default;\n                -webkit-user-select: none;\n                user-select: none;\n            }\n\n\t\t\t/* Dividers are decoration, not menu actions. */\n\t\t\t.sidebar-divider {\n\t\t\t\tcursor: default;\n\t\t\t}\n\t\t\t.sidebar-divider > hr {\n\t\t\t\tpointer-events: none;\n\t\t\t}\n\n\t\t\t/* Sidebar collapse toggle button */\n\t\t\t.sidebar-toggle-btn .panel-toggle-fill { fill: none; }\n\t\t\t.sidebar-toggle-btn[aria-expanded=\"true\"] .panel-toggle-fill { fill: currentColor; }\n\t\t\t.sidebar-toggle-btn {\n\t\t\t\topacity: 0.7;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t.sidebar-toggle-btn.header-action-btn { opacity: 1; }\n\t\t\t@media (hover: hover) {\n\t\t\t\t.sidebar-toggle-btn:hover {\n\t\t\t\t\topacity: 1;\n\t\t\t\t}\n\t\t\t}\n\t\t\t\n\t\t\t.sidebar-footer {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmin-height: 3.25rem;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.sidebar-user-trigger {\n\t\t\t\theight: 24px !important;\n\t\t\t\tmin-height: 24px !important;\n\t\t\t\tmax-height: 24px !important;\n\t\t\t\tdisplay: flex !important;\n\t\t\t\talign-items: center !important;\n\t\t\t\tpadding: 0 0.5rem !important;\n\t\t\t\tpadding-top: 0 !important;\n\t\t\t\tpadding-bottom: 0 !important;\n\t\t\t\tmargin: 0 !important;\n\t\t\t\tborder: 0 !important;\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tline-height: 1 !important;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.sidebar-user-trigger .avatar,\n\t\t\t.sidebar-user-trigger #sidebar-auth-name {\n\t\t\t\tmargin: 0 !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:hover {\n\t\t\t\tbackground-color: transparent !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:focus-visible,\n\t\t\t[data-theme=\"dark\"] .sidebar-user-trigger:focus-visible {\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--bc) / 0.4);\n\t\t\t}\n\t\t</style><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfetch('/auth/me', { credentials: 'same-origin' })\t\t\t\t\t\t.then(function(resp) {\n\t\t\t\t\t\t\tif (!resp.ok) return null;\n\t\t\t\t\t\t\treturn resp.json();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.then(function(data) {\n\t\t\t\t\t\t\tif (!data || !data.authenticated || !data.username) return;\n\t\t\t\t\t\t\tvar user = document.getElementById('sidebar-auth-user');\n\t\t\t\t\t\t\tvar userCollapsed = document.getElementById('sidebar-auth-user-collapsed');\n\t\t\t\t\t\t\tvar name = document.getElementById('sidebar-auth-name');\n\t\t\t\t\t\t\tvar avatar = document.getElementById('sidebar-auth-avatar');\n\t\t\t\t\t\t\tvar avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');\n\t\t\t\t\t\t\tvar logoutLabel = document.getElementById('sidebar-logout-label');\n\t\t\t\t\t\t\tif (user) user.classList.remove('hidden');\n\t\t\t\t\t\t\tif (userCollapsed) userCollapsed.classList.remove('hidden');\n\t\t\t\t\t\t\tif (name) name.textContent = data.display || data.username;\n\t\t\t\t\t\t\tvar initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();\n\t\t\t\t\t\t\tif (avatar) avatar.textContent = initial;\n\t\t\t\t\t\t\tif (avatarCollapsed) avatarCollapsed.textContent = initial;\n\t\t\t\t\t\t\tif (logoutLabel && data.auth_source === 'hosted_sso') logoutLabel.textContent = 'Log out of this workspace';\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(function() {});\n\t\t\t\t})();\n\n\t\t\t\t(function() {\n\t\t\t\t\tvar btn = document.getElementById('new-project-btn');\n\t\t\t\t\tif (!btn) return;\n\t\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tvar container = document.getElementById('new-project-container');\n\t\t\t\t\t\thtmx.ajax('GET', '/projects/new', {\n\t\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t})();\t\t</script><script>\n\t\t\t(function() {\n\t\t\t\tconst btn = document.getElementById('project-settings-btn');\n\t\t\t\tif (!btn) return;\n\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\tconst sel = document.getElementById('project-selector');\n\t\t\t\t\tif (!sel || !sel.value || sel.value === '__all_projects__') return;\n\t\t\t\t\tconst container = document.getElementById('project-settings-container');\n\t\t\t\t\thtmx.ajax('GET', '/projects/' + sel.value + '/edit', {\n\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t})();\n\t\t</script></aside>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var24 string
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/themes?project_id=%s", currentProjectID)).Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1058, Col: 69}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z\"></path> <path d=\"m9.5 3-.6 2.2-1.5.9-2.2-.6-2.5 4.3 1.6 1.6v1.8l-1.6 1.6 2.5 4.3 2.2-.6 1.5.9.6 2.2h5l.6-2.2 1.5-.9 2.2.6 2.5-4.3-1.6-1.6v-1.8l1.6-1.6-2.5-4.3-2.2.6-1.5-.9-.6-2.2Z\"></path></svg> <span class=\"sidebar-text\">Settings</span></a></li></ul></div><style>\n            /* Section labels do not participate in menu hover/active states. */\n            #sidebar .menu-title {\n                pointer-events: none;\n                cursor: default;\n                -webkit-user-select: none;\n                user-select: none;\n            }\n\n\t\t\t/* Dividers are decoration, not menu actions. */\n\t\t\t.sidebar-divider {\n\t\t\t\tcursor: default;\n\t\t\t}\n\t\t\t.sidebar-divider > hr {\n\t\t\t\tpointer-events: none;\n\t\t\t}\n\n\t\t\t/* Sidebar collapse toggle button */\n\t\t\t.sidebar-toggle-btn .panel-toggle-fill { fill: none; }\n\t\t\t.sidebar-toggle-btn[aria-expanded=\"true\"] .panel-toggle-fill { fill: currentColor; }\n\t\t\t.sidebar-toggle-btn {\n\t\t\t\topacity: 0.7;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t.sidebar-toggle-btn.header-action-btn { opacity: 1; }\n\t\t\t@media (hover: hover) {\n\t\t\t\t.sidebar-toggle-btn:hover {\n\t\t\t\t\topacity: 1;\n\t\t\t\t}\n\t\t\t}\n\t\t\t\n\t\t\t.sidebar-footer {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmin-height: 3.25rem;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.sidebar-user-trigger {\n\t\t\t\theight: 24px !important;\n\t\t\t\tmin-height: 24px !important;\n\t\t\t\tmax-height: 24px !important;\n\t\t\t\tdisplay: flex !important;\n\t\t\t\talign-items: center !important;\n\t\t\t\tpadding: 0 0.5rem !important;\n\t\t\t\tpadding-top: 0 !important;\n\t\t\t\tpadding-bottom: 0 !important;\n\t\t\t\tmargin: 0 !important;\n\t\t\t\tborder: 0 !important;\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tline-height: 1 !important;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.sidebar-user-trigger .avatar,\n\t\t\t.sidebar-user-trigger #sidebar-auth-name {\n\t\t\t\tmargin: 0 !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:hover {\n\t\t\t\tbackground-color: transparent !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:focus-visible,\n\t\t\t[data-theme=\"dark\"] .sidebar-user-trigger:focus-visible {\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--bc) / 0.4);\n\t\t\t}\n\t\t</style><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfetch('/auth/me', { credentials: 'same-origin' })\t\t\t\t\t\t.then(function(resp) {\n\t\t\t\t\t\t\tif (!resp.ok) return null;\n\t\t\t\t\t\t\treturn resp.json();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.then(function(data) {\n\t\t\t\t\t\t\tif (!data || !data.authenticated || !data.username) return;\n\t\t\t\t\t\t\tvar user = document.getElementById('sidebar-auth-user');\n\t\t\t\t\t\t\tvar userCollapsed = document.getElementById('sidebar-auth-user-collapsed');\n\t\t\t\t\t\t\tvar name = document.getElementById('sidebar-auth-name');\n\t\t\t\t\t\t\tvar avatar = document.getElementById('sidebar-auth-avatar');\n\t\t\t\t\t\t\tvar avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');\n\t\t\t\t\t\t\tvar logoutLabel = document.getElementById('sidebar-logout-label');\n\t\t\t\t\t\t\tif (user) user.classList.remove('hidden');\n\t\t\t\t\t\t\tif (userCollapsed) userCollapsed.classList.remove('hidden');\n\t\t\t\t\t\t\tif (name) name.textContent = data.display || data.username;\n\t\t\t\t\t\t\tvar initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();\n\t\t\t\t\t\t\tif (avatar) avatar.textContent = initial;\n\t\t\t\t\t\t\tif (avatarCollapsed) avatarCollapsed.textContent = initial;\n\t\t\t\t\t\t\tif (logoutLabel && data.auth_source === 'hosted_sso') logoutLabel.textContent = 'Log out of this workspace';\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(function() {});\n\t\t\t\t})();\n\n\t\t\t\t(function() {\n\t\t\t\t\tvar btn = document.getElementById('new-project-btn');\n\t\t\t\t\tif (!btn) return;\n\t\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tvar container = document.getElementById('new-project-container');\n\t\t\t\t\t\thtmx.ajax('GET', '/projects/new', {\n\t\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t})();\t\t</script><script>\n\t\t\t(function() {\n\t\t\t\tconst btn = document.getElementById('project-settings-btn');\n\t\t\t\tif (!btn) return;\n\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\tconst sel = document.getElementById('project-selector');\n\t\t\t\t\tif (!sel || !sel.value || sel.value === '__all_projects__') return;\n\t\t\t\t\tconst container = document.getElementById('project-settings-container');\n\t\t\t\t\thtmx.ajax('GET', '/projects/' + sel.value + '/edit', {\n\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t})();\n\t\t</script></aside>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -385,22 +398,22 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<div class=\"form-control mb-6 sidebar-hide-collapsed\" data-project-selector data-searchable-selector data-searchable-selector-local data-searchable-selector-left-anchor data-searchable-selector-kind=\"project\"><div class=\"flex items-center justify-between mb-1\"><span class=\"label-text text-xs uppercase tracking-wider opacity-60\">Project</span><div class=\"flex items-center gap-1\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<div class=\"form-control mb-6 sidebar-hide-collapsed\" data-project-selector data-searchable-selector data-searchable-selector-local data-searchable-selector-left-anchor data-searchable-selector-kind=\"project\"><div class=\"flex items-center justify-between mb-1\"><span class=\"label-text text-xs uppercase tracking-wider opacity-60\">Project</span><div class=\"flex items-center gap-1\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if serverRuntimeMode(ctx) != "desktop" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<button id=\"project-settings-btn\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<button id=\"project-settings-btn\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if currentProjectID == models.AllProjectsID {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, " disabled")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, " disabled")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, " class=\"btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100\" aria-label=\"Project Settings\" data-tooltip-disabled><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-3.5 w-3.5 transition-opacity\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg></button> <button id=\"new-project-btn\" class=\"btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100\" aria-label=\"New Project\" data-tooltip-disabled>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, " class=\"btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100\" aria-label=\"Project Settings\" data-tooltip-disabled><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-3.5 w-3.5 transition-opacity\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg></button> <button id=\"new-project-btn\" class=\"btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100\" aria-label=\"New Project\" data-tooltip-disabled>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -408,91 +421,91 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</div></div><select id=\"project-selector\" class=\"sr-only\" aria-hidden=\"true\" tabindex=\"-1\" data-project-selector-value data-searchable-selector-value>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</div></div><select id=\"project-selector\" class=\"sr-only\" aria-hidden=\"true\" tabindex=\"-1\" data-project-selector-value data-searchable-selector-value>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, p := range projects {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<option value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var25 string
-			templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1216, Col: 19}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if p.ID == currentProjectID {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, ">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<option value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var26 string
-			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
+			templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1219, Col: 15}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1231, Col: 19}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</option>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</select> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if serverRuntimeMode(ctx) == "desktop" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<button id=\"project-selector-trigger\" type=\"button\" aria-label=\"Open project\" title=\"Open project\" aria-haspopup=\"dialog\" aria-expanded=\"false\" aria-controls=\"project-selector-dialog\" data-searchable-selector-trigger><svg width=\"12\" height=\"12\" viewBox=\"0 0 14 14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M7 2v10M2 7h10\"></path></svg></button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<button id=\"project-selector-trigger\" class=\"select select-bordered select-sm w-full sidebar-project-select flex min-w-0 items-center text-left\" type=\"button\" aria-label=\"Switch project\" aria-haspopup=\"dialog\" aria-expanded=\"false\" aria-controls=\"project-selector-dialog\" data-searchable-selector-trigger")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if len(projects) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, " disabled")
+			if p.ID == currentProjectID {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, " selected")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "><svg class=\"project-selector-plus\" width=\"12\" height=\"12\" viewBox=\"0 0 14 14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" aria-hidden=\"true\"><path d=\"M7 2v10M2 7h10\"></path></svg> <span id=\"project-selector-current-label\" class=\"min-w-0 truncate\" data-searchable-selector-current-label>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, ">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var27 string
-			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(sidebarProjectDisplayName(projects, currentProjectID))
+			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1238, Col: 166}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1234, Col: 15}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</span></button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</option>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</select> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if serverRuntimeMode(ctx) == "desktop" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<button id=\"project-selector-trigger\" type=\"button\" aria-label=\"Open project\" title=\"Open project\" aria-haspopup=\"dialog\" aria-expanded=\"false\" aria-controls=\"project-selector-dialog\" data-searchable-selector-trigger><svg width=\"12\" height=\"12\" viewBox=\"0 0 14 14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M7 2v10M2 7h10\"></path></svg></button>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<button id=\"project-selector-trigger\" class=\"select select-bordered select-sm w-full sidebar-project-select flex min-w-0 items-center text-left\" type=\"button\" aria-label=\"Switch project\" aria-haspopup=\"dialog\" aria-expanded=\"false\" aria-controls=\"project-selector-dialog\" data-searchable-selector-trigger")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if len(projects) == 0 {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, " disabled")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "><svg class=\"project-selector-plus\" width=\"12\" height=\"12\" viewBox=\"0 0 14 14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" aria-hidden=\"true\"><path d=\"M7 2v10M2 7h10\"></path></svg> <span id=\"project-selector-current-label\" class=\"min-w-0 truncate\" data-searchable-selector-current-label>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var28 string
+			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(sidebarProjectDisplayName(projects, currentProjectID))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1253, Col: 166}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</span></button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -502,7 +515,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 			selectorConfig.CreateButtonID = "new-project-btn"
 			selectorConfig.CreateLabel = "Create New Project"
 		}
-		templ_7745c5c3_Var28 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var29 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -515,7 +528,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 			}
 			ctx = templ.InitializeContext(ctx)
 			if len(projects) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<div class=\"px-3 py-8 text-center text-sm text-base-content/60\" data-project-selector-no-projects>No projects available.</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div class=\"px-3 py-8 text-center text-sm text-base-content/60\" data-project-selector-no-projects>No projects available.</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -524,25 +537,25 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 					templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 					templ_7745c5c3_Buffer := templ.GetBuffer()
 					var templ_7745c5c3_ElementScripts []templ.ComponentScript
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div role=\"listbox\" aria-label=\"Projects\" class=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div role=\"listbox\" aria-label=\"Projects\" class=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var29 = []any{templateui.SearchableSelectorMenuClass}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var29...)
+					var templ_7745c5c3_Var30 = []any{templateui.SearchableSelectorMenuClass}
+					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var30...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var30 string
-					templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var29).String()).Resolve(ctx)
+					var templ_7745c5c3_Var31 string
+					templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var30).String()).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -556,7 +569,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 					}
 					templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, ">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, ">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -565,90 +578,90 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 						templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 						templ_7745c5c3_Buffer := templ.GetBuffer()
 						var templ_7745c5c3_ElementScripts []templ.ComponentScript
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<button class=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<button class=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var31 = []any{templateui.SearchableSelectorOptionClass}
-						templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var31...)
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var32 string
-						templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var31).String()).Resolve(ctx)
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" type=\"button\" role=\"option\" aria-selected=\"")
+						var templ_7745c5c3_Var32 = []any{templateui.SearchableSelectorOptionClass}
+						templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var32...)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var33 string
-						templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%t", p.ID == currentProjectID)).Resolve(ctx)
+						templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var32).String()).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1255, Col: 68}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" tabindex=\"-1\" data-project-selector-option data-project-id=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" type=\"button\" role=\"option\" aria-selected=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var34 string
-						templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
+						templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%t", p.ID == currentProjectID)).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1258, Col: 31}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1270, Col: 68}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" data-project-name=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" tabindex=\"-1\" data-project-selector-option data-project-id=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var35 string
-						templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.Name).Resolve(ctx)
+						templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1259, Col: 35}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1273, Col: 31}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\" data-searchable-selector-option data-searchable-selector-id=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\" data-project-name=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var36 string
-						templ_7745c5c3_Var36, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
+						templ_7745c5c3_Var36, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.Name).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1261, Col: 43}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1274, Col: 35}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" data-searchable-selector-name=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" data-searchable-selector-option data-searchable-selector-id=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var37 string
-						templ_7745c5c3_Var37, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.Name).Resolve(ctx)
+						templ_7745c5c3_Var37, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1262, Col: 47}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1276, Col: 43}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" data-searchable-selector-name=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var38 string
+						templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.Name).Resolve(ctx)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1277, Col: 47}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -662,36 +675,36 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 						}
 						templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "><span class=\"min-w-0 break-words\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "><span class=\"min-w-0 break-words\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var38 string
-					templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
+					var templ_7745c5c3_Var39 string
+					templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1264, Col: 51}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1279, Col: 51}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</span></button>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</span></button>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</div><div class=\"px-3 py-8 text-center\" data-project-selector-no-match data-searchable-selector-no-match hidden><p class=\"font-medium\">No projects match your search.</p><p class=\"mt-1 text-sm text-base-content/60\">Try a different name.</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "</div><div class=\"px-3 py-8 text-center\" data-project-selector-no-match data-searchable-selector-no-match hidden><p class=\"font-medium\">No projects match your search.</p><p class=\"mt-1 text-sm text-base-content/60\">Try a different name.</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = templateui.SearchableSelector(selectorConfig).Render(templ.WithChildren(ctx, templ_7745c5c3_Var28), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = templateui.SearchableSelector(selectorConfig).Render(templ.WithChildren(ctx, templ_7745c5c3_Var29), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -716,7 +729,7 @@ func SidebarToggle() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<button id=\"sidebar-collapse-btn\" type=\"button\" class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" title=\"Collapse sidebar (Ctrl+B)\" aria-label=\"Collapse sidebar (Ctrl+B)\" aria-controls=\"sidebar\" aria-expanded=\"true\" data-tip=\"Collapse sidebar\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 sidebar-toggle-icon\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path class=\"panel-toggle-fill\" d=\"M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4Z\" stroke=\"none\"></path> <rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect> <line x1=\"9\" y1=\"3\" x2=\"9\" y2=\"21\"></line></svg></button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<button id=\"sidebar-collapse-btn\" type=\"button\" class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" title=\"Collapse sidebar (Ctrl+B)\" aria-label=\"Collapse sidebar (Ctrl+B)\" aria-controls=\"sidebar\" aria-expanded=\"true\" data-tip=\"Collapse sidebar\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 sidebar-toggle-icon\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path class=\"panel-toggle-fill\" d=\"M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4Z\" stroke=\"none\"></path> <rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect> <line x1=\"9\" y1=\"3\" x2=\"9\" y2=\"21\"></line></svg></button>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -144,6 +144,23 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  uploadForm.requestSubmit();
  await wait(()=>toasts.some(t=>t.includes('Installed Browser uploaded')),'Folder upload did not install');
  if(document.getElementById('plugin-install-modal').open)throw Error('Upload success left modal open');
+ const nav=document.getElementById('plugin-pages-nav');
+ const originalProject=nav.dataset.pluginProject;
+ let railRequests=0;
+ nav.addEventListener('htmx:beforeRequest',()=>railRequests++);
+ window.openVibelyRefreshPluginNav('__all_projects__');
+ window.openVibelyRefreshPluginNav('__all_projects__');
+ await new Promise(r=>setTimeout(r,400));
+ if(railRequests!==1)throw Error('Duplicate rail refresh on project switch: '+railRequests);
+ window.openVibelyRefreshPluginNav(originalProject);
+ if(nav.children.length)throw Error('Previous project icons retained during switch');
+ await new Promise(r=>setTimeout(r,400));
+ if(nav.dataset.pluginProject!==originalProject)throw Error('Rail scope was overwritten');
+ const stale=new Event('htmx:beforeSwap');
+ stale.detail={shouldSwap:true,xhr:{responseURL:location.origin+'/plugin-pages/nav?project_id=__all_projects__'}};
+ nav.dispatchEvent(stale);
+ if(stale.detail.shouldSwap)throw Error('Stale project response allowed to flash');
+
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}
 })();</script>`
