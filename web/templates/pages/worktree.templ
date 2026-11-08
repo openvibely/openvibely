@@ -163,6 +163,9 @@ func changesMetadataKey(task *models.Task, pr *models.TaskPullRequest, unavailab
 
 templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool) {
  if task.WorktreeBranch != "" {
+ if !conflictRecovery {
+ @changesSplitAction(task, taskPR, localMergeUnavailable, rebaseAvailable)
+ } else {
 						// Unified actions dropdown with Local and GitHub sections
 						<div class="dropdown dropdown-end relative z-[60] flex-shrink-0" id="changes-actions-dropdown">
 							<button type="button" role="button" popovertarget="changes-actions-menu" class="btn btn-primary btn-sm whitespace-nowrap">
@@ -232,6 +235,7 @@ templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, l
 							</ul>
 							@changesActionsPopoverScript()
 						</div>
+ }
  }
 }
 

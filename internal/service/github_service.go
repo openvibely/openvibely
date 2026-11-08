@@ -77,6 +77,7 @@ type GitHubRepoRef struct {
 }
 
 type GitHubPullRequest struct {
+	BaseRef          string
 	Number           int
 	URL              string
 	Body             string `json:"-"`
@@ -160,21 +161,23 @@ var DefaultGitHubSDLCLabels = []string{
 }
 
 type GitHubCreatePullRequestRequest struct {
-	Title string
-	Body  string
-	Head  string
-	Base  string
-	Draft bool
+	HeadRepo string
+	Title    string
+	Body     string
+	Head     string
+	Base     string
+	Draft    bool
 }
 
 type GitHubPublishBranchRequest struct {
-	RepoPath       string
-	WorktreePath   string
-	Branch         string
-	BaseBranch     string
-	CommitMessage  string
-	CommitterName  string
-	CommitterEmail string
+	LocalBaseBranch string // Local diff baseline, independent of the remote PR target.
+	RepoPath        string
+	WorktreePath    string
+	Branch          string
+	BaseBranch      string
+	CommitMessage   string
+	CommitterName   string
+	CommitterEmail  string
 }
 
 type GitHubPublishedCommitStats struct {
@@ -830,7 +833,11 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		return nil, fmt.Errorf("repository path is required")
 	}
 
-	changes, err := s.collectGitHubBranchChanges(ctx, dir, baseBranch)
+	localBase := strings.TrimSpace(publishReq.LocalBaseBranch)
+	if localBase == "" {
+		localBase = baseBranch
+	}
+	changes, err := s.collectGitHubBranchChanges(ctx, dir, localBase)
 	if err != nil {
 		return nil, err
 	}
@@ -1775,7 +1782,10 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 		Body   string `json:"body"`
 		State  string `json:"state"`
 		Merged bool   `json:"merged"`
-		Head   struct {
+		Base   struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		Head struct {
 			Ref  string `json:"ref"`
 			SHA  string `json:"sha"`
 			Repo struct {
@@ -1786,7 +1796,7 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 	if err := s.doGitHubJSON(req, &pr); err != nil {
 		return nil, err
 	}
-	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, Body: pr.Body, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA}, nil
+	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, Body: pr.Body, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA, BaseRef: pr.Base.Ref}, nil
 }
 
 func (s *GitHubService) UpdatePullRequestBody(ctx context.Context, repo *GitHubRepoRef, number int, body string) error {
@@ -1814,6 +1824,13 @@ func (s *GitHubService) UpdatePullRequestBody(ctx context.Context, repo *GitHubR
 }
 
 func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
+	return s.findPullRequest(ctx, repo, branch, "", "")
+}
+
+func (s *GitHubService) FindPullRequestForTarget(ctx context.Context, repo *GitHubRepoRef, head, headRepo, base string) (*GitHubPullRequest, error) {
+	return s.findPullRequest(ctx, repo, head, headRepo, base)
+}
+func (s *GitHubService) findPullRequest(ctx context.Context, repo *GitHubRepoRef, branch, headRepo, base string) (*GitHubPullRequest, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository reference is required")
 	}
@@ -1827,8 +1844,15 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 		return nil, err
 	}
 
-	head := url.QueryEscape(fmt.Sprintf("%s:%s", repo.Owner, branch))
+	headName := branch
+	if !strings.Contains(headName, ":") {
+		headName = repo.Owner + ":" + headName
+	}
+	head := url.QueryEscape(headName)
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls?state=all&head=%s", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), head)
+	if base != "" {
+		endpoint += "&base=" + url.QueryEscape(base) + "&per_page=100"
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -1840,7 +1864,10 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 		URL    string `json:"html_url"`
 		Body   string `json:"body"`
 		State  string `json:"state"`
-		Head   struct {
+		Base   struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		Head struct {
 			Ref  string `json:"ref"`
 			SHA  string `json:"sha"`
 			Repo struct {
@@ -1854,6 +1881,14 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 	if len(prs) == 0 {
 		return nil, nil
 	}
+	if headRepo != "" {
+		for _, pr := range prs {
+			if IsOpenPullRequestState(pr.State) && strings.EqualFold(pr.Head.Repo.FullName, headRepo) && pr.Base.Ref == base {
+				return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, Body: pr.Body, State: pr.State, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA, BaseRef: pr.Base.Ref}, nil
+			}
+		}
+		return nil, nil
+	}
 	selected := prs[0]
 	for _, pr := range prs {
 		if IsOpenPullRequestState(pr.State) {
@@ -1861,7 +1896,7 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 			break
 		}
 	}
-	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, Body: selected.Body, State: selected.State, HeadRef: selected.Head.Ref, HeadRepoFullName: selected.Head.Repo.FullName, HeadSHA: selected.Head.SHA}, nil
+	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, Body: selected.Body, State: selected.State, HeadRef: selected.Head.Ref, HeadRepoFullName: selected.Head.Repo.FullName, HeadSHA: selected.Head.SHA, BaseRef: selected.Base.Ref}, nil
 }
 
 func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
@@ -1884,6 +1919,9 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 		"body":  createReq.Body,
 		"draft": createReq.Draft,
 	}
+	if createReq.HeadRepo != "" {
+		payload["head_repo"] = createReq.HeadRepo
+	}
 	body, _ := json.Marshal(payload)
 
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
@@ -1899,7 +1937,10 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 		URL    string `json:"html_url"`
 		Body   string `json:"body"`
 		State  string `json:"state"`
-		Head   struct {
+		Base   struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		Head struct {
 			Ref  string `json:"ref"`
 			SHA  string `json:"sha"`
 			Repo struct {
@@ -1911,7 +1952,7 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 		return nil, err
 	}
 
-	return &GitHubPullRequest{Number: created.Number, URL: created.URL, Body: created.Body, State: created.State, HeadRef: created.Head.Ref, HeadRepoFullName: created.Head.Repo.FullName, HeadSHA: created.Head.SHA}, nil
+	return &GitHubPullRequest{Number: created.Number, URL: created.URL, Body: created.Body, State: created.State, HeadRef: created.Head.Ref, HeadRepoFullName: created.Head.Repo.FullName, HeadSHA: created.Head.SHA, BaseRef: created.Base.Ref}, nil
 }
 
 func (s *GitHubService) EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, requested []string) error {

@@ -391,6 +391,9 @@ func (h *Handler) rebaseTaskBranchOptions(taskID, projectID string, fromTaskCard
 
 // MergeTaskBranch manually merges a task's worktree branch to target.
 func (h *Handler) MergeTaskBranch(c echo.Context) error {
+	if err := h.applyChangesLocalTarget(c); err != nil {
+		return err
+	}
 	taskID := c.Param("taskId")
 	fromTaskCard := c.FormValue("merge_source") == "task_card"
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
@@ -532,6 +535,9 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 
 // RebaseTaskBranch rebases a task's worktree branch onto its target branch.
 func (h *Handler) RebaseTaskBranch(c echo.Context) error {
+	if err := h.applyChangesLocalTarget(c); err != nil {
+		return err
+	}
 	taskID := c.Param("taskId")
 	fromTaskCard := c.FormValue("merge_source") == "task_card"
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
@@ -739,6 +745,8 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	var eligibilityReason string
 	result, mutationErr := h.newTaskPullRequestService().OpenForTaskValidated(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
+		TargetRepoURL: strings.TrimSpace(c.FormValue("target_repo")),
+		Base:          strings.TrimSpace(c.FormValue("base")),
 	}, func() (*models.Project, *models.Task, error) {
 		currentTask, loadErr := h.taskSvc.GetByID(c.Request().Context(), taskID)
 		if loadErr != nil || currentTask == nil {

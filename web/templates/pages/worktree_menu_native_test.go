@@ -55,11 +55,11 @@ const worktreeMenuNativeRunner = `<script>
 window.addEventListener('DOMContentLoaded',()=>{
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  (async()=>{
-  for(let i=0;i<500 && !document.querySelector('#changes-actions-dropdown');i++)await wait(10);
-  const root=document.querySelector('#changes-actions-dropdown');
+  for(let i=0;i<500 && !document.querySelector('[data-changes-split]');i++)await wait(10);
+  const root=document.querySelector('[data-changes-split]');
   if(!root)throw Error('Missing Actions');
   root.parentElement.style.cssText='position:relative;z-index:0;transform:translateZ(0)';
-  const button=root.querySelector('button[popovertarget]'),menu=root.querySelector('ul');
+  const button=root.querySelector('button[popovertarget]'),menu=root.querySelector('#changes-split-settings');
   if(menu.getClientRects().length)throw Error('Closed menu visible on load');
   for(const mode of ['inline','split']) {
    switchDiffView(mode,false); await wait(100);

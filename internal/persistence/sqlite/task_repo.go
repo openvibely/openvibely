@@ -3311,6 +3311,13 @@ func (r *TaskRepo) ClearActiveMergeConflictOwner(ctx context.Context, taskID str
 	return nil
 }
 
+// UpdateMergeTargetBranch changes only the manual merge destination. It must
+// preserve independently configured automatic merge flags, including concurrent edits.
+func (r *TaskRepo) UpdateMergeTargetBranch(ctx context.Context, id, targetBranch string) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`, targetBranch, id)
+	return err
+}
+
 // UpdateAutoMerge sets the completion auto-merge flag and merge target branch.
 // Callers that expose both task settings should use UpdateAutoMergeSettings.
 func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge bool, targetBranch string) error {

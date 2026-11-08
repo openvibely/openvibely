@@ -1,0 +1,166 @@
+package pages
+
+import (
+ "fmt"
+ "github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/web/templates/components"
+ "github.com/openvibely/openvibely/web/templates"
+)
+
+templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable bool, rebaseAvailable bool) {
+ @templates.MenuStyles()
+ <div data-changes-split data-task-id={ task.ID } data-project-id={ task.ProjectID } data-local-available={ fmt.Sprint(!localUnavailable && task.MergeStatus != models.MergeStatusMerged) } data-linked-pr={ fmt.Sprint(taskPR != nil) }>
+  <div class="join ov-changes-split">
+   if taskPR != nil {
+    <a class="btn btn-primary btn-sm join-item" data-linked-pr-action href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprint(taskPR.PRNumber) }</a>
+   }
+   <button type="button" class="btn btn-primary btn-sm join-item" data-changes-primary disabled hidden?={ taskPR != nil }>Loading…</button>
+   <button type="button" class="btn btn-primary btn-sm join-item" data-changes-settings-toggle popovertarget="changes-split-settings" aria-label="Action settings" aria-expanded="false">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m6 9 6 6 6-6z"></path></svg>
+   </button>
+  </div>
+  <div id="changes-split-settings" data-menu-content popover="manual" class="ov-menu ov-changes-settings" style="position:fixed;inset:auto;margin:0;">
+   <div class="join flex w-full" role="group" aria-label="Action type">
+    <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="pr" aria-pressed="false">Pull request</button>
+    <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="local" aria-pressed="false" disabled?={ localUnavailable || task.MergeStatus == models.MergeStatusMerged }>Local merge</button>
+   </div>
+   <div data-changes-pr-fields>
+    <label for="changes-target-repo">Target repository</label>
+    <select id="changes-target-repo" class="select select-bordered select-sm w-full" data-changes-repo></select>
+    <label for="changes-target-branch">Target branch</label>
+    <input id="changes-target-branch" class="input input-bordered input-sm w-full" list="changes-target-branches" autocomplete="off" data-changes-branch/>
+    <datalist id="changes-target-branches"></datalist>
+    <button type="button" class="btn btn-ghost btn-xs mt-2" data-changes-more hidden>Load more branches</button>
+    <p class="text-xs opacity-60 mt-2" data-changes-linked-note hidden>The linked PR keeps its original destination.</p>
+   </div>
+   <div data-changes-local-fields hidden>
+    <label for="changes-local-branch">Target branch</label>
+    <select id="changes-local-branch" class="select select-bordered select-sm w-full" data-changes-local-branch></select>
+    <label for="changes-merge-method">Merge method</label>
+    <select id="changes-merge-method" class="select select-bordered select-sm w-full" data-changes-method>
+     for _, action := range components.TaskWorktreeMergeActions() {
+      if !localUnavailable && task.MergeStatus != models.MergeStatusMerged && (!action.RequiresRebaseEligibility || rebaseAvailable) {
+       <option value={ action.MergeType }>{ action.Label }</option>
+      }
+     }
+    </select>
+    <p class="text-xs opacity-60 mt-2" data-changes-method-help></p>
+   </div>
+   <p class="text-xs opacity-60 mt-4" data-changes-save-state role="status">Choices are remembered for this project.</p>
+   <p class="text-xs text-error mt-2" data-changes-error role="alert" hidden></p>
+   <button type="button" class="btn btn-ghost btn-xs mt-2" data-changes-retry hidden>Retry loading</button>
+  </div>
+  <div hidden data-changes-transports>
+   if !localUnavailable && task.MergeStatus != models.MergeStatusMerged {
+    for _, action := range components.TaskWorktreeMergeActions() {
+     if !action.RequiresRebaseEligibility || rebaseAvailable {
+      @components.TaskWorktreeMergeActionItem(task, action, "changes", "#changes-content", "innerHTML", "[data-changes-split] button", "changes_tab")
+     }
+    }
+   }
+   if taskPR == nil {
+    <button type="button" data-changes-pr-transport hx-post={ fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID) } hx-target="#changes-content" hx-swap="innerHTML" hx-disabled-elt="[data-changes-split] button">Create PR</button>
+   }
+  </div>
+ </div>
+ <style>
+  .ov-changes-split { border-radius:var(--rounded-btn,.5rem);overflow:hidden; }
+  .ov-changes-split.join > [data-changes-primary], .ov-changes-split.join > [data-linked-pr-action] { border-top-left-radius:var(--rounded-btn,.5rem);border-bottom-left-radius:var(--rounded-btn,.5rem); }
+  .ov-changes-split > .btn { transition:background-color 100ms ease; }
+  [data-color-theme][data-theme] .ov-changes-split > .btn:active { transform:none; }
+  .ov-changes-split:has(> .btn:active:not(:disabled)) { transform:scale(var(--btn-focus-scale,.97)); }
+  @media(hover:hover) {
+   [data-color-theme][data-theme] .ov-changes-split > .btn-primary:hover:not(:disabled) {
+    background-color:color-mix(in srgb,var(--ov-primary-action-color,oklch(var(--p))) 88%,white) !important;
+    border-color:var(--ov-primary-action-color,oklch(var(--p))) !important;
+   }
+  }
+  .ov-changes-settings { width:320px;max-width:calc(100vw - 16px);padding:16px;overflow:auto; }
+  .ov-changes-settings label { display:block;font-size:12px;opacity:.75;margin:14px 0 6px; }
+  [data-changes-split] [hidden] { display:none !important; }
+  @media(prefers-reduced-motion:reduce) { .ov-changes-split > .btn { transition:none; } }
+ </style>
+ @changesSplitActionScript()
+}
+
+templ changesSplitActionScript() {
+ <script>
+ (() => {
+  if(window.ovChangesSplit){window.ovChangesSplit.init();return;}
+  const states=new WeakMap();
+  function init(){document.querySelectorAll('[data-changes-split]').forEach(root=>{
+   if(states.has(root))return;
+   const find=s=>root.querySelector(s),primary=find('[data-changes-primary]'),toggle=find('[data-changes-settings-toggle]'),panel=find('#changes-split-settings');
+   const repo=find('[data-changes-repo]'),branch=find('[data-changes-branch]'),localBranch=find('[data-changes-local-branch]'),method=find('[data-changes-method]'),error=find('[data-changes-error]'),saveState=find('[data-changes-save-state]'),more=find('[data-changes-more]'),retry=find('[data-changes-retry]');
+   const endpoint='/tasks/'+encodeURIComponent(root.dataset.taskId)+'/worktree/';
+   let prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='';
+   const linked=root.dataset.linkedPr==='true',canLocal=root.dataset.localAvailable==='true';
+   function showError(message){error.textContent=message||'';error.hidden=!message;}
+   async function request(url,options){const response=await fetch(url,{credentials:'same-origin',...options});if(!response.ok){let message='Request failed ('+response.status+')';try{const data=await response.json();message=data.message||message;}catch{}throw new Error(message);}return response.status===204?null:response.json();}
+   function fill(select,items){select.replaceChildren(...items.map(item=>{const option=document.createElement('option');option.value=item.value;option.textContent=item.label;return option;}));}
+   function position(){if(!panel.matches(':popover-open'))return;const r=toggle.getBoundingClientRect();panel.style.maxHeight=Math.max(0,innerHeight-16)+'px';panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(r.bottom+4,innerHeight-panel.offsetHeight-8))+'px';}
+   const controller=window.ovMenuController.create({trigger:()=>toggle,panels:[panel],isOpen:()=>panel.matches(':popover-open'),open:()=>{panel.showPopover();toggle.setAttribute('aria-expanded','true');position();},close:()=>{panel.hidePopover();toggle.setAttribute('aria-expanded','false');}});
+   toggle.addEventListener('click',event=>{event.preventDefault();controller.toggle(event);});
+   panel.addEventListener('toggle',position);
+   const state={position,close:()=>controller.close(false)};states.set(root,state);
+   function render(){
+    if(!prefs)return;
+    const pr=prefs.mode==='pr',choice=choices.find(c=>c.url===prefs.repository),localValid=Array.from(localBranch.options).some(o=>o.value===prefs.local_branch),methodValid=Array.from(method.options).some(o=>o.value===prefs.method);
+    find('[data-changes-pr-fields]').hidden=!pr;find('[data-changes-local-fields]').hidden=pr;
+    root.querySelectorAll('[data-changes-mode]').forEach(button=>{const selected=button.dataset.changesMode===prefs.mode;button.classList.toggle('btn-active',selected);button.setAttribute('aria-pressed',String(selected));});
+    repo.value=linkedTarget?.repository||prefs.repository;branch.value=linkedTarget?linkedTarget.branch:prefs.branch;branch.placeholder=linkedTarget&&!linkedTarget.branch?'See linked PR':'';localBranch.value=prefs.local_branch;method.value=prefs.method;
+    repo.disabled=linked;branch.disabled=linked;find('[data-changes-linked-note]').hidden=!linked;
+    const view=find('[data-linked-pr-action]');if(view)view.hidden=!pr;primary.hidden=pr&&linked;
+    const names={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash into '};
+    primary.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to '+choice.name):''):(names[prefs.method]||'Merge into ')+prefs.local_branch;
+    primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):prefs.local_branch;
+    primary.disabled=busy||saveCount>0||saveFailed||(pr?(!choice||!prefs.branch||!!githubError):(!canLocal||!localValid||!methodValid));
+    const descriptions={merge:'Combine the task branch with the target using a merge commit.',ff:'Move the target forward only if its history has not diverged.',squash:'Combine the task changes into one commit on the target branch.',rebase:'Replay task commits onto the target. This does not merge them into the target branch.'};
+    find('[data-changes-method-help]').textContent=descriptions[prefs.method]||'This method is unavailable for this task.';
+    position();
+   }
+   function save(){
+    const snapshot={...prefs};saveCount++;saveState.textContent='Saving…';render();
+    pending=pending.catch(()=>{}).then(()=>request(endpoint+'action-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(snapshot)})).then(()=>{saveFailed=false;saveState.textContent='Choices are remembered for this project.';showError(prefs.mode==='pr'?githubError:'');}).catch(err=>{saveFailed=true;showError(err.message);saveState.textContent='Preferences were not saved. Change a setting to retry.';}).finally(()=>{saveCount--;render();});
+   }
+   async function loadBranches(reset){
+    if(linked||!prefs||!prefs.repository)return;
+    if(reset){page=0;branchVersion++;more.hidden=true;more.textContent='Load more branches';find('#changes-target-branches').replaceChildren();}
+    const version=branchVersion,repository=prefs.repository,next=page+1;more.disabled=true;
+    try{const data=await request(endpoint+'action-branches?repository='+encodeURIComponent(repository)+'&page='+next);if(version!==branchVersion||!root.isConnected)return;page=next;for(const name of data.branches){const option=document.createElement('option');option.value=name;find('#changes-target-branches').append(option);}more.hidden=!data.has_more;}
+    catch(err){if(version===branchVersion){showError(err.message);more.hidden=false;more.textContent='Retry loading branches';}}
+    finally{if(version===branchVersion)more.disabled=false;position();}
+   }
+   root.querySelectorAll('[data-changes-mode]').forEach(button=>button.addEventListener('click',()=>{if(!prefs)return;prefs.mode=button.dataset.changesMode;render();save();if(prefs.mode==='pr')loadBranches(true);}));
+   repo.addEventListener('change',()=>{prefs.repository=repo.value;prefs.branch=choices.find(c=>c.url===repo.value)?.default_branch||'';render();save();loadBranches(true);});
+   branch.addEventListener('change',()=>{prefs.branch=branch.value.trim();render();save();});
+   localBranch.addEventListener('change',()=>{prefs.local_branch=localBranch.value;render();save();});
+   method.addEventListener('change',()=>{prefs.method=method.value;render();save();});
+   more.addEventListener('click',()=>loadBranches(false));
+   primary.addEventListener('click',async()=>{
+    await pending;if(primary.disabled||!prefs)return;
+    let transport,values;
+    if(prefs.mode==='pr'){transport=find('[data-changes-pr-transport]');values={target_repo:prefs.repository,base:prefs.branch};}
+    else{transport=Array.from(root.querySelectorAll('[data-merge-type]')).find(el=>el.dataset.mergeType===prefs.method);values={merge_type:prefs.method,merge_source:'changes_tab',changes_target:prefs.local_branch};}
+    if(!transport)return;transport.setAttribute('hx-vals',JSON.stringify(values));window.htmx.process(transport);controller.close(false);transport.click();
+   });
+   root.addEventListener('htmx:beforeRequest',()=>{busy=true;render();});
+   root.addEventListener('htmx:afterRequest',()=>{busy=false;render();});
+   async function load(){retry.hidden=true;primary.disabled=true;try{
+    const data=await request(endpoint+'action-settings');if(!root.isConnected)return;prefs=data.preferences;choices=data.repositories||[];linkedTarget=data.linked_pr||null;githubError=data.github_error||'';
+    if(linkedTarget&&!choices.some(c=>c.url===linkedTarget.repository))choices.push({url:linkedTarget.repository,name:linkedTarget.repository.replace(/^https:\/\//,''),default_branch:linkedTarget.branch});
+    fill(repo,choices.map(c=>({value:c.url,label:c.name+(c.upstream?' · Upstream':choices.some(r=>r.upstream)?' · This fork':'')})));
+    fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));
+    showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;render();if(prefs.mode==='pr')loadBranches(true);
+   }catch(err){showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}
+   retry.addEventListener('click',load);load();
+  });}
+  window.ovChangesSplit={init};
+  document.addEventListener('htmx:afterSwap',init);
+  document.addEventListener('htmx:beforeSwap',event=>{document.querySelectorAll('[data-changes-split]').forEach(root=>{if(event.detail?.target?.contains(root))states.get(root)?.close();});},true);
+  window.addEventListener('resize',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()));
+  document.addEventListener('scroll',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()),true);
+  init();
+ })();
+ </script>
+}

@@ -790,10 +790,10 @@ func TestHandler_GetTaskChanges_ShowsMergeOptions(t *testing.T) {
 	if !strings.Contains(body, "merge_source") {
 		t.Fatalf("expected changes-tab merge actions to include merge_source marker, body=%s", body)
 	}
-	if !strings.Contains(body, "Local") {
+	if !strings.Contains(body, `data-local-available="true"`) {
 		t.Fatalf("expected Local section header in actions dropdown, body=%s", body)
 	}
-	if !strings.Contains(body, "GitHub") {
+	if !strings.Contains(body, "data-changes-pr-fields") {
 		t.Fatalf("expected GitHub section header in actions dropdown, body=%s", body)
 	}
 }
@@ -837,10 +837,10 @@ func TestHandler_GetTaskChanges_HidesMergeOptionsForFailedMergedTask(t *testing.
 	if strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Merge commit") {
 		t.Fatalf("did not expect local merge options for already-merged failed task, body=%s", body)
 	}
-	if strings.Contains(body, "Local") {
+	if strings.Contains(body, `data-local-available="true"`) {
 		t.Fatalf("did not expect Local section header for already-merged failed task, body=%s", body)
 	}
-	if !strings.Contains(body, "GitHub") {
+	if !strings.Contains(body, "data-changes-pr-fields") {
 		t.Fatalf("expected GitHub section to remain available for already-merged failed task, body=%s", body)
 	}
 }

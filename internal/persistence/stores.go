@@ -743,6 +743,7 @@ type TaskStore interface {
 	Update(ctx context.Context, t *models.Task) error
 	UpdateAgentDefinition(ctx context.Context, taskID string, agentDefinitionID *string) error
 	UpdateAgentID(ctx context.Context, id string, agentID string) error
+	UpdateMergeTargetBranch(ctx context.Context, id, targetBranch string) error
 	UpdateAutoMerge(ctx context.Context, id string, autoMerge bool, targetBranch string) error
 	UpdateAutoMergeSettings(ctx context.Context, id string, autoMerge bool, autoMergeOnGoalAchieved *bool, targetBranch string) error
 	UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error

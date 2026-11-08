@@ -2491,7 +2491,11 @@ func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, 
 	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(ctx)); err != nil {
 		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
 	}
-	livePR, err := h.githubSvc.GetPullRequest(ctx, repoRef, pullRequest.PRNumber)
+	targetRepo, err := service.TaskPullRequestTarget(pullRequest.PRURL, pullRequest.PRNumber, repoRef)
+	if err != nil {
+		return true, fmt.Sprintf("GitHub PR target could not be verified: %v", err)
+	}
+	livePR, err := h.githubSvc.GetPullRequest(ctx, targetRepo, pullRequest.PRNumber)
 	if err != nil {
 		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
 	}
@@ -3290,6 +3294,18 @@ func (h *Handler) liveStartupSyncPullRequest(ctx context.Context, task *models.T
 	}
 	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(ctx)); err != nil {
 		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
+	}
+	if h.taskPullRequestRepo != nil {
+		record, loadErr := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if record != nil && record.PRNumber == number {
+			repoRef, err = service.TaskPullRequestTarget(record.PRURL, number, repoRef)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	livePR, err := h.githubSvc.GetPullRequest(ctx, repoRef, number)
 	if err != nil {

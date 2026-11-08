@@ -1,0 +1,46 @@
+package pages
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestBrowserFunctional_ChangesSplitActionPreferencesAndOneClick(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-split-action", func(b *composerFocusCDP) {
+		b.waitFor("upstream default ready", `String(document.querySelector('[data-changes-primary]')?.textContent==='Create PR to upstream' && !document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.actionState=s));'ok'`)
+		b.click(`[data-changes-primary]`)
+		b.waitFor("PR submitted once", `String(window.actionState?.actions.length===1&&window.actionState.actions[0].base==='main'&&window.actionState.actions[0].target_repo==='https://github.com/upstream/repo')`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.waitFor("settings open", `String(document.querySelector('#changes-split-settings').matches(':popover-open'))`, "true")
+		b.click(`[data-changes-mode="local"]`)
+		b.waitFor("local default saved", `String(document.querySelector('[data-changes-primary]').textContent==='Merge into main'&&!document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`(()=>{const branch=document.querySelector('[data-changes-local-branch]');branch.value='develop';branch.dispatchEvent(new Event('change',{bubbles:true}));const method=document.querySelector('[data-changes-method]');method.value='squash';method.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';})()`)
+		b.waitFor("squash preference saved", `String(document.querySelector('[data-changes-primary]').textContent==='Squash into develop'&&!document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
+		b.click(`[data-changes-primary]`)
+		b.waitFor("local action dispatched once", `String(window.actionState?.actions.length===2&&window.actionState.actions[1].merge_type==='squash'&&window.actionState.actions[1].changes_target==='develop')`, "true")
+		b.evaluate(`window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});'ok'`)
+		b.waitFor("saved action restored after refresh", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]').textContent==='Squash into develop'&&!document.querySelector('[data-changes-primary]').disabled)`, "true")
+		for _, selector := range []string{"[data-changes-primary]", "[data-changes-settings-toggle]"} {
+			raw := b.evaluate(`(()=>{const r=document.querySelector('` + selector + `').getBoundingClientRect();return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2});})()`)
+			var point struct {
+				X float64 `json:"x"`
+				Y float64 `json:"y"`
+			}
+			if err := json.Unmarshal([]byte(raw), &point); err != nil {
+				t.Fatal(err)
+			}
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+			b.waitFor("whole split shrinks", `(()=>{const root=document.querySelector('.ov-changes-split');return String(getComputedStyle(root).transform!=='none'&&Array.from(root.querySelectorAll('.btn')).every(el=>getComputedStyle(el).transform==='none'));})()`, "true")
+			// Release outside to avoid performing the action during this visual check.
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 1, "y": 1, "buttons": 1}, nil)
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 1, "y": 1, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+		}
+		b.waitFor("button typography matches view controls", `(()=>{const a=getComputedStyle(document.querySelector('[data-changes-primary]')),v=getComputedStyle(document.querySelector('#diff-btn-inline'));return String(a.fontFamily===v.fontFamily&&a.fontSize===v.fontSize&&a.fontWeight===v.fontWeight&&a.height===v.height);})()`, "true")
+	})
+}
