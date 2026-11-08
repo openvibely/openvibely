@@ -137,17 +137,9 @@ func TestBrowserFunctional_ProjectRepoRecovery(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL, "project-recovery", func(b *composerFocusCDP) {
 		b.waitFor("ready", `String(!!document.querySelector('[data-recover-repo]'))`, "true")
 		result := b.evaluateAwait(`(async()=>{
- const button=document.querySelector('[data-recover-repo]');window.deniedRecoveryToasts=[];window.showToast=m=>deniedRecoveryToasts.push(m);window.fetch=async()=>new Response(JSON.stringify({message:'Maintainer access required'}),{status:403});
+ const button=document.querySelector('[data-recover-repo]');window.deniedRecoveryToasts=[];window.showToast=m=>deniedRecoveryToasts.push(m);window.fetch=async()=>new Response(JSON.stringify({message:'Maintainer access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
  button.click();for(let i=0;i<100&&button.disabled;i++)await new Promise(r=>setTimeout(r,10));
  return deniedRecoveryToasts.length===1&&deniedRecoveryToasts[0]==='Maintainer access required'&&!button.disabled&&document.querySelector('[data-recovery-feedback]').classList.contains('hidden')&&document.querySelector('[name="repo_url"]').value==='https://github.com/acme/widgets'?'ok':'denied recovery changed form';})()`)
-		if result != "ok" {
-			t.Fatal(result)
-		}
-		result = b.evaluateAwait(`(async()=>{
- const feedback=document.getElementById('edit-project-picker-feedback');const before=feedback.outerHTML;
- const button=document.getElementById('edit-project-browse-btn');button.click();
- for(let i=0;i<100&&button.disabled;i++)await new Promise(r=>setTimeout(r,10));
- return deniedRecoveryToasts.length===2&&feedback.outerHTML===before&&!button.disabled?'ok':'folder denial changed UI';})()`)
 		if result != "ok" {
 			t.Fatal(result)
 		}

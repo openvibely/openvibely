@@ -213,7 +213,6 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			async function systemUpdateAction(action) {
 				if (window.openVibelyCanManageUpdates !== true) return;
 				var response = await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});
-                if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 				if (action === 'cancel' && response.ok && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();
 				await refreshSystemUpdateCard();
 			}
@@ -242,17 +241,11 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				if (!container || container.dataset.alertDetailState === 'loaded' || container.dataset.alertDetailState === 'loading') return;
 				var url = details.dataset.alertDetailUrl || '';
 				if (!url) return;
-				var previousState = container.dataset.alertDetailState;
 				container.dataset.alertDetailState = 'loading';
-				fetch(url, {headers: {'Accept': 'text/html'}}).then(async function(response) {
-                    if (await window.openVibelyPermissionErrors?.fetch(response)) {
-                        if (previousState === undefined) delete container.dataset.alertDetailState; else container.dataset.alertDetailState = previousState;
-                        return null;
-                    }
+				fetch(url, {headers: {'Accept': 'text/html'}}).then(function(response) {
 					if (!response.ok) throw new Error('detail request failed');
 					return response.text();
 				}).then(function(html) {
-                    if (html === null) return;
 					container.innerHTML = html;
 					hydrateAlertMarkdown(container);
 					container.dataset.alertDetailState = 'loaded';

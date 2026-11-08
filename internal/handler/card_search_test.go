@@ -255,13 +255,6 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     document.querySelector('[data-card-select-loaded]').click(); document.querySelector('[data-card-delete-selected]').click();
     var dialog=document.querySelector('[data-card-bulk-confirm]');
     if (!dialog.open || !dialog.textContent.includes('3 selected models')) fail('bulk confirmation did not open with the selected count');
-    var savedFetch=window.fetch, savedToast=window.showToast, permissionToasts=[];
-    window.showToast=function(message){permissionToasts.push(message);};
-    window.fetch=async function(){return new Response(JSON.stringify({message:'Admin access required'}),{status:403});};
-    dialog.querySelector('[data-card-bulk-confirm-delete]').click();
-    for(var retry=0;retry<80 && dialog.querySelector('[data-card-bulk-confirm-delete]').disabled;retry++)await wait(25);
-    window.fetch=savedFetch;window.showToast=savedToast;
-    if(permissionToasts.length!==1 || permissionToasts[0]!=='Admin access required' || !dialog.open || !dialog.querySelector('[data-card-bulk-error]').classList.contains('hidden') || selectedCount()!=='3 selected')fail('permission denial changed bulk selection or confirmation: '+JSON.stringify({toasts:permissionToasts,open:dialog.open,error:dialog.querySelector('[data-card-bulk-error]').outerHTML,count:selectedCount()}));
     dialog.querySelector('[data-card-bulk-confirm-delete]').click();
     for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);
     if (!window.bulkFinished) fail('bulk deletion did not finish');
@@ -298,7 +291,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     alertsRoot.querySelector('[data-card-select-loaded]').click();
     var readButton=alertsRoot.querySelector('[data-card-mark-read-selected]'),readError=alertsRoot.querySelector('[data-card-action-error]');
     var readFetch=window.fetch,readToast=window.showToast,readToasts=[];
-    window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});window.showToast=m=>readToasts.push(m);
+    window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});window.showToast=m=>readToasts.push(m);
     readButton.click();for(var retry=0;retry<80&&readButton.disabled;retry++)await wait(25);
     window.fetch=readFetch;window.showToast=readToast;
     if(readToasts.length!==1||readToasts[0]!=='Editor access required'||!readError.classList.contains('hidden')||alertsRoot.querySelector('[data-card-selected-count]').textContent.trim()!=='1 selected')fail('mark read denial changed selection or added inline error');

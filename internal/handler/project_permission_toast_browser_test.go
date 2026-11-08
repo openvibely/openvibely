@@ -53,6 +53,26 @@ func TestViewerPermissionToastsInChrome(t *testing.T) {
    if(target.textContent!=='Keep existing thread')throw Error('denial replaced thread');
    if(form.querySelector('textarea').value!=='Keep my draft')throw Error('lost draft');
   }
+  // Exercise real routed responses, not simulated 403s. Only role denials
+  // should be eligible for the shared frontend permission handler.
+  const originalToast=window.showToast,denials=[];
+  window.showToast=(message)=>denials.push(message);
+  for(const [method,path] of [
+    ['POST','/tasks?project_id=` + project.ID + `'],
+    ['POST','/tasks/` + task.ID + `/thread?project_id=` + project.ID + `'],
+    ['GET','/channels/webhooks/example?project_id=` + project.ID + `'],
+    ['POST','/automations/yaml/parse?project_id=` + project.ID + `']
+  ]) {
+    const response=await fetch(path,{method});
+    if(response.status!==403||response.headers.get('X-OpenVibely-Permission-Denied')!=='true')throw Error('Missing role-denial contract: '+path);
+    const count=denials.length;
+    if(!await openVibelyPermissionErrors.fetch(response)||denials.length!==count+1)throw Error('Expected one permission toast: '+path);
+  }
+  for(const path of ['/models','/agents','/skills','/personality']) {
+    const response=await fetch(path),count=denials.length;
+    if(response.status!==404||await openVibelyPermissionErrors.fetch(response)||denials.length!==count)throw Error('Hidden resource misclassified: '+path);
+  }
+  window.showToast=originalToast;
   await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'pass'},body:'ok'});
  }catch(e){await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'fail'},body:String(e.stack||e)});}
 })();</script>`

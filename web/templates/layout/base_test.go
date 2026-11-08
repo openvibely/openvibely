@@ -2048,7 +2048,7 @@ global.fetch = (url, options) => {
  // Permission denials only toast: acquisition never opens a dialog.
  const toasts = [];
  window.showToast = message => toasts.push(message);
- global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403});
+ global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
  const shownBeforeDenied = shown;
  await window.editPendingThreadInput(button);
  assert.equal(shown, shownBeforeDenied);
@@ -2060,7 +2060,7 @@ global.fetch = (url, options) => {
  opening = window.editPendingThreadInput(button);
  completeHold(); await opening;
  controls.textarea.value = 'Keep denied draft';
- global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403});
+ global.fetch = async () => new Response(JSON.stringify({message:'Editor access required'}), {status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
  const closedBeforeDenied = closed;
  controls['[role="alert"]'].textContent='';controls['[type="submit"]'].disabled=false;
  await renewal();

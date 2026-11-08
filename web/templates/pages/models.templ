@@ -1084,7 +1084,6 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                 async function connect() {
                     try {
                         var response = await fetch(modelMutationURL(path), {headers:{Accept:'application/json'}});
-                        if (await window.openVibelyPermissionErrors?.fetch(response)) return;
                         if (!response.ok) throw Error('Failed to open OAuth in browser');
                         await response.json();
                         if (!current()) return;
@@ -1094,7 +1093,6 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                         var statusPath = path.replace(/\/initiate$/, '/status');
                         while (current() && Date.now() < deadline) {
                             var result = await fetch(modelMutationURL(statusPath), {cache:'no-store'});
-                            if (await window.openVibelyPermissionErrors?.fetch(result)) return;
                             if (!result.ok) throw Error('Could not check OAuth connection. Try again.');
                             var state = await result.json();
                             if (!current()) return;
@@ -1623,7 +1621,6 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 							status.textContent = 'Opening sign-in…';
 							try {
 								var response = await fetch(modelMutationURL('/models/oauth/setup'), {method:'POST',body:new FormData(document.getElementById('model_form'))});
-								if (await window.openVibelyPermissionErrors?.fetch(response)) { if(popup)popup.close();status.textContent='';return; }
 								var data = await response.json();
 								if (!response.ok) throw Error(data.message || data.error || 'Could not start sign-in.');
 								if (generation !== modelOAuthSetupGeneration) {
@@ -1642,7 +1639,6 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 									if (generation !== modelOAuthSetupGeneration || !modal || !modal.open) return;
 									try {
 										var result = await fetch('/models/oauth/setup/status', {headers:{'X-Model-OAuth-Setup':data.session_id}});
-										if (await window.openVibelyPermissionErrors?.fetch(result)) { if(generation===modelOAuthSetupGeneration){sessionInput.value='';status.textContent='';}return; }
 										var state = await result.json();
 										if (generation !== modelOAuthSetupGeneration) return;
 										if (!result.ok) throw Error(state.message || state.error || 'Sign-in expired. Connect OAuth again.');
@@ -1691,9 +1687,9 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                         document.getElementById('model_ollama_base_url').value === endpoint;
                 }
                 fetch('/models/ollama/context?' + new URLSearchParams({base_url:endpoint, model:model}), {signal:controller.signal})
-                    .then(async function(response) { if (await window.openVibelyPermissionErrors?.fetch(response)) return null; if (!response.ok) throw Error('Discovery failed'); return response.json(); })
+                    .then(function(response) { if (!response.ok) throw Error('Discovery failed'); return response.json(); })
                     .then(function(data) {
-                        if (!current() || data === null) return;
+                        if (!current()) return;
                         ollamaDetectedContext = Math.max(0, Number(data.context_length) || 0);
                         ollamaModelCapacity = Math.max(0, Number(data.model_context_length) || 0);
                         updateProviderContextDisplays();
@@ -1724,12 +1720,12 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				status.textContent = 'Loading models…';
 				setModelDiscoveryLoading(true);
 				fetch('/models/ollama/available?' + new URLSearchParams({base_url:baseURL}), {signal:controller.signal})
-					.then(async function(response) {if (await window.openVibelyPermissionErrors?.fetch(response)) {if (generation === openAICompatibleDiscoveryGeneration) status.textContent = '';return null;}return response.json().then(function(data) {
+					.then(function(response) {return response.json().then(function(data) {
 						if (!response.ok) throw Error(data.error || 'Could not load Ollama models.');
 						return data || [];
 					});})
 					.then(function(models) {
-						if (models === null || generation !== openAICompatibleDiscoveryGeneration || document.getElementById('model_provider').value !== 'ollama') return;
+						if (generation !== openAICompatibleDiscoveryGeneration || document.getElementById('model_provider').value !== 'ollama') return;
 						var previous = select.value;
 						var names = Array.from(new Set(models.map(function(model) {return model.name || model.model;}).filter(Boolean)));
                         select.replaceChildren();
@@ -2300,15 +2296,13 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 								if (discoveryAbortController) fetchOptions.signal = discoveryAbortController.signal;
 								setModelDiscoveryLoading(true);
 								fetch('/models/openai-compatible/available?' + params.toString(), fetchOptions)
-									.then(async function(resp) {
-                                        if (await window.openVibelyPermissionErrors?.fetch(resp)) {if (openAICompatibleDiscoveryGeneration === discoveryGeneration) status.textContent = '';return null;}
-                                        return resp.json().then(function(data) {
+									.then(function(resp) {								return resp.json().then(function(data) {
 										if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
 										return data;
 									});
 								})
 									.then(function(data) {
-										if (data === null || openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
+										if (openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
 											currentOpenAICompatibleDiscoveryIdentity() !== discoveryIdentity) return;
 										var models = (data.models || []).filter(function(model) {return !!model.id;});
 										var select = document.getElementById('model_id');
@@ -2439,12 +2433,11 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					credentials: 'same-origin',
 					headers: {'Accept': 'application/json'},
 					cache: 'no-store'
-				}).then(async function(resp) {
-                    if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
+				}).then(function(resp) {
 					if (!resp.ok) throw new Error('Could not load model configuration.');
 					return resp.json();
 				}).then(function(details) {
-					if (generation !== window._modelEditRequestGeneration || window._modelEditRequestedID !== id || details === null || details.id !== id) return;
+					if (generation !== window._modelEditRequestGeneration || window._modelEditRequestedID !== id || details.id !== id) return;
 					populateModelEditForm({dataset: {
 						modelId: details.id,
 						modelName: details.name || '',
@@ -2773,7 +2766,6 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                     updateModelOAuthBadge('Connecting');
                     async function request(url, options) {
                         var response = await fetch(modelMutationURL(url), options);
-                        if (await window.openVibelyPermissionErrors?.fetch(response)) { var error = new Error('Permission denied');error.toastOnly=true;throw error; }
                         var data = await response.json();
                         if (!response.ok) throw Error(data.message || data.error || 'Could not connect OAuth.');
                         return data;
@@ -2810,8 +2802,8 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                         if (popup) popup.close();
                         if (generation === modelOAuthSetupGeneration) {
                             updateModelOAuthBadge();
-                            status.textContent = error.toastOnly ? '' : error.message;
-                            if (!error.toastOnly) showModelFormError(error.message);
+                            status.textContent = error.message;
+                            showModelFormError(error.message);
                         }
                     } finally {
                         if (popup && !popupNavigated) popup.close();
@@ -3107,7 +3099,6 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					document.body.addEventListener('htmx:responseError', function(event) {
 						var form = document.getElementById('model_form');
 						if (!form || !event.detail || event.detail.elt !== form) return;
-						if (window.openVibelyPermissionErrors?.htmx(event.detail.xhr)) return;
 						showModelFormError(modelSaveErrorMessage(event.detail.xhr));
 					});
 				}

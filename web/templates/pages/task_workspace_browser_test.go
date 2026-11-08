@@ -166,7 +166,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		assertFooter()
 		result := b.evaluateAwait(`(async()=>{
  const originalFetch=window.fetch,originalToast=window.showToast;const toasts=[];
- window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});window.showToast=m=>toasts.push(m);
+ window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});window.showToast=m=>toasts.push(m);
  const toggle=document.querySelector('#task-auto-merge-panel input[name="auto_merge"]'),checked=toggle.checked;toggle.click();
  for(let i=0;i<100&&toggle.disabled;i++)await new Promise(r=>setTimeout(r,10));
  if(toggle.checked!==checked||document.querySelector('[data-auto-merge-error]').textContent)return 'toggle changed';

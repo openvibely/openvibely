@@ -29,6 +29,7 @@ func TestProjectPermissionToast(t *testing.T) {
 			err := projectAccessResponse(c, &authz.InsufficientRole{Role: tt.role, Permission: tt.permission})
 			e.HTTPErrorHandler(err, c)
 			require.Equal(t, http.StatusForbidden, w.Code)
+			require.Equal(t, "true", w.Header().Get("X-OpenVibely-Permission-Denied"))
 			require.Contains(t, w.Header().Get("HX-Trigger"), "openvibelyToast")
 			require.Contains(t, w.Header().Get("HX-Trigger"), tt.message)
 			require.Contains(t, w.Body.String(), "You have "+tt.role+" access")
@@ -42,5 +43,6 @@ func TestProjectPermissionToast(t *testing.T) {
 		e.HTTPErrorHandler(projectAccessResponse(c, authz.ErrDenied), c)
 		require.Equal(t, http.StatusNotFound, w.Code)
 		require.Empty(t, w.Header().Get("HX-Trigger"))
+		require.Empty(t, w.Header().Get("X-OpenVibely-Permission-Denied"))
 	})
 }

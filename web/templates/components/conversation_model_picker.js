@@ -195,7 +195,8 @@
 
   async function settingsError(response, fallback) {
     let message = fallback;
-    if (response.status === 403) {
+    const permissionDenied = response.status === 403 && response.headers.get("X-OpenVibely-Permission-Denied") === "true";
+    if (permissionDenied) {
       message = "You do not have permission to change these model settings. Ask the project owner or an organization admin for access.";
       let toast;
       try {
@@ -212,7 +213,7 @@
       if (window.showToast) window.showToast(message, "failed");
     }
     const error = Error(message);
-    error.toastOnly = response.status === 403;
+    error.toastOnly = permissionDenied;
     return error;
   }
   function inlineSettingsError(s) {

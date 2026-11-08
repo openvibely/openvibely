@@ -15,13 +15,13 @@
   const fallback = 'You do not have permission to perform this action. Ask an organization admin for access.';
   window.openVibelyPermissionErrors = {
     async fetch(response) {
-      if (response.status !== 403) return false;
+      if (response.status !== 403 || response.headers.get('X-OpenVibely-Permission-Denied') !== 'true') return false;
       const message = toastMessage(response.headers.get('HX-Trigger')) || bodyMessage(await response.clone().text()) || fallback;
       window.showToast?.(message, 'failed');
       return true;
     },
     htmx(xhr) {
-      if (!xhr || xhr.status !== 403) return false;
+      if (!xhr || xhr.status !== 403 || xhr.getResponseHeader('X-OpenVibely-Permission-Denied') !== 'true') return false;
       // HTMX processes HX-Trigger before firing responseError.
       if (!toastMessage(xhr.getResponseHeader('HX-Trigger'))) {
         window.showToast?.(bodyMessage(xhr.responseText) || fallback, 'failed');

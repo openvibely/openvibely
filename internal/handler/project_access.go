@@ -105,6 +105,7 @@ func projectAccessResponse(c echo.Context, err error) error {
 			requirement = "Only the project owner or an organization admin can perform this action."
 		}
 		message := "You have " + denied.Role + " access to this project. " + requirement + " Ask the project owner or an organization admin for access."
+		c.Response().Header().Set("X-OpenVibely-Permission-Denied", "true")
 		setHTMXToast(c, message, "failed")
 		c.Response().Header().Set("HX-Reswap", "none")
 		return echo.NewHTTPError(http.StatusForbidden, message)

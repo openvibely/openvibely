@@ -549,7 +549,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (!deleteAgentID) return;
 					var id = deleteAgentID;
 					var modal = document.getElementById('delete_agent_confirm_modal');
-
+					if (modal) modal.close();
 					var container = document.getElementById('agents-container');
 					var deleteURL = withCurrentAgentListState('/agents/' + encodeURIComponent(id));
 					if (window.cardPaginationRefreshURL) deleteURL = window.cardPaginationRefreshURL(container, deleteURL);
@@ -558,11 +558,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							method: 'DELETE',
 							headers: { 'HX-Request': 'true' }
 						});
-						if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 						if (!response.ok) {
 							throw new Error(await response.text() || 'Delete failed');
 						}
-						if (modal) modal.close();
 						const html = await response.text();
 						if (container && typeof window.replaceSearchableCardContainer === 'function') {
 							window.replaceSearchableCardContainer('#agents-container', html);
@@ -1139,7 +1137,6 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			setPluginCatalogLoading(true);
 			try {
 				const response = await fetch('/agents/plugins/state');
-                if (await window.openVibelyPermissionErrors?.fetch(response)) return false;
 				if (!response.ok) throw new Error('Failed to load plugin state');
 				const payload = await response.json();
 				if (requestToken !== pluginStateRequestToken) {
@@ -1192,13 +1189,12 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ source: source, scope: 'user' })
 				});
-				if (await window.openVibelyPermissionErrors?.fetch(response)) { setMarketplaceActionStatus('', ''); return; }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'add marketplace failed');
 					throw new Error(msg);
 				}
 				input.value = '';
-				if (await loadPluginState(true, { throwOnError: true }) === false) return;
+				await loadPluginState(true, { throwOnError: true });
 				setMarketplaceActionStatus('Marketplace added', 'success');
 				if (window.showToast) window.showToast('Marketplace added', 'completed');
 			} catch (err) {
@@ -1219,12 +1215,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			renderPluginMarketplaces();
 			try {
 				const response = await fetch('/agents/plugins/marketplaces/reset-defaults', { method: 'POST' });
-				if (await window.openVibelyPermissionErrors?.fetch(response)) { setMarketplaceActionStatus('', ''); return; }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'reset default marketplaces failed');
 					throw new Error(msg);
 				}
-				if (await loadPluginState(true, { throwOnError: true }) === false) return;
+				await loadPluginState(true, { throwOnError: true });
 				setMarketplaceActionStatus('Default marketplaces restored', 'success');
 				if (window.showToast) window.showToast('Default marketplaces restored', 'completed');
 			} catch (err) {
@@ -1247,12 +1242,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			renderPluginMarketplaces();
 			try {
 				const response = await fetch('/agents/plugins/marketplaces/' + encodeURIComponent(safeName) + '/update', { method: 'POST' });
-				if (await window.openVibelyPermissionErrors?.fetch(response)) { setMarketplaceActionStatus('', ''); return; }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'update marketplace failed');
 					throw new Error(msg);
 				}
-				if (await loadPluginState(true, { throwOnError: true }) === false) return;
+				await loadPluginState(true, { throwOnError: true });
 				setMarketplaceActionStatus('Marketplace synced', 'success');
 				if (window.showToast) window.showToast('Marketplace synced', 'completed');
 			} catch (err) {
@@ -1276,12 +1270,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			renderPluginMarketplaces();
 			try {
 				const response = await fetch('/agents/plugins/marketplaces/' + encodeURIComponent(safeName), { method: 'DELETE' });
-				if (await window.openVibelyPermissionErrors?.fetch(response)) { setMarketplaceActionStatus('', ''); return; }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'remove marketplace failed');
 					throw new Error(msg);
 				}
-				if (await loadPluginState(true, { throwOnError: true }) === false) return;
+				await loadPluginState(true, { throwOnError: true });
 				setMarketplaceActionStatus('Marketplace removed', 'success');
 				if (window.showToast) window.showToast('Marketplace removed', 'completed');
 			} catch (err) {
@@ -1311,7 +1304,6 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify(body)
 				});
-				if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'install plugin failed');
 					throw new Error(msg);
@@ -1330,7 +1322,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					selectedPluginIDs = Array.from(new Set(selectedPluginIDs.concat([id]))).sort();
 				}
 				renderPluginCatalog();
-				if (await loadPluginState(true, { throwOnError: true, suppressDiscoveryWarningToast: true }) === false) return;
+				await loadPluginState(true, { throwOnError: true, suppressDiscoveryWarningToast: true });
 				if (window.showToast) {
 					if (currentAgentID) {
 						if (enabledForAgent) {
@@ -1373,11 +1365,6 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ plugin_id: id })
 				});
-				if (await window.openVibelyPermissionErrors?.fetch(response)) {
-                    pendingUninstalledPluginIDs.delete(id);
-                    setMarketplaceActionStatus('', '');
-                    return;
-                }
 				if (!response.ok) {
 					const msg = await readErrorMessage(response, 'uninstall plugin failed');
 					throw new Error(msg);
@@ -1391,7 +1378,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					? agentPluginState.available
 					: [];
 				renderPluginCatalog();
-				if (await loadPluginState(false, { throwOnError: true }) === false) return;
+				await loadPluginState(false, { throwOnError: true });
 				pendingUninstalledPluginIDs.delete(id);
 				setMarketplaceActionStatus('Plugin removed', 'success');
 				if (window.showToast) {
@@ -1573,7 +1560,6 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 					body: body.toString()
 				});
-				if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 				if (!response.ok) throw new Error('generation failed');
 				const data = await response.json();
 				fillAgentFormFromGenerated(data);
@@ -1772,10 +1758,10 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 
 			async function loadLifecycleHooksForAgent(agentID, generation) {
 				if (!isCurrentAgentModalLoad(agentID, generation)) return;
-
+				lifecycleHooksState = [];
+				document.getElementById('lifecycle_hooks_list').innerHTML = '';
 				try {
 					const response = await fetch(withCurrentProject('/agents/' + encodeURIComponent(agentID) + '/lifecycle-hooks'), { headers: { 'Accept': 'application/json' }});
-					if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 					if (!response.ok) {
 						throw new Error('failed to load hooks: ' + response.status);
 					}
@@ -1849,15 +1835,15 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					async function loadAgentSkillsForAgent(agentID) {
 					const list = document.getElementById('agent_skills_list');
 						if (!list) return;
+							agentOwnedSkillsState = { routed_skills: [], can_manage: false, protected: false };
+						renderAgentOwnedSkills();
 						if (!agentID) {
-                            agentOwnedSkillsState = { routed_skills: [], can_manage: false, protected: false };
-                            renderAgentOwnedSkills();
 							list.innerHTML = '<p class="text-sm opacity-50">Save this agent before creating skills.</p>';
 							return;
 						}
+						list.innerHTML = '<p class="text-sm opacity-50">Loading routed skills...</p>';
 						try {
 							const response = await fetch(agentSkillAPIURL('/agents/' + encodeURIComponent(agentID) + '/skills'), { headers: { 'Accept': 'application/json' } });
-							if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not load skills'));
 							agentOwnedSkillsState = await response.json();
 							renderAgentOwnedSkills();
@@ -1969,7 +1955,6 @@ window.renderSkillDependencyDetails?.(document.getElementById('agent_skill_depen
 						const method = editingAgentSkillOriginalHandle ? 'PUT' : 'POST';
 						try {
 							const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(payload) });
-							if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not save skill'));
 							agentOwnedSkillsState = await response.json();
 							cancelAgentOwnedSkillEdit();
@@ -1986,7 +1971,6 @@ window.renderSkillDependencyDetails?.(document.getElementById('agent_skill_depen
 							const skill = (Array.isArray(agentOwnedSkillsState.routed_skills) ? agentOwnedSkillsState.routed_skills : []).find(item => item.handle === handle) || {};
 							const scopeParam = skill.scope ? ('?scope=' + encodeURIComponent(skill.scope)) : '';
 							const response = await fetch(agentSkillAPIURL('/agents/' + encodeURIComponent(activeAgentID) + '/skills/' + encodeURIComponent(handle) + '/archive' + scopeParam), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ reason: 'Archived from the agent dialog' }) });
-							if (await window.openVibelyPermissionErrors?.fetch(response)) return;
 							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not archive skill'));
 							agentOwnedSkillsState = await response.json();
 							renderAgentOwnedSkills();
@@ -2051,7 +2035,6 @@ window.renderSkillDependencyDetails?.(document.getElementById('agent_skill_depen
 					if (!event.detail || !event.detail.target || event.detail.target.id !== 'agents-container') return;
 					const xhr = event.detail.xhr;
 					if (!xhr) return;
-					if (window.openVibelyPermissionErrors?.htmx(xhr)) { event.preventDefault(); return; }
 					const message = String(xhr.responseText || '').trim() || 'Could not save agent';
 					const modal = document.getElementById('agent_modal');
 					if (xhr.status === 400 && message.toLowerCase().includes('directory')) {

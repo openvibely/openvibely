@@ -135,27 +135,6 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.evaluate(`var root=document.createElement("div"); root.id="task-detail-content"; root.dataset.taskId="viewer-task"; var files=document.getElementById("mixed-files"); files.before(root); root.append(files); "ok"`)
 		b.click("#mixed-image")
 		b.waitFor("single shared file window", `String(document.querySelectorAll('dialog[open]').length===1 && document.querySelector('[data-gallery-count]').textContent==='1 / 3' && !!document.querySelector('[data-gallery-image]').naturalWidth)`, "true")
-		result := b.evaluateAwait(`(async()=>{
- const originalFetch=window.fetch,originalToast=window.showToast;const toasts=[];
- window.showToast=m=>toasts.push(m);window.fetch=async()=>new Response(JSON.stringify({message:'Access denied'}),{status:403});
- try{
- const dialog=document.getElementById('image-gallery'),before=dialog.innerHTML;
- document.querySelector('[data-gallery-next]').click();
- for(let i=0;i<100&&toasts.length===0;i++)await new Promise(r=>setTimeout(r,10));
- await new Promise(r=>setTimeout(r,20));
- if(toasts.length!==1||toasts[0]!=='Access denied'||dialog.innerHTML!==before)return 'preview changed on denial';
- const form=document.createElement('form');form.innerHTML='<input name="attachment_session_id"><input type="file">';document.body.append(form);
- const button=document.createElement('button');button.dataset.fileAttach='/fixture/denied';button.dataset.fileName='denied';dialog.append(button);
- const status=document.createElement('p');status.dataset.fileAttachStatus='';status.textContent='Keep status';dialog.append(status);
- button.click();for(let i=0;i<100&&button.disabled;i++)await new Promise(r=>setTimeout(r,10));
- const ok=toasts.length===2&&status.textContent==='Keep status'&&!form.querySelector('[type=file]').files.length&&dialog.open;
- form.remove();button.remove();status.remove();return ok?'ok':'attachment changed on denial';
- }finally{window.fetch=originalFetch;window.showToast=originalToast;}
- })()`)
-		if result != "ok" {
-			t.Fatal(result)
-		}
-
 		b.click("[data-gallery-plus]")
 		b.waitFor("image-specific zoom", `document.querySelector('[data-gallery-fit]').getAttribute('aria-label')`, "Fit image (150%)")
 		b.click("[data-gallery-next]")

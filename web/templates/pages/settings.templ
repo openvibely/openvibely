@@ -1748,19 +1748,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				function openWebhookEditModal(id) {
 					var modal = document.getElementById('webhook_modal');
 					if (!modal) return;
-					var form = document.getElementById('webhook_form');
-                    var card = document.querySelector('[data-webhook-id="' + id + '"]');
-                    var pid = card?.dataset.webhookProject || form.getAttribute('data-project-id') || '';
-                    var requestGeneration = ++webhookEditRequestGeneration;
-					fetch('/channels/webhooks/' + encodeURIComponent(id) + '?project_id=' + encodeURIComponent(pid), {
-						headers: { 'Accept': 'application/json' }
-					}).then(async function(response) {
-                        if (await window.openVibelyPermissionErrors?.fetch(response)) return null;
-						if (!response.ok) throw new Error('Failed to load webhook');
-						return response.json();
-					}).then(function(detail) {
-						if (requestGeneration !== webhookEditRequestGeneration || !detail || detail.id !== id) return;
-                    closeAllDropdownMenus();
+					closeAllDropdownMenus();
 					document.getElementById('webhook_modal_title').textContent = 'Edit Webhook';
 					var form = document.getElementById('webhook_form');
 					var card = document.querySelector('[data-webhook-id="' + id + '"]');
@@ -1797,7 +1785,18 @@ templ settingsContent(view ChannelsSettingsView) {
 					htmx.process(form);
 					modal.showModal();
 
-
+					var requestGeneration = ++webhookEditRequestGeneration;
+					fetch('/channels/webhooks/' + encodeURIComponent(id) + '?project_id=' + encodeURIComponent(pid), {
+						headers: { 'Accept': 'application/json' }
+					}).then(async function(response) {
+                        if (await window.openVibelyPermissionErrors?.fetch(response)) {
+                            if (requestGeneration === webhookEditRequestGeneration) modal.close();
+                            return null;
+                        }
+						if (!response.ok) throw new Error('Failed to load webhook');
+						return response.json();
+					}).then(function(detail) {
+						if (requestGeneration !== webhookEditRequestGeneration || !detail || detail.id !== id) return;
 						form.dataset.webhookDetailReady = 'true';
 						setWebhookSubmitState(true, 'Save Webhook');
 						document.getElementById('webhook_name').value = detail.name || '';

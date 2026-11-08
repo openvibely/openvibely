@@ -149,6 +149,7 @@ func (h *Handler) requireOrgAdmin(c echo.Context) (models.Principal, error) {
 	}
 	p, ok := models.PrincipalFromContext(c.Request().Context())
 	if !ok || !p.IsOrgAdmin() {
+		c.Response().Header().Set("X-OpenVibely-Permission-Denied", "true")
 		return p, echo.NewHTTPError(http.StatusForbidden, "organization administrator required")
 	}
 	if c.Request().Method != http.MethodGet {

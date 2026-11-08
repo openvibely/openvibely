@@ -1882,13 +1882,11 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                     button.disabled=!credit.id||credit.usable===false||(validDate&&date.getTime()<=Date.now());
                                                     button.addEventListener('click',async()=>{
                                                         const buttons=Array.from(section.querySelectorAll('button'));const disabledBefore=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);
-                                                        const previousLabel=button.textContent;
                                                         button.textContent='Resetting…';
                                                         const message=document.createElement('p');message.className='text-xs mt-2';message.setAttribute('role','status');section.appendChild(message);
                                                         try{
                                                             if(!attempts.has(credit.id)){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');attempts.set(credit.id,[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-'));}
                                                             const response=await fetch('/api/analytics/usage/resets/consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_key:account.key,credit_id:credit.id,idempotency_key:attempts.get(credit.id)})});
-                                                            if(await window.openVibelyPermissionErrors?.fetch(response)){message.remove();button.textContent=previousLabel;buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);return;}
                                                             const result=await response.json();if(!response.ok)throw Error(result.message||'Unable to use reset');
                                                             const outcome=result.outcome;
                                                             if(!result.retry_same_request)attempts.delete(credit.id);

@@ -119,14 +119,6 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
     menu.open=true;
     resume.click();await tick();
     check(requests[0].action==='resume_all','project resume action works from menu');
-    var originalToast=window.showToast,permissionToasts=[];window.showToast=m=>permissionToasts.push(m);
-   window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
-   var feedbackBefore=replacement.querySelector('#schedule-calendar-feedback').innerHTML;
-   var undoBefore=window._scheduleCalendarUndo;
-   replacement.querySelector('[data-calendar-action="pause_all"]').click();await tick();
-   check(permissionToasts.length===1&&permissionToasts[0]==='Editor access required','calendar permission toast');
-   check(replacement.isConnected&&replacement.querySelector('#schedule-calendar-feedback').innerHTML===feedbackBefore&&window._scheduleCalendarUndo===undoBefore,'denial preserves calendar and feedback');
-   window.showToast=originalToast;
    report('pass','');return;
    }
    check(root.querySelector('[data-calendar-action="resume_all"]').hidden,'active project offers pause only');
@@ -170,14 +162,6 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    if(innerWidth<768) {
     toolbar.querySelector('[data-calendar-action="clear"]').click();
     check(getComputedStyle(toolbar).display==='none','clearing selection hides panel');
-    var originalToast=window.showToast,permissionToasts=[];window.showToast=m=>permissionToasts.push(m);
-   window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
-   var feedbackBefore=replacement.querySelector('#schedule-calendar-feedback').innerHTML;
-   var undoBefore=window._scheduleCalendarUndo;
-   replacement.querySelector('[data-calendar-action="pause_all"]').click();await tick();
-   check(permissionToasts.length===1&&permissionToasts[0]==='Editor access required','calendar permission toast');
-   check(replacement.isConnected&&replacement.querySelector('#schedule-calendar-feedback').innerHTML===feedbackBefore&&window._scheduleCalendarUndo===undoBefore,'denial preserves calendar and feedback');
-   window.showToast=originalToast;
    report('pass','');return;
    }
    var selectionMenu=root.querySelector('#schedule-context-menu');
@@ -358,7 +342,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    timeline=replacement.querySelector('#schedule-timeline-container');
    check(timeline.scrollTop===expectedTop && timeline.scrollLeft===expectedLeft,'calendar action preserves both scroll axes after scripts and HTMX settle');
    var originalToast=window.showToast,permissionToasts=[];window.showToast=m=>permissionToasts.push(m);
-   window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
+   window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
    var feedbackBefore=replacement.querySelector('#schedule-calendar-feedback').innerHTML;
    var undoBefore=window._scheduleCalendarUndo;
    replacement.querySelector('[data-calendar-action="pause_all"]').click();await tick();

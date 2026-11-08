@@ -292,7 +292,7 @@ window.addEventListener('DOMContentLoaded', async function() {
   window.fetch = originalFetch; window.htmx.ajax = originalAjax;
   const originalToast=window.showToast;const deniedToasts=[];
   window.showToast=message=>deniedToasts.push(message);
-  window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
+  window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
   window.htmx.ajax=()=>Promise.resolve();
   try {
   await window.kanbanBatch(action('ff'), [{id:'one',title:'One',status:'completed',merge:''}]);

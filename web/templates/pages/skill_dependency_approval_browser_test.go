@@ -102,7 +102,7 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 		result := browser.evaluateAwait(`(async()=>{
  const originalFetch=window.fetch,originalToast=window.showToast;
  const card=document.getElementById('chat-input-request-request');const before=card.innerHTML;window.denialToasts=[];
- window.showToast=m=>denialToasts.push(m);window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403});
+ window.showToast=m=>denialToasts.push(m);window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
  card.querySelector('[data-option-label="Not now"]').click();
  for(let i=0;i<100 && card.dataset.submitted==='true';i++)await new Promise(r=>setTimeout(r,10));
  window.fetch=originalFetch;window.showToast=originalToast;
@@ -119,14 +119,6 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 		browser.waitFor("persistent answer after reload", `document.readyState === 'complete' && document.documentElement && !document.documentElement.dataset.beforeApprovalReload && typeof window.previewImportedSkillDependencies === 'function' && document.querySelector('[data-execution-pair]')?.dataset.skillApprovalsLoaded === 'project' && !document.getElementById('chat-input-request-request') ? 'ready' : 'waiting'`, "ready")
 		browser.evaluate(`document.body.insertAdjacentHTML('beforeend','<section id="skill_import_dependency_details"></section><button id="skill_import_submit_btn">Import</button>'); window.previewImportedSkillDependencies({files:[new File(['---\ndependencies: []\n---'],'SKILL.md')]}); 'preview'`)
 		browser.waitFor("import dependency preview", `document.getElementById('skill_import_dependency_details').textContent.includes('preview-tool') && !document.getElementById('skill_import_submit_btn').disabled ? 'ready' : 'waiting'`, "ready")
-		result = browser.evaluateAwait(`(async()=>{
- const originalFetch=window.fetch,originalToast=window.showToast;const root=document.getElementById('skill_import_dependency_details');const before=root.innerHTML;const disabled=document.getElementById('skill_import_submit_btn').disabled;
- let count=0;window.showToast=()=>count++;window.fetch=async()=>new Response(JSON.stringify({message:'Admin required'}),{status:403});
- await previewImportedSkillDependencies({files:[new File(['test'],'SKILL.md')]});window.fetch=originalFetch;window.showToast=originalToast;
- return count===1&&root.innerHTML===before&&document.getElementById('skill_import_submit_btn').disabled===disabled?'ok':'preview changed';})()`)
-		if result != "ok" {
-			t.Fatal(result)
-		}
 
 		mu.Lock()
 		state = "pending" // A new missing-dependency question; no revocation endpoint.

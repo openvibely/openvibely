@@ -267,9 +267,6 @@ templ diffViewerPerformanceScript() {
     });
    }
    function load(card, restore) {
-    var previousChildren = Array.from(card.childNodes);
-    var previousStatus = card.querySelector('[data-diff-load-status]');
-    var previousStatusText = previousStatus && previousStatus.textContent;
     var abort = new AbortController();
     var reviewCommentsAtStart = viewer._diffReviewComments;
     pending.set(card, abort); inFlight++;
@@ -298,18 +295,10 @@ templ diffViewerPerformanceScript() {
      url.searchParams.set('anchor_new_line', restore.snapshot.anchor.newLine || 0);
     }
     fetch(url, {headers:{'HX-Request':'true'}, signal:abort.signal})
-     .then(async function(response) {
-      if (await window.openVibelyPermissionErrors?.fetch(response)) {
-       // Stop automatic retries without replacing the visible content.
-       card.dataset.diffLoadFailed = 'true';
-       Array.from(card.childNodes).forEach(function(node) { if (!previousChildren.includes(node)) node.remove(); });
-       if (previousStatus) previousStatus.textContent = previousStatusText;
-       return null;
-      }
+     .then(function(response) {
       if (!response.ok) throw new Error('Could not load diff');
       return response.text();
      }).then(function(html) {
-      if (html === null) return;
       if (stopped || !card.isConnected || abort.signal.aborted) return;
       if (restore && (anchorRestore !== restore || !activePanel.contains(card) || Math.abs(scroller.scrollTop-restore.scrollTop) >= 2)) return;
       if (anchorRestore && !restore) return;

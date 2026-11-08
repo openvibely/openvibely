@@ -592,17 +592,6 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				var handle = card.dataset.skillHandle || '';
 				var scope = card.dataset.skillScope || 'project';
 				var requestGeneration = ++skillDetailRequestGeneration;
-				fetch('/skills/' + encodeURIComponent(handle) + '/details?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery(card.dataset.skillProject).replace(/^\?/, '&'), {
-					method: 'GET',
-					headers: {'Accept': 'application/json'}
-				}).then(async function(resp) {
-                    if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
-					if (!resp.ok) {
-						return resp.text().then(function(text) { throw new Error(text || 'Failed to load skill details.'); });
-					}
-					return resp.json();
-				}).then(function(detail) {
-					if (detail === null || requestGeneration !== skillDetailRequestGeneration) return;
 				form.dataset.mode = 'edit';
  form.dataset.skillProject = card.dataset.skillProject || '';
  var projectChoice = document.getElementById('skill_project_owner'); if(projectChoice){projectChoice.value=form.dataset.skillProject;projectChoice.disabled=true;}
@@ -627,7 +616,16 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				renderSkillPackageFiles('');
 				setSkillModalError('');
 				skill_modal.showModal();
-
+				fetch('/skills/' + encodeURIComponent(handle) + '/details?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery(card.dataset.skillProject).replace(/^\?/, '&'), {
+					method: 'GET',
+					headers: {'Accept': 'application/json'}
+				}).then(function(resp) {
+					if (!resp.ok) {
+						return resp.text().then(function(text) { throw new Error(text || 'Failed to load skill details.'); });
+					}
+					return resp.json();
+				}).then(function(detail) {
+					if (requestGeneration !== skillDetailRequestGeneration || form.dataset.mode !== 'edit' || form.dataset.originalHandle !== handle || document.getElementById('skill_scope').value !== scope) return;
 					document.getElementById('skill_handle').value = detail.handle || handle;
 					document.getElementById('skill_name').value = detail.name || '';
 					document.getElementById('skill_description').value = detail.description || '';
@@ -640,8 +638,9 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
  window.renderSkillDependencyDetails?.(document.getElementById('skill_dependency_details'), detail);
 					document.getElementById('skill_submit_btn').disabled = false;
 				}).catch(function(err) {
-					if (requestGeneration !== skillDetailRequestGeneration) return;
-                    window.showToast?.(err.message || 'Failed to load skill details.', 'failed');
+					if (requestGeneration !== skillDetailRequestGeneration || form.dataset.mode !== 'edit' || form.dataset.originalHandle !== handle) return;
+					document.getElementById('skill_body').value = '';
+					setSkillModalError(err.message || 'Failed to load skill details.');
 				});
 			}
 
@@ -685,14 +684,13 @@ var action = enable ? 'Enable' : 'Disable';
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify({enabled: enable, scope: scope})
-				}).then(async function(resp) {
+				}).then(function(resp) {
 					if (!resp.ok) {
-						if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to ' + action.toLowerCase() + ' skill.'); });
 					}
 					return resp.text();
 				}).then(function(html) {
-					if (html !== null) replaceSkillsContainer(html);
+					replaceSkillsContainer(html);
 				}).catch(function(err) {
 					alert(err.message || 'Failed to ' + action.toLowerCase() + ' skill.');
 				});
@@ -708,14 +706,13 @@ var action = enable ? 'Enable' : 'Disable';
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify({always_use: alwaysUse, scope: scope})
-				}).then(async function(resp) {
+				}).then(function(resp) {
 					if (!resp.ok) {
-						if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to update always use setting.'); });
 					}
 					return resp.text();
 				}).then(function(html) {
-					if (html !== null) replaceSkillsContainer(html);
+					replaceSkillsContainer(html);
 				}).catch(function(err) {
 					alert(err.message || 'Failed to update always use setting.');
 				});
@@ -738,14 +735,12 @@ var action = enable ? 'Enable' : 'Disable';
 					method: 'POST',
 					headers: {'HX-Request': 'true'},
 					body: data
-				}).then(async function(resp) {
-					if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
+				}).then(function(resp) {
 					if (!resp.ok) {
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to import skill package.'); });
 					}
 					return resp.text();
 				}).then(function(html) {
-					if (html === null) return null;
 					replaceSkillsContainer(html);
 					var modal = document.getElementById('skill_import_modal');
 					if (modal && modal.open) modal.close();
@@ -788,14 +783,12 @@ var action = enable ? 'Enable' : 'Disable';
 					method: method,
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify(payload)
-				}).then(async function(resp) {
-					if (await window.openVibelyPermissionErrors?.fetch(resp)) return null;
+				}).then(function(resp) {
 					if (!resp.ok) {
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to save skill.'); });
 					}
 					return resp.text();
 				}).then(function(html) {
-					if (html === null) return null;
 					var alwaysUse = document.getElementById('skill_always_use').checked;
 					var originalAlwaysUse = form.dataset.originalAlwaysUse === 'true';
 					if (alwaysUse === originalAlwaysUse) return html;
@@ -805,15 +798,13 @@ var action = enable ? 'Enable' : 'Disable';
 						method: 'POST',
 						headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 						body: JSON.stringify({always_use: alwaysUse, scope: auScope})
-					}).then(async function(resp2) {
-						if (await window.openVibelyPermissionErrors?.fetch(resp2)) return null;
+					}).then(function(resp2) {
 						if (!resp2.ok) {
 							return resp2.text().then(function(t) { throw new Error(t || 'Saved but failed to update always use setting.'); });
 						}
 						return resp2.text();
 					});
 				}).then(function(html) {
-					if (html === null) return null;
 					replaceSkillsContainer(html);
 					var modal = document.getElementById('skill_modal');
 					if (modal && modal.open) modal.close();
