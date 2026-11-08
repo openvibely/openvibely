@@ -333,14 +333,14 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-trigger=\"load, plugin-nav-refresh from:body\" hx-swap=\"innerHTML\"></ul><style>#sidebar #plugin-pages-nav [hidden]{display:none!important}.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style><script>\n\t\t\t\t\t\twindow.openVibelyRefreshPluginNav = function(projectID) {\n\t\t\t\t\t\t\tvar nav = document.getElementById('plugin-pages-nav');\n\t\t\t\t\t\t\tif (!nav || !window.htmx) return;\n\t\t\t\t\t\t\tnav.setAttribute('hx-get', nav.getAttribute('data-nav-src') + '?project_id=' + encodeURIComponent(projectID));\n\t\t\t\t\t\t\thtmx.process(nav);\n\t\t\t\t\t\t\thtmx.trigger(document.body, 'plugin-nav-refresh');\n\t\t\t\t\t\t};\n\t\t\t\t\t</script></li></ul></div><!-- Footer: user info + settings pinned to bottom of sidebar --><div class=\"sidebar-footer border-t border-base-300 p-3 flex items-center justify-between gap-2\"><div id=\"sidebar-auth-user\" class=\"hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto\"><div class=\"dropdown dropdown-top w-full\"><button id=\"sidebar-user-menu-trigger\" type=\"button\" class=\"sidebar-user-trigger btn btn-ghost w-full flex-nowrap justify-start items-center gap-2 normal-case\" aria-haspopup=\"menu\" aria-label=\"Open user menu\"><div class=\"avatar placeholder\"><div class=\"bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center\"><span id=\"sidebar-auth-avatar\" class=\"text-xs font-semibold leading-none\">U</span></div></div><div id=\"sidebar-auth-name\" class=\"min-w-0 text-xs font-medium truncate leading-none\">User</div></button><ul id=\"sidebar-user-menu\" tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu w-44 z-[120]\" role=\"menu\" aria-label=\"User menu\"><li role=\"none\"><form method=\"POST\" action=\"/logout\" class=\"w-full\" role=\"none\"><button id=\"sidebar-logout-label\" type=\"submit\" class=\"ov-menu-option w-full\" role=\"menuitem\">Logout</button></form></li></ul></div></div><ul class=\"menu menu-sm p-0 sidebar-footer-menu\"><li><a data-nav-base=\"/themes\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-trigger=\"load, plugin-nav-refresh from:body\" hx-swap=\"innerHTML\"></ul></li></ul></div><style>#sidebar #plugin-pages-nav [hidden]{display:none!important}.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style><script>\n\t\t\twindow.openVibelyRefreshPluginNav = function(projectID) {\n\t\t\t\tvar nav = document.getElementById('plugin-pages-nav');\n\t\t\t\tif (!nav || !window.htmx) return;\n\t\t\t\tnav.setAttribute('hx-get', nav.getAttribute('data-nav-src') + '?project_id=' + encodeURIComponent(projectID));\n\t\t\t\thtmx.process(nav);\n\t\t\t\thtmx.trigger(document.body, 'plugin-nav-refresh');\n\t\t\t};\n\t\t</script><!-- Footer: user info + settings pinned to bottom of sidebar --><div class=\"sidebar-footer border-t border-base-300 p-3 flex items-center justify-between gap-2\"><div id=\"sidebar-auth-user\" class=\"hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto\"><div class=\"dropdown dropdown-top w-full\"><button id=\"sidebar-user-menu-trigger\" type=\"button\" class=\"sidebar-user-trigger btn btn-ghost w-full flex-nowrap justify-start items-center gap-2 normal-case\" aria-haspopup=\"menu\" aria-label=\"Open user menu\"><div class=\"avatar placeholder\"><div class=\"bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center\"><span id=\"sidebar-auth-avatar\" class=\"text-xs font-semibold leading-none\">U</span></div></div><div id=\"sidebar-auth-name\" class=\"min-w-0 text-xs font-medium truncate leading-none\">User</div></button><ul id=\"sidebar-user-menu\" tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu w-44 z-[120]\" role=\"menu\" aria-label=\"User menu\"><li role=\"none\"><form method=\"POST\" action=\"/logout\" class=\"w-full\" role=\"none\"><button id=\"sidebar-logout-label\" type=\"submit\" class=\"ov-menu-option w-full\" role=\"menuitem\">Logout</button></form></li></ul></div></div><ul class=\"menu menu-sm p-0 sidebar-footer-menu\"><li><a data-nav-base=\"/themes\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(fmt.Sprintf("/themes?project_id=%s", currentProjectID))).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1039, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1040, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -353,7 +353,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var23 string
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/themes?project_id=%s", currentProjectID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1040, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1041, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
@@ -425,7 +425,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 			var templ_7745c5c3_Var25 string
 			templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1213, Col: 19}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1214, Col: 19}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 			if templ_7745c5c3_Err != nil {
@@ -448,7 +448,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 			var templ_7745c5c3_Var26 string
 			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1216, Col: 15}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1217, Col: 15}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 			if templ_7745c5c3_Err != nil {
@@ -486,7 +486,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(sidebarProjectDisplayName(projects, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1235, Col: 166}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1236, Col: 166}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {
@@ -590,7 +590,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 						var templ_7745c5c3_Var33 string
 						templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%t", p.ID == currentProjectID)).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1252, Col: 68}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1253, Col: 68}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 						if templ_7745c5c3_Err != nil {
@@ -603,7 +603,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 						var templ_7745c5c3_Var34 string
 						templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1255, Col: 31}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1256, Col: 31}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 						if templ_7745c5c3_Err != nil {
@@ -616,7 +616,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 						var templ_7745c5c3_Var35 string
 						templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.Name).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1256, Col: 35}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1257, Col: 35}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 						if templ_7745c5c3_Err != nil {
@@ -629,7 +629,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 						var templ_7745c5c3_Var36 string
 						templ_7745c5c3_Var36, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.ID).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1258, Col: 43}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1259, Col: 43}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 						if templ_7745c5c3_Err != nil {
@@ -642,7 +642,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 						var templ_7745c5c3_Var37 string
 						templ_7745c5c3_Var37, templ_7745c5c3_Err = templruntime.NewAttributeExpression(p.Name).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1259, Col: 47}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1260, Col: 47}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 						if templ_7745c5c3_Err != nil {
@@ -669,7 +669,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 					var templ_7745c5c3_Var38 string
 					templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1261, Col: 51}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1262, Col: 51}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 					if templ_7745c5c3_Err != nil {

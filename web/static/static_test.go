@@ -11,6 +11,7 @@ import (
 var layoutAssets = []string{
 	"app.css",
 	"permission-errors.js",
+	"chat-input-requests.js",
 	"app-utilities.css",
 	"vendor/htmx.min.js",
 	"vendor/idiomorph-ext.min.js",
