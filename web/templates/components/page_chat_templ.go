@@ -68,7 +68,7 @@ func PageSideChat(v PageChatView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<style>\n  #page-side-chat #task-thread-view .chat-input-shadow-gutter{width:calc(100% - 32px);max-width:calc(100% - 32px);margin-inline:auto!important;padding-inline:0!important;box-sizing:border-box}\n  #page-side-chat [data-page-chat-close]{display:none}\n  #page-side-chat[data-overlay=\"true\"] [data-page-chat-close]{display:flex}\n  #page-side-chat[data-overlay=\"true\"] #task-thread-messages{padding-top:48px}\n </style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<style>\n  #page-chat-toggle{flex-shrink:0}\n  #page-side-chat #task-thread-view .chat-input-shadow-gutter{width:calc(100% - 32px);max-width:calc(100% - 32px);margin-inline:auto!important;padding-inline:0!important;box-sizing:border-box}\n  #page-side-chat [data-page-chat-close]{display:none}\n  #page-side-chat[data-overlay=\"true\"] [data-page-chat-close]{display:flex}\n  #page-side-chat[data-overlay=\"true\"] #task-thread-messages{padding-top:48px}\n </style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

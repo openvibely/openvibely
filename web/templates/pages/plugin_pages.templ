@@ -47,8 +47,8 @@ templ PluginPageContent(v PluginPageView) {
 		data-events-url={ pluginAPI(v, "/events") }
 		data-retire-url={ pluginAPI(v, "/handle/retire") }
 	>
-		<div data-page-header class="flex items-center justify-between gap-2 mb-3">
-			<div class="min-w-0">
+		<div data-page-header class="flex items-center gap-2 flex-shrink-0 min-w-0">
+			<div class="min-w-0 flex-1">
 				<h2 class="text-2xl font-bold truncate">{ v.Title }</h2>
 			</div>
 			@components.SidePanelToggle("page-chat-toggle", "page-side-chat", templ.Attributes{"data-page-chat-toggle": ""})

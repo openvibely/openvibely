@@ -23,6 +23,7 @@ templ PageSideChat(v PageChatView) {
   @TaskThreadView(v.ChatTask,v.ChatExecutions,v.Agents,nil,v.Attachments,v.PendingInputs,v.HasEarlier,50)
  }
  <style>
+  #page-chat-toggle{flex-shrink:0}
   #page-side-chat #task-thread-view .chat-input-shadow-gutter{width:calc(100% - 32px);max-width:calc(100% - 32px);margin-inline:auto!important;padding-inline:0!important;box-sizing:border-box}
   #page-side-chat [data-page-chat-close]{display:none}
   #page-side-chat[data-overlay="true"] [data-page-chat-close]{display:flex}

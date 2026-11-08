@@ -77,6 +77,11 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  await wait(()=>pageFrame.style.getPropertyValue('--superellipse-clip'),'Page corners not shaped');
  const clip=pageFrame.style.getPropertyValue('--superellipse-clip');
  if(!clip.includes(pageFrame.clientWidth.toFixed(2)+'px '+pageFrame.clientHeight.toFixed(2)+'px') || !clip.includes('0.00px '+pageFrame.clientHeight.toFixed(2)+'px'))throw Error('Page bottom corners are not square');
+ const pageHeader=document.querySelector('#plugin-page-root > [data-page-header]');
+ const toggle=document.querySelector('#page-chat-toggle');
+ const headerRect=pageHeader.getBoundingClientRect(), toggleRect=toggle.getBoundingClientRect();
+ if(Math.abs(toggleRect.top-headerRect.top-8)>1 || Math.abs(toggleRect.right-headerRect.right)>1 || toggleRect.width!==32 || toggleRect.height!==32)throw Error('Page toggle does not match standard thread toolbar alignment: '+JSON.stringify({header:headerRect,toggle:toggleRect}));
+ if(getComputedStyle(pageHeader).flexShrink!=='0')throw Error('Page toolbar can shrink out of alignment');
  const oldHandle=document.querySelector('#plugin-page-root').getAttribute('data-plugin-handle');
  document.querySelector('#appearance-settings-nav a[data-nav-base="/settings/plugin-pages"]').click();
  await wait(()=>document.querySelector('#plugin-settings'),'Settings did not open');
