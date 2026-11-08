@@ -2055,6 +2055,14 @@ global.fetch = (url, options) => {
  assert.equal(toasts.length, 1);
  assert.equal(button.disabled, false);
  assert.equal(listeners.pagehide, undefined);
+ // An unmarked 403 follows the existing error path and retains its message.
+ const ordinaryErrors=[];
+ window.alert=message=>ordinaryErrors.push(message);
+ global.fetch=async()=>new Response(JSON.stringify({message:'Request origin rejected'}),{status:403});
+ await window.editPendingThreadInput(button);
+ assert.deepEqual(ordinaryErrors,['Request origin rejected']);
+ assert.equal(toasts.length,1);
+ assert.equal(shown,shownBeforeDenied);
  // A denied save preserves the draft and leaves the editor usable.
  global.fetch = workingFetch;
  opening = window.editPendingThreadInput(button);
@@ -2075,6 +2083,11 @@ global.fetch = (url, options) => {
  assert.equal(controls.textarea.value, 'Keep denied draft');
  assert.equal(controls.textarea.disabled, false);
  assert.equal(controls['[role="alert"]'].textContent, '');
+ global.fetch=async()=>new Response(JSON.stringify({message:'Request origin rejected'}),{status:403});
+ await controls.form.onsubmit({preventDefault(){}});
+ assert.equal(controls['[role="alert"]'].textContent,'Request origin rejected');
+ assert.equal(toasts.length,3);
+ assert.equal(controls.textarea.value,'Keep denied draft');
  global.fetch = workingFetch;
  listeners.pagehide();
 })().catch(error => {console.error(error); process.exit(1)});

@@ -321,7 +321,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     try {
                         return await Promise.race([
                             fetch(url, Object.assign({}, options, {signal: controller.signal})).then(async function(response) {
-                                if (readJSON && response.status !== 403) response.editorBody = await response.json();
+                                var permissionDenied = response.status === 403 && response.headers.get('X-OpenVibely-Permission-Denied') === 'true';
+                                if (readJSON && !permissionDenied) response.editorBody = await response.json();
                                 return response;
                             }),
                             new Promise(function(resolve, reject) {
