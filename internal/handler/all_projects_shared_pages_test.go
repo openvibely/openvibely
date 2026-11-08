@@ -32,7 +32,13 @@ func TestAllProjectsSharedSidebarPages(t *testing.T) {
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path+"?project_id="+models.AllProjectsID, nil))
+			url := tc.path + "?project_id=" + models.AllProjectsID
+			if tc.path == "/schedule" {
+				// A run one hour ahead can fall outside the current week late
+				// Saturday. Both daily schedules recur in the following week.
+				url += "&week=1"
+			}
+			app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
 			require.Equal(t, 200, rec.Code, rec.Body.String())
 			body := rec.Body.String()
 			require.Contains(t, body, tc.marker)
