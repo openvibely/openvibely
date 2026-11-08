@@ -91,7 +91,6 @@ func (salesBuiltin) Invoke(_ context.Context, req BuiltinRequest) (BuiltinResult
 	now := time.Now()
 	if st.Revision == 0 {
 		st = salesState{Revision: 1, Target: 250000, GeneratedAt: now, Rows: generateSales(req.Instance.ID, 1, now)}
-		changed = true
 	}
 	switch req.Operation {
 	case "refresh_data":

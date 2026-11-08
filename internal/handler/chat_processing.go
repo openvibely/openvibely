@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
@@ -355,6 +356,15 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		if err != nil {
 			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "follow-up authorization failed", 0, params.ChannelReply)
+			return
+		}
+		baseCtx = authorizedCtx
+	}
+
+	if params.PageConversation != nil {
+		authorizedCtx, err := h.pagePrincipalContext(baseCtx, params.PrincipalID, params.ProjectID, authz.Edit)
+		if err != nil {
+			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "page conversation authorization failed", 0, params.ChannelReply)
 			return
 		}
 		baseCtx = authorizedCtx

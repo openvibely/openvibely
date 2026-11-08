@@ -23,6 +23,8 @@ import (
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -39,6 +41,7 @@ var errPluginChatBusy = errPageChatBusy
 func (h *Handler) SetPagePlugins(m *pageplugins.Manager) {
 	h.pagePlugins = m
 	if m != nil {
+		m.AuthorizeOperation = h.authorizePageOperation
 		m.OnDisable = func(ctx context.Context, instanceID string) error {
 			return h.cancelPluginConversation(ctx, instanceID)
 		}
@@ -113,6 +116,13 @@ func (h *Handler) resolvePluginForRequest(c echo.Context, allowAllProjects bool)
 		}
 		return nil, err
 	}
+	permission := authz.View
+	if c.Request().Method == http.MethodPost && strings.Contains(c.Path(), "/chat") {
+		permission = authz.Edit
+	}
+	if err := h.requirePageAccess(c.Request().Context(), r.Instance.ProjectID, permission); err != nil {
+		return nil, err
+	}
 	return r, nil
 }
 
@@ -151,6 +161,9 @@ func (h *Handler) PluginPage(c echo.Context) error {
 	}
 	if in == nil {
 		return pluginNotFound()
+	}
+	if err := h.requirePageAccess(ctx, in.ProjectID, authz.View); err != nil {
+		return err
 	}
 	if requested == "" || requested == models.AllProjectsID {
 		// Opening from All Projects (or a bare deep link) keeps the page's own project.
@@ -246,6 +259,12 @@ func (h *Handler) PluginPagesNav(c echo.Context) error {
 	}
 	entries := make([]pages.PluginNavEntry, 0, len(ins))
 	for _, in := range ins {
+		if err := h.requirePageAccess(c.Request().Context(), in.ProjectID, authz.View); err != nil {
+			if errors.Is(err, authz.ErrDenied) {
+				continue
+			}
+			return err
+		}
 		label := in.ProjectName
 		if label == "" {
 			label = in.ProjectID
@@ -287,6 +306,9 @@ func (h *Handler) PluginAsset(c echo.Context) error {
 	}
 	r, err := h.pagePlugins.Resolve(c.Request().Context(), hd.InstanceID, hd.ProjectID)
 	if err != nil {
+		return pluginNotFound()
+	}
+	if _, err := h.pagePrincipalContext(c.Request().Context(), hd.PrincipalID, hd.ProjectID, authz.View); err != nil {
 		return pluginNotFound()
 	}
 	rel := c.Param("*")
@@ -445,6 +467,9 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 		}
 		out, err := pageintegration.Run(ctx, integration, pageintegration.Caller{PrincipalID: principal, Via: "page"}, p.Operation, p.Input)
 		if err != nil {
+			if errors.Is(err, authz.ErrDenied) {
+				return err
+			}
 			status := http.StatusBadRequest
 			if errors.Is(err, pageintegration.ErrOperationNotFound) {
 				status = http.StatusNotFound
@@ -477,6 +502,9 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 		}
 		exec, _, err := h.startPluginChatTurn(c, r, strings.TrimSpace(p.Prompt), pageChatInput{})
 		if err != nil {
+			if errors.Is(err, authz.ErrDenied) {
+				return err
+			}
 			return bridgeError(c, pluginChatStatus(err), err.Error())
 		}
 		return bridgeResult(c, map[string]string{"exec_id": exec.ID})
@@ -514,6 +542,23 @@ func (h *Handler) PluginEvents(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	var projectWatch, userWatch *service.AccessWatch
+	var projectChanges, userChanges <-chan struct{}
+	userID := strings.TrimPrefix(hd.PrincipalID, "user:")
+	if h.projectAccessSvc != nil {
+		projectWatch = h.projectAccessSvc.Watch(userID)
+		defer projectWatch.Close()
+		projectWatch.SetProjects(map[string]bool{hd.ProjectID: true}, false)
+		projectChanges = projectWatch.C()
+	}
+	if h.organizationSvc != nil {
+		userWatch = h.organizationSvc.Watch(userID)
+		defer userWatch.Close()
+		userChanges = userWatch.C()
+	}
+	if !h.pluginSubscriptionAuthorized(c, r, hd) {
+		return pluginNotFound()
+	}
 	ch, unsubscribe, ok := h.pagePlugins.Hub.Subscribe(r.Instance.ID)
 	if !ok {
 		return echo.NewHTTPError(http.StatusTooManyRequests, "too many subscribers for this page")
@@ -533,6 +578,22 @@ func (h *Handler) PluginEvents(c echo.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-projectChanges:
+			projectWatch.Drain()
+			if !h.pluginSubscriptionAuthorized(c, r, hd) {
+				h.pagePlugins.RetireHandle(hd.Token)
+				_, _ = io.WriteString(w, "event: closed\ndata: {}\n\n")
+				w.Flush()
+				return nil
+			}
+		case <-userChanges:
+			userWatch.Drain()
+			if !h.pluginSubscriptionAuthorized(c, r, hd) {
+				h.pagePlugins.RetireHandle(hd.Token)
+				_, _ = io.WriteString(w, "event: closed\ndata: {}\n\n")
+				w.Flush()
+				return nil
+			}
 		case <-hd.Done():
 			_, _ = io.WriteString(w, "event: closed\ndata: {}\n\n")
 			w.Flush()
@@ -566,6 +627,9 @@ func (h *Handler) PluginEvents(c echo.Context) error {
 // Recheck the capability and current account/instance on heartbeat and before
 // delivery. Disable/retire additionally close the handle immediately.
 func (h *Handler) pluginSubscriptionAuthorized(c echo.Context, r *pageplugins.Resolved, hd pageplugins.Handle) bool {
+	if _, err := h.pagePrincipalContext(c.Request().Context(), hd.PrincipalID, hd.ProjectID, authz.View); err != nil {
+		return false
+	}
 	if _, err := h.pluginHandleFor(c, r, hd.Token); err != nil {
 		return false
 	}

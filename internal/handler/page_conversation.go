@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 const pageConversationCategory = models.CategoryPageChat
@@ -80,6 +81,9 @@ func (h *Handler) pageConversationTask(ctx context.Context, binding pageintegrat
 // startPageChatTurn runs one side-chat turn through the shared streaming
 // pipeline with a per-turn page context snapshot and server-resolved page tools.
 func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conversation, message string, input pageChatInput) (*models.Execution, []models.ChatAttachment, error) {
+	if err := h.requirePageAccess(c.Request().Context(), binding.Page.ProjectID, authz.Edit); err != nil {
+		return nil, nil, err
+	}
 	if input.AttachmentSessionID != "" && !isValidPendingAttachmentSessionID(input.AttachmentSessionID) {
 		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
 	}
@@ -215,6 +219,10 @@ type pageTurnContext struct {
 }
 
 func (h *Handler) pageChatParams(ctx context.Context, binding pageintegration.Conversation, task *models.Task, exec *models.Execution, agent *models.LLMConfig, message string, turn pageQueuedContext) (streamingResponseParams, error) {
+	ctx, err := h.pagePrincipalContext(ctx, turn.Principal, binding.Page.ProjectID, authz.Edit)
+	if err != nil {
+		return streamingResponseParams{}, err
+	}
 	integration, err := binding.Resolve(ctx)
 	if err != nil {
 		return streamingResponseParams{}, err
@@ -244,7 +252,13 @@ func (h *Handler) pageChatParams(ctx context.Context, binding pageintegration.Co
 	}, nil
 }
 
-func (h *Handler) authorizePageTurn(ctx context.Context, principal string) error {
+func (h *Handler) authorizePageTurn(ctx context.Context, principal, projectID string) error {
+	if _, err := h.pagePrincipalContext(ctx, principal, projectID, authz.Edit); err != nil {
+		if errors.Is(err, authz.ErrDenied) {
+			return errPageTurnUnauthorized
+		}
+		return err
+	}
 	if principal == "" {
 		return errPageTurnUnauthorized
 	}
@@ -371,12 +385,16 @@ func (h *Handler) startNextQueuedPageTurn(ctx context.Context, binding pageinteg
 	if json.Unmarshal([]byte(raw), &turn) != nil || turn.Principal == "" {
 		return
 	}
-	if err = h.authorizePageTurn(ctx, turn.Principal); err != nil {
+	if err = h.authorizePageTurn(ctx, turn.Principal, binding.Page.ProjectID); err != nil {
 		if errors.Is(err, errPageTurnUnauthorized) {
 			if _, err = h.threadInputRepo.CancelPending(ctx, queued.ID); err == nil {
 				h.goStartNextQueuedTurnAfter(streamingResponseParams{ProjectID: binding.Page.ProjectID, TaskID: taskID, PageConversation: &binding}, "")
 			}
 		}
+		return
+	}
+	ctx, err = h.pagePrincipalContext(ctx, turn.Principal, binding.Page.ProjectID, authz.Edit)
+	if err != nil {
 		return
 	}
 	agent, _, err := h.resolveQueuedInputAgent(ctx, *queued)

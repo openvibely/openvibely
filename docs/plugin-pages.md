@@ -111,6 +111,14 @@ Host → page messages use the envelope `{"v":1,"type":"…","replyTo":<id or nu
 | `analysis.delta` | `{exec_id, text}` |
 | `analysis.done` | `{exec_id, error?}` |
 
+## Project permissions
+
+Custom pages use the same `ProjectAccessService` as task threads. View access is required for the page, transcript, asset capabilities, live events, and declared read operations. Edit access is required for chat sends, Analyze, steering, Stop, publication, and action operations. The navigation rail lists only accessible projects' pages, including in All Projects. Package administration and native-backend approval remain organization-admin operations.
+
+Queued turns and installation continuations restore the saved submitting user and recheck Edit access before starting. Page tools recheck the user's current role on every invocation. As with task threads, revoking Edit access does not cancel a reply already running, but blocks its unauthorized tools and subsequent turns. Losing View access closes live page subscriptions and prevents reuse of asset capabilities.
+
+Operation kinds are a backend contract: `read` must not change stored data; mutations must use `action`. The Sales example's Refresh is an action, while Get report reads without persisting initialization. Administrator-approved native processes remain outside the application sandbox and must honor their declared operation semantics.
+
 ## Backend processes (JSON-RPC 2.0 over stdio)
 
 - **Launch:** started with `os/exec` and never through a shell. The working directory is the package directory. The environment is minimal (PATH, LANG, TMPDIR; or SystemRoot, PATH, TEMP, TMP on Windows), so no OpenVibely secrets are inherited.

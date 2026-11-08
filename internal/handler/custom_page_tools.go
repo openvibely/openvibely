@@ -13,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageplugins"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 // publishCustomPageTool publishes a bundle authored by the current task. The
@@ -30,6 +31,9 @@ func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingRes
 	}
 	if task == nil || task.ProjectID != params.ProjectID || task.ProjectID == models.AllProjectsID || task.Category == models.CategoryChat || task.Category == models.CategoryPageChat {
 		return "", errors.New("custom page must belong to the current coding task's project")
+	}
+	if err := h.requirePageAccess(ctx, task.ProjectID, authz.Edit); err != nil {
+		return "", err
 	}
 	var req struct {
 		PackagePath string `json:"package_path"`
@@ -123,6 +127,9 @@ func (h *Handler) customPageStatusTool(ctx context.Context, params streamingResp
 	}
 	if task == nil || task.ProjectID != params.ProjectID || task.ProjectID == models.AllProjectsID || task.Category == models.CategoryChat || task.Category == models.CategoryPageChat {
 		return "", errors.New("custom page must belong to the current coding task's project")
+	}
+	if err := h.requirePageAccess(ctx, task.ProjectID, authz.View); err != nil {
+		return "", err
 	}
 	var request struct {
 		InstanceID string `json:"instance_id"`

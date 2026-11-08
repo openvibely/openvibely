@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/skilldeps"
 	"github.com/openvibely/openvibely/internal/update"
 )
@@ -438,8 +439,12 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 		if saved.Page.Key() != pageBinding.Page.Key() || saved.Page.ProjectID != task.ProjectID {
 			return errors.New("page context binding changed")
 		}
-		if e = h.authorizePageTurn(ctx, saved.Principal); e != nil {
+		if e = h.authorizePageTurn(ctx, saved.Principal, task.ProjectID); e != nil {
 			return e
+		}
+		ctx, err = h.pagePrincipalContext(ctx, saved.Principal, task.ProjectID, authz.Edit)
+		if err != nil {
+			return err
 		}
 		pageTurn.Principal = saved.Principal
 		if saved.HasContext {

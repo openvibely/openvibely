@@ -13,7 +13,7 @@
     {
       "name": "refresh_data",
       "description": "Regenerate the latest sales figures for this project's Sales page and return the updated report. Optional region filter.",
-      "kind": "read",
+      "kind": "action",
       "expose_as_tool": true,
       "permissions": ["storage", "events"],
       "emits": ["data.changed"],

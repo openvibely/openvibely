@@ -109,7 +109,9 @@ type Manager struct {
 	lifetimes map[string]*instanceLifetime
 	// OnDisable cancels host-owned work after admission is closed.
 	OnDisable func(context.Context, string) error
-	now       func() time.Time
+	// AuthorizeOperation rechecks the caller through the host permission service.
+	AuthorizeOperation func(context.Context, pageintegration.Caller, string, pageintegration.OperationKind) (context.Context, error)
+	now                func() time.Time
 }
 
 // NewManager creates a manager storing packages under root (outside any task worktree).
@@ -740,6 +742,12 @@ func (p *pluginIntegration) Invoke(ctx context.Context, caller pageintegration.C
 	opDef, ok := pageintegration.FindOperation(p, op)
 	if !ok {
 		return nil, pageintegration.ErrOperationNotFound
+	}
+	if p.m.AuthorizeOperation != nil {
+		ctx, err = p.m.AuthorizeOperation(ctx, caller, fresh.ProjectID, opDef.Kind)
+		if err != nil {
+			return nil, err
+		}
 	}
 	man := p.r.Manifest
 	if man.Backend == nil {
