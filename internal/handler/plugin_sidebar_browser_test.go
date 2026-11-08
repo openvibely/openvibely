@@ -82,6 +82,15 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  if(document.querySelector('#plugin-settings .alert-success'))throw Error('Success banner still rendered');
  await wait(()=>toasts.includes('Disabled'),'Standard success toast missing');
  checkSettings();
+ const install=document.getElementById('plugin-install-modal');install.showModal();
+ const form=install.querySelector('form');const badPath='/nonexistent/plugin-browser-test';
+ form.elements.path.value=badPath;form.requestSubmit();
+ await wait(()=>document.getElementById('plugin-install-error'),'Installation error missing');
+ const reopened=document.getElementById('plugin-install-modal');
+ await wait(()=>reopened.open,'Install modal did not remain open');
+ if(!reopened.contains(document.getElementById('plugin-install-error')))throw Error('Error is outside modal');
+ if(reopened.querySelector('[name="path"]').value!==badPath)throw Error('Failed path not preserved');
+ if(!document.getElementById('plugin-install-error').getClientRects().length)throw Error('Installation error hidden');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}
 })();</script>`

@@ -883,6 +883,9 @@ func (h *Handler) renderPluginSettings(c echo.Context, projectID, notice string,
 	v.Sort = c.QueryParam("sort")
 	v.Enabled = c.QueryParam("enabled")
 	v.OpenInstall = c.FormValue("open_install") == "true"
+	if v.OpenInstall && actionErr != nil {
+		v.InstallPath = c.FormValue("path")
+	}
 	if v.Search != "" || v.Enabled != "" {
 		filtered := v.Instances[:0]
 		for _, row := range v.Instances {

@@ -151,6 +151,7 @@ type PluginSettingsView struct {
 	Search      string
 	Sort        string
 	OpenInstall bool
+	InstallPath string
 	Enabled     string
 	ProjectID   string
 	Packages    []PluginSettingsPackage
@@ -192,7 +193,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 				</ul>
 			</div>
 		</div>
-		if v.Error != "" {
+		if v.Error != "" && !v.OpenInstall {
 			<div class="alert alert-error text-sm mb-4" role="alert">{ v.Error }</div>
 		}
 		@CardListToolbar(CardListToolbarConfig{PageKey: "plugin-pages", Placeholder: "Search pages...", Action: "/settings/plugin-pages", ProjectID: v.ProjectID, Search: v.Search, Sort: v.Sort, Filters: []CardListFilter{{Key: "enabled", Label: "Status", Value: v.Enabled, Options: cardListOptions("true", "Enabled", "false", "Disabled")}}, SortOptions: cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A")})
@@ -265,7 +266,10 @@ templ PluginSettingsContent(v PluginSettingsView) {
 		}
 		@pluginSettingsDialog("plugin-install-modal", "Install package") {
 			<form class="space-y-3" hx-post={ v.URL("/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
-				<label class="form-control"><span class="label-text">Package directory</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" required/></label>
+				<label class="form-control"><span class="label-text">Package directory</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" value={ v.InstallPath } aria-describedby="plugin-install-error" aria-invalid={ v.OpenInstall && v.Error != "" } required/></label>
+				if v.OpenInstall && v.Error != "" {
+					<p id="plugin-install-error" class="text-sm text-error" role="alert">{ v.Error }</p>
+				}
 				<button class="btn btn-primary" type="submit">Install</button>
 			</form>
 			<h4 class="font-semibold">Installed packages</h4>
