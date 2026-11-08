@@ -45,8 +45,8 @@ func TestForkPullRequestPublishesToForkAndKeepsLinkedDestination(t *testing.T) {
 			if repo.FullName != source.FullName {
 				t.Fatalf("published to upstream: %s", repo.FullName)
 			}
-			if req.BaseBranch != "main" || req.LocalBaseBranch != "main" {
-				t.Fatalf("publication baseline changed to PR target: %+v", req)
+			if !req.PreserveLocalHistory || req.LocalBaseBranch != "main" {
+				t.Fatalf("fork publication must preserve local history: %+v", req)
 			}
 			return &GitHubPublishBranchResult{HeadSHA: sha}, nil
 		},

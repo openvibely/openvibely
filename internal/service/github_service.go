@@ -170,14 +170,15 @@ type GitHubCreatePullRequestRequest struct {
 }
 
 type GitHubPublishBranchRequest struct {
-	LocalBaseBranch string // Local diff baseline, independent of the remote PR target.
-	RepoPath        string
-	WorktreePath    string
-	Branch          string
-	BaseBranch      string
-	CommitMessage   string
-	CommitterName   string
-	CommitterEmail  string
+	PreserveLocalHistory bool   // Publish the actual task commits rather than rebuilding a remote tree.
+	LocalBaseBranch      string // Local diff baseline, independent of the remote PR target.
+	RepoPath             string
+	WorktreePath         string
+	Branch               string
+	BaseBranch           string
+	CommitMessage        string
+	CommitterName        string
+	CommitterEmail       string
 }
 
 type GitHubPublishedCommitStats struct {
@@ -805,6 +806,9 @@ func isGitHubCommitSHA(value string) bool {
 }
 
 func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+	if publishReq.PreserveLocalHistory {
+		return s.publishTaskHistory(ctx, repo, publishReq)
+	}
 	if repo == nil {
 		return nil, fmt.Errorf("repository reference is required")
 	}

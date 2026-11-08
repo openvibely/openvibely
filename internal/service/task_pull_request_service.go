@@ -403,25 +403,16 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if commitMessage == "" {
 		commitMessage = fmt.Sprintf("Prepare task %s", task.ID)
 	}
-	publishBase := createReq.Base
-	if !strings.EqualFold(repoRef.FullName, headRepo.FullName) {
-		publishBase = strings.TrimSpace(task.MergeTargetBranch)
-		if publishBase == "" {
-			publishBase, err = s.github.DefaultBranch(ctx, headRepo)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
 	publishResult, err := s.github.PublishBranch(ctx, headRepo, GitHubPublishBranchRequest{
-		RepoPath:        project.RepoPath,
-		WorktreePath:    task.WorktreePath,
-		Branch:          task.WorktreeBranch,
-		BaseBranch:      publishBase,
-		LocalBaseBranch: task.MergeTargetBranch,
-		CommitMessage:   commitMessage,
-		CommitterName:   "OpenVibely Bot",
-		CommitterEmail:  "bot@openvibely.ai",
+		RepoPath:             project.RepoPath,
+		WorktreePath:         task.WorktreePath,
+		Branch:               task.WorktreeBranch,
+		BaseBranch:           createReq.Base,
+		PreserveLocalHistory: !strings.EqualFold(repoRef.FullName, headRepo.FullName),
+		LocalBaseBranch:      task.MergeTargetBranch,
+		CommitMessage:        commitMessage,
+		CommitterName:        "OpenVibely Bot",
+		CommitterEmail:       "bot@openvibely.ai",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("publishing branch: %w", err)
