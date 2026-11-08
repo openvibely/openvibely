@@ -306,7 +306,8 @@ templ CardListToolbar(config CardListToolbarConfig) {
 		if config.CanSelect {
 			<dialog class="modal" data-card-bulk-confirm aria-labelledby={ config.PageKey + "-bulk-title" } aria-describedby={ config.PageKey + "-bulk-description" }>
 				<div class="modal-box">
-					<h3 id={ config.PageKey + "-bulk-title" } class="text-lg font-bold text-error" data-card-bulk-confirm-title>Delete selected?</h3>
+					@ModalCloseButton("this.closest('dialog')", "Close bulk-delete confirmation")
+					<h3 id={ config.PageKey + "-bulk-title" } class="text-lg font-bold text-error pr-10" data-card-bulk-confirm-title>Delete selected?</h3>
 					if config.BulkDeleteDescription != "" {
 					<p id={ config.PageKey + "-bulk-description" } class="py-4">{ config.BulkDeleteDescription }</p>
 				} else {
