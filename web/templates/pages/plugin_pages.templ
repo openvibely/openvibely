@@ -159,7 +159,7 @@ type PluginSettingsView struct {
 }
 
 templ PluginSettings(projects []models.Project, currentProjectID string, v PluginSettingsView) {
-	@layout.Base("Plugin pages", projects, currentProjectID) {
+	@layout.Base("Custom pages", projects, currentProjectID) {
 		@PluginSettingsContent(v)
 	}
 }
@@ -179,10 +179,10 @@ func (v PluginSettingsView) URL(suffix string) string {
 }
 
 templ PluginSettingsContent(v PluginSettingsView) {
-	@layout.PageTitle("Plugin pages")
+	@layout.PageTitle("Custom pages")
 	<div id="plugin-settings" data-search-container data-card-loaded-name-sort data-card-pagination-root data-card-pagination-list="#plugin-page-cards" data-card-pagination-card-selector="[data-plugin-card-id]" data-card-pagination-key="data-plugin-card-id" data-card-pagination-has-more="false" data-card-pagination-url={ v.URL("") }>
 		<div data-page-header class="flex items-center justify-between mb-6">
-			<h2 class="text-2xl font-bold">Plugin pages</h2>
+			<h2 class="text-2xl font-bold">Custom pages</h2>
 			<div class="dropdown dropdown-end">
 				<button type="button" tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Add page" data-tooltip-disabled onclick="handleDropdownToggle(event)">@pageCreateIcon()</button>
 				<ul tabindex="0" class="ov-menu ov-menu-actions dropdown-content z-[100] menu w-48">

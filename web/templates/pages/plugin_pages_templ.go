@@ -512,7 +512,7 @@ func PluginSettings(projects []models.Project, currentProjectID string, v Plugin
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layout.Base("Plugin pages", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var24), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.Base("Custom pages", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var24), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -551,7 +551,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = layout.PageTitle("Plugin pages").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.PageTitle("Custom pages").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -568,7 +568,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\"><div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Plugin pages</h2><div class=\"dropdown dropdown-end\"><button type=\"button\" tabindex=\"0\" class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Add page\" data-tooltip-disabled onclick=\"handleDropdownToggle(event)\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\"><div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Custom pages</h2><div class=\"dropdown dropdown-end\"><button type=\"button\" tabindex=\"0\" class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Add page\" data-tooltip-disabled onclick=\"handleDropdownToggle(event)\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
