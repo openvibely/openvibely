@@ -158,9 +158,15 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  await new Promise(r=>setTimeout(r,400));
  if(nav.dataset.pluginProject!==originalProject)throw Error('Rail scope was overwritten');
  const stale=new Event('htmx:beforeSwap');
- stale.detail={shouldSwap:true,xhr:{responseURL:location.origin+'/plugin-pages/nav?project_id=__all_projects__'}};
+ stale.detail={target:nav,shouldSwap:true,xhr:{responseURL:location.origin+'/plugin-pages/nav?project_id=__all_projects__'}};
  nav.dispatchEvent(stale);
  if(stale.detail.shouldSwap)throw Error('Stale project response allowed to flash');
+ window.openVibelyRefreshPluginNav('__all_projects__');
+ await wait(()=>nav.querySelector('[data-plugin-nav-entry] a'),'All Projects pages missing');
+ nav.querySelector('[data-plugin-nav-entry] a').click();
+ await wait(()=>document.querySelector('#plugin-page-root'),'All Projects page click did not navigate');
+ await wait(()=>document.querySelector('#plugin-startup')?.dataset.state==='loaded','All Projects page failed to load');
+
 
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}

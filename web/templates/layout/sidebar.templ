@@ -1010,6 +1010,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     event.detail.path = nav.dataset.navSrc + '?project_id=' + encodeURIComponent(nav.dataset.pluginProject);
                 });
                 nav.addEventListener('htmx:beforeSwap', function(event) {
+                    if (event.detail.target !== nav) return;
                     var path = event.detail.xhr && event.detail.xhr.responseURL;
                     if (path && new URL(path, location.href).searchParams.get('project_id') !== nav.dataset.pluginProject) event.detail.shouldSwap = false;
                 });
