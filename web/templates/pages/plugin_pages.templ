@@ -163,15 +163,16 @@ type PluginSettingsPackage struct {
 }
 
 type PluginSettingsView struct {
-	Search      string
-	Sort        string
-	OpenInstall bool
-	InstallPath string
-	Enabled     string
-	ProjectID   string
-	Packages    []PluginSettingsPackage
-	Instances   []PluginSettingsRow
-	Error       string
+	Search       string
+	Sort         string
+	OpenInstall  bool
+	InstallPath  string
+	NativePicker bool
+	Enabled      string
+	ProjectID    string
+	Packages     []PluginSettingsPackage
+	Instances    []PluginSettingsRow
+	Error        string
 }
 
 templ PluginSettings(projects []models.Project, currentProjectID string, v PluginSettingsView) {
@@ -316,13 +317,26 @@ templ PluginSettingsContent(v PluginSettingsView) {
 			</form>
 		}
 		@pluginSettingsDialog("plugin-install-modal", "Install package") {
-			<form class="space-y-3" hx-post={ v.URL("/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
-				<label class="form-control"><span class="label-text">Package directory</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" value={ v.InstallPath } aria-describedby="plugin-install-error" aria-invalid={ v.OpenInstall && v.Error != "" } required/></label>
-				if v.OpenInstall && v.Error != "" {
-					<p id="plugin-install-error" class="text-sm text-error" role="alert">{ v.Error }</p>
-				}
-				<button class="btn btn-primary" type="submit">Install</button>
+			<form class="space-y-3" hx-post={ v.URL("/upload") } hx-encoding="multipart/form-data" hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML" hx-on:htmx:config-request="event.detail.parameters.paths = Array.from(this.querySelector('input[type=file]').files).map(function(f){return f.webkitRelativePath || f.name;});">
+				<label class="form-control"><span class="label-text">Upload folder</span><input type="file" name="files" class="file-input file-input-bordered w-full" multiple webkitdirectory required/></label>
+				<p class="text-sm opacity-70">Choose a folder on your computer containing plugin.json. Up to 64 MiB.</p>
+				<button class="btn btn-primary" type="submit">Upload and install</button>
 			</form>
+			if v.OpenInstall && v.Error != "" {
+				<p id="plugin-install-error" class="text-sm text-error" role="alert">{ v.Error }</p>
+			}
+			<details open?={ v.InstallPath != "" }>
+				<summary class="cursor-pointer">Advanced: server folder path</summary>
+				<form class="space-y-3" hx-post={ v.URL("/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
+					<label class="form-control"><span class="label-text">Folder on the OpenVibely server</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" value={ v.InstallPath } aria-describedby="plugin-install-error" aria-invalid={ v.OpenInstall && v.Error != "" } required/></label>
+					if v.NativePicker {
+						<button type="button" class="btn btn-ghost" onclick="var form=this.form; var button=this; button.disabled=true; fetch('/projects/pick-folder',{method:'POST',headers:{'HX-Request':'true'}}).then(async function(r){var p=await r.json(); if(!r.ok) throw new Error(p.message||p.error||'Folder picker unavailable. Enter the server path manually.'); if(p.selected) form.elements.path.value=p.path;}).catch(function(e){form.querySelector('[data-picker-error]').textContent=e.message;}).finally(function(){button.disabled=false;});">Browse on server</button>
+					}
+					<p class="text-sm opacity-70">Browse opens on the server machine and may be unavailable in hosted environments.</p>
+					<p data-picker-error class="text-sm text-error" role="alert"></p>
+					<button class="btn btn-primary" type="submit">Install</button>
+				</form>
+			</details>
 		}
 		if v.OpenInstall {
 			<script>document.getElementById('plugin-install-modal').showModal();</script>

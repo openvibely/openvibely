@@ -67,6 +67,7 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	api.POST("/chat/thread/queued/:inputId/steer", h.PluginChatQueuedSteer)
 	e.GET("/settings/plugin-pages", h.PluginSettings)
 	e.POST("/settings/plugin-pages/install", h.PluginSettingsInstall)
+	e.POST("/settings/plugin-pages/upload", h.PluginSettingsUpload)
 	e.POST("/settings/plugin-pages/install-example", h.PluginSettingsInstallExample)
 	e.POST("/settings/plugin-pages/instances", h.PluginSettingsCreateInstance)
 	e.POST("/settings/plugin-pages/instances/:instanceId/:action", h.PluginSettingsInstanceAction)
@@ -896,10 +897,11 @@ func (h *Handler) renderPluginSettings(c echo.Context, projectID, notice string,
 		return err
 	}
 	c.Response().Header().Set("X-OpenVibely-Card-Page-Has-More", "false")
+	v.NativePicker = h.isLocalRepoPathEnabled()
 	v.Search = strings.TrimSpace(c.QueryParam("search"))
 	v.Sort = c.QueryParam("sort")
 	v.Enabled = c.QueryParam("enabled")
-	v.OpenInstall = c.FormValue("open_install") == "true" && actionErr != nil
+	v.OpenInstall = (c.FormValue("open_install") == "true" || c.Path() == "/settings/plugin-pages/upload") && actionErr != nil
 	if v.OpenInstall && actionErr != nil {
 		v.InstallPath = c.FormValue("path")
 	}

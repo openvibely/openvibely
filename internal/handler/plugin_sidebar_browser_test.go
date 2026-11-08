@@ -89,7 +89,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  await wait(()=>toasts.includes('Disabled'),'Standard success toast missing');
  checkSettings();
  const install=document.getElementById('plugin-install-modal');install.showModal();
- const form=install.querySelector('form');const badPath='/nonexistent/plugin-browser-test';
+ install.querySelector('details').open=true;const form=install.querySelector('form[hx-post*="/install?"]');const badPath='/nonexistent/plugin-browser-test';
  form.elements.path.value=badPath;form.requestSubmit();
  await wait(()=>document.getElementById('plugin-install-error'),'Installation error missing');
  const reopened=document.getElementById('plugin-install-modal');
@@ -97,6 +97,19 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  if(!reopened.contains(document.getElementById('plugin-install-error')))throw Error('Error is outside modal');
  if(reopened.querySelector('[name="path"]').value!==badPath)throw Error('Failed path not preserved');
  if(!document.getElementById('plugin-install-error').getClientRects().length)throw Error('Installation error hidden');
+
+ reopened.close();
+ const uploadModal=document.getElementById('plugin-install-modal');uploadModal.showModal();
+ const uploadForm=uploadModal.querySelector('form[hx-encoding]');
+ const transfer=new DataTransfer();
+ const manifest=JSON.stringify({schema_version:1,id:'test.browser-upload',name:'Browser uploaded',version:'1.0.0',pages:[{id:'home',title:'Home',entry:'assets/index.html'}]});
+ for(const [name,relative,content] of [['plugin.json','bundle/plugin.json',manifest],['index.html','bundle/assets/index.html','<html>hello</html>']]){
+  const file=new File([content],name);Object.defineProperty(file,'webkitRelativePath',{value:relative});transfer.items.add(file);
+ }
+ uploadForm.querySelector('input[type=file]').files=transfer.files;
+ uploadForm.requestSubmit();
+ await wait(()=>toasts.some(t=>t.includes('Installed Browser uploaded')),'Folder upload did not install');
+ if(document.getElementById('plugin-install-modal').open)throw Error('Upload success left modal open');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)});}
 })();</script>`
