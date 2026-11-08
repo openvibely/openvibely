@@ -856,29 +856,9 @@ func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pag
 		return v, err
 	}
 	for _, in := range ins {
-		pkg, err := store.GetPackage(ctx, in.PackageID)
-		if err != nil || pkg == nil {
-			continue
-		}
-		man, err := h.pagePlugins.Manifest(pkg)
-		if err != nil {
-			continue
-		}
-		status, _ := h.pagePlugins.ProcessStatus(in.ID)
-		v.Instances = append(v.Instances, pages.PluginSettingsRow{Instance: in, RunsProcess: man.RunsProcess(), Permissions: pluginPermissions(man), ProcessStatus: status})
+		v.Instances = append(v.Instances, pages.PluginSettingsRow{Instance: in})
 	}
 	return v, nil
-}
-
-func pluginPermissions(man *pageplugins.Manifest) []pages.PluginPermission {
-	out := make([]pages.PluginPermission, 0, len(man.Permissions))
-	for _, p := range man.Permissions {
-		if p == pageplugins.PermissionAgent {
-			continue
-		} // Legacy declaration; chat is always available.
-		out = append(out, pages.PluginPermission{Name: p, Description: pageplugins.PermissionDescription(p)})
-	}
-	return out
 }
 
 func (h *Handler) renderPluginSettings(c echo.Context, projectID, notice string, actionErr error) error {

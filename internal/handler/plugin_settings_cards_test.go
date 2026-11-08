@@ -13,7 +13,7 @@ func TestPluginSettingsCardsAndDialogs(t *testing.T) {
 	base := "/settings/plugin-pages?project_id=" + env.projA.ID
 	rec := env.do(t, http.MethodGet, base, "", nil)
 	require.Equal(t, 200, rec.Code)
-	for _, marker := range []string{`aria-label="Add page"`, `data-card-list-toolbar="plugin-pages"`, `id="plugin-template-modal"`, `id="plugin-describe-modal"`, `id="plugin-install-modal"`, `id="plugin-delete-` + env.inA.ID, `id="plugin-details-` + env.inA.ID} {
+	for _, marker := range []string{`aria-label="Add page"`, `data-card-list-toolbar="plugin-pages"`, `id="plugin-template-modal"`, `id="plugin-describe-modal"`, `id="plugin-install-modal"`, `id="plugin-delete-` + env.inA.ID} {
 		require.Contains(t, rec.Body.String(), marker)
 	}
 	rec = env.do(t, http.MethodGet, base+"&search=nonexistent", "", nil)

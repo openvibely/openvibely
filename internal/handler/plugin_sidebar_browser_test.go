@@ -47,8 +47,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  if(installModal.querySelector('[data-plugin-package]')||installModal.textContent.includes('Installed packages'))throw Error('Install modal contains package management');
  const templateModal=document.getElementById('plugin-template-modal');
  if(!templateModal.querySelector('select[name="template_key"]')||!templateModal.querySelector('.modal-action button[type="submit"]'))throw Error('Template modal does not use standard selector and footer');
- const details=document.querySelector('[id^="plugin-details-"]');
- details.showModal();details.close();
+ if(document.querySelector('[id^="plugin-details-"]'))throw Error('Obsolete details modal present');
  const search=document.querySelector('#plugin-settings [data-card-search]');
  search.value='not-a-page';search.dispatchEvent(new Event('input',{bubbles:true}));
  await wait(()=>!Array.from(document.querySelectorAll('[data-plugin-instance-row]')).some(e=>e.getClientRects().length),'Search did not hide Sales');

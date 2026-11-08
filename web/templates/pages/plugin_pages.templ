@@ -137,14 +137,6 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 // PluginSettingsRow is one project instance shown in settings.
 type PluginSettingsRow struct {
 	Instance      models.PagePluginInstance
-	RunsProcess   bool
-	Permissions   []PluginPermission
-	ProcessStatus string
-}
-
-type PluginPermission struct {
-	Name        string
-	Description string
 }
 
 type PluginSettingsPackage struct {
@@ -221,7 +213,6 @@ templ PluginSettingsContent(v PluginSettingsView) {
 								} else {
 									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button></li>
 								}
-								<li><button onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-details-" + r.Instance.ID + "').showModal()"} }>Details</button></li>
 								<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-delete-" + r.Instance.ID + "').showModal()"} }>Delete</button></li>
 							}
 						</div>
@@ -236,13 +227,6 @@ templ PluginSettingsContent(v PluginSettingsView) {
 						</div>
 					</div>
 				</div>
-				@pluginSettingsDialog("plugin-details-"+r.Instance.ID, r.Instance.Title) {
-					<p class="text-sm break-all opacity-60">{ r.Instance.ContentHash }</p>
-					@pluginPermissionList(r.Permissions, r.RunsProcess)
-					if r.RunsProcess {
-						<p class="text-sm">Backend: { r.ProcessStatus }</p>
-					}
-				}
 				@pluginSettingsDialog("plugin-delete-"+r.Instance.ID, "Delete "+r.Instance.Title+"?") {
 					<p>This deletes this project's page, saved data, and conversation. Other projects and the installed package are kept.</p>
 					<button class="btn btn-error" hx-post={ v.URL("/instances/" + r.Instance.ID + "/remove") } hx-target="#plugin-settings" hx-swap="outerHTML">Delete page</button>
@@ -338,19 +322,6 @@ templ pluginSettingsDialog(id, title string) {
 		</div>
 		<form method="dialog" class="modal-backdrop"><button>Close</button></form>
 	</dialog>
-}
-
-templ pluginPermissionList(perms []PluginPermission, runsProcess bool) {
-	if len(perms) > 0 {
-		<ul class="text-xs list-disc pl-5 opacity-80">
-			for _, p := range perms {
-				<li><code>{ p.Name }</code> — { p.Description }</li>
-			}
-		</ul>
-	}
-	if runsProcess {
-		<div class="text-xs text-warning">Backend processes are not sandboxed: they run with this server's OS user permissions and a minimal environment.</div>
-	}
 }
 
 // pluginHostBridgeScript is the host side of bridge v1. It accepts messages
