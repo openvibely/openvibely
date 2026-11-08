@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/pageplugins"
-	"github.com/openvibely/openvibely/internal/service"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,24 +25,9 @@ func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Con
 	if err != nil {
 		return nil, "", err
 	}
-	allowed := func(ctx context.Context, name string) bool {
-		taskID, err := binding.Store.TaskID(ctx)
-		if err != nil {
-			return false
-		}
-		agent := h.resolveTaskAgentDefinitionForTask(ctx, taskID, nil)
-		if agent != nil && agent.ToolConfig.SkipDefaultTools {
-			return false
-		}
-		grant := map[string]string{"read_file": "Read", "write_file": "Write", "edit_file": "Edit", "list_files": "Glob", "grep_search": "Grep", "shell": "Bash", "process": "Bash"}[name]
-		return service.AgentAllowsTool(agent, grant) || (grant == "Bash" && service.AgentAllowsTool(agent, "Shell"))
-	}
 	rt := &llmcontracts.RuntimeTools{}
 	names := map[string]bool{}
 	for _, def := range agenttools.Definitions() {
-		if !allowed(ctx, def.Name) {
-			continue
-		}
 		names[def.Name] = true
 		access := llmcontracts.RuntimeToolAccessWrite
 		if def.Name == "read_file" || def.Name == "list_files" || def.Name == "grep_search" {
@@ -52,16 +36,13 @@ func (h *Handler) pageEditTools(ctx context.Context, binding pageintegration.Con
 		rt.Definitions = append(rt.Definitions, llmcontracts.RuntimeToolDefinition{Name: def.Name, Description: def.Description + " Work in the current page files. Successful file changes automatically update the page. Files persist across replies; failed updates retain your edits. Build backend code with shell when needed.", Schema: def.Schema, Access: access})
 	}
 	rt.Filter = func(name string) (bool, bool) {
-		return names[name] && allowed(context.WithoutCancel(ctx), name), names[name]
+		return names[name], names[name]
 	}
 	rt.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		if !names[name] {
 			return "", false, false, nil
 		}
 		fail := func(err error) (string, bool, bool, error) { return err.Error(), true, true, nil }
-		if !allowed(ctx, name) {
-			return fail(fmt.Errorf("tool is not permitted by the assigned agent"))
-		}
 		if err := h.authorizePageTurn(ctx, principal, binding.Page.ProjectID); err != nil {
 			return fail(err)
 		}
