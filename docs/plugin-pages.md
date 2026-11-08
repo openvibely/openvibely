@@ -11,9 +11,9 @@ Ask, for example: **“Create a sales report page for this project with filters 
 Task agents have two tools, on initial runs and task-thread follow-ups:
 
 - `get_custom_page_guide` returns the bundled manifest, bridge, context, operation, language-independent backend, and optional storage authoring instructions. It works even when the user's repository contains no OV source.
-- `publish_custom_page` takes `package_path` relative to the task workspace and an optional `page_id`. The server resolves the owning project from the persisted task, validates paths and package contents, copies the package outside the worktree, and registers the project instance. The response includes a page URL and enabled/approval status. Successful publication emits a live navigation refresh event.
+- `publish_custom_page` takes `package_path` relative to the task workspace and an optional `page_id`. The server resolves the owning project from the persisted task, validates paths and package contents, copies the package outside the worktree, and registers the project instance. The response includes a page URL and enabled status. Successful publication emits a live navigation refresh event.
 
-Frontend-only pages are enabled automatically. Packages with native backends are installed without execution and remain disabled until an administrator approves and enables them; the task returns an approval link. The agent cannot grant itself backend approval. Existing agent/model selection and task tool policies apply. Publication is unavailable to project chat and automation auditor tasks; project chat can delegate page creation to a coding task.
+Published pages are enabled automatically, including their declared native backend. There is no separate custom-page approval workflow. Existing agent/model selection and task tool policies apply. Publication is unavailable to project chat and automation auditor tasks; project chat can delegate page creation to a coding task.
 
 Identical retries reuse the same package and project instance. Changed content requires a version bump; the matching page instance is updated while preserving its state and conversation. Supply `instance_id` when known. Task publication requires a configured task workspace. The source bundle remains in the task's changes for review; the installed copy survives worktree deletion.
 
@@ -24,7 +24,7 @@ Local import in settings is an advanced fallback for existing bundles, not the n
 | Term | Meaning |
 | --- | --- |
 | **Package** | One immutable, installed `plugin.json` bundle version (`<id>@<version>`). It is content-hashed and stored under the managed root, outside any task worktree. |
-| **Instance** | One page of a package that has been added to **one** project. It has its own enabled flag, config, state, approval, and side-chat conversation. |
+| **Instance** | One page of a package that has been added to **one** project. It has its own enabled flag, config, state, and side-chat conversation. |
 | **Page integration** | The shared contract in `internal/pageintegration`. It covers page identity, explicit context, operations, events, and agent tools. Plugin pages use it through an adapter, and built-in pages can adopt it later. |
 
 The managed root is `$OPENVIBELY_PAGE_PLUGIN_ROOT`, or `<AppDataDir>/page-plugins` by default. Packages live at `<root>/<plugin id>/<version>/`.
@@ -73,7 +73,7 @@ Validation is strict:
 | `storage` | Lets the backend persist per-instance state (max 1 MiB) |
 | `events` | Lets the plugin publish and subscribe to live refresh events. Required for any `emits`. |
 | `agent` | Enables the side chat and `analyze.request` |
-| `backend.exec` | Runs the backend executable. Requires administrator approval. |
+| `backend.exec` | Runs the backend executable. Starts when the page is enabled. |
 
 Operation `kind` is either `read` or `action`. Agent tool calls run directly, like other OV tools; there is no per-action confirmation.
 
@@ -112,31 +112,30 @@ Host → page messages use the envelope `{"v":1,"type":"…","replyTo":<id or nu
 
 ## Project permissions
 
-Custom pages use the same `ProjectAccessService` as task threads. View access is required for the page, transcript, asset capabilities, live events, and declared read operations. Edit access is required for chat sends, Analyze, steering, Stop, publication, and action operations. The navigation rail lists only accessible projects' pages, including in All Projects. Package administration and native-backend approval remain organization-admin operations.
+Custom pages use the same `ProjectAccessService` as task threads. View access is required for the page, transcript, asset capabilities, live events, and declared read operations. Edit access is required for chat sends, Analyze, steering, Stop, publication, and action operations. The navigation rail lists only accessible projects' pages, including in All Projects. Package administration remains an organization-admin operation.
 
 Queued turns and installation continuations restore the saved submitting user and recheck Edit access before starting. Page tools recheck the user's current role on every invocation. As with task threads, revoking Edit access does not cancel a reply already running, but blocks its unauthorized tools and subsequent turns. Losing View access closes live page subscriptions and prevents reuse of asset capabilities.
 
-Operation kinds are a backend contract: `read` must not change stored data; mutations must use `action`. The Sales example's Refresh is an action, while Get report reads without persisting initialization. Administrator-approved native processes remain outside the application sandbox and must honor their declared operation semantics.
+Operation kinds are a backend contract: `read` must not change stored data; mutations must use `action`. The Sales example's Refresh is an action, while Get report reads without persisting initialization. Installed native processes remain outside the application sandbox and must honor their declared operation semantics.
 
 ## Backend processes (JSON-RPC 2.0 over stdio)
 
 - **Launch:** started with `os/exec` and never through a shell. The working directory is the package directory. The environment is minimal (PATH, LANG, TMPDIR; or SystemRoot, PATH, TEMP, TMP on Windows), so no OpenVibely secrets are inherited.
 - **One process per enabled instance.** It is started on enable or first use. It is stopped on disable, instance removal, project deletion, and server shutdown.
 - **Framing:** one JSON object per line on stdin and stdout. Messages are limited to 1 MiB each; a larger message makes the host stop the process. stderr is captured as sanitized log lines, keeping the last 200.
-- **Handshake:** the host sends `initialize {protocol:"openvibely.page/1", params:{protocol, instance{id,project_id,page_id}, config, state}}`. The backend must answer `{"protocol":"openvibely.page/1"}` within 10 s. Every actual launch, including automatic crash recovery, reloads persisted instance state/configuration after checking enabled status and approval. A failed read prevents launch; an old startup snapshot is never used as a fallback.
+- **Handshake:** the host sends `initialize {protocol:"openvibely.page/1", params:{protocol, instance{id,project_id,page_id}, config, state}}`. The backend must answer `{"protocol":"openvibely.page/1"}` within 10 s. Every actual launch, including automatic crash recovery, reloads persisted instance state/configuration after checking enabled status and package integrity. A failed read prevents launch; an old startup snapshot is never used as a fallback.
 - **Calls:** `operation/invoke {operation, input, caller{via}}`. Every request has an integer `id`. The default timeout is 30 s, including waiting for and writing to stdin. Cancellation while awaiting a response attempts `$/cancelRequest {id}` with a separate 100 ms bound. If a write is interrupted, OV terminates that process and closes its pipe: a partially written JSON-RPC frame cannot safely be reused. Restart backoff also respects cancellation.
 - **Notifications from the backend:** `state/set {state}` (requires `storage`) and `events/publish {type, data}` (requires `events`).
 - **Shutdown:** the host attempts `shutdown` (request), then `exit` (notification), and closes stdin. These steps share one 3 s grace period. An independent timer kills the process tree at that deadline even if stdin is blocked. Waiting for the killed process to exit is bounded to one additional second.
 - **Restarts:** a crashed backend is restarted on the next call, with backoff, at most 3 times per 5 minutes. After that the instance reports `failed` until it is re-enabled.
-- **Limits:** backends run with your OpenVibely OS user's permissions and are **not** sandboxed at the OS level. That is why `backend.exec` requires administrator approval.
+- **Limits:** backends run with your OpenVibely OS user's permissions and are **not** sandboxed at the OS level. Installing and enabling a package authorizes that backend to run.
 
-## Install, approve, enable, remove
+## Install, enable, remove
 
 Use **Settings → Plugin pages** (`/settings/plugin-pages?project_id=<project>`).
 
 1. **Install**: either "Install Sales example" or "Install from directory" with an absolute path to a prebuilt bundle. You need to be an administrator when organizations are enabled.
 2. **Add to project**: pick an installed package and a page to create a disabled instance in the current project.
-3. **Approve** (only for `backend.exec`): the approval screen shows the permissions and the content hash. Approval is bound to that hash. Every actual launch, including a cached process's automatic crash recovery, rechecks the enabled instance, its persisted approval, and the installed package's content hash before executing code. Changed files block launch. Restore the approved files, or install the changes as a new package version and approve that version; approving the old package record does not authorize edits to its files.
 4. **Enable**: the page appears in the left rail. **Disable** closes admission to new operations, cancels that instance's running side-chat and inline analysis through OV's existing cancellation machinery, interrupts backend startup and active calls, and releases its handles and subscriptions. Backend termination does not depend on the process reading stdin. Saved state and conversation history remain intact. Re-enabling creates a new runtime lifetime; cancelled work from the previous lifetime stays cancelled. Other instances are unaffected.
 5. **Remove instance**: deletes only that instance, together with its state, side-chat conversation, and turn-context snapshots. Other projects' instances of the same package are unaffected.
 6. **Remove package**: only allowed once no instance uses it. Its files are deleted from the managed root.
@@ -222,8 +221,12 @@ A backend that exhausts its crash-restart budget stays failed: ordinary calls ca
 
 `publish_custom_page` accepts an optional `instance_id`. By default it matches the task project's stable plugin ID and page ID. A new manifest version replaces that instance, preserving its URL, configuration, state and conversation. Explicit IDs are checked against the task project and the same plugin/page identity; ambiguous existing duplicates require an explicit ID. Use a different stable identity only when intentionally creating another page.
 
-Installation validates and copies the new bundle before changing the live instance. Replacement closes old handles/subscriptions and cancels active page work. Native replacements remain disabled until administrator approval; publishing never executes native code. The previous package and approval are temporarily retained in a recovery record that survives server restart. Successful backend startup (or frontend activation) finalizes the replacement. Failed backend startup restores the previous package and approval, and starts the previous backend if it had been enabled. If restoring the old backend also fails, the error is reported and the page stays disabled.
+Installation validates and copies the new bundle before changing the live instance. Replacement closes old handles/subscriptions and stops the old backend. Enabled replacements start immediately; the active side-chat turn is preserved. The previous package are temporarily retained in a recovery record that survives server restart. Successful backend startup (or frontend activation) finalizes the replacement. Failed backend startup restores the previous package, and starts the previous backend if it had been enabled. If restoring the old backend also fails, the error is reported and the page stays disabled.
 
 After finalization, unused old code is removed. Packages still used by another project/page or pending recovery are protected. Cleanup failures are logged and leave removable unused packages rather than undoing a successful update. There is no permanent version history. Code rollback does not undo writes to saved state or external databases. Browser startup is reported separately when a browser opens the page; it is not an installation commit gate.
 
-Side chat is available on every enabled page. All declared operations are automatically exposed to its assistant. Legacy `agent` and `expose_as_tool` declarations are accepted for existing packages but do not control chat or tool availability. Project access checks and native backend approval still apply.
+Side chat is available on every enabled page. All declared operations are automatically exposed to its assistant. Legacy `agent` and `expose_as_tool` declarations are accepted for existing packages but do not control chat or tool availability. Project access checks still apply.
+
+## Editing in side chat
+
+Side chat provides the shared file and shell tools against a disposable draft copied from the installed bundle. The assistant builds/tests changes and calls `apply_page_changes`; revisions are assigned automatically. Publication rechecks project Edit access and the current package hash, preserves page identity/data/chat, and refreshes open views. A stale draft is rejected. Validation or backend startup failure leaves/restores the working package. Draft files are cleaned up when the turn ends; unfinished drafts are not a durable source repository. Include editable source and build instructions in the bundle when backend iteration is needed. Shell tools have the same server access as existing local coding tools, not an OS sandbox.

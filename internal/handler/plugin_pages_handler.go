@@ -865,7 +865,7 @@ func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pag
 			continue
 		}
 		status, _ := h.pagePlugins.ProcessStatus(in.ID)
-		v.Instances = append(v.Instances, pages.PluginSettingsRow{Instance: in, NeedsApproval: h.pagePlugins.NeedsApproval(&in, man), RunsProcess: man.RunsProcess(), Permissions: pluginPermissions(man), ProcessStatus: status})
+		v.Instances = append(v.Instances, pages.PluginSettingsRow{Instance: in, RunsProcess: man.RunsProcess(), Permissions: pluginPermissions(man), ProcessStatus: status})
 	}
 	return v, nil
 }
@@ -1020,9 +1020,9 @@ func (h *Handler) PluginSettingsCreateInstance(c echo.Context) error {
 	return h.renderPluginSettings(c, projectID, fmt.Sprintf("Added %q to this project (disabled until enabled)", in.Title), nil)
 }
 
-// PluginSettingsInstanceAction approves, enables, disables, or removes one project instance.
+// PluginSettingsInstanceAction enables, disables, or removes one project instance.
 func (h *Handler) PluginSettingsInstanceAction(c echo.Context) error {
-	by, err := h.requirePluginAdmin(c)
+	_, err := h.requirePluginAdmin(c)
 	if err != nil {
 		return err
 	}
@@ -1041,8 +1041,6 @@ func (h *Handler) PluginSettingsInstanceAction(c echo.Context) error {
 	var actionErr error
 	notice := ""
 	switch c.Param("action") {
-	case "approve":
-		actionErr, notice = h.pagePlugins.Approve(ctx, in.ID, c.FormValue("content_hash"), by), "Approved backend for this package version"
 	case "enable":
 		actionErr, notice = h.pagePlugins.Enable(ctx, in.ID), "Enabled"
 	case "disable":

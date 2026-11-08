@@ -9,13 +9,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
+
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
-	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -51,15 +50,6 @@ func enabledSales(t *testing.T, m *Manager, projectID string) *models.PagePlugin
 		t.Fatal(err)
 	}
 	return in
-}
-
-func approveCurrent(t *testing.T, m *Manager, ctx context.Context, id string) error {
-	t.Helper()
-	in, err := m.store.GetInstance(ctx, id)
-	if err != nil || in == nil {
-		t.Fatalf("load instance for approval: %v", err)
-	}
-	return m.Approve(ctx, id, in.ContentHash, "admin")
 }
 
 func revisionOf(t *testing.T, raw json.RawMessage) int {
@@ -229,7 +219,7 @@ func writeProcessPackage(t *testing.T) string {
 	return dir
 }
 
-func TestProcessBackendRequiresHashBoundApproval(t *testing.T) {
+func TestProcessBackendStartsWithoutSeparateApproval(t *testing.T) {
 	if testing.Short() {
 		t.Skip("copies the test binary")
 	}
@@ -242,11 +232,8 @@ func TestProcessBackendRequiresHashBoundApproval(t *testing.T) {
 	}
 	inA, _ := m.CreateInstance(ctx, projA, pkg.ID, "")
 	inB, _ := m.CreateInstance(ctx, projB, pkg.ID, "")
-	if err := m.Enable(ctx, inA.ID); !errors.Is(err, ErrApprovalRequired) {
-		t.Fatalf("backend enabled without approval: %v", err)
-	}
-	if err := approveCurrent(t, m, ctx, inA.ID); err != nil {
-		t.Fatal(err)
+	if err := m.Enable(ctx, inA.ID); err != nil {
+		t.Fatalf("backend did not start: %v", err)
 	}
 	if err := m.Enable(ctx, inA.ID); err != nil {
 		t.Fatal(err)
@@ -254,8 +241,8 @@ func TestProcessBackendRequiresHashBoundApproval(t *testing.T) {
 	if st, _ := m.ProcessStatus(inA.ID); st != "running" {
 		t.Fatalf("process status %s", st)
 	}
-	if err := m.Enable(ctx, inB.ID); !errors.Is(err, ErrApprovalRequired) {
-		t.Fatal("approval leaked across project instances")
+	if err := m.Enable(ctx, inB.ID); err != nil {
+		t.Fatal("second project backend failed")
 	}
 
 	r, _ := m.Resolve(ctx, inA.ID, projA)
@@ -307,9 +294,6 @@ func TestDisableCancelsNativeOperationAndRejectsStaleIntegration(t *testing.T) {
 	}
 	in, err := m.CreateInstance(ctx, project, pkg.ID, "")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := approveCurrent(t, m, ctx, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Enable(ctx, in.ID); err != nil {
@@ -389,9 +373,6 @@ func TestDisableInterruptsNativeStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := approveCurrent(t, m, ctx, in.ID); err != nil {
-		t.Fatal(err)
-	}
 	enabled := make(chan error, 1)
 	go func() { enabled <- m.Enable(ctx, in.ID) }()
 	deadline := time.After(3 * time.Second)
@@ -428,13 +409,11 @@ func TestDisableInterruptsNativeStartup(t *testing.T) {
 	}
 }
 
-func TestCrashRecoveryVerifiesApprovedPackageBeforeEveryLaunch(t *testing.T) {
-	for _, changed := range []string{"index.html", "bin/backend", "approval"} {
+func TestCrashRecoveryVerifiesInstalledPackageBeforeEveryLaunch(t *testing.T) {
+	for _, changed := range []string{"index.html", "bin/backend"} {
 		t.Run(changed, func(t *testing.T) {
 			m, _, project, _ := newTestManager(t)
 			defer m.StopAll()
-			var revoked atomic.Bool
-			m.store = revokedApprovalStore{PagePluginStore: m.store, revoked: &revoked}
 			ctx := context.Background()
 			pkg, err := m.InstallFromDir(ctx, writeProcessPackage(t), "admin")
 			if err != nil {
@@ -442,9 +421,6 @@ func TestCrashRecoveryVerifiesApprovedPackageBeforeEveryLaunch(t *testing.T) {
 			}
 			in, err := m.CreateInstance(ctx, project, pkg.ID, "")
 			if err != nil {
-				t.Fatal(err)
-			}
-			if err := approveCurrent(t, m, ctx, in.ID); err != nil {
 				t.Fatal(err)
 			}
 			if err := m.Enable(ctx, in.ID); err != nil {
@@ -484,36 +460,33 @@ func TestCrashRecoveryVerifiesApprovedPackageBeforeEveryLaunch(t *testing.T) {
 			m.mu.Unlock()
 			crash()
 			want := ErrContentChanged
-			if changed == "approval" {
-				revoked.Store(true)
-				want = ErrApprovalRequired
-			} else {
-				f, err := os.OpenFile(filepath.Join(pkg.InstallPath, changed), os.O_APPEND|os.O_WRONLY, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, writeErr := f.WriteString("changed after approval")
-				closeErr := f.Close()
-				if writeErr != nil {
-					t.Fatal(writeErr)
-				}
-				if closeErr != nil {
-					t.Fatal(closeErr)
-				}
+
+			f, err := os.OpenFile(filepath.Join(pkg.InstallPath, changed), os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
 			}
+			_, writeErr := f.WriteString("changed after installation")
+			closeErr := f.Close()
+			if writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			if closeErr != nil {
+				t.Fatal(closeErr)
+			}
+
 			// Call the cached process directly as well as through the manager. Neither
-			// path may spawn anything after files or the persisted approval change.
+			// path may spawn anything after files change.
 			if _, err := proc.Call(ctx, "operation/invoke", map[string]any{"operation": "echo"}); !errors.Is(err, want) {
 				t.Fatalf("cached restart: got %v, want %v", err, want)
 			}
 			if proc.Running() || proc.PID() != 0 {
-				t.Fatal("unapproved backend was launched")
+				t.Fatal("modified backend was launched")
 			}
 			if _, err := integration.Invoke(ctx, pageintegration.Caller{}, "echo", nil); !errors.Is(err, want) {
 				t.Fatalf("manager restart: got %v, want %v", err, want)
 			}
 			if proc.Running() || proc.PID() != 0 {
-				t.Fatal("manager launched unapproved backend")
+				t.Fatal("manager launched modified backend")
 			}
 		})
 	}
@@ -595,9 +568,6 @@ func TestCrashRecoveryLoadsLatestSavedStatePerInstance(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := m.Store().UpdateInstanceState(t.Context(), in.ID, state); err != nil {
-			t.Fatal(err)
-		}
-		if err := approveCurrent(t, m, t.Context(), in.ID); err != nil {
 			t.Fatal(err)
 		}
 		if err := m.Enable(t.Context(), in.ID); err != nil {
@@ -726,9 +696,6 @@ func TestManagerPreservesExhaustedRestartBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = approveCurrent(t, m, t.Context(), in.ID); err != nil {
-		t.Fatal(err)
-	}
 	if err = m.Enable(t.Context(), in.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -808,52 +775,4 @@ func TestRemovePackageKeepsRecordWhenFileDeletionFails(t *testing.T) {
 	if gone, _ := m.store.GetPackage(ctx, pkg.ID); gone != nil {
 		t.Fatal("package record not removed on retry")
 	}
-}
-
-func TestApproveRejectsContentAdminDidNotReview(t *testing.T) {
-	m, _, project, _ := newTestManager(t)
-	ctx := context.Background()
-	v1, err := m.InstallFromDir(ctx, writeProcessPackage(t), "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	in, err := m.CreateInstance(ctx, project, v1.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	reviewed := v1.ContentHash
-
-	other := writeProcessPackage(t)
-	raw, _ := os.ReadFile(filepath.Join(other, ManifestFile))
-	os.WriteFile(filepath.Join(other, ManifestFile), []byte(strings.Replace(string(raw), `"0.1.0"`, `"0.2.0"`, 1)), 0o644)
-	if _, err := m.PublishToInstance(ctx, other, project, in.PageID, "task", in.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := m.Approve(ctx, in.ID, reviewed, "admin"); !errors.Is(err, ErrApprovalStale) {
-		t.Fatalf("approval of unreviewed content not rejected: %v", err)
-	}
-	if err := m.Approve(ctx, in.ID, "", "admin"); !errors.Is(err, ErrApprovalStale) {
-		t.Fatalf("approval without a reviewed hash not rejected: %v", err)
-	}
-	fresh, _ := m.store.GetInstance(ctx, in.ID)
-	if fresh.ApprovedHash != "" {
-		t.Fatalf("unreviewed content approved: %s", fresh.ApprovedHash)
-	}
-	if err := m.Approve(ctx, in.ID, fresh.ContentHash, "admin"); err != nil {
-		t.Fatalf("approval of current content failed: %v", err)
-	}
-}
-
-type revokedApprovalStore struct {
-	persistence.PagePluginStore
-	revoked *atomic.Bool
-}
-
-func (s revokedApprovalStore) GetInstance(ctx context.Context, id string) (*models.PagePluginInstance, error) {
-	in, err := s.PagePluginStore.GetInstance(ctx, id)
-	if in != nil && s.revoked.Load() {
-		in.ApprovedHash = "revoked"
-	}
-	return in, err
 }

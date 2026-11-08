@@ -12,8 +12,10 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageintegration"
+	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service/authz"
 )
@@ -205,6 +207,9 @@ func (h *Handler) launchPageChat(ctx context.Context, binding pageintegration.Co
 		h.broadcaster.Publish(events.TaskEvent{Type: events.TaskThreadExecutionStarted, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: exec.ID, Message: message})
 	}
 	if err := h.startStreamingResponse(params); err != nil {
+		if params.RuntimeCleanup != nil {
+			params.RuntimeCleanup()
+		}
 		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
 	return chatAttachments, nil
@@ -242,13 +247,28 @@ func (h *Handler) pageChatParams(ctx context.Context, binding pageintegration.Co
 	if err != nil {
 		return streamingResponseParams{}, err
 	}
+	runtime := pageintegration.BuildRuntimeTools(integration, binding.Resolve, pageintegration.Caller{PrincipalID: turn.Principal})
+	var cleanup func()
+	editContext := ""
+	workDir := h.resolveWorkDir(ctx, binding.Page.ProjectID)
+	if binding.Page.Kind == pageplugins.Kind && h.pagePlugins != nil {
+		edits, release, draftDir, err := h.pageEditTools(ctx, binding, turn.Principal)
+		if err != nil {
+			return streamingResponseParams{}, err
+		}
+		workDir = draftDir
+		runtime = llmcontracts.CompositeRuntimeTools(edits, runtime)
+		cleanup = release
+		editContext = "For changes to this custom page, use the provided coding tools directly in its draft bundle, then call apply_page_changes. Do not create a separate task or ask the user to install or approve the page. Read the existing files first. Compile changed backend source with shell and run relevant checks before applying. Versioning is automatic. Only claim an update is live after apply_page_changes succeeds."
+	}
 	return streamingResponseParams{
+		RuntimeCleanup:      cleanup,
 		CancellationContext: binding.Lifetime(), ExecID: exec.ID, TaskID: task.ID, Message: message, Agent: *agent,
 		ChatHistory: filterChatHistory(history, exec.ID), ProjectID: binding.Page.ProjectID, PrincipalID: turn.Principal,
-		SystemContext: combineContexts(h.getPersonalityContext(ctx, binding.Page.ProjectID), pageintegration.RenderContextForPrompt(binding.Page, turn.Snapshot, integration.Operations())),
-		WorkDir:       h.resolveWorkDir(ctx, binding.Page.ProjectID), TaskScopedChat: true, PageConversation: &binding,
+		SystemContext: combineContexts(editContext, combineContexts(h.getPersonalityContext(ctx, binding.Page.ProjectID), pageintegration.RenderContextForPrompt(binding.Page, turn.Snapshot, integration.Operations()))),
+		WorkDir:       workDir, TaskScopedChat: true, PageConversation: &binding,
 		ChatMode: models.ChatModeOrchestrate, Surface: chatcontrol.SurfaceWeb,
-		RuntimeTools: pageintegration.BuildRuntimeTools(integration, binding.Resolve, pageintegration.Caller{PrincipalID: turn.Principal}),
+		RuntimeTools: runtime,
 	}, nil
 }
 

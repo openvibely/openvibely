@@ -14,26 +14,12 @@ func (m *Manager) stageReplacement(ctx context.Context, in *models.PagePluginIns
 	lifecycle := m.instanceLock("lifecycle:" + in.ID)
 	lifecycle.Lock()
 	defer lifecycle.Unlock()
-	// Cancel active calls before waiting for admission, just as disable does.
-	m.mu.Lock()
-	if life := m.lifetimes[in.ID]; life != nil {
-		life.cancel()
-	}
-	m.mu.Unlock()
 	lock := m.instanceLock(in.ID)
 	lock.Lock()
 	defer lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	m.releaseInstance(in.ID)
-	if m.OnDisable != nil {
-		if err := m.OnDisable(ctx, in.ID); err != nil {
-			if in.Enabled {
-				return errors.Join(err, m.enableLocked(ctx, in.ID))
-			}
-			return err
-		}
-	}
+	m.releaseInstanceRuntime(in.ID, false)
 	// Replacement also admits a new reference to the installed package.
 	m.packageMu.Lock()
 	err := m.store.StageReplacement(ctx, in.ID, in.PackageID, pkg.ID)
@@ -59,15 +45,11 @@ func (m *Manager) enableReplacementLocked(ctx context.Context, id string) error 
 	if previous == nil {
 		return err
 	}
-	// Missing administrator consent is a pending update, not a failed launch.
-	if errors.Is(err, ErrApprovalRequired) {
-		return err
-	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err != nil {
 		failed, readErr := m.store.GetInstance(cleanupCtx, id)
-		m.releaseInstance(id)
+		m.releaseInstanceRuntime(id, false)
 		if restoreErr := m.store.FinishReplacement(cleanupCtx, id, true); restoreErr != nil {
 			return errors.Join(err, fmt.Errorf("restoring previous package: %w", restoreErr))
 		}

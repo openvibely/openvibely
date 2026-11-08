@@ -93,3 +93,16 @@ test('Sales ignores old report responses and publishes context before Analyze',a
   assert.equal(loaded.timers[0],null);
   const closed=setup();closed.window.emit('pagehide');assert.equal(closed.timers[0],null);
  });
+
+
+test('page update refreshes only its own page and detaches on navigation',()=>{
+ const h=setup(); let reloads=0;
+ h.window.location={pathname:'/p/current',reload(){reloads++}};
+ h.window.emit('plugin-page-updated',{detail:{task_id:'other'}});
+ assert.equal(reloads,0);
+ h.window.emit('plugin-page-updated',{detail:{task_id:'current'}});
+ assert.equal(reloads,1);
+ h.window.emit('pagehide',{});
+ h.window.emit('plugin-page-updated',{detail:{task_id:'current'}});
+ assert.equal(reloads,1);
+});

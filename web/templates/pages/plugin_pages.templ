@@ -138,7 +138,6 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 // PluginSettingsRow is one project instance shown in settings.
 type PluginSettingsRow struct {
 	Instance      models.PagePluginInstance
-	NeedsApproval bool
 	RunsProcess   bool
 	Permissions   []PluginPermission
 	ProcessStatus string
@@ -223,7 +222,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 								} else {
 									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button></li>
 								}
-								<li><button onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-details-" + r.Instance.ID + "').showModal()"} }>Details / approval</button></li>
+								<li><button onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-details-" + r.Instance.ID + "').showModal()"} }>Details</button></li>
 								<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-delete-" + r.Instance.ID + "').showModal()"} }>Delete</button></li>
 							}
 						</div>
@@ -235,9 +234,6 @@ templ PluginSettingsContent(v PluginSettingsView) {
 							} else {
 								<span class="badge badge-ghost badge-sm">Disabled</span>
 							}
-							if r.NeedsApproval {
-								<span class="badge badge-warning badge-sm">Approval required</span>
-							}
 						</div>
 					</div>
 				</div>
@@ -246,9 +242,6 @@ templ PluginSettingsContent(v PluginSettingsView) {
 					@pluginPermissionList(r.Permissions, r.RunsProcess)
 					if r.RunsProcess {
 						<p class="text-sm">Backend: { r.ProcessStatus }</p>
-					}
-					if r.NeedsApproval {
-						<button class="btn btn-warning" hx-post={ v.URL("/instances/" + r.Instance.ID + "/approve") } hx-vals={ fmt.Sprintf(`{"content_hash":%q}`, r.Instance.ContentHash) } hx-target="#plugin-settings" hx-swap="outerHTML">Approve backend</button>
 					}
 				}
 				@pluginSettingsDialog("plugin-delete-"+r.Instance.ID, "Delete "+r.Instance.Title+"?") {
@@ -420,8 +413,13 @@ templ pluginHostBridgeScript() {
 			try { fetch(retireURL + '&handle=' + encodeURIComponent(handle), {method: 'POST', keepalive: true, credentials: 'same-origin', headers: {'X-OpenVibely-Plugin-Bridge': '1'}}).catch(function () {}); } catch (_) {}
 			window.removeEventListener('message', onMessage);
 			document.removeEventListener('htmx:beforeSwap', onSwap);
+ window.removeEventListener('plugin-page-updated', onPageUpdated);
 			window.removeEventListener('pagehide', onPageHide);
 		}
+		function onPageUpdated(e) {
+ if (e.detail && e.detail.task_id && window.location.pathname === '/p/' + e.detail.task_id) window.location.reload();
+ }
+ window.addEventListener('plugin-page-updated', onPageUpdated);
 		function onPageHide(e) {
 			cleanup();
 			// A bfcache document contains a retired capability. Obtain a new page load

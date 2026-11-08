@@ -93,7 +93,7 @@ func TestPageReplacementPreservesIdentityAndOtherProject(t *testing.T) {
 	}
 }
 
-func TestNativeReplacementApprovalAndRollback(t *testing.T) {
+func TestNativeReplacementStartsAndRollsBack(t *testing.T) {
 	m, _, a, _ := newTestManager(t)
 	ctx := t.Context()
 	source := writeProcessPackage(t)
@@ -103,9 +103,6 @@ func TestNativeReplacementApprovalAndRollback(t *testing.T) {
 	}
 	in, err := m.CreateInstance(ctx, a, pkg.ID, "")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err = approveCurrent(t, m, ctx, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = m.Enable(ctx, in.ID); err != nil {
@@ -131,41 +128,25 @@ func TestNativeReplacementApprovalAndRollback(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(source, "plugin.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := m.PublishToInstance(ctx, source, a, in.PageID, "task", in.ID)
-	if err != nil {
-		t.Fatal(err)
+	_, err = m.PublishToInstance(ctx, source, a, in.PageID, "task", in.ID)
+	if err == nil || !strings.Contains(err.Error(), "previous package restored") {
+		t.Fatalf("expected immediate rollback: %v", err)
 	}
-	if !result.ApprovalRequired || result.Instance.Enabled {
-		t.Fatal("backend executed without approval")
-	}
-	if err = m.Enable(ctx, in.ID); err != ErrApprovalRequired {
-		t.Fatal("approval bypass", err)
-	}
-	pending, err := m.store.GetReplacement(ctx, in.ID)
-	if err != nil || pending == nil {
-		t.Fatal("backup missing", err)
-	}
-	if err = m.RemovePackage(ctx, pkg.ID); err != ErrPackageInUse {
-		t.Fatal("pending backup could be removed", err)
-	}
-	// Recreate the manager to exercise recovery metadata surviving an OV restart.
+	// Restart still loads the restored version, without a new approval.
 	m.StopAll()
 	m = NewManager(m.store, m.root)
 	t.Cleanup(m.StopAll)
-	if err = approveCurrent(t, m, ctx, in.ID); err != nil {
+	if err = m.Enable(ctx, in.ID); err != nil {
 		t.Fatal(err)
-	}
-	if err = m.Enable(ctx, in.ID); err == nil || !strings.Contains(err.Error(), "previous package restored") {
-		t.Fatal("broken backend update accepted", err)
 	}
 	restored, err := m.store.GetInstance(ctx, in.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.PackageID != pkg.ID || !restored.Enabled || restored.StateJSON != `{"n":42}` || restored.ApprovedHash != pkg.ContentHash {
+	if restored.PackageID != pkg.ID || !restored.Enabled || restored.StateJSON != `{"n":42}` {
 		t.Fatalf("rollback lost state: %+v", restored)
 	}
-	if p, _ := m.store.GetPackage(ctx, result.Instance.PackageID); p != nil {
+	if p, _ := m.store.GetPackageByVersion(ctx, man.ID, "2.0.0"); p != nil {
 		t.Fatal("failed replacement not cleaned up")
 	}
 	// A valid approved replacement commits and removes the old package.
@@ -182,11 +163,8 @@ func TestNativeReplacementApprovalAndRollback(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(good, "plugin.json"), bytes, 0600); err != nil {
 		t.Fatal(err)
 	}
-	result, err = m.PublishToInstance(ctx, good, a, in.PageID, "task", in.ID)
+	_, err = m.PublishToInstance(ctx, good, a, in.PageID, "task", in.ID)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err = approveCurrent(t, m, ctx, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = m.Enable(ctx, in.ID); err != nil {

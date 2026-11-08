@@ -158,32 +158,13 @@ func TestCustomPagePublishBoundaries(t *testing.T) {
 		t.Fatal("auditor can publish")
 	}
 }
-func TestCustomPageNativePublicationNeverExecutes(t *testing.T) {
+func TestCustomPageNativePublicationReportsStartupFailure(t *testing.T) {
 	env := setupPluginPages(t)
 	task, root := customPageTask(t, env)
 	customPageBundle(t, root, true)
-	raw, err := env.h.publishCustomPageTool(context.Background(), streamingResponseParams{TaskID: task.ID, ProjectID: task.ProjectID, IsTaskFollowup: true}, json.RawMessage(`{"package_path":"custom-pages/report"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result struct {
-		InstanceID       string `json:"instance_id"`
-		ApprovalRequired bool   `json:"approval_required"`
-		SettingsURL      string `json:"settings_url"`
-		Enabled          bool   `json:"enabled"`
-	}
-	if err = json.Unmarshal([]byte(raw), &result); err != nil {
-		t.Fatal(err)
-	}
-	if !result.ApprovalRequired || result.SettingsURL == "" || result.Enabled {
-		t.Fatalf("bad approval result: %s", raw)
-	}
-	instance, err := env.mgr.Store().GetInstance(context.Background(), result.InstanceID)
-	if err != nil || instance.ApprovedHash != "" || instance.Enabled {
-		t.Fatalf("native backend authorized: %+v %v", instance, err)
-	}
-	if status, _ := env.mgr.ProcessStatus(instance.ID); status != "none" {
-		t.Fatalf("native backend started: %s", status)
+	_, err := env.h.publishCustomPageTool(context.Background(), streamingResponseParams{TaskID: task.ID, ProjectID: task.ProjectID, IsTaskFollowup: true}, json.RawMessage(`{"package_path":"custom-pages/report"}`))
+	if err == nil {
+		t.Fatal("invalid backend startup must fail publication")
 	}
 }
 

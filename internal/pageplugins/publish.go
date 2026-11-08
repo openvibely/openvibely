@@ -15,7 +15,7 @@ type PublishResult struct {
 
 // PublishToInstance installs a task-authored package and registers or updates a
 // page in its owning project. An empty instanceID selects the project instance
-// automatically. It never approves or launches native code. Identical retries
+// automatically. Enabled replacements start their backend immediately. Identical retries
 // reuse the existing package and project instance.
 func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, pageID, by, instanceID string) (*PublishResult, error) {
 	if projectID == "" || projectID == models.AllProjectsID {
@@ -23,6 +23,10 @@ func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, page
 	}
 	m.publishMu.Lock()
 	defer m.publishMu.Unlock()
+	return m.publishLocked(ctx, source, projectID, pageID, by, instanceID)
+}
+
+func (m *Manager) publishLocked(ctx context.Context, source, projectID, pageID, by, instanceID string) (*PublishResult, error) {
 	// Validate the page choice before creating any installed package records.
 	man, _, err := validatePackageFS(os.DirFS(source))
 	if err != nil {
@@ -116,7 +120,7 @@ func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, page
 			return nil, err
 		}
 	}
-	if !man.RunsProcess() {
+	{
 		if enable {
 			err = m.Enable(ctx, instance.ID)
 		} else {
@@ -133,5 +137,5 @@ func (m *Manager) PublishToInstance(ctx context.Context, source, projectID, page
 	if instance == nil {
 		return nil, ErrNotFound
 	}
-	return &PublishResult{Instance: instance, ApprovalRequired: man.RunsProcess() && !instance.Enabled}, nil
+	return &PublishResult{Instance: instance, ApprovalRequired: false}, nil
 }

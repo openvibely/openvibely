@@ -25,12 +25,12 @@ const (
 	MaxOperations    = 32
 )
 
-// Known permissions. Unknown permissions are rejected so approvals stay meaningful.
+// Known permissions. Unknown permissions are rejected so capability declarations stay meaningful.
 const (
 	PermissionStorage = "storage"      // persist instance state
 	PermissionEvents  = "events"       // publish/receive refresh events
 	PermissionAgent   = "agent"        // legacy declaration; side chat is always available
-	PermissionBackend = "backend.exec" // run a local backend process (requires admin approval)
+	PermissionBackend = "backend.exec" // run a local backend process when the page is enabled
 )
 
 var knownPermissions = map[string]string{

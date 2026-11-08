@@ -26,14 +26,12 @@ const Kind = "plugin"
 const HandleTTL = 12 * time.Hour
 
 var (
-	ErrNotFound         = errors.New("plugin page not found")
-	ErrDisabled         = errors.New("plugin page is disabled")
-	ErrApprovalRequired = errors.New("administrator approval required before this plugin's backend can run")
-	ErrApprovalStale    = errors.New("this page changed since you loaded Settings; review the current version and approve again")
-	ErrPackageChanged   = errors.New("plugin page was updated; reload it to use the current version")
-	ErrContentChanged   = errors.New("plugin package content no longer matches the approved hash")
-	ErrVersionConflict  = errors.New("this plugin version is already installed with different content; bump the version")
-	ErrPackageInUse     = errors.New("package still has project instances")
+	ErrNotFound        = errors.New("plugin page not found")
+	ErrDisabled        = errors.New("plugin page is disabled")
+	ErrPackageChanged  = errors.New("plugin page was updated; reload it to use the current version")
+	ErrContentChanged  = errors.New("plugin package content no longer matches the installed hash")
+	ErrVersionConflict = errors.New("this plugin version is already installed with different content; bump the version")
+	ErrPackageInUse    = errors.New("package still has project instances")
 )
 
 // BuiltinRequest is passed to host-implemented example backends.
@@ -290,34 +288,6 @@ func (m *Manager) CreateInstance(ctx context.Context, projectID, packageID, page
 	return m.store.GetInstance(ctx, in.ID)
 }
 
-// NeedsApproval reports whether the instance must be approved for its current package content.
-func (m *Manager) NeedsApproval(in *models.PagePluginInstance, man *Manifest) bool {
-	return man.RunsProcess() && in.ApprovedHash != in.ContentHash
-}
-
-// Approve records administrator approval for the exact content hash the
-// administrator reviewed; it fails if the page now uses different content.
-func (m *Manager) Approve(ctx context.Context, instanceID, reviewedHash, approvedBy string) error {
-	if reviewedHash == "" {
-		return ErrApprovalStale
-	}
-	in, err := m.store.GetInstance(ctx, instanceID)
-	if err != nil {
-		return err
-	}
-	if in == nil {
-		return ErrNotFound
-	}
-	ok, err := m.store.ApproveInstanceIfContent(ctx, instanceID, reviewedHash, approvedBy)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrApprovalStale
-	}
-	return nil
-}
-
 // Enable turns an instance on, starting its backend process when it has one.
 func (m *Manager) Enable(ctx context.Context, instanceID string) error {
 	lifecycle := m.instanceLock("lifecycle:" + instanceID)
@@ -334,9 +304,6 @@ func (m *Manager) enableLocked(ctx context.Context, instanceID string) error {
 	in, pkg, man, err := m.load(ctx, instanceID)
 	if err != nil {
 		return err
-	}
-	if m.NeedsApproval(in, man) {
-		return ErrApprovalRequired
 	}
 	if err := m.store.SetInstanceEnabled(ctx, instanceID, true); err != nil {
 		return err
@@ -404,8 +371,12 @@ func (m *Manager) ReleaseProject(projectID string) {
 }
 
 func (m *Manager) releaseInstance(instanceID string) {
+	m.releaseInstanceRuntime(instanceID, true)
+}
+
+func (m *Manager) releaseInstanceRuntime(instanceID string, cancelConversation bool) {
 	m.mu.Lock()
-	if life := m.lifetimes[instanceID]; life != nil {
+	if life := m.lifetimes[instanceID]; life != nil && cancelConversation {
 		life.cancel()
 	}
 	entry := m.procs[instanceID]
@@ -583,11 +554,8 @@ func (m *Manager) instanceLock(id string) *sync.Mutex {
 }
 
 func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstance, pkg *models.PagePluginPackage, man *Manifest) (*Process, error) {
-	if m.NeedsApproval(in, man) || in.ApprovedHash != pkg.ContentHash {
-		return nil, ErrApprovalRequired
-	}
 	m.mu.Lock()
-	if e := m.procs[in.ID]; e != nil && e.hash == in.ApprovedHash && e.proc.Status() != "stopped" {
+	if e := m.procs[in.ID]; e != nil && e.hash == pkg.ContentHash && e.proc.Status() != "stopped" {
 		m.mu.Unlock()
 		return e.proc, nil
 	}
@@ -608,7 +576,7 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 		prev.proc.CloseNotifications()
 	}
 	instanceID, projectID := in.ID, in.ProjectID
-	packageID, approvedHash, installPath := pkg.ID, pkg.ContentHash, pkg.InstallPath
+	packageID, installedHash, installPath := pkg.ID, pkg.ContentHash, pkg.InstallPath
 	proc := NewProcess(ProcessSpec{
 		// Cached processes also pass through this hook on every actual launch.
 		// Load state/config from the same fresh record used for authorization;
@@ -621,14 +589,14 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 			if fresh == nil || !fresh.Enabled || fresh.ProjectID != projectID {
 				return nil, ErrDisabled
 			}
-			if fresh.PackageID != packageID || fresh.ApprovedHash != approvedHash || fresh.ContentHash != approvedHash {
-				return nil, ErrApprovalRequired
+			if fresh.PackageID != packageID || fresh.ContentHash != installedHash {
+				return nil, ErrPackageChanged
 			}
 			onDisk, err := HashTree(os.DirFS(installPath))
 			if err != nil {
 				return nil, err
 			}
-			if onDisk != approvedHash {
+			if onDisk != installedHash {
 				return nil, ErrContentChanged
 			}
 			return map[string]any{
@@ -653,7 +621,7 @@ func (m *Manager) ensureProcess(ctx context.Context, in *models.PagePluginInstan
 	if old := m.procs[in.ID]; old != nil {
 		go old.proc.Stop()
 	}
-	m.procs[in.ID] = &procEntry{proc: proc, projectID: in.ProjectID, hash: in.ApprovedHash}
+	m.procs[in.ID] = &procEntry{proc: proc, projectID: in.ProjectID, hash: pkg.ContentHash}
 	m.mu.Unlock()
 	return proc, nil
 }

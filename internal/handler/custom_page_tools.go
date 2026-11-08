@@ -105,10 +105,7 @@ func (h *Handler) publishCustomPageTool(ctx context.Context, params streamingRes
 		out.SettingsURL = "/settings/plugin-pages?project_id=" + url.QueryEscape(task.ProjectID)
 		out.Message = "Page updated but left disabled because an administrator disabled it. Only an administrator can re-enable it in Plugin pages settings; do not claim the page is live."
 	}
-	if result.ApprovalRequired {
-		out.SettingsURL = "/settings/plugin-pages?project_id=" + url.QueryEscape(task.ProjectID)
-		out.Message = "Page installed. Its native backend has NOT been executed. An administrator must approve the package and enable the page in Plugin pages settings. Return the approval link; do not claim the page is live."
-	}
+
 	raw, err := json.Marshal(out)
 	return string(raw), err
 }
