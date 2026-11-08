@@ -44,3 +44,21 @@ func TestBrowserFunctional_ChangesSplitActionPreferencesAndOneClick(t *testing.T
 		b.waitFor("button typography matches view controls", `(()=>{const a=getComputedStyle(document.querySelector('[data-changes-primary]')),v=getComputedStyle(document.querySelector('#diff-btn-inline'));return String(a.fontFamily===v.fontFamily&&a.fontSize===v.fontSize&&a.fontWeight===v.fontWeight&&a.height===v.height);})()`, "true")
 	})
 }
+
+func TestBrowserFunctional_ChangesSplitActionPartialDiscovery(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-partial-discovery", func(b *composerFocusCDP) {
+		b.waitFor("initial settings", `String(document.querySelector('[data-changes-primary]')?.disabled===false)`, "true")
+		b.evaluate(`(()=>{const original=window.fetch;window.fetch=async function(url,options){const response=await original(url,options);if(String(url).endsWith('/action-settings')&&(!options?.method||options.method==='GET')){const data=await response.json();data.repositories=data.repositories.filter(r=>!r.upstream);data.github_error='Upstream repository is unavailable';return new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}});}return response;};window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});return 'ok';})()`)
+		b.waitFor("unavailable upstream retained", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]')?.disabled&&document.querySelector('[data-changes-repo] option:checked')?.textContent.includes('Unavailable'))`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.evaluate(`(()=>{const repo=document.querySelector('[data-changes-repo]');repo.value='https://github.com/me/repo';repo.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';})()`)
+		b.waitFor("fork action enabled despite warning", `String(!document.querySelector('[data-changes-primary]').disabled&&document.querySelector('[data-changes-primary]').textContent==='Create PR to me/repo'&&!document.querySelector('[data-changes-error]').hidden)`, "true")
+		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
+		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.partialActions=s));'ok'`)
+		b.click(`[data-changes-primary]`)
+		b.waitFor("fork PR submitted", `String(window.partialActions?.actions.length===1&&window.partialActions.actions[0].target_repo==='https://github.com/me/repo')`, "true")
+	})
+}

@@ -108,7 +108,7 @@ templ changesSplitActionScript() {
     const names={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash into '};
     primary.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to '+choice.name):''):(names[prefs.method]||'Merge into ')+prefs.local_branch;
     primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):prefs.local_branch;
-    primary.disabled=busy||saveCount>0||saveFailed||(pr?(!choice||!prefs.branch||!!githubError):(!canLocal||!localValid||!methodValid));
+    primary.disabled=busy||saveCount>0||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||!methodValid));
     const descriptions={merge:'Combine the task branch with the target using a merge commit.',ff:'Move the target forward only if its history has not diverged.',squash:'Combine the task changes into one commit on the target branch.',rebase:'Replay task commits onto the target. This does not merge them into the target branch.'};
     find('[data-changes-method-help]').textContent=descriptions[prefs.method]||'This method is unavailable for this task.';
     position();
@@ -144,6 +144,7 @@ templ changesSplitActionScript() {
     const data=await request(endpoint+'action-settings');if(!root.isConnected)return;prefs=data.preferences;choices=data.repositories||[];linkedTarget=data.linked_pr||null;githubError=data.github_error||'';
     if(linkedTarget&&!choices.some(c=>c.url===linkedTarget.repository))choices.push({url:linkedTarget.repository,name:linkedTarget.repository.replace(/^https:\/\//,''),default_branch:linkedTarget.branch});
     fill(repo,choices.map(c=>({value:c.url,label:c.name+(c.upstream?' · Upstream':choices.some(r=>r.upstream)?' · This fork':'')})));
+    if(prefs.repository&&!choices.some(c=>c.url===prefs.repository)){const option=document.createElement('option');option.value=prefs.repository;option.textContent=prefs.repository.replace(/^https:\/\//,'')+' · Unavailable';option.disabled=true;repo.append(option);}
     fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));
     showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;render();if(prefs.mode==='pr')loadBranches(true);
    }catch(err){showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}

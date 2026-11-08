@@ -95,7 +95,7 @@ func (h *Handler) changesRepositories(ctx context.Context, project *models.Proje
 	if metadata.Parent != nil {
 		parentData, err := provider.RepositoryOptions(ctx, metadata.Parent)
 		if err != nil {
-			return nil, repo, err
+			return choices, repo, fmt.Errorf("Upstream repository is unavailable: %w", err)
 		}
 		choices = append([]changesRepositoryChoice{{URL: metadata.Parent.HTMLURL, Name: metadata.Parent.FullName, Upstream: true, DefaultBranch: parentData.DefaultBranch}}, choices...)
 	}
@@ -119,7 +119,7 @@ func (h *Handler) GetChangesActionSettings(c echo.Context) error {
 	if source != nil || project.RepoURL != "" {
 		prefs.Mode = "pr"
 	}
-	if githubErr == nil && len(choices) > 0 {
+	if len(choices) > 0 {
 		prefs.Mode = "pr"
 		prefs.Repository = choices[0].URL
 		prefs.Branch = choices[0].DefaultBranch
@@ -176,7 +176,7 @@ func (h *Handler) validateChangesPreferences(ctx context.Context, project *model
 		return fmt.Errorf("local target branch no longer exists")
 	}
 	choices, source, err := h.changesRepositories(ctx, project)
-	if err != nil {
+	if err != nil && len(choices) == 0 {
 		return err
 	}
 	for _, choice := range choices {
@@ -228,7 +228,7 @@ func (h *Handler) GetChangesActionBranches(c echo.Context) error {
 		return err
 	}
 	choices, source, err := h.changesRepositories(c.Request().Context(), project)
-	if err != nil {
+	if err != nil && len(choices) == 0 {
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
 	requested := c.QueryParam("repository")
