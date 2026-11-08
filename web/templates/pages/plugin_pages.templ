@@ -86,10 +86,18 @@ templ PluginPageContent(v PluginPageView) {
 
 // PluginNavEntry is one enabled page instance in the left rail.
 type PluginNavEntry struct {
+	Icon         string
 	InstanceID   string
 	Title        string
 	ProjectID    string
 	ProjectLabel string
+}
+
+func pluginNavProjectSuffix(e PluginNavEntry, showProject bool) string {
+	if showProject {
+		return " · " + e.ProjectLabel
+	}
+	return ""
 }
 
 templ PluginNav(entries []PluginNavEntry, showProject bool) {
@@ -102,10 +110,17 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 			<a
 				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID)) }
 				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID) }
+				aria-label={ e.Title + pluginNavProjectSuffix(e, showProject) }
+				data-tip={ e.Title + pluginNavProjectSuffix(e, showProject) }
+				data-tip-side="right"
 				hx-target="#main-content"
 				hx-push-url="true"
 			>
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16M4 12h16M4 19h10"></path></svg>
+				if e.Icon != "" {
+					<span class="h-4 w-4 shrink-0 inline-flex items-center justify-center" aria-hidden="true">{ e.Icon }</span>
+				} else {
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16M4 12h16M4 19h10"></path></svg>
+				}
 				<span class="sidebar-text">
 					{ e.Title }
 					if showProject {

@@ -63,6 +63,8 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  await wait(()=>document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]'),'Enabled Sales missing at startup');
  const entry=document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]');
  if(!entry.textContent.includes('Sales'))throw Error('Sales label missing');
+ if(entry.querySelector('a').getAttribute('data-tip')!=='Sales')throw Error('Sales tooltip missing');
+ if(!entry.textContent.includes('📊'))throw Error('Sales custom icon missing');
  if(!entry.getClientRects().length)throw Error('Sales entry hidden: '+[entry,...(function*(){let p=entry.parentElement;while(p){yield p;p=p.parentElement}})()].map(e=>e.tagName+'#'+e.id+'.'+e.className+':'+getComputedStyle(e).display).join(' / '));
  const clickAction=async action=>{
   await wait(()=>document.querySelector('#plugin-settings button[hx-post*="/'+action+'?"]'),'Missing '+action+' control');

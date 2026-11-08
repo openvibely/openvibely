@@ -270,7 +270,24 @@ func (h *Handler) PluginPagesNav(c echo.Context) error {
 		if label == "" {
 			label = in.ProjectID
 		}
-		entries = append(entries, pages.PluginNavEntry{InstanceID: in.ID, Title: in.Title, ProjectID: in.ProjectID, ProjectLabel: label})
+		icon := ""
+		pkg, err := h.pagePlugins.Store().GetPackage(c.Request().Context(), in.PackageID)
+		if err != nil {
+			return err
+		}
+		if pkg != nil {
+			manifest, err := h.pagePlugins.Manifest(pkg)
+			if err != nil {
+				return err
+			}
+			if page, ok := manifest.Page(in.PageID); ok {
+				icon = strings.TrimSpace(page.Icon)
+				if icon == "chart" {
+					icon = "📊"
+				}
+			}
+		}
+		entries = append(entries, pages.PluginNavEntry{InstanceID: in.ID, Title: in.Title, Icon: icon, ProjectID: in.ProjectID, ProjectLabel: label})
 	}
 	return render(c, http.StatusOK, pages.PluginNav(entries, projectID == models.AllProjectsID))
 }
