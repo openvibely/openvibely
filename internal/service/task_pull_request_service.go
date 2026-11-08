@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -36,14 +39,16 @@ type TaskPullRequestService struct {
 }
 
 type OpenTaskPullRequestOptions struct {
-	TargetRepoURL string
-	Title         string
-	Body          string
-	Base          string
-	Draft         bool
-	CommitMessage string
-	IssueNumber   *int
-	IssueURL      string
+	closingIssueRef         string
+	previousClosingIssueRef string
+	TargetRepoURL           string
+	Title                   string
+	Body                    string
+	Base                    string
+	Draft                   bool
+	CommitMessage           string
+	IssueNumber             *int
+	IssueURL                string
 	// PreserveNeedsRepublish keeps a durable startup-sync publication marker
 	// until the caller has atomically completed the execution.
 	PreserveNeedsRepublish bool
@@ -382,6 +387,14 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		validatedExistingPR = livePR
 	}
 
+	issueOpts := opts
+	if existingPR != nil {
+		if opts.IssueNumber != nil && existingPR.IssueNumber != nil && *opts.IssueNumber == *existingPR.IssueNumber && strings.TrimSpace(issueOpts.IssueURL) == "" {
+			issueOpts.IssueURL = existingPR.IssueURL
+		}
+		opts.previousClosingIssueRef = taskIssueClosingRef(OpenTaskPullRequestOptions{IssueNumber: existingPR.IssueNumber, IssueURL: existingPR.IssueURL}, headRepo.HTMLURL)
+	}
+	opts.closingIssueRef = taskIssueClosingRef(issueOpts, headRepo.HTMLURL)
 	createReq := s.buildCreatePullRequestRequest(ctx, project, task, opts, repoRef)
 	if existingPR == nil && opts.TargetRepoURL != "" {
 		if validator, ok := s.github.(interface {
@@ -567,38 +580,81 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	}, nil
 }
 
+// Resolve the issue against its source, never the PR destination.
+func taskIssueClosingRef(opts OpenTaskPullRequestOptions, sourceRepoURL string) string {
+	if raw := strings.TrimSpace(opts.IssueURL); raw != "" {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return ""
+		}
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) != 4 || parts[2] != "issues" {
+			return ""
+		}
+		n, err := strconv.Atoi(parts[3])
+		if err != nil || n <= 0 || (opts.IssueNumber != nil && *opts.IssueNumber != n) {
+			return ""
+		}
+		u.RawQuery, u.Fragment = "", ""
+		return strings.TrimRight(u.String(), "/")
+	}
+	if opts.IssueNumber == nil || *opts.IssueNumber <= 0 {
+		return ""
+	}
+	repo, err := ParseGitHubRepoURL(sourceRepoURL)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s/issues/%d", strings.TrimRight(repo.HTMLURL, "/"), *opts.IssueNumber)
+}
+
+// Qualify only closing references for the linked issue; leave other prose intact.
+func qualifyIssueClosingReferences(body string, opts OpenTaskPullRequestOptions) string {
+	if opts.IssueNumber == nil || opts.closingIssueRef == "" {
+		return body
+	}
+	pattern := regexp.MustCompile(fmt.Sprintf(`(?i)(\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\s+)#%d(\b)`, *opts.IssueNumber))
+	return pattern.ReplaceAllStringFunc(body, func(match string) string {
+		i := strings.LastIndex(match, "#")
+		return match[:i] + opts.closingIssueRef
+	})
+}
+
 func reusedPullRequestBody(existingBody, defaultBody string, previousIssueNumber *int, opts OpenTaskPullRequestOptions) (string, bool) {
 	if body := strings.TrimSpace(opts.Body); body != "" {
-		return body, true
+		return qualifyIssueClosingReferences(body, opts), true
 	}
-	if opts.IssueNumber == nil {
+	if opts.closingIssueRef == "" {
 		return "", false
 	}
 
-	closingLine := fmt.Sprintf("Closes #%d", *opts.IssueNumber)
+	closingLine := "Closes " + opts.closingIssueRef
 	originalBody := strings.TrimSpace(existingBody)
-	body := originalBody
-	if previousIssueNumber != nil && *previousIssueNumber != *opts.IssueNumber {
-		body = removePullRequestIssueClosingLine(body, *previousIssueNumber)
+	body := qualifyIssueClosingReferences(originalBody, opts)
+	if previousIssueNumber != nil && opts.IssueNumber != nil && (*previousIssueNumber != *opts.IssueNumber || (opts.previousClosingIssueRef != "" && opts.previousClosingIssueRef != opts.closingIssueRef)) {
+		body = removePullRequestIssueClosingLine(body, fmt.Sprintf("#%d", *previousIssueNumber))
+		if opts.previousClosingIssueRef != "" {
+			body = removePullRequestIssueClosingLine(body, opts.previousClosingIssueRef)
+		}
 	}
-	if pullRequestBodyClosesIssue(body, *opts.IssueNumber) {
+	if pullRequestBodyClosesIssue(body, opts.closingIssueRef) {
 		if body != originalBody {
 			return body, true
 		}
 		return "", false
 	}
 	if body == "" {
-		return strings.TrimSpace(defaultBody), true
+		return qualifyIssueClosingReferences(strings.TrimSpace(defaultBody), opts), true
 	}
 	return body + "\n\n" + closingLine, true
 }
 
-func removePullRequestIssueClosingLine(body string, issueNumber int) string {
+func removePullRequestIssueClosingLine(body string, issueRef string) string {
 	lines := strings.Split(body, "\n")
 	kept := lines[:0]
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
-		if pullRequestClosingLineMatchesIssue(line, issueNumber) {
+		if pullRequestClosingLineMatchesIssue(line, issueRef) {
 			if i+1 < len(lines) && len(kept) > 0 && strings.TrimSpace(lines[i+1]) == "" && strings.TrimSpace(kept[len(kept)-1]) == "" {
 				i++
 			}
@@ -609,7 +665,7 @@ func removePullRequestIssueClosingLine(body string, issueNumber int) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
-func pullRequestClosingLineMatchesIssue(line string, issueNumber int) bool {
+func pullRequestClosingLineMatchesIssue(line string, issueRef string) bool {
 	fields := strings.Fields(strings.TrimSpace(line))
 	if len(fields) == 3 && (fields[0] == "-" || fields[0] == "*" || fields[0] == "+") {
 		fields = fields[1:]
@@ -621,14 +677,13 @@ func pullRequestClosingLineMatchesIssue(line string, issueNumber int) bool {
 	switch keyword {
 	case "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved":
 		ref := strings.Trim(fields[1], "*_`.,;:[]()")
-		return strings.EqualFold(ref, fmt.Sprintf("#%d", issueNumber))
+		return strings.EqualFold(ref, issueRef)
 	default:
 		return false
 	}
 }
 
-func pullRequestBodyClosesIssue(body string, issueNumber int) bool {
-	issueRef := fmt.Sprintf("#%d", issueNumber)
+func pullRequestBodyClosesIssue(body string, issueRef string) bool {
 	for _, line := range strings.Split(body, "\n") {
 		fields := strings.Fields(line)
 		for i := 0; i+1 < len(fields); i++ {
@@ -670,15 +725,18 @@ func (s *TaskPullRequestService) buildCreatePullRequestRequest(ctx context.Conte
 	if title == "" {
 		title = task.Title
 	}
-	body := strings.TrimSpace(opts.Body)
+	if opts.closingIssueRef == "" {
+		opts.closingIssueRef = taskIssueClosingRef(opts, project.RepoURL)
+	}
+	body := qualifyIssueClosingReferences(strings.TrimSpace(opts.Body), opts)
 	if body == "" {
 		summary := strings.TrimSpace(task.Title)
 		if opts.IssueNumber != nil {
 			summary = strings.TrimSpace(strings.TrimSuffix(summary, fmt.Sprintf("(#%d)", *opts.IssueNumber)))
 		}
 		body = "## Summary\n- " + summary
-		if opts.IssueNumber != nil {
-			body += fmt.Sprintf("\n\nCloses #%d", *opts.IssueNumber)
+		if opts.closingIssueRef != "" {
+			body += "\n\nCloses " + opts.closingIssueRef
 		}
 	}
 	base := strings.TrimSpace(opts.Base)

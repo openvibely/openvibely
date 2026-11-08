@@ -58,6 +58,10 @@ func TestForkPullRequestPublishesToForkAndKeepsLinkedDestination(t *testing.T) {
 		},
 		createPRFn: func(_ context.Context, repo *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			createCount++
+			if req.Body != "Login fix\n\nCloses https://github.com/contributor/fork/issues/42" {
+				t.Fatalf("wrong issue source: %q", req.Body)
+			}
+			pr.Body = req.Body
 			if repo.FullName != target.FullName || req.Head != "contributor:"+task.WorktreeBranch || req.HeadRepo != "fork" || req.Base != "release" {
 				t.Fatalf("wrong PR destination: %s %+v", repo.FullName, req)
 			}
@@ -77,7 +81,8 @@ func TestForkPullRequestPublishesToForkAndKeepsLinkedDestination(t *testing.T) {
 		},
 	}}
 	svc := NewTaskPullRequestService(provider, env.Stores.TaskPullRequests)
-	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{TargetRepoURL: target.HTMLURL, Base: "release"})
+	issueNumber := 42
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{TargetRepoURL: target.HTMLURL, Base: "release", IssueNumber: &issueNumber, Body: "Login fix\n\nCloses #42"})
 	if err != nil {
 		t.Fatal(err)
 	}
