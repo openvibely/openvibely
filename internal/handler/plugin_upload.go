@@ -1,9 +1,9 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,19 +23,20 @@ func (h *Handler) PluginSettingsUpload(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	form, err := c.MultipartForm()
-	if c.Request().MultipartForm != nil {
-		defer c.Request().MultipartForm.RemoveAll()
-	}
-	if err != nil {
-		return h.renderPluginSettings(c, projectID, "", fmt.Errorf("choose a package folder up to 64 MiB"))
-	}
-	root, err := os.MkdirTemp("", "ov-plugin-upload-")
+	work, err := os.MkdirTemp("", "ov-plugin-upload-")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(root)
-	if err = stagePluginUpload(root, form.File["files"], form.Value["paths"]); err != nil {
+	defer os.RemoveAll(work)
+	files, paths, err := readPluginUpload(c.Request(), work)
+	if err != nil {
+		return h.renderPluginSettings(c, projectID, "", err)
+	}
+	root := filepath.Join(work, "package")
+	if err = os.Mkdir(root, 0700); err != nil {
+		return err
+	}
+	if err = stagePluginUpload(root, files, paths); err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
 	pkg, err := h.pagePlugins.InstallFromDir(c.Request().Context(), root, by)
@@ -47,7 +48,7 @@ func (h *Handler) PluginSettingsUpload(c echo.Context) error {
 
 // Browser directory uploads carry relative paths separately because multipart
 // filenames discard directories. Never trust either field as a filesystem path.
-func stagePluginUpload(root string, files []*multipart.FileHeader, paths []string) error {
+func stagePluginUpload(root string, files []pluginUploadFile, paths []string) error {
 	if len(files) == 0 || len(files) > pageplugins.MaxPackageFiles || len(paths) != len(files) {
 		return fmt.Errorf("choose a package folder containing plugin.json (maximum %d files)", pageplugins.MaxPackageFiles)
 	}
@@ -79,7 +80,7 @@ func stagePluginUpload(root string, files []*multipart.FileHeader, paths []strin
 			return fmt.Errorf("duplicate package path: %s", rel)
 		}
 		seen[rel] = true
-		total += header.Size
+		total += header.size
 		if total > pageplugins.MaxPackageBytes {
 			return fmt.Errorf("package exceeds 64 MiB")
 		}
@@ -87,26 +88,8 @@ func stagePluginUpload(root string, files []*multipart.FileHeader, paths []strin
 		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 			return err
 		}
-		src, err := header.Open()
-		if err != nil {
+		if err := os.Rename(header.path, target); err != nil {
 			return err
-		}
-		dst, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			src.Close()
-			return err
-		}
-		n, copyErr := io.Copy(dst, io.LimitReader(src, header.Size+1))
-		src.Close()
-		closeErr := dst.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if n != header.Size {
-			return fmt.Errorf("invalid upload size")
 		}
 	}
 	if !seen["plugin.json"] {
@@ -134,4 +117,80 @@ func stagePluginUpload(root string, files []*multipart.FileHeader, paths []strin
 		}
 	}
 	return nil
+}
+
+// Spool each file independently rather than using ReadForm's global 1,000-part
+// limit. File count, aggregate content, metadata, and HTTP body remain bounded.
+type pluginUploadFile struct {
+	path string
+	size int64
+}
+
+func readPluginUpload(r *http.Request, work string) ([]pluginUploadFile, []string, error) {
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid folder upload")
+	}
+	var files []pluginUploadFile
+	var paths []string
+	var total int64
+	metadata := 0
+	fail := func(err error) ([]pluginUploadFile, []string, error) {
+		var limit *http.MaxBytesError
+		if errors.As(err, &limit) {
+			return nil, nil, fmt.Errorf("upload exceeds the request size limit (64 MiB of package files plus metadata)")
+		}
+		return nil, nil, fmt.Errorf("invalid folder upload: %w", err)
+	}
+	for parts := 0; ; parts++ {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if parts >= 2*pageplugins.MaxPackageFiles+16 {
+			return nil, nil, fmt.Errorf("too many upload fields")
+		}
+		if part.FormName() == "files" && part.FileName() != "" {
+			if len(files) >= pageplugins.MaxPackageFiles {
+				return nil, nil, fmt.Errorf("too many files: maximum %d", pageplugins.MaxPackageFiles)
+			}
+			file, err := os.CreateTemp(work, "file-")
+			if err != nil {
+				return fail(err)
+			}
+			n, copyErr := io.Copy(file, io.LimitReader(part, int64(pageplugins.MaxPackageBytes)-total+1))
+			closeErr := file.Close()
+			if copyErr != nil {
+				return fail(copyErr)
+			}
+			if closeErr != nil {
+				return fail(closeErr)
+			}
+			total += n
+			if total > pageplugins.MaxPackageBytes {
+				return nil, nil, fmt.Errorf("package files exceed 64 MiB")
+			}
+			files = append(files, pluginUploadFile{file.Name(), n})
+		} else {
+			data, err := io.ReadAll(io.LimitReader(part, 8193))
+			if err != nil {
+				return fail(err)
+			}
+			metadata += len(data)
+			if len(data) > 8192 || metadata > 2<<20 {
+				return nil, nil, fmt.Errorf("upload metadata is too large")
+			}
+			if part.FormName() == "paths" {
+				if len(paths) >= pageplugins.MaxPackageFiles {
+					return nil, nil, fmt.Errorf("too many files: maximum %d", pageplugins.MaxPackageFiles)
+				}
+				paths = append(paths, string(data))
+			}
+		}
+		part.Close()
+	}
+	return files, paths, nil
 }
