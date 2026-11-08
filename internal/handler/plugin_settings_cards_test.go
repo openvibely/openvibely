@@ -35,6 +35,8 @@ func TestPluginSettingsCardsAndDialogs(t *testing.T) {
 	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/instances/"+env.inA.ID+"/remove?project_id="+env.projA.ID, "", headers)
 	require.Equal(t, 200, rec.Code)
 	require.NotContains(t, rec.Body.String(), `data-plugin-instance-row=`)
+	require.Contains(t, rec.Body.String(), `data-plugin-package=`)
+	require.Contains(t, rec.Body.String(), "Available to add")
 	rec = env.do(t, http.MethodGet, "/settings/plugin-pages?project_id="+env.projB.ID, "", nil)
 	require.Contains(t, rec.Body.String(), `data-plugin-instance-row=`)
 

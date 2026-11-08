@@ -43,6 +43,10 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
   if(!document.getElementById(id).open)throw Error('Dialog did not open '+id);
   document.getElementById(id).close();
  }
+ const installModal=document.getElementById('plugin-install-modal');
+ if(installModal.querySelector('[data-plugin-package]')||installModal.textContent.includes('Installed packages'))throw Error('Install modal contains package management');
+ const templateModal=document.getElementById('plugin-template-modal');
+ if(!templateModal.querySelector('select[name="template_key"]')||!templateModal.querySelector('.modal-action button[type="submit"]'))throw Error('Template modal does not use standard selector and footer');
  const details=document.querySelector('[id^="plugin-details-"]');
  details.showModal();details.close();
  const search=document.querySelector('#plugin-settings [data-card-search]');

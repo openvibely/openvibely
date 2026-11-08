@@ -882,10 +882,37 @@ func (h *Handler) renderPluginSettings(c echo.Context, projectID, notice string,
 	v.Search = strings.TrimSpace(c.QueryParam("search"))
 	v.Sort = c.QueryParam("sort")
 	v.Enabled = c.QueryParam("enabled")
-	v.OpenInstall = c.FormValue("open_install") == "true"
+	v.OpenInstall = c.FormValue("open_install") == "true" && actionErr != nil
 	if v.OpenInstall && actionErr != nil {
 		v.InstallPath = c.FormValue("path")
 	}
+	// Show installed pages once. Packages without a page here remain manageable
+	// on the card list instead of being hidden inside the install modal.
+	used := make(map[string]bool)
+	for _, row := range v.Instances {
+		used[row.Instance.PackageID+":"+row.Instance.PageID] = true
+	}
+	available := v.Packages[:0]
+	for _, pkg := range v.Packages {
+		remaining := pkg.Pages[:0]
+		for _, page := range pkg.Pages {
+			if !used[pkg.Package.ID+":"+page] {
+				remaining = append(remaining, page)
+			}
+		}
+		pkg.Pages = remaining
+		if len(pkg.Pages) > 0 && v.Enabled == "" && strings.Contains(strings.ToLower(pkg.Package.Name+" "+pkg.Package.PluginID), strings.ToLower(v.Search)) {
+			available = append(available, pkg)
+		}
+	}
+	v.Packages = available
+	sort.SliceStable(v.Packages, func(i, j int) bool {
+		a, b := strings.ToLower(v.Packages[i].Package.Name), strings.ToLower(v.Packages[j].Package.Name)
+		if v.Sort == "name_desc" {
+			return a > b
+		}
+		return a < b
+	})
 	if v.Search != "" || v.Enabled != "" {
 		filtered := v.Instances[:0]
 		for _, row := range v.Instances {
