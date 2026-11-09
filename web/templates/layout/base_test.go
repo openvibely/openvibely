@@ -1181,8 +1181,7 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 	// 1,1,0 beats Tailwind CDN's .w-full (0,1,0) which injects after the <style> block:
 	//   - width: calc(100% + 16px)  — only needs to recover the left shift, no extra right
 	for _, expected := range []string{
-		"#chat-messages,",
-		"#task-thread-messages,",
+		"[data-chat-transcript],",
 		"[data-thread-refresh-preview] {",
 		".chat-input-shadow-gutter,",
 		"margin-left: -16px;",

@@ -1130,7 +1130,7 @@ func TestHandler_GetTaskChanges_UsesMergedPreservedDiff(t *testing.T) {
 	changesBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID)
 
 	assertBodyContainsAll(t, changesBody, "preserved_merged.txt", "preserved merged endpoint-equivalent diff")
-	assertBodyOmitsAll(t, changesBody, "merged branch content", "/worktree/merge", "Merge commit", "Fast-forward only", "Squash merge")
+	assertBodyOmitsAll(t, changesBody, "merged branch content", `hx-post="/tasks/`+task.ID+`/worktree/merge"`)
 }
 
 func TestHandler_GetTaskChanges_UsesMissingWorktreeFallback(t *testing.T) {

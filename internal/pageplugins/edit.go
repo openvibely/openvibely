@@ -115,6 +115,11 @@ func (m *Manager) replacePageSources(instanceID, source string) error {
 		if err != nil {
 			return err
 		}
+		// Unlink the old inode before writing: Linux forbids truncating a running
+		// executable. The running process can keep its old inode until restart.
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 		if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
 			return err
 		}

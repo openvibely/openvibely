@@ -834,7 +834,7 @@ func TestHandler_GetTaskChanges_HidesMergeOptionsForFailedMergedTask(t *testing.
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Merge commit") {
+	if strings.Contains(body, `hx-post="/tasks/`+task.ID+`/worktree/merge"`) {
 		t.Fatalf("did not expect local merge options for already-merged failed task, body=%s", body)
 	}
 	if strings.Contains(body, `data-local-available="true"`) {

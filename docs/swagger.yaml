@@ -2712,6 +2712,136 @@ paths:
       summary: Stop the page side-chat turn
       tags:
       - plugin-pages
+  /api/plugin-pages/{instanceId}/chat/thread:
+    get:
+      parameters:
+      - description: Page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Chat response
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: PluginChatThread
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/chat/thread/composer-action:
+    get:
+      parameters:
+      - description: Plugin page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: HTML fragment
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Page side-chat composer action
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/chat/thread/executions/{execId}/fragment:
+    get:
+      parameters:
+      - description: Page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      - description: Resource ID
+        in: path
+        name: execId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Chat response
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: PluginChatThreadFragment
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/chat/thread/pending-inputs:
+    get:
+      parameters:
+      - description: Page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Chat response
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: PluginChatThreadPending
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/chat/thread/queued/{inputId}/steer:
+    post:
+      parameters:
+      - description: Page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      - description: Resource ID
+        in: path
+        name: inputId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Chat response
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: PluginChatQueuedSteer
+      tags:
+      - plugin-pages
+  /api/plugin-pages/{instanceId}/chat/thread/steer:
+    post:
+      parameters:
+      - description: Page instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Chat response
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: PluginChatSteer
+      tags:
+      - plugin-pages
   /api/plugin-pages/{instanceId}/events:
     get:
       description: Server-sent events for page refreshes.

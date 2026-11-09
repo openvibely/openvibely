@@ -78,7 +78,12 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  if(!entry.getClientRects().length)throw Error('Sales entry hidden: '+[entry,...(function*(){let p=entry.parentElement;while(p){yield p;p=p.parentElement}})()].map(e=>e.tagName+'#'+e.id+'.'+e.className+':'+getComputedStyle(e).display).join(' / '));
  const clickAction=async action=>{
   await wait(()=>document.querySelector('#plugin-settings button[hx-post*="/'+action+'?"]'),'Missing '+action+' control');
-  document.querySelector('#plugin-settings button[hx-post*="/'+action+'?"]').click();
+  await new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>{document.body.removeEventListener('htmx:afterSettle',settled);reject(Error('Settings did not settle after '+action));},5000);
+   const settled=e=>{if(e.detail.elt?.id==='plugin-settings'){clearTimeout(timer);document.body.removeEventListener('htmx:afterSettle',settled);resolve();}};
+   document.body.addEventListener('htmx:afterSettle',settled);
+   document.querySelector('#plugin-settings button[hx-post*="/'+action+'?"]').click();
+  });
  };
  const pageLink=document.querySelector('#plugin-pages-nav [data-plugin-nav-entry] a');
  pageLink.click();

@@ -1108,12 +1108,29 @@ func (h *Handler) pluginSteeringTask(c echo.Context) error {
 	c.SetParamValues(append(values, taskID)...)
 	return nil
 }
+
+// PluginChatSteer serves page-scoped chat.
+// @Summary PluginChatSteer
+// @Tags plugin-pages
+// @Param instanceId path string true "Page instance ID"
+// @Success 200 {string} string "Chat response"
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/chat/thread/steer [post]
 func (h *Handler) PluginChatSteer(c echo.Context) error {
 	if err := h.pluginSteeringTask(c); err != nil {
 		return err
 	}
 	return h.TaskThreadSteer(c)
 }
+
+// PluginChatQueuedSteer serves page-scoped chat.
+// @Summary PluginChatQueuedSteer
+// @Tags plugin-pages
+// @Param instanceId path string true "Page instance ID"
+// @Param inputId path string true "Resource ID"
+// @Success 200 {string} string "Chat response"
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/chat/thread/queued/{inputId}/steer [post]
 func (h *Handler) PluginChatQueuedSteer(c echo.Context) error {
 	if err := h.pluginSteeringTask(c); err != nil {
 		return err

@@ -34,6 +34,14 @@ func (h *Handler) pluginThreadContext(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return nil
 }
+
+// PluginChatThread serves page-scoped chat.
+// @Summary PluginChatThread
+// @Tags plugin-pages
+// @Param instanceId path string true "Page instance ID"
+// @Success 200 {string} string "Chat response"
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/chat/thread [get]
 func (h *Handler) PluginChatThread(c echo.Context) error {
 	if err := h.pluginThreadContext(c); err != nil {
 		return err
@@ -45,12 +53,29 @@ func (h *Handler) PluginChatThread(c echo.Context) error {
 	}
 	return h.GetTaskThread(c)
 }
+
+// PluginChatThreadFragment serves page-scoped chat.
+// @Summary PluginChatThreadFragment
+// @Tags plugin-pages
+// @Param instanceId path string true "Page instance ID"
+// @Param execId path string true "Resource ID"
+// @Success 200 {string} string "Chat response"
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/chat/thread/executions/{execId}/fragment [get]
 func (h *Handler) PluginChatThreadFragment(c echo.Context) error {
 	if err := h.pluginThreadContext(c); err != nil {
 		return err
 	}
 	return h.GetTaskThreadExecutionFragment(c)
 }
+
+// PluginChatThreadPending serves page-scoped chat.
+// @Summary PluginChatThreadPending
+// @Tags plugin-pages
+// @Param instanceId path string true "Page instance ID"
+// @Success 200 {string} string "Chat response"
+// @Failure 404 {object} ErrorResponse
+// @Router /api/plugin-pages/{instanceId}/chat/thread/pending-inputs [get]
 func (h *Handler) PluginChatThreadPending(c echo.Context) error {
 	if err := h.pluginThreadContext(c); err != nil {
 		return err
