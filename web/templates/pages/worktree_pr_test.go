@@ -91,7 +91,7 @@ func TestTaskChangesWorktreeContent_SettingsUseTopLayerPopover(t *testing.T) {
 	for _, want := range []string{
 		`data-changes-settings-toggle popovertarget="changes-split-settings"`,
 		`aria-label="Action settings" aria-expanded="false"`,
-		`id="changes-split-settings" data-menu-content popover="manual"`,
+		`id="changes-split-settings" data-menu-content hidden popover="manual"`,
 		`style="position:fixed;inset:auto;margin:0;"`,
 	} {
 		if !strings.Contains(out, want) {

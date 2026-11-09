@@ -19,7 +19,7 @@ templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, loca
     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m6 9 6 6 6-6z"></path></svg>
    </button>
   </div>
-  <div id="changes-split-settings" data-menu-content popover="manual" class="ov-menu ov-changes-settings" style="position:fixed;inset:auto;margin:0;">
+  <div id="changes-split-settings" data-menu-content hidden popover="manual" class="ov-menu ov-changes-settings" style="position:fixed;inset:auto;margin:0;">
    <div class="join flex w-full" role="group" aria-label="Action type">
     <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="pr" aria-pressed="false">Pull request</button>
     <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="local" aria-pressed="false">Local merge</button>
@@ -87,8 +87,11 @@ templ changesSplitActionScript() {
    function showError(message){error.textContent=message||'';error.hidden=!message;}
    async function request(url,options){const response=await fetch(url,{credentials:'same-origin',...options});if(!response.ok){let message='Request failed ('+response.status+')';try{const data=await response.json();message=data.message||message;}catch{}throw new Error(message);}return response.status===204?null:response.json();}
    function fill(select,items){select.replaceChildren(...items.map(item=>{const option=document.createElement('option');option.value=item.value;option.textContent=item.label;return option;}));}
-   function position(){if(!panel.matches(':popover-open'))return;const r=toggle.getBoundingClientRect();panel.style.maxHeight=Math.max(0,innerHeight-16)+'px';panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(r.bottom+4,innerHeight-panel.offsetHeight-8))+'px';}
-   const controller=window.ovMenuController.create({trigger:()=>toggle,panels:[panel],isOpen:()=>panel.matches(':popover-open'),open:()=>{panel.showPopover();toggle.setAttribute('aria-expanded','true');position();},close:()=>{panel.hidePopover();toggle.setAttribute('aria-expanded','false');}});
+   const nativePopover=typeof panel.showPopover==='function'&&typeof panel.hidePopover==='function';
+   if(!nativePopover){panel.removeAttribute('popover');toggle.removeAttribute('popovertarget');}
+   function isOpen(){return nativePopover?panel.matches(':popover-open'):!panel.hidden;}
+   function position(){if(!isOpen())return;const r=toggle.getBoundingClientRect();panel.style.maxHeight=Math.max(0,innerHeight-16)+'px';panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(r.bottom+4,innerHeight-panel.offsetHeight-8))+'px';}
+   const controller=window.ovMenuController.create({trigger:()=>toggle,panels:[panel],isOpen,open:()=>{panel.hidden=false;if(nativePopover)panel.showPopover();toggle.setAttribute('aria-expanded','true');position();},close:()=>{if(nativePopover)panel.hidePopover();panel.hidden=true;toggle.setAttribute('aria-expanded','false');}});
    toggle.addEventListener('click',event=>{event.preventDefault();controller.toggle(event);});
    panel.addEventListener('toggle',position);
    const state={position,close:()=>controller.close(false)};states.set(root,state);

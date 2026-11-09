@@ -5,7 +5,7 @@
  let nav, inner, more, menu, frame, resize, mutation, hiddenEntries = [];
  function close(focus) {
   if (!menu) return;
-  if (menu.matches(':popover-open')) menu.hidePopover();
+  if (typeof menu.hidePopover === 'function' && menu.matches(':popover-open')) menu.hidePopover();
   menu.hidden = true;
   if (more) {
    more.querySelector('button').setAttribute('aria-expanded', 'false');
@@ -74,7 +74,8 @@
    menu.id = 'plugin-pages-overflow-menu';
    menu.className = 'ov-menu ov-menu-actions menu';
    menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'More pages');
-   menu.setAttribute('popover', 'auto'); menu.hidden = true;
+   if (typeof menu.showPopover === 'function') menu.setAttribute('popover', 'auto');
+   menu.hidden = true;
    menu.style.cssText = 'position:fixed;inset:auto;margin:0;width:280px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:auto;z-index:1000;';
    document.body.append(menu);
    menu.addEventListener('toggle', e => {
