@@ -3540,16 +3540,29 @@ document.getElementById('preview-divider').onchange=e=>root.dataset.previewDivid
 document.getElementById('preview-theme').onchange=e=>theme(e.target.value);
 const action=document.querySelector('[data-changes-primary]'),toggle=document.querySelector('[data-changes-settings-toggle]'),panel=document.getElementById('changes-split-settings');
 for(const b of [action,toggle]){b.disabled=false;b.setAttribute('aria-disabled','false');b.removeAttribute('aria-busy');}
-action.textContent='Create PR';action.hidden=false;
+action.hidden=false;
 const repo=document.querySelector('[data-changes-repo]'),branch=document.querySelector('[data-changes-branch]'),local=document.querySelector('[data-changes-local-branch]'),method=document.querySelector('[data-changes-method]');
-repo.innerHTML='<option>openvibely/openvibely</option>';branch.innerHTML=local.innerHTML='<option>main</option><option>develop</option>';
+const choices=[{url:'https://github.com/openvibely/openvibely',name:'openvibely/openvibely',upstream:true},{url:'https://github.com/example/openvibely',name:'example/openvibely',upstream:false}];
+repo.replaceChildren(...choices.map(choice=>new Option(choice.name+(choice.upstream?' · Upstream':' · This fork'),choice.url)));
+branch.innerHTML=local.innerHTML='<option>main</option><option>develop</option>';
 let mode='pr';
-function render(){document.querySelector('[data-changes-pr-fields]').hidden=mode!=='pr';document.querySelector('[data-changes-local-fields]').hidden=mode==='pr';document.querySelectorAll('[data-changes-mode]').forEach(b=>{b.classList.toggle('btn-active',b.dataset.changesMode===mode);b.setAttribute('aria-pressed',String(b.dataset.changesMode===mode));});action.textContent=mode==='pr'?'Create PR':({merge:'Merge into ',squash:'Squash into ',ff:'Fast-forward ',rebase:'Rebase onto '}[method.value]||'Merge into ')+local.value;}
+function render(){
+ const pr=mode==='pr',choice=choices.find(c=>c.url===repo.value);
+ document.querySelector('[data-changes-pr-fields]').hidden=!pr;
+ document.querySelector('[data-changes-local-fields]').hidden=pr;
+ document.querySelectorAll('[data-changes-mode]').forEach(b=>{b.classList.toggle('btn-active',b.dataset.changesMode===mode);b.setAttribute('aria-pressed',String(b.dataset.changesMode===mode));});
+ // Match changesSplitActionScript: the destination is part of the action label.
+ const names={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash into '};
+ action.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to '+choice.name):''):(names[method.value]||'Merge into ')+local.value;
+ action.title=pr?(choice?choice.name+':'+branch.value:'Select a PR destination'):local.value;
+ if(!panel.hidden)position();
+}
 function close(){if(panel.matches(':popover-open'))panel.hidePopover();panel.hidden=true;toggle.setAttribute('aria-expanded','false');}
 toggle.removeAttribute('popovertarget');
-toggle.onclick=()=>{if(!panel.hidden){close();return;}panel.hidden=false;panel.showPopover();toggle.setAttribute('aria-expanded','true');const r=toggle.getBoundingClientRect();panel.style.left=Math.max(8,r.right-panel.offsetWidth)+'px';panel.style.top=(r.bottom+5)+'px';};
+function position(){const r=toggle.getBoundingClientRect();panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(r.bottom+5,innerHeight-panel.offsetHeight-8))+'px';}
+toggle.onclick=()=>{if(!panel.hidden){close();return;}panel.hidden=false;panel.showPopover();toggle.setAttribute('aria-expanded','true');position();};
 document.querySelectorAll('[data-changes-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.changesMode;render();});
-method.onchange=local.onchange=render;render();
+repo.onchange=branch.onchange=method.onchange=local.onchange=render;render();
 action.onclick=()=>{close();document.getElementById('preview-status').textContent='Preview only — no action performed.';};
 document.addEventListener('click',e=>{if(!panel.contains(e.target)&&!toggle.contains(e.target))close();if(e.target.closest('a'))e.preventDefault();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden){close();toggle.focus();}});
