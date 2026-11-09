@@ -3543,7 +3543,7 @@ for(const b of [action,toggle]){b.disabled=false;b.setAttribute('aria-disabled',
 action.hidden=false;
 const repo=document.querySelector('[data-changes-repo]'),branch=document.querySelector('[data-changes-branch]'),local=document.querySelector('[data-changes-local-branch]'),method=document.querySelector('[data-changes-method]');
 const choices=[{url:'https://github.com/openvibely/openvibely',name:'openvibely/openvibely',upstream:true},{url:'https://github.com/example/openvibely',name:'example/openvibely',upstream:false}];
-repo.replaceChildren(...choices.map(choice=>new Option(choice.name+(choice.upstream?' · Upstream':' · This fork'),choice.url)));
+repo.replaceChildren(...choices.map(choice=>new Option(choice.name+(choice.upstream?' · Upstream':' · Origin'),choice.url)));
 branch.innerHTML=local.innerHTML='<option>main</option><option>develop</option>';
 let mode='pr';
 function render(){
@@ -3551,9 +3551,9 @@ function render(){
  document.querySelector('[data-changes-pr-fields]').hidden=!pr;
  document.querySelector('[data-changes-local-fields]').hidden=pr;
  document.querySelectorAll('[data-changes-mode]').forEach(b=>{b.classList.toggle('btn-active',b.dataset.changesMode===mode);b.setAttribute('aria-pressed',String(b.dataset.changesMode===mode));});
- // Match changesSplitActionScript: the destination is part of the action label.
+ // Proposed compact labels; the dropdown and tooltip retain the full destination.
  const names={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash into '};
- action.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to '+choice.name):''):(names[method.value]||'Merge into ')+local.value;
+ action.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to origin'):''):(names[method.value]||'Merge into ')+local.value;
  action.title=pr?(choice?choice.name+':'+branch.value:'Select a PR destination'):local.value;
  if(!panel.hidden)position();
 }
