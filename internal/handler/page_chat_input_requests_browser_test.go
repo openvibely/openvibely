@@ -71,6 +71,26 @@ func testPageSideChatQuestion(t *testing.T, analyze bool) {
 			if (!ANALYZE_TEST) await waitFor(function() { return document.querySelector('#task-thread-messages [data-exec-id]'); }, 'side chat history missing');
 			if (!ANALYZE_TEST) await waitFor(function() { return Array.from(document.querySelectorAll('#task-thread-messages [data-streaming-resume]')).some(function(el){ return el._sseConnected; }); }, 'running reply did not reconnect after page load');
             if (!ANALYZE_TEST) {
+                var html = document.documentElement;
+                var oldWidth = html.getAttribute('data-thread-width');
+                var oldPanelStyle = panel.getAttribute('style');
+                var transcript = panel.querySelector('[data-chat-transcript]');
+                var row = transcript.querySelector('[data-exec-id]');
+                while (row.parentElement !== transcript) row = row.parentElement;
+                for (var mode of ['full', 'focused']) {
+                    html.setAttribute('data-thread-width', mode);
+                    for (var width of [420, 1000]) {
+                        panel.style.setProperty('width', width + 'px', 'important');
+                        var messageRect = row.getBoundingClientRect();
+                        var composerRect = composer.getBoundingClientRect();
+                        if (Math.abs(messageRect.left - composerRect.left) > 1 || Math.abs(messageRect.width - composerRect.width) > 1)
+                            throw new Error('horizontal alignment ' + mode + '/' + width + ': message ' + messageRect.left + ',' + messageRect.width + ' composer ' + composerRect.left + ',' + composerRect.width);
+                    }
+                }
+                if (oldWidth === null) html.removeAttribute('data-thread-width'); else html.setAttribute('data-thread-width', oldWidth);
+                if (oldPanelStyle === null) panel.removeAttribute('style'); else panel.setAttribute('style', oldPanelStyle);
+            }
+            if (!ANALYZE_TEST) {
                 var streamNode = document.querySelector('#task-thread-messages [data-streaming-resume]');
                 var controller = window.openVibelyThreadController, attach = controller.attach, source;
                 controller.detach(streamNode); delete streamNode._sseConnected;
