@@ -131,3 +131,17 @@ func TestBrowserFunctional_ChangesSplitActionKeepsColorWhileSaving(t *testing.T)
 		b.waitFor("PR ready", `String(document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false')`, "true")
 	})
 }
+
+func TestBrowserFunctional_ChangesSplitActionBranchDropdown(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-branch-dropdown", func(b *composerFocusCDP) {
+		b.waitFor("branches loaded", `(()=>{const el=document.querySelector('[data-changes-branch]');return String(el?.tagName==='SELECT'&&el.value==='main'&&Array.from(el.options).map(o=>o.value).join(',')==='main,develop');})()`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-branch]');el.value='develop';el.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';})()`)
+		b.waitFor("selection saved", `String(document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false'&&document.querySelector('[data-changes-branch]').value==='develop')`, "true")
+		b.evaluate(`window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});'ok'`)
+		b.waitFor("saved selection and full list restored", `(()=>{const el=document.querySelector('[data-changes-branch]');return String(document.querySelector('[data-changes-split]')!==window.oldSplit&&el?.value==='develop'&&el.options.length===2&&Array.from(el.options).some(o=>o.value==='main'));})()`, "true")
+	})
+}
