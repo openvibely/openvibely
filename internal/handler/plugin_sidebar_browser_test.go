@@ -36,7 +36,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  document.querySelector('#appearance-settings-nav a[data-nav-base="/settings/plugin-pages"]').click();
  await new Promise(r=>setTimeout(r,400));
  checkSettings();
- for (const id of ['plugin-template-modal','plugin-describe-modal','plugin-install-modal']) {
+ for (const id of ['plugin-describe-modal','plugin-install-modal']) {
   const button=Array.from(document.querySelectorAll('#plugin-settings button')).find(b=>(b.getAttribute('onclick')||'').includes(id));
   if(!button)throw Error('Missing add menu entry '+id);
   button.click();
@@ -45,8 +45,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  }
  const installModal=document.getElementById('plugin-install-modal');
  if(installModal.querySelector('[data-plugin-package]')||installModal.textContent.includes('Installed packages'))throw Error('Install modal contains package management');
- const templateModal=document.getElementById('plugin-template-modal');
- if(!templateModal.querySelector('select[name="template_key"]')||!templateModal.querySelector('.modal-action button[type="submit"]'))throw Error('Template modal does not use standard selector and footer');
+ if(document.getElementById('plugin-template-modal'))throw Error('Removed Sales template modal present');
  if(document.querySelector('[id^="plugin-details-"]'))throw Error('Obsolete details modal present');
  const search=document.querySelector('#plugin-settings [data-card-search]');
  search.value='not-a-page';search.dispatchEvent(new Event('input',{bubbles:true}));

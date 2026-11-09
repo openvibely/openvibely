@@ -134,7 +134,7 @@ Operation kinds are a backend contract: `read` must not change stored data; muta
 
 Use **Settings → Plugin pages** (`/settings/plugin-pages?project_id=<project>`).
 
-1. **Install**: either "Install Sales example" or "Install from directory" with an absolute path to a prebuilt bundle. You need to be an administrator when organizations are enabled.
+1. **Install**: use **+ → Install package** to upload a prebuilt package folder, or use the advanced server-directory option. You need to be an administrator when organizations are enabled.
 2. **Add to project**: pick an installed package and a page to create a disabled instance in the current project.
 4. **Enable**: the page appears in the left rail. **Disable** closes admission to new operations, cancels that instance's running side-chat and inline analysis through OV's existing cancellation machinery, interrupts backend startup and active calls, and releases its handles and subscriptions. Backend termination does not depend on the process reading stdin. Saved state and conversation history remain intact. Re-enabling creates a new runtime lifetime; cancelled work from the previous lifetime stays cancelled. Other instances are unaffected.
 5. **Remove instance**: deletes only that instance, together with its state, side-chat conversation, and turn-context snapshots. Other projects' instances of the same package are unaffected.
@@ -164,18 +164,9 @@ The "Chat about this page" panel reuses the standard chat message components and
 - **Tools:** page tools (`page_<operation>`) are built server-side from the manifest. Each tool call re-resolves and re-authorizes the instance. Agent calls to actions wait for Approve or Deny in the page.
 - **In-page analysis:** `analyze.request` runs the same kind of turn and streams `analysis.delta` messages into the page.
 
-## Sales example
+## Test fixture
 
-The bundled example (`internal/pageplugins/examples/sales`) uses a host-implemented builtin backend, so it does not execute any process. It generates deterministic sample data per instance, keeps state per instance, and offers these operations:
-- `refresh_data` (read, tool, emits `data.changed`)
-- `get_report` (read, tool)
-- `set_target` (action, tool)
-
-To try it:
-1. Open Settings → Plugin pages in project A, click **Install Sales example**, add the `sales` page, and click **Enable**.
-2. Switch to project B and add and enable it again. Each project now has its own Sales page with independent data.
-3. Open **Sales** in the left rail. Click **Refresh** to see the revision change live, or use **Analyze** to stream an analysis into the page.
-4. Open the side chat and ask "Refresh the data and summarize it". The agent calls `page_refresh_data`, which is the same operation the button uses, and the page updates through the `data.changed` event.
+The Sales example lives in `internal/pageplugins/testdata/sales` for integration tests. It is not bundled or offered as a shipped template. The builtin Sales backend remains available for compatibility with previously installed pages.
 
 ## Adopting the interface in built-in pages (Analytics, Automations)
 

@@ -126,7 +126,7 @@ func TestPageProjectPermissionMatrix(t *testing.T) {
 				require.NotEqual(t, 200, rec.Code)
 			}
 			if role != "admin" {
-				rec = pageAccessRequest(t, env, p, "POST", "/settings/plugin-pages/install-example?project_id="+env.projA.ID, "", "")
+				rec = pageAccessRequest(t, env, p, "POST", "/settings/plugin-pages/install?project_id="+env.projA.ID, "", "")
 				require.Equal(t, 403, rec.Code)
 			}
 		})

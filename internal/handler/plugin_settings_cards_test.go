@@ -13,7 +13,7 @@ func TestPluginSettingsCardsAndDialogs(t *testing.T) {
 	base := "/settings/plugin-pages?project_id=" + env.projA.ID
 	rec := env.do(t, http.MethodGet, base, "", nil)
 	require.Equal(t, 200, rec.Code)
-	for _, marker := range []string{`aria-label="Add page"`, `data-card-list-toolbar="plugin-pages"`, `id="plugin-template-modal"`, `id="plugin-describe-modal"`, `id="plugin-install-modal"`, `id="plugin-delete-` + env.inA.ID} {
+	for _, marker := range []string{`aria-label="Add page"`, `data-card-list-toolbar="plugin-pages"`, `id="plugin-describe-modal"`, `id="plugin-install-modal"`, `id="plugin-delete-` + env.inA.ID} {
 		require.Contains(t, rec.Body.String(), marker)
 	}
 	rec = env.do(t, http.MethodGet, base+"&search=nonexistent", "", nil)
@@ -25,12 +25,12 @@ func TestPluginSettingsCardsAndDialogs(t *testing.T) {
 	rec = env.do(t, http.MethodGet, base+"&enabled=true&sort=name_desc", "", nil)
 	require.Contains(t, rec.Body.String(), `data-plugin-instance-row=`)
 	headers := map[string]string{"Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true"}
-	project := createProject(t, env.h, "Templates")
-	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/install-example?project_id="+project.ID, "create_page=true", headers)
+	project := createProject(t, env.h, "Package destination")
+	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/instances?project_id="+project.ID, "package_id="+env.inA.PackageID+"&page_id="+env.inA.PageID, headers)
 	require.Equal(t, 200, rec.Code)
 	require.Equal(t, 1, strings.Count(rec.Body.String(), `data-plugin-instance-row=`))
 	require.NotContains(t, rec.Body.String(), "alert-success")
-	require.Contains(t, rec.Header().Get("HX-Trigger"), "Added Sales")
+	require.NotContains(t, rec.Body.String(), `id="plugin-template-modal"`)
 	require.Contains(t, rec.Header().Get("HX-Trigger"), "plugin-nav-refresh")
 	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/instances/"+env.inA.ID+"/remove?project_id="+env.projA.ID, "", headers)
 	require.Equal(t, 200, rec.Code)
@@ -61,7 +61,7 @@ func TestPluginSettingsAllProjects(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, in.Enabled)
 	project := createProject(t, env.h, "All projects destination")
-	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/install-example"+scope, "create_page=true&destination_project="+project.ID, headers)
+	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/instances"+scope, "package_id="+env.inA.PackageID+"&page_id="+env.inA.PageID+"&destination_project="+project.ID, headers)
 	require.Equal(t, 200, rec.Code)
 	instances, err := env.mgr.Store().ListInstances(t.Context(), project.ID, false)
 	require.NoError(t, err)

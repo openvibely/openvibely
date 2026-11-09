@@ -69,7 +69,7 @@ test('Sales ignores old report responses and publishes context before Analyze',a
  const element=()=>({...emitter(),value:'',style:{},textContent:'',appendChild(){}});
  const elements=new Map();
  const document={getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id)},createElement:element};
- vm.runInNewContext(readFileSync(path.join(__dirname,'../../internal/pageplugins/examples/sales/app.js'),'utf8'),{window,document,location:{search:'?handle=h'},URLSearchParams,console});
+ vm.runInNewContext(readFileSync(path.join(__dirname,'../../internal/pageplugins/testdata/sales/app.js'),'utf8'),{window,document,location:{search:'?handle=h'},URLSearchParams,console});
  const reply=(msg,payload)=>window.emit('message',{source:parent,data:{v:1,handle:'h',type:'result',replyTo:msg.id,payload}});
  reply(outgoing.at(-1),{});await flush();reply(outgoing.at(-1),{});await flush();
  const first=outgoing.filter(m=>m.type==='op.invoke').at(-1);

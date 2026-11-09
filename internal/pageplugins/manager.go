@@ -49,7 +49,7 @@ type BuiltinResult struct {
 	State  json.RawMessage
 }
 
-// Builtin is a backend implemented in-process (used for bundled examples only).
+// Builtin is a backend implemented in-process, including compatibility for installed examples.
 type Builtin interface {
 	Invoke(ctx context.Context, req BuiltinRequest) (BuiltinResult, error)
 }
@@ -135,7 +135,7 @@ func NewManager(store persistence.PagePluginStore, root string) *Manager {
 
 func (m *Manager) Root() string { return m.root }
 
-// RegisterBuiltin adds a host-implemented backend (tests and bundled examples).
+// RegisterBuiltin adds a host-implemented backend.
 func (m *Manager) RegisterBuiltin(name string, b Builtin) { m.builtins[name] = b }
 
 // InstallFromDir validates and copies a prebuilt plugin bundle into the managed store.
@@ -149,11 +149,6 @@ func (m *Manager) InstallFromDir(ctx context.Context, dir, installedBy string) (
 		return nil, fmt.Errorf("plugin directory %q not found", dir)
 	}
 	return m.install(ctx, os.DirFS(abs), installedBy)
-}
-
-// InstallExample installs the bundled Sales example package.
-func (m *Manager) InstallExample(ctx context.Context, installedBy string) (*models.PagePluginPackage, error) {
-	return m.install(ctx, SalesExampleFS(), installedBy)
 }
 
 func (m *Manager) install(ctx context.Context, src fs.FS, installedBy string) (*models.PagePluginPackage, error) {

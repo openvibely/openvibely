@@ -182,7 +182,6 @@ templ PluginSettingsContent(v PluginSettingsView) {
 			<div class="dropdown dropdown-end">
 				<button type="button" tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Add page" data-tooltip-disabled onclick="handleDropdownToggle(event)">@pageCreateIcon()</button>
 				<ul tabindex="0" class="ov-menu ov-menu-actions dropdown-content z-[100] menu w-48">
-					<li><button onclick="document.activeElement.blur();document.getElementById('plugin-template-modal').showModal()">Template</button></li>
 					<li><button onclick="document.activeElement.blur();document.getElementById('plugin-describe-modal').showModal()">Describe</button></li>
 					<li><button onclick="document.activeElement.blur();document.getElementById('plugin-install-modal').showModal()">Install package</button></li>
 				</ul>
@@ -277,29 +276,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 				</div>
 			}
 		</div>
-		<dialog id="plugin-template-modal" class="modal">
-			<div class="modal-box">
-				@ModalCloseButton("document.getElementById('plugin-template-modal')", "Close template selection")
-				<h3 class="pr-10 text-lg font-bold">Create from template</h3>
-				<p class="mt-2 text-sm text-base-content/65">Choose a page template to add to this project.</p>
-				<form method="post" hx-post={ v.URL("/install-example") } hx-target="#plugin-settings" hx-swap="outerHTML" class="mt-4 space-y-4">
-					@pluginDestination(v)
-<input type="hidden" name="create_page" value="true"/>
-					<label class="form-control">
-						<span class="label-text mb-1 font-medium">Template</span>
-						<select name="template_key" class="select select-bordered w-full" aria-label="Page template">
-							<option value="sales">Sales</option>
-						</select>
-					</label>
-					<p class="rounded-box bg-base-200/60 p-3 text-sm text-base-content/70">Explore sales data with filters and a page-aware assistant.</p>
-					<div class="modal-action">
-						<button class="btn" type="button" onclick="document.getElementById('plugin-template-modal').close()">Cancel</button>
-						<button class="btn btn-primary" type="submit">Use template</button>
-					</div>
-				</form>
-			</div>
-			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
-		</dialog>
+
 		@pluginSettingsDialog("plugin-describe-modal", "Describe a page") {
 			<p class="text-sm opacity-70">Create a task to build and publish a page in this project. Open the task to run it.</p>
 			<form method="post" action={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } class="space-y-4" onsubmit="this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">

@@ -46,7 +46,7 @@ func setupPluginPages(t *testing.T) *pluginTestEnv {
 		return nil
 	}
 	ctx := context.Background()
-	pkg, err := mgr.InstallExample(ctx, "admin")
+	pkg, err := mgr.InstallFromDir(ctx, "../pageplugins/testdata/sales", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

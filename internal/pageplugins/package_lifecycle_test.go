@@ -44,7 +44,7 @@ func TestPackageRemovalSerializesInstanceCreation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			m, env, project, _ := newTestManager(t)
 			ctx := t.Context()
-			pkg, err := m.InstallExample(ctx, "admin")
+			pkg, err := m.InstallFromDir(ctx, "testdata/sales", "admin")
 			require.NoError(t, err)
 			store := &packageAdmissionStore{PagePluginStore: env.PagePlugins, createEntered: make(chan struct{}), countEntered: make(chan struct{}), release: make(chan struct{}), createFirst: createFirst}
 			m.store = store

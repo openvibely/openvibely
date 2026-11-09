@@ -38,7 +38,7 @@ func newTestManager(t *testing.T) (*Manager, *teststores.Env, string, string) {
 func enabledSales(t *testing.T, m *Manager, projectID string) *models.PagePluginInstance {
 	t.Helper()
 	ctx := context.Background()
-	pkg, err := m.InstallExample(ctx, "admin")
+	pkg, err := m.InstallFromDir(ctx, "testdata/sales", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,14 +162,14 @@ func TestDisableRetiresRuntimeResources(t *testing.T) {
 func TestPackagePathsAndInstallSafety(t *testing.T) {
 	m, _, projA, _ := newTestManager(t)
 	ctx := context.Background()
-	pkg, err := m.InstallExample(ctx, "admin")
+	pkg, err := m.InstallFromDir(ctx, "testdata/sales", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(pkg.InstallPath, m.Root()) {
 		t.Fatalf("package stored outside managed root: %s", pkg.InstallPath)
 	}
-	again, err := m.InstallExample(ctx, "admin")
+	again, err := m.InstallFromDir(ctx, "testdata/sales", "admin")
 	if err != nil || again.ID != pkg.ID {
 		t.Fatalf("idempotent reinstall failed: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestCrashRecoveryVerifiesInstalledPackageBeforeEveryLaunch(t *testing.T) {
 func TestHandleLifetimeRetireExpireAndDisable(t *testing.T) {
 	m, _, project, _ := newTestManager(t)
 	defer m.StopAll()
-	pkg, err := m.InstallExample(t.Context(), "admin")
+	pkg, err := m.InstallFromDir(t.Context(), "testdata/sales", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -746,7 +746,7 @@ func TestRemovePackageKeepsRecordWhenFileDeletionFails(t *testing.T) {
 	}
 	m, _, _, _ := newTestManager(t)
 	ctx := context.Background()
-	pkg, err := m.InstallExample(ctx, "admin")
+	pkg, err := m.InstallFromDir(ctx, "testdata/sales", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

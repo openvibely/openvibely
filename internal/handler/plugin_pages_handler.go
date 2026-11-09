@@ -68,7 +68,6 @@ func (h *Handler) registerPluginPageRoutes(e *echo.Echo) {
 	e.GET("/settings/plugin-pages", h.PluginSettings)
 	e.POST("/settings/plugin-pages/install", h.PluginSettingsInstall)
 	e.POST("/settings/plugin-pages/upload", h.PluginSettingsUpload)
-	e.POST("/settings/plugin-pages/install-example", h.PluginSettingsInstallExample)
 	e.POST("/settings/plugin-pages/instances", h.PluginSettingsCreateInstance)
 	e.POST("/settings/plugin-pages/instances/:instanceId/:action", h.PluginSettingsInstanceAction)
 	e.POST("/settings/plugin-pages/packages/:packageId/remove", h.PluginSettingsRemovePackage)
@@ -995,33 +994,6 @@ func (h *Handler) PluginSettingsInstall(c echo.Context) error {
 		if err := h.addInstalledPluginPages(c.Request().Context(), destination, pkg); err != nil {
 			return h.renderPluginSettings(c, projectID, "", err)
 		}
-	}
-	return h.renderPluginSettings(c, projectID, fmt.Sprintf("Installed %s %s", pkg.Name, pkg.Version), nil)
-}
-
-func (h *Handler) PluginSettingsInstallExample(c echo.Context) error {
-	by, err := h.requirePluginAdmin(c)
-	if err != nil {
-		return err
-	}
-	projectID, err := h.pluginSettingsProject(c)
-	if err != nil {
-		return err
-	}
-	pkg, err := h.pagePlugins.InstallExample(c.Request().Context(), by)
-	if err != nil {
-		return h.renderPluginSettings(c, projectID, "", err)
-	}
-	if c.FormValue("create_page") == "true" {
-		destination, err := h.pluginSettingsDestination(c, projectID)
-		if err != nil {
-			return h.renderPluginSettings(c, projectID, "", err)
-		}
-		_, createErr := h.pagePlugins.CreateInstance(c.Request().Context(), destination, pkg.ID, "sales")
-		if createErr != nil {
-			return h.renderPluginSettings(c, projectID, "", createErr)
-		}
-		return h.renderPluginSettings(c, projectID, "Added Sales. Enable it from its card when ready.", nil)
 	}
 	return h.renderPluginSettings(c, projectID, fmt.Sprintf("Installed %s %s", pkg.Name, pkg.Version), nil)
 }

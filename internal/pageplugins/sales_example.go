@@ -2,29 +2,15 @@ package pageplugins
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"io/fs"
 	"math/rand"
 	"time"
 )
 
-// SalesBuiltinName is the in-process backend used by the bundled Sales example.
+// SalesBuiltinName is the in-process backend used by previously installed Sales example packages.
 const SalesBuiltinName = "sales-demo"
-
-//go:embed examples/sales
-var salesExample embed.FS
-
-// SalesExampleFS returns the bundled Sales example package files.
-func SalesExampleFS() fs.FS {
-	sub, err := fs.Sub(salesExample, "examples/sales")
-	if err != nil {
-		panic(err)
-	}
-	return sub
-}
 
 type salesRow struct {
 	Date    string  `json:"date"`
