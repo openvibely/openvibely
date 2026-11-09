@@ -85,7 +85,7 @@ templ changesSplitActionScript() {
    const find=s=>root.querySelector(s),primary=find('[data-changes-primary]'),toggle=find('[data-changes-settings-toggle]'),panel=find('#changes-split-settings');
    const repo=find('[data-changes-repo]'),branch=find('[data-changes-branch]'),localBranch=find('[data-changes-local-branch]'),method=find('[data-changes-method]'),error=find('[data-changes-error]'),saveState=find('[data-changes-save-state]'),more=find('[data-changes-more]'),retry=find('[data-changes-retry]');
    const endpoint='/tasks/'+encodeURIComponent(root.dataset.taskId)+'/worktree/';
-   let prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='',localVersion=0,localChecked='',mergeAllowed=false,rebaseAllowed=false;
+   let prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='',localVersion=0,localChecked='',localLoading=false,mergeAllowed=false,rebaseAllowed=false;
    const linked=root.dataset.linkedPr==='true',canLocal=root.dataset.localAvailable==='true';
    function showError(message){error.textContent=message||'';error.hidden=!message;}
    async function request(url,options){const response=await fetch(url,{credentials:'same-origin',...options});if(!response.ok){let message='Request failed ('+response.status+')';try{const data=await response.json();message=data.message||message;}catch{}throw new Error(message);}return response.status===204?null:response.json();}
@@ -107,7 +107,10 @@ templ changesSplitActionScript() {
     const names={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash into '};
     primary.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to '+choice.name):''):(names[prefs.method]||'Merge into ')+prefs.local_branch;
     primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):prefs.local_branch;
-    primary.disabled=busy||saveCount>0||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||!methodValid||localChecked!==prefs.local_branch||!mergeAllowed));
+    const checkingLocal=!pr&&localLoading,waiting=saveCount>0||checkingLocal;
+    primary.disabled=busy||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||(!checkingLocal&&(!methodValid||localChecked!==prefs.local_branch||!mergeAllowed))));
+    primary.setAttribute('aria-busy',String(waiting||busy));
+    primary.setAttribute('aria-disabled',String(primary.disabled||waiting));
     const descriptions={merge:'Combine the task branch with the target using a merge commit.',ff:'Move the target forward only if its history has not diverged.',squash:'Combine the task changes into one commit on the target branch.',rebase:'Replay task commits onto the target. This does not merge them into the target branch.'};
     find('[data-changes-method-help]').textContent=descriptions[prefs.method]||'This method is unavailable for this task.';
     position();
@@ -125,11 +128,11 @@ templ changesSplitActionScript() {
     finally{if(version===branchVersion)more.disabled=false;position();}
    }
    async function loadLocalEligibility(){
-    const target=prefs.local_branch,version=++localVersion;localChecked='';mergeAllowed=false;rebaseAllowed=false;render();
-    if(!canLocal||!target)return;
+    const target=prefs.local_branch,version=++localVersion;localChecked='';mergeAllowed=false;rebaseAllowed=false;localLoading=canLocal&&!!target;render();
+    if(!localLoading)return;
     try{const data=await request(endpoint+'action-local?target='+encodeURIComponent(target));if(version!==localVersion||!root.isConnected)return;localChecked=target;mergeAllowed=data.merge_available===true;rebaseAllowed=data.rebase_available===true;if(prefs.mode==='local')showError(mergeAllowed?'':data.reason||'Local merge is unavailable.');}
     catch(err){if(version===localVersion)showError(err.message);}
-    finally{if(version===localVersion)render();}
+    finally{if(version===localVersion){localLoading=false;render();}}
    }
    root.querySelectorAll('[data-changes-mode]').forEach(button=>button.addEventListener('click',()=>{if(!prefs)return;prefs.mode=button.dataset.changesMode;render();save();if(prefs.mode==='pr')loadBranches(true);else loadLocalEligibility();}));
    repo.addEventListener('change',()=>{prefs.repository=repo.value;prefs.branch=choices.find(c=>c.url===repo.value)?.default_branch||'';render();save();loadBranches(true);});
@@ -138,7 +141,8 @@ templ changesSplitActionScript() {
    method.addEventListener('change',()=>{prefs.method=method.value;render();save();});
    more.addEventListener('click',()=>loadBranches(false));
    primary.addEventListener('click',async()=>{
-    await pending;if(primary.disabled||!prefs)return;
+    if(primary.disabled||primary.getAttribute('aria-disabled')==='true'||!prefs)return;
+    await pending;if(primary.disabled||primary.getAttribute('aria-disabled')==='true'||!prefs)return;
     let transport,values;
     if(prefs.mode==='pr'){transport=find('[data-changes-pr-transport]');values={target_repo:prefs.repository,base:prefs.branch};}
     else{transport=Array.from(root.querySelectorAll('[data-merge-type]')).find(el=>el.dataset.mergeType===prefs.method);values={merge_type:prefs.method,merge_source:'changes_tab',changes_target:prefs.local_branch};}
