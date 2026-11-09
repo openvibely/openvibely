@@ -848,13 +848,15 @@ func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pag
 	if err != nil {
 		return v, err
 	}
+	descriptions := make(map[string]string, len(pkgs))
 	for i := range pkgs {
 		man, err := h.pagePlugins.Manifest(&pkgs[i])
 		if err != nil {
 			continue
 		}
 		n, _ := store.CountInstancesForPackage(ctx, pkgs[i].ID)
-		row := pages.PluginSettingsPackage{Package: pkgs[i], InUse: n}
+		descriptions[pkgs[i].ID] = man.Description
+		row := pages.PluginSettingsPackage{Package: pkgs[i], Description: man.Description, InUse: n}
 		for _, p := range man.Pages {
 			row.Pages = append(row.Pages, p.ID)
 		}
@@ -883,7 +885,7 @@ func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pag
 			}
 			return v, err
 		}
-		v.Instances = append(v.Instances, pages.PluginSettingsRow{Instance: in})
+		v.Instances = append(v.Instances, pages.PluginSettingsRow{Instance: in, Description: descriptions[in.PackageID]})
 	}
 	return v, nil
 }
