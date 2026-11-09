@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 226
+const latestMigrationVersion = 227
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -4241,7 +4241,7 @@ func TestMigration212PreservesExistingGeneratedFiles(t *testing.T) {
 	}
 }
 
-func TestMigration226CustomPagesFromMain(t *testing.T) {
+func TestMigration227CustomPagesFromMain(t *testing.T) {
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "custom-pages.db"))
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -4299,7 +4299,7 @@ func TestMigration226CustomPagesFromMain(t *testing.T) {
 		}
 	}
 	for pass := 0; pass < 2; pass++ {
-		if err := goose.UpTo(db, ".", 226); err != nil {
+		if err := goose.UpTo(db, ".", 227); err != nil {
 			t.Fatal(err)
 		}
 		checkExisting()
