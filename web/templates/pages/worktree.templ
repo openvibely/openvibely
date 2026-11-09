@@ -149,7 +149,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
             </div>
 			@taskChangesStyles()
 			// Diff viewer
-			@components.DiffViewer(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery, rebaseAvailable))
+			@components.DiffViewer(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery))
 		</div>
 	</div>
 }
@@ -161,12 +161,12 @@ func changesMetadataKey(task *models.Task, pr *models.TaskPullRequest, unavailab
     return fmt.Sprintf("%q:%q:%q:%t:%t:%t:%q", task.WorktreeBranch, components.TaskWorktreeMergeTarget(task), task.MergeStatus, unavailable, conflict, rebase, prKey)
 }
 
-templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool) {
+templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool) {
  if task.WorktreeBranch != "" {
  if !conflictRecovery {
- @changesSplitAction(task, taskPR, localMergeUnavailable, rebaseAvailable)
+ @changesSplitAction(task, taskPR, localMergeUnavailable)
  } else {
-						// Unified actions dropdown with Local and GitHub sections
+						// Conflict recovery actions and the linked PR remain accessible here.
 						<div class="dropdown dropdown-end relative z-[60] flex-shrink-0" id="changes-actions-dropdown">
 							<button type="button" role="button" popovertarget="changes-actions-menu" class="btn btn-primary btn-sm whitespace-nowrap">
 								Actions
@@ -176,7 +176,6 @@ templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, l
 							</button>
 							<ul id="changes-actions-menu" popover="manual" class="ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]" style="position:fixed;inset:auto;margin:0;">
 
-								if conflictRecovery {
 									<li class="menu-title"><span>Conflict recovery</span></li>
 									<li>
 										<button
@@ -202,14 +201,6 @@ templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, l
 											Abort Merge
 										</button>
 									</li>
-								} else if !localMergeUnavailable && task.MergeStatus != models.MergeStatusMerged {
-								<li class="menu-title"><span>Local</span></li>
-								for _, action := range components.TaskWorktreeMergeActions() {
-									if !action.RequiresRebaseEligibility || rebaseAvailable {
-										@components.TaskWorktreeMergeActionItem(task, action, "changes", "#changes-content", "innerHTML", "#changes-actions-dropdown button", "changes_tab")
-									}
-								}
-							}
 							<li class="menu-title"><span>GitHub</span></li>
 							if taskPR != nil {
 								<li>

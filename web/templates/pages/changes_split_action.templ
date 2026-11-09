@@ -7,7 +7,7 @@ import (
  "github.com/openvibely/openvibely/web/templates"
 )
 
-templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable bool, rebaseAvailable bool) {
+templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable bool) {
  @templates.MenuStyles()
  <div data-changes-split data-task-id={ task.ID } data-project-id={ task.ProjectID } data-local-available={ fmt.Sprint(!localUnavailable && task.MergeStatus != models.MergeStatusMerged) } data-linked-pr={ fmt.Sprint(taskPR != nil) }>
   <div class="join ov-changes-split">
