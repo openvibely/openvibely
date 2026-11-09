@@ -3545,16 +3545,21 @@ const repo=document.querySelector('[data-changes-repo]'),branch=document.querySe
 const choices=[{url:'https://github.com/openvibely/openvibely',name:'openvibely/openvibely',upstream:true},{url:'https://github.com/example/openvibely',name:'example/openvibely',upstream:false}];
 repo.replaceChildren(...choices.map(choice=>new Option(choice.name+(choice.upstream?' · Upstream':' · Origin'),choice.url)));
 branch.innerHTML=local.innerHTML='<option>main</option><option>develop</option>';
-let mode='pr';
+local.add(new Option('recovery/task-04114335-pre-goal-verification-20260730193258'));
+let mode='local';
+local.selectedIndex=2;
+method.value='ff';
 function render(){
  const pr=mode==='pr',choice=choices.find(c=>c.url===repo.value);
  document.querySelector('[data-changes-pr-fields]').hidden=!pr;
  document.querySelector('[data-changes-local-fields]').hidden=pr;
  document.querySelectorAll('[data-changes-mode]').forEach(b=>{b.classList.toggle('btn-active',b.dataset.changesMode===mode);b.setAttribute('aria-pressed',String(b.dataset.changesMode===mode));});
  // Proposed compact labels; the dropdown and tooltip retain the full destination.
- const names={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash into '};
- action.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to origin'):''):(names[method.value]||'Merge into ')+local.value;
- action.title=pr?(choice?choice.name+':'+branch.value:'Select a PR destination'):local.value;
+ const names={merge:'Merge',ff:'Fast-forward',rebase:'Rebase',squash:'Squash merge'};
+ const destinations={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash into '};
+ action.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to origin'):''):(names[method.value]||'Merge');
+ action.title=pr?(choice?choice.name+':'+branch.value:'Select a PR destination'):(destinations[method.value]||'Merge into ')+local.value;
+ action.setAttribute('aria-label',pr?action.textContent+' ('+action.title+')':action.title);
  if(!panel.hidden)position();
 }
 function close(){if(panel.matches(':popover-open'))panel.hidePopover();panel.hidden=true;toggle.setAttribute('aria-expanded','false');}
