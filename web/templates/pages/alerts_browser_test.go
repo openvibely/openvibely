@@ -691,9 +691,12 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 		case r.URL.Path == "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
-		default:
+		case r.URL.Path == "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(page))
+		default:
+			// Layout fragments load on page load; serving the page to them nests it recursively.
+			w.WriteHeader(http.StatusNoContent)
 		}
 	}))
 	defer server.Close()
