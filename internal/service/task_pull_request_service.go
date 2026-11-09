@@ -610,10 +610,22 @@ func taskIssueClosingRef(opts OpenTaskPullRequestOptions, sourceRepoURL string) 
 
 // Qualify only closing references for the linked issue; leave other prose intact.
 func qualifyIssueClosingReferences(body string, opts OpenTaskPullRequestOptions) string {
-	if opts.IssueNumber == nil || opts.closingIssueRef == "" {
+	if opts.closingIssueRef == "" {
 		return body
 	}
-	pattern := regexp.MustCompile(fmt.Sprintf(`(?i)(\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\s+)#%d(\b)`, *opts.IssueNumber))
+	var issueNumber int
+	if opts.IssueNumber != nil {
+		issueNumber = *opts.IssueNumber
+	} else {
+		// closingIssueRef is the validated, canonical issue URL. URL-only
+		// callers still identify the issue whose shorthand needs qualifying.
+		var err error
+		issueNumber, err = strconv.Atoi(opts.closingIssueRef[strings.LastIndex(opts.closingIssueRef, "/")+1:])
+		if err != nil || issueNumber <= 0 {
+			return body
+		}
+	}
+	pattern := regexp.MustCompile(fmt.Sprintf(`(?i)(\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\s+)#%d(\b)`, issueNumber))
 	return pattern.ReplaceAllStringFunc(body, func(match string) string {
 		i := strings.LastIndex(match, "#")
 		return match[:i] + opts.closingIssueRef

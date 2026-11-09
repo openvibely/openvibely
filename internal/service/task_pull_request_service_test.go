@@ -1518,3 +1518,32 @@ func TestTaskPullRequestIssueClosingSource(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskPullRequestURLOnlyClosingReferences(t *testing.T) {
+	const issueURL = "https://github.com/alice/app/issues/42"
+	const body = "Fix login.\n\nCloses #42\nFixes #420\nCloses #7"
+	const want = "Fix login.\n\nCloses " + issueURL + "\nFixes #420\nCloses #7"
+	opts := OpenTaskPullRequestOptions{IssueURL: issueURL, Body: body}
+	svc := &TaskPullRequestService{}
+	req := svc.buildCreatePullRequestRequest(context.Background(), &models.Project{RepoURL: "https://github.com/alice/app"}, &models.Task{Title: "Fix login", MergeTargetBranch: "main"}, opts, &GitHubRepoRef{HTMLURL: "https://github.com/company/app"})
+	if req.Body != want {
+		t.Fatalf("new PR body = %q, want %q", req.Body, want)
+	}
+	opts.closingIssueRef = taskIssueClosingRef(opts, "https://github.com/alice/app")
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reused explicit=%v", explicit), func(t *testing.T) {
+			reuseOpts := opts
+			if !explicit {
+				reuseOpts.Body = ""
+			}
+			got, update := reusedPullRequestBody(body, req.Body, nil, reuseOpts)
+			if !update || got != want {
+				t.Fatalf("reused body = (%q, %v), want (%q, true)", got, update, want)
+			}
+			reuseOpts.Body = ""
+			if _, update := reusedPullRequestBody(got, req.Body, nil, reuseOpts); update {
+				t.Fatal("already qualified body should not be updated again")
+			}
+		})
+	}
+}
