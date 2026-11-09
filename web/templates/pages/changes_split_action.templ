@@ -14,7 +14,7 @@ templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, loca
    if taskPR != nil {
     <a class="btn btn-primary btn-sm join-item" data-linked-pr-action href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprint(taskPR.PRNumber) }</a>
    }
-   <button type="button" class="btn btn-primary btn-sm join-item" data-changes-primary disabled hidden?={ taskPR != nil }>Loading…</button>
+   <button type="button" class="btn btn-primary btn-sm join-item" data-changes-primary aria-disabled="true" aria-busy="true" hidden?={ taskPR != nil }>Loading…</button>
    <button type="button" class="btn btn-primary btn-sm join-item" data-changes-settings-toggle popovertarget="changes-split-settings" aria-label="Action settings" aria-expanded="false">
     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m6 9 6 6 6-6z"></path></svg>
    </button>
@@ -82,7 +82,7 @@ templ changesSplitActionScript() {
    const find=s=>root.querySelector(s),primary=find('[data-changes-primary]'),toggle=find('[data-changes-settings-toggle]'),panel=find('#changes-split-settings');
    const repo=find('[data-changes-repo]'),branch=find('[data-changes-branch]'),localBranch=find('[data-changes-local-branch]'),method=find('[data-changes-method]'),error=find('[data-changes-error]'),saveState=find('[data-changes-save-state]'),more=find('[data-changes-more]'),retry=find('[data-changes-retry]');
    const endpoint='/tasks/'+encodeURIComponent(root.dataset.taskId)+'/worktree/';
-   let prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='',localVersion=0,localChecked='',localLoading=false,mergeAllowed=false,rebaseAllowed=false;
+   let settingsLoading=true,prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='',localVersion=0,localChecked='',localLoading=false,mergeAllowed=false,rebaseAllowed=false;
    const linked=root.dataset.linkedPr==='true',canLocal=root.dataset.localAvailable==='true';
    function showError(message){error.textContent=message||'';error.hidden=!message;}
    async function request(url,options){const response=await fetch(url,{credentials:'same-origin',...options});if(!response.ok){let message='Request failed ('+response.status+')';try{const data=await response.json();message=data.message||message;}catch{}throw new Error(message);}return response.status===204?null:response.json();}
@@ -96,7 +96,7 @@ templ changesSplitActionScript() {
    panel.addEventListener('toggle',position);
    const state={position,close:()=>controller.close(false)};states.set(root,state);
    function render(){
-    if(!prefs)return;
+    if(settingsLoading||!prefs)return;
     const rebaseOption=method.querySelector('[value="rebase"]');if(rebaseOption){rebaseOption.disabled=localChecked!==prefs.local_branch||!rebaseAllowed;rebaseOption.hidden=rebaseOption.disabled;}
     const pr=prefs.mode==='pr',choice=choices.find(c=>c.url===prefs.repository),localValid=Array.from(localBranch.options).some(o=>o.value===prefs.local_branch),methodValid=Array.from(method.options).some(o=>o.value===prefs.method&&!o.disabled);
     find('[data-changes-pr-fields]').hidden=!pr;find('[data-changes-local-fields]').hidden=pr;
@@ -150,14 +150,14 @@ templ changesSplitActionScript() {
    });
    root.addEventListener('htmx:beforeRequest',()=>{busy=true;render();});
    root.addEventListener('htmx:afterRequest',()=>{busy=false;render();});
-   async function load(){retry.hidden=true;primary.disabled=true;try{
+   async function load(){settingsLoading=true;retry.hidden=true;primary.disabled=false;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','true');try{
     const data=await request(endpoint+'action-settings');if(!root.isConnected)return;prefs=data.preferences;choices=data.repositories||[];linkedTarget=data.linked_pr||null;githubError=data.github_error||'';
     if(linkedTarget&&!choices.some(c=>c.url===linkedTarget.repository))choices.push({url:linkedTarget.repository,name:linkedTarget.repository.replace(/^https:\/\//,''),default_branch:linkedTarget.branch});
     fill(repo,choices.map(c=>({value:c.url,label:c.name+(c.upstream?' · Upstream':choices.some(r=>r.upstream)?' · This fork':'')})));
     if(prefs.repository&&!choices.some(c=>c.url===prefs.repository)){const option=document.createElement('option');option.value=prefs.repository;option.textContent=prefs.repository.replace(/^https:\/\//,'')+' · Unavailable';option.disabled=true;repo.append(option);}
     fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));
-    showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;render();loadLocalEligibility();if(prefs.mode==='pr')loadBranches(true);
-   }catch(err){showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}
+    showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;settingsLoading=false;render();loadLocalEligibility();if(prefs.mode==='pr')loadBranches(true);
+   }catch(err){settingsLoading=false;primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','false');showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}
    retry.addEventListener('click',load);load();
   });}
   window.ovChangesSplit={init};

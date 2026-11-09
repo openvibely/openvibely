@@ -215,3 +215,18 @@ func TestBrowserFunctional_ChangesSplitActionWithoutNativePopover(t *testing.T) 
 		}
 	})
 }
+
+func TestBrowserFunctional_ChangesSplitActionInitialLoadingColor(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-initial-loading", func(b *composerFocusCDP) {
+		b.waitFor("initial ready", `String(document.querySelector('[data-changes-primary]')?.getAttribute('aria-disabled')==='false')`, "true")
+		b.evaluate(`(()=>{const original=window.fetch;window.fetch=async function(url,options){const response=await original(url,options);if(String(url).endsWith('/action-settings')&&!options?.method)await new Promise(resolve=>window.releaseSettings=resolve);return response;};window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});return 'ok';})()`)
+		b.waitFor("loading stays accent", `(()=>{const el=document.querySelector('[data-changes-primary]');return String(document.querySelector('[data-changes-split]')!==window.oldSplit&&typeof window.releaseSettings==='function'&&el.textContent==='Loading…'&&!el.disabled&&el.getAttribute('aria-disabled')==='true'&&el.getAttribute('aria-busy')==='true'&&getComputedStyle(el).backgroundColor===getComputedStyle(document.querySelector('[data-changes-settings-toggle]')).backgroundColor);})()`, "true")
+		b.evaluate(`document.querySelector('[data-changes-primary]').click();fetch('/fixture-state').then(r=>r.json()).then(s=>window.initialActions=s.actions.length);'ok'`)
+		b.waitFor("loading click blocked", `String(window.initialActions===0)`, "true")
+		b.evaluate(`window.releaseSettings();'ok'`)
+		b.waitFor("action ready", `String(document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false'&&document.querySelector('[data-changes-primary]').getAttribute('aria-busy')==='false')`, "true")
+	})
+}
