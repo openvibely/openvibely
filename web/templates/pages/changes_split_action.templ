@@ -62,6 +62,8 @@ templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, loca
   .ov-changes-split { border-radius:var(--rounded-btn,.5rem);overflow:hidden; }
   .ov-changes-split.join > [data-changes-primary], .ov-changes-split.join > [data-linked-pr-action] { border-top-left-radius:var(--rounded-btn,.5rem);border-bottom-left-radius:var(--rounded-btn,.5rem); }
   .ov-changes-split > .btn { transition:background-color 100ms ease; }
+  .ov-changes-split > [data-changes-settings-toggle] { position:relative; }
+  .ov-changes-split > [data-changes-settings-toggle]::before { content:"";position:absolute;left:0;top:-1px;bottom:-1px;width:1px;background:var(--board-page-bg, var(--ov-content-bg, var(--fallback-b1, oklch(var(--b1) / 1))));pointer-events:none; }
   [data-color-theme][data-theme] .ov-changes-split > .btn:active { transform:none; }
   .ov-changes-split:has(> .btn:active:not(:disabled)) { transform:scale(var(--btn-focus-scale,.97)); }
   .ov-changes-settings { width:320px;max-width:calc(100vw - 16px);padding:16px;overflow:auto; }
@@ -108,9 +110,11 @@ templ changesSplitActionScript() {
     repo.value=linkedTarget?.repository||prefs.repository;const selectedBranch=linkedTarget?linkedTarget.branch:prefs.branch;if(!Array.from(branch.options).some(o=>o.value===selectedBranch)){const option=document.createElement('option');option.value=selectedBranch;option.textContent=selectedBranch||(linkedTarget?'See linked PR':'Select a branch');branch.append(option);}branch.value=selectedBranch;localBranch.value=prefs.local_branch;method.value=prefs.method;
     repo.disabled=linked;branch.disabled=linked;find('[data-changes-linked-note]').hidden=!linked;
     const view=find('[data-linked-pr-action]');if(view)view.hidden=!pr;primary.hidden=pr&&linked;
-    const names={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash into '};
-    primary.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to '+choice.name):''):(names[prefs.method]||'Merge into ')+prefs.local_branch;
-    primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):prefs.local_branch;
+    const names={merge:'Merge',ff:'Fast-forward',rebase:'Rebase',squash:'Squash merge'};
+    const destinations={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash merge into '};
+    primary.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to origin'):''):(names[prefs.method]||'Merge');
+    primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):(destinations[prefs.method]||'Merge into ')+prefs.local_branch;
+    primary.setAttribute('aria-label',pr?primary.textContent+' ('+primary.title+')':primary.title);
     const checkingLocal=!pr&&localLoading,waiting=saveCount>0||checkingLocal;
     primary.disabled=root.dataset.taskRunning==='true'||busy||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||(!checkingLocal&&(!methodValid||localChecked!==prefs.local_branch||!mergeAllowed))));
     primary.setAttribute('aria-busy',String(waiting||busy));
@@ -157,7 +161,7 @@ templ changesSplitActionScript() {
    async function load(){settingsLoading=true;setGroupDisabled(true);retry.hidden=true;primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','true');try{
     const data=await request(endpoint+'action-settings');if(!root.isConnected)return;prefs=data.preferences;choices=data.repositories||[];linkedTarget=data.linked_pr||null;githubError=data.github_error||'';
     if(linkedTarget&&!choices.some(c=>c.url===linkedTarget.repository))choices.push({url:linkedTarget.repository,name:linkedTarget.repository.replace(/^https:\/\//,''),default_branch:linkedTarget.branch});
-    fill(repo,choices.map(c=>({value:c.url,label:c.name+(c.upstream?' · Upstream':choices.some(r=>r.upstream)?' · This fork':'')})));
+    fill(repo,choices.map(c=>({value:c.url,label:c.name+(c.upstream?' · Upstream':' · Origin')})));
     if(prefs.repository&&!choices.some(c=>c.url===prefs.repository)){const option=document.createElement('option');option.value=prefs.repository;option.textContent=prefs.repository.replace(/^https:\/\//,'')+' · Unavailable';option.disabled=true;repo.append(option);}
     fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));
     showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;settingsLoading=false;render();loadLocalEligibility();if(prefs.mode==='pr')loadBranches(true);
