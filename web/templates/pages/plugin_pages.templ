@@ -291,17 +291,17 @@ templ PluginSettingsContent(v PluginSettingsView) {
 		</div>
 
 		@pluginSettingsDialog("plugin-describe-modal", "Describe a page") {
-			<p class="text-sm opacity-70">Create a task to build and publish a page in this project. Open the task to run it.</p>
+			<p class="text-sm opacity-70">Start a task to build and publish a page in the selected project.</p>
 			<form method="post" action={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } class="space-y-4" onsubmit="this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
 				@pluginDestination(v)
-<input type="hidden" name="category" value="backlog"/>
+<input type="hidden" name="category" value="active"/>
 				<input type="hidden" name="priority" value="2"/>
 				<input type="hidden" name="prompt"/>
 				<label class="form-control"><span class="label-text">Name</span><input name="title" class="input input-bordered" required maxlength="200"/></label>
 				<label class="form-control"><span class="label-text">What should this page do?</span><textarea name="description" class="textarea textarea-bordered" rows="5" required></textarea></label>
 				<div class="modal-action">
                     <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create task</button>
+                    <button type="submit" class="btn btn-primary">Create and start</button>
                 </div>
 			</form>
 		}

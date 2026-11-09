@@ -1265,7 +1265,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "<p class=\"text-sm opacity-70\">Create a task to build and publish a page in this project. Open the task to run it.</p><form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "<p class=\"text-sm opacity-70\">Start a task to build and publish a page in the selected project.</p><form method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1286,7 +1286,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "<input type=\"hidden\" name=\"category\" value=\"backlog\"> <input type=\"hidden\" name=\"priority\" value=\"2\"> <input type=\"hidden\" name=\"prompt\"> <label class=\"form-control\"><span class=\"label-text\">Name</span><input name=\"title\" class=\"input input-bordered\" required maxlength=\"200\"></label> <label class=\"form-control\"><span class=\"label-text\">What should this page do?</span><textarea name=\"description\" class=\"textarea textarea-bordered\" rows=\"5\" required></textarea></label><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"this.closest('dialog').close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Create task</button></div></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "<input type=\"hidden\" name=\"category\" value=\"active\"> <input type=\"hidden\" name=\"priority\" value=\"2\"> <input type=\"hidden\" name=\"prompt\"> <label class=\"form-control\"><span class=\"label-text\">Name</span><input name=\"title\" class=\"input input-bordered\" required maxlength=\"200\"></label> <label class=\"form-control\"><span class=\"label-text\">What should this page do?</span><textarea name=\"description\" class=\"textarea textarea-bordered\" rows=\"5\" required></textarea></label><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"this.closest('dialog').close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Create and start</button></div></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
