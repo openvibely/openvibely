@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,5 +102,34 @@ func TestPluginEntryLargerThanPrefixIsStreamedWhole(t *testing.T) {
 				t.Fatalf("content type %q", ct)
 			}
 		})
+	}
+}
+
+func TestPluginExternalLinksOpenOutsideFrame(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	html := instrumentPluginHTML("", "test")
+	script := strings.TrimSuffix(strings.TrimPrefix(html, "<script>"), "</script>")
+	harness := `const assert=require('node:assert/strict');
+const handlers={};global.window={addEventListener(){}};
+global.document={addEventListener(type,fn){handlers[type]=fn}};
+global.location={href:'https://ov.test/plugin-assets/token/index.html',origin:'https://ov.test'};
+` + script + `
+for(const type of ['click','auxclick']) {
+ for(const href of ['https://news.test/article','http://news.test/article']) {
+  const rel=new Set();const a={href,target:'_self',relList:{add(...v){v.forEach(x=>rel.add(x))}}};
+  handlers[type]({target:{closest(){return a}}});
+  assert.equal(a.target,'_blank');assert(rel.has('noopener'));assert(rel.has('noreferrer'));
+ }
+ for(const href of ['https://ov.test/plugin-assets/token/index.html#section','https://ov.test/plugin-assets/token/other.html','mailto:user@example.com']) {
+  const a={href,target:'_self',relList:{add(){throw Error('internal link changed')}}};
+  handlers[type]({target:{closest(){return a}}});assert.equal(a.target,'_self');
+ }
+}
+`
+	if out, err := exec.Command(node, "-e", harness).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
 	}
 }

@@ -86,7 +86,7 @@ func (env *pluginTestEnv) openPage(t *testing.T, in *models.PagePluginInstance) 
 		t.Fatalf("open page: %d %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `sandbox="allow-scripts allow-forms"`) {
+	if !strings.Contains(body, `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"`) {
 		t.Fatal("plugin iframe is not sandboxed")
 	}
 	m := handlePattern.FindStringSubmatch(body)

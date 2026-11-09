@@ -60,7 +60,7 @@ templ PluginPageContent(v PluginPageView) {
 				data-tooltip-disabled
 				title={ v.Title }
 				class="flex-1 min-w-0 w-full h-full border border-base-300 bg-base-100"
-				sandbox="allow-scripts allow-forms"
+				sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
 				referrerpolicy="no-referrer"
 				src={ v.AssetURL }
 			></iframe>
