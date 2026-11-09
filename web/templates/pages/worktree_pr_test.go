@@ -20,7 +20,8 @@ func TestTaskChangesWorktreeContent_CreatePRIsDirectActionWithoutEndpointModal(t
 	for _, want := range []string{
 		`hx-post="/tasks/task-1/worktree/pull-request"`,
 		`hx-target="#changes-content"`,
-		`hx-indicator="#create-pr-indicator"`,
+		`data-changes-pr-transport`,
+		`hx-disabled-elt="[data-changes-split] button"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected direct Create PR action to contain %q", want)
@@ -67,7 +68,7 @@ func TestTaskChangesWorktreeContent_HeaderLabelsStayContained(t *testing.T) {
 	}
 	out := buf.String()
 	if !strings.Contains(out, `<div class="relative flex flex-wrap items-start justify-between gap-2 mb-2 min-w-0 max-w-full">`) {
-		t.Fatal("expected worktree header row to wrap within the page without clipping the actions dropdown")
+		t.Fatal("expected worktree header row to wrap within the page without clipping the action settings")
 	}
 	if !strings.Contains(out, `<p class="text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">`) {
 		t.Fatal("expected branch summary to break long labels instead of widening the page")
@@ -80,48 +81,53 @@ func TestTaskChangesWorktreeContent_HeaderLabelsStayContained(t *testing.T) {
 	}
 }
 
-func TestTaskChangesWorktreeContent_ActionsDropdownLayersAboveDiffHeaders(t *testing.T) {
-	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
-
-	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render failed: %v", err)
-	}
-	out := buf.String()
-	if !strings.Contains(out, `<div class="dropdown dropdown-end relative z-[60] flex-shrink-0" id="changes-actions-dropdown">`) {
-		t.Fatal("expected Actions dropdown to establish a stacking context above sticky diff headers")
-	}
-	if !strings.Contains(out, `<ul id="changes-actions-menu" popover="manual" class="ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]" style="position:fixed;inset:auto;margin:0;">`) {
-		t.Fatal("expected Actions menu content to layer above diff content and stay viewport-contained")
-	}
-	legacyActionsSnippet := `<div class="dropdown dropdown-end flex-shrink-0" id="changes-actions-dropdown"><div tabindex="0" role="button" class="btn btn-primary btn-sm whitespace-nowrap">Actions <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></div><ul tabindex="0" class="dropdown-content z-[1] menu`
-	if strings.Contains(out, legacyActionsSnippet) {
-		t.Fatal("Actions dropdown must not use the previous low z-index that allowed sticky diff headers to cover it")
-	}
-}
-
-func TestTaskChangesWorktreeContent_RendersCreatePRInGitHubSection(t *testing.T) {
+func TestTaskChangesWorktreeContent_SettingsUseTopLayerPopover(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
 	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render failed: %v", err)
+		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "Create PR") {
-		t.Fatal("expected Create PR item in dropdown")
+	for _, want := range []string{
+		`data-changes-settings-toggle popovertarget="changes-split-settings"`,
+		`aria-label="Action settings" aria-expanded="false"`,
+		`id="changes-split-settings" data-menu-content popover="manual"`,
+		`style="position:fixed;inset:auto;margin:0;"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing split settings popover markup %q", want)
+		}
 	}
-	if !strings.Contains(out, "GitHub") {
-		t.Fatal("expected GitHub section header in dropdown")
-	}
-	if !strings.Contains(out, `hx-indicator="#create-pr-indicator"`) {
-		t.Fatal("expected Create PR action to include htmx indicator slot for consistent indentation")
-	}
-	if !strings.Contains(out, `id="create-pr-indicator"`) {
-		t.Fatal("expected Create PR indicator element in dropdown action")
+	// Actual layering and viewport placement are exercised by
+	// TestBrowserFunctional_WorktreeActionsAboveDiffHeader.
+	if strings.Contains(out, `id="changes-actions-dropdown"`) {
+		t.Fatal("ordinary actions should use the split settings, not the legacy menu")
 	}
 }
 
-func TestTaskChangesWorktreeContent_RendersViewPRInGitHubSection(t *testing.T) {
+func TestTaskChangesWorktreeContent_RendersPRSettingsAndDirectAction(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		`data-changes-primary disabled`,
+		`data-changes-mode="pr" aria-pressed="false">Pull request</button>`,
+		`data-changes-repo`, `data-changes-branch`,
+		`data-changes-pr-transport hx-post="/tasks/task-1/worktree/pull-request"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing PR action control %q", want)
+		}
+	}
+	if strings.Contains(out, `data-linked-pr-action href=`) {
+		t.Fatal("unlinked task must not render a View PR link")
+	}
+}
+
+func TestTaskChangesWorktreeContent_RendersLinkedPRAction(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	pr := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/openvibely/openvibely/pull/42", PRState: "open"}
 	var buf bytes.Buffer
@@ -130,7 +136,7 @@ func TestTaskChangesWorktreeContent_RendersViewPRInGitHubSection(t *testing.T) {
 	}
 	out := buf.String()
 	if !strings.Contains(out, "View PR #42") {
-		t.Fatal("expected View PR link in dropdown")
+		t.Fatal("expected View PR link in split button")
 	}
 	// The View PR action must point at the absolute GitHub PR URL and use
 	// target="_blank" so the desktop bridge (in base layout) routes the click
@@ -142,38 +148,36 @@ func TestTaskChangesWorktreeContent_RendersViewPRInGitHubSection(t *testing.T) {
 	if !strings.Contains(out, `target="_blank"`) {
 		t.Fatal("expected View PR anchor to use target=\"_blank\" so the desktop bridge can intercept it")
 	}
-	if strings.Contains(out, "Create PR") {
-		t.Fatal("did not expect Create PR when PR exists")
+	if strings.Contains(out, `data-changes-pr-transport hx-post=`) {
+		t.Fatal("linked task must not render a Create PR transport")
 	}
-	if !strings.Contains(out, "GitHub") {
-		t.Fatal("expected GitHub section header in dropdown")
-	}
-	if !strings.Contains(out, `<span class="htmx-indicator"><span class="loading loading-spinner loading-xs"></span></span>`) {
-		t.Fatal("expected View PR action to include indicator-width slot for consistent indentation")
+	for _, want := range []string{`data-linked-pr="true"`, `data-linked-pr-action href=`, `rel="noopener noreferrer"`, `data-changes-primary disabled hidden`, `data-changes-settings-toggle`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing linked PR control %q", want)
+		}
 	}
 }
 
-func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
+func TestTaskChangesWorktreeContent_LocalAndPRSettings(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
 	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "Local") {
-		t.Fatal("expected Local section header in dropdown")
-	}
-	if !strings.Contains(out, "GitHub") {
-		t.Fatal("expected GitHub section header in dropdown")
+	for _, want := range []string{`data-changes-mode="local" aria-pressed="false">Local merge</button>`, `data-changes-mode="pr" aria-pressed="false">Pull request</button>`, `data-changes-local-branch`, `data-changes-method`, `data-changes-pr-fields`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing action settings %q", want)
+		}
 	}
 	if !strings.Contains(out, "Merge commit") {
-		t.Fatal("expected Merge commit option in Local section")
+		t.Fatal("expected Merge commit option in merge method selector")
 	}
 	if !strings.Contains(out, "Fast-forward only") {
-		t.Fatal("expected Fast-forward only option in Local section")
+		t.Fatal("expected Fast-forward only option in merge method selector")
 	}
 	if !strings.Contains(out, "Squash merge") {
-		t.Fatal("expected Squash merge option in Local section")
+		t.Fatal("expected Squash merge option in merge method selector")
 	}
 	if !strings.Contains(out, `hx-target="#changes-content"`) {
 		t.Fatal("expected Changes-tab local merge actions to target the visible changes content")
@@ -181,8 +185,8 @@ func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
 	if !strings.Contains(out, `type="button"`) {
 		t.Fatal("expected Changes-tab local merge actions to be explicit buttons so clicks cannot fall back to form submission")
 	}
-	if !strings.Contains(out, "Create PR") {
-		t.Fatal("expected Create PR in GitHub section")
+	if !strings.Contains(out, `data-changes-pr-transport hx-post=`) {
+		t.Fatal("expected PR creation transport")
 	}
 }
 
@@ -289,9 +293,12 @@ func TestTaskChangesWorktreeContent_MergedStatusWithoutDiffHidesLocalSection(t *
 	if strings.Contains(out, "/worktree/merge") {
 		t.Fatal("did not expect merge endpoint actions when already merged")
 	}
-	// GitHub section should still render
-	if !strings.Contains(out, "GitHub") {
-		t.Fatal("expected GitHub section header when already merged")
+	// PR creation remains available while local actions are disabled.
+	if !strings.Contains(out, `data-changes-pr-transport hx-post=`) {
+		t.Fatal("expected PR creation transport when already merged")
+	}
+	if !strings.Contains(out, `data-changes-mode="local" aria-pressed="false" disabled`) {
+		t.Fatal("merged task must disable local mode")
 	}
 }
 
@@ -333,7 +340,7 @@ func TestTaskChangesWorktreeContent_FailedStatusShowsRetryActions(t *testing.T) 
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"Merge commit", "Fast-forward only", "Squash merge", `hx-disabled-elt="#changes-actions-dropdown button"`} {
+	for _, want := range []string{"Merge commit", "Fast-forward only", "Squash merge", `hx-disabled-elt="[data-changes-split] button"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected failed status retry content %q, body=%s", want, out)
 		}
@@ -408,9 +415,12 @@ func TestTaskChangesWorktreeContent_BranchAlreadyMergedHidesLocalSection(t *test
 	if !strings.Contains(out, "file.txt") {
 		t.Fatal("expected preserved diff to remain visible when local merge actions are hidden")
 	}
-	// GitHub section should still render (Create PR / View PR remains valid).
-	if !strings.Contains(out, "GitHub") {
-		t.Fatal("expected GitHub section header even when branch is already merged")
+	// PR controls remain available even when local integration is complete.
+	if !strings.Contains(out, `data-changes-pr-transport hx-post=`) {
+		t.Fatal("expected PR creation transport when branch is already merged")
+	}
+	if !strings.Contains(out, `data-changes-mode="local" aria-pressed="false" disabled`) {
+		t.Fatal("already merged branch must disable local mode")
 	}
 }
 
@@ -446,7 +456,7 @@ func TestTaskChangesWorktreeContent_ToolbarActionOrder(t *testing.T) {
 	}
 	out := buf.String()
 	last := -1
-	for _, marker := range []string{`data-diff-toolbar`, `id="diff-btn-inline"`, `id="diff-btn-split"`, `id="review-toolbar"`, `id="changes-actions-dropdown"`} {
+	for _, marker := range []string{`data-diff-toolbar`, `id="diff-btn-inline"`, `id="diff-btn-split"`, `id="review-toolbar"`, `data-changes-split data-task-id=`} {
 		pos := strings.Index(out, marker)
 		if pos <= last {
 			t.Fatalf("missing or misplaced toolbar control %s", marker)
@@ -458,14 +468,14 @@ func TestTaskChangesWorktreeContent_ToolbarActionOrder(t *testing.T) {
 			t.Fatalf("unexpected toolbar chrome: %s", unwanted)
 		}
 	}
-	if !strings.Contains(out, `popovertarget="changes-actions-menu" class="btn btn-primary btn-sm whitespace-nowrap"`) {
-		t.Fatal("Actions should retain its accent color")
+	if !strings.Contains(out, `class="btn btn-primary btn-sm join-item" data-changes-primary`) {
+		t.Fatal("split primary action should retain its accent color")
 	}
 	buf.Reset()
 	if err := TaskChangesWorktreeContent("", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), `id="changes-actions-dropdown"`) {
+	if !strings.Contains(buf.String(), `data-changes-split data-task-id=`) {
 		t.Fatal("actions must remain available with no diff")
 	}
 }
