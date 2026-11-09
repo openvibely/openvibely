@@ -479,3 +479,34 @@ func TestTaskChangesWorktreeContent_ToolbarActionOrder(t *testing.T) {
 		t.Fatal("actions must remain available with no diff")
 	}
 }
+
+func TestTaskChangesWorktreeContent_RefreshesRunningStateWithUnchangedDiff(t *testing.T) {
+	task := &models.Task{ID: "task-refresh", WorktreeBranch: "task/feature", MergeTargetBranch: "main", MergeStatus: models.MergeStatusMerged}
+	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+	renderKey := func(status models.TaskStatus) string {
+		t.Helper()
+		task.Status = status
+		var buf bytes.Buffer
+		// Local merge remains unavailable across every execution state.
+		if err := TaskChangesWorktreeContent(diff, task, nil, nil, nil, true, false).Render(context.Background(), &buf); err != nil {
+			t.Fatal(err)
+		}
+		_, rest, ok := strings.Cut(buf.String(), `data-changes-metadata="`)
+		if !ok {
+			t.Fatal("missing toolbar refresh key")
+		}
+		key, _, ok := strings.Cut(rest, `"`)
+		if !ok {
+			t.Fatal("unterminated toolbar refresh key")
+		}
+		return key
+	}
+	stopped := renderKey(models.StatusCompleted)
+	running := renderKey(models.StatusRunning)
+	if stopped == running {
+		t.Fatal("starting execution must refresh the toolbar despite unchanged diff and eligibility")
+	}
+	if finished := renderKey(models.StatusCompleted); finished == running || finished != stopped {
+		t.Fatal("stopping execution must restore the non-running toolbar key")
+	}
+}

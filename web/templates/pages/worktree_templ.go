@@ -424,7 +424,7 @@ func changesMetadataKey(task *models.Task, pr *models.TaskPullRequest, unavailab
 	if pr != nil {
 		prKey = fmt.Sprintf("%d:%s", pr.PRNumber, pr.PRURL)
 	}
-	return fmt.Sprintf("%q:%q:%q:%t:%t:%t:%q", task.WorktreeBranch, components.TaskWorktreeMergeTarget(task), task.MergeStatus, unavailable, conflict, rebase, prKey)
+	return fmt.Sprintf("%q:%q:%q:%t:%t:%t:%q:%t", task.WorktreeBranch, components.TaskWorktreeMergeTarget(task), task.MergeStatus, unavailable, conflict, rebase, prKey, task.Status == models.StatusRunning)
 }
 
 func changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool) templ.Component {
