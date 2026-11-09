@@ -249,14 +249,16 @@ templ PluginSettingsContent(v PluginSettingsView) {
                                     }
                                 </select>
                             </label>
-                            <button type="submit" class="btn btn-primary">Add page</button>
+                            <div class="modal-action">
+                                <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+                                <button type="submit" class="btn btn-primary">Add page</button>
+                            </div>
                         </form>
                     }
                 }
-				@pluginSettingsDialog("plugin-delete-"+r.Instance.ID, "Delete "+r.Instance.Title+"?") {
-					<p>This deletes this project's page, saved data, and conversation. Other projects and the installed package are kept.</p>
-					<button class="btn btn-error" hx-post={ v.URL("/instances/" + r.Instance.ID + "/remove") } hx-target="#plugin-settings" hx-swap="outerHTML">Delete page</button>
-				}
+                @pluginRemovalDialog("plugin-delete-"+r.Instance.ID, "Delete page", r.Instance.Title, "Delete page", v.URL("/instances/"+r.Instance.ID+"/remove")) {
+                    <p>This deletes this project's page, saved data, and conversation. Other projects are kept.</p>
+                }
 			}
 			for _, p := range v.Packages {
 				<div class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 transition-all min-w-0" data-plugin-package={ p.Package.PluginID } data-plugin-card-id={ p.Package.ID } data-card-sort-name={ p.Package.Name } data-search-card data-search-text={ p.Package.Name + " " + p.Package.PluginID }>
@@ -269,7 +271,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 <button type="submit">Add { page } to project</button></form></li>
 								}
 								if p.InUse == 0 {
-									<li><button class="text-error" hx-post={ v.URL("/packages/" + url.PathEscape(p.Package.ID) + "/remove") } hx-confirm="Uninstall this unused package? Its files will be deleted." hx-target="#plugin-settings" hx-swap="outerHTML">Uninstall package</button></li>
+									<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-uninstall-"+p.Package.ID+"').showModal()"} }>Uninstall package</button></li>
 								}
 							}
 						</div>
@@ -280,6 +282,11 @@ templ PluginSettingsContent(v PluginSettingsView) {
 						<span class="badge badge-ghost badge-sm">Available to add</span>
 					</div>
 				</div>
+                if p.InUse == 0 {
+                    @pluginRemovalDialog("plugin-uninstall-"+p.Package.ID, "Uninstall package", p.Package.Name, "Uninstall package", v.URL("/packages/"+url.PathEscape(p.Package.ID)+"/remove")) {
+                        <p>This removes the unused package and its files.</p>
+                    }
+                }
 			}
 		</div>
 
@@ -292,22 +299,24 @@ templ PluginSettingsContent(v PluginSettingsView) {
 				<input type="hidden" name="prompt"/>
 				<label class="form-control"><span class="label-text">Name</span><input name="title" class="input input-bordered" required maxlength="200"/></label>
 				<label class="form-control"><span class="label-text">What should this page do?</span><textarea name="description" class="textarea textarea-bordered" rows="5" required></textarea></label>
-				<button type="submit" class="btn btn-primary">Create task</button>
+				<div class="modal-action">
+                    <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create task</button>
+                </div>
 			</form>
 		}
 		@pluginSettingsDialog("plugin-install-modal", "Install package") {
-			<form class="space-y-3" hx-post={ v.URL("/upload") } hx-encoding="multipart/form-data" hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML" hx-on:htmx:config-request="if(this.elements.destination_project){event.detail.path += '&destination_project='+encodeURIComponent(this.elements.destination_project.value);}event.detail.parameters.paths = Array.from(this.querySelector('input[type=file]').files).map(function(f){return f.webkitRelativePath || f.name;});">
+			<form id="plugin-upload-form" class="space-y-3" hx-post={ v.URL("/upload") } hx-encoding="multipart/form-data" hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML" hx-on:htmx:config-request="if(this.elements.destination_project){event.detail.path += '&destination_project='+encodeURIComponent(this.elements.destination_project.value);}event.detail.parameters.paths = Array.from(this.querySelector('input[type=file]').files).map(function(f){return f.webkitRelativePath || f.name;});">
 				@pluginDestination(v)
 <label class="form-control"><span class="label-text">Upload folder</span><input type="file" name="files" class="file-input file-input-bordered w-full" multiple webkitdirectory required/></label>
 				<p class="text-sm opacity-70">Choose a folder on your computer containing plugin.json. Up to 64 MiB.</p>
-				<button class="btn btn-primary" type="submit">Upload and install</button>
 			</form>
 			if v.OpenInstall && v.Error != "" {
 				<p id="plugin-install-error" class="text-sm text-error" role="alert">{ v.Error }</p>
 			}
-			<details open?={ v.InstallPath != "" }>
+			<details open?={ v.InstallPath != "" } ontoggle="var button=document.getElementById('plugin-install-submit');button.setAttribute('form',this.open?'plugin-path-form':'plugin-upload-form');button.textContent=this.open?'Install':'Upload and install';">
 				<summary class="cursor-pointer">Advanced: server folder path</summary>
-				<form class="space-y-3" hx-post={ v.URL("/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
+				<form id="plugin-path-form" class="space-y-3" hx-post={ v.URL("/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
 					@pluginDestination(v)
 <label class="form-control"><span class="label-text">Folder on the OpenVibely server</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" value={ v.InstallPath } aria-describedby="plugin-install-error" aria-invalid={ v.OpenInstall && v.Error != "" } required/></label>
 					if v.NativePicker {
@@ -315,14 +324,32 @@ templ PluginSettingsContent(v PluginSettingsView) {
 					}
 					<p class="text-sm opacity-70">Browse opens on the server machine and may be unavailable in hosted environments.</p>
 					<p data-picker-error class="text-sm text-error" role="alert"></p>
-					<button class="btn btn-primary" type="submit">Install</button>
 				</form>
-			</details>
-		}
+            </details>
+            <div class="modal-action">
+                <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+                <button id="plugin-install-submit" type="submit" class="btn btn-primary" form={ func() string { if v.InstallPath != "" { return "plugin-path-form" }; return "plugin-upload-form" }() }>
+                    if v.InstallPath != "" {
+                        Install
+                    } else {
+                        Upload and install
+                    }
+                </button>
+            </div>
+        }
 		if v.OpenInstall {
 			<script>document.getElementById('plugin-install-modal').showModal();</script>
 		}
 	</div>
+}
+
+templ pluginRemovalDialog(id, title, name, action, endpoint string) {
+    @layout.ConfirmationFrame(id, "Close confirmation", title, "Are you sure you want to remove ", "", name, "? This action cannot be undone.", action, true,
+        templ.ComponentScript{Call: "document.getElementById('"+id+"').close()"},
+        templ.ComponentScript{Call: "document.getElementById('"+id+"-form').requestSubmit()"}) {
+        { children... }
+        <form id={ id+"-form" } hx-post={ endpoint } hx-target="#plugin-settings" hx-swap="outerHTML"></form>
+    }
 }
 
 templ pluginSettingsDialog(id, title string) {

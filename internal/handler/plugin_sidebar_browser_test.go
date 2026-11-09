@@ -43,6 +43,18 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
   if(!document.getElementById(id).open)throw Error('Dialog did not open '+id);
   document.getElementById(id).close();
  }
+ for (const modal of document.querySelectorAll('#plugin-settings dialog')) {
+  modal.showModal();
+  const footer=modal.querySelector('.modal-action');
+  if(!footer)throw Error('Missing standard footer '+modal.id);
+  const buttons=footer.querySelectorAll('button');
+  if(buttons.length!==2 || buttons[0].textContent.trim()!=='Cancel')throw Error('Wrong footer actions '+modal.id);
+  const box=modal.querySelector('.modal-box').getBoundingClientRect();
+  const action=buttons[1].getBoundingClientRect();
+  if(action.right < box.left+box.width*0.8)throw Error('Action not right aligned '+modal.id);
+  buttons[0].click();
+  if(modal.open)throw Error('Cancel did not close '+modal.id);
+ }
  const installModal=document.getElementById('plugin-install-modal');
  if(installModal.querySelector('[data-plugin-package]')||installModal.textContent.includes('Installed packages'))throw Error('Install modal contains package management');
  if(document.getElementById('plugin-template-modal'))throw Error('Removed Sales template modal present');
@@ -123,7 +135,9 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
   }
  };
  document.body.addEventListener('htmx:afterSettle',onInstallSettled);
- form.elements.path.value=badPath;form.requestSubmit();
+ form.elements.path.value=badPath;
+ await wait(()=>document.getElementById('plugin-install-submit').form===form,'Server install button not bound');
+ document.getElementById('plugin-install-submit').click();
  await wait(()=>installSettled,'Installation response did not finish settling');
  await wait(()=>document.getElementById('plugin-install-error'),'Installation error missing');
  const reopened=document.getElementById('plugin-install-modal');
@@ -134,6 +148,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
 
  reopened.close();
  const uploadModal=document.getElementById('plugin-install-modal');uploadModal.showModal();
+ uploadModal.querySelector('details').open=false;
  const uploadForm=uploadModal.querySelector('form[hx-encoding]');
  const transfer=new DataTransfer();
  const manifest=JSON.stringify({schema_version:1,id:'test.browser-upload',name:'Browser uploaded',version:'1.0.0',pages:[{id:'home',title:'Home',entry:'assets/index.html'}]});
@@ -141,7 +156,8 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
   const file=new File([content],name);Object.defineProperty(file,'webkitRelativePath',{value:relative});transfer.items.add(file);
  }
  uploadForm.querySelector('input[type=file]').files=transfer.files;
- uploadForm.requestSubmit();
+ await wait(()=>document.getElementById('plugin-install-submit').form===uploadForm,'Upload button not bound');
+ document.getElementById('plugin-install-submit').click();
  await wait(()=>toasts.some(t=>t.includes('Installed Browser uploaded')),'Folder upload did not install');
  if(document.getElementById('plugin-install-modal').open)throw Error('Upload success left modal open');
  const nav=document.getElementById('plugin-pages-nav');
