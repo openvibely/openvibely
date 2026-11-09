@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Split button · Divider preview</title>
+<style>
+:root { color-scheme:dark; --page:#17191f; --panel:#20232b; --text:#eceef4; --muted:#9299aa; --border:#343844; --primary:#a6b2ff; --ink:#161b38; }
+:root.light { color-scheme:light; --page:#f5f6f9; --panel:#fff; --text:#202430; --muted:#687184; --border:#dce0e8; --primary:#5367d9; --ink:#fff; }
+* { box-sizing:border-box; } body { margin:0; background:var(--page); color:var(--text); font:14px/1.5 system-ui,sans-serif; } button,select { font:inherit; } button { cursor:pointer; } button:focus-visible,select:focus-visible { outline:2px solid var(--primary); outline-offset:4px; }
+main { max-width:960px; margin:72px auto; padding:0 28px; } header { display:flex; justify-content:space-between; align-items:center; gap:24px; } h1 { font-size:25px; letter-spacing:-.6px; margin:6px 0; } .eyebrow { color:var(--muted); font-size:11px; letter-spacing:1.5px; text-transform:uppercase; } p { color:var(--muted); } .quiet { background:transparent; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 12px; }
+.workspace { margin-top:40px; border-top:1px solid var(--border); } .toolbar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:24px 0; } .tabs { display:flex; gap:22px; color:var(--muted); } .tabs strong { color:var(--text); } .actions { position:relative; } .split { display:inline-flex; border-radius:8px; background:var(--primary); } .split button { border:0; background:transparent; color:var(--ink); font-weight:600; height:36px; } .split button:hover { background:color-mix(in srgb,var(--ink) 10%,transparent); } .split .action { padding:0 14px; border-radius:8px 0 0 8px; } .split .dropdown { width:36px; border-left:1px solid var(--page); border-radius:0 8px 8px 0; display:grid; place-items:center; } svg { width:14px; height:14px; }
+.menu { position:absolute; top:44px; right:0; width:285px; max-width:calc(100vw - 56px); padding:18px; border:1px solid var(--border); border-radius:12px; background:var(--panel); box-shadow:0 14px 36px #0003; z-index:2; } .menu label { display:block; color:var(--muted); font-size:12px; margin-bottom:6px; } select { width:100%; padding:8px; background:var(--page); color:var(--text); border:1px solid var(--border); border-radius:6px; margin-bottom:14px; } .menu p { font-size:12px; margin:0; }
+.file { background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden; } .filename { padding:12px 16px; border-bottom:1px solid var(--border); font-family:ui-monospace,monospace; font-size:12px; } pre { margin:0; padding:20px; overflow:auto; color:var(--muted); font-size:12px; line-height:1.9; } .added { color:#64bd8e; } .note { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-top:20px; color:var(--muted); font-size:12px; } #status { min-height:22px; margin-top:24px; } [hidden] { display:none!important; } @media(max-width:580px) { main { margin-top:36px; } header,.toolbar { align-items:flex-start; flex-direction:column; } .actions { align-self:flex-end; } }
+</style>
+</head>
+<body><main>
+<header><div><div class="eyebrow">Interaction preview</div><h1>A subtle split, a clear choice.</h1><p>A full-height, 1px divider matches the page background.</p></div><button class="quiet" id="theme">Switch to light</button></header>
+<section class="workspace" aria-label="Changes preview">
+<div class="toolbar"><div class="tabs"><span>Overview</span><strong>Changes <small>2</small></strong></div><div class="actions">
+<div class="split" role="group" aria-label="Change actions"><button class="action" id="action">Create PR</button><button class="dropdown" id="toggle" aria-label="Action settings" aria-expanded="false" aria-controls="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></div>
+<div class="menu" id="settings" hidden><label for="mode">Action</label><select id="mode"><option value="pr">Pull request</option><option value="merge">Local merge</option></select><label for="branch">Target branch</label><select id="branch"><option>main</option><option>develop</option></select><p>Choose the destination for your changes.</p></div>
+</div></div>
+<div class="file"><div class="filename">web / components / split-button.css</div><pre> .split-button__dropdown {
+<span class="added">+  border-left: 1px solid var(--page-background);</span>
+ }</pre></div>
+<div class="note"><span>Shared silhouette · Separate hover areas</span><span>Try the dropdown and light theme</span></div><p id="status" role="status"></p>
+</section></main>
+<script>
+const theme=document.getElementById('theme'),toggle=document.getElementById('toggle'),settings=document.getElementById('settings'),action=document.getElementById('action'),mode=document.getElementById('mode'),branch=document.getElementById('branch');
+function close(){settings.hidden=true;toggle.setAttribute('aria-expanded','false');}
+theme.onclick=()=>{const light=document.documentElement.classList.toggle('light');theme.textContent=light?'Switch to dark':'Switch to light';};
+toggle.onclick=()=>{settings.hidden=!settings.hidden;toggle.setAttribute('aria-expanded',String(!settings.hidden));};
+document.addEventListener('click',event=>{if(!event.target.closest('.actions'))close();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!settings.hidden){close();toggle.focus();}});
+function update(){action.textContent=mode.value==='pr'?'Create PR':'Merge into '+branch.value;}
+mode.onchange=update;branch.onchange=update;
+action.onclick=()=>{close();document.getElementById('status').textContent='Preview only: '+action.textContent+' → '+branch.value;};
+</script></body></html>
