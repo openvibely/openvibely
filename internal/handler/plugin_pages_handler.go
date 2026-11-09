@@ -819,10 +819,27 @@ func (h *Handler) pluginSettingsProject(c echo.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if projectID == "" || projectID == models.AllProjectsID {
+	if projectID == "" {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "choose a project to manage its plugin pages")
 	}
 	return projectID, nil
+}
+
+func (h *Handler) pluginSettingsDestination(c echo.Context, scope string) (string, error) {
+	destination := scope
+	if scope == models.AllProjectsID {
+		destination = c.QueryParam("destination_project")
+		if destination == "" {
+			destination = c.FormValue("destination_project")
+		}
+	}
+	if destination == "" || destination == models.AllProjectsID {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "choose a project")
+	}
+	if err := h.requirePageAccess(c.Request().Context(), destination, authz.Edit); err != nil {
+		return "", err
+	}
+	return destination, nil
 }
 
 func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pages.PluginSettingsView, error) {
@@ -844,11 +861,29 @@ func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pag
 		}
 		v.Packages = append(v.Packages, row)
 	}
+	projects, err := h.projectSvc.ListSelectorOptions(ctx)
+	if err != nil {
+		return v, err
+	}
+	for _, project := range projects {
+		if project.ID != models.AllProjectsID && h.requirePageAccess(ctx, project.ID, authz.Edit) == nil {
+			v.Projects = append(v.Projects, project)
+		}
+	}
 	ins, err := store.ListInstances(ctx, projectID, false)
+	if projectID == models.AllProjectsID {
+		ins, err = store.ListAllInstances(ctx, false)
+	}
 	if err != nil {
 		return v, err
 	}
 	for _, in := range ins {
+		if err := h.requirePageAccess(ctx, in.ProjectID, authz.View); err != nil {
+			if errors.Is(err, authz.ErrDenied) {
+				continue
+			}
+			return v, err
+		}
 		v.Instances = append(v.Instances, pages.PluginSettingsRow{Instance: in})
 	}
 	return v, nil
@@ -948,9 +983,18 @@ func (h *Handler) PluginSettingsInstall(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	destination, err := h.pluginSettingsDestination(c, projectID)
+	if err != nil {
+		return h.renderPluginSettings(c, projectID, "", err)
+	}
 	pkg, err := h.pagePlugins.InstallFromDir(c.Request().Context(), strings.TrimSpace(c.FormValue("path")), by)
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
+	}
+	if projectID == models.AllProjectsID {
+		if err := h.addInstalledPluginPages(c.Request().Context(), destination, pkg); err != nil {
+			return h.renderPluginSettings(c, projectID, "", err)
+		}
 	}
 	return h.renderPluginSettings(c, projectID, fmt.Sprintf("Installed %s %s", pkg.Name, pkg.Version), nil)
 }
@@ -969,7 +1013,11 @@ func (h *Handler) PluginSettingsInstallExample(c echo.Context) error {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
 	if c.FormValue("create_page") == "true" {
-		_, createErr := h.pagePlugins.CreateInstance(c.Request().Context(), projectID, pkg.ID, "sales")
+		destination, err := h.pluginSettingsDestination(c, projectID)
+		if err != nil {
+			return h.renderPluginSettings(c, projectID, "", err)
+		}
+		_, createErr := h.pagePlugins.CreateInstance(c.Request().Context(), destination, pkg.ID, "sales")
 		if createErr != nil {
 			return h.renderPluginSettings(c, projectID, "", createErr)
 		}
@@ -986,7 +1034,11 @@ func (h *Handler) PluginSettingsCreateInstance(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	in, err := h.pagePlugins.CreateInstance(c.Request().Context(), projectID, c.FormValue("package_id"), c.FormValue("page_id"))
+	destination, err := h.pluginSettingsDestination(c, projectID)
+	if err != nil {
+		return h.renderPluginSettings(c, projectID, "", err)
+	}
+	in, err := h.pagePlugins.CreateInstance(c.Request().Context(), destination, c.FormValue("package_id"), c.FormValue("page_id"))
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
@@ -1008,8 +1060,11 @@ func (h *Handler) PluginSettingsInstanceAction(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if in == nil || in.ProjectID != projectID {
+	if in == nil || (projectID != models.AllProjectsID && in.ProjectID != projectID) {
 		return pluginNotFound()
+	}
+	if err := h.requirePageAccess(ctx, in.ProjectID, authz.Edit); err != nil {
+		return err
 	}
 	var actionErr error
 	notice := ""
@@ -1093,4 +1148,17 @@ func (h *Handler) PluginChatQueuedSteer(c echo.Context) error {
 }
 func pluginQueuedSteerURL(instanceID, projectID string, input models.ThreadInput) string {
 	return pluginAPI(instanceID, projectID, "/chat/thread/queued/"+url.PathEscape(input.ID)+"/steer") + "&expected_turn_id=" + url.QueryEscape(input.RunExecutionID)
+}
+
+func (h *Handler) addInstalledPluginPages(ctx context.Context, projectID string, pkg *models.PagePluginPackage) error {
+	man, err := h.pagePlugins.Manifest(pkg)
+	if err != nil {
+		return err
+	}
+	for _, page := range man.Pages {
+		if _, err := h.pagePlugins.CreateInstance(ctx, projectID, pkg.ID, page.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }

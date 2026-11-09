@@ -41,3 +41,28 @@ func TestPluginSettingsCardsAndDialogs(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `data-plugin-instance-row=`)
 
 }
+
+func TestPluginSettingsAllProjects(t *testing.T) {
+	env := setupPluginPages(t)
+	scope := "?project_id=__all_projects__"
+	rec := env.do(t, http.MethodGet, "/settings/plugin-pages"+scope, "", nil)
+	require.Equal(t, 200, rec.Code)
+	require.Contains(t, rec.Body.String(), `name="destination_project"`)
+	require.Contains(t, rec.Body.String(), env.projA.Name)
+	require.Contains(t, rec.Body.String(), env.projB.Name)
+	require.Contains(t, rec.Body.String(), `data-plugin-instance-row="`+env.inA.ID+`"`)
+	headers := map[string]string{"Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true"}
+	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/instances/"+env.inA.ID+"/disable"+scope, "", headers)
+	require.Equal(t, 200, rec.Code)
+	require.Contains(t, rec.Body.String(), "project_id=__all_projects__")
+	in, err := env.mgr.Store().GetInstance(t.Context(), env.inA.ID)
+	require.NoError(t, err)
+	require.False(t, in.Enabled)
+	project := createProject(t, env.h, "All projects destination")
+	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/install-example"+scope, "create_page=true&destination_project="+project.ID, headers)
+	require.Equal(t, 200, rec.Code)
+	instances, err := env.mgr.Store().ListInstances(t.Context(), project.ID, false)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	require.Contains(t, rec.Body.String(), "project_id=__all_projects__")
+}

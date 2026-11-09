@@ -1,7 +1,6 @@
 package pages
 
 import (
-	"fmt"
 	"net/url"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -142,6 +141,7 @@ type PluginSettingsPackage struct {
 }
 
 type PluginSettingsView struct {
+ Projects []models.Project
 	Search       string
 	Sort         string
 	OpenInstall  bool
@@ -202,7 +202,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 						<div class="absolute top-4 right-4">
 							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + r.Instance.Title}) {
 								if r.Instance.Enabled {
-									<li><a href={ templ.SafeURL("/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(v.ProjectID)) }>Open</a></li>
+									<li><a href={ templ.SafeURL("/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(r.Instance.ProjectID)) }>Open</a></li>
 								}
 								if r.Instance.Enabled {
 									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button></li>
@@ -213,6 +213,9 @@ templ PluginSettingsContent(v PluginSettingsView) {
 							}
 						</div>
 						<h3 class="card-title pr-12">{ r.Instance.Title }</h3>
+ if v.ProjectID == models.AllProjectsID {
+ <p class="text-sm opacity-60">{ r.Instance.ProjectName }</p>
+ }
 						<p class="text-sm opacity-60">{ r.Instance.PluginID } · { r.Instance.Version }</p>
 						<div class="flex gap-2">
 							if r.Instance.Enabled {
@@ -234,7 +237,9 @@ templ PluginSettingsContent(v PluginSettingsView) {
 						<div class="absolute top-4 right-4">
 							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + p.Package.Name}) {
 								for _, page := range p.Pages {
-									<li><button hx-post={ v.URL("/instances") } hx-vals={ fmt.Sprintf(`{"package_id":%q,"page_id":%q}`, p.Package.ID, page) } hx-target="#plugin-settings" hx-swap="outerHTML">Add { page } to this project</button></li>
+									<li><form hx-post={ v.URL("/instances") } hx-target="#plugin-settings" hx-swap="outerHTML"><input type="hidden" name="package_id" value={ p.Package.ID }/><input type="hidden" name="page_id" value={ page }/>
+@pluginDestination(v)
+<button type="submit">Add { page } to project</button></form></li>
 								}
 								if p.InUse == 0 {
 									<li><button class="text-error" hx-post={ v.URL("/packages/" + url.PathEscape(p.Package.ID) + "/remove") } hx-confirm="Uninstall this unused package? Its files will be deleted." hx-target="#plugin-settings" hx-swap="outerHTML">Uninstall package</button></li>
@@ -254,7 +259,8 @@ templ PluginSettingsContent(v PluginSettingsView) {
 				<h3 class="pr-10 text-lg font-bold">Create from template</h3>
 				<p class="mt-2 text-sm text-base-content/65">Choose a page template to add to this project.</p>
 				<form method="post" hx-post={ v.URL("/install-example") } hx-target="#plugin-settings" hx-swap="outerHTML" class="mt-4 space-y-4">
-					<input type="hidden" name="create_page" value="true"/>
+					@pluginDestination(v)
+<input type="hidden" name="create_page" value="true"/>
 					<label class="form-control">
 						<span class="label-text mb-1 font-medium">Template</span>
 						<select name="template_key" class="select select-bordered w-full" aria-label="Page template">
@@ -272,8 +278,9 @@ templ PluginSettingsContent(v PluginSettingsView) {
 		</dialog>
 		@pluginSettingsDialog("plugin-describe-modal", "Describe a page") {
 			<p class="text-sm opacity-70">Create a task to build and publish a page in this project. Open the task to run it.</p>
-			<form method="post" action={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } class="space-y-4" onsubmit="this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
-				<input type="hidden" name="category" value="backlog"/>
+			<form method="post" action={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } class="space-y-4" onsubmit="if(this.elements.destination_project){this.action='/tasks?from=new&project_id='+encodeURIComponent(this.elements.destination_project.value);}this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
+				@pluginDestination(v)
+<input type="hidden" name="category" value="backlog"/>
 				<input type="hidden" name="priority" value="2"/>
 				<input type="hidden" name="prompt"/>
 				<label class="form-control"><span class="label-text">Name</span><input name="title" class="input input-bordered" required maxlength="200"/></label>
@@ -282,8 +289,9 @@ templ PluginSettingsContent(v PluginSettingsView) {
 			</form>
 		}
 		@pluginSettingsDialog("plugin-install-modal", "Install package") {
-			<form class="space-y-3" hx-post={ v.URL("/upload") } hx-encoding="multipart/form-data" hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML" hx-on:htmx:config-request="event.detail.parameters.paths = Array.from(this.querySelector('input[type=file]').files).map(function(f){return f.webkitRelativePath || f.name;});">
-				<label class="form-control"><span class="label-text">Upload folder</span><input type="file" name="files" class="file-input file-input-bordered w-full" multiple webkitdirectory required/></label>
+			<form class="space-y-3" hx-post={ v.URL("/upload") } hx-encoding="multipart/form-data" hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML" hx-on:htmx:config-request="if(this.elements.destination_project){event.detail.path += '&destination_project='+encodeURIComponent(this.elements.destination_project.value);}event.detail.parameters.paths = Array.from(this.querySelector('input[type=file]').files).map(function(f){return f.webkitRelativePath || f.name;});">
+				@pluginDestination(v)
+<label class="form-control"><span class="label-text">Upload folder</span><input type="file" name="files" class="file-input file-input-bordered w-full" multiple webkitdirectory required/></label>
 				<p class="text-sm opacity-70">Choose a folder on your computer containing plugin.json. Up to 64 MiB.</p>
 				<button class="btn btn-primary" type="submit">Upload and install</button>
 			</form>
@@ -293,7 +301,8 @@ templ PluginSettingsContent(v PluginSettingsView) {
 			<details open?={ v.InstallPath != "" }>
 				<summary class="cursor-pointer">Advanced: server folder path</summary>
 				<form class="space-y-3" hx-post={ v.URL("/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
-					<label class="form-control"><span class="label-text">Folder on the OpenVibely server</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" value={ v.InstallPath } aria-describedby="plugin-install-error" aria-invalid={ v.OpenInstall && v.Error != "" } required/></label>
+					@pluginDestination(v)
+<label class="form-control"><span class="label-text">Folder on the OpenVibely server</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" value={ v.InstallPath } aria-describedby="plugin-install-error" aria-invalid={ v.OpenInstall && v.Error != "" } required/></label>
 					if v.NativePicker {
 						<button type="button" class="btn btn-ghost" onclick="var form=this.form; var button=this; button.disabled=true; fetch('/projects/pick-folder',{method:'POST',headers:{'HX-Request':'true'}}).then(async function(r){var p=await r.json(); if(!r.ok) throw new Error(p.message||p.error||'Folder picker unavailable. Enter the server path manually.'); if(p.selected) form.elements.path.value=p.path;}).catch(function(e){form.querySelector('[data-picker-error]').textContent=e.message;}).finally(function(){button.disabled=false;});">Browse on server</button>
 					}
@@ -469,4 +478,18 @@ templ pluginHostBridgeScript() {
 
 	})();
 	</script>
+}
+
+templ pluginDestination(v PluginSettingsView) {
+ if v.ProjectID == models.AllProjectsID {
+ <label class="form-control">
+ <span class="label-text">Project</span>
+ <select name="destination_project" class="select select-bordered w-full" required aria-label="Project">
+ <option value="">Choose a project</option>
+ for _, project := range v.Projects {
+ <option value={ project.ID }>{ project.Name }</option>
+ }
+ </select>
+ </label>
+ }
 }

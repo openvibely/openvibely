@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageplugins"
 )
 
@@ -22,6 +23,10 @@ func (h *Handler) PluginSettingsUpload(c echo.Context) error {
 	projectID, err := h.pluginSettingsProject(c)
 	if err != nil {
 		return err
+	}
+	destination, err := h.pluginSettingsDestination(c, projectID)
+	if err != nil {
+		return h.renderPluginSettings(c, projectID, "", err)
 	}
 	work, err := os.MkdirTemp("", "ov-plugin-upload-")
 	if err != nil {
@@ -42,6 +47,11 @@ func (h *Handler) PluginSettingsUpload(c echo.Context) error {
 	pkg, err := h.pagePlugins.InstallFromDir(c.Request().Context(), root, by)
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
+	}
+	if projectID == models.AllProjectsID {
+		if err := h.addInstalledPluginPages(c.Request().Context(), destination, pkg); err != nil {
+			return h.renderPluginSettings(c, projectID, "", err)
+		}
 	}
 	return h.renderPluginSettings(c, projectID, fmt.Sprintf("Installed %s %s", pkg.Name, pkg.Version), nil)
 }
