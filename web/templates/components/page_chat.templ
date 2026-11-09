@@ -30,7 +30,7 @@ templ PageSideChat(v PageChatView) {
   #page-side-chat #task-thread-view [data-thread-refresh-preview]{margin-left:0;width:100%;max-width:100%;padding-left:16px;padding-right:16px;box-sizing:border-box}
   /* Match main-content's 4px bottom inset. The shared composer already
      supplies its own 14px bottom gutter. */
-  html[data-shell-frame] #page-side-chat{padding-bottom:4px}
+  html[data-shell-frame] #page-side-chat{bottom:0;padding-bottom:4px}
   #page-side-chat #task-thread-view .chat-input-shadow-gutter{width:calc(100% - 32px);max-width:calc(100% - 32px);margin-inline:auto!important;padding-inline:0!important;box-sizing:border-box}
   html[data-thread-width="focused"] #page-side-chat #task-thread-view .chat-input-shadow-gutter{max-width:min(820px,calc(100% - 32px))}
   #page-side-chat [data-page-chat-close]{display:none}

@@ -55,9 +55,13 @@ func testPageSideChatQuestion(t *testing.T, analyze bool) {
             if (!panel.querySelector('form.chat-input-container') || !panel.querySelector('[aria-label="Attach files"]')) throw new Error('shared composer missing');
             var shellFrame = document.documentElement.getAttribute('data-shell-frame');
             document.documentElement.setAttribute('data-shell-frame', '');
-            var panelInset = getComputedStyle(panel).paddingBottom;
-            var threadInset = getComputedStyle(document.getElementById('main-content')).paddingBottom;
-            if (panelInset !== threadInset) throw new Error('page chat bottom inset differs from task thread: ' + panelInset + ' vs ' + threadInset);
+            var main = document.getElementById('main-content');
+            var composer = panel.querySelector('form.chat-input-container');
+            var gutter = composer.closest('.chat-input-shadow-gutter');
+            var expectedBottom = main.getBoundingClientRect().bottom - parseFloat(getComputedStyle(main).paddingBottom) - parseFloat(getComputedStyle(gutter).paddingBottom);
+            var actualBottom = composer.getBoundingClientRect().bottom;
+            if (Math.abs(actualBottom - expectedBottom) > 1) throw new Error('page chat composer bottom differs from task thread layout: ' + actualBottom + ' vs ' + expectedBottom);
+            if (Math.abs(panel.getBoundingClientRect().bottom - window.innerHeight) > 1) throw new Error('page chat retains an extra shell bottom gap');
             if (shellFrame === null) document.documentElement.removeAttribute('data-shell-frame');
             else document.documentElement.setAttribute('data-shell-frame', shellFrame);
             if (panel.textContent.includes('uses page context + tools') || panel.textContent.includes('Chat ·')) throw new Error('unexpected panel header');
