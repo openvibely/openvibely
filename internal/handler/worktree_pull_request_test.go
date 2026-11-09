@@ -844,3 +844,69 @@ func TestHandler_GetTaskChanges_HidesMergeOptionsForFailedMergedTask(t *testing.
 		t.Fatalf("expected GitHub section to remain available for already-merged failed task, body=%s", body)
 	}
 }
+
+func TestCreateTaskPullRequest_ChangesRechecksRunningStatusInsideLease(t *testing.T) {
+	ctx := context.Background()
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
+	githubCalls := 0
+	h.SetGitHubService(&fakeGitHubService{resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+		githubCalls++
+		return nil, fmt.Errorf("unexpected GitHub call")
+	}})
+	project := &models.Project{Name: "Running PR", RepoPath: t.TempDir(), RepoURL: "https://github.com/example/repo"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Running PR", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/pr", MergeTargetBranch: "main"}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- service.WithRepositoryMutation(project.RepoPath, func() error { close(entered); <-release; return nil })
+	}()
+	<-entered
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		form := url.Values{"project_id": {project.ID}}
+		req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		result <- rec
+	}()
+	select {
+	case rec := <-result:
+		t.Fatalf("request bypassed lock: %d %s", rec.Code, rec.Body.String())
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	released = true
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case rec := <-result:
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "Wait for the task to finish") {
+			t.Fatalf("expected running-task rejection, got %d %s", rec.Code, rec.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not resume")
+	}
+	if githubCalls != 0 {
+		t.Fatalf("running task reached GitHub %d times", githubCalls)
+	}
+}

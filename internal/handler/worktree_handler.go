@@ -777,6 +777,10 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 			eligibilityReason = "Task project repository eligibility changed."
 			return nil, nil, errTaskMutationEligibilityChanged
 		}
+		if currentTask.Status == models.StatusRunning {
+			eligibilityReason = "Wait for the task to finish before creating a PR."
+			return nil, nil, errTaskMutationEligibilityChanged
+		}
 		h.recoverTaskWorktreeState(c.Request().Context(), currentTask, currentProject)
 		if fromTaskCard {
 			if eligible, reason := h.taskCardPullRequestEligibility(currentTask, currentProject); !eligible {
