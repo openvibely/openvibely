@@ -302,6 +302,18 @@ func nativePluginAssetCSP(handle string) string {
 	return policy
 }
 
+// WebKit does not match 'self' for subresources of sandboxed documents on
+// Wails' custom scheme. Allow only this load's capability-scoped asset directory;
+// keep frame ancestors, sandbox isolation and network restrictions unchanged.
+func nativePluginAssetCSP(handle string) string {
+	assetSource := "wails://localhost/plugin-assets/" + url.PathEscape(handle) + "/"
+	policy := pluginAssetCSP
+	for _, directive := range []string{"script-src", "style-src", "img-src", "font-src", "media-src"} {
+		policy = strings.Replace(policy, directive+" 'self'", directive+" 'self' "+assetSource, 1)
+	}
+	return policy
+}
+
 // PluginAsset serves a static file from the instance's package. The unguessable
 // per-load handle is the capability: sandboxed (opaque-origin) frames do not
 // send session cookies for subresources.
