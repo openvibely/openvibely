@@ -608,6 +608,15 @@ func taskIssueClosingRef(opts OpenTaskPullRequestOptions, sourceRepoURL string) 
 	return fmt.Sprintf("%s/issues/%d", strings.TrimRight(repo.HTMLURL, "/"), *opts.IssueNumber)
 }
 
+// closingIssueNumber reads the number from an already validated issue URL.
+func closingIssueNumber(ref string) int {
+	n, err := strconv.Atoi(ref[strings.LastIndex(ref, "/")+1:])
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
 // Qualify only closing references for the linked issue; leave other prose intact.
 func qualifyIssueClosingReferences(body string, opts OpenTaskPullRequestOptions) string {
 	if opts.closingIssueRef == "" {
@@ -619,9 +628,8 @@ func qualifyIssueClosingReferences(body string, opts OpenTaskPullRequestOptions)
 	} else {
 		// closingIssueRef is the validated, canonical issue URL. URL-only
 		// callers still identify the issue whose shorthand needs qualifying.
-		var err error
-		issueNumber, err = strconv.Atoi(opts.closingIssueRef[strings.LastIndex(opts.closingIssueRef, "/")+1:])
-		if err != nil || issueNumber <= 0 {
+		issueNumber = closingIssueNumber(opts.closingIssueRef)
+		if issueNumber == 0 {
 			return body
 		}
 	}
@@ -642,13 +650,24 @@ func reusedPullRequestBody(existingBody, defaultBody string, previousIssueNumber
 
 	closingLine := "Closes " + opts.closingIssueRef
 	originalBody := strings.TrimSpace(existingBody)
-	body := qualifyIssueClosingReferences(originalBody, opts)
-	if previousIssueNumber != nil && opts.IssueNumber != nil && (*previousIssueNumber != *opts.IssueNumber || (opts.previousClosingIssueRef != "" && opts.previousClosingIssueRef != opts.closingIssueRef)) {
-		body = removePullRequestIssueClosingLine(body, fmt.Sprintf("#%d", *previousIssueNumber))
+	body := originalBody
+	previousNumber := closingIssueNumber(opts.previousClosingIssueRef)
+	if previousNumber == 0 && previousIssueNumber != nil {
+		previousNumber = *previousIssueNumber
+	}
+	issueChanged := opts.previousClosingIssueRef != "" && !strings.EqualFold(opts.previousClosingIssueRef, opts.closingIssueRef)
+	if opts.previousClosingIssueRef == "" && previousNumber > 0 {
+		issueChanged = previousNumber != closingIssueNumber(opts.closingIssueRef)
+	}
+	if issueChanged {
+		if previousNumber > 0 {
+			body = removePullRequestIssueClosingLine(body, fmt.Sprintf("#%d", previousNumber))
+		}
 		if opts.previousClosingIssueRef != "" {
 			body = removePullRequestIssueClosingLine(body, opts.previousClosingIssueRef)
 		}
 	}
+	body = qualifyIssueClosingReferences(body, opts)
 	if pullRequestBodyClosesIssue(body, opts.closingIssueRef) {
 		if body != originalBody {
 			return body, true

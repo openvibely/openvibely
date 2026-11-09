@@ -1547,3 +1547,69 @@ func TestTaskPullRequestURLOnlyClosingReferences(t *testing.T) {
 		})
 	}
 }
+
+func TestReusedPullRequestBodyURLOnlyRelinking(t *testing.T) {
+	const oldURL = "https://github.com/alice/app/issues/42"
+	const newURL = "https://github.com/alice/app/issues/43"
+	for _, tt := range []struct {
+		name, previousURL, nextURL, existing, want string
+		update                                     bool
+	}{
+		{"replace qualified", oldURL, newURL, "Notes\n\nCloses " + oldURL, "Notes\n\nCloses " + newURL, true},
+		{"replace shorthand", oldURL, newURL, "Notes\n\n- Fixes #42.", "Notes\n\nCloses " + newURL, true},
+		{"preserve unrelated references", oldURL, newURL, "Notes\n\nCloses " + oldURL + "\n\nCloses #7", "Notes\n\nCloses #7\n\nCloses " + newURL, true},
+		{"new reference already present", oldURL, newURL, "Notes\n\nCloses " + oldURL + "\n\nCloses " + newURL, "Notes\n\nCloses " + newURL, true},
+		{"same number different repository", oldURL, "https://github.com/company/app/issues/42", "Notes\n\nCloses " + oldURL, "Notes\n\nCloses https://github.com/company/app/issues/42", true},
+		{"same issue unchanged", oldURL, oldURL, "Notes\n\nCloses " + oldURL, "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := OpenTaskPullRequestOptions{IssueURL: tt.nextURL}
+			opts.closingIssueRef = taskIssueClosingRef(opts, "")
+			opts.previousClosingIssueRef = taskIssueClosingRef(OpenTaskPullRequestOptions{IssueURL: tt.previousURL}, "")
+			body, update := reusedPullRequestBody(tt.existing, "Notes\n\nCloses "+tt.nextURL, nil, opts)
+			if body != tt.want || update != tt.update {
+				t.Fatalf("got (%q, %v), want (%q, %v)", body, update, tt.want, tt.update)
+			}
+		})
+	}
+}
+
+func TestTaskPullRequestServiceURLOnlyRelinkUpdatesExistingPR(t *testing.T) {
+	ctx := context.Background()
+	env := teststores.New(t)
+	project := &models.Project{Name: "Relink", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := env.Stores.Projects.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Fix login", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/relink", MergeTargetBranch: "main"}
+	if err := env.Stores.Tasks.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	const oldURL = "https://github.com/openvibely/openvibely/issues/42"
+	const newURL = "https://github.com/openvibely/openvibely/issues/43"
+	const prURL = "https://github.com/openvibely/openvibely/pull/23"
+	if err := env.Stores.TaskPullRequests.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 23, PRURL: prURL, PRState: "open", IssueURL: oldURL}); err != nil {
+		t.Fatal(err)
+	}
+	updated := ""
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 23, URL: prURL, Body: "Notes\n\nCloses " + oldURL, State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: strings.Repeat("a", 40)}, nil
+		},
+		updatePRBodyFn: func(_ context.Context, _ *GitHubRepoRef, _ int, body string) error { updated = body; return nil },
+	}, env.Stores.TaskPullRequests)
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueURL: newURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.ReusedExistingRecord || updated != "Notes\n\nCloses "+newURL {
+		t.Fatalf("unexpected relink result: %+v body=%q", result, updated)
+	}
+	saved, err := env.Stores.TaskPullRequests.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.IssueURL != newURL {
+		t.Fatalf("saved issue URL = %q", saved.IssueURL)
+	}
+}
