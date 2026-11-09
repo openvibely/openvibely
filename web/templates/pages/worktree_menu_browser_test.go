@@ -56,8 +56,11 @@ func TestBrowserFunctional_WorktreeActionsAboveDiffHeader(t *testing.T) {
 	})
 }
 
-func worktreeActionsFixture(t *testing.T, runner string, results chan string) *httptest.Server {
+func worktreeActionsFixture(t *testing.T, runner string, results chan string, statuses ...models.TaskStatus) *httptest.Server {
 	task := &models.Task{ID: "layer-task", WorktreeBranch: "task/layer", MergeStatus: models.MergeStatusPending}
+	if len(statuses) > 0 {
+		task.Status = statuses[0]
+	}
 	var mu sync.Mutex
 	var saved json.RawMessage
 	actions := []map[string]string{}

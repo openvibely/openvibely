@@ -2,6 +2,7 @@ package pages
 
 import (
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/models"
 	"testing"
 )
 
@@ -143,5 +144,22 @@ func TestBrowserFunctional_ChangesSplitActionBranchDropdown(t *testing.T) {
 		b.waitFor("selection saved", `String(document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false'&&document.querySelector('[data-changes-branch]').value==='develop')`, "true")
 		b.evaluate(`window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});'ok'`)
 		b.waitFor("saved selection and full list restored", `(()=>{const el=document.querySelector('[data-changes-branch]');return String(document.querySelector('[data-changes-split]')!==window.oldSplit&&el?.value==='develop'&&el.options.length===2&&Array.from(el.options).some(o=>o.value==='main'));})()`, "true")
+	})
+}
+
+func TestBrowserFunctional_ChangesSplitActionRunningSettings(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil, models.StatusRunning)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-running-settings", func(b *composerFocusCDP) {
+		b.waitFor("PR settings loaded", `String(document.querySelector('[data-changes-repo]')?.options.length>0&&document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.click(`[data-changes-mode="local"]`)
+		b.waitFor("local settings accessible", `String(!document.querySelector('[data-changes-local-fields]').hidden&&document.querySelector('[data-changes-method]').options.length>0&&document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`document.querySelector('[data-changes-primary]').click();'ok'`)
+		b.click(`[data-changes-mode="pr"]`)
+		b.waitFor("PR action blocked", `String(!document.querySelector('[data-changes-pr-fields]').hidden&&document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`document.querySelector('[data-changes-primary]').click();fetch('/fixture-state').then(r=>r.json()).then(s=>window.runningActions=s.actions.length);'ok'`)
+		b.waitFor("no mutations", `String(window.runningActions===0)`, "true")
 	})
 }

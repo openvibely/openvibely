@@ -297,8 +297,8 @@ func TestTaskChangesWorktreeContent_MergedStatusWithoutDiffHidesLocalSection(t *
 	if !strings.Contains(out, `data-changes-pr-transport hx-post=`) {
 		t.Fatal("expected PR creation transport when already merged")
 	}
-	if !strings.Contains(out, `data-changes-mode="local" aria-pressed="false" disabled`) {
-		t.Fatal("merged task must disable local mode")
+	if !strings.Contains(out, `data-changes-mode="local" aria-pressed="false">Local merge</button>`) {
+		t.Fatal("merged task must allow viewing local settings")
 	}
 }
 
@@ -419,8 +419,8 @@ func TestTaskChangesWorktreeContent_BranchAlreadyMergedHidesLocalSection(t *test
 	if !strings.Contains(out, `data-changes-pr-transport hx-post=`) {
 		t.Fatal("expected PR creation transport when branch is already merged")
 	}
-	if !strings.Contains(out, `data-changes-mode="local" aria-pressed="false" disabled`) {
-		t.Fatal("already merged branch must disable local mode")
+	if !strings.Contains(out, `data-changes-mode="local" aria-pressed="false">Local merge</button>`) {
+		t.Fatal("already merged branch must allow viewing local settings")
 	}
 }
 

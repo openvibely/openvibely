@@ -9,7 +9,7 @@ import (
 
 templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable bool) {
  @templates.MenuStyles()
- <div data-changes-split data-task-id={ task.ID } data-project-id={ task.ProjectID } data-local-available={ fmt.Sprint(!localUnavailable && task.MergeStatus != models.MergeStatusMerged) } data-linked-pr={ fmt.Sprint(taskPR != nil) }>
+ <div data-changes-split data-task-id={ task.ID } data-project-id={ task.ProjectID } data-local-available={ fmt.Sprint(!localUnavailable && task.MergeStatus != models.MergeStatusMerged) } data-linked-pr={ fmt.Sprint(taskPR != nil) } data-task-running={ fmt.Sprint(task.Status == models.StatusRunning) }>
   <div class="join ov-changes-split">
    if taskPR != nil {
     <a class="btn btn-primary btn-sm join-item" data-linked-pr-action href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprint(taskPR.PRNumber) }</a>
@@ -22,7 +22,7 @@ templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, loca
   <div id="changes-split-settings" data-menu-content popover="manual" class="ov-menu ov-changes-settings" style="position:fixed;inset:auto;margin:0;">
    <div class="join flex w-full" role="group" aria-label="Action type">
     <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="pr" aria-pressed="false">Pull request</button>
-    <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="local" aria-pressed="false" disabled?={ localUnavailable || task.MergeStatus == models.MergeStatusMerged }>Local merge</button>
+    <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="local" aria-pressed="false">Local merge</button>
    </div>
    <div data-changes-pr-fields>
     <label for="changes-target-repo">Target repository</label>
@@ -38,9 +38,7 @@ templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, loca
     <label for="changes-merge-method">Merge method</label>
     <select id="changes-merge-method" class="select select-bordered select-sm w-full" data-changes-method>
      for _, action := range components.TaskWorktreeMergeActions() {
-      if !localUnavailable && task.MergeStatus != models.MergeStatusMerged {
-       <option value={ action.MergeType }>{ action.Label }</option>
-      }
+      <option value={ action.MergeType }>{ action.Label }</option>
      }
     </select>
     <p class="text-xs opacity-60 mt-2" data-changes-method-help></p>
@@ -107,7 +105,7 @@ templ changesSplitActionScript() {
     primary.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to '+choice.name):''):(names[prefs.method]||'Merge into ')+prefs.local_branch;
     primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):prefs.local_branch;
     const checkingLocal=!pr&&localLoading,waiting=saveCount>0||checkingLocal;
-    primary.disabled=busy||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||(!checkingLocal&&(!methodValid||localChecked!==prefs.local_branch||!mergeAllowed))));
+    primary.disabled=root.dataset.taskRunning==='true'||busy||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||(!checkingLocal&&(!methodValid||localChecked!==prefs.local_branch||!mergeAllowed))));
     primary.setAttribute('aria-busy',String(waiting||busy));
     primary.setAttribute('aria-disabled',String(primary.disabled||waiting));
     const descriptions={merge:'Combine the task branch with the target using a merge commit.',ff:'Move the target forward only if its history has not diverged.',squash:'Combine the task changes into one commit on the target branch.',rebase:'Replay task commits onto the target. This does not merge them into the target branch.'};
