@@ -163,3 +163,55 @@ func TestBrowserFunctional_ChangesSplitActionRunningSettings(t *testing.T) {
 		b.waitFor("no mutations", `String(window.runningActions===0)`, "true")
 	})
 }
+
+func TestBrowserFunctional_ChangesSplitActionWithoutNativePopover(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-legacy-popover", func(b *composerFocusCDP) {
+		b.call("Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": `
+			window.legacyErrors=[];
+			window.addEventListener('error',event=>legacyErrors.push(event.error?.stack||event.message));
+			window.addEventListener('unhandledrejection',event=>legacyErrors.push(String(event.reason)));
+			HTMLElement.prototype.showPopover=undefined;
+			HTMLElement.prototype.hidePopover=undefined;
+			const matches=Element.prototype.matches;
+			Element.prototype.matches=function(selector){
+				if(selector.includes(':popover-open'))throw new SyntaxError('Unsupported popover selector');
+				return matches.call(this,selector);
+			};
+			// Simulate an engine that has no UA rule hiding popover elements.
+			document.addEventListener('DOMContentLoaded',()=>{
+				const style=document.createElement('style');style.textContent='[popover]{display:block}';document.head.append(style);
+			});
+		`}, nil)
+		b.call("Page.reload", map[string]any{}, nil)
+		b.waitFor("legacy settings ready", `String(window.legacyErrors&&document.querySelector('[data-changes-primary]')?.getAttribute('aria-disabled')==='false')`, "true")
+		b.waitFor("menu initially hidden", `String(document.querySelector('#changes-split-settings').hidden&&document.querySelector('#changes-split-settings').getClientRects().length===0)`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.waitFor("fallback menu open", `String(!document.querySelector('#changes-split-settings').hidden&&document.querySelector('[data-changes-settings-toggle]').getAttribute('aria-expanded')==='true')`, "true")
+		b.evaluate(`window.toggleChangesShortcut=()=>{const apple=/Mac|iPhone|iPad/.test(navigator.platform);document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'D',code:'KeyD',shiftKey:true,metaKey:apple,ctrlKey:!apple,bubbles:true,cancelable:true}));};window.toggleChangesShortcut();'ok'`)
+		b.waitFor("open fallback blocks workspace shortcut", `String(!document.querySelector('#tab-changes').classList.contains('hidden')&&!document.querySelector('#changes-split-settings').hidden)`, "true")
+		b.click(`[data-changes-mode="local"]`)
+		b.waitFor("fallback controls usable", `String(document.querySelector('[data-changes-primary]').textContent==='Merge into main'&&document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false')`, "true")
+		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
+		b.waitFor("outside click closes fallback", `String(document.querySelector('#changes-split-settings').hidden&&!document.querySelector('#changes-split-settings').hasAttribute('data-menu-open'))`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+		b.waitFor("escape closes and restores focus", `String(document.querySelector('#changes-split-settings').hidden&&document.activeElement===document.querySelector('[data-changes-settings-toggle]'))`, "true")
+		b.evaluate(`window.toggleChangesShortcut();'ok'`)
+		b.waitFor("closed fallback releases workspace shortcut", `String(document.querySelector('#tab-changes').classList.contains('hidden'))`, "true")
+		b.evaluate(`window.toggleChangesShortcut();'ok'`)
+		b.waitFor("workspace shortcut returns to changes", `String(!document.querySelector('#tab-changes').classList.contains('hidden'))`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.evaluate(`window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});'ok'`)
+		b.waitFor("swap closes menu and restores settings", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('#changes-split-settings').hidden&&document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false')`, "true")
+		b.waitFor("backdrop released", `String(!document.querySelector('#ov-menu-backdrop')||getComputedStyle(document.querySelector('#ov-menu-backdrop')).display==='none')`, "true")
+		b.click(`#diff-btn-split`)
+		b.waitFor("page still responds", `String(!document.querySelector('#diff-content-split').classList.contains('hidden'))`, "true")
+		if got := b.evaluate(`JSON.stringify(window.legacyErrors)`); got != "[]" {
+			t.Fatalf("legacy browser errors: %s", got)
+		}
+	})
+}
