@@ -53,6 +53,13 @@ func testPageSideChatQuestion(t *testing.T, analyze bool) {
             toggle.click();
             if (panel.hidden || toggle.getAttribute('aria-expanded') !== 'true') throw new Error('panel did not open');
             if (!panel.querySelector('form.chat-input-container') || !panel.querySelector('[aria-label="Attach files"]')) throw new Error('shared composer missing');
+            var shellFrame = document.documentElement.getAttribute('data-shell-frame');
+            document.documentElement.setAttribute('data-shell-frame', '');
+            var panelInset = getComputedStyle(panel).paddingBottom;
+            var threadInset = getComputedStyle(document.getElementById('main-content')).paddingBottom;
+            if (panelInset !== threadInset) throw new Error('page chat bottom inset differs from task thread: ' + panelInset + ' vs ' + threadInset);
+            if (shellFrame === null) document.documentElement.removeAttribute('data-shell-frame');
+            else document.documentElement.setAttribute('data-shell-frame', shellFrame);
             if (panel.textContent.includes('uses page context + tools') || panel.textContent.includes('Chat ·')) throw new Error('unexpected panel header');
             toggle.click();
             if (!panel.hidden) throw new Error('panel did not collapse');
