@@ -4241,7 +4241,7 @@ func TestMigration212PreservesExistingGeneratedFiles(t *testing.T) {
 	}
 }
 
-func TestMigration227CustomPagesFromMain(t *testing.T) {
+func TestMigration226CustomPagesFromMain(t *testing.T) {
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "custom-pages.db"))
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -4303,6 +4303,11 @@ func TestMigration227CustomPagesFromMain(t *testing.T) {
 			t.Fatal(err)
 		}
 		checkExisting()
+		for _, column := range []string{"head_repo_url", "base_branch"} {
+			if !tableHasColumn(t, db, "task_pull_requests", column) {
+				t.Fatalf("missing fork pull request column %s", column)
+			}
+		}
 		for _, table := range []string{"page_plugin_packages", "page_plugin_instances", "page_conversations", "page_turn_contexts", "page_plugin_replacements", "page_queued_contexts"} {
 			var n int
 			if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {
