@@ -257,6 +257,19 @@ func TestAllProjectsResourceNavigationAndCreation(t *testing.T) {
 	task, err := stores.Tasks.GetByID(t.Context(), id)
 	require.NoError(t, err)
 	require.Equal(t, second.ID, task.ProjectID)
+
+	// Custom-page Describe uses the ordinary task form with an explicit destination.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/tasks?project_id="+models.AllProjectsID+"&from=new", strings.NewReader("destination_project="+second.ID+"&title=Describe+page&prompt=Build+a+custom+page&category=backlog&priority=2"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	app.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+	target := rec.Header().Get("Location")
+	require.Contains(t, target, "?project_id="+models.AllProjectsID)
+	createdID := strings.TrimSuffix(strings.TrimPrefix(target, "/tasks/"), "?project_id="+models.AllProjectsID)
+	described, err := stores.Tasks.GetByID(t.Context(), createdID)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, described.ProjectID)
 }
 
 func TestAllProjectsNewAndDuplicateAutomationKeepWorkspace(t *testing.T) {

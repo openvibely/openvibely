@@ -302,7 +302,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 		</dialog>
 		@pluginSettingsDialog("plugin-describe-modal", "Describe a page") {
 			<p class="text-sm opacity-70">Create a task to build and publish a page in this project. Open the task to run it.</p>
-			<form method="post" action={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } class="space-y-4" onsubmit="if(this.elements.destination_project){this.action='/tasks?from=new&project_id='+encodeURIComponent(this.elements.destination_project.value);}this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
+			<form method="post" action={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } class="space-y-4" onsubmit="this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
 				@pluginDestination(v)
 <input type="hidden" name="category" value="backlog"/>
 				<input type="hidden" name="priority" value="2"/>

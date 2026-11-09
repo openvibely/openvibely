@@ -1285,7 +1285,7 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "\" class=\"space-y-4\" onsubmit=\"if(this.elements.destination_project){this.action='/tasks?from=new&project_id='+encodeURIComponent(this.elements.destination_project.value);}this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "\" class=\"space-y-4\" onsubmit=\"this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

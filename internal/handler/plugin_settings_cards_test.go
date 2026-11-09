@@ -48,6 +48,8 @@ func TestPluginSettingsAllProjects(t *testing.T) {
 	rec := env.do(t, http.MethodGet, "/settings/plugin-pages"+scope, "", nil)
 	require.Equal(t, 200, rec.Code)
 	require.Contains(t, rec.Body.String(), `name="destination_project"`)
+	require.NotContains(t, rec.Body.String(), "this.action=")
+	require.Contains(t, rec.Body.String(), `/tasks?from=new&amp;project_id=__all_projects__`)
 	require.Contains(t, rec.Body.String(), env.projA.Name)
 	require.Contains(t, rec.Body.String(), env.projB.Name)
 	require.Contains(t, rec.Body.String(), `data-plugin-instance-row="`+env.inA.ID+`"`)
