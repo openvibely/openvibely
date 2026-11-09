@@ -91,7 +91,7 @@ templ changesSplitActionScript() {
    if(!nativePopover){panel.removeAttribute('popover');toggle.removeAttribute('popovertarget');}
    function isOpen(){return nativePopover?panel.matches(':popover-open'):!panel.hidden;}
    function position(){if(!isOpen())return;const r=toggle.getBoundingClientRect();panel.style.maxHeight=Math.max(0,innerHeight-16)+'px';panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(r.bottom+4,innerHeight-panel.offsetHeight-8))+'px';}
-   const controller=window.ovMenuController.create({trigger:()=>toggle,panels:[panel],isOpen,open:()=>{panel.hidden=false;if(nativePopover)panel.showPopover();toggle.setAttribute('aria-expanded','true');position();},close:()=>{if(nativePopover)panel.hidePopover();panel.hidden=true;toggle.setAttribute('aria-expanded','false');}});
+   const controller=window.ovMenuController.create({trigger:()=>toggle,panels:[panel],isOpen,open:()=>{panel.hidden=false;if(nativePopover)panel.showPopover();else panel.setAttribute('data-menu-open','true');toggle.setAttribute('aria-expanded','true');position();},close:()=>{if(nativePopover)panel.hidePopover();panel.hidden=true;panel.removeAttribute('data-menu-open');toggle.setAttribute('aria-expanded','false');}});
    toggle.addEventListener('click',event=>{event.preventDefault();controller.toggle(event);});
    panel.addEventListener('toggle',position);
    const state={position,close:()=>controller.close(false)};states.set(root,state);
