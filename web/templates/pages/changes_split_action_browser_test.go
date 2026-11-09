@@ -91,3 +91,18 @@ func TestBrowserFunctional_ChangesSplitActionRebaseTarget(t *testing.T) {
 		b.waitFor("rebase submitted to develop", `String(window.actionState?.actions.some(a=>a.changes_target==='develop'&&a.merge_type==='rebase'))`, "true")
 	})
 }
+
+func TestBrowserFunctional_ChangesSplitActionMissingTarget(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-missing-target", func(b *composerFocusCDP) {
+		b.waitFor("settings ready", `String(document.querySelector('[data-changes-primary]')?.disabled===false)`, "true")
+		b.evaluate(`(()=>{const original=window.fetch;window.fetch=async function(url,options){const response=await original(url,options);if(String(url).endsWith('/action-settings')&&(!options?.method||options.method==='GET')){const data=await response.json();data.preferences.mode='local';data.preferences.local_branch='deleted';return new Response(JSON.stringify(data),{status:200});}if(String(url).endsWith('action-local?target=deleted'))return new Response(JSON.stringify({message:'local target branch no longer exists'}),{status:400});return response;};window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});return 'ok';})()`)
+		b.waitFor("missing target disabled action", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]').textContent==='Merge into deleted'&&document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.waitFor("local controls accessible", `String(!document.querySelector('[data-changes-mode="local"]').disabled&&!document.querySelector('[data-changes-local-fields]').hidden)`, "true")
+		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='main';el.dispatchEvent(new Event('change'));return 'ok';})()`)
+		b.waitFor("replacement eligible", `String(document.querySelector('[data-changes-primary]').textContent==='Merge into main'&&!document.querySelector('[data-changes-primary]').disabled)`, "true")
+	})
+}

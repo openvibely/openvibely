@@ -1156,6 +1156,7 @@ type taskChangesWorktreeState struct {
 }
 
 type taskMergeEligibility struct {
+	TargetMissing    bool
 	MergeAvailable   bool
 	ConflictRecovery bool
 	Reason           string
@@ -1220,6 +1221,7 @@ func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.
 		return result
 	}
 	if targetBranch == "" || !gitRefExists(ctx, project.RepoPath, targetBranch) {
+		result.TargetMissing = true
 		result.Reason = "target branch does not exist"
 		return result
 	}
@@ -1260,7 +1262,8 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 	state.UseWorktreeContent = true
 	state.BranchAlreadyMerged = mergeState.BranchAlreadyMerged
 	mergeEligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
-	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery
+	// A missing old target must not prevent choosing a valid replacement.
+	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery && !mergeEligibility.TargetMissing
 	state.ConflictRecovery = mergeEligibility.ConflictRecovery
 	state.RebaseAvailable = mergeEligibility.MergeAvailable && mergeState.RebaseAvailable
 	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued

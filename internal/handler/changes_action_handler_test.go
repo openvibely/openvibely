@@ -279,4 +279,37 @@ func TestChangesActionLocalRebaseEligibilityUsesSelectedTarget(t *testing.T) {
 	if saved.MergeTargetBranch != "main" {
 		t.Fatal("eligibility check changed the task target")
 	}
+	// Simulate deleting the task's original target after project defaults changed.
+	git("branch", "old-target", "main")
+	if err := h.taskRepo.UpdateMergeTargetBranch(ctx, task.ID, "old-target"); err != nil {
+		t.Fatal(err)
+	}
+	task.MergeTargetBranch = "old-target"
+	git("branch", "-D", "old-target")
+	state := h.resolveTaskChangesWorktreeState(ctx, task)
+	if state.LocalMergeUnavailable {
+		t.Fatal("missing old target must allow choosing a replacement")
+	}
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/worktree/action-local?target=main", nil))
+	var eligibility struct {
+		Merge bool `json:"merge_available"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &eligibility); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 200 || !eligibility.Merge {
+		t.Fatalf("replacement target unavailable: %d %s", rec.Code, rec.Body.String())
+	}
+	saved, err = h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.MergeTargetBranch != "old-target" {
+		t.Fatal("preview persisted replacement target")
+	}
+	task.Status = models.StatusRunning
+	if !h.resolveTaskChangesWorktreeState(ctx, task).LocalMergeUnavailable {
+		t.Fatal("running task must stay unavailable")
+	}
 }

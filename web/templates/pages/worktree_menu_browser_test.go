@@ -120,7 +120,7 @@ func worktreeActionsFixture(t *testing.T, runner string, results chan string) *h
 		}
 		if r.URL.Path == "/tasks/layer-task/worktree/action-local" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"target": r.URL.Query().Get("target"), "rebase_available": r.URL.Query().Get("target") == "develop"})
+			json.NewEncoder(w).Encode(map[string]any{"target": r.URL.Query().Get("target"), "merge_available": true, "rebase_available": r.URL.Query().Get("target") == "develop"})
 			return
 		}
 		if r.URL.Path == "/tasks/layer-task/worktree/action-branches" {

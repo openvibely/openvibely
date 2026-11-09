@@ -314,6 +314,8 @@ func (h *Handler) GetChangesLocalEligibility(c echo.Context) error {
 	if err := h.selectChangesLocalTarget(ctx, &selected, project, target); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	available := h.taskRebaseAvailable(ctx, &selected, project, taskBranchAlreadyMergedForProject(ctx, &selected, project))
-	return c.JSON(http.StatusOK, map[string]any{"target": target, "rebase_available": available})
+	merged := taskBranchAlreadyMergedForProject(ctx, &selected, project)
+	eligibility := h.resolveTaskMergeEligibility(ctx, &selected, project, merged)
+	available := eligibility.MergeAvailable && h.taskRebaseAvailable(ctx, &selected, project, merged)
+	return c.JSON(http.StatusOK, map[string]any{"target": target, "merge_available": eligibility.MergeAvailable, "rebase_available": available, "reason": eligibility.Reason})
 }
