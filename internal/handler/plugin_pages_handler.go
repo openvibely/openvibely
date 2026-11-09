@@ -290,6 +290,18 @@ var pluginAssetTypes = map[string]string{
 
 const pluginAssetCSP = "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
 
+// WebKit does not match 'self' for subresources of sandboxed documents on
+// Wails' custom scheme. Allow only this load's capability-scoped asset directory;
+// keep frame ancestors, sandbox isolation and network restrictions unchanged.
+func nativePluginAssetCSP(handle string) string {
+	assetSource := "wails://localhost/plugin-assets/" + url.PathEscape(handle) + "/"
+	policy := pluginAssetCSP
+	for _, directive := range []string{"script-src", "style-src", "img-src", "font-src", "media-src"} {
+		policy = strings.Replace(policy, directive+" 'self'", directive+" 'self' "+assetSource, 1)
+	}
+	return policy
+}
+
 // PluginAsset serves a static file from the instance's package. The unguessable
 // per-load handle is the capability: sandboxed (opaque-origin) frames do not
 // send session cookies for subresources.
@@ -349,7 +361,11 @@ func (h *Handler) PluginAsset(c echo.Context) error {
 		return pluginNotFound()
 	}
 	hdr := c.Response().Header()
-	hdr.Set("Content-Security-Policy", pluginAssetCSP)
+	policy := pluginAssetCSP
+	if h.desktopMode && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1" {
+		policy = nativePluginAssetCSP(hd.Token)
+	}
+	hdr.Set("Content-Security-Policy", policy)
 	hdr.Set("X-Content-Type-Options", "nosniff")
 	hdr.Set("Referrer-Policy", "no-referrer")
 	hdr.Set("Cache-Control", "no-store")
