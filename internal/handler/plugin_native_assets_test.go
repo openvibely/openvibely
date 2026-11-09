@@ -47,7 +47,7 @@ func TestPluginNativeAssetPolicy(t *testing.T) {
 			t.Fatalf("missing scoped %s", directive)
 		}
 	}
-	for _, restriction := range []string{"sandbox allow-scripts allow-forms;", "connect-src 'none'", "frame-src 'none'", "frame-ancestors 'self'"} {
+	for _, restriction := range []string{"sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox;", "connect-src 'none'", "frame-src 'none'", "frame-ancestors 'self'"} {
 		if !strings.Contains(policy, restriction) {
 			t.Fatalf("lost restriction %s", restriction)
 		}
