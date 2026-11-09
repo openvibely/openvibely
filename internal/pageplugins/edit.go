@@ -92,11 +92,20 @@ func (m *Manager) replacePageSources(instanceID, source string) error {
 		if err := checkSourceTarget(dir, target); err != nil {
 			return err
 		}
+		if !entry.IsDir() && !entry.Type().IsRegular() {
+			return fmt.Errorf("unsupported source file: %s", rel)
+		}
+		existing, err := os.Lstat(target)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err == nil && existing.IsDir() != entry.IsDir() {
+			if err := os.RemoveAll(target); err != nil {
+				return err
+			}
+		}
 		if entry.IsDir() {
 			return os.MkdirAll(target, 0755)
-		}
-		if !entry.Type().IsRegular() {
-			return fmt.Errorf("unsupported source file: %s", rel)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {

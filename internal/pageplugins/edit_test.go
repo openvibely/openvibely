@@ -154,3 +154,39 @@ func TestRemoveEditedPageCleansPackageAndPreservesSharedSources(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskPublicationReplacesSourcePathTypes(t *testing.T) {
+	for _, oldDirectory := range []bool{false, true} {
+		name := "file-to-directory"
+		if oldDirectory {
+			name = "directory-to-file"
+		}
+		t.Run(name, func(t *testing.T) {
+			m, _, project, _ := newTestManager(t)
+			writeAsset := func(root string, directory bool, content string) {
+				t.Helper()
+				path := filepath.Join(root, "assets")
+				if directory {
+					require.NoError(t, os.MkdirAll(path, 0700))
+					path = filepath.Join(path, "app.js")
+				}
+				require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+			}
+			first := replacementBundle(t, "1.0.0")
+			writeAsset(first, oldDirectory, "old")
+			result, err := m.PublishToInstance(t.Context(), first, project, "", "test", "")
+			require.NoError(t, err)
+			next := replacementBundle(t, "1.0.1")
+			writeAsset(next, !oldDirectory, "new")
+			_, err = m.PublishToInstance(t.Context(), next, project, "", "test", result.Instance.ID)
+			require.NoError(t, err)
+			path := filepath.Join(m.pageSourceDir(result.Instance.ID), "assets")
+			if !oldDirectory {
+				path = filepath.Join(path, "app.js")
+			}
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, "new", string(content))
+		})
+	}
+}
