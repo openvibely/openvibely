@@ -66,3 +66,25 @@ func TestPluginSettingsAllProjects(t *testing.T) {
 	require.Len(t, instances, 1)
 	require.Contains(t, rec.Body.String(), "project_id=__all_projects__")
 }
+
+func TestPluginSettingsAllProjectsReusePage(t *testing.T) {
+	env := setupPluginPages(t)
+	project := createProject(t, env.h, "Reuse destination")
+	scope := "?project_id=__all_projects__"
+	rec := env.do(t, http.MethodGet, "/settings/plugin-pages"+scope, "", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "Add to another project")
+	require.Contains(t, rec.Body.String(), `id="plugin-add-project-`+env.inA.ID+`"`)
+	headers := map[string]string{"Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true"}
+	rec = env.do(t, http.MethodPost, "/settings/plugin-pages/instances"+scope, "package_id="+env.inA.PackageID+"&page_id="+env.inA.PageID+"&destination_project="+project.ID, headers)
+	require.Equal(t, http.StatusOK, rec.Code)
+	instances, err := env.mgr.Store().ListInstances(t.Context(), project.ID, false)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	require.NotEqual(t, env.inA.ID, instances[0].ID)
+	require.Equal(t, env.inA.PackageID, instances[0].PackageID)
+	require.Contains(t, rec.Body.String(), "project_id=__all_projects__")
+	original, err := env.mgr.Store().GetInstance(t.Context(), env.inA.ID)
+	require.NoError(t, err)
+	require.True(t, original.Enabled)
+}

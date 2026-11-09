@@ -209,6 +209,9 @@ templ PluginSettingsContent(v PluginSettingsView) {
 								} else {
 									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button></li>
 								}
+                                if v.ProjectID == models.AllProjectsID {
+                                    <li><button onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-add-project-" + r.Instance.ID + "').showModal()"} }>Add to another project</button></li>
+                                }
 								<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-delete-" + r.Instance.ID + "').showModal()"} }>Delete</button></li>
 							}
 						</div>
@@ -226,6 +229,27 @@ templ PluginSettingsContent(v PluginSettingsView) {
 						</div>
 					</div>
 				</div>
+                if v.ProjectID == models.AllProjectsID {
+                    @pluginSettingsDialog("plugin-add-project-"+r.Instance.ID, "Add "+r.Instance.Title+" to another project") {
+                        <p class="text-sm opacity-70">Create a separate page with its own data and conversation.</p>
+                        <form hx-post={ v.URL("/instances") } hx-target="#plugin-settings" hx-swap="outerHTML" class="space-y-4">
+                            <input type="hidden" name="package_id" value={ r.Instance.PackageID }/>
+                            <input type="hidden" name="page_id" value={ r.Instance.PageID }/>
+                            <label class="form-control">
+                                <span class="label-text">Project</span>
+                                <select name="destination_project" class="select select-bordered w-full" required aria-label="Project">
+                                    <option value="">Choose a project</option>
+                                    for _, project := range v.Projects {
+                                        if project.ID != r.Instance.ProjectID {
+                                            <option value={ project.ID }>{ project.Name }</option>
+                                        }
+                                    }
+                                </select>
+                            </label>
+                            <button type="submit" class="btn btn-primary">Add page</button>
+                        </form>
+                    }
+                }
 				@pluginSettingsDialog("plugin-delete-"+r.Instance.ID, "Delete "+r.Instance.Title+"?") {
 					<p>This deletes this project's page, saved data, and conversation. Other projects and the installed package are kept.</p>
 					<button class="btn btn-error" hx-post={ v.URL("/instances/" + r.Instance.ID + "/remove") } hx-target="#plugin-settings" hx-swap="outerHTML">Delete page</button>
