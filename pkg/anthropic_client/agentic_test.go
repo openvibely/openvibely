@@ -52,6 +52,7 @@ func TestNativeCompactionStrategy(t *testing.T) {
 		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-opus-4-6",
+		"claude-fable-5-2",
 		"claude-fable-5-1",
 		"claude-fable-5",
 		"claude-mythos-5-1",
@@ -2171,7 +2172,7 @@ func TestContextManagementEdit_WithThinking(t *testing.T) {
 }
 
 func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T) {
-	models := []string{"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5", "claude-haiku-5-5"}
+	models := []string{"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-fable-5-2", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5", "claude-haiku-5-5"}
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2255,6 +2256,8 @@ func TestNormalizeEffortRejectsUnsupportedModelCombinations(t *testing.T) {
 		{"claude-opus-5", " LOW ", "low"},
 		{"claude-opus-5", "xhigh", "xhigh"},
 		{"claude-sonnet-5", "xhigh", "xhigh"},
+		{"claude-fable-5-2", "xhigh", "xhigh"},
+		{"claude-fable-5-2", "max", "max"},
 		{"claude-fable-5-1", "xhigh", "xhigh"},
 		{"claude-fable-5-1", "max", "max"},
 		{"claude-fable-5", "xhigh", "xhigh"},

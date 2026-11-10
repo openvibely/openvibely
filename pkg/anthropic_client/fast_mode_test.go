@@ -12,7 +12,7 @@ import (
 )
 
 func TestFastModeRequests(t *testing.T) {
-	for _, model := range []string{"claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-4-7"} {
+	for _, model := range []string{"claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-fable-5-2", "claude-sonnet-5-5", "claude-opus-4-7"} {
 		for _, tier := range []string{"priority", "default", "", "invalid"} {
 			for _, oauth := range []bool{false, true} {
 				for _, mode := range []string{"send", "attachment", "agentic"} {
@@ -28,7 +28,7 @@ func TestFastModeRequests(t *testing.T) {
 							if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 								t.Fatal(err)
 							}
-							wantFast := tier == "priority" && (model == "claude-opus-4-8" || model == "claude-opus-5" || model == "claude-opus-5-5")
+							wantFast := tier == "priority" && (model == "claude-opus-4-8" || model == "claude-opus-5" || model == "claude-opus-5-5" || model == "claude-fable-5-2")
 							speed, present := body["speed"]
 							if present != wantFast || (wantFast && speed != "fast") {
 								t.Fatalf("speed=%v present=%t wantFast=%t", speed, present, wantFast)
