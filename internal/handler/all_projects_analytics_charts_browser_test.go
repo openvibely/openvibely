@@ -30,9 +30,12 @@ func TestAllProjectsEveryAnalyticsChartInChrome(t *testing.T) {
 	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
 	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
 	ctx := t.Context()
-	// Transition fixtures are stored at whole-second precision. Derive both
-	// endpoints from one anchor so setup latency cannot turn 60 seconds into 61.
-	transitionStart := time.Now().UTC().Truncate(time.Second).Add(-10 * time.Minute)
+	// Keep every run in one daily bucket, even when the suite starts near
+	// midnight. The assertions sum per-bucket percentages, which are not
+	// additive across days. Yesterday at local noon is also inside the 7d range.
+	// Whole-second precision keeps transition durations exactly 60 seconds.
+	yesterday := time.Now().AddDate(0, 0, -1)
+	fixtureStart := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 12, 0, 0, 0, time.Local).UTC()
 	for _, name := range []string{"First", "Second"} {
 		project := createProject(t, h, name)
 		config := &models.LLMConfig{Name: name + " model", Provider: models.ProviderTest, Model: name}
@@ -48,7 +51,7 @@ func TestAllProjectsEveryAnalyticsChartInChrome(t *testing.T) {
 			for i, status := range []models.ExecutionStatus{models.ExecCompleted, models.ExecFailed, models.ExecCompleted} {
 				run := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, IsFollowup: i > 0}
 				require.NoError(t, stores.Executions.Create(ctx, run))
-				started := time.Now().UTC().Add(time.Duration(-10+i) * time.Minute)
+				started := fixtureStart.Add(time.Duration(i) * time.Minute)
 				require.NoError(t, stores.Fixtures.SetExecutionStartedAt(ctx, run.ID, started))
 				require.NoError(t, stores.Executions.Complete(ctx, run.ID, status, "done", "fixture failure", 10, 60000))
 				require.NoError(t, stores.Fixtures.SetExecutionCompletedAt(ctx, run.ID, started.Add(time.Minute)))
@@ -71,7 +74,7 @@ func TestAllProjectsEveryAnalyticsChartInChrome(t *testing.T) {
 					EventKey: key, ToNodeID: binding.NodeID, Transition: state,
 				})
 				require.NoError(t, err)
-				require.NoError(t, stores.Fixtures.SetAutomationTransitionTime(ctx, binding.AutomationID, key, transitionStart.Add(time.Duration(i)*time.Minute)))
+				require.NoError(t, stores.Fixtures.SetAutomationTransitionTime(ctx, binding.AutomationID, key, fixtureStart.Add(time.Duration(i)*time.Minute)))
 			}
 		}
 	}
