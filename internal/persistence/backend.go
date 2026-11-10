@@ -29,6 +29,7 @@ type PageConversationStore interface {
 type Stores struct {
 	PageConversations    PageConversationStore
 	Organizations        OrganizationStore
+	GitHubConnections    GitHubConnectionStore
 	ProjectAccess        ProjectAccessStore
 	RunIdentities        RunIdentityStore
 	Agents               AgentStore

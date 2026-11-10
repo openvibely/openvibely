@@ -44,6 +44,7 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 	alerts.SetAutomationRepo(automations)
 	return persistence.Stores{
 		Organizations:        NewOrganizationRepo(db),
+		GitHubConnections:    NewGitHubConnectionRepo(db),
 		ProjectAccess:        NewProjectAccessRepo(db),
 		RunIdentities:        NewRunIdentityRepo(db),
 		Agents:               NewAgentRepo(db),
