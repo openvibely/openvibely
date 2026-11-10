@@ -292,3 +292,24 @@ func TestCustomPageBreadcrumbSelector(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `/breadcrumb-selectors/custom-pages?project_id=`+env.projA.ID)
 	require.Contains(t, rec.Body.String(), `data-breadcrumb-title`)
 }
+
+func TestCustomPageAllProjectsNavigationKeepsScope(t *testing.T) {
+	env := setupPluginPages(t)
+	scope := models.AllProjectsID
+	nav := env.do(t, http.MethodGet, "/plugin-pages/nav?project_id="+scope, "", nil)
+	require.Contains(t, nav.Body.String(), `/p/`+env.inA.ID+`?project_id=`+scope)
+	for _, instance := range []*models.PagePluginInstance{env.inA, env.inB} {
+		for _, headers := range []map[string]string{nil, {"HX-Request": "true"}} {
+			page := env.do(t, http.MethodGet, "/p/"+instance.ID+"?project_id="+scope, "", headers)
+			require.Equal(t, http.StatusOK, page.Code)
+			require.Empty(t, page.Header().Get("HX-Redirect"))
+			require.Contains(t, page.Body.String(), `/settings/plugin-pages?project_id=`+scope)
+			require.Contains(t, page.Body.String(), `/breadcrumb-selectors/custom-pages?project_id=`+scope)
+			require.Contains(t, page.Body.String(), `/api/plugin-pages/`+instance.ID+`/bridge?project_id=`+instance.ProjectID)
+		}
+	}
+	selector := env.do(t, http.MethodGet, "/breadcrumb-selectors/custom-pages?project_id="+scope, "", nil)
+	require.Contains(t, selector.Body.String(), `/p/`+env.inB.ID+`?project_id=`+scope)
+	settings := env.do(t, http.MethodGet, "/settings/plugin-pages?project_id="+scope, "", nil)
+	require.Equal(t, http.StatusOK, settings.Code)
+}

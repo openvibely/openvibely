@@ -98,6 +98,11 @@ func pluginNavProjectSuffix(e PluginNavEntry, showProject bool) string {
 	return ""
 }
 
+func pluginNavScope(e PluginNavEntry, allProjects bool) string {
+    if allProjects { return models.AllProjectsID }
+    return e.ProjectID
+}
+
 templ PluginNav(entries []PluginNavEntry, showProject bool) {
 	if len(entries) > 0 {
 		<li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.2;margin:8px 4px" role="separator"></li>
@@ -106,8 +111,8 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 	for _, e := range entries {
 		<li data-plugin-nav-entry={ e.InstanceID }>
 			<a
-				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID)) }
-				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(e.ProjectID) }
+				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject))) }
+				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject)) }
 				aria-label={ e.Title + pluginNavProjectSuffix(e, showProject) }
 				data-tip={ e.Title + pluginNavProjectSuffix(e, showProject) }
 				data-tip-side="right"

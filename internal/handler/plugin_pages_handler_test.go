@@ -126,8 +126,8 @@ func TestPluginPage_CrossProjectAccessDenied(t *testing.T) {
 		t.Fatalf("foreign handle accepted = %d", rec.Code)
 	}
 	rec = env.do(t, http.MethodGet, "/p/"+env.inA.ID+"?project_id="+models.AllProjectsID, "", nil)
-	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "project_id="+env.projA.ID) {
-		t.Fatalf("all-projects open did not keep owning project: %d %s", rec.Code, rec.Header().Get("Location"))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "/breadcrumb-selectors/custom-pages?project_id="+models.AllProjectsID) {
+		t.Fatalf("all-projects open lost workspace scope: %d", rec.Code)
 	}
 }
 
@@ -154,8 +154,8 @@ func TestPluginNav_AllProjectsShowsOwningProject(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(body, "Alpha") || !strings.Contains(body, "Beta") {
 		t.Fatalf("all-projects nav missing project labels: %d %s", rec.Code, body)
 	}
-	if !strings.Contains(body, "project_id="+env.projA.ID) || !strings.Contains(body, "project_id="+env.projB.ID) {
-		t.Fatal("nav links do not open in owning project")
+	if !strings.Contains(body, "/p/"+env.inA.ID+"?project_id="+models.AllProjectsID) || !strings.Contains(body, "/p/"+env.inB.ID+"?project_id="+models.AllProjectsID) {
+		t.Fatal("nav links lost All Projects scope")
 	}
 	rec = env.do(t, http.MethodGet, "/plugin-pages/nav?project_id="+env.projA.ID, "", nil)
 	if strings.Contains(rec.Body.String(), env.inB.ID) {
