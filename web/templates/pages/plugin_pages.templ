@@ -47,9 +47,18 @@ templ PluginPageContent(v PluginPageView) {
 		data-retire-url={ pluginAPI(v, "/handle/retire") }
 	>
 		<div data-page-header class="flex items-center gap-2 flex-shrink-0 min-w-0">
-			<div class="min-w-0 flex-1">
-				<h2 class="text-2xl font-bold truncate">{ v.Title }</h2>
-			</div>
+			<nav class="flex min-w-0 flex-1 items-center gap-2" aria-label="Breadcrumb">
+                <a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL("/settings/plugin-pages?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, v.OwningProjectID))) } onclick="event.preventDefault(); window.openVibelyNavigate(this.getAttribute('href'));">Custom Pages</a>
+                <span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
+                <div class="min-w-0 flex-1 flex items-center gap-1">
+                    <span data-breadcrumb-title class="min-w-0 truncate">{ v.Title }</span>
+                    @components.BreadcrumbSelector(models.BreadcrumbSelector{
+                        ID: "custom-page-resource-selector", Kind: "Custom page", CurrentID: v.InstanceID, CurrentName: v.Title,
+                        SearchURL: "/breadcrumb-selectors/custom-pages?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, v.OwningProjectID)) + "&current_id=" + url.QueryEscape(v.InstanceID),
+                        CaretOnly: true,
+                    })
+                </div>
+            </nav>
 			@components.SidePanelToggle("page-chat-toggle", "page-side-chat", templ.Attributes{"data-page-chat-toggle": ""})
 		</div>
 		<div id="plugin-startup" class="text-xs mb-2" role="status" hidden data-state="loading"></div>
@@ -447,8 +456,8 @@ templ pluginHostBridgeScript() {
                 loads = 0;
                 subscribed = false;
                 frame.src = nextFrame.getAttribute('src');
-                var header = root.querySelector('[data-page-header] .min-w-0');
-                var nextHeader = updated.querySelector('[data-page-header] .min-w-0');
+                var header = root.querySelector('[data-breadcrumb-title]');
+                var nextHeader = updated.querySelector('[data-breadcrumb-title]');
                 if (header && nextHeader) header.replaceChildren.apply(header, Array.from(nextHeader.childNodes));
                 startupTimer = setTimeout(function () {
                     onMessage({source: frame.contentWindow, data: {v: 1, handle: handle, id: 'startup-timeout', type: 'page.failed', payload: {error: 'Page did not confirm startup within 30 seconds.'}}});

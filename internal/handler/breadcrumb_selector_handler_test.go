@@ -268,3 +268,27 @@ func TestBreadcrumbSelectorItemURLPreservesOnlySupportedContext(t *testing.T) {
 	require.Equal(t, "/automations/automation/builder?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", "edit", "", "", ""))
 	require.Equal(t, "/automations/automation?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", strings.Repeat("x", 20), "", "", ""))
 }
+
+func TestCustomPageBreadcrumbSelector(t *testing.T) {
+	env := setupPluginPages(t)
+	for _, scope := range []string{env.projA.ID, models.AllProjectsID} {
+		rec := env.do(t, http.MethodGet, "/breadcrumb-selectors/custom-pages?project_id="+scope+"&current_id="+env.inA.ID, "", nil)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), "/p/"+env.inA.ID+"?project_id="+scope)
+		require.Contains(t, rec.Body.String(), `aria-selected="true"`)
+		if scope == models.AllProjectsID {
+			require.Contains(t, rec.Body.String(), "/p/"+env.inB.ID)
+		} else {
+			require.NotContains(t, rec.Body.String(), env.inB.ID)
+		}
+	}
+	rec := env.do(t, http.MethodGet, "/breadcrumb-selectors/custom-pages?project_id="+env.projA.ID+"&search=missing-title", "", nil)
+	require.Contains(t, rec.Body.String(), "No Custom pages found")
+	require.NoError(t, env.mgr.Disable(t.Context(), env.inB.ID))
+	rec = env.do(t, http.MethodGet, "/breadcrumb-selectors/custom-pages?project_id="+models.AllProjectsID, "", nil)
+	require.NotContains(t, rec.Body.String(), env.inB.ID)
+	rec = env.do(t, http.MethodGet, "/p/"+env.inA.ID+"?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
+	require.Contains(t, rec.Body.String(), `aria-label="Breadcrumb"`)
+	require.Contains(t, rec.Body.String(), `/breadcrumb-selectors/custom-pages?project_id=`+env.projA.ID)
+	require.Contains(t, rec.Body.String(), `data-breadcrumb-title`)
+}
