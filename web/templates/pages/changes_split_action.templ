@@ -30,7 +30,7 @@ templ changesSplitActionView(task *models.Task, taskPR *models.TaskPullRequest, 
    <button type="button" class={ "btn join-item", templ.KV("btn-primary btn-sm", !composer), templ.KV("btn-ghost btn-xs h-6 min-h-0 text-xs font-normal px-2", composer) } data-changes-primary disabled aria-disabled="true" aria-busy="true" hidden?={ taskPR != nil }>Loading…</button>
    <button type="button" class={ "btn join-item", templ.KV("btn-primary btn-sm", !composer), templ.KV("btn-ghost btn-xs h-6 min-h-0 text-xs font-normal px-2", composer) } data-changes-settings-toggle disabled popovertarget={ prefix + "-split-settings" } aria-label="Action settings" aria-expanded="false">
     if composer {
-     <svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+     <svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
     } else {
     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m6 9 6 6 6-6z"></path></svg>
     }
@@ -90,9 +90,9 @@ templ changesSplitActionView(task *models.Task, taskPR *models.TaskPullRequest, 
 
   [data-composer-action="true"] .ov-changes-split { border-radius:6px;color:oklch(var(--bc));display:flex; }
   [data-composer-action="true"] .ov-changes-split > .btn { opacity:.5;border-radius:0; }
-  [data-composer-action="true"] .ov-changes-split > :first-child { border-radius:6px 0 0 6px;padding-right:4px; }
-  [data-composer-action="true"] .ov-changes-split > [data-changes-primary] { border-radius:6px 0 0 6px;padding-right:4px; }
-  [data-composer-action="true"] .ov-changes-split > [data-changes-settings-toggle] { border-radius:0 6px 6px 0;width:22px;min-width:22px;padding:0 8px 0 4px; }
+  [data-composer-action="true"] .ov-changes-split > :first-child { border-radius:6px 0 0 6px;padding-right:2px;border-right-width:0; }
+  [data-composer-action="true"] .ov-changes-split > [data-changes-primary] { border-radius:6px 0 0 6px;padding-right:2px;border-right-width:0; }
+  [data-composer-action="true"] .ov-changes-split > [data-changes-settings-toggle] { border-radius:0 6px 6px 0;width:21px;min-width:21px;padding:0 8px 0 2px;border-left-width:0;margin-left:0; }
   [data-composer-action="true"] .ov-changes-split > [data-changes-settings-toggle]::before { display:none; }
   [data-composer-action="true"] .ov-changes-split > .btn:hover:not(:disabled),
   [data-composer-action="true"] [data-changes-settings-toggle][aria-expanded="true"] { opacity:1; }
