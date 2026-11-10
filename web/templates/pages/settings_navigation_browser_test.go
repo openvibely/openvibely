@@ -240,6 +240,7 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 		t.Run(route, func(t *testing.T) {
 			runComposerFocusCDP(t, chrome, server.URL+route, "settings-picker", func(b *composerFocusCDP) {
 				b.waitFor("picker ready", `String(document.readyState==='complete' && !!window.ovModelPicker && !!window.workspaceNavigation && !!document.querySelector('.chat-model-select'))`, "true")
+				b.waitFor("shared selector chevron spacing", `String(Array.from(document.querySelectorAll('.chat-model-select,.chat-mode-select')).every(b=>{const label=b.querySelector('.chat-custom-select-label').getBoundingClientRect(),arrow=b.querySelector('svg').getBoundingClientRect(),rect=b.getBoundingClientRect();return Math.abs(arrow.left-label.right-10)<.1&&Math.abs(rect.right-arrow.right-4)<.1}))`, "true")
 				b.evaluate(`window.originalPickerButton=document.querySelector('.chat-model-select');window.ovModelPicker.open(window.originalPickerButton);'opened'`)
 				b.waitFor("picker visible", `String(!document.getElementById('conversation-model-picker').hidden)`, "true")
 				b.click(`#conversation-model-picker .ov-mp-provider`)
