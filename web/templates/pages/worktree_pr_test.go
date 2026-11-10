@@ -91,7 +91,7 @@ func TestTaskChangesWorktreeContent_SettingsUseTopLayerPopover(t *testing.T) {
 	for _, want := range []string{
 		`data-changes-settings-toggle disabled popovertarget="changes-split-settings"`,
 		`aria-label="Action settings" aria-expanded="false"`,
-		`id="changes-split-settings" data-menu-content hidden popover="manual"`,
+		`id="changes-split-settings" data-changes-settings data-menu-content hidden popover="manual"`,
 		`style="position:fixed;inset:auto;margin:0;"`,
 	} {
 		if !strings.Contains(out, want) {
@@ -456,7 +456,7 @@ func TestTaskChangesWorktreeContent_ToolbarActionOrder(t *testing.T) {
 	}
 	out := buf.String()
 	last := -1
-	for _, marker := range []string{`data-diff-toolbar`, `id="diff-btn-inline"`, `id="diff-btn-split"`, `id="review-toolbar"`, `data-changes-split data-task-id=`} {
+	for _, marker := range []string{`data-diff-toolbar`, `id="diff-btn-inline"`, `id="diff-btn-split"`, `id="review-toolbar"`, `data-composer-action="false" data-task-id=`} {
 		pos := strings.Index(out, marker)
 		if pos <= last {
 			t.Fatalf("missing or misplaced toolbar control %s", marker)
@@ -468,14 +468,14 @@ func TestTaskChangesWorktreeContent_ToolbarActionOrder(t *testing.T) {
 			t.Fatalf("unexpected toolbar chrome: %s", unwanted)
 		}
 	}
-	if !strings.Contains(out, `class="btn btn-primary btn-sm join-item" data-changes-primary`) {
+	if !strings.Contains(out, `class="btn join-item btn-primary btn-sm" data-changes-primary`) {
 		t.Fatal("split primary action should retain its accent color")
 	}
 	buf.Reset()
 	if err := TaskChangesWorktreeContent("", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), `data-changes-split data-task-id=`) {
+	if !strings.Contains(buf.String(), `data-composer-action="false" data-task-id=`) {
 		t.Fatal("actions must remain available with no diff")
 	}
 }

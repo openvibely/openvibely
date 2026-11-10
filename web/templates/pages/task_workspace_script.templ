@@ -18,7 +18,7 @@ templ TaskWorkspaceScript() {
 		var signal = abort.signal;
 		var tabNames = ['details', 'schedules', 'chaining', 'attachments', 'lifecycle'];
 		var selected = 'details', scrollState = null, returnFocus = null, composerFocus = null;
-		var summary = null, timer = null, pending = false, dirty = false, titleVersion = 0;
+		var summary = null, timer = null, pending = false, dirty = false, titleVersion = 0, actionRevision = null;
 		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
 		function store(key, value) { try { localStorage.setItem(key, value); } catch (_) {} }
 		var saved = read('task-inspector-tab-' + taskID);
@@ -241,8 +241,6 @@ templ TaskWorkspaceScript() {
 			comments.hidden = !summary.review_comments;
 			comments.textContent = summary.review_comments ? summary.review_comments.toLocaleString() + (summary.review_comments === 1 ? ' comment' : ' comments') : '';
 			var action = 'Review changes';
-			bar.querySelector('[data-change-action]').textContent = action;
-			bar.querySelector('.task-change-review').setAttribute('aria-label', action);
 			bar.querySelector('.task-change-summary').setAttribute('aria-label', action + ': ' + summary.files + ' files changed, ' + summary.insertions + ' lines added, ' + summary.deletions + ' lines removed');
 		}
 		function applyTitle(value) {
@@ -259,6 +257,15 @@ templ TaskWorkspaceScript() {
 				input.defaultValue = value;
 			}
 		}
+        function refreshComposerActions() {
+            var host=root.querySelector('#composer-changes-action');
+            if (!host || !window.htmx) return;
+            htmx.trigger(host,'composer-actions-refresh');
+        }
+        on(document,'htmx:afterRequest',function(event){
+            var config=event.detail && event.detail.requestConfig;
+            if (config && config.verb === 'post' && config.path.indexOf('/tasks/'+taskID+'/worktree/')===0) refreshComposerActions();
+        });
 		function refreshSummary() {
 			timer = null;
 			if (!taskID || signal.aborted || !root.isConnected) return;
@@ -268,7 +275,7 @@ templ TaskWorkspaceScript() {
 			fetch('/tasks/' + encodeURIComponent(taskID) + '/changes/summary?project_id=' + encodeURIComponent(root.dataset.projectId), {signal:signal}).then(function(response) {
 				if (!response.ok) throw new Error('Summary unavailable');
 				return response.json();
-			}).then(function(value) { if (!signal.aborted) { summary = value; if (requestedTitleVersion === titleVersion) applyTitle(value.title); renderSummary(); } }).catch(function() {}).finally(function() {
+			}).then(function(value) { if (!signal.aborted) { summary = value; var revision=value.action_revision || value.status; if(actionRevision!==null && revision!==actionRevision) refreshComposerActions(); actionRevision=revision; if (requestedTitleVersion === titleVersion) applyTitle(value.title); renderSummary(); } }).catch(function() {}).finally(function() {
 				pending = false;
 				if (dirty && !signal.aborted) { dirty = false; scheduleSummary(); }
 			});

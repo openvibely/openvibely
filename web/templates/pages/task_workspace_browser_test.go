@@ -483,6 +483,10 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"files":%d,"insertions":51,"deletions":12,"status":"completed","duration":"12m 41s","review_comments":0}`, files.Load())
 		case "/tasks/workspace-task/changes":
+			if r.URL.Query().Get("composer_action") == "1" {
+				fmt.Fprint(w, render(ComposerChangesAction(task, nil, true, false)))
+				return
+			}
 			diffRequests.Add(1)
 			fmt.Fprint(w, `<div id="diff-viewer">Authoritative full diff</div>`)
 		case "/auth/me":
@@ -582,14 +586,14 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("Back restores diff in place", `document.getElementById('tab-changes').classList.contains('hidden')+':'+(window.savedThread===document.getElementById('task-thread-view'))`, "false:true")
 		b.navigateHistory(1)
 		b.waitFor("Forward restores thread in place", `document.getElementById('tab-chat').classList.contains('hidden')+':'+(window.savedThread===document.getElementById('task-thread-view'))`, "false:true")
-		b.click(".task-change-review")
+		b.click(".task-change-summary")
 		b.waitFor("toolbar review opens changes", `String(!document.getElementById('tab-changes').classList.contains('hidden'))`, "true")
 		b.click("#task-breadcrumb-title")
 		b.waitFor("breadcrumb returns to thread without opening menu", `String(document.getElementById('task-breadcrumb-changes').hidden && document.getElementById('task-breadcrumb-title').disabled && !document.querySelector('#task-resource-selector-dialog').open && !document.getElementById('tab-chat').classList.contains('hidden'))`, "true")
 		// A pinned thread must follow content received while Changes was visible.
 		for _, returnControl := range []string{"#task-workspace-back", "#task-breadcrumb-title", "history"} {
 			b.evaluate(`window._taskThreadPageTracker.returnToLatest(false); 'pinned'`)
-			b.click(".task-change-review")
+			b.click(".task-change-summary")
 			b.evaluate(`var added=document.createElement('div');added.style.height='400px';added.textContent='Incoming message';document.getElementById('task-thread-messages').appendChild(added); 'appended'`)
 			if returnControl == "history" {
 				b.navigateHistory(-1)
