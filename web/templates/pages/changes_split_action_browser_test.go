@@ -11,7 +11,7 @@ func TestBrowserFunctional_ChangesSplitActionPreferencesAndOneClick(t *testing.T
 	server := worktreeActionsFixture(t, "", nil)
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-split-action", func(b *composerFocusCDP) {
-		b.waitFor("upstream default ready", `String(document.querySelector('[data-changes-primary]')?.textContent==='Create PR to upstream' && !document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("upstream default ready", `String(document.querySelector('[data-changes-primary]')?.textContent==='Create PR' && !document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
 		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.actionState=s));'ok'`)
 		b.click(`[data-changes-primary]`)
 		b.waitFor("PR submitted once", `String(window.actionState?.actions.length===1&&window.actionState.actions[0].base==='main'&&window.actionState.actions[0].target_repo==='https://github.com/upstream/repo')`, "true")
@@ -56,7 +56,8 @@ func TestBrowserFunctional_ChangesSplitActionPartialDiscovery(t *testing.T) {
 		b.waitFor("unavailable upstream retained", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]')?.matches(':disabled,[aria-disabled="true"]')&&document.querySelector('[data-changes-repo] option:checked')?.textContent.includes('Unavailable'))`, "true")
 		b.click(`[data-changes-settings-toggle]`)
 		b.evaluate(`(()=>{const repo=document.querySelector('[data-changes-repo]');repo.value='https://github.com/me/repo';repo.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';})()`)
-		b.waitFor("fork action enabled despite warning", `String(!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]')&&document.querySelector('[data-changes-primary]').textContent==='Create PR to origin'&&!document.querySelector('[data-changes-error]').hidden)`, "true")
+		b.waitFor("fork action enabled despite warning", `String(!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]')&&document.querySelector('[data-changes-primary]').textContent==='Create PR'&&!document.querySelector('[data-changes-error]').hidden)`, "true")
+		b.waitFor("PR destination retained in tooltip and accessible label", `(()=>{const el=document.querySelector('[data-changes-primary]');return String((el.title||el.dataset.ovTooltip)==='me/repo:main'&&el.getAttribute('aria-label')==='Create PR (me/repo:main)');})()`, "true")
 		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
 		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.partialActions=s));'ok'`)
 		b.click(`[data-changes-primary]`)

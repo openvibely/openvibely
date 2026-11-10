@@ -112,7 +112,7 @@ templ changesSplitActionScript() {
     const view=find('[data-linked-pr-action]');if(view)view.hidden=!pr;primary.hidden=pr&&linked;
     const names={merge:'Merge',ff:'Fast-forward',rebase:'Rebase',squash:'Squash merge'};
     const destinations={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash merge into '};
-    primary.textContent=pr?'Create PR'+(choice?(choice.upstream?' to upstream':' to origin'):''):(names[prefs.method]||'Merge');
+    primary.textContent=pr?'Create PR':(names[prefs.method]||'Merge');
     primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):(destinations[prefs.method]||'Merge into ')+prefs.local_branch;
     primary.setAttribute('aria-label',pr?primary.textContent+' ('+primary.title+')':primary.title);
     const checkingLocal=!pr&&localLoading,waiting=saveCount>0||checkingLocal;
