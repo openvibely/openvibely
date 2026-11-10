@@ -152,16 +152,32 @@ func TestPersonalGitHubRestoresExecutionIdentityBeforeTaskIdentity(t *testing.T)
 	require.ErrorIs(t, err, persistence.ErrProjectDenied)
 }
 
-func TestPersonalGitHubAuthOffLocalCommitDefaults(t *testing.T) {
+func TestPersonalGitHubMissingIdentityAllowsGitFallback(t *testing.T) {
 	s := personalServiceForTest()
 	s.personalConnections = &personalConnectionTestStore{rows: map[string]models.GitHubConnection{}}
 	s.credentialAuthOff = true
 	identity, err := gitidentity.Resolve(s.GitContext(t.Context()))
 	require.NoError(t, err)
-	require.Equal(t, "OpenVibely Bot", identity.Name)
-	require.Equal(t, "bot@openvibely.ai", identity.Email)
+	require.Empty(t, identity.Name)
+	require.Empty(t, identity.Email)
 	require.Empty(t, identity.Token)
 	s.credentialAuthOff = false
 	ctx := models.WithPrincipal(t.Context(), models.Principal{UserID: "alice"})
-	require.Error(t, gitidentity.RequireCommit(s.GitContext(ctx)))
+	require.NoError(t, gitidentity.RequireCommit(s.GitContext(ctx)))
+}
+
+func TestPersonalGitHubAllowsOptionalCommitIdentity(t *testing.T) {
+	for _, fields := range []struct{ name, email string }{{"", ""}, {"Alice", ""}, {"", "alice@example.com"}} {
+		s := personalServiceForTest()
+		ctx := models.WithPrincipal(t.Context(), models.Principal{UserID: "alice"})
+		saved, err := s.SavePersonalConnection(ctx, models.GitHubConnection{PAT: "alice-token", AuthorName: fields.name, AuthorEmail: fields.email}, 1)
+		require.NoError(t, err)
+		require.True(t, saved)
+	}
+	s := personalServiceForTest()
+	ctx := models.WithPrincipal(t.Context(), models.Principal{UserID: "alice"})
+	for _, fields := range []struct{ name, email string }{{"bad\nname", ""}, {"", "invalid"}} {
+		_, err := s.SavePersonalConnection(ctx, models.GitHubConnection{PAT: "alice-token", AuthorName: fields.name, AuthorEmail: fields.email}, 1)
+		require.Error(t, err)
+	}
 }

@@ -35,11 +35,11 @@ func (s *GitHubService) PersonalConnection(ctx context.Context) (*models.GitHubC
 func (s *GitHubService) SavePersonalConnection(ctx context.Context, c models.GitHubConnection, revision int64) (bool, error) {
 	c.AuthorName = strings.TrimSpace(c.AuthorName)
 	c.AuthorEmail = strings.TrimSpace(c.AuthorEmail)
-	if c.AuthorName == "" || strings.ContainsAny(c.AuthorName, "\r\n\x00<>") {
-		return false, fmt.Errorf("commit author name is required and must not contain control characters or angle brackets")
+	if strings.ContainsAny(c.AuthorName, "\r\n\x00<>") {
+		return false, fmt.Errorf("commit author name must not contain control characters or angle brackets")
 	}
 	address, err := mail.ParseAddress(c.AuthorEmail)
-	if err != nil || address.Address != c.AuthorEmail || strings.ContainsAny(c.AuthorEmail, "\r\n\x00") {
+	if c.AuthorEmail != "" && (err != nil || address.Address != c.AuthorEmail || strings.ContainsAny(c.AuthorEmail, "\r\n\x00")) {
 		return false, fmt.Errorf("a valid commit email is required")
 	}
 	c.APIEndpoint, err = personalGitHubAPIEndpoint(c.APIEndpoint)
@@ -160,18 +160,7 @@ func (s *GitHubService) GitContext(ctx context.Context) context.Context {
 			host = "github.com"
 		}
 		principal, _ := models.PrincipalFromContext(s.personalContext(operation))
-		name, email := c.AuthorName, c.AuthorEmail
-		// Auth-off installations can perform local work before configuring
-		// GitHub. Use the existing bot default, never a machine user's identity.
-		if s.credentialAuthOff && principal.UserID == models.BootstrapUserID {
-			if name == "" {
-				name = "OpenVibely Bot"
-			}
-			if email == "" {
-				email = "bot@openvibely.ai"
-			}
-		}
-		return gitidentity.Identity{Name: name, Email: email, Token: c.PAT, Host: host, Scope: principal.UserID}, nil
+		return gitidentity.Identity{Name: c.AuthorName, Email: c.AuthorEmail, Token: c.PAT, Host: host, Scope: principal.UserID}, nil
 	})
 }
 

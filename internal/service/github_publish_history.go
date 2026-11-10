@@ -60,7 +60,12 @@ func (s *GitHubService) publishTaskHistory(ctx context.Context, repo *GitHubRepo
 			if err != nil {
 				return nil, err
 			}
-			name, email = identity.Name, identity.Email
+			if identity.Name != "" {
+				name = identity.Name
+			}
+			if identity.Email != "" {
+				email = identity.Email
+			}
 		}
 		if name == "" {
 			name = "OpenVibely Bot"

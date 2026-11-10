@@ -42,13 +42,13 @@ func Executable(ctx context.Context) (string, error) {
 			return
 		}
 		quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
-		script := "#!/bin/sh\nHOME=" + quote(home) + "\nexport HOME\nreal_git=" + quote(realGit) + "\n" + networkScopeScript + "\nexec \"$real_git\" \"$@\"\n"
+		script := "#!/bin/sh\nreal_git=" + quote(realGit) + "\n" + identityFallbackScript + "\nHOME=" + quote(home) + "\nexport HOME\n" + networkScopeScript + "\nexec \"$real_git\" \"$@\"\n"
 		path := filepath.Join(dir, "git")
 		if runtime.GOOS == "windows" {
 			path += ".cmd"
 			psQuote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 			psPath := filepath.Join(dir, "git-wrapper.ps1")
-			psScript := "$env:HOME = " + psQuote(home) + "\n$realGit = " + psQuote(realGit) + "\n" + windowsNetworkScopeScript
+			psScript := "$realGit = " + psQuote(realGit) + "\n" + windowsIdentityFallbackScript + "\n$env:HOME = " + psQuote(home) + "\n" + windowsNetworkScopeScript
 			if err = os.WriteFile(psPath, []byte(psScript), 0600); err != nil {
 				os.RemoveAll(dir)
 				isolatedGit.err = err

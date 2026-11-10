@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 )
 
 func TestWorktreeServiceRepositoryMutationSerializesCanonicalAliasesAcrossInstances(t *testing.T) {
@@ -856,7 +857,7 @@ func TestSyncWorktreeFromMainAtStart_CleanWorktreeAutoMergeSuccess(t *testing.T)
 	taskRepo := storeEnv.Stores.Tasks
 	projectRepo := storeEnv.Stores.Projects
 	settingsRepo := storeEnv.Stores.Settings
-	ctx := context.Background()
+	ctx := gitidentity.WithResolver(t.Context(), func(context.Context) (gitidentity.Identity, error) { return gitidentity.Identity{}, nil })
 
 	repoDir := createTestGitRepo(t)
 	defaultBranch := GetCurrentBranch(repoDir)
@@ -6448,5 +6449,40 @@ func TestCleanupMergedWorktreesDoesNotInventMerge(t *testing.T) {
 				t.Fatal("unverified or unmerged worktree was removed")
 			}
 		})
+	}
+}
+
+func TestCommitWorktreeChangesPersonalIdentityUsesLegacyBotFallback(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file"), []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := gitidentity.WithResolver(t.Context(), func(context.Context) (gitidentity.Identity, error) { return gitidentity.Identity{}, nil })
+	if err := CommitWorktreeChangesContext(ctx, dir, "fallback"); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "-C", dir, "log", "-1", "--format=%an <%ae>")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(out)) != "OpenVibely Bot <bot@openvibely.ai>" {
+		t.Fatalf("unexpected fallback: %s", out)
+	}
+	cmd = exec.Command("git", "-C", dir, "config", "--local", "--get", "user.name")
+	if out, _ := cmd.Output(); len(out) != 0 {
+		t.Fatal("fallback modified repository config")
 	}
 }

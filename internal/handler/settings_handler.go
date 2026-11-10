@@ -598,7 +598,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		channelView.GitHubRevision = strconv.FormatInt(own.Revision, 10)
 		channelView.GitHubAuthorName = own.AuthorName
 		channelView.GitHubAuthorEmail = own.AuthorEmail
-		channelView.GitHubPATValue = ""
+		channelView.GitHubPATValue = own.PAT
 		channelView.GitHubHasPAT = own.PAT != ""
 		if githubAuthMode == service.GitHubAuthModePAT {
 			channelView.GitHubAPIEndpoint = own.APIEndpoint

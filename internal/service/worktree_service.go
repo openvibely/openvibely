@@ -1215,8 +1215,9 @@ func CommitWorktreeChangesContext(ctx context.Context, worktreePath string, mess
 
 	// Commit
 	commitArgs := []string{}
+	// Personal contexts resolve identity and bot defaults in the shared wrapper.
 	if !gitidentity.Configured(ctx) {
-		// Legacy/App mode retains its configured identity, with process-local
+		// Preserve legacy Git identity, with process-local
 		// defaults only for missing fields. Never modify repository config.
 		for _, field := range [][2]string{{"user.name", "OpenVibely Bot"}, {"user.email", "bot@openvibely.ai"}} {
 			query := exec.CommandContext(ctx, "git", "config", "--get", field[0])

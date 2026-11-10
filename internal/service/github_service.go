@@ -1441,10 +1441,15 @@ func (s *GitHubService) createGitHubCommit(ctx context.Context, token string, re
 		if err != nil {
 			return "", err
 		}
-		committerName, committerEmail = identity.Name, identity.Email
+		if identity.Name != "" {
+			committerName = identity.Name
+		}
+		if identity.Email != "" {
+			committerEmail = identity.Email
+		}
 	}
 	payload := map[string]any{"message": message, "tree": treeSHA, "parents": parentSHAs}
-	if gitidentity.Configured(gitCtx) {
+	if gitidentity.Configured(gitCtx) && strings.TrimSpace(committerName) != "" && strings.TrimSpace(committerEmail) != "" {
 		payload["author"] = map[string]string{"name": committerName, "email": committerEmail}
 	}
 	if strings.TrimSpace(committerName) != "" && strings.TrimSpace(committerEmail) != "" {

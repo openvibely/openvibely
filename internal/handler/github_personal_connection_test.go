@@ -51,7 +51,11 @@ func TestPersonalGitHubModalAndHandlersIsolateMembers(t *testing.T) {
 	for _, actor := range []models.Principal{alice, bob} {
 		response = call(actor, "GET", "/channels?project_id=__all_projects__", nil)
 		require.Equal(t, 200, response.Code, response.Body.String())
-		require.NotContains(t, response.Body.String(), "alice-secret")
+		if actor.UserID == alice.UserID {
+			require.Contains(t, response.Body.String(), `value="alice-secret"`)
+		} else {
+			require.NotContains(t, response.Body.String(), "alice-secret")
+		}
 		require.Contains(t, response.Body.String(), `name="github_author_name"`)
 		if actor.UserID == bob.UserID {
 			require.NotContains(t, response.Body.String(), "alice@example.com")
