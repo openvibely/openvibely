@@ -61,6 +61,10 @@ func worktreeActionsFixture(t *testing.T, runner string, results chan string, st
 	if len(statuses) > 0 {
 		task.Status = statuses[0]
 	}
+	return worktreeActionsFixtureForTask(t, runner, results, task)
+}
+
+func worktreeActionsFixtureForTask(t *testing.T, runner string, results chan string, task *models.Task) *httptest.Server {
 	var mu sync.Mutex
 	var saved json.RawMessage
 	actions := []map[string]string{}

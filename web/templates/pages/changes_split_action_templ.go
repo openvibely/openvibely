@@ -76,115 +76,128 @@ func changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, local
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" data-linked-pr=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" data-task-merged=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(taskPR != nil)).Resolve(ctx)
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(task.MergeStatus == models.MergeStatusMerged)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 12, Col: 230}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 12, Col: 263}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" data-task-running=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" data-linked-pr=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(task.Status == models.StatusRunning)).Resolve(ctx)
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(taskPR != nil)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 12, Col: 300}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 12, Col: 308}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\"><div class=\"join ov-changes-split\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" data-task-running=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var7 string
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(task.Status == models.StatusRunning)).Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 12, Col: 378}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\"><div class=\"join ov-changes-split\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if taskPR != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<a class=\"btn btn-primary btn-sm join-item btn-disabled\" data-linked-pr-action aria-disabled=\"true\" tabindex=\"-1\" href=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var7 string
-			templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(taskPR.PRURL)).ResolveURL(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 15, Col: 152}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" target=\"_blank\" rel=\"noopener noreferrer\">View PR #")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<a class=\"btn btn-primary btn-sm join-item btn-disabled\" data-linked-pr-action aria-disabled=\"true\" tabindex=\"-1\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(taskPR.PRNumber))
+			templ_7745c5c3_Var8, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(taskPR.PRURL)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 15, Col: 235}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 15, Col: 152}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</a> ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<button type=\"button\" class=\"btn btn-primary btn-sm join-item\" data-changes-primary disabled aria-disabled=\"true\" aria-busy=\"true\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if taskPR != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, " hidden")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, ">Loading…</button> <button type=\"button\" class=\"btn btn-primary btn-sm join-item\" data-changes-settings-toggle disabled popovertarget=\"changes-split-settings\" aria-label=\"Action settings\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6z\"></path></svg></button></div><div id=\"changes-split-settings\" data-menu-content hidden popover=\"manual\" class=\"ov-menu ov-changes-settings\" style=\"position:fixed;inset:auto;margin:0;\"><div class=\"join flex w-full\" role=\"group\" aria-label=\"Action type\"><button type=\"button\" class=\"btn btn-sm join-item flex-1\" data-changes-mode=\"pr\" aria-pressed=\"false\">Pull request</button> <button type=\"button\" class=\"btn btn-sm join-item flex-1\" data-changes-mode=\"local\" aria-pressed=\"false\">Local merge</button></div><div data-changes-pr-fields><label for=\"changes-target-repo\">Target repository</label> <select id=\"changes-target-repo\" class=\"select select-bordered select-sm w-full\" data-changes-repo></select> <label for=\"changes-target-branch\">Target branch</label> <select id=\"changes-target-branch\" class=\"select select-bordered select-sm w-full\" data-changes-branch></select> <button type=\"button\" class=\"btn btn-ghost btn-xs mt-2\" data-changes-more hidden>Load more branches</button><p class=\"text-xs opacity-60 mt-2\" data-changes-linked-note hidden>The linked PR keeps its original destination.</p></div><div data-changes-local-fields hidden><label for=\"changes-local-branch\">Target branch</label> <select id=\"changes-local-branch\" class=\"select select-bordered select-sm w-full\" data-changes-local-branch></select> <label for=\"changes-merge-method\">Merge method</label> <select id=\"changes-merge-method\" class=\"select select-bordered select-sm w-full\" data-changes-method>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		for _, action := range components.TaskWorktreeMergeActions() {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<option value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" target=\"_blank\" rel=\"noopener noreferrer\">View PR #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var9 string
-			templ_7745c5c3_Var9, templ_7745c5c3_Err = templruntime.NewAttributeExpression(action.MergeType).Resolve(ctx)
+			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(taskPR.PRNumber))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 41, Col: 38}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 15, Col: 235}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(action.Label)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 41, Col: 55}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</option>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</a> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</select><p class=\"text-xs opacity-60 mt-2\" data-changes-method-help></p></div><p class=\"text-xs opacity-60 mt-4\" data-changes-save-state role=\"status\">Choices are remembered for this project.</p><p class=\"text-xs text-error mt-2\" data-changes-error role=\"alert\" hidden></p><button type=\"button\" class=\"btn btn-ghost btn-xs mt-2\" data-changes-retry hidden>Retry loading</button></div><div hidden data-changes-transports>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<button type=\"button\" class=\"btn btn-primary btn-sm join-item\" data-changes-primary disabled aria-disabled=\"true\" aria-busy=\"true\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if taskPR != nil {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " hidden")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, ">Loading…</button> <button type=\"button\" class=\"btn btn-primary btn-sm join-item\" data-changes-settings-toggle disabled popovertarget=\"changes-split-settings\" aria-label=\"Action settings\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6z\"></path></svg></button></div><div id=\"changes-split-settings\" data-menu-content hidden popover=\"manual\" class=\"ov-menu ov-changes-settings\" style=\"position:fixed;inset:auto;margin:0;\"><div class=\"join flex w-full\" role=\"group\" aria-label=\"Action type\"><button type=\"button\" class=\"btn btn-sm join-item flex-1\" data-changes-mode=\"pr\" aria-pressed=\"false\">Pull request</button> <button type=\"button\" class=\"btn btn-sm join-item flex-1\" data-changes-mode=\"local\" aria-pressed=\"false\">Local merge</button></div><div data-changes-pr-fields><label for=\"changes-target-repo\">Target repository</label> <select id=\"changes-target-repo\" class=\"select select-bordered select-sm w-full\" data-changes-repo></select> <label for=\"changes-target-branch\">Target branch</label> <select id=\"changes-target-branch\" class=\"select select-bordered select-sm w-full\" data-changes-branch></select> <button type=\"button\" class=\"btn btn-ghost btn-xs mt-2\" data-changes-more hidden>Load more branches</button><p class=\"text-xs opacity-60 mt-2\" data-changes-linked-note hidden>The linked PR keeps its original destination.</p></div><div data-changes-local-fields hidden><label for=\"changes-local-branch\">Target branch</label> <select id=\"changes-local-branch\" class=\"select select-bordered select-sm w-full\" data-changes-local-branch></select> <label for=\"changes-merge-method\">Merge method</label> <select id=\"changes-merge-method\" class=\"select select-bordered select-sm w-full\" data-changes-method>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for _, action := range components.TaskWorktreeMergeActions() {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<option value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var10 string
+			templ_7745c5c3_Var10, templ_7745c5c3_Err = templruntime.NewAttributeExpression(action.MergeType).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 41, Col: 38}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var11 string
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(action.Label)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 41, Col: 55}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</option>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</select><p class=\"text-xs opacity-60 mt-2\" data-changes-method-help></p></div><p class=\"text-xs opacity-60 mt-4\" data-changes-save-state role=\"status\">Choices are remembered for this project.</p><p class=\"text-xs text-error mt-2\" data-changes-error role=\"alert\" hidden></p><button type=\"button\" class=\"btn btn-ghost btn-xs mt-2\" data-changes-retry hidden>Retry loading</button></div><div hidden data-changes-transports>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -197,25 +210,25 @@ func changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, local
 			}
 		}
 		if taskPR == nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<button type=\"button\" data-changes-pr-transport hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<button type=\"button\" data-changes-pr-transport hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var11 string
-			templ_7745c5c3_Var11, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID)).Resolve(ctx)
+			var templ_7745c5c3_Var12 string
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/changes_split_action.templ`, Line: 57, Col: 117}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" hx-target=\"#changes-content\" hx-swap=\"innerHTML\" hx-disabled-elt=\"[data-changes-split] button\">Create PR</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#changes-content\" hx-swap=\"innerHTML\" hx-disabled-elt=\"[data-changes-split] button\">Create PR</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</div></div><style>\n  .ov-changes-split { border-radius:var(--rounded-btn,.5rem);overflow:hidden; }\n  .ov-changes-split.join > [data-changes-primary], .ov-changes-split.join > [data-linked-pr-action] { border-top-left-radius:var(--rounded-btn,.5rem);border-bottom-left-radius:var(--rounded-btn,.5rem); }\n  .ov-changes-split > .btn { transition:background-color 100ms ease; }\n  .ov-changes-split > [data-changes-settings-toggle] { position:relative; }\n  .ov-changes-split > [data-changes-settings-toggle]::before { content:\"\";position:absolute;left:0;top:-1px;bottom:-1px;width:1px;background:var(--board-page-bg, var(--ov-content-bg, var(--fallback-b1, oklch(var(--b1) / 1))));pointer-events:none; }\n  [data-color-theme][data-theme] .ov-changes-split > .btn:active { transform:none; }\n  /* Keep the hit area fixed between pointer press and release, including the edges. */\n  .ov-changes-settings { width:320px;max-width:calc(100vw - 16px);padding:16px;overflow:auto; }\n  .ov-changes-settings label { display:block;font-size:12px;opacity:.75;margin:14px 0 6px; }\n  [data-changes-split] [hidden] { display:none !important; }\n  @media(prefers-reduced-motion:reduce) { .ov-changes-split > .btn { transition:none; } }\n </style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</div></div><style>\n  .ov-changes-split { border-radius:var(--rounded-btn,.5rem);overflow:hidden; }\n  .ov-changes-split.join > [data-changes-primary], .ov-changes-split.join > [data-linked-pr-action] { border-top-left-radius:var(--rounded-btn,.5rem);border-bottom-left-radius:var(--rounded-btn,.5rem); }\n  .ov-changes-split > .btn { transition:background-color 100ms ease; }\n  .ov-changes-split > [data-changes-settings-toggle] { position:relative; }\n  .ov-changes-split > [data-changes-settings-toggle]::before { content:\"\";position:absolute;left:0;top:-1px;bottom:-1px;width:1px;background:var(--board-page-bg, var(--ov-content-bg, var(--fallback-b1, oklch(var(--b1) / 1))));pointer-events:none; }\n  [data-color-theme][data-theme] .ov-changes-split > .btn:active { transform:none; }\n  /* Keep the hit area fixed between pointer press and release, including the edges. */\n  .ov-changes-settings { width:320px;max-width:calc(100vw - 16px);padding:16px;overflow:auto; }\n  .ov-changes-settings label { display:block;font-size:12px;opacity:.75;margin:14px 0 6px; }\n  [data-changes-split] [hidden] { display:none !important; }\n  @media(prefers-reduced-motion:reduce) { .ov-changes-split > .btn { transition:none; } }\n </style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -244,7 +257,7 @@ func changesSplitActionScript() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<script>\n (() => {\n  if(window.ovChangesSplit){window.ovChangesSplit.init();return;}\n  const states=new WeakMap();\n  function init(){document.querySelectorAll('[data-changes-split]').forEach(root=>{\n   if(states.has(root))return;\n   const find=s=>root.querySelector(s),primary=find('[data-changes-primary]'),toggle=find('[data-changes-settings-toggle]'),panel=find('#changes-split-settings');\n   const repo=find('[data-changes-repo]'),branch=find('[data-changes-branch]'),localBranch=find('[data-changes-local-branch]'),method=find('[data-changes-method]'),error=find('[data-changes-error]'),saveState=find('[data-changes-save-state]'),more=find('[data-changes-more]'),retry=find('[data-changes-retry]');\n   const endpoint='/tasks/'+encodeURIComponent(root.dataset.taskId)+'/worktree/';\n   let settingsLoading=true,prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='',localVersion=0,localChecked='',localLoading=false,mergeAllowed=false,rebaseAllowed=false;\n   const linked=root.dataset.linkedPr==='true',canLocal=root.dataset.localAvailable==='true';\n   function showError(message){error.textContent=message||'';error.hidden=!message;}\n   async function request(url,options){const response=await fetch(url,{credentials:'same-origin',...options});if(!response.ok){let message='Request failed ('+response.status+')';try{const data=await response.json();message=data.message||message;}catch{}throw new Error(message);}return response.status===204?null:response.json();}\n   function fill(select,items){select.replaceChildren(...items.map(item=>{const option=document.createElement('option');option.value=item.value;option.textContent=item.label;return option;}));}\n   const nativePopover=typeof panel.showPopover==='function'&&typeof panel.hidePopover==='function';\n   if(!nativePopover){panel.removeAttribute('popover');toggle.removeAttribute('popovertarget');}\n   function isOpen(){return nativePopover?panel.matches(':popover-open'):!panel.hidden;}\n   function position(){if(!isOpen())return;const r=toggle.getBoundingClientRect();panel.style.maxHeight=Math.max(0,innerHeight-16)+'px';panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(r.bottom+4,innerHeight-panel.offsetHeight-8))+'px';}\n   const controller=window.ovMenuController.create({trigger:()=>toggle,panels:[panel],isOpen,open:()=>{if(toggle.disabled)return;panel.hidden=false;if(nativePopover)panel.showPopover();else panel.setAttribute('data-menu-open','true');toggle.setAttribute('aria-expanded','true');position();},close:()=>{if(nativePopover)panel.hidePopover();panel.hidden=true;panel.removeAttribute('data-menu-open');toggle.setAttribute('aria-expanded','false');}});\n   toggle.addEventListener('click',event=>{event.preventDefault();if(!toggle.disabled)controller.toggle(event);});\n   panel.addEventListener('toggle',position);\n   const state={position,close:()=>controller.close(false)};states.set(root,state);\n   const linkedAction=find('[data-linked-pr-action]');\n   if(linkedAction)linkedAction.addEventListener('click',event=>{if(linkedAction.getAttribute('aria-disabled')==='true')event.preventDefault();});\n   function setGroupDisabled(disabled){toggle.disabled=disabled;if(linkedAction){linkedAction.classList.toggle('btn-disabled',disabled);linkedAction.setAttribute('aria-disabled',String(disabled));if(disabled)linkedAction.setAttribute('tabindex','-1');else linkedAction.removeAttribute('tabindex');}if(disabled&&isOpen())controller.close(false);}\n   function render(){\n    setGroupDisabled(settingsLoading||root.dataset.taskRunning==='true'||busy);\n    if(settingsLoading||!prefs)return;\n    const rebaseOption=method.querySelector('[value=\"rebase\"]');if(rebaseOption){rebaseOption.disabled=localChecked!==prefs.local_branch||!rebaseAllowed;rebaseOption.hidden=rebaseOption.disabled;}\n    const pr=prefs.mode==='pr',choice=choices.find(c=>c.url===prefs.repository),localValid=Array.from(localBranch.options).some(o=>o.value===prefs.local_branch),methodValid=Array.from(method.options).some(o=>o.value===prefs.method&&!o.disabled);\n    find('[data-changes-pr-fields]').hidden=!pr;find('[data-changes-local-fields]').hidden=pr;\n    root.querySelectorAll('[data-changes-mode]').forEach(button=>{const selected=button.dataset.changesMode===prefs.mode;button.classList.toggle('btn-active',selected);button.setAttribute('aria-pressed',String(selected));});\n    repo.value=linkedTarget?.repository||prefs.repository;const selectedBranch=linkedTarget?linkedTarget.branch:prefs.branch;if(!Array.from(branch.options).some(o=>o.value===selectedBranch)){const option=document.createElement('option');option.value=selectedBranch;option.textContent=selectedBranch||(linkedTarget?'See linked PR':'Select a branch');branch.append(option);}branch.value=selectedBranch;localBranch.value=prefs.local_branch;method.value=prefs.method;\n    repo.disabled=linked;branch.disabled=linked;find('[data-changes-linked-note]').hidden=!linked;\n    const view=find('[data-linked-pr-action]');if(view)view.hidden=!pr;primary.hidden=pr&&linked;\n    const names={merge:'Merge',ff:'Fast-forward',rebase:'Rebase',squash:'Squash merge'};\n    const destinations={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash merge into '};\n    primary.textContent=pr?'Create PR':(names[prefs.method]||'Merge');\n    primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):(destinations[prefs.method]||'Merge into ')+prefs.local_branch;\n    primary.setAttribute('aria-label',pr?primary.textContent+' ('+primary.title+')':primary.title);\n    const checkingLocal=!pr&&localLoading,waiting=saveCount>0||checkingLocal;\n    primary.disabled=root.dataset.taskRunning==='true'||busy||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||(!checkingLocal&&(!methodValid||localChecked!==prefs.local_branch||!mergeAllowed))));\n    primary.setAttribute('aria-busy',String(waiting||busy));\n    primary.setAttribute('aria-disabled',String(primary.disabled||waiting));\n    const descriptions={merge:'Combine the task branch with the target using a merge commit.',ff:'Move the target forward only if its history has not diverged.',squash:'Combine the task changes into one commit on the target branch.',rebase:'Replay task commits onto the target. This does not merge them into the target branch.'};\n    find('[data-changes-method-help]').textContent=descriptions[prefs.method]||'This method is unavailable for this task.';\n    position();\n   }\n   function save(){\n    const snapshot={...prefs};saveCount++;saveState.textContent='Saving…';render();\n    pending=pending.catch(()=>{}).then(()=>request(endpoint+'action-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(snapshot)})).then(()=>{saveFailed=false;saveState.textContent='Choices are remembered for this project.';showError(prefs.mode==='pr'?githubError:'');}).catch(err=>{saveFailed=true;showError(err.message);saveState.textContent='Preferences were not saved. Change a setting to retry.';}).finally(()=>{saveCount--;render();});\n   }\n   async function loadBranches(reset){\n    if(linked||!prefs||!prefs.repository)return;\n    if(reset){page=0;branchVersion++;more.hidden=true;more.textContent='Load more branches';branch.replaceChildren();render();}\n    const version=branchVersion,repository=prefs.repository,next=page+1;more.disabled=true;\n    try{const data=await request(endpoint+'action-branches?repository='+encodeURIComponent(repository)+'&page='+next);if(version!==branchVersion||!root.isConnected)return;page=next;for(const name of data.branches){if(Array.from(branch.options).some(o=>o.value===name))continue;const option=document.createElement('option');option.value=name;option.textContent=name;branch.append(option);}more.hidden=!data.has_more;}\n    catch(err){if(version===branchVersion){showError(err.message);more.hidden=false;more.textContent='Retry loading branches';}}\n    finally{if(version===branchVersion)more.disabled=false;position();}\n   }\n   async function loadLocalEligibility(){\n    const target=prefs.local_branch,version=++localVersion;localChecked='';mergeAllowed=false;rebaseAllowed=false;localLoading=canLocal&&!!target;render();\n    if(!localLoading)return;\n    try{const data=await request(endpoint+'action-local?target='+encodeURIComponent(target));if(version!==localVersion||!root.isConnected)return;localChecked=target;mergeAllowed=data.merge_available===true;rebaseAllowed=data.rebase_available===true;if(prefs.mode==='local')showError(mergeAllowed?'':data.reason||'Local merge is unavailable.');}\n    catch(err){if(version===localVersion)showError(err.message);}\n    finally{if(version===localVersion){localLoading=false;render();}}\n   }\n   root.querySelectorAll('[data-changes-mode]').forEach(button=>button.addEventListener('click',()=>{if(!prefs)return;prefs.mode=button.dataset.changesMode;render();save();if(prefs.mode==='pr')loadBranches(true);else loadLocalEligibility();}));\n   repo.addEventListener('change',()=>{prefs.repository=repo.value;prefs.branch=choices.find(c=>c.url===repo.value)?.default_branch||'';render();save();loadBranches(true);});\n   branch.addEventListener('change',()=>{prefs.branch=branch.value.trim();render();save();});\n   localBranch.addEventListener('change',()=>{prefs.local_branch=localBranch.value;loadLocalEligibility();save();});\n   method.addEventListener('change',()=>{prefs.method=method.value;render();save();});\n   more.addEventListener('click',()=>loadBranches(false));\n   primary.addEventListener('click',async()=>{\n    if(primary.disabled||primary.getAttribute('aria-disabled')==='true'||!prefs)return;\n    await pending;if(primary.disabled||primary.getAttribute('aria-disabled')==='true'||!prefs)return;\n    let transport,values;\n    if(prefs.mode==='pr'){transport=find('[data-changes-pr-transport]');values={target_repo:prefs.repository,base:prefs.branch};}\n    else{transport=Array.from(root.querySelectorAll('[data-merge-type]')).find(el=>el.dataset.mergeType===prefs.method);values={merge_type:prefs.method,merge_source:'changes_tab',changes_target:prefs.local_branch};}\n    if(!transport)return;transport.setAttribute('hx-vals',JSON.stringify(values));window.htmx.process(transport);controller.close(false);transport.click();\n   });\n   root.addEventListener('htmx:beforeRequest',()=>{busy=true;render();});\n   root.addEventListener('htmx:afterRequest',()=>{busy=false;render();});\n   async function load(){settingsLoading=true;setGroupDisabled(true);retry.hidden=true;primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','true');try{\n    const data=await request(endpoint+'action-settings');if(!root.isConnected)return;prefs=data.preferences;choices=data.repositories||[];linkedTarget=data.linked_pr||null;githubError=data.github_error||'';\n    if(linkedTarget&&!choices.some(c=>c.url===linkedTarget.repository))choices.push({url:linkedTarget.repository,name:linkedTarget.repository.replace(/^https:\\/\\//,''),default_branch:linkedTarget.branch});\n    fill(repo,choices.map(c=>({value:c.url,label:c.name})));\n    if(prefs.repository&&!choices.some(c=>c.url===prefs.repository)){const option=document.createElement('option');option.value=prefs.repository;option.textContent=prefs.repository.replace(/^https:\\/\\//,'')+' · Unavailable';option.disabled=true;repo.append(option);}\n    fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));\n    showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;settingsLoading=false;render();loadLocalEligibility();if(prefs.mode==='pr')loadBranches(true);\n   }catch(err){settingsLoading=false;setGroupDisabled(root.dataset.taskRunning==='true');primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','false');showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}\n   retry.addEventListener('click',load);load();\n  });}\n  window.ovChangesSplit={init};\n  document.addEventListener('htmx:afterSwap',init);\n  document.addEventListener('htmx:beforeSwap',event=>{document.querySelectorAll('[data-changes-split]').forEach(root=>{if(event.detail?.target?.contains(root))states.get(root)?.close();});},true);\n  window.addEventListener('resize',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()));\n  document.addEventListener('scroll',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()),true);\n  init();\n })();\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<script>\n (() => {\n  if(window.ovChangesSplit){window.ovChangesSplit.init();return;}\n  const states=new WeakMap();\n  function init(){document.querySelectorAll('[data-changes-split]').forEach(root=>{\n   if(states.has(root))return;\n   const find=s=>root.querySelector(s),primary=find('[data-changes-primary]'),toggle=find('[data-changes-settings-toggle]'),panel=find('#changes-split-settings');\n   const repo=find('[data-changes-repo]'),branch=find('[data-changes-branch]'),localBranch=find('[data-changes-local-branch]'),method=find('[data-changes-method]'),error=find('[data-changes-error]'),saveState=find('[data-changes-save-state]'),more=find('[data-changes-more]'),retry=find('[data-changes-retry]');\n   const endpoint='/tasks/'+encodeURIComponent(root.dataset.taskId)+'/worktree/';\n   let settingsLoading=true,prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='',localVersion=0,localChecked='',localLoading=false,mergeAllowed=false,rebaseAllowed=false;\n   const linked=root.dataset.linkedPr==='true',canLocal=root.dataset.localAvailable==='true';\n   function showError(message){error.textContent=message||'';error.hidden=!message;}\n   async function request(url,options){const response=await fetch(url,{credentials:'same-origin',...options});if(!response.ok){let message='Request failed ('+response.status+')';try{const data=await response.json();message=data.message||message;}catch{}throw new Error(message);}return response.status===204?null:response.json();}\n   function fill(select,items){select.replaceChildren(...items.map(item=>{const option=document.createElement('option');option.value=item.value;option.textContent=item.label;return option;}));}\n   const nativePopover=typeof panel.showPopover==='function'&&typeof panel.hidePopover==='function';\n   if(!nativePopover){panel.removeAttribute('popover');toggle.removeAttribute('popovertarget');}\n   function isOpen(){return nativePopover?panel.matches(':popover-open'):!panel.hidden;}\n   function position(){if(!isOpen())return;const r=toggle.getBoundingClientRect();panel.style.maxHeight=Math.max(0,innerHeight-16)+'px';panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(r.bottom+4,innerHeight-panel.offsetHeight-8))+'px';}\n   const controller=window.ovMenuController.create({trigger:()=>toggle,panels:[panel],isOpen,open:()=>{if(toggle.disabled)return;panel.hidden=false;if(nativePopover)panel.showPopover();else panel.setAttribute('data-menu-open','true');toggle.setAttribute('aria-expanded','true');position();},close:()=>{if(nativePopover)panel.hidePopover();panel.hidden=true;panel.removeAttribute('data-menu-open');toggle.setAttribute('aria-expanded','false');}});\n   toggle.addEventListener('click',event=>{event.preventDefault();if(!toggle.disabled)controller.toggle(event);});\n   panel.addEventListener('toggle',position);\n   const state={position,close:()=>controller.close(false)};states.set(root,state);\n   const linkedAction=find('[data-linked-pr-action]');\n   if(linkedAction)linkedAction.addEventListener('click',event=>{if(linkedAction.getAttribute('aria-disabled')==='true')event.preventDefault();});\n   function setGroupDisabled(disabled){toggle.disabled=disabled||(root.dataset.taskMerged==='true'&&prefs?.mode==='local');if(linkedAction){linkedAction.classList.toggle('btn-disabled',disabled);linkedAction.setAttribute('aria-disabled',String(disabled));if(disabled)linkedAction.setAttribute('tabindex','-1');else linkedAction.removeAttribute('tabindex');}if(toggle.disabled&&isOpen())controller.close(false);}\n   function render(){\n    setGroupDisabled(settingsLoading||root.dataset.taskRunning==='true'||busy);\n    if(settingsLoading||!prefs)return;\n    const rebaseOption=method.querySelector('[value=\"rebase\"]');if(rebaseOption){rebaseOption.disabled=localChecked!==prefs.local_branch||!rebaseAllowed;rebaseOption.hidden=rebaseOption.disabled;}\n    const pr=prefs.mode==='pr',choice=choices.find(c=>c.url===prefs.repository),localValid=Array.from(localBranch.options).some(o=>o.value===prefs.local_branch),methodValid=Array.from(method.options).some(o=>o.value===prefs.method&&!o.disabled);\n    find('[data-changes-pr-fields]').hidden=!pr;find('[data-changes-local-fields]').hidden=pr;\n    root.querySelectorAll('[data-changes-mode]').forEach(button=>{const selected=button.dataset.changesMode===prefs.mode;button.classList.toggle('btn-active',selected);button.setAttribute('aria-pressed',String(selected));});\n    repo.value=linkedTarget?.repository||prefs.repository;const selectedBranch=linkedTarget?linkedTarget.branch:prefs.branch;if(!Array.from(branch.options).some(o=>o.value===selectedBranch)){const option=document.createElement('option');option.value=selectedBranch;option.textContent=selectedBranch||(linkedTarget?'See linked PR':'Select a branch');branch.append(option);}branch.value=selectedBranch;localBranch.value=prefs.local_branch;method.value=prefs.method;\n    repo.disabled=linked;branch.disabled=linked;find('[data-changes-linked-note]').hidden=!linked;\n    const view=find('[data-linked-pr-action]');if(view)view.hidden=!pr;primary.hidden=pr&&linked;\n    const names={merge:'Merge',ff:'Fast-forward',rebase:'Rebase',squash:'Squash merge'};\n    const destinations={merge:'Merge into ',ff:'Fast-forward ',rebase:'Rebase onto ',squash:'Squash merge into '};\n    primary.textContent=pr?'Create PR':(names[prefs.method]||'Merge');\n    primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):(destinations[prefs.method]||'Merge into ')+prefs.local_branch;\n    primary.setAttribute('aria-label',pr?primary.textContent+' ('+primary.title+')':primary.title);\n    const checkingLocal=!pr&&localLoading,waiting=saveCount>0||checkingLocal;\n    primary.disabled=root.dataset.taskRunning==='true'||busy||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||(!checkingLocal&&(!methodValid||localChecked!==prefs.local_branch||!mergeAllowed))));\n    primary.setAttribute('aria-busy',String(waiting||busy));\n    primary.setAttribute('aria-disabled',String(primary.disabled||waiting));\n    const descriptions={merge:'Combine the task branch with the target using a merge commit.',ff:'Move the target forward only if its history has not diverged.',squash:'Combine the task changes into one commit on the target branch.',rebase:'Replay task commits onto the target. This does not merge them into the target branch.'};\n    find('[data-changes-method-help]').textContent=descriptions[prefs.method]||'This method is unavailable for this task.';\n    position();\n   }\n   function save(){\n    const snapshot={...prefs};saveCount++;saveState.textContent='Saving…';render();\n    pending=pending.catch(()=>{}).then(()=>request(endpoint+'action-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(snapshot)})).then(()=>{saveFailed=false;saveState.textContent='Choices are remembered for this project.';showError(prefs.mode==='pr'?githubError:'');}).catch(err=>{saveFailed=true;showError(err.message);saveState.textContent='Preferences were not saved. Change a setting to retry.';}).finally(()=>{saveCount--;render();});\n   }\n   async function loadBranches(reset){\n    if(linked||!prefs||!prefs.repository)return;\n    if(reset){page=0;branchVersion++;more.hidden=true;more.textContent='Load more branches';branch.replaceChildren();render();}\n    const version=branchVersion,repository=prefs.repository,next=page+1;more.disabled=true;\n    try{const data=await request(endpoint+'action-branches?repository='+encodeURIComponent(repository)+'&page='+next);if(version!==branchVersion||!root.isConnected)return;page=next;for(const name of data.branches){if(Array.from(branch.options).some(o=>o.value===name))continue;const option=document.createElement('option');option.value=name;option.textContent=name;branch.append(option);}more.hidden=!data.has_more;}\n    catch(err){if(version===branchVersion){showError(err.message);more.hidden=false;more.textContent='Retry loading branches';}}\n    finally{if(version===branchVersion)more.disabled=false;position();}\n   }\n   async function loadLocalEligibility(){\n    const target=prefs.local_branch,version=++localVersion;localChecked='';mergeAllowed=false;rebaseAllowed=false;localLoading=canLocal&&!!target;render();\n    if(!localLoading)return;\n    try{const data=await request(endpoint+'action-local?target='+encodeURIComponent(target));if(version!==localVersion||!root.isConnected)return;localChecked=target;mergeAllowed=data.merge_available===true;rebaseAllowed=data.rebase_available===true;if(prefs.mode==='local')showError(mergeAllowed?'':data.reason||'Local merge is unavailable.');}\n    catch(err){if(version===localVersion)showError(err.message);}\n    finally{if(version===localVersion){localLoading=false;render();}}\n   }\n   root.querySelectorAll('[data-changes-mode]').forEach(button=>button.addEventListener('click',()=>{if(!prefs)return;prefs.mode=button.dataset.changesMode;render();save();if(prefs.mode==='pr')loadBranches(true);else loadLocalEligibility();}));\n   repo.addEventListener('change',()=>{prefs.repository=repo.value;prefs.branch=choices.find(c=>c.url===repo.value)?.default_branch||'';render();save();loadBranches(true);});\n   branch.addEventListener('change',()=>{prefs.branch=branch.value.trim();render();save();});\n   localBranch.addEventListener('change',()=>{prefs.local_branch=localBranch.value;loadLocalEligibility();save();});\n   method.addEventListener('change',()=>{prefs.method=method.value;render();save();});\n   more.addEventListener('click',()=>loadBranches(false));\n   primary.addEventListener('click',async()=>{\n    if(primary.disabled||primary.getAttribute('aria-disabled')==='true'||!prefs)return;\n    await pending;if(primary.disabled||primary.getAttribute('aria-disabled')==='true'||!prefs)return;\n    let transport,values;\n    if(prefs.mode==='pr'){transport=find('[data-changes-pr-transport]');values={target_repo:prefs.repository,base:prefs.branch};}\n    else{transport=Array.from(root.querySelectorAll('[data-merge-type]')).find(el=>el.dataset.mergeType===prefs.method);values={merge_type:prefs.method,merge_source:'changes_tab',changes_target:prefs.local_branch};}\n    if(!transport)return;transport.setAttribute('hx-vals',JSON.stringify(values));window.htmx.process(transport);controller.close(false);transport.click();\n   });\n   root.addEventListener('htmx:beforeRequest',()=>{busy=true;render();});\n   root.addEventListener('htmx:afterRequest',()=>{busy=false;render();});\n   async function load(){settingsLoading=true;setGroupDisabled(true);retry.hidden=true;primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','true');try{\n    const data=await request(endpoint+'action-settings');if(!root.isConnected)return;prefs=data.preferences;choices=data.repositories||[];linkedTarget=data.linked_pr||null;githubError=data.github_error||'';\n    if(linkedTarget&&!choices.some(c=>c.url===linkedTarget.repository))choices.push({url:linkedTarget.repository,name:linkedTarget.repository.replace(/^https:\\/\\//,''),default_branch:linkedTarget.branch});\n    fill(repo,choices.map(c=>({value:c.url,label:c.name})));\n    if(prefs.repository&&!choices.some(c=>c.url===prefs.repository)){const option=document.createElement('option');option.value=prefs.repository;option.textContent=prefs.repository.replace(/^https:\\/\\//,'')+' · Unavailable';option.disabled=true;repo.append(option);}\n    fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));\n    showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;settingsLoading=false;render();loadLocalEligibility();if(prefs.mode==='pr')loadBranches(true);\n   }catch(err){settingsLoading=false;setGroupDisabled(root.dataset.taskRunning==='true');primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','false');showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}\n   retry.addEventListener('click',load);load();\n  });}\n  window.ovChangesSplit={init};\n  document.addEventListener('htmx:afterSwap',init);\n  document.addEventListener('htmx:beforeSwap',event=>{document.querySelectorAll('[data-changes-split]').forEach(root=>{if(event.detail?.target?.contains(root))states.get(root)?.close();});},true);\n  window.addEventListener('resize',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()));\n  document.addEventListener('scroll',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()),true);\n  init();\n })();\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
