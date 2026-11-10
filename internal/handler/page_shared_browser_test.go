@@ -46,7 +46,9 @@ func TestPageSharedHistoryAndSteeringBrowser(t *testing.T) {
  const wait=async(fn,label)=>{const until=Date.now()+6000;while(Date.now()<until){if(fn())return;await new Promise(r=>setTimeout(r,30));}throw Error(label);};
  try{
  if(document.readyState==='loading')await new Promise(r=>document.addEventListener('DOMContentLoaded',r,{once:true}));
- document.querySelector('[data-page-chat-toggle]').click();
+ const panel=document.getElementById('page-side-chat');
+ if(sessionStorage.getItem('shared-conversation-reloaded') && panel.hidden)throw Error('reload did not restore open page chat');
+ if(panel.hidden)document.querySelector('[data-page-chat-toggle]').click();
  const box=document.getElementById('task-thread-messages');
  await wait(()=>box.querySelector('[data-earlier-loader]'),'history loader missing');
  await wait(()=>box.querySelector('[data-chat-virtual-owner]'),'shared virtualization missing');
