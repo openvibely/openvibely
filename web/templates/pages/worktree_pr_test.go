@@ -89,7 +89,7 @@ func TestTaskChangesWorktreeContent_SettingsUseTopLayerPopover(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		`data-changes-settings-toggle popovertarget="changes-split-settings"`,
+		`data-changes-settings-toggle disabled popovertarget="changes-split-settings"`,
 		`aria-label="Action settings" aria-expanded="false"`,
 		`id="changes-split-settings" data-menu-content hidden popover="manual"`,
 		`style="position:fixed;inset:auto;margin:0;"`,
@@ -113,7 +113,7 @@ func TestTaskChangesWorktreeContent_RendersPRSettingsAndDirectAction(t *testing.
 	}
 	out := buf.String()
 	for _, want := range []string{
-		`data-changes-primary disabled`,
+		`data-changes-primary disabled aria-disabled="true" aria-busy="true"`,
 		`data-changes-mode="pr" aria-pressed="false">Pull request</button>`,
 		`data-changes-repo`, `data-changes-branch`,
 		`data-changes-pr-transport hx-post="/tasks/task-1/worktree/pull-request"`,
@@ -122,7 +122,7 @@ func TestTaskChangesWorktreeContent_RendersPRSettingsAndDirectAction(t *testing.
 			t.Fatalf("missing PR action control %q", want)
 		}
 	}
-	if strings.Contains(out, `data-linked-pr-action href=`) {
+	if strings.Contains(out, `data-linked-pr-action aria-disabled="true" tabindex="-1" href=`) {
 		t.Fatal("unlinked task must not render a View PR link")
 	}
 }
@@ -151,7 +151,7 @@ func TestTaskChangesWorktreeContent_RendersLinkedPRAction(t *testing.T) {
 	if strings.Contains(out, `data-changes-pr-transport hx-post=`) {
 		t.Fatal("linked task must not render a Create PR transport")
 	}
-	for _, want := range []string{`data-linked-pr="true"`, `data-linked-pr-action href=`, `rel="noopener noreferrer"`, `data-changes-primary disabled hidden`, `data-changes-settings-toggle`} {
+	for _, want := range []string{`data-linked-pr="true"`, `data-linked-pr-action aria-disabled="true" tabindex="-1" href=`, `rel="noopener noreferrer"`, `data-changes-primary disabled aria-disabled="true" aria-busy="true" hidden`, `data-changes-settings-toggle`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing linked PR control %q", want)
 		}

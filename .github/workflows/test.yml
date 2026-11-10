@@ -194,7 +194,9 @@ jobs:
         run: go test ./... -count=1 -timeout 600s -coverpkg=./... -coverprofile=coverage.txt
 
       - name: Run component functional browser tests
-        run: go test ./web/templates/components -run '^TestBrowserFunctional_' -count=1 -timeout 180s
+        # Aggregate budget for sequential fixtures; each browser session keeps
+        # its own timeout and reserves time for diagnostics and cleanup.
+        run: go test ./web/templates/components -run '^TestBrowserFunctional_' -count=1 -timeout 600s
 
       - name: Run page functional browser tests
         # This is the aggregate budget for all sequential browser fixtures;

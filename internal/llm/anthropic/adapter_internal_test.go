@@ -162,6 +162,7 @@ func TestClaudeCodeMaxOutputTokens(t *testing.T) {
 		{"opus 5.5", "claude-opus-5-5", 128000},
 		{"opus 5", "claude-opus-5", 64000},
 		{"sonnet 5", "claude-sonnet-5", 64000},
+		{"fable 5.2", "claude-fable-5-2", 128000},
 		{"fable 5.1", "claude-fable-5-1", 64000},
 		{"mythos 5.1", "claude-mythos-5-1", 64000},
 		{"fable 5", "claude-fable-5", 64000},

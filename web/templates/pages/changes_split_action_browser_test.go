@@ -153,13 +153,9 @@ func TestBrowserFunctional_ChangesSplitActionRunningSettings(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-running-settings", func(b *composerFocusCDP) {
 		b.waitFor("PR settings loaded", `String(document.querySelector('[data-changes-repo]')?.options.length>0&&document.querySelector('[data-changes-primary]').disabled)`, "true")
-		b.click(`[data-changes-settings-toggle]`)
-		b.click(`[data-changes-mode="local"]`)
-		b.waitFor("local settings accessible", `String(!document.querySelector('[data-changes-local-fields]').hidden&&document.querySelector('[data-changes-method]').options.length>0&&document.querySelector('[data-changes-primary]').disabled)`, "true")
-		b.evaluate(`document.querySelector('[data-changes-primary]').click();'ok'`)
-		b.click(`[data-changes-mode="pr"]`)
-		b.waitFor("PR action blocked", `String(!document.querySelector('[data-changes-pr-fields]').hidden&&document.querySelector('[data-changes-primary]').disabled)`, "true")
-		b.evaluate(`document.querySelector('[data-changes-primary]').click();fetch('/fixture-state').then(r=>r.json()).then(s=>window.runningActions=s.actions.length);'ok'`)
+		b.waitFor("both halves disabled", `String(document.querySelector('[data-changes-settings-toggle]').disabled&&document.querySelector('[data-changes-primary]').disabled)`, "true")
+		b.evaluate(`document.querySelector('[data-changes-settings-toggle]').click();document.querySelector('[data-changes-primary]').click();fetch('/fixture-state').then(r=>r.json()).then(s=>window.runningActions=s.actions.length);'ok'`)
+		b.waitFor("settings stay closed", `String(document.querySelector('[data-changes-settings-toggle]').getAttribute('aria-expanded')==='false')`, "true")
 		b.waitFor("no mutations", `String(window.runningActions===0)`, "true")
 	})
 }
@@ -213,5 +209,20 @@ func TestBrowserFunctional_ChangesSplitActionWithoutNativePopover(t *testing.T) 
 		if got := b.evaluate(`JSON.stringify(window.legacyErrors)`); got != "[]" {
 			t.Fatalf("legacy browser errors: %s", got)
 		}
+	})
+}
+
+func TestBrowserFunctional_ChangesSplitActionInitialLoadingDisabled(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-initial-loading", func(b *composerFocusCDP) {
+		b.waitFor("initial ready", `String(document.querySelector('[data-changes-primary]')?.getAttribute('aria-disabled')==='false')`, "true")
+		b.evaluate(`(()=>{const original=window.fetch;window.fetch=async function(url,options){const response=await original(url,options);if(String(url).endsWith('/action-settings')&&!options?.method)await new Promise(resolve=>window.releaseSettings=resolve);return response;};window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});return 'ok';})()`)
+		b.waitFor("both halves disabled during loading", `(()=>{const el=document.querySelector('[data-changes-primary]');return String(document.querySelector('[data-changes-split]')!==window.oldSplit&&typeof window.releaseSettings==='function'&&el.textContent==='Loading…'&&el.disabled&&document.querySelector('[data-changes-settings-toggle]').disabled&&el.getAttribute('aria-disabled')==='true'&&el.getAttribute('aria-busy')==='true'&&getComputedStyle(el).backgroundColor===getComputedStyle(document.querySelector('[data-changes-settings-toggle]')).backgroundColor);})()`, "true")
+		b.evaluate(`document.querySelector('[data-changes-primary]').click();fetch('/fixture-state').then(r=>r.json()).then(s=>window.initialActions=s.actions.length);'ok'`)
+		b.waitFor("loading click blocked", `String(window.initialActions===0)`, "true")
+		b.evaluate(`window.releaseSettings();'ok'`)
+		b.waitFor("action ready", `String(!document.querySelector('[data-changes-settings-toggle]').disabled&&document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false'&&document.querySelector('[data-changes-primary]').getAttribute('aria-busy')==='false')`, "true")
 	})
 }

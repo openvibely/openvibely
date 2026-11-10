@@ -2437,27 +2437,42 @@ func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	started := filepath.Join(t.TempDir(), "pre-commit-started")
-	hook := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
-	hookBody := fmt.Sprintf("#!/bin/sh\ntouch %q\nsleep 2\n", started)
-	if err := os.WriteFile(hook, []byte(hookBody), 0755); err != nil {
-		t.Fatal(err)
+	// The validator runs while MergeBranchValidated holds the repository lease.
+	// Hold that lease explicitly instead of racing Git startup and a sleeping hook.
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	unblock := func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
 	}
-
+	t.Cleanup(func() {
+		unblock()
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Error("first merge did not finish after releasing the repository lease barrier")
+		}
+	})
 	firstDone := make(chan error, 1)
 	go func() {
-		_, mergeErr := ws.MergeBranch(ctx, task, repoDir, "merge")
+		defer close(finished)
+		_, mergeErr := ws.MergeBranchValidated(ctx, task, repoDir, "merge", func() error {
+			close(started)
+			<-release
+			return nil
+		})
 		firstDone <- mergeErr
 	}()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, statErr := os.Stat(started); statErr == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("first merge did not reach pre-commit hook")
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-started:
+	case firstErr := <-firstDone:
+		t.Fatalf("first merge exited before reaching the repository lease barrier: %v", firstErr)
+	case <-time.After(10 * time.Second):
+		t.Fatal("first merge did not reach the repository lease barrier")
 	}
 
 	secondDone := make(chan error, 1)
@@ -2487,8 +2502,14 @@ func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("concurrent rebase was not rejected promptly")
 	}
-	if firstErr := <-firstDone; firstErr != nil {
-		t.Fatalf("first merge failed: %v", firstErr)
+	unblock()
+	select {
+	case firstErr := <-firstDone:
+		if firstErr != nil {
+			t.Fatalf("first merge failed: %v", firstErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first merge did not finish after releasing the repository lease barrier")
 	}
 }
 

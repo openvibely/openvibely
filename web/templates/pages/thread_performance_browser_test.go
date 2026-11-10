@@ -46,7 +46,7 @@ func TestBrowserFunctional_ThreadCacheAndVirtualRowsInChrome(t *testing.T) {
 		for i := 0; i < 200; i++ {
 			fmt.Fprintf(&rows, `<div class="stream-tool" data-row="%d"><button>Tool %d</button><pre>%s</pre></div>`, i, i, strings.Repeat("tool output\n", 4))
 		}
-		return fmt.Sprintf(`<section data-page="%s"><span data-openvibely-page-title="%s" hidden></span><div id="task-thread-view" data-task-id="%s" data-thread-revision="v%d"><span id="version">%d</span><div id="task-thread-messages"><div id="exec-%s" data-execution-pair="true" data-exec-id="exec-%s" data-exec-status="completed" data-execution-revision="stable">%s</div><div data-execution-pair="true" data-exec-status="running"><div class="stream-tool" id="live-row">live output</div></div></div><form id="task-thread-form"><textarea id="draft"></textarea></form></div></section><script>window.refreshVirtualChatRows(document.getElementById('task-thread-messages'));</script>`, name, name, name, version.Load(), version.Load(), name, name, rows.String())
+		return fmt.Sprintf(`<section data-page="%s"><span data-openvibely-page-title="%s" hidden></span><div id="task-thread-view" data-task-id="%s" data-thread-revision="v%d"><span id="version">%d</span><div data-chat-transcript id="task-thread-messages"><div id="exec-%s" data-execution-pair="true" data-exec-id="exec-%s" data-exec-status="completed" data-execution-revision="stable">%s</div><div data-execution-pair="true" data-exec-status="running"><div class="stream-tool" id="live-row">live output</div></div></div><form id="task-thread-form"><textarea id="draft"></textarea></form></div></section><script>window.refreshVirtualChatRows(document.getElementById('task-thread-messages'));</script>`, name, name, name, version.Load(), version.Load(), name, name, rows.String())
 	}
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {
@@ -241,7 +241,7 @@ func TestBrowserFunctional_VirtualRowsNavigationLayoutsInChrome(t *testing.T) {
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><script src="/htmx.js"></script><script src="%s"></script>
 <style>#task-thread-messages{height:400px;overflow:auto}.stream-tool{padding:8px;margin:12px 0;border:1px solid}pre{height:60px;width:400px;overflow:auto;margin:0}</style></head><body>
 <button id="leave" hx-get="/next" hx-target="#main-content" hx-push-url="true">Leave</button>
-<main id="main-content" hx-history-elt><div id="task-thread-messages"><div id="pair" data-execution-pair="true" data-exec-status="completed"></div></div></main>
+<main id="main-content" hx-history-elt><div data-chat-transcript id="task-thread-messages"><div id="pair" data-execution-pair="true" data-exec-status="completed"></div></div></main>
 <script>
 const pair=document.getElementById('pair');
 for(let i=0;i<400;i++){const row=document.createElement('div');row.className='stream-tool';const pre=document.createElement('pre');pre.textContent=('tool output '.repeat(15)+'\n').repeat(8);row.append(pre);pair.append(row)}

@@ -1732,6 +1732,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					border-color: var(--ov-l-accent-soft);
 				}
 
+					/* Selected Changes controls must not depend on daisyUI's color-mix()
+					   active fill, which older desktop WebKit cannot render. IDs keep
+					   this state above generic theme and hover button overrides. */
+					#diff-btn-inline.btn-active,
+					#diff-btn-split.btn-active,
+					#changes-split-settings [data-changes-mode].btn-active {
+						background: var(--ov-button-bg, #7480ff) !important;
+						border-color: var(--ov-button-bg, #7480ff) !important;
+						color: var(--ov-button-fg, #050617) !important;
+					}
+
 					/* --- Buttons --- */
 					/* Dark-mode hover parity across web and desktop (deterministic, engine-agnostic). */
 					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn:hover:where(:not(:disabled):not(.btn-disabled)) {

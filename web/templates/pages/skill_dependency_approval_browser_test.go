@@ -95,10 +95,27 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 		browser.waitFor("failed spinner stopped", `document.querySelector('[data-skill-dependency-status]')?.textContent.includes('installation failed') && !document.querySelector('[data-skill-dependency-status] .loading-spinner') ? 'stopped' : 'waiting'`, "stopped")
 		browser.evaluate(`window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_progress',exec_id:'execution',dependency_name:'example',phase:'ready'}})); 'sent'`)
 		browser.waitFor("ready status removed", `document.querySelector('[data-skill-dependency-status]') ? 'waiting' : 'removed'`, "removed")
-		browser.evaluate(`document.getElementById('chat-input-request-request').dataset.beforeRefresh='true';window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_approval',exec_id:'execution',project_id:'project',pending_input_id:'request',status:'pending'}})); 'sent'`)
+		browser.evaluate(`
+ window.retainedApprovalCard=document.getElementById('chat-input-request-request');
+ window.approvalRefreshRead=false;
+ const approvalFetch=window.fetch;
+ window.fetch=async function(...args){
+  const response=await approvalFetch.apply(this,args);
+  if(String(args[0]).startsWith('/chat/input-requests?')){
+   const read=response.text.bind(response);
+   response.text=async()=>{const html=await read();window.approvalRefreshRead=true;return html;};
+   window.fetch=approvalFetch;
+  }
+  return response;
+ };
+ window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_approval',exec_id:'execution',project_id:'project',pending_input_id:'request',status:'pending'}}));
+ 'sent'`)
 		browser.waitFor("navigable toast", `window.approvalToast?.clickURL || ''`, "/chat/input-requests/request/open?project_id=project")
-		// Clicking while the refresh swaps the card splits press and release across nodes.
-		browser.waitFor("refreshed card", `document.getElementById('chat-input-request-request')?.dataset.beforeRefresh === undefined ? 'ready' : 'waiting'`, "ready")
+		// Refresh must preserve the card so a press/release cannot land on different nodes.
+		browser.waitFor("approval refresh response", `String(window.approvalRefreshRead)`, "true")
+		if got := browser.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>resolve(String(document.getElementById('chat-input-request-request')===window.retainedApprovalCard))))`); got != "true" {
+			t.Fatal("approval refresh replaced the existing card")
+		}
 		result := browser.evaluateAwait(`(async()=>{
  const originalFetch=window.fetch,originalToast=window.showToast;
  const card=document.getElementById('chat-input-request-request');const before=card.innerHTML;window.denialToasts=[];

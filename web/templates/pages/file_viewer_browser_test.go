@@ -249,7 +249,7 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 var virtualScope=document.createElement('div');virtualScope.id=%q;
 virtualScope.style.cssText='position:fixed;inset:100px;z-index:10';document.body.append(virtualScope);
 var messages=document.createElement('div');messages.id=virtualScope.id==='chat-page-root'?'chat-messages':'task-thread-messages';
-messages.style.cssText='height:300px;overflow:auto';messages.dataset.transcriptHydrating='true';virtualScope.append(messages);
+messages.style.cssText='height:300px;overflow:auto';messages.dataset.transcriptHydrating='true';messages.setAttribute('data-chat-transcript','');virtualScope.append(messages);
 messages.innerHTML='<div data-execution-pair data-exec-status="completed"><div class="chat-markdown" id="offscreen-file"><a data-file-preview href="/fixture/math.md">Math</a></div></div><div style="height:5000px"></div><div id="cold-files"></div><div style="height:5000px"></div><a id="visible-file" data-file-preview href="/fixture/data.json">JSON</a>';
 messages.querySelector('[data-execution-pair]').insertAdjacentHTML('beforeend','<div class="stream-tool">Row</div>'.repeat(45));
 document.getElementById('offscreen-file').insertAdjacentHTML('beforeend',window.renderChatMarkdown(robotSVG));

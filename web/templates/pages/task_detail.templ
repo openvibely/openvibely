@@ -1900,6 +1900,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								htmx.process(changesContent);
 							}
 
+                            // Direct DOM replacement does not run the split-action script
+                            // or emit the afterSwap event that initializes new controls.
+                            if (window.ovChangesSplit) window.ovChangesSplit.init();
+
 							// Direct refreshes do not emit HTMX afterSettle. Update the
 							// explorer before restoring the selected file's scroll anchor.
 							if (window.syncAppearanceSettings) window.syncAppearanceSettings();
