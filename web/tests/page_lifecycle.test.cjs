@@ -10,28 +10,28 @@ function emitter() {
  const listeners = new Map();
  return {addEventListener(k,f){listeners.set(k,f)},removeEventListener(k,f){if(listeners.get(k)===f)listeners.delete(k)},emit(k,e){listeners.get(k)?.(e)}};
 }
-function setup() {
+function setup(settings) {
  const posts=[],requests=[],events=[],streams=[],timers=[];
  const frame={...emitter(),contentWindow:{postMessage(m){posts.push(m)}}};
  const approvals={innerHTML:''};
  const attrs={'data-plugin-handle':'handle','data-bridge-url':'/bridge','data-events-url':'/events?project_id=p','data-retire-url':'/retire?project_id=p','data-approvals-url':'/approvals','data-project-id':'p'};
- const root={setAttribute(k,v){attrs[k]=v},getAttribute(k){return attrs[k]},querySelector(k){return k==='#plugin-frame'?frame:k==='#plugin-approvals'?approvals:null}};
- const window={...emitter(),openVibelyLive:{execution(){const s={...emitter(),close(){s.closed=true}};streams.push(s);return s}}};
+ const root={setAttribute(k,v){attrs[k]=v},getAttribute(k){return attrs[k]},querySelector(k){return k==='#plugin-frame'?frame:k==='#plugin-approvals'?approvals:k==='#task-thread-form'&&settings?{querySelector(selector){const name=selector.match(/name="([^"]+)"/)[1];return name in settings?{value:settings[name]}:null}}:null}};
+ const window={...emitter(),location:{href:'http://localhost/p/page'},openVibelyLive:{execution(){const s={...emitter(),close(){s.closed=true}};streams.push(s);return s}}};
  const document={...emitter(),currentScript:{closest(){return root}}};
  const fetch=(url,opts)=>new Promise(resolve=>requests.push({url,opts,resolve}));
  function EventSource(){const s={...emitter(),close(){s.closed=true}};events.push(s);return s;}
  class DOMParser { parseFromString() { return {querySelector(){return {getAttribute(k){return k === "data-plugin-handle" ? "new-handle" : attrs[k]},querySelector(k){return k === "#plugin-frame" ? {getAttribute(){return "/new-frame"}} : null}}}}} }
- vm.runInNewContext(source,{DOMParser,window,document,fetch,EventSource,AbortController,console,setTimeout:(fn)=>{timers.push(fn);return timers.length-1},clearTimeout:(id)=>{timers[id]=null}});
+ vm.runInNewContext(source,{URL,DOMParser,window,document,fetch,EventSource,AbortController,console,setTimeout:(fn)=>{timers.push(fn);return timers.length-1},clearTimeout:(id)=>{timers[id]=null}});
  const send=(type,id='m')=>window.emit('message',{source:frame.contentWindow,data:{v:1,handle:'handle',id,type,payload:{}}});
  const respond=(req,result)=>req.resolve({ok:true,json:async()=>({ok:true,result}),text:async()=>result});
  return {posts,requests,events,streams,timers,frame,window,document,root,approvals,send,respond};
 }
 
 test('reconnect requests fresh page data; navigation closes streams and ignores late analysis',async()=>{
- const h=setup();h.send('events.subscribe');h.respond(h.requests.find(r=>r.url==='/bridge'),{});await flush();
+ const h=setup();h.send('events.subscribe');h.respond(h.requests.find(r=>new URL(r.url,'http://localhost').pathname==='/bridge'),{});await flush();
  h.posts.length=0;
  h.events[0].onopen();assert.ok(h.posts.some(p=>p.type==='event'&&p.payload.type==='page.refresh'));
- h.send('analyze.request','late');const pending=h.requests.filter(r=>r.url==='/bridge').at(-1);
+ h.send('analyze.request','late');const pending=h.requests.filter(r=>new URL(r.url,'http://localhost').pathname==='/bridge').at(-1);
  h.document.emit('htmx:beforeSwap',{detail:{target:{id:'main-content'}}});
  assert.equal(h.events[0].closed,true);assert.equal(pending.opts.signal.aborted,true);
  const n=h.posts.length;h.respond(pending,{exec_id:'late'});await flush();
@@ -45,12 +45,12 @@ test('failed navigation keeps the current bridge alive', async()=>{
  h.document.emit('htmx:beforeSwap',{detail:{target:{id:'main-content'},shouldSwap:false}});
  assert.equal(h.events[0].closed,undefined);
  assert.equal(h.requests.some(r=>r.url.startsWith('/retire')),false);
- h.send('op.invoke');h.respond(h.requests.find(r=>r.url==='/bridge'),{value:1});await flush();
+ h.send('op.invoke');h.respond(h.requests.find(r=>new URL(r.url,'http://localhost').pathname==='/bridge'),{value:1});await flush();
  assert.ok(h.posts.some(p=>p.type==='result'));
 });
 
 test('leaving detaches an active analysis stream without sending Stop',async()=>{
- const h=setup();h.send('analyze.request');h.respond(h.requests.find(r=>r.url==='/bridge'),{exec_id:'running'});await flush();
+ const h=setup();h.send('analyze.request');h.respond(h.requests.find(r=>new URL(r.url,'http://localhost').pathname==='/bridge'),{exec_id:'running'});await flush();
  assert.equal(h.streams.length,1);h.window.emit('pagehide');assert.equal(h.streams[0].closed,true);
  const n=h.posts.length;h.streams[0].emit('message',{data:'late token'});assert.equal(h.posts.length,n);
  assert.equal(h.requests.some(r=>r.url.includes('/stop')),false);
@@ -87,10 +87,10 @@ test('Sales ignores old report responses and publishes context before Analyze',a
 
  test('startup timeout reports failure; confirmed startup clears the timeout', async()=>{
   const h=setup();h.timers[0]();
-  const request=h.requests.find(r=>r.url==='/bridge');
+  const request=h.requests.find(r=>new URL(r.url,'http://localhost').pathname==='/bridge');
   assert.equal(JSON.parse(request.opts.body).type,'page.failed');
   const loaded=setup();loaded.send('page.loaded');
-  loaded.respond(loaded.requests.find(r=>r.url==='/bridge'),{state:'loaded'});await flush();
+  loaded.respond(loaded.requests.find(r=>new URL(r.url,'http://localhost').pathname==='/bridge'),{state:'loaded'});await flush();
   assert.equal(loaded.timers[0],null);
   const closed=setup();closed.window.emit('pagehide');assert.equal(closed.timers[0],null);
  });
@@ -111,3 +111,15 @@ test('page update refreshes only the frame and leaves chat mounted',async()=>{
  h.window.emit('plugin-page-updated',{detail:{task_id:'current'}});
  assert.equal(h.requests.length,count);
 });
+
+ test('analysis forwards the current composer settings only on analysis requests',()=>{
+ const settings={agent_id:'selected model',reasoning_effort:'high',service_tier:'priority'};
+ const h=setup(settings);h.send('analyze.request');
+ let url=new URL(h.requests.at(-1).url);
+ for(const [key,value] of Object.entries(settings))assert.equal(url.searchParams.get(key),value);
+ settings.agent_id='default';settings.reasoning_effort='';settings.service_tier='default';
+ h.send('analyze.request');url=new URL(h.requests.at(-1).url);
+ for(const [key,value] of Object.entries(settings))assert.equal(url.searchParams.get(key),value);
+ h.send('context.set');url=new URL(h.requests.at(-1).url);
+ assert.equal(url.searchParams.has('agent_id'),false);
+ });
