@@ -521,7 +521,7 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 		if err := pageplugins.DecodeStrict(msg.Payload, &p); err != nil || strings.TrimSpace(p.Prompt) == "" || utf8.RuneCountInString(p.Prompt) > maxPluginAnalyzePrompt {
 			return bridgeError(c, http.StatusBadRequest, "analyze.request needs a prompt (max 4000 characters)")
 		}
-		exec, _, err := h.startPluginChatTurn(c, r, strings.TrimSpace(p.Prompt), pageChatInput{})
+		exec, _, err := h.startPluginChatTurn(c, r, strings.TrimSpace(p.Prompt), pageChatInput{AgentID: c.QueryParam("agent_id")})
 		if err != nil {
 			if errors.Is(err, authz.ErrDenied) {
 				return err

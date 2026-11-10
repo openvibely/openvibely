@@ -540,3 +540,24 @@ func TestPluginChatComposerStaleStop(t *testing.T) {
 		t.Fatal("composer state leaked across projects", rec.Code)
 	}
 }
+
+func TestPluginAnalyzeUsesComposerSettings(t *testing.T) {
+	env := setupPluginPages(t)
+	agent := createAgent(t, env.h.llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Selected composer model"
+		a.Provider = models.ProviderOpenAI
+		a.Model = "gpt-6-astra"
+		a.ReasoningEffort = "medium"
+	})
+	handle := env.openPage(t, env.inA)
+	query := url.Values{"project_id": {env.projA.ID}, "agent_id": {agent.ID}, "reasoning_effort": {"high"}, "service_tier": {"priority"}}
+	body := `{"v":1,"type":"analyze.request","id":"summary","handle":"` + handle + `","payload":{"prompt":"Summarize the headlines"}}`
+	rec := env.do(t, http.MethodPost, "/api/plugin-pages/"+env.inA.ID+"/bridge?"+query.Encode(), body, bridgeHeaders())
+	if rec.Code != http.StatusOK || len(env.starts) != 1 {
+		t.Fatalf("analyze: %d %s", rec.Code, rec.Body.String())
+	}
+	got := env.starts[0].Agent
+	if got.ID != agent.ID || got.ReasoningEffort != "high" || got.ServiceTier != "priority" {
+		t.Fatalf("wrong composer settings: id=%s effort=%s tier=%s", got.ID, got.ReasoningEffort, got.ServiceTier)
+	}
+}

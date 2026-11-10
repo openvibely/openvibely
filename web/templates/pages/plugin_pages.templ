@@ -480,7 +480,15 @@ templ pluginHostBridgeScript() {
 			var body;
 			try { body = JSON.stringify({v: 1, type: msg.type, id: msg.id, handle: msg.handle, payload: msg.payload || {}}); } catch (_) { return; }
 			if (body.length > MAX) { post('error', msg.id, {message: 'bridge message too large'}); return; }
-			fetch(bridgeURL, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OpenVibely-Plugin-Bridge': '1'}, body: body, signal: requests.signal})
+			var requestURL = new URL(bridgeURL, window.location.href);
+			if (msg.type === 'analyze.request') {
+				var composer = root.querySelector('#task-thread-form');
+				['agent_id', 'reasoning_effort', 'service_tier'].forEach(function (name) {
+					var input = composer && composer.querySelector('[name="' + name + '"]');
+					if (input) requestURL.searchParams.set(name, input.value);
+				});
+			}
+			fetch(requestURL.href, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OpenVibely-Plugin-Bridge': '1'}, body: body, signal: requests.signal})
 				.then(function (r) { return r.json(); })
 				.then(function (res) {
 				if (dead) return;
