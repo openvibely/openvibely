@@ -9,7 +9,7 @@ import (
 
 templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable bool) {
  @templates.MenuStyles()
- <div data-changes-split data-task-id={ task.ID } data-project-id={ task.ProjectID } data-local-available={ fmt.Sprint(!localUnavailable && task.MergeStatus != models.MergeStatusMerged) } data-linked-pr={ fmt.Sprint(taskPR != nil) } data-task-running={ fmt.Sprint(task.Status == models.StatusRunning) }>
+ <div data-changes-split data-task-id={ task.ID } data-project-id={ task.ProjectID } data-local-available={ fmt.Sprint(!localUnavailable && task.MergeStatus != models.MergeStatusMerged) } data-task-merged={ fmt.Sprint(task.MergeStatus == models.MergeStatusMerged) } data-linked-pr={ fmt.Sprint(taskPR != nil) } data-task-running={ fmt.Sprint(task.Status == models.StatusRunning) }>
   <div class="join ov-changes-split">
    if taskPR != nil {
     <a class="btn btn-primary btn-sm join-item btn-disabled" data-linked-pr-action aria-disabled="true" tabindex="-1" href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprint(taskPR.PRNumber) }</a>
@@ -99,7 +99,7 @@ templ changesSplitActionScript() {
    const state={position,close:()=>controller.close(false)};states.set(root,state);
    const linkedAction=find('[data-linked-pr-action]');
    if(linkedAction)linkedAction.addEventListener('click',event=>{if(linkedAction.getAttribute('aria-disabled')==='true')event.preventDefault();});
-   function setGroupDisabled(disabled){toggle.disabled=disabled;if(linkedAction){linkedAction.classList.toggle('btn-disabled',disabled);linkedAction.setAttribute('aria-disabled',String(disabled));if(disabled)linkedAction.setAttribute('tabindex','-1');else linkedAction.removeAttribute('tabindex');}if(disabled&&isOpen())controller.close(false);}
+   function setGroupDisabled(disabled){toggle.disabled=disabled||(root.dataset.taskMerged==='true'&&prefs?.mode==='local');if(linkedAction){linkedAction.classList.toggle('btn-disabled',disabled);linkedAction.setAttribute('aria-disabled',String(disabled));if(disabled)linkedAction.setAttribute('tabindex','-1');else linkedAction.removeAttribute('tabindex');}if(toggle.disabled&&isOpen())controller.close(false);}
    function render(){
     setGroupDisabled(settingsLoading||root.dataset.taskRunning==='true'||busy);
     if(settingsLoading||!prefs)return;

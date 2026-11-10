@@ -3,6 +3,8 @@ package pages
 import (
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/models"
+	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -270,4 +272,35 @@ func TestBrowserFunctional_ChangesSplitActionRightEdge(t *testing.T) {
 		}
 		b.waitFor("right edge opens menu", `String(document.querySelector('#changes-split-settings').matches(':popover-open'))`, "true")
 	})
+}
+
+func TestBrowserFunctional_ChangesSplitActionMergedLocalSettings(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixtureForTask(t, "", nil, &models.Task{ID: "layer-task", WorktreeBranch: "task/layer", MergeStatus: models.MergeStatusMerged})
+	defer server.Close()
+	for _, mode := range []string{"local", "pr"} {
+		t.Run(mode, func(t *testing.T) {
+			response, err := http.Post(server.URL+"/tasks/layer-task/worktree/action-settings", "application/json", strings.NewReader(`{"mode":"`+mode+`","repository":"https://github.com/upstream/repo","branch":"main","local_branch":"main","method":"ff"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusNoContent {
+				t.Fatalf("save preferences: %s", response.Status)
+			}
+			runComposerFocusCDP(t, chrome, server.URL+"/", "changes-merged-"+mode, func(b *composerFocusCDP) {
+				b.waitFor("settings loaded", `String(document.querySelector('[data-changes-repo]')?.options.length===2)`, "true")
+				if mode == "local" {
+					b.waitFor("completed merge disables both halves", `String(document.querySelector('[data-changes-primary]').textContent==='Fast-forward'&&document.querySelector('[data-changes-primary]').disabled&&document.querySelector('[data-changes-settings-toggle]').disabled)`, "true")
+					b.evaluate(`document.querySelector('[data-changes-settings-toggle]').click();document.querySelector('[data-changes-primary]').click();fetch('/fixture-state').then(r=>r.json()).then(s=>window.mergedActions=s.actions.length);'ok'`)
+					b.waitFor("menu stays closed", `String(document.querySelector('[data-changes-settings-toggle]').getAttribute('aria-expanded')==='false')`, "true")
+					b.waitFor("no repeated merge", `String(window.mergedActions===0)`, "true")
+				} else {
+					b.waitFor("PR actions remain available", `String(!document.querySelector('[data-changes-primary]').disabled&&!document.querySelector('[data-changes-settings-toggle]').disabled)`, "true")
+					b.click(`[data-changes-settings-toggle]`)
+					b.waitFor("PR settings open", `String(document.querySelector('[data-changes-settings-toggle]').getAttribute('aria-expanded')==='true')`, "true")
+				}
+			})
+		})
+	}
 }
