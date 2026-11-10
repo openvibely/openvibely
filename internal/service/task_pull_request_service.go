@@ -217,8 +217,11 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 			return nil, err
 		}
 		if !strings.EqualFold(head.FullName, repoRef.FullName) {
-			return nil, fmt.Errorf("project repository differs from linked PR source")
+			if err := s.validatePublicationRepository(ctx, repoRef, head); err != nil {
+				return nil, err
+			}
 		}
+		repoRef = head
 	}
 	linkedPR, err := replacer.GetPullRequest(ctx, targetRepo, existingPR.PRNumber)
 	if err != nil {
@@ -328,7 +331,8 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if err := ConfigureGitHubRepoEndpoint(repoRef, s.github.GlobalAPIEndpoint(ctx)); err != nil {
 		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
 	}
-	// Publication always uses the project/fork; PR operations use the selected base repository.
+	// Keep the project as the issue source even when publication uses a personal fork.
+	projectSource := repoRef
 	headRepo := repoRef
 	if existingPR != nil && existingPR.HeadRepoURL != "" {
 		headRepo, err = SameHostGitHubRepo(existingPR.HeadRepoURL, repoRef)
@@ -336,7 +340,9 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 			return nil, err
 		}
 		if !strings.EqualFold(headRepo.FullName, repoRef.FullName) {
-			return nil, fmt.Errorf("project repository differs from the linked pull request source")
+			if err := s.validatePublicationRepository(ctx, repoRef, headRepo); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if existingPR != nil {
@@ -387,14 +393,24 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		validatedExistingPR = livePR
 	}
 
+	issueRepo := projectSource
+	if existingPR == nil {
+		if provider, ok := s.github.(taskPublicationRepositoryProvider); ok {
+			headRepo, err = provider.PreparePublicationRepository(ctx, headRepo)
+			if err != nil {
+				return nil, fmt.Errorf("preparing publication repository: %w", err)
+			}
+		}
+	}
+
 	issueOpts := opts
 	if existingPR != nil {
 		if opts.IssueNumber != nil && existingPR.IssueNumber != nil && *opts.IssueNumber == *existingPR.IssueNumber && strings.TrimSpace(issueOpts.IssueURL) == "" {
 			issueOpts.IssueURL = existingPR.IssueURL
 		}
-		opts.previousClosingIssueRef = taskIssueClosingRef(OpenTaskPullRequestOptions{IssueNumber: existingPR.IssueNumber, IssueURL: existingPR.IssueURL}, headRepo.HTMLURL)
+		opts.previousClosingIssueRef = taskIssueClosingRef(OpenTaskPullRequestOptions{IssueNumber: existingPR.IssueNumber, IssueURL: existingPR.IssueURL}, issueRepo.HTMLURL)
 	}
-	opts.closingIssueRef = taskIssueClosingRef(issueOpts, headRepo.HTMLURL)
+	opts.closingIssueRef = taskIssueClosingRef(issueOpts, issueRepo.HTMLURL)
 	createReq := s.buildCreatePullRequestRequest(ctx, project, task, opts, repoRef)
 	if existingPR == nil && opts.TargetRepoURL != "" {
 		if validator, ok := s.github.(interface {
@@ -827,4 +843,12 @@ func (s *TaskPullRequestService) findPullRequestForTarget(ctx context.Context, t
 		return provider.FindPullRequestForTarget(ctx, target, req.Head, head.FullName, req.Base)
 	}
 	return s.github.FindPullRequestByBranch(ctx, target, req.Head)
+}
+
+func (s *TaskPullRequestService) validatePublicationRepository(ctx context.Context, project, head *GitHubRepoRef) error {
+	provider, ok := s.github.(taskPublicationRepositoryProvider)
+	if !ok {
+		return fmt.Errorf("project repository differs from the linked pull request source")
+	}
+	return provider.ValidatePublicationRepository(ctx, project, head)
 }

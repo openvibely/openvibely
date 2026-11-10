@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/openvibely/openvibely/internal/service/authz"
 )
@@ -72,20 +73,20 @@ func guardGitHubRuntimeProvider(opts githubIssueRuntimeOptions) GitHubIssueRunti
 	branch, hasBranch := opts.GitHub.(taskPullRequestBranchReplacer)
 	if hasBody && hasBranch {
 		return struct {
-			GitHubIssueRuntimeProvider
+			*authorizedGitHubRuntimeProvider
 			taskPullRequestBodyUpdater
 			githubRuntimeBranchReplacement
 		}{base, authorizedGitHubBodyUpdater{body, opts}, authorizedGitHubBranchReplacer{branch, opts}}
 	}
 	if hasBody {
 		return struct {
-			GitHubIssueRuntimeProvider
+			*authorizedGitHubRuntimeProvider
 			taskPullRequestBodyUpdater
 		}{base, authorizedGitHubBodyUpdater{body, opts}}
 	}
 	if hasBranch {
 		return struct {
-			GitHubIssueRuntimeProvider
+			*authorizedGitHubRuntimeProvider
 			githubRuntimeBranchReplacement
 		}{base, authorizedGitHubBranchReplacer{branch, opts}}
 	}
@@ -119,4 +120,25 @@ func (p authorizedGitHubBranchReplacer) ReplaceBranchHead(ctx context.Context, r
 		return "", err
 	}
 	return p.provider.ReplaceBranchHead(ctx, repo, req)
+}
+
+func (p *authorizedGitHubRuntimeProvider) PreparePublicationRepository(ctx context.Context, repo *GitHubRepoRef) (*GitHubRepoRef, error) {
+	ctx, err := authorizeGitHubRuntime(ctx, p.options, authz.Manage)
+	if err != nil {
+		return nil, err
+	}
+	if provider, ok := p.GitHubIssueRuntimeProvider.(taskPublicationRepositoryProvider); ok {
+		return provider.PreparePublicationRepository(ctx, repo)
+	}
+	return repo, nil
+}
+func (p *authorizedGitHubRuntimeProvider) ValidatePublicationRepository(ctx context.Context, repo, head *GitHubRepoRef) error {
+	ctx, err := authorizeGitHubRuntime(ctx, p.options, authz.Manage)
+	if err != nil {
+		return err
+	}
+	if provider, ok := p.GitHubIssueRuntimeProvider.(taskPublicationRepositoryProvider); ok {
+		return provider.ValidatePublicationRepository(ctx, repo, head)
+	}
+	return fmt.Errorf("GitHub integration cannot verify the publication fork")
 }

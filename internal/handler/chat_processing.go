@@ -2549,6 +2549,24 @@ func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, 
 	if err != nil {
 		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
 	}
+	if pullRequest.HeadRepoURL != "" {
+		head, err := service.SameHostGitHubRepo(pullRequest.HeadRepoURL, repoRef)
+		if err != nil {
+			return true, fmt.Sprintf("GitHub PR source could not be verified: %v", err)
+		}
+		if !strings.EqualFold(head.FullName, repoRef.FullName) {
+			validator, ok := h.githubSvc.(interface {
+				ValidatePublicationRepository(context.Context, *service.GitHubRepoRef, *service.GitHubRepoRef) error
+			})
+			if !ok {
+				return true, "GitHub integration cannot verify the publication fork"
+			}
+			if err := validator.ValidatePublicationRepository(ctx, repoRef, head); err != nil {
+				return true, fmt.Sprintf("GitHub PR source could not be verified: %v", err)
+			}
+		}
+		repoRef = head
+	}
 	if err := service.ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, pullRequest.PublishedHeadSHA); err != nil {
 		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is not reviewable with the current published task work: %v; rerun after resolving PR publication", pullRequest.PRNumber, err)
 	}
