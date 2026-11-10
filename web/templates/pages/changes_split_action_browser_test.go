@@ -11,21 +11,22 @@ func TestBrowserFunctional_ChangesSplitActionPreferencesAndOneClick(t *testing.T
 	server := worktreeActionsFixture(t, "", nil)
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-split-action", func(b *composerFocusCDP) {
-		b.waitFor("upstream default ready", `String(document.querySelector('[data-changes-primary]')?.textContent==='Create PR to upstream' && !document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("upstream default ready", `String(document.querySelector('[data-changes-primary]')?.textContent==='Create PR' && !document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("repository names without remote labels", `JSON.stringify(Array.from(document.querySelector('[data-changes-repo]').options,option=>({label:option.textContent,value:option.value})))`, `[{"label":"upstream/repo","value":"https://github.com/upstream/repo"},{"label":"me/repo","value":"https://github.com/me/repo"}]`)
 		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.actionState=s));'ok'`)
 		b.click(`[data-changes-primary]`)
 		b.waitFor("PR submitted once", `String(window.actionState?.actions.length===1&&window.actionState.actions[0].base==='main'&&window.actionState.actions[0].target_repo==='https://github.com/upstream/repo')`, "true")
 		b.click(`[data-changes-settings-toggle]`)
 		b.waitFor("settings open", `String(document.querySelector('#changes-split-settings').matches(':popover-open'))`, "true")
 		b.click(`[data-changes-mode="local"]`)
-		b.waitFor("local default saved", `String(document.querySelector('[data-changes-primary]').textContent==='Merge into main'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("local default saved", `String(document.querySelector('[data-changes-primary]').textContent==='Merge'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
 		b.evaluate(`(()=>{const branch=document.querySelector('[data-changes-local-branch]');branch.value='develop';branch.dispatchEvent(new Event('change',{bubbles:true}));const method=document.querySelector('[data-changes-method]');method.value='squash';method.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';})()`)
-		b.waitFor("squash preference saved", `String(document.querySelector('[data-changes-primary]').textContent==='Squash into develop'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("squash preference saved", `String(document.querySelector('[data-changes-primary]').textContent==='Squash merge'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
 		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
 		b.click(`[data-changes-primary]`)
 		b.waitFor("local action dispatched once", `String(window.actionState?.actions.length===2&&window.actionState.actions[1].merge_type==='squash'&&window.actionState.actions[1].changes_target==='develop')`, "true")
 		b.evaluate(`window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});'ok'`)
-		b.waitFor("saved action restored after refresh", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]').textContent==='Squash into develop'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("saved action restored after refresh", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]').textContent==='Squash merge'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
 		for _, selector := range []string{"[data-changes-primary]", "[data-changes-settings-toggle]"} {
 			raw := b.evaluate(`(()=>{const r=document.querySelector('` + selector + `').getBoundingClientRect();return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2});})()`)
 			var point struct {
@@ -37,7 +38,7 @@ func TestBrowserFunctional_ChangesSplitActionPreferencesAndOneClick(t *testing.T
 			}
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
-			b.waitFor("whole split shrinks", `(()=>{const root=document.querySelector('.ov-changes-split');return String(getComputedStyle(root).transform!=='none'&&Array.from(root.querySelectorAll('.btn')).every(el=>getComputedStyle(el).transform==='none'));})()`, "true")
+			b.waitFor("split hit area stays fixed", `(()=>{const root=document.querySelector('.ov-changes-split');return String(getComputedStyle(root).transform==='none'&&Array.from(root.querySelectorAll('.btn')).every(el=>getComputedStyle(el).transform==='none'));})()`, "true")
 			// Release outside to avoid performing the action during this visual check.
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 1, "y": 1, "buttons": 1}, nil)
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 1, "y": 1, "button": "left", "buttons": 0, "clickCount": 1}, nil)
@@ -56,7 +57,8 @@ func TestBrowserFunctional_ChangesSplitActionPartialDiscovery(t *testing.T) {
 		b.waitFor("unavailable upstream retained", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]')?.matches(':disabled,[aria-disabled="true"]')&&document.querySelector('[data-changes-repo] option:checked')?.textContent.includes('Unavailable'))`, "true")
 		b.click(`[data-changes-settings-toggle]`)
 		b.evaluate(`(()=>{const repo=document.querySelector('[data-changes-repo]');repo.value='https://github.com/me/repo';repo.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';})()`)
-		b.waitFor("fork action enabled despite warning", `String(!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]')&&document.querySelector('[data-changes-primary]').textContent==='Create PR to me/repo'&&!document.querySelector('[data-changes-error]').hidden)`, "true")
+		b.waitFor("fork action enabled despite warning", `String(!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]')&&document.querySelector('[data-changes-primary]').textContent==='Create PR'&&!document.querySelector('[data-changes-error]').hidden)`, "true")
+		b.waitFor("PR destination retained in tooltip and accessible label", `(()=>{const el=document.querySelector('[data-changes-primary]');return String((el.title||el.dataset.ovTooltip)==='me/repo:main'&&el.getAttribute('aria-label')==='Create PR (me/repo:main)');})()`, "true")
 		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
 		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.partialActions=s));'ok'`)
 		b.click(`[data-changes-primary]`)
@@ -76,7 +78,7 @@ func TestBrowserFunctional_ChangesSplitActionRebaseTarget(t *testing.T) {
 		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='develop';el.dispatchEvent(new Event('change'));return 'ok';})()`)
 		b.waitFor("develop allows rebase", `String(document.querySelector('[data-changes-method] option[value="rebase"]')?.disabled===false)`, "true")
 		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-method]');el.value='rebase';el.dispatchEvent(new Event('change'));return 'ok';})()`)
-		b.waitFor("rebase enabled", `String(document.querySelector('[data-changes-primary]').textContent==='Rebase onto develop'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("rebase enabled", `String(document.querySelector('[data-changes-primary]').textContent==='Rebase'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
 		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='main';el.dispatchEvent(new Event('change'));return 'ok';})()`)
 		b.waitFor("main disables saved rebase", `String(document.querySelector('[data-changes-method] option[value="rebase"]').disabled&&document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
 		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='develop';el.dispatchEvent(new Event('change'));return 'ok';})()`)
@@ -100,11 +102,11 @@ func TestBrowserFunctional_ChangesSplitActionMissingTarget(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-missing-target", func(b *composerFocusCDP) {
 		b.waitFor("settings ready", `String(document.querySelector('[data-changes-primary]')?.matches(':disabled,[aria-disabled="true"]')===false)`, "true")
 		b.evaluate(`(()=>{const original=window.fetch;window.fetch=async function(url,options){const response=await original(url,options);if(String(url).endsWith('/action-settings')&&(!options?.method||options.method==='GET')){const data=await response.json();data.preferences.mode='local';data.preferences.local_branch='deleted';return new Response(JSON.stringify(data),{status:200});}if(String(url).endsWith('action-local?target=deleted'))return new Response(JSON.stringify({message:'local target branch no longer exists'}),{status:400});return response;};window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});return 'ok';})()`)
-		b.waitFor("missing target disabled action", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]').textContent==='Merge into deleted'&&document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("missing target disabled action", `String(document.querySelector('[data-changes-split]')!==window.oldSplit&&document.querySelector('[data-changes-primary]').textContent==='Merge'&&document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
 		b.click(`[data-changes-settings-toggle]`)
 		b.waitFor("local controls accessible", `String(!document.querySelector('[data-changes-mode="local"]').disabled&&!document.querySelector('[data-changes-local-fields]').hidden)`, "true")
 		b.evaluate(`(()=>{const el=document.querySelector('[data-changes-local-branch]');el.value='main';el.dispatchEvent(new Event('change'));return 'ok';})()`)
-		b.waitFor("replacement eligible", `String(document.querySelector('[data-changes-primary]').textContent==='Merge into main'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("replacement eligible", `String(document.querySelector('[data-changes-primary]').textContent==='Merge'&&!document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
 	})
 }
 
@@ -189,7 +191,7 @@ func TestBrowserFunctional_ChangesSplitActionWithoutNativePopover(t *testing.T) 
 		b.evaluate(`window.toggleChangesShortcut=()=>{const apple=/Mac|iPhone|iPad/.test(navigator.platform);document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'D',code:'KeyD',shiftKey:true,metaKey:apple,ctrlKey:!apple,bubbles:true,cancelable:true}));};window.toggleChangesShortcut();'ok'`)
 		b.waitFor("open fallback blocks workspace shortcut", `String(!document.querySelector('#tab-changes').classList.contains('hidden')&&!document.querySelector('#changes-split-settings').hidden)`, "true")
 		b.click(`[data-changes-mode="local"]`)
-		b.waitFor("fallback controls usable", `String(document.querySelector('[data-changes-primary]').textContent==='Merge into main'&&document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false')`, "true")
+		b.waitFor("fallback controls usable", `String(document.querySelector('[data-changes-primary]').textContent==='Merge'&&document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false')`, "true")
 		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
 		b.waitFor("outside click closes fallback", `String(document.querySelector('#changes-split-settings').hidden&&!document.querySelector('#changes-split-settings').hasAttribute('data-menu-open'))`, "true")
 		b.click(`[data-changes-settings-toggle]`)
@@ -224,5 +226,48 @@ func TestBrowserFunctional_ChangesSplitActionInitialLoadingDisabled(t *testing.T
 		b.waitFor("loading click blocked", `String(window.initialActions===0)`, "true")
 		b.evaluate(`window.releaseSettings();'ok'`)
 		b.waitFor("action ready", `String(!document.querySelector('[data-changes-settings-toggle]').disabled&&document.querySelector('[data-changes-primary]').getAttribute('aria-disabled')==='false'&&document.querySelector('[data-changes-primary]').getAttribute('aria-busy')==='false')`, "true")
+	})
+}
+
+func TestBrowserFunctional_ChangesSplitActionLongTargetLabel(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-long-target", func(b *composerFocusCDP) {
+		b.waitFor("settings ready", `String(document.querySelector('[data-changes-primary]')?.getAttribute('aria-disabled')==='false')`, "true")
+		b.evaluate(`(()=>{window.longTarget='recovery/task-04114335-pre-goal-verification-20260730193258';const original=window.fetch;window.fetch=async function(url,options){const response=await original(url,options);if(String(url).endsWith('/action-settings')&&(!options?.method||options.method==='GET')){const data=await response.json();data.local_branches.push(window.longTarget);data.preferences={...data.preferences,mode:'local',method:'ff',local_branch:window.longTarget};return new Response(JSON.stringify(data),{status:200});}return response;};window.oldSplit=document.querySelector('[data-changes-split]');htmx.ajax('GET','/tasks/layer-task/changes',{target:'#changes-content',swap:'innerHTML'});return 'ok';})()`)
+		b.waitFor("compact label with full destination", `(()=>{const el=document.querySelector('[data-changes-primary]');return String(document.querySelector('[data-changes-split]')!==window.oldSplit&&el?.textContent==='Fast-forward'&&(el.title||el.dataset.ovTooltip)==='Fast-forward '+window.longTarget&&el.getAttribute('aria-label')==='Fast-forward '+window.longTarget&&el.getAttribute('aria-disabled')==='false')==='true'?'true':JSON.stringify({html:el?.outerHTML,target:window.longTarget});})()`, "true")
+		b.waitFor("page-colored divider", `(()=>{const divider=getComputedStyle(document.querySelector('[data-changes-settings-toggle]'),'::before');return String(divider.width==='1px'&&divider.backgroundColor===getComputedStyle(document.querySelector('[data-diff-toolbar]')).backgroundColor);})()`, "true")
+		b.click(`[data-changes-settings-toggle]`)
+		b.waitFor("full branch remains selectable", `String(document.querySelector('[data-changes-local-branch]').selectedOptions[0].textContent===window.longTarget)`, "true")
+		b.clickMenuBackdrop(`[data-changes-settings-toggle]`)
+		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.longTargetActions=s.actions));'ok'`)
+		b.click(`[data-changes-primary]`)
+		b.waitFor("full target dispatched", `String(window.longTargetActions?.length===1&&window.longTargetActions[0].changes_target===window.longTarget&&window.longTargetActions[0].merge_type==='ff')`, "true")
+	})
+}
+
+func TestBrowserFunctional_ChangesSplitActionRightEdge(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-right-edge", func(b *composerFocusCDP) {
+		b.waitFor("ready", `String(document.querySelector('[data-changes-primary]')?.getAttribute('aria-disabled')==='false')`, "true")
+		raw := b.evaluate(`(()=>{const el=document.querySelector('[data-changes-settings-toggle]');el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return JSON.stringify({x:r.right-1,y:r.top+r.height/2});})()`)
+		var point struct {
+			X float64 `json:"x"`
+			Y float64 `json:"y"`
+		}
+		if err := json.Unmarshal([]byte(raw), &point); err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range []map[string]any{
+			{"type": "mouseMoved", "x": point.X, "y": point.Y},
+			{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1},
+			{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "left", "buttons": 0, "clickCount": 1},
+		} {
+			b.call("Input.dispatchMouseEvent", event, nil)
+		}
+		b.waitFor("right edge opens menu", `String(document.querySelector('#changes-split-settings').matches(':popover-open'))`, "true")
 	})
 }
