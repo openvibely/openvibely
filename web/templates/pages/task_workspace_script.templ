@@ -277,7 +277,7 @@ templ TaskWorkspaceScript() {
 			fetch('/tasks/' + encodeURIComponent(taskID) + '/changes/summary?project_id=' + encodeURIComponent(root.dataset.projectId), {signal:signal}).then(function(response) {
 				if (!response.ok) throw new Error('Summary unavailable');
 				return response.json();
-			}).then(function(value) { if (!signal.aborted) { summary = value; var revision=value.action_revision || value.status; if(actionRevision!==null && revision!==actionRevision) refreshComposerActions(); actionRevision=revision; if (requestedTitleVersion === titleVersion) applyTitle(value.title); renderSummary(); } }).catch(function() {}).finally(function() {
+			}).then(function(value) { if (!signal.aborted) { summary = value; var revision=value.action_revision || value.status; if(actionRevision===null || revision!==actionRevision) refreshComposerActions(); actionRevision=revision; if (requestedTitleVersion === titleVersion) applyTitle(value.title); renderSummary(); } }).catch(function() {}).finally(function() {
 				pending = false;
 				if (dirty && !signal.aborted) { dirty = false; scheduleSummary(); }
 			});
