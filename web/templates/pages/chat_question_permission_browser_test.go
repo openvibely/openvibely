@@ -31,7 +31,8 @@ func TestBrowserFunctional_ChatQuestionPermissionPreservesAnswer(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/chat", "question-permission", func(b *composerFocusCDP) {
-		b.waitFor("chat initialized", `String(!!window._chatInputRequestClickBound && !!document.querySelector('[data-chat-input-option]') && !document.querySelector('#chat-messages[data-transcript-hydrating]'))`, "true")
+		// The layout defines window.showToast after the chat markup, so stubbing it before parsing completes gets overwritten.
+		b.waitFor("chat initialized", `String(document.readyState!=='loading' && !!window._chatInputRequestClickBound && !!document.querySelector('[data-chat-input-option]') && !document.querySelector('#chat-messages[data-transcript-hydrating]'))`, "true")
 		b.evaluate(`window.permissionToasts=[];window.showToast=(m)=>permissionToasts.push(m);window.realFetch=window.fetch;window.fetch=(url,opts)=>String(url).includes('/answer')?Promise.resolve(new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}})):realFetch(url,opts);'ready'`)
 		b.click(`[data-option-label="Keep answer"]`)
 		b.evaluate(`window.questionCard=document.querySelector('[data-chat-input-request-id]');window.questionStatus=questionCard.querySelector('[role="status"]');window.oldQuestionStatus=questionStatus.textContent;window.oldQuestionClass=questionStatus.className;'ready'`)
