@@ -38,7 +38,7 @@ func TestBrowserFunctional_ChangesSplitActionPreferencesAndOneClick(t *testing.T
 			}
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
-			b.waitFor("whole split shrinks", `(()=>{const root=document.querySelector('.ov-changes-split');return String(getComputedStyle(root).transform!=='none'&&Array.from(root.querySelectorAll('.btn')).every(el=>getComputedStyle(el).transform==='none'));})()`, "true")
+			b.waitFor("split hit area stays fixed", `(()=>{const root=document.querySelector('.ov-changes-split');return String(getComputedStyle(root).transform==='none'&&Array.from(root.querySelectorAll('.btn')).every(el=>getComputedStyle(el).transform==='none'));})()`, "true")
 			// Release outside to avoid performing the action during this visual check.
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 1, "y": 1, "buttons": 1}, nil)
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 1, "y": 1, "button": "left", "buttons": 0, "clickCount": 1}, nil)
@@ -244,5 +244,30 @@ func TestBrowserFunctional_ChangesSplitActionLongTargetLabel(t *testing.T) {
 		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.longTargetActions=s.actions));'ok'`)
 		b.click(`[data-changes-primary]`)
 		b.waitFor("full target dispatched", `String(window.longTargetActions?.length===1&&window.longTargetActions[0].changes_target===window.longTarget&&window.longTargetActions[0].merge_type==='ff')`, "true")
+	})
+}
+
+func TestBrowserFunctional_ChangesSplitActionRightEdge(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := worktreeActionsFixture(t, "", nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-right-edge", func(b *composerFocusCDP) {
+		b.waitFor("ready", `String(document.querySelector('[data-changes-primary]')?.getAttribute('aria-disabled')==='false')`, "true")
+		raw := b.evaluate(`(()=>{const el=document.querySelector('[data-changes-settings-toggle]');el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return JSON.stringify({x:r.right-1,y:r.top+r.height/2});})()`)
+		var point struct {
+			X float64 `json:"x"`
+			Y float64 `json:"y"`
+		}
+		if err := json.Unmarshal([]byte(raw), &point); err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range []map[string]any{
+			{"type": "mouseMoved", "x": point.X, "y": point.Y},
+			{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1},
+			{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "left", "buttons": 0, "clickCount": 1},
+		} {
+			b.call("Input.dispatchMouseEvent", event, nil)
+		}
+		b.waitFor("right edge opens menu", `String(document.querySelector('#changes-split-settings').matches(':popover-open'))`, "true")
 	})
 }
