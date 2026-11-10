@@ -165,7 +165,7 @@ func PluginPageContent(v PluginPageView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\"><div data-page-header class=\"flex items-center gap-2 flex-shrink-0 min-w-0\"><nav class=\"flex min-w-0 flex-1 items-center gap-2\" aria-label=\"Breadcrumb\"><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\"><div data-page-header class=\"flex items-center gap-2 flex-shrink-0 min-w-0\"><nav class=\"flex min-w-0 flex-1 items-center gap-2\" aria-label=\"Breadcrumb\" data-page-header><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

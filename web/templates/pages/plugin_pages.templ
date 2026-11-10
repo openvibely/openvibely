@@ -47,7 +47,7 @@ templ PluginPageContent(v PluginPageView) {
 		data-retire-url={ pluginAPI(v, "/handle/retire") }
 	>
 		<div data-page-header class="flex items-center gap-2 flex-shrink-0 min-w-0">
-			<nav class="flex min-w-0 flex-1 items-center gap-2" aria-label="Breadcrumb">
+			<nav class="flex min-w-0 flex-1 items-center gap-2" aria-label="Breadcrumb" data-page-header>
                 <a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL("/settings/plugin-pages?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, v.OwningProjectID))) } onclick="event.preventDefault(); window.openVibelyNavigate(this.getAttribute('href'));">Custom Pages</a>
                 <span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
                 <div class="min-w-0 flex-1 flex items-center gap-1">
