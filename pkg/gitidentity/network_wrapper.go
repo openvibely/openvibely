@@ -51,3 +51,48 @@ if [ "$network" = 1 ]; then
  export GIT_CONFIG_COUNT=$scope_count
 fi
 `
+
+// windowsNetworkScopeScript mirrors the POSIX wrapper using process-local
+// environment settings. No token is written to disk or passed as an argument.
+const windowsNetworkScopeScript = `
+$gitArgs = @($args)
+function Add-Config([string] $setting) {
+ $script:configParameters += " '" + $setting.Replace("'", "'\''") + "'"
+}
+function Scope-Url([string] $target) {
+ if (-not ($target.StartsWith('https://', [StringComparison]::Ordinal) -or $target.StartsWith('http://', [StringComparison]::Ordinal))) { return }
+ if ($target.Contains('?') -or $target.Contains('#')) { return }
+ Add-Config "http.$target.extraHeader="
+ if ($target.StartsWith("https://$env:OV_GIT_AUTH_HOST/", [StringComparison]::Ordinal) -and $env:OV_GIT_AUTH_HEADER) {
+  Add-Config "http.$target.extraHeader=$env:OV_GIT_AUTH_HEADER"
+ }
+}
+$network = $false
+foreach ($argument in $gitArgs) {
+ if (@('clone', 'fetch', 'push', 'pull', 'ls-remote', 'submodule') -ccontains $argument) { $network = $true }
+}
+if ($network) {
+ # Windows PowerShell removes empty environment values. Use Git's quoted
+ # parameter format so empty header resets survive in the child process.
+ $script:configParameters = $env:GIT_CONFIG_PARAMETERS
+ $repoDir = (Get-Location).Path
+ $directoryNext = $false
+ foreach ($argument in $gitArgs) {
+  if ($directoryNext) {
+   if ($argument -ne '') {
+    if ([IO.Path]::IsPathRooted($argument)) { $repoDir = $argument }
+    else { $repoDir = [IO.Path]::GetFullPath((Join-Path $repoDir $argument)) }
+   }
+   $directoryNext = $false
+  } elseif ($argument -ceq '-C') { $directoryNext = $true }
+  Scope-Url $argument
+ }
+ foreach ($remote in @(& $realGit -C $repoDir remote 2>$null)) {
+  foreach ($target in @(& $realGit -C $repoDir remote get-url --all $remote 2>$null)) { Scope-Url $target }
+  foreach ($target in @(& $realGit -C $repoDir remote get-url --push --all $remote 2>$null)) { Scope-Url $target }
+ }
+ $env:GIT_CONFIG_PARAMETERS = $script:configParameters
+}
+& $realGit @gitArgs
+exit $LASTEXITCODE
+`

@@ -59,14 +59,18 @@ func TestNetworkCredentialsOverrideSavedRepositoryHeaders(t *testing.T) {
 			case "push":
 				cmd = Command(ctx, "push", endpoint, "HEAD:main")
 			default:
-				if runtime.GOOS == "windows" {
-					t.Skip("POSIX agent shell")
-				}
 				line := "git push origin HEAD:main"
 				if operation == "plugin-pull" {
 					line = "git -C '" + dir + "' pull --ff-only"
 				}
-				cmd = exec.Command("/bin/sh", "-c", line)
+				if runtime.GOOS == "windows" {
+					if operation == "plugin-pull" {
+						line = `git -C "` + dir + `" pull --ff-only`
+					}
+					cmd = exec.Command("cmd.exe", "/d", "/c", line)
+				} else {
+					cmd = exec.Command("/bin/sh", "-c", line)
+				}
 				var err error
 				cmd.Env, err = Environment(ctx, os.Environ())
 				if err != nil {

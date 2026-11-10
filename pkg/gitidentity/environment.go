@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -101,9 +102,22 @@ func CommandEnvironment(ctx context.Context, base []string, args []string) ([]st
 			config = append(config, [2]string{exact, ""}, [2]string{exact, header})
 		}
 	}
+	if runtime.GOOS == "windows" {
+		// Windows PowerShell can discard empty environment values. Preserve
+		// header/helper resets in Git's quoted parameter representation.
+		return append(out, "GIT_CONFIG_PARAMETERS="+configParameters(config)), nil
+	}
 	out = append(out, "GIT_CONFIG_COUNT="+strconv.Itoa(len(config)))
 	for n, pair := range config {
 		out = append(out, "GIT_CONFIG_KEY_"+strconv.Itoa(n)+"="+pair[0], "GIT_CONFIG_VALUE_"+strconv.Itoa(n)+"="+pair[1])
 	}
 	return out, nil
+}
+
+func configParameters(config [][2]string) string {
+	parameters := make([]string, 0, len(config))
+	for _, pair := range config {
+		parameters = append(parameters, "'"+strings.ReplaceAll(pair[0]+"="+pair[1], "'", "'\\''")+"'")
+	}
+	return strings.Join(parameters, " ")
 }

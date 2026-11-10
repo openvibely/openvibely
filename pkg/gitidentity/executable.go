@@ -46,7 +46,18 @@ func Executable(ctx context.Context) (string, error) {
 		path := filepath.Join(dir, "git")
 		if runtime.GOOS == "windows" {
 			path += ".cmd"
-			script = "@echo off\r\nset \"HOME=" + home + "\"\r\n\"" + realGit + "\" %*\r\n"
+			psQuote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+			psPath := filepath.Join(dir, "git-wrapper.ps1")
+			psScript := "$env:HOME = " + psQuote(home) + "\n$realGit = " + psQuote(realGit) + "\n" + windowsNetworkScopeScript
+			if err = os.WriteFile(psPath, []byte(psScript), 0600); err != nil {
+				os.RemoveAll(dir)
+				isolatedGit.err = err
+				return
+			}
+			// PowerShell is available on supported Windows installations. Keep
+			// the .cmd entry point so both cmd.exe and agent shells find git
+			// through PATH. Credentials remain in the inherited environment.
+			script = "@echo off\r\npowershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + psPath + "\" %*\r\nexit /b %errorlevel%\r\n"
 		}
 		if err = os.WriteFile(path, []byte(script), 0700); err != nil {
 			os.RemoveAll(dir)
