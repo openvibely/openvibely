@@ -20,7 +20,7 @@ func TestBrowserFunctional_TranscriptWheelAndPrependInChrome(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`<!doctype html><div id="task-thread-messages" style="height:500px;width:600px;overflow:auto"><div id="spacer" style="height:10000px"></div><div id="tool" style="position:fixed;left:20px;top:20px;width:100px;height:100px;overflow:auto"><div style="height:2000px">nested</div></div></div><script src="/virtual.js"></script><script>
+		w.Write([]byte(`<!doctype html><div data-chat-transcript id="task-thread-messages" style="height:500px;width:600px;overflow:auto"><div id="spacer" style="height:10000px"></div><div id="tool" style="position:fixed;left:20px;top:20px;width:100px;height:100px;overflow:auto"><div style="height:2000px">nested</div></div></div><script src="/virtual.js"></script><script>
  document.dispatchEvent(new Event('htmx:afterSwap'));
  const m=document.getElementById('task-thread-messages');m.scrollTop=1000;
  window.events=[];

@@ -93,6 +93,15 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 			if err != nil {
 				t.Error(err)
 			}
+		case "/tasks/explorer-task/worktree/action-settings":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"preferences":{"mode":"pr","repository":"https://github.com/example/repo","branch":"main","local_branch":"main","method":"merge"},"repositories":[{"url":"https://github.com/example/repo","name":"example/repo","default_branch":"main"}],"local_branches":["main"]}`)
+		case "/tasks/explorer-task/worktree/action-branches":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"branches":["main"],"has_more":false}`)
+		case "/tasks/explorer-task/worktree/action-local":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"merge_available":true,"rebase_available":true}`)
 		case "/tasks/explorer-task/thread":
 			fmt.Fprint(w, `<textarea id="task-message-input">Keep this draft</textarea>`)
 		case "/tasks/explorer-task/changes":
@@ -181,7 +190,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 			metadataChanged.Store(false)
 			b.evaluate(`_updateDiffViewer();'restore metadata'`)
 			waitChangesLoaded("metadata restored")
-			b.waitFor("removed conflict guidance and restored PR action", `String(!document.querySelector('[data-merge-conflict-guidance]') && document.querySelector('#changes-actions-menu').textContent.includes('Create PR') && !document.querySelector('#changes-actions-menu').textContent.includes('Abort Merge') && document.getElementById('diff-viewer')===window.retainedDiffViewer && document.getElementById('diff-body-0')===window.retainedDiffBody)`, "true")
+			b.waitFor("removed conflict guidance and restored PR action", `String(!document.querySelector('[data-merge-conflict-guidance]') && document.querySelector('[data-changes-primary]')?.textContent.includes('Create PR') && !document.querySelector('#changes-actions-menu') && document.getElementById('diff-viewer')===window.retainedDiffViewer && document.getElementById('diff-body-0')===window.retainedDiffBody)`, "true")
 			b.evaluate(`document.getElementById('tab-changes').scrollTop=0;'restore scroll'`)
 		}
 		b.evaluate(`openInlineCommentForm(document.querySelector('#diff-file-0 tr.diff-review-line'));document.querySelector('.review-comment-form textarea').value='Keep review draft';'open draft'`)
@@ -213,9 +222,10 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.waitFor("long diff scrolled", `String(document.getElementById('tab-changes').scrollTop>500)`, "true")
 		b.waitFor("toolbar and file header stack while scrolling", `String((()=>{const bar=document.querySelector('[data-diff-toolbar]'), scroll=document.getElementById('tab-changes'), header=document.querySelector('#diff-file-1 .diff-file-header');return (Math.abs(bar.getBoundingClientRect().top-scroll.getBoundingClientRect().top)<2 && Math.abs(header.getBoundingClientRect().top-bar.getBoundingClientRect().bottom)<2) || JSON.stringify({bar:bar.getBoundingClientRect().toJSON(),scroll:scroll.getBoundingClientRect().toJSON(),header:header.getBoundingClientRect().toJSON(),offset:getComputedStyle(header).top,position:getComputedStyle(bar).position})})())`, "true")
 		if !saved {
-			b.evaluate(`document.querySelector('[popovertarget="changes-actions-menu"]').click();'actions'`)
-			b.waitFor("actions menu opens while scrolled", `String(document.getElementById('changes-actions-menu').matches(':popover-open'))`, "true")
-			assertMenuConsumesOutsideClick(b, `!document.getElementById('changes-actions-menu').matches(':popover-open')`)
+			b.waitFor("action settings ready", `String(document.querySelector('[data-changes-settings-toggle]')?.disabled===false)`, "true")
+			b.evaluate(`document.querySelector('[data-changes-settings-toggle]').click();'settings'`)
+			b.waitFor("action settings open while scrolled", `String(document.getElementById('changes-split-settings').matches(':popover-open'))`, "true")
+			assertMenuConsumesOutsideClick(b, `!document.getElementById('changes-split-settings').matches(':popover-open')`)
 		}
 		b.evaluate(`document.getElementById('tab-changes').style.maxWidth='360px';'narrow changes'`)
 		b.waitFor("wrapped toolbar updates sticky offset", `String((()=>{const bar=document.querySelector('[data-diff-toolbar]'),header=document.querySelector('#diff-file-1 .diff-file-header');return bar.getBoundingClientRect().height>60 && Math.abs(header.getBoundingClientRect().top-bar.getBoundingClientRect().bottom)<2})())`, "true")
