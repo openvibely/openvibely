@@ -3543,7 +3543,7 @@ for(const b of [action,toggle]){b.disabled=false;b.setAttribute('aria-disabled',
 action.hidden=false;
 const repo=document.querySelector('[data-changes-repo]'),branch=document.querySelector('[data-changes-branch]'),local=document.querySelector('[data-changes-local-branch]'),method=document.querySelector('[data-changes-method]');
 const choices=[{url:'https://github.com/openvibely/openvibely',name:'openvibely/openvibely',upstream:true},{url:'https://github.com/example/openvibely',name:'example/openvibely',upstream:false}];
-repo.replaceChildren(...choices.map(choice=>new Option(choice.name+(choice.upstream?' · Upstream':' · Origin'),choice.url)));
+repo.replaceChildren(...choices.map(choice=>new Option(choice.name,choice.url)));
 branch.innerHTML=local.innerHTML='<option>main</option><option>develop</option>';
 local.add(new Option('recovery/task-04114335-pre-goal-verification-20260730193258'));
 let mode='local';

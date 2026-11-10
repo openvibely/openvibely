@@ -12,6 +12,7 @@ func TestBrowserFunctional_ChangesSplitActionPreferencesAndOneClick(t *testing.T
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-split-action", func(b *composerFocusCDP) {
 		b.waitFor("upstream default ready", `String(document.querySelector('[data-changes-primary]')?.textContent==='Create PR' && !document.querySelector('[data-changes-primary]').matches(':disabled,[aria-disabled="true"]'))`, "true")
+		b.waitFor("repository names without remote labels", `JSON.stringify(Array.from(document.querySelector('[data-changes-repo]').options,option=>({label:option.textContent,value:option.value})))`, `[{"label":"upstream/repo","value":"https://github.com/upstream/repo"},{"label":"me/repo","value":"https://github.com/me/repo"}]`)
 		b.evaluate(`document.addEventListener('htmx:afterRequest',()=>fetch('/fixture-state').then(r=>r.json()).then(s=>window.actionState=s));'ok'`)
 		b.click(`[data-changes-primary]`)
 		b.waitFor("PR submitted once", `String(window.actionState?.actions.length===1&&window.actionState.actions[0].base==='main'&&window.actionState.actions[0].target_repo==='https://github.com/upstream/repo')`, "true")

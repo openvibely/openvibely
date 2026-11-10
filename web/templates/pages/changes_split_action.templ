@@ -161,7 +161,7 @@ templ changesSplitActionScript() {
    async function load(){settingsLoading=true;setGroupDisabled(true);retry.hidden=true;primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','true');try{
     const data=await request(endpoint+'action-settings');if(!root.isConnected)return;prefs=data.preferences;choices=data.repositories||[];linkedTarget=data.linked_pr||null;githubError=data.github_error||'';
     if(linkedTarget&&!choices.some(c=>c.url===linkedTarget.repository))choices.push({url:linkedTarget.repository,name:linkedTarget.repository.replace(/^https:\/\//,''),default_branch:linkedTarget.branch});
-    fill(repo,choices.map(c=>({value:c.url,label:c.name+(c.upstream?' · Upstream':' · Origin')})));
+    fill(repo,choices.map(c=>({value:c.url,label:c.name})));
     if(prefs.repository&&!choices.some(c=>c.url===prefs.repository)){const option=document.createElement('option');option.value=prefs.repository;option.textContent=prefs.repository.replace(/^https:\/\//,'')+' · Unavailable';option.disabled=true;repo.append(option);}
     fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));
     showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;settingsLoading=false;render();loadLocalEligibility();if(prefs.mode==='pr')loadBranches(true);
