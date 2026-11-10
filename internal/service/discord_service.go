@@ -829,6 +829,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		FilterHistory: filterDiscordChatHistory,
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		GitHubConnection:   s.githubProjectSvc,
 		ProjectID:          projectID,
 		CallerTaskID:       callerTaskID,
 		TaskRepo:           s.taskRepo,

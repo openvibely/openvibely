@@ -30,6 +30,10 @@ type ChannelsSettingsView struct {
 	GitHubAppSlug                string
 	GitHubPrivateKeyValue        string
 	GitHubPATValue               string
+	GitHubPersonal               bool
+	GitHubRevision               string
+	GitHubAuthorName             string
+	GitHubAuthorEmail            string
 	GitHubAPIEndpoint            string
 	GitHubHasPrivateKey          bool
 	GitHubHasPAT                 bool

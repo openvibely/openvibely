@@ -363,6 +363,7 @@ type updateAgentRuntimeResponse struct {
 }
 
 type channelUtilityActionHandlerOptions struct {
+	GitHubConnection          any
 	ProjectID                 string
 	CallerTaskID              string
 	TaskRepo                  persistence.TaskStore
@@ -1091,6 +1092,14 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		Settings:                   LoadChannelStatusSettings(ctx, opts.SettingsRepo, projectID),
 		GitHubUsePersistedSettings: true,
 		Discord:                    DiscordConnectionStatus{SendResponses: true},
+	}
+	if provider, ok := opts.GitHubConnection.(automationGitHubConnectionProvider); ok && provider != nil {
+		status, err := provider.GetConnectionStatus(ctx)
+		if err != nil {
+			return "", err
+		}
+		input.GitHub = status
+		input.GitHubUsePersistedSettings = false
 	}
 	var webhooks []models.WebhookEndpoint
 

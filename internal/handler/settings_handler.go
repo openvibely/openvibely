@@ -139,6 +139,14 @@ func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 
+	personalPAT := false
+	if h.personalGitHub != nil {
+		var modeErr error
+		personalPAT, modeErr = h.personalGitHub.UsesPersonalPAT(c.Request().Context())
+		if modeErr != nil {
+			return modeErr
+		}
+	}
 	providers := make(map[string]bool)
 	settingResets := make(map[string]string)
 	webhookIDs := make([]string, 0, len(ids))
@@ -150,7 +158,9 @@ func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
 				return echo.NewHTTPError(http.StatusBadRequest, "unsupported channel selection")
 			}
 			providers[provider] = true
-			mergeChannelSettingResets(settingResets, resets)
+			if provider != "github" || !personalPAT {
+				mergeChannelSettingResets(settingResets, resets)
+			}
 			continue
 		}
 		webhookIDs = append(webhookIDs, id)
@@ -164,8 +174,10 @@ func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "all selected channels must be removable from the current project").SetInternal(err)
 	}
 
-	if providers["github"] && h.githubSvc != nil {
-		_ = h.githubSvc.Disconnect(c.Request().Context())
+	if providers["github"] && h.githubSvc != nil && (h.personalGitHub == nil || personalPAT) {
+		if err := h.githubSvc.Disconnect(c.Request().Context()); err != nil {
+			return err
+		}
 	}
 	if providers["slack"] && h.slackSvc != nil {
 		_ = h.slackSvc.Disconnect(c.Request().Context())
@@ -362,7 +374,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	githubAppSlug = setting(service.GitHubSettingAppSlug)
 	githubPrivateKeyValue = setting(service.GitHubSettingAppPrivateKey)
 	githubHasPrivateKey = strings.TrimSpace(githubPrivateKeyValue) != ""
-	githubPATValue = setting(service.GitHubSettingPAT)
+	if h.personalGitHub == nil {
+		githubPATValue = setting(service.GitHubSettingPAT)
+	}
 	if strings.TrimSpace(githubPATValue) != "" {
 		githubHasPAT = true
 	}
@@ -575,6 +589,22 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		channelView.DiscordBotToken = ""
 		channelView.EmailPasswordValue = ""
 	}
+	if h.personalGitHub != nil {
+		own, err := h.personalGitHub.PersonalConnection(h.projectRuntimePrincipalContext(ctx))
+		if err != nil {
+			return projectAccessResponse(c, err)
+		}
+		channelView.GitHubPersonal = true
+		channelView.GitHubRevision = strconv.FormatInt(own.Revision, 10)
+		channelView.GitHubAuthorName = own.AuthorName
+		channelView.GitHubAuthorEmail = own.AuthorEmail
+		channelView.GitHubPATValue = ""
+		channelView.GitHubHasPAT = own.PAT != ""
+		if githubAuthMode == service.GitHubAuthModePAT {
+			channelView.GitHubAPIEndpoint = own.APIEndpoint
+			channelView.HasGitHubChannel = own.PAT != ""
+		}
+	}
 	if isHTMX(c) || page.IsFragment {
 		return render(c, http.StatusOK, pages.SettingsContent(channelView))
 	}
@@ -751,6 +781,9 @@ func (h *Handler) handleGitHubConnect(c echo.Context) error {
 }
 
 func (h *Handler) handleGitHubConfigure(c echo.Context) error {
+	if h.personalGitHub != nil && service.NormalizeGitHubAuthMode(c.FormValue("github_auth_mode")) == service.GitHubAuthModePAT {
+		return h.savePersonalGitHub(c)
+	}
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
@@ -839,6 +872,15 @@ func (h *Handler) handleGitHubCallback(c echo.Context) error {
 }
 
 func (h *Handler) handleGitHubDisconnect(c echo.Context) error {
+	if h.personalGitHub != nil {
+		personal, err := h.personalGitHub.UsesPersonalPAT(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		if personal {
+			return h.removePersonalGitHub(c)
+		}
+	}
 	if h.githubSvc == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "GitHub integration is not configured")
 	}
@@ -849,6 +891,15 @@ func (h *Handler) handleGitHubDisconnect(c echo.Context) error {
 }
 
 func (h *Handler) handleGitHubRemove(c echo.Context) error {
+	if h.personalGitHub != nil {
+		personal, err := h.personalGitHub.UsesPersonalPAT(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		if personal {
+			return h.removePersonalGitHub(c)
+		}
+	}
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}

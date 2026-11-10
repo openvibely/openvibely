@@ -1529,6 +1529,7 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		},
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		GitHubConnection:   s.githubProjectSvc,
 		ProjectID:          projectID,
 		CallerTaskID:       callerTaskID,
 		TaskRepo:           s.taskRepo,

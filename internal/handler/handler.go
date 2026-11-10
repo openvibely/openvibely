@@ -109,6 +109,7 @@ type Handler struct {
 	githubPRFeedbackRepo       persistence.GitHubPRFeedbackStore
 	githubAuthRepo             persistence.GitHubAuthStore
 	githubSvc                  GitHubServiceProvider
+	personalGitHub             *service.GitHubService
 	slackSvc                   SlackServiceProvider
 	discordSvc                 DiscordServiceProvider
 	channelMessageRouter       *service.ChannelMessageRouter
@@ -1016,6 +1017,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/telegram/remove", h.handleTelegramRemove)
 	e.POST("/channels/telegram/send-responses", h.handleTelegramSendResponses)
 	e.POST("/channels/github/configure", h.handleGitHubConfigure)
+	e.POST("/channels/github/identity", h.lookupPersonalGitHub)
 	e.GET("/channels/github/connect", h.handleGitHubConnect)
 	e.GET("/channels/github/callback", h.handleGitHubCallback)
 	e.POST("/channels/github/disconnect", h.handleGitHubDisconnect)

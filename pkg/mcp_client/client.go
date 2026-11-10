@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 )
 
 // MCPServer represents a running MCP server subprocess.
@@ -125,6 +127,30 @@ type serverAcquireResult struct {
 
 // NewMCPManager creates a manager and starts all configured MCP servers.
 func NewMCPManager(ctx context.Context, configs []models.MCPServerConfig, workDir string) (*MCPManager, error) {
+	if gitidentity.Configured(ctx) && len(configs) > 0 {
+		identity, err := gitidentity.Resolve(ctx)
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := json.Marshal(identity)
+		if err != nil {
+			return nil, err
+		}
+		scope := fmt.Sprintf("%x", sha256.Sum256(encoded))
+		configs = append([]models.MCPServerConfig(nil), configs...)
+		for i, cfg := range configs {
+			if cfg.Type != "stdio" && (cfg.Type != "" || cfg.URL != "") {
+				continue
+			}
+			vars := make(map[string]string, len(cfg.Env)+1)
+			for k, v := range cfg.Env {
+				vars[k] = v
+			}
+			vars["OV_GIT_IDENTITY_SCOPE"] = scope
+			configs[i].Env = vars
+		}
+	}
+
 	// Avoid worker bookkeeping on the common single-server path.
 	if len(configs) == 1 {
 		cfg := configs[0]
@@ -503,6 +529,11 @@ func startServer(ctx context.Context, cfg models.MCPServerConfig, workDir string
 		cmd.Env = os.Environ()
 		for k, v := range cfg.Env {
 			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+		var envErr error
+		cmd.Env, envErr = gitidentity.Environment(ctx, cmd.Env)
+		if envErr != nil {
+			return nil, envErr
 		}
 		stdin, err := cmd.StdinPipe()
 		if err != nil {

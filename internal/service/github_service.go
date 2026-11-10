@@ -27,6 +27,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -225,6 +226,8 @@ type githubAppConfig struct {
 }
 
 type GitHubService struct {
+	gitRunIdentities        persistence.RunIdentityStore
+	personalConnections     persistence.GitHubConnectionStore
 	credentialOrganizations persistence.OrganizationStore
 	credentialAuthOff       bool
 	projectCloneLocks       sync.Map // project ID -> *semaphore.Weighted
@@ -266,13 +269,20 @@ func NewGitHubService(settingsRepo persistence.SettingsStore, appID, appSlug, ap
 }
 
 func defaultRunGit(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := gitidentity.Command(ctx, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, extraEnv...)
-	cmd.Env = ensureGitSSLConfig(cmd.Env)
+	var envErr error
+	cmd.Env, envErr = gitidentity.Environment(ctx, cmd.Env)
+	if envErr != nil {
+		return nil, envErr
+	}
+	if !gitidentity.Configured(ctx) {
+		cmd.Env = ensureGitSSLConfig(cmd.Env)
+	}
 	if len(args) > 0 && args[0] == "status" {
 		cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=0")
 	}
@@ -344,9 +354,12 @@ func (s *GitHubService) GetConnectionStatus(ctx context.Context) (GitHubConnecti
 	if err != nil {
 		return GitHubConnectionStatus{}, err
 	}
-	pat, err := s.getPAT(ctx)
-	if err != nil {
-		return GitHubConnectionStatus{}, err
+	var pat string
+	if mode == GitHubAuthModePAT {
+		pat, err = s.getPAT(ctx)
+		if err != nil {
+			return GitHubConnectionStatus{}, err
+		}
 	}
 
 	status := GitHubConnectionStatus{
@@ -357,7 +370,14 @@ func (s *GitHubService) GetConnectionStatus(ctx context.Context) (GitHubConnecti
 	if mode == GitHubAuthModePAT {
 		status.Configured = status.HasPAT
 		status.Connected = status.HasPAT
-		if s.settingsRepo != nil {
+		if s.personalConnections != nil {
+			c, err := s.PersonalConnection(ctx)
+			if err != nil {
+				return status, err
+			}
+			status.AccountLogin = c.Login
+			status.AccountType = "User"
+		} else if s.settingsRepo != nil {
 			patLogin, _ := s.settingsRepo.Get(ctx, GitHubSettingPATUserLogin)
 			status.AccountLogin = strings.TrimSpace(patLogin)
 			if status.AccountLogin != "" {
@@ -447,6 +467,31 @@ func (s *GitHubService) HandleInstallCallback(ctx context.Context, installationI
 }
 
 func (s *GitHubService) Disconnect(ctx context.Context) error {
+	if s.personalConnections != nil {
+		appCfg, err := s.getAppConfig(ctx)
+		if err != nil {
+			return err
+		}
+		mode, err := s.resolveAuthMode(ctx, appCfg)
+		if err != nil {
+			return err
+		}
+		if mode == GitHubAuthModePAT {
+			c, err := s.PersonalConnection(ctx)
+			if err != nil {
+				return err
+			}
+			ok, err := s.DeletePersonalConnection(ctx, c.Revision)
+			if err != nil {
+				return err
+			}
+			if !ok && c.Revision != 0 {
+				return fmt.Errorf("GitHub settings changed; refresh before disconnecting")
+			}
+			return nil
+		}
+	}
+
 	ctx, accessErr := credentialPrincipalContext(ctx, s.credentialOrganizations, s.credentialAuthOff)
 	if accessErr != nil {
 		return accessErr
@@ -1387,7 +1432,21 @@ func githubPublishCommitParents(primaryParentSHA, baseSHA, comparisonStatus stri
 }
 
 func (s *GitHubService) createGitHubCommit(ctx context.Context, token string, repo *GitHubRepoRef, message, treeSHA string, parentSHAs []string, committerName, committerEmail string) (string, error) {
+	gitCtx := s.GitContext(ctx)
+	if gitidentity.Configured(gitCtx) {
+		if err := gitidentity.RequireCommit(gitCtx); err != nil {
+			return "", err
+		}
+		identity, err := gitidentity.Resolve(gitCtx)
+		if err != nil {
+			return "", err
+		}
+		committerName, committerEmail = identity.Name, identity.Email
+	}
 	payload := map[string]any{"message": message, "tree": treeSHA, "parents": parentSHAs}
+	if gitidentity.Configured(gitCtx) {
+		payload["author"] = map[string]string{"name": committerName, "email": committerEmail}
+	}
 	if strings.TrimSpace(committerName) != "" && strings.TrimSpace(committerEmail) != "" {
 		payload["committer"] = map[string]string{"name": strings.TrimSpace(committerName), "email": strings.TrimSpace(committerEmail)}
 	}
@@ -2305,7 +2364,17 @@ func (s *GitHubService) getAuthenticatedUser(ctx context.Context, repo *GitHubRe
 		return &GitHubAuthenticatedUser{Login: login, Source: GitHubAuthModeApp}, nil
 	}
 
-	useGlobalPATLoginCache := repo == nil || strings.TrimSpace(repo.APIBaseURL) == ""
+	if s.personalConnections != nil && (repo == nil || strings.TrimSpace(repo.APIBaseURL) == "") {
+		c, err := s.PersonalConnection(ctx)
+		if err != nil {
+			return nil, err
+		}
+		apiBaseURL, err = personalGitHubAPIEndpoint(c.APIEndpoint)
+		if err != nil {
+			return nil, err
+		}
+	}
+	useGlobalPATLoginCache := s.personalConnections == nil && (repo == nil || strings.TrimSpace(repo.APIBaseURL) == "")
 	if useGlobalPATLoginCache && s.settingsRepo != nil {
 		stored, err := s.settingsRepo.Get(ctx, GitHubSettingPATUserLogin)
 		if err != nil {
@@ -2960,6 +3029,19 @@ func (s *GitHubService) createOperationAccessToken(ctx context.Context, apiBaseU
 		return "", err
 	}
 	if mode == GitHubAuthModePAT {
+		if s.personalConnections != nil {
+			c, err := s.PersonalConnection(ctx)
+			if err != nil {
+				return "", err
+			}
+			expected, err := personalGitHubAPIEndpoint(c.APIEndpoint)
+			if err != nil {
+				return "", err
+			}
+			if strings.TrimRight(apiBaseURL, "/") != expected {
+				return "", fmt.Errorf("your GitHub connection is configured for a different server")
+			}
+		}
 		pat, err := s.getPAT(ctx)
 		if err != nil {
 			return "", err
@@ -3016,6 +3098,9 @@ func (s *GitHubService) cloneProjectRepo(ctx context.Context, tokenCloneURL, loc
 		return s.cloneWithToken(ctx, tokenCloneURL, destPath, token)
 	}
 
+	if gitidentity.Configured(s.GitContext(ctx)) {
+		return fmt.Errorf("configure your GitHub connection before cloning: %w", tokenErr)
+	}
 	if err := s.cloneWithLocalGit(ctx, localCloneURL, destPath); err != nil {
 		if shouldIncludeGitHubAuthUnavailableContext(err) {
 			return fmt.Errorf("cloning repository with local git CLI fallback after GitHub auth was unavailable (%v): %w", tokenErr, err)
@@ -3533,6 +3618,18 @@ func NormalizeGitHubAuthMode(raw string) string {
 }
 
 func (s *GitHubService) resolveAuthMode(ctx context.Context, appCfg githubAppConfig) (string, error) {
+	if s.personalConnections != nil {
+		if s.settingsRepo != nil {
+			mode, err := s.settingsRepo.Get(ctx, GitHubSettingAuthMode)
+			if err != nil {
+				return "", err
+			}
+			if mode == GitHubAuthModeApp || (strings.TrimSpace(mode) == "" && appCfg.isConfigured()) {
+				return GitHubAuthModeApp, nil
+			}
+		}
+		return GitHubAuthModePAT, nil
+	}
 	mode := ""
 	if s.settingsRepo != nil {
 		storedMode, err := s.settingsRepo.Get(ctx, GitHubSettingAuthMode)
@@ -3559,6 +3656,13 @@ func (s *GitHubService) resolveAuthMode(ctx context.Context, appCfg githubAppCon
 }
 
 func (s *GitHubService) getPAT(ctx context.Context) (string, error) {
+	if s.personalConnections != nil {
+		c, err := s.PersonalConnection(ctx)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(c.PAT), nil
+	}
 	if s.settingsRepo == nil {
 		return "", nil
 	}
@@ -3572,6 +3676,20 @@ func (s *GitHubService) getPAT(ctx context.Context) (string, error) {
 // GlobalAPIEndpoint returns the GitHub API endpoint saved in the global settings.
 // An empty string means public GitHub (https://api.github.com is the implicit default).
 func (s *GitHubService) GlobalAPIEndpoint(ctx context.Context) string {
+	if s.personalConnections != nil {
+		appCfg, configErr := s.getAppConfig(ctx)
+		mode, modeErr := s.resolveAuthMode(ctx, appCfg)
+		if configErr != nil || modeErr != nil {
+			return ""
+		}
+		if mode != GitHubAuthModeApp {
+			c, err := s.PersonalConnection(ctx)
+			if err != nil {
+				return ""
+			}
+			return c.APIEndpoint
+		}
+	}
 	if s.settingsRepo == nil {
 		return ""
 	}

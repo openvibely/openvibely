@@ -29,6 +29,8 @@ func TestMigration228PreservesLegacyPATForOwnerOnly(t *testing.T) {
 		var count int
 		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM user_github_connections`).Scan(&count))
 		require.Equal(t, 1, count)
+		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM app_settings WHERE key IN ('github_pat','github_pat_user_login')`).Scan(&count))
+		require.Zero(t, count, "no stale shared PAT may remain after migration")
 		require.NoError(t, goose.DownTo(db, ".", 227))
 	}
 }

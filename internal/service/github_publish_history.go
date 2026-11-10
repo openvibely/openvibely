@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 	"strings"
 )
 
@@ -50,6 +51,17 @@ func (s *GitHubService) publishTaskHistory(ctx context.Context, repo *GitHubRepo
 			return nil, fmt.Errorf("staging task changes: %w", err)
 		}
 		name, email := strings.TrimSpace(req.CommitterName), strings.TrimSpace(req.CommitterEmail)
+		gitCtx := s.GitContext(ctx)
+		if gitidentity.Configured(gitCtx) {
+			if err := gitidentity.RequireCommit(gitCtx); err != nil {
+				return nil, err
+			}
+			identity, err := gitidentity.Resolve(gitCtx)
+			if err != nil {
+				return nil, err
+			}
+			name, email = identity.Name, identity.Email
+		}
 		if name == "" {
 			name = "OpenVibely Bot"
 		}

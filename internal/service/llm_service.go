@@ -35,6 +35,7 @@ type LLMCaller interface {
 }
 
 type LLMService struct {
+	gitCredentials            *GitHubService
 	checkpointCache           activeCheckpointCache
 	skillInstallationResult   func(context.Context, llmcontracts.AgentRequest) (string, error)
 	skillInstallationPrompt   func(context.Context, llmcontracts.AgentRequest, skilldeps.InstallationRequest) error
@@ -520,6 +521,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		}
 	}
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		GitHubConnection:      personalGitHubStatusProvider(s.gitCredentials),
 		ProjectID:             task.ProjectID,
 		CallerTaskID:          task.ID,
 		TaskRepo:              s.taskRepo,
@@ -1169,6 +1171,7 @@ func applyPlannerFollowupEffort(task models.Task, agent *models.LLMConfig, model
 }
 
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
+	ctx = s.gitContext(ctx)
 	ctx = agenttools.WithProcessLifetime(ctx)
 	modelDefaultTier := agent.ServiceTier
 	modelDefaultEffort := agent.ReasoningEffort
@@ -2352,10 +2355,12 @@ func (s *LLMService) callAgentDirect(ctx context.Context, message string, attach
 }
 
 func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool) (string, int, error) {
+	ctx = s.gitContext(ctx)
 	return s.callAgentDirectWithDefinitionMode(ctx, message, attachments, agent, workDir, agentDef, disableTools, false)
 }
 
 func (s *LLMService) callAgentDirectWithDefinitionMode(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool, rawDirectPrompt bool) (string, int, error) {
+	ctx = s.gitContext(ctx)
 	if s.updateTracker != nil {
 		done, err := s.updateTracker.Start(update.WorkChat)
 		if err != nil {
@@ -2496,6 +2501,7 @@ func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *mod
 // workDir is the project's repo path used as the working directory for model calls.
 // isTaskFollowup when true uses the coding agent system prompt instead of task management prompt.
 func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, agentDef *models.Agent, isTaskFollowup ...bool) (llmcontracts.AgentResult, error) {
+	ctx = s.gitContext(ctx)
 	ctx = agenttools.WithProcessLifetime(ctx)
 	followup := len(isTaskFollowup) > 0 && isTaskFollowup[0]
 	applog.Infof("[agent-svc] CallAgentDirectStreaming agent=%s model=%s message_len=%d exec=%s history=%d workDir=%s isTaskFollowup=%v", agent.Name, agent.Model, len(message), execID, len(chatHistory), workDir, followup)

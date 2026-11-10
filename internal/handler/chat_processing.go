@@ -2843,7 +2843,7 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 				if h.llmSvc != nil {
 					return h.llmSvc.CommitTaskWorktreeChanges(ctx, task, exec, workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
 				}
-				return service.CommitWorktreeChanges(workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
+				return service.CommitWorktreeChangesContext(ctx, workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
 			})
 			if commitErr != nil {
 				applog.Infof("[handler] error committing task follow-up worktree changes task=%s worktree=%s: %v", task.ID, workDir, commitErr)

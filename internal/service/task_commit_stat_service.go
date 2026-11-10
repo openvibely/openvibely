@@ -24,8 +24,19 @@ func (s *LLMService) SetTaskCommitStatRepo(repo persistence.TaskCommitStatStore)
 
 // CommitTaskWorktreeChanges commits OpenVibely-produced task changes and records summary-only commit stats.
 func (s *LLMService) CommitTaskWorktreeChanges(ctx context.Context, task *models.Task, execModel *models.Execution, worktreePath, message string) error {
+	if s.gitCredentials != nil && task != nil {
+		execID := ""
+		if execModel != nil {
+			execID = execModel.ID
+		}
+		var err error
+		ctx, err = s.gitCredentials.TaskGitContext(ctx, task.ID, execID)
+		if err != nil {
+			return err
+		}
+	}
 	beforeSHA, _ := gitCommitSHA(worktreePath, "HEAD")
-	if err := CommitWorktreeChanges(worktreePath, message); err != nil {
+	if err := CommitWorktreeChangesContext(s.gitContext(ctx), worktreePath, message); err != nil {
 		return err
 	}
 	afterSHA, err := gitCommitSHA(worktreePath, "HEAD")

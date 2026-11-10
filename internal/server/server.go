@@ -799,6 +799,10 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		cfg.ProjectRepoRoot,
 	)
 	githubSvc.SetCredentialAuthorization(stores.Organizations, cfg.AuthMode == auth.AuthModeDisabled)
+	githubSvc.SetPersonalConnections(stores.GitHubConnections)
+	agentplugins.SetGitContextResolver(githubSvc.GitContext)
+	githubSvc.SetGitRunIdentities(stores.RunIdentities)
+	llmSvc.SetGitCredentials(githubSvc)
 	projectSvc.SetManagedProjectRepoResolver(githubSvc)
 	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
 	automationLiveViewTracker := service.NewAutomationLiveViewTracker()
@@ -1208,6 +1212,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	h.SetGitHubPRFeedbackRepo(githubPRFeedbackRepo)
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetGitHubService(githubSvc)
+	h.SetPersonalGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
 	h.SetDiscordService(discordSvc)
 	h.SetChannelMessageRouter(channelMessageRouter)

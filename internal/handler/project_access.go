@@ -16,6 +16,9 @@ func (h *Handler) SetProjectAccessService(s *service.ProjectAccessService) { h.p
 // ownership for an arbitrary task, schedule, execution, input, or attachment ID.
 func (h *Handler) projectAccessBoundary(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		if h.personalGitHub != nil {
+			c.SetRequest(c.Request().WithContext(h.personalGitHub.GitContext(c.Request().Context())))
+		}
 		if h.projectAccessSvc != nil {
 			switch c.Path() {
 			case "/api/system/update/apply", "/api/system/update/cancel":

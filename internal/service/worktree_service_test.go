@@ -2129,13 +2129,16 @@ func TestCommitWorktreeChanges_AutoConfigSetupMissingName(t *testing.T) {
 
 	cmd = exec.Command("git", "config", "--local", "user.name")
 	cmd.Dir = dir
+	if out, err := cmd.Output(); err == nil || len(out) != 0 {
+		t.Fatal("commit must not write repository identity")
+	}
+	cmd = exec.Command("git", "log", "-1", "--format=%an <%ae>")
+	cmd.Dir = dir
 	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || strings.TrimSpace(string(out)) != "OpenVibely Bot <partial@example.com>" {
+		t.Fatalf("wrong process identity: %s: %v", out, err)
 	}
-	if name := strings.TrimSpace(string(out)); name != "OpenVibely Bot" {
-		t.Fatalf("expected missing user.name to be filled, got %q", name)
-	}
+
 }
 
 func TestWorktreeDiff(t *testing.T) {

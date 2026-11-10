@@ -12,6 +12,24 @@ import (
 // A project maintainer grant must not authorize changing shared executable code.
 func (h *Handler) authorizeSharedDefinitionResource(c echo.Context) error {
 	path := c.Path()
+	if h.personalGitHub != nil {
+		switch path {
+		case "/channels/github/identity":
+			return nil
+		case "/channels/github/configure":
+			if c.FormValue("github_auth_mode") != "app" {
+				return nil
+			}
+		case "/channels/github/remove", "/channels/github/disconnect":
+			personal, err := h.personalGitHub.UsesPersonalPAT(c.Request().Context())
+			if err != nil {
+				return err
+			}
+			if personal {
+				return nil
+			}
+		}
+	}
 	// OAuth callbacks authenticate using their single-use state, not a browser
 	// session. Callback run-as checks belong in flow completion.
 	if path == "/models/oauth/callback" {

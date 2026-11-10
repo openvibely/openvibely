@@ -12,10 +12,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/mcpconfig"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 	mcpclient "github.com/openvibely/openvibely/pkg/mcp_client"
 )
 
@@ -196,8 +198,35 @@ func defaultPluginBaseFromRuntime() string {
 	return base
 }
 
+var gitContextMu sync.RWMutex
+var gitContextResolver func(context.Context) context.Context
+
+// SetGitContextResolver also protects background marketplace operations that
+// have no request context. Missing authenticated actors fail closed.
+func SetGitContextResolver(resolve func(context.Context) context.Context) {
+	gitContextMu.Lock()
+	defer gitContextMu.Unlock()
+	gitContextResolver = resolve
+}
+
 func runCommandCombined(ctx context.Context, name string, args ...string) error {
+	gitContextMu.RLock()
+	resolve := gitContextResolver
+	gitContextMu.RUnlock()
+	if name == "git" && resolve != nil {
+		ctx = resolve(ctx)
+	}
+
 	cmd := exec.CommandContext(ctx, name, args...)
+	if name == "git" {
+		cmd = gitidentity.Command(ctx, args...)
+	}
+
+	var envErr error
+	cmd.Env, envErr = gitidentity.Environment(ctx, os.Environ())
+	if envErr != nil {
+		return envErr
+	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s %s failed: %s", name, strings.Join(args, " "), strings.TrimSpace(string(out)))
 	}

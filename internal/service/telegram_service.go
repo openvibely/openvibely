@@ -1415,6 +1415,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		ResultAdapter: telegramSendToTaskActionResult,
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		GitHubConnection:   s.githubProjectSvc,
 		ProjectID:          projectID,
 		CallerTaskID:       callerTaskID,
 		TaskRepo:           s.taskRepo,
