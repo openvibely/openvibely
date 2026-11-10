@@ -796,6 +796,20 @@ func TestHandler_GetTaskChanges_ShowsMergeOptions(t *testing.T) {
 	if !strings.Contains(body, "data-changes-pr-fields") {
 		t.Fatalf("expected GitHub section header in actions dropdown, body=%s", body)
 	}
+	// The composer endpoint shares eligibility but returns only the action fragment.
+	req = httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes?composer_action=1", nil)
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatal(err)
+	}
+	body = rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, `data-composer-action="true"`) || !strings.Contains(body, `id="composer-changes-split-settings"`) || !strings.Contains(body, `data-local-available="true"`) || strings.Contains(body, `id="diff-viewer"`) {
+		t.Fatalf("unexpected composer action fragment: status %d, body %s", rec.Code, body)
+	}
+
 }
 
 func TestHandler_GetTaskChanges_HidesMergeOptionsForFailedMergedTask(t *testing.T) {

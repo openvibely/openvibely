@@ -1,8 +1,11 @@
 package pages
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"net/http"
 	"strings"
 	"testing"
@@ -303,4 +306,38 @@ func TestBrowserFunctional_ChangesSplitActionMergedLocalSettings(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestBrowserFunctional_ChangesSplitActionComposer(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	var activity bytes.Buffer
+	if err := components.TaskChangeActivity("layer-task").Render(context.Background(), &activity); err != nil {
+		t.Fatal(err)
+	}
+	server := worktreeActionsFixture(t, `<form hx-target="#composer-thread-sentinel" style="position:fixed;bottom:20px;left:20px;width:650px;z-index:90;background:#22272e;padding:16px"><div id="composer-thread-sentinel">Thread retained</div>`+activity.String()+`</form>`, nil)
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-composer", func(b *composerFocusCDP) {
+		b.waitFor("composer summary mounted", `String(!!document.querySelector('#task-change-activity'))`, "true")
+		b.evaluate(`document.querySelector('#task-change-activity').hidden=false;'ok'`)
+		b.waitFor("composer action ready", `String(document.querySelector('#composer-changes-action [data-changes-primary]')?.textContent==='Create PR')`, "true")
+		b.waitFor("thread untouched by action fragment load", `document.querySelector("#composer-thread-sentinel").textContent`, "Thread retained")
+		b.waitFor("unique menu IDs", `String(document.querySelectorAll('#changes-split-settings').length===1&&document.querySelectorAll('#composer-changes-split-settings').length===1)`, "true")
+		b.waitFor("ghost appearance", `(()=>{const b=document.querySelector('#composer-changes-action [data-changes-primary]'),t=document.querySelector('#composer-changes-action [data-changes-settings-toggle]');return String(b.classList.contains('btn-ghost')&&getComputedStyle(b).fontSize==='12px'&&getComputedStyle(b).opacity==='0.5'&&getComputedStyle(t,'::before').display==='none'&&t.querySelector('polyline')!==null)})()`, "true")
+		b.evaluate(`window.taskWorkspace.openThread();'ok'`)
+		b.click(`#composer-changes-action [data-changes-settings-toggle]`)
+		b.waitFor("composer popup above trigger", `(()=>{const p=document.querySelector('#composer-changes-split-settings'),b=document.querySelector('#composer-changes-action [data-changes-settings-toggle]');return String(p.matches(':popover-open')&&p.getBoundingClientRect().bottom<=b.getBoundingClientRect().top)})()`, "true")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 5, "y": 5}, nil)
+		b.waitFor("open highlight persists", `(()=>{const a=document.querySelector('#composer-changes-action [data-changes-primary]'),b=document.querySelector('#composer-changes-action [data-changes-settings-toggle]');return String(b.getAttribute('aria-expanded')==='true'&&getComputedStyle(b).opacity==='1'&&getComputedStyle(a).backgroundColor!=='rgba(0, 0, 0, 0)'&&getComputedStyle(b).backgroundColor!==getComputedStyle(a).backgroundColor)})()`, "true")
+		b.click(`#composer-changes-action [data-changes-mode="local"]`)
+		b.waitFor("local action enabled", `String(document.querySelector('#composer-changes-action [data-changes-primary]').textContent==='Merge'&&!document.querySelector('#composer-changes-action [data-changes-primary]').disabled&&document.querySelector('#composer-changes-action [data-changes-primary]').getAttribute('aria-busy')==='false')`, "true")
+		b.waitFor("preference save completed", `String(document.querySelector('#composer-changes-action [data-changes-save-state]').textContent==='Choices are remembered for this project.')`, "true")
+		b.waitFor("hidden toolbar is not synchronized", `String(document.querySelector('[data-composer-action="false"] [data-changes-primary]').textContent==='Create PR')`, "true")
+		b.evaluate(`window.taskWorkspace.openChanges();'ok'`)
+		b.waitFor("Changes toolbar fetches preferences on visit", `String(document.querySelector('[data-composer-action="false"] [data-changes-primary]').textContent==='Merge')`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+		b.click(`#composer-changes-action [data-changes-primary]`)
+		b.evaluate(`fetch('/fixture-state').then(r=>r.json()).then(s=>window.composerActions=s.actions);'ok'`)
+		b.waitFor("composer dispatches selected merge once", `String(window.composerActions?.length===1&&window.composerActions[0].merge_type==='merge'&&window.composerActions[0].changes_target==='main')`, "true")
+	})
 }

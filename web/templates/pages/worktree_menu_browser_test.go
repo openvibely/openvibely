@@ -102,6 +102,12 @@ func worktreeActionsFixtureForTask(t *testing.T, runner string, results chan str
 			return
 		}
 		if r.URL.Path == "/tasks/layer-task/changes" {
+			if r.URL.Query().Get("composer_action") == "1" {
+				if err := ComposerChangesAction(task, nil, false, false).Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+				return
+			}
 			if err := TaskChangesWorktreeContent(diff, task, nil, nil, nil, false, false).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}

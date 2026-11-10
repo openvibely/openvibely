@@ -8,35 +8,52 @@ import (
 )
 
 templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable bool) {
+ @changesSplitActionView(task, taskPR, localUnavailable, false)
+}
+
+templ ComposerChangesAction(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable, conflict bool) {
+ if task.WorktreeBranch != "" && !conflict {
+  @changesSplitActionView(task, taskPR, localUnavailable, true)
+ } else {
+  <button type="button" class="btn btn-ghost btn-xs text-xs font-normal opacity-50 hover:opacity-100" data-review-changes onclick="window.taskWorkspace.openChanges()">Review changes</button>
+ }
+}
+
+templ changesSplitActionView(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable, composer bool) {
+ {{ prefix := "changes"; if composer { prefix = "composer-changes" } }}
  @templates.MenuStyles()
- <div data-changes-split data-task-id={ task.ID } data-project-id={ task.ProjectID } data-local-available={ fmt.Sprint(!localUnavailable && task.MergeStatus != models.MergeStatusMerged) } data-task-merged={ fmt.Sprint(task.MergeStatus == models.MergeStatusMerged) } data-linked-pr={ fmt.Sprint(taskPR != nil) } data-task-running={ fmt.Sprint(task.Status == models.StatusRunning) }>
+ <div data-changes-split data-composer-action={ fmt.Sprint(composer) } data-task-id={ task.ID } data-project-id={ task.ProjectID } data-local-available={ fmt.Sprint(!localUnavailable && task.MergeStatus != models.MergeStatusMerged) } data-task-merged={ fmt.Sprint(task.MergeStatus == models.MergeStatusMerged) } data-linked-pr={ fmt.Sprint(taskPR != nil) } data-task-running={ fmt.Sprint(task.Status == models.StatusRunning) }>
   <div class="join ov-changes-split">
    if taskPR != nil {
-    <a class="btn btn-primary btn-sm join-item btn-disabled" data-linked-pr-action aria-disabled="true" tabindex="-1" href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprint(taskPR.PRNumber) }</a>
+    <a class={ "btn join-item btn-disabled", templ.KV("btn-primary btn-sm", !composer), templ.KV("btn-ghost btn-xs h-6 min-h-0 text-xs font-normal px-2", composer) } data-linked-pr-action aria-disabled="true" tabindex="-1" href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprint(taskPR.PRNumber) }</a>
    }
-   <button type="button" class="btn btn-primary btn-sm join-item" data-changes-primary disabled aria-disabled="true" aria-busy="true" hidden?={ taskPR != nil }>Loading…</button>
-   <button type="button" class="btn btn-primary btn-sm join-item" data-changes-settings-toggle disabled popovertarget="changes-split-settings" aria-label="Action settings" aria-expanded="false">
+   <button type="button" class={ "btn join-item", templ.KV("btn-primary btn-sm", !composer), templ.KV("btn-ghost btn-xs h-6 min-h-0 text-xs font-normal px-2", composer) } data-changes-primary disabled aria-disabled="true" aria-busy="true" hidden?={ taskPR != nil }>Loading…</button>
+   <button type="button" class={ "btn join-item", templ.KV("btn-primary btn-sm", !composer), templ.KV("btn-ghost btn-xs h-6 min-h-0 text-xs font-normal px-2", composer) } data-changes-settings-toggle disabled popovertarget={ prefix + "-split-settings" } aria-label="Action settings" aria-expanded="false">
+    if composer {
+     <svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+    } else {
     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m6 9 6 6 6-6z"></path></svg>
+    }
    </button>
   </div>
-  <div id="changes-split-settings" data-menu-content hidden popover="manual" class="ov-menu ov-changes-settings" style="position:fixed;inset:auto;margin:0;">
+  <div id={ prefix + "-split-settings" } data-changes-settings data-menu-content hidden popover="manual" class="ov-menu ov-changes-settings" style="position:fixed;inset:auto;margin:0;">
    <div class="join flex w-full" role="group" aria-label="Action type">
     <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="pr" aria-pressed="false">Pull request</button>
     <button type="button" class="btn btn-sm join-item flex-1" data-changes-mode="local" aria-pressed="false">Local merge</button>
    </div>
    <div data-changes-pr-fields>
-    <label for="changes-target-repo">Target repository</label>
-    <select id="changes-target-repo" class="select select-bordered select-sm w-full" data-changes-repo></select>
-    <label for="changes-target-branch">Target branch</label>
-    <select id="changes-target-branch" class="select select-bordered select-sm w-full" data-changes-branch></select>
+    <label for={ prefix + "-target-repo" }>Target repository</label>
+    <select id={ prefix + "-target-repo" } class="select select-bordered select-sm w-full" data-changes-repo></select>
+    <label for={ prefix + "-target-branch" }>Target branch</label>
+    <select id={ prefix + "-target-branch" } class="select select-bordered select-sm w-full" data-changes-branch></select>
     <button type="button" class="btn btn-ghost btn-xs mt-2" data-changes-more hidden>Load more branches</button>
     <p class="text-xs opacity-60 mt-2" data-changes-linked-note hidden>The linked PR keeps its original destination.</p>
    </div>
    <div data-changes-local-fields hidden>
-    <label for="changes-local-branch">Target branch</label>
-    <select id="changes-local-branch" class="select select-bordered select-sm w-full" data-changes-local-branch></select>
-    <label for="changes-merge-method">Merge method</label>
-    <select id="changes-merge-method" class="select select-bordered select-sm w-full" data-changes-method>
+    <label for={ prefix + "-local-branch" }>Target branch</label>
+    <select id={ prefix + "-local-branch" } class="select select-bordered select-sm w-full" data-changes-local-branch></select>
+    <label for={ prefix + "-merge-method" }>Merge method</label>
+    <select id={ prefix + "-merge-method" } class="select select-bordered select-sm w-full" data-changes-method>
      for _, action := range components.TaskWorktreeMergeActions() {
       <option value={ action.MergeType }>{ action.Label }</option>
      }
@@ -70,6 +87,20 @@ templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, loca
   .ov-changes-settings label { display:block;font-size:12px;opacity:.75;margin:14px 0 6px; }
   [data-changes-split] [hidden] { display:none !important; }
   @media(prefers-reduced-motion:reduce) { .ov-changes-split > .btn { transition:none; } }
+
+  [data-composer-action="true"] .ov-changes-split { border-radius:6px;color:oklch(var(--bc));display:flex; }
+  [data-composer-action="true"] .ov-changes-split > .btn { opacity:.5;border-radius:0; }
+  [data-composer-action="true"] .ov-changes-split > :first-child { border-radius:6px 0 0 6px;padding-right:4px; }
+  [data-composer-action="true"] .ov-changes-split > [data-changes-primary] { border-radius:6px 0 0 6px;padding-right:4px; }
+  [data-composer-action="true"] .ov-changes-split > [data-changes-settings-toggle] { border-radius:0 6px 6px 0;width:22px;min-width:22px;padding:0 8px 0 4px; }
+  [data-composer-action="true"] .ov-changes-split > [data-changes-settings-toggle]::before { display:none; }
+  [data-composer-action="true"] .ov-changes-split > .btn:hover:not(:disabled),
+  [data-composer-action="true"] [data-changes-settings-toggle][aria-expanded="true"] { opacity:1; }
+  [data-composer-action="true"] { --composer-action-hover:rgba(255,255,255,.12); }
+  [data-theme="light"] [data-composer-action="true"] { --composer-action-hover:var(--ov-l-surface-hover); }
+  [data-ov-theme-layer="custom"] [data-composer-action="true"] { --composer-action-hover:var(--ov-hover-bg); }
+  [data-composer-action="true"] .ov-changes-split:is(:hover,:has([aria-expanded="true"])) > .btn:not(:hover):not(:disabled) { background:color-mix(in srgb,var(--composer-action-hover) 45%,transparent) !important; }
+  [data-composer-action="true"] .ov-changes-split > [aria-expanded="true"]:not(:disabled) { background:var(--composer-action-hover) !important; }
  </style>
  @changesSplitActionScript()
 }
@@ -81,7 +112,7 @@ templ changesSplitActionScript() {
   const states=new WeakMap();
   function init(){document.querySelectorAll('[data-changes-split]').forEach(root=>{
    if(states.has(root))return;
-   const find=s=>root.querySelector(s),primary=find('[data-changes-primary]'),toggle=find('[data-changes-settings-toggle]'),panel=find('#changes-split-settings');
+   const find=s=>root.querySelector(s),primary=find('[data-changes-primary]'),toggle=find('[data-changes-settings-toggle]'),panel=find('[data-changes-settings]');
    const repo=find('[data-changes-repo]'),branch=find('[data-changes-branch]'),localBranch=find('[data-changes-local-branch]'),method=find('[data-changes-method]'),error=find('[data-changes-error]'),saveState=find('[data-changes-save-state]'),more=find('[data-changes-more]'),retry=find('[data-changes-retry]');
    const endpoint='/tasks/'+encodeURIComponent(root.dataset.taskId)+'/worktree/';
    let settingsLoading=true,prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='',localVersion=0,localChecked='',localLoading=false,mergeAllowed=false,rebaseAllowed=false;
@@ -92,7 +123,7 @@ templ changesSplitActionScript() {
    const nativePopover=typeof panel.showPopover==='function'&&typeof panel.hidePopover==='function';
    if(!nativePopover){panel.removeAttribute('popover');toggle.removeAttribute('popovertarget');}
    function isOpen(){return nativePopover?panel.matches(':popover-open'):!panel.hidden;}
-   function position(){if(!isOpen())return;const r=toggle.getBoundingClientRect();panel.style.maxHeight=Math.max(0,innerHeight-16)+'px';panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(r.bottom+4,innerHeight-panel.offsetHeight-8))+'px';}
+   function position(){if(!isOpen())return;const r=toggle.getBoundingClientRect();panel.style.maxHeight=Math.max(0,innerHeight-16)+'px';panel.style.left=Math.max(8,Math.min(r.right-panel.offsetWidth,innerWidth-panel.offsetWidth-8))+'px';panel.style.top=Math.max(8,Math.min(root.dataset.composerAction==='true'?r.top-panel.offsetHeight-8:r.bottom+4,innerHeight-panel.offsetHeight-8))+'px';}
    const controller=window.ovMenuController.create({trigger:()=>toggle,panels:[panel],isOpen,open:()=>{if(toggle.disabled)return;panel.hidden=false;if(nativePopover)panel.showPopover();else panel.setAttribute('data-menu-open','true');toggle.setAttribute('aria-expanded','true');position();},close:()=>{if(nativePopover)panel.hidePopover();panel.hidden=true;panel.removeAttribute('data-menu-open');toggle.setAttribute('aria-expanded','false');}});
    toggle.addEventListener('click',event=>{event.preventDefault();if(!toggle.disabled)controller.toggle(event);});
    panel.addEventListener('toggle',position);
@@ -166,9 +197,9 @@ templ changesSplitActionScript() {
     fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));
     showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;settingsLoading=false;render();loadLocalEligibility();if(prefs.mode==='pr')loadBranches(true);
    }catch(err){settingsLoading=false;setGroupDisabled(root.dataset.taskRunning==='true');primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','false');showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}
-   retry.addEventListener('click',load);load();
+   retry.addEventListener('click',load);state.load=load;load();
   });}
-  window.ovChangesSplit={init};
+  window.ovChangesSplit={init,refresh:container=>container.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.load())};
   document.addEventListener('htmx:afterSwap',init);
   document.addEventListener('htmx:beforeSwap',event=>{document.querySelectorAll('[data-changes-split]').forEach(root=>{if(event.detail?.target?.contains(root))states.get(root)?.close();});},true);
   window.addEventListener('resize',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()));

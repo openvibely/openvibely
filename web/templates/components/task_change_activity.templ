@@ -1,5 +1,7 @@
 package components
 
+import "fmt"
+
 // This node is preserved during thread morphs; the workspace controller owns its compact JSON projection.
 templ TaskChangeActivity(taskID string) {
 	<div id="task-change-activity" data-task-id={ taskID } hx-preserve="true" class="flex min-h-8 items-center gap-3 rounded-lg px-3 py-1.5 text-sm text-base-content/80" hidden>
@@ -11,7 +13,9 @@ templ TaskChangeActivity(taskID string) {
 				<span data-change-comments hidden></span>
 			</span>
 		</button>
-		<button type="button" class="task-change-review btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" data-review-changes onclick="window.taskWorkspace.openChanges()"><span data-change-action>Review changes</span></button>
+		<div id="composer-changes-action" class="flex-shrink-0" hx-get={ fmt.Sprintf("/tasks/%s/changes?composer_action=1", taskID) } hx-trigger="load, composer-actions-refresh" hx-target="this" hx-sync="this:queue last" hx-swap="innerHTML">
+   <button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 text-xs font-normal opacity-50" disabled>Loading…</button>
+  </div>
 	</div>
 	<style>
 		#task-change-activity { min-width:0; max-width:100%; margin-bottom:14px; }

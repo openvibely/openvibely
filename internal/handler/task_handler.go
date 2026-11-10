@@ -1417,6 +1417,7 @@ func (h *Handler) GetTaskChangesSummary(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"title": task.Title, "files": len(files), "insertions": insertions, "deletions": deletions,
 		"review_comments": len(h.loadTaskReviewComments(ctx, task.ID)),
+		"action_revision": fmt.Sprintf("%s:%s:%s:%s", task.Status, task.MergeStatus, task.WorktreeBranch, task.WorktreePath),
 		"status":          task.Status, "duration": components.FormatDuration(metrics.LatestDurationMs),
 	})
 }
@@ -1436,6 +1437,14 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 
 	ctx := c.Request().Context()
 	state := h.resolveTaskChangesWorktreeState(ctx, task)
+
+	if c.QueryParam("composer_action") == "1" {
+		var taskPR *models.TaskPullRequest
+		if h.taskPullRequestRepo != nil {
+			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
+		}
+		return render(c, http.StatusOK, pages.ComposerChangesAction(task, taskPR, state.LocalMergeUnavailable, state.ConflictRecovery))
+	}
 
 	reviewComments := h.loadTaskReviewComments(ctx, taskID)
 
