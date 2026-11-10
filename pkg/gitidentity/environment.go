@@ -47,6 +47,12 @@ func RequireCommit(ctx context.Context) error {
 // Rebase commands retain Git's original-author handling; the committer comes
 // from this environment.
 func Environment(ctx context.Context, base []string) ([]string, error) {
+	return CommandEnvironment(ctx, base, nil)
+}
+
+// CommandEnvironment scopes credentials to repository URLs supplied to Git.
+// Same-key empty values clear saved headers before adding the acting user's.
+func CommandEnvironment(ctx context.Context, base []string, args []string) ([]string, error) {
 	if !Configured(ctx) {
 		return base, nil
 	}
@@ -61,7 +67,7 @@ func Environment(ctx context.Context, base []string) ([]string, error) {
 	out := make([]string, 0, len(base)+24)
 	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")
-		if strings.HasPrefix(key, "GIT_TRACE") || key == "GIT_CURL_VERBOSE" || key == "GIT_SSL_NO_VERIFY" || strings.HasPrefix(key, "GIT_CONFIG_") || strings.HasPrefix(key, "GIT_AUTHOR_") || strings.HasPrefix(key, "GIT_COMMITTER_") || key == "EMAIL" || key == "GH_TOKEN" || key == "GITHUB_TOKEN" || key == "GH_ENTERPRISE_TOKEN" || key == "GITHUB_ENTERPRISE_TOKEN" || key == "GIT_ASKPASS" || key == "SSH_ASKPASS" || key == "GIT_SSH" || key == "GIT_SSH_COMMAND" || key == "GIT_TERMINAL_PROMPT" || key == "GH_CONFIG_DIR" || key == "GH_HOST" {
+		if strings.HasPrefix(key, "OV_GIT_AUTH_") || strings.HasPrefix(key, "GIT_TRACE") || key == "GIT_CURL_VERBOSE" || key == "GIT_SSL_NO_VERIFY" || strings.HasPrefix(key, "GIT_CONFIG_") || strings.HasPrefix(key, "GIT_AUTHOR_") || strings.HasPrefix(key, "GIT_COMMITTER_") || key == "EMAIL" || key == "GH_TOKEN" || key == "GITHUB_TOKEN" || key == "GH_ENTERPRISE_TOKEN" || key == "GITHUB_ENTERPRISE_TOKEN" || key == "GIT_ASKPASS" || key == "SSH_ASKPASS" || key == "GIT_SSH" || key == "GIT_SSH_COMMAND" || key == "GIT_TERMINAL_PROMPT" || key == "GH_CONFIG_DIR" || key == "GH_HOST" {
 			continue
 		}
 		if key == "PATH" {
@@ -82,9 +88,18 @@ func Environment(ctx context.Context, base []string) ([]string, error) {
 		} else {
 			out = append(out, "GH_ENTERPRISE_TOKEN="+i.Token)
 		}
-		out = append(out, "GH_HOST="+i.Host)
+		header := "AUTHORIZATION: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+i.Token))
+		out = append(out, "GH_HOST="+i.Host, "OV_GIT_AUTH_HOST="+i.Host, "OV_GIT_AUTH_HEADER="+header)
 		key := "http.https://" + i.Host + "/.extraHeader"
-		config = append(config, [2]string{key, ""}, [2]string{key, "AUTHORIZATION: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+i.Token))})
+		config = append(config, [2]string{key, ""}, [2]string{key, header})
+		for _, raw := range args {
+			target, err := url.Parse(raw)
+			if err != nil || target.Scheme != "https" || target.Host != i.Host || target.User != nil || target.RawQuery != "" || target.Fragment != "" {
+				continue
+			}
+			exact := "http." + target.String() + ".extraHeader"
+			config = append(config, [2]string{exact, ""}, [2]string{exact, header})
+		}
 	}
 	out = append(out, "GIT_CONFIG_COUNT="+strconv.Itoa(len(config)))
 	for n, pair := range config {

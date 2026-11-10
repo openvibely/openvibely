@@ -276,7 +276,7 @@ func defaultRunGit(ctx context.Context, dir string, extraEnv []string, args ...s
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, extraEnv...)
 	var envErr error
-	cmd.Env, envErr = gitidentity.Environment(ctx, cmd.Env)
+	cmd.Env, envErr = gitidentity.CommandEnvironment(ctx, cmd.Env, args)
 	if envErr != nil {
 		return nil, envErr
 	}

@@ -223,7 +223,11 @@ func runCommandCombined(ctx context.Context, name string, args ...string) error 
 	}
 
 	var envErr error
-	cmd.Env, envErr = gitidentity.Environment(ctx, os.Environ())
+	if name == "git" {
+		cmd.Env, envErr = gitidentity.CommandEnvironment(ctx, os.Environ(), args)
+	} else {
+		cmd.Env, envErr = gitidentity.Environment(ctx, os.Environ())
+	}
 	if envErr != nil {
 		return envErr
 	}

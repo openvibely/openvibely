@@ -42,7 +42,7 @@ func Executable(ctx context.Context) (string, error) {
 			return
 		}
 		quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
-		script := "#!/bin/sh\nHOME=" + quote(home) + "\nexport HOME\nexec " + quote(realGit) + " \"$@\"\n"
+		script := "#!/bin/sh\nHOME=" + quote(home) + "\nexport HOME\nreal_git=" + quote(realGit) + "\n" + networkScopeScript + "\nexec \"$real_git\" \"$@\"\n"
 		path := filepath.Join(dir, "git")
 		if runtime.GOOS == "windows" {
 			path += ".cmd"

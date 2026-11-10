@@ -18,7 +18,7 @@ func Command(ctx context.Context, args ...string) *exec.Cmd {
 	if pathErr != nil {
 		cmd.Err = pathErr
 	}
-	env, err := Environment(ctx, os.Environ())
+	env, err := CommandEnvironment(ctx, os.Environ(), args)
 	if err == nil && len(args) > 0 && (args[0] == "commit" || args[0] == "merge" || args[0] == "rebase") {
 		err = RequireCommit(ctx)
 	}
