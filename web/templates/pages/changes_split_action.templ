@@ -12,10 +12,8 @@ templ changesSplitAction(task *models.Task, taskPR *models.TaskPullRequest, loca
 }
 
 templ ComposerChangesAction(task *models.Task, taskPR *models.TaskPullRequest, localUnavailable, conflict bool) {
- if task.WorktreeBranch != "" && !conflict {
+ if task.WorktreeBranch != "" && task.MergeStatus != models.MergeStatusMerged && !conflict {
   @changesSplitActionView(task, taskPR, localUnavailable, true)
- } else {
-  <button type="button" class="btn btn-ghost btn-xs text-xs font-normal opacity-50 hover:opacity-100" data-review-changes onclick="window.taskWorkspace.openChanges()">Review changes</button>
  }
 }
 
