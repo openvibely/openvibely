@@ -510,3 +510,31 @@ func TestTaskChangesWorktreeContent_RefreshesRunningStateWithUnchangedDiff(t *te
 		t.Fatal("stopping execution must restore the non-running toolbar key")
 	}
 }
+
+func TestComposerChangesActionVisibility(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		task     models.Task
+		conflict bool
+		visible  bool
+	}{
+		{name: "pending", task: models.Task{WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}, visible: true},
+		{name: "merged before cleanup", task: models.Task{WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusMerged}},
+		{name: "merged after cleanup", task: models.Task{MergeStatus: models.MergeStatusMerged}},
+		{name: "no worktree", task: models.Task{}},
+		{name: "conflict", task: models.Task{WorktreeBranch: "task/feature"}, conflict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := ComposerChangesAction(&tc.task, nil, false, tc.conflict).Render(context.Background(), &buf); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(buf.String(), "data-changes-split"); got != tc.visible {
+				t.Fatalf("split action visible=%v, want %v", got, tc.visible)
+			}
+			if !tc.visible && strings.TrimSpace(buf.String()) != "" {
+				t.Fatalf("expected no replacement action, got %s", buf.String())
+			}
+		})
+	}
+}
