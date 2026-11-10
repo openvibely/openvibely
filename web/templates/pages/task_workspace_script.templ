@@ -104,6 +104,7 @@ templ TaskWorkspaceScript() {
 				_startFileChangesSSE(taskID);
 				// Revalidate retained changes without tearing down loaded diff bodies.
 				if (!wasDiff) {
+                    if (window.ovChangesSplit) window.ovChangesSplit.refresh(changes);
                     var content = changes.querySelector('#changes-content');
                     if (content.querySelector('#diff-viewer')) _updateDiffViewer();
                     else if (window.htmx) htmx.ajax('GET', content.getAttribute('hx-get'), {
@@ -114,6 +115,7 @@ templ TaskWorkspaceScript() {
 			} else {
 				_stopFileChangesSSE();
 				delete thread.dataset.workspaceHidden;
+                if (wasDiff) refreshComposerActions();
 				if (wasDiff && messages && scrollState !== null) {
 					var tracker = window._taskThreadPageTracker;
 					if (tracker) tracker.userScrolledUp = scrollState.userScrolledUp;
@@ -259,7 +261,7 @@ templ TaskWorkspaceScript() {
 		}
         function refreshComposerActions() {
             var host=root.querySelector('#composer-changes-action');
-            if (!host || !window.htmx) return;
+            if (!host || !window.htmx || thread.classList.contains('hidden')) return;
             htmx.trigger(host,'composer-actions-refresh');
         }
         on(document,'htmx:afterRequest',function(event){

@@ -156,7 +156,7 @@ templ changesSplitActionScript() {
    }
    function save(){
     const snapshot={...prefs};saveCount++;saveState.textContent='Saving…';render();
-    pending=pending.catch(()=>{}).then(()=>request(endpoint+'action-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(snapshot)})).then(()=>{saveFailed=false;document.dispatchEvent(new CustomEvent('ov-changes-preferences',{detail:{root,project:root.dataset.projectId}}));saveState.textContent='Choices are remembered for this project.';showError(prefs.mode==='pr'?githubError:'');}).catch(err=>{saveFailed=true;showError(err.message);saveState.textContent='Preferences were not saved. Change a setting to retry.';}).finally(()=>{saveCount--;render();});
+    pending=pending.catch(()=>{}).then(()=>request(endpoint+'action-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(snapshot)})).then(()=>{saveFailed=false;saveState.textContent='Choices are remembered for this project.';showError(prefs.mode==='pr'?githubError:'');}).catch(err=>{saveFailed=true;showError(err.message);saveState.textContent='Preferences were not saved. Change a setting to retry.';}).finally(()=>{saveCount--;render();});
    }
    async function loadBranches(reset){
     if(linked||!prefs||!prefs.repository)return;
@@ -199,9 +199,8 @@ templ changesSplitActionScript() {
    }catch(err){settingsLoading=false;setGroupDisabled(root.dataset.taskRunning==='true');primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','false');showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}
    retry.addEventListener('click',load);state.load=load;load();
   });}
-  window.ovChangesSplit={init};
+  window.ovChangesSplit={init,refresh:container=>container.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.load())};
   document.addEventListener('htmx:afterSwap',init);
-  document.addEventListener('ov-changes-preferences',event=>{document.querySelectorAll('[data-changes-split]').forEach(root=>{if(root!==event.detail.root&&root.dataset.projectId===event.detail.project)states.get(root)?.load();});});
   document.addEventListener('htmx:beforeSwap',event=>{document.querySelectorAll('[data-changes-split]').forEach(root=>{if(event.detail?.target?.contains(root))states.get(root)?.close();});},true);
   window.addEventListener('resize',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()));
   document.addEventListener('scroll',()=>document.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.position()),true);
