@@ -194,7 +194,7 @@ func Icon(task models.Task) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		case "pr-open":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"6\" cy=\"5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"6\" cy=\"19\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"18\" cy=\"19\" r=\"2.5\" stroke-width=\"2\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 7.5v9M18 16.5V8a3 3 0 0 0-3-3h-3m3-3-3 3 3 3\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"6\" cy=\"5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"6\" cy=\"19\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"18\" cy=\"19\" r=\"2.5\" stroke-width=\"2\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 7.5v9M18 16.5V7a2 2 0 0 0-2-2h-5M14 2l-3 3 3 3\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
