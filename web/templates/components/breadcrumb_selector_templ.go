@@ -500,7 +500,7 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 					return templ_7745c5c3_Err
 				}
 				if kind == "Task" {
-					templ_7745c5c3_Err = TaskStateIcon(models.Task{Status: item.Status, Category: item.Category, MergeStatus: item.MergeStatus, GoalMet: item.GoalMet}).Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = TaskStateIcon(models.Task{Status: item.Status, Category: item.Category, MergeStatus: item.MergeStatus, GoalMet: item.GoalMet, HasOpenPullRequest: item.HasOpenPullRequest}).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

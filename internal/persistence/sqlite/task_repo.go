@@ -152,6 +152,7 @@ const scheduleCalendarQuery = `SELECT ` + scheduleCalendarTaskSelectColumns + `,
 const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.auto_merge_on_goal_achieved, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
+				EXISTS(SELECT 1 FROM task_pull_requests pr WHERE pr.task_id = t.id AND lower(trim(pr.pr_state)) = 'open') AS has_open_pull_request,
 				0 AS automation_capacity_queued,
 				0 AS worker_capacity_queued,
 				t.created_at, t.updated_at, t.completed_at`
@@ -161,6 +162,7 @@ const BoardPromptPreviewCodePoints = 300
 var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.auto_merge_on_goal_achieved, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 					EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 					EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
+				EXISTS(SELECT 1 FROM task_pull_requests pr WHERE pr.task_id = t.id AND lower(trim(pr.pr_state)) = 'open') AS has_open_pull_request,
 					EXISTS(SELECT 1 FROM automation_dispatch_outbox d
 						JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
 					WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued,
@@ -317,7 +319,8 @@ func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search
 }
 
 const breadcrumbSelectorSelectColumns = `id, title, project_id, status, category, merge_status,
-				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = tasks.id AND g.status = 'achieved') AS goal_met`
+				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = tasks.id AND g.status = 'achieved') AS goal_met,
+				EXISTS(SELECT 1 FROM task_pull_requests pr WHERE pr.task_id = tasks.id AND lower(trim(pr.pr_state)) = 'open') AS has_open_pull_request`
 
 const breadcrumbSelectorCurrentQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
@@ -509,7 +512,7 @@ func (r *TaskRepo) listBreadcrumbSelectorRows(ctx context.Context, query string,
 	items := make([]models.BreadcrumbSelectorItem, 0, capacity)
 	for rows.Next() {
 		var item models.BreadcrumbSelectorItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.ProjectID, &item.Status, &item.Category, &item.MergeStatus, &item.GoalMet); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.ProjectID, &item.Status, &item.Category, &item.MergeStatus, &item.GoalMet, &item.HasOpenPullRequest); err != nil {
 			return nil, fmt.Errorf("scanning task breadcrumb selector: %w", err)
 		}
 		items = append(items, item)
@@ -633,7 +636,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.GoalMet, &t.AutomationCapacityQueued, &t.WorkerCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.GoalMet, &t.HasOpenPullRequest, &t.AutomationCapacityQueued, &t.WorkerCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)

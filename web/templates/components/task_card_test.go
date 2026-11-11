@@ -627,6 +627,7 @@ func TestKanbanBoard_RendersStateIconsInEveryCardVariant(t *testing.T) {
 		{ID: "backlog-failed", ProjectID: "default", Title: "Failed card", Category: models.CategoryBacklog, Status: models.StatusFailed},
 		{ID: "active-queued", ProjectID: "default", Title: "Queued card", Category: models.CategoryActive, Status: models.StatusQueued},
 		{ID: "active-running", ProjectID: "default", Title: "Running card", Category: models.CategoryActive, Status: models.StatusRunning},
+		{ID: "completed-pr", ProjectID: "default", Title: "Review card", Category: models.CategoryCompleted, Status: models.StatusCompleted, HasOpenPullRequest: true},
 		{ID: "completed-merged", ProjectID: "default", Title: "Merged card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged},
 		{ID: "completed-merge-failed", ProjectID: "default", Title: "Failed merge card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusFailed},
 		{ID: "completed-merge-conflict", ProjectID: "default", Title: "Merge conflict card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusConflict},
@@ -636,7 +637,7 @@ func TestKanbanBoard_RendersStateIconsInEveryCardVariant(t *testing.T) {
 		t.Fatalf("render kanban board: %v", err)
 	}
 	body := buf.String()
-	for _, state := range []string{"failed", "queued", "running", "merged", "merge-failed", "merge-conflict"} {
+	for _, state := range []string{"failed", "queued", "running", "merged", "merge-failed", "merge-conflict", "pr-open"} {
 		if !strings.Contains(body, `data-task-state-icon data-task-state="`+state+`"`) {
 			t.Fatalf("expected %s icon in rendered board variants, got %s", state, body)
 		}
