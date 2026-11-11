@@ -3252,7 +3252,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside .menu a { position: relative; opacity: .75; }
 				html[data-shell-frame] .sidebar-aside .menu a:hover { opacity: 1; }
 				/* Navigation highlights must not fade through the previously hovered/selected icon. */
-				html[data-shell-frame] .sidebar-aside .menu a[data-nav-base] { transition: none; }
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]) { transition: none; }
                 html[data-shell-frame] #alerts-nav-link[data-system-update-available="true"] { opacity: 1; }
                 .sidebar-update-dot { display: none; }
                 html[data-shell-frame] #alerts-nav-link[data-system-update-available="true"] .sidebar-update-dot {
