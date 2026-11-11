@@ -1776,9 +1776,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 				function _cancelComposerFocusForSwap(event) {
 					var target = event.detail && (event.detail.target || event.detail.elt);
-					var withinComposerSurface = target && target.closest && target.closest('form[data-composer-auto-focus="true"]');
+					var composer = target && target.closest && target.closest('form[data-composer-auto-focus="true"]');
+					var textarea = composer && composer.querySelector('textarea[name="message"]');
+					var replacesTextarea = textarea && target.contains(textarea);
 					var containsComposer = target && target.querySelector && target.querySelector('form[data-composer-auto-focus="true"]');
-					if (!target || target.id === 'main-content' || withinComposerSurface || containsComposer) {
+					// Control-only refreshes leave the pending textarea intact, and
+					// their settle target cannot restart the form's focus request.
+					if (!target || target.id === 'main-content' || replacesTextarea || containsComposer) {
 						_cancelComposerFocus();
 					}
 				}
