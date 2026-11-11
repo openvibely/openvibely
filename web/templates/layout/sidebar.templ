@@ -671,9 +671,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					(function() {
 						function syncSidebarActiveNavigation() {
 							var currentPath = new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href).pathname;
-							document.querySelectorAll('[data-nav-base]').forEach(function(link) {
-								var base = link.getAttribute('data-nav-base');
-                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(currentPath));
+							document.querySelectorAll('[data-nav-base], [data-sidebar-path]').forEach(function(link) {
+								var base = link.getAttribute('data-nav-base') || link.getAttribute('data-sidebar-path');
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/plugin-pages)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
