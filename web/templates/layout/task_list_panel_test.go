@@ -1,6 +1,9 @@
 package layout
 
 import (
+	"bytes"
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -61,5 +64,16 @@ func TestTaskListGroupsPreservesOrderAndExcludesChildren(t *testing.T) {
 	}
 	if len(groups[3].Tasks) != 1 || groups[3].Tasks[0].ID != "waiting" {
 		t.Fatalf("unexpected scheduled tasks: %+v", groups[3].Tasks)
+	}
+}
+
+func TestTaskListOpenPullRequestIcon(t *testing.T) {
+	tasks := []models.Task{{ID: "review", ProjectID: "default", Title: "Review", Category: models.CategoryCompleted, Status: models.StatusCompleted, HasOpenPullRequest: true}}
+	var out bytes.Buffer
+	if err := TaskListPanelContent("default", TaskListGroups(tasks)).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `data-task-state="pr-open"`) {
+		t.Fatal("missing PR icon in navigation")
 	}
 }

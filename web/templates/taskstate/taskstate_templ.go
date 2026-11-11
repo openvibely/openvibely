@@ -72,6 +72,9 @@ func Display(task models.Task) State {
 	if canShowMergeProblem(task) && task.MergeStatus == models.MergeStatusFailed {
 		return State{Key: "merge-failed", Label: "Merge failed", TextClass: "text-error"}
 	}
+	if task.Status == models.StatusCompleted && task.HasOpenPullRequest {
+		return State{Key: "pr-open", Label: "Pull request open", TextClass: "text-success"}
+	}
 	if task.Status == models.StatusCompleted && task.GoalMet {
 		return State{Key: "goal-met", Label: "Goal met", TextClass: "text-success"}
 	}
@@ -129,7 +132,7 @@ func Icon(task models.Task) templ.Component {
 			var templ_7745c5c3_Var2 string
 			templ_7745c5c3_Var2, templ_7745c5c3_Err = templruntime.NewAttributeExpression(state.Key).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/taskstate/taskstate.templ`, Line: 98, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/taskstate/taskstate.templ`, Line: 101, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 			if templ_7745c5c3_Err != nil {
@@ -160,7 +163,7 @@ func Icon(task models.Task) templ.Component {
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Task state: " + state.Label).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/taskstate/taskstate.templ`, Line: 102, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/taskstate/taskstate.templ`, Line: 105, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 			if templ_7745c5c3_Err != nil {
@@ -190,53 +193,58 @@ func Icon(task models.Task) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		case "merged":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"6.5\" cy=\"4.5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"6.5\" cy=\"19.5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"18\" cy=\"12\" r=\"2.5\" stroke-width=\"2\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6.5 7v10M6.5 7c0 3.2 3.4 5 9 5\"></path></svg>")
+		case "pr-open":
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"6\" cy=\"5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"6\" cy=\"19\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"18\" cy=\"19\" r=\"2.5\" stroke-width=\"2\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 7.5v9M18 16.5V8a3 3 0 0 0-3-3h-3m3-3-3 3 3 3\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		case "merge-failed", "merge-conflict":
+		case "merged":
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"6.5\" cy=\"4.5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"6.5\" cy=\"19.5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"18\" cy=\"12\" r=\"2.5\" stroke-width=\"2\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6.5 7v10M6.5 7c0 3.2 3.4 5 9 5\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+		case "merge-failed", "merge-conflict":
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"6.5\" cy=\"4.5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"6.5\" cy=\"19.5\" r=\"2.5\" stroke-width=\"2\"></circle> <circle cx=\"18\" cy=\"12\" r=\"2.5\" stroke-width=\"2\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6.5 7v10M6.5 7c0 3.2 3.4 5 9 5\"></path></svg>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		case "queued":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"7\" r=\"1\" fill=\"currentColor\" stroke=\"none\"></circle> <circle cx=\"5\" cy=\"12\" r=\"1\" fill=\"currentColor\" stroke=\"none\"></circle> <circle cx=\"5\" cy=\"17\" r=\"1\" fill=\"currentColor\" stroke=\"none\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 7h10M9 12h10M9 17h7\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"7\" r=\"1\" fill=\"currentColor\" stroke=\"none\"></circle> <circle cx=\"5\" cy=\"12\" r=\"1\" fill=\"currentColor\" stroke=\"none\"></circle> <circle cx=\"5\" cy=\"17\" r=\"1\" fill=\"currentColor\" stroke=\"none\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 7h10M9 12h10M9 17h7\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "running":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" stroke-width=\"2\"></circle> <path d=\"m10 8 6 4-6 4z\" fill=\"currentColor\" stroke=\"none\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" stroke-width=\"2\"></circle> <path d=\"m10 8 6 4-6 4z\" fill=\"currentColor\" stroke=\"none\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "completed":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" stroke-width=\"2\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m7.5 12 3 3 6-6\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" stroke-width=\"2\"></circle> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m7.5 12 3 3 6-6\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "failed":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m8 3-5 5v8l5 5h8l5-5V8l-5-5zM12 7.5v6m0 3h.01\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m8 3-5 5v8l5 5h8l5-5V8l-5-5zM12 7.5v6m0 3h.01\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "cancelled":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"4\" stroke-width=\"2\"></rect> <path d=\"M9 9h6v6H9z\" fill=\"currentColor\" stroke=\"none\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"4\" stroke-width=\"2\"></rect> <path d=\"M9 9h6v6H9z\" fill=\"currentColor\" stroke=\"none\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		case "blocked":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><rect x=\"5\" y=\"10\" width=\"14\" height=\"10\" rx=\"2\" stroke-width=\"2\"></rect> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 10V7a4 4 0 0 1 8 0v3\"></path></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><rect x=\"5\" y=\"10\" width=\"14\" height=\"10\" rx=\"2\" stroke-width=\"2\"></rect> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 10V7a4 4 0 0 1 8 0v3\"></path></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		default:
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" stroke-width=\"2\"></circle> <circle cx=\"12\" cy=\"12\" r=\"1.75\" fill=\"currentColor\" stroke=\"none\"></circle></svg>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" stroke-width=\"2\"></circle> <circle cx=\"12\" cy=\"12\" r=\"1.75\" fill=\"currentColor\" stroke=\"none\"></circle></svg>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

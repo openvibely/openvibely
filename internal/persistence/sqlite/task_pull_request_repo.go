@@ -5,16 +5,20 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
 type TaskPullRequestRepo struct {
-	db *sql.DB
+	db          *sql.DB
+	broadcaster *events.Broadcaster
 }
 
 func NewTaskPullRequestRepo(db *sql.DB) *TaskPullRequestRepo {
 	return &TaskPullRequestRepo{db: db}
 }
+
+func (r *TaskPullRequestRepo) SetBroadcaster(b *events.Broadcaster) { r.broadcaster = b }
 
 func (r *TaskPullRequestRepo) GetByTaskID(ctx context.Context, taskID string) (*models.TaskPullRequest, error) {
 	return r.getOne(ctx,
@@ -71,7 +75,7 @@ func (r *TaskPullRequestRepo) Upsert(ctx context.Context, pr *models.TaskPullReq
 	if pr == nil {
 		return fmt.Errorf("task pull request is nil")
 	}
-	return queryRowBoundSQLite(ctx, r.db,
+	err := queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO task_pull_requests (id, task_id, pr_number, pr_url, pr_state, published_head_sha, needs_republish, issue_number, issue_url, head_repo_url, base_branch)
 				 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(task_id) DO UPDATE SET
@@ -86,6 +90,16 @@ func (r *TaskPullRequestRepo) Upsert(ctx context.Context, pr *models.TaskPullReq
 					updated_at = datetime('now')
 				 RETURNING id, created_at, updated_at, needs_republish`,
 		pr.TaskID, pr.PRNumber, pr.PRURL, pr.PRState, pr.PublishedHeadSHA, pr.NeedsRepublish, pr.IssueNumber, pr.IssueURL, pr.HeadRepoURL, pr.BaseBranch).Scan(&pr.ID, &pr.CreatedAt, &pr.UpdatedAt, &pr.NeedsRepublish)
+	if err != nil {
+		return err
+	}
+	if r.broadcaster != nil {
+		event := events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: pr.TaskID}
+		if err := r.db.QueryRowContext(ctx, `SELECT project_id, title, status, category FROM tasks WHERE id = ?`, pr.TaskID).Scan(&event.ProjectID, &event.TaskName, &event.Status, &event.Category); err == nil {
+			r.broadcaster.Publish(event)
+		}
+	}
+	return nil
 }
 
 func (r *TaskPullRequestRepo) SetNeedsRepublish(ctx context.Context, taskID string, needsRepublish bool) error {
