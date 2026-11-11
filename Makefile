@@ -12,6 +12,7 @@ endif
 TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
 SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
 GOOSE_VERSION := $(shell go list -m -f '{{.Version}}' github.com/pressly/goose/v3)
+GO_VERSION := $(shell sed -n 's/^go //p' go.mod)
 AIR_VERSION := v1.67.4
 GO_BIN := $(shell go env GOBIN)
 ifeq ($(GO_BIN),)
@@ -101,10 +102,10 @@ docker-build:
 # Verify the image is configured non-root and its coding toolchain works as that user.
 docker-check-tools:
 	@test "$$($(DOCKER) image inspect --format '{{.Config.User}}' $(IMAGE))" = "10001:10001"
-	@test "$$($(DOCKER) run --rm --entrypoint /usr/bin/sh $(IMAGE) -c '. /etc/os-release; printf %s "$$VERSION_ID"')" = "44"
+	@test "$$($(DOCKER) run --rm --entrypoint /usr/bin/sh $(IMAGE) -c '. /etc/os-release; printf %s "$$VERSION_ID"')" = "45"
 	@test -z "$$($(DOCKER) run --rm --entrypoint /usr/bin/sh $(IMAGE) -c 'find / -xdev -perm /6000 -type f 2>/dev/null')"
 	@$(DOCKER) run --rm --entrypoint /usr/bin/sh $(IMAGE) -c '! command -v sudo'
-	$(DOCKER) run --rm $(IMAGE) bash -lc 'set -euo pipefail; test "$$(id -u)" = 10001; test "$$(id -g)" = 10001; test -w /data; go version; node --version; npm --version; corepack --version; tsc --version; python3 --version; python3 -m pip --version; venv="$$(mktemp -d)"; python3 -m venv "$$venv"; "$$venv/bin/python" --version; rm -rf "$$venv"; rustc --version; cargo --version; java -version; javac -version; ruby --version; git --version; rg --version | head -n 1; make --version | head -n 1; gcc --version | head -n 1; g++ --version | head -n 1; pkg-config --version'
+	$(DOCKER) run --rm $(IMAGE) bash -lc 'set -euo pipefail; test "$$(id -u)" = 10001; test "$$(id -g)" = 10001; test -w /data; test "$$(go env GOVERSION)" = "go$(GO_VERSION)"; go version; node --version; npm --version; corepack --version; tsc --version; python3 --version; python3 -m pip --version; venv="$$(mktemp -d)"; python3 -m venv "$$venv"; "$$venv/bin/python" --version; rm -rf "$$venv"; rustc --version; cargo --version; java -version; javac -version; ruby --version; git --version; rg --version | head -n 1; make --version | head -n 1; gcc --version | head -n 1; g++ --version | head -n 1; pkg-config --version'
 
 # Clean build artifacts
 clean:

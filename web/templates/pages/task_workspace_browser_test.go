@@ -344,8 +344,17 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 				view = NewTask([]models.Project{project}, &project, nil, nil)
 			}
 		default:
+			// Saved tasks load their composer actions. Only IDs actually created
+			// by this fixture may make these requests; drafts must still fail.
+			for id := int32(1); id <= sends.Load(); id++ {
+				if r.Method == http.MethodGet && r.URL.Path == fmt.Sprintf("/tasks/created-%d/changes", id) && r.URL.Query().Get("composer_action") == "1" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+			}
 			if strings.HasPrefix(r.URL.Path, "/tasks/") {
 				unexpected.Add(1)
+				t.Logf("unexpected task request: %s %s", r.Method, r.URL.RequestURI())
 			}
 			http.NotFound(w, r)
 			return
