@@ -12,6 +12,12 @@
    if (focus) more.querySelector('button').focus();
   }
  }
+ function syncSelection() {
+  if (!more) return;
+  const active = !more.hidden && hiddenEntries.some(entry => entry.isConnected && entry.querySelector('a[aria-current="page"]'));
+  more.querySelector('button').toggleAttribute('data-active-page', active);
+ }
+ window.syncPluginNavOverflowSelection = syncSelection;
  function fit() {
   frame = null;
   if (!nav || !nav.isConnected || !nav.getClientRects().length) return;
@@ -26,12 +32,13 @@
   // Use scroll-independent coordinates: opening a menu must not change which
   // links fit merely because the navigation was previously scrolled.
   const end = e => e.getBoundingClientRect().bottom + inner.scrollTop;
-  if (!entries.length || end(entries[entries.length - 1]) <= bottom) return;
+  if (!entries.length || end(entries[entries.length - 1]) <= bottom) { syncSelection(); return; }
   more.hidden = false;
   for (let i = entries.length - 1; i >= 0 && end(more) > bottom; i--) {
    entries[i].hidden = true;
    hiddenEntries.unshift(entries[i]);
   }
+  syncSelection();
  }
  function schedule() {
   if (!frame) frame = requestAnimationFrame(fit);
