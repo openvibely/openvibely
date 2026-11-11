@@ -130,7 +130,7 @@ templ changesSplitActionScript() {
    if(linkedAction)linkedAction.addEventListener('click',event=>{if(linkedAction.getAttribute('aria-disabled')==='true')event.preventDefault();});
    function setGroupDisabled(disabled){toggle.disabled=disabled||(root.dataset.taskMerged==='true'&&prefs?.mode==='local');if(linkedAction){linkedAction.classList.toggle('btn-disabled',disabled);linkedAction.setAttribute('aria-disabled',String(disabled));if(disabled)linkedAction.setAttribute('tabindex','-1');else linkedAction.removeAttribute('tabindex');}if(toggle.disabled&&isOpen())controller.close(false);}
    function render(){
-    setGroupDisabled(settingsLoading||root.dataset.taskRunning==='true'||busy);
+    setGroupDisabled(settingsLoading||busy);
     if(settingsLoading||!prefs)return;
     const rebaseOption=method.querySelector('[value="rebase"]');if(rebaseOption){rebaseOption.disabled=localChecked!==prefs.local_branch||!rebaseAllowed;rebaseOption.hidden=rebaseOption.disabled;}
     const pr=prefs.mode==='pr',choice=choices.find(c=>c.url===prefs.repository),localValid=Array.from(localBranch.options).some(o=>o.value===prefs.local_branch),methodValid=Array.from(method.options).some(o=>o.value===prefs.method&&!o.disabled);
@@ -144,6 +144,7 @@ templ changesSplitActionScript() {
     primary.textContent=pr?'Create PR':(names[prefs.method]||'Merge');
     primary.title=pr?(choice?choice.name+':'+prefs.branch:'Select a PR destination'):(destinations[prefs.method]||'Merge into ')+prefs.local_branch;
     primary.setAttribute('aria-label',pr?primary.textContent+' ('+primary.title+')':primary.title);
+    if(root.dataset.taskRunning==='true')primary.title='Wait for the task to finish before '+(pr?'creating a pull request.':'merging or rebasing.');
     const checkingLocal=!pr&&localLoading,waiting=saveCount>0||checkingLocal;
     primary.disabled=root.dataset.taskRunning==='true'||busy||saveFailed||(pr?(!choice||!prefs.branch):(!canLocal||!localValid||(!checkingLocal&&(!methodValid||localChecked!==prefs.local_branch||!mergeAllowed))));
     primary.setAttribute('aria-busy',String(waiting||busy));
@@ -194,7 +195,7 @@ templ changesSplitActionScript() {
     if(prefs.repository&&!choices.some(c=>c.url===prefs.repository)){const option=document.createElement('option');option.value=prefs.repository;option.textContent=prefs.repository.replace(/^https:\/\//,'')+' · Unavailable';option.disabled=true;repo.append(option);}
     fill(localBranch,data.local_branches.map(name=>({value:name,label:name})));
     showError(prefs.mode==='pr'?githubError:'');retry.hidden=!githubError;settingsLoading=false;render();loadLocalEligibility();if(prefs.mode==='pr')loadBranches(true);
-   }catch(err){settingsLoading=false;setGroupDisabled(root.dataset.taskRunning==='true');primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','false');showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}
+   }catch(err){settingsLoading=false;setGroupDisabled(false);primary.disabled=true;primary.setAttribute('aria-disabled','true');primary.setAttribute('aria-busy','false');showError(err.message);primary.textContent='Action unavailable';retry.hidden=false;}}
    retry.addEventListener('click',load);state.load=load;load();
   });}
   window.ovChangesSplit={init,refresh:container=>container.querySelectorAll('[data-changes-split]').forEach(root=>states.get(root)?.load())};
