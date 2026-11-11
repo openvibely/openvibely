@@ -677,6 +677,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
+							if (window.syncPluginNavOverflowSelection) window.syncPluginNavOverflowSelection();
 						}
 						window.syncSidebarActiveNavigation = syncSidebarActiveNavigation;
 						syncSidebarActiveNavigation();
