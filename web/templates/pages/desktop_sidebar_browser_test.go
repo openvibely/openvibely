@@ -93,3 +93,52 @@ func TestBrowserFunctional_DesktopSidebarAtNarrowWidths(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_SidebarHighlightFollowsNavigationBeforeSettle(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path != "/tasks" && r.URL.Path != "/automations" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		if r.Header.Get("HX-Request") == "true" {
+			fmt.Fprintf(w, `<div id="navigation-result">%s</div>`, r.URL.Path)
+			return
+		}
+		if err := layout.Base("Tasks", nil, "default").Render(context.Background(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks", "sidebar-highlight", func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1200, "height": 800, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("initial selection", `String(document.querySelector('#sidebar [aria-current="page"]')?.dataset.navBase)`, "/tasks")
+		// Stretch settling so an afterSettle-only update cannot pass accidentally.
+		b.evaluate(`htmx.config.defaultSettleDelay = 1000;
+		window.railSamples = [];
+		document.body.addEventListener('htmx:afterSwap', function(event) {
+			if (event.detail.target.id !== 'main-content') return;
+			var links = Array.from(document.querySelectorAll('#sidebar [data-nav-base]'));
+			var selected = links.filter(link => link.getAttribute('aria-current') === 'page');
+			var current = selected[0];
+			railSamples.push(JSON.stringify({
+				path: location.pathname,
+				selected: selected.map(link => link.dataset.navBase),
+				visible: !!current && getComputedStyle(current).backgroundColor !== 'rgba(0, 0, 0, 0)',
+				instant: links.every(link => getComputedStyle(link).transitionDuration === '0s')
+			}));
+		}); 'ok'`)
+		for i, path := range []string{"/automations", "/tasks"} {
+			b.click(fmt.Sprintf(`#sidebar [data-nav-base=%q]`, path))
+			want := fmt.Sprintf(`{"path":%q,"selected":[%q],"visible":true,"instant":true}`, path, path)
+			b.waitFor("correct highlight immediately after swap", fmt.Sprintf(`String(railSamples[%d])`, i), want)
+			b.waitFor("navigation settled", `String(!document.querySelector('#main-content.htmx-settling'))`, "true")
+		}
+		b.evaluate(`history.back(); 'ok'`)
+		b.waitFor("back restores selection", `String(document.querySelector('#sidebar [aria-current="page"]')?.dataset.navBase)`, "/automations")
+	})
+}
