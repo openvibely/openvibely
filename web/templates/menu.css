@@ -192,3 +192,16 @@
   pointer-events: auto;
   cursor: default;
 }
+
+/* The current overflow page remains distinct from menu focus and hover. */
+#plugin-pages-overflow-menu a[aria-current="page"],
+#sidebar [data-plugin-nav-overflow] > button[data-active-page] {
+  background: var(--shell-row-selected, var(--ov-menu-active));
+  color: inherit;
+}
+#sidebar [data-plugin-nav-overflow] > button {
+  transition: none;
+}
+#sidebar [data-plugin-nav-overflow] > button:focus:not(:focus-visible):not(:hover):not([data-active-page]) {
+  background: transparent;
+}

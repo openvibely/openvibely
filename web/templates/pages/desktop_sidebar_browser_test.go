@@ -142,3 +142,61 @@ func TestBrowserFunctional_SidebarHighlightFollowsNavigationBeforeSettle(t *test
 		b.waitFor("back restores selection", `String(document.querySelector('#sidebar [aria-current="page"]')?.dataset.navBase)`, "/automations")
 	})
 }
+
+func TestBrowserFunctional_CustomPageOverflowSelection(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	entries := make([]PluginNavEntry, 8)
+	for i := range entries {
+		entries[i] = PluginNavEntry{InstanceID: fmt.Sprintf("page-%d", i), Title: fmt.Sprintf("Page %d", i), ProjectID: "default"}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		if r.URL.Path == "/plugin-pages/nav" {
+			if err := PluginNav(entries, false).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		if r.URL.Path == "/tasks" || r.URL.Path == "/p/page-7" {
+			if r.Header.Get("HX-Request") == "true" {
+				fmt.Fprintf(w, `<div id="navigation-result">%s</div>`, r.URL.Path)
+			} else if err := layout.Base("Tasks", nil, "default").Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks", "overflow-selection", func(b *composerFocusCDP) {
+		resize := func(height int) {
+			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1200, "height": height, "deviceScaleFactor": 1, "mobile": false}, nil)
+		}
+		resize(650)
+		b.waitFor("page in overflow", `String(document.querySelector('[data-plugin-nav-entry="page-7"]')?.hidden)`, "true")
+		b.waitFor("overflow button ready", `String(!!document.querySelector('[data-plugin-nav-overflow]:not([hidden]) button'))`, "true")
+		b.click(`[data-plugin-nav-overflow] button`)
+		b.click(`#plugin-pages-overflow-menu [data-sidebar-path="/p/page-7"]`)
+		b.waitFor("overflow page opened", `location.pathname`, "/p/page-7")
+		b.waitFor("overflow button selected", `String(document.querySelector('[data-plugin-nav-overflow] button').hasAttribute('data-active-page'))`, "true")
+		b.evaluate(`document.activeElement.blur(); 'ok'`)
+		b.waitFor("persistent button background", `String(getComputedStyle(document.querySelector('[data-plugin-nav-overflow] button')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
+		b.click(`[data-plugin-nav-overflow] button`)
+		b.waitFor("selected menu entry", `String(document.querySelector('#plugin-pages-overflow-menu [data-sidebar-path="/p/page-7"]').getAttribute('aria-current') === 'page')`, "true")
+		b.evaluate(`document.querySelector('#plugin-pages-overflow-menu a').focus(); 'ok'`)
+		b.waitFor("selection visible without focus", `String(getComputedStyle(document.querySelector('#plugin-pages-overflow-menu [aria-current="page"]')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
+		b.click(`[data-plugin-nav-overflow] button`)
+		resize(1800)
+		b.waitFor("page returns to rail", `String(document.querySelector('[data-plugin-nav-entry="page-7"]').hidden)`, "false")
+		b.waitFor("overflow highlight cleared when page fits", `String(document.querySelector('[data-plugin-nav-overflow] button').hasAttribute('data-active-page'))`, "false")
+		resize(650)
+		b.waitFor("overflow selection restored after resize", `String(document.querySelector('[data-plugin-nav-overflow] button').hasAttribute('data-active-page'))`, "true")
+		b.click(`#sidebar [data-nav-base="/tasks"]`)
+		b.waitFor("leaving page clears overflow selection", `String(location.pathname === '/tasks' && !document.querySelector('[data-plugin-nav-overflow] button').hasAttribute('data-active-page'))`, "true")
+		b.evaluate(`history.back(); 'ok'`)
+		b.waitFor("history restores overflow selection", `String(location.pathname === '/p/page-7' && document.querySelector('[data-plugin-nav-overflow] button').hasAttribute('data-active-page'))`, "true")
+	})
+}
