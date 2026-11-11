@@ -35,6 +35,49 @@
         row.placeholder.style.cssText = 'height:' + height + 'px;min-height:' + height +
             'px;box-sizing:border-box;flex-shrink:0;margin-top:' + (margins?.marginTop || '0px') + ';margin-bottom:' + (margins?.marginBottom || '0px') + ';';
     }
+    // Index DOM order only when membership changes. Search sibling intervals using
+    // real layout, so margins, non-row content and delayed heights need no stale
+    // prefix-height estimates. Nested virtual owners form their own sibling level.
+    function indexRows(list) {
+        // Explicit hydration can run before the mutation observer's microtask.
+        if (list.observer.takeRecords().length) list.dirty = true;
+        if (!list.dirty) return;
+        collect(list);
+        const ordered = Array.from(list.rows.values()).sort((a, b) =>
+            element(a).compareDocumentPosition(element(b)) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+        list.index = [];
+        list.mounted = new Set();
+        const stack = [];
+        for (const row of ordered) {
+            row.list = list;
+            row.children = [];
+            while (stack.length && !element(stack[stack.length - 1]).contains(element(row))) stack.pop();
+            (stack.length ? stack[stack.length - 1].children : list.index).push(row);
+            stack.push(row);
+            if (row.node?.isConnected) list.mounted.add(row);
+        }
+        list.dirty = false;
+    }
+    function windowRows(list, top, bottom) {
+        indexRows(list);
+        const found = new Map();
+        function visit(rows) {
+            let low = 0, high = rows.length;
+            while (low < high) {
+                const mid = (low + high) >>> 1;
+                if (element(rows[mid]).getBoundingClientRect().bottom < top) low = mid + 1;
+                else high = mid;
+            }
+            for (let i = low; i < rows.length; i++) {
+                const row = rows[i], rect = element(row).getBoundingClientRect();
+                if (rect.top > bottom) break;
+                found.set(row, rect);
+                if (row.children.length) visit(row.children);
+            }
+        }
+        visit(list.index);
+        return found;
+    }
     function saveAnchor(list, followMovement) {
         const messages = list.messages;
         // Hidden history may still be parsed, but zero-sized geometry must not
@@ -55,10 +98,9 @@
         const readingPair = earlierBounds && earlierBounds.bottom > bounds.top && earlierBounds.top < bounds.bottom ? earlierPair : null;
         if (readingPair && earlierBounds.top >= bounds.top) anchor = {row:{node:readingPair}, top:earlierBounds.top, bottom:earlierBounds.bottom};
         // Map insertion order can differ from DOM order after prepending history.
-        list.rows.forEach(row => {
+        windowRows(list, bounds.top, bounds.bottom).forEach((rect, row) => {
             const el = element(row);
             if (!el.isConnected || (readingPair && !readingPair.contains(el))) return;
-            const rect = el.getBoundingClientRect();
             const estimated = row.lazy && !row.ready;
             // Follow actual content already being read, not a newly encountered
             // estimate whose height can change drastically when it finishes.
@@ -127,6 +169,7 @@
     };
     function mount(row, restored, synchronous) {
         if (!row.placeholder.isConnected && !row.node?.isConnected) return;
+        row.list?.mounted.add(row);
         if (row.lazy && !row.ready && (!row.loading || synchronous)) {
             if (!row.node) {
                 row.node = document.createElement('div');
@@ -166,6 +209,9 @@
             // Retained rows miss document-wide preference updates. Reattach first:
             // deferred activity content needs a connected transcript to render.
             row.placeholder.replaceWith(row.node);
+            // A detached outer row may contain virtual owners omitted by the
+            // last membership scan. Rediscover them when their parent returns.
+            if (row.node.querySelector('[data-chat-virtual-owner]')) row.list.dirty = true;
             window.syncToolDisclosures?.(row.node);
             restored.push(row);
         }
@@ -223,6 +269,9 @@
         list.messages.removeEventListener('scroll', list.schedule);
         if (list.wheel) list.messages.removeEventListener('wheel', list.wheel);
         list.rows.clear();
+        list.index = [];
+        list.mounted.clear();
+        list.observedRows.clear();
         list.viewportReady?.(false);
         list.viewportReady = null;
         lists.delete(list.messages);
@@ -230,7 +279,7 @@
     function ensureList(messages) {
         let list = lists.get(messages);
         if (!list) {
-            list = {messages, rows:new Map(), frame:null, overflowAnchor:messages.style.overflowAnchor, observedRows:new Set()};
+            list = {messages, rows:new Map(), frame:null, overflowAnchor:messages.style.overflowAnchor, observedRows:new Set(), mounted:new Set(), dirty:true, index:[]};
             // One owner compensates for height changes in both Chrome and WebKit.
             messages.style.overflowAnchor = 'none';
             list.schedule = function () {
@@ -241,7 +290,7 @@
                 }
                 if (list.frame === null) list.frame = requestAnimationFrame(() => refresh(list));
             };
-            list.observer = new MutationObserver(list.schedule);
+            list.observer = new MutationObserver(() => { list.dirty = true; list.schedule(); });
             list.resize = typeof ResizeObserver === 'function' ? new ResizeObserver(list.schedule) : null;
             list.resize?.observe(messages);
             list.rowResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
@@ -258,6 +307,7 @@
         return list;
     }
     function collect(list) {
+        list.dirty = true;
         // Preserved executions can move to a new transcript during an HTMX swap.
         list.messages.querySelectorAll('[data-chat-virtual-owner]').forEach(owner => {
             owner._chatVirtualRows?.forEach(row => list.rows.set(row.placeholder, row));
@@ -293,11 +343,14 @@
     }
     function observeRowLayout(list) {
         const mounted = new Set();
-        list.rows.forEach(row => { if (row.node?.isConnected) mounted.add(row.node); });
+        list.mounted.forEach(row => {
+            if (row.node?.isConnected) mounted.add(row.node);
+            else list.mounted.delete(row);
+        });
         list.observedRows.forEach(node => { if (!mounted.has(node)) list.rowResize?.unobserve(node); });
         mounted.forEach(node => { if (!list.observedRows.has(node)) list.rowResize?.observe(node); });
         list.observedRows = mounted;
-        list.lateAnchor = saveAnchor(list, true);
+        // The final restore already captured this layout for delayed resizing.
     }
     function refresh(list, hydrating) {
         cancelAnimationFrame(list.frame);
@@ -310,7 +363,7 @@
         if (!hasVisibleArea(list.messages)) return [];
         compensateLateLayout(list);
         list.observer.disconnect();
-        collect(list);
+        indexRows(list);
         const width = list.messages.clientWidth;
         if (list.width !== width) {
             const restore = saveAnchor(list), restored = [];
@@ -334,10 +387,15 @@
         const selection = window.getSelection();
         const changes = [], restored = [], pending = [];
         const restore = saveAnchor(list);
-        list.rows.forEach(row => {
+        const nearby = windowRows(list,
+            bounds.top - (movement < 0 || prepareInitialLookahead ? lookahead + buffer : buffer),
+            bounds.bottom + (movement > 0 ? lookahead : buffer));
+        const candidates = suspended || list.selecting || list.rows.size < 40 ? Array.from(list.rows.values()) :
+            Array.from(new Set([...list.mounted, ...nearby.keys()]));
+        candidates.forEach(row => {
             const mounted = !!row.node?.isConnected;
             const el = element(row);
-            const rect = el.getBoundingClientRect();
+            const rect = nearby.get(row) || el.getBoundingClientRect();
             const protectedRow = mounted && (row.loading || row.node.contains(document.activeElement) ||
                 (selection && !selection.isCollapsed && selection.containsNode(row.node, true)) ||
                 row.node.querySelector('video, audio, iframe, [data-file-html-expanded], [data-chat-input-request-id]'));
@@ -369,7 +427,10 @@
                 const style = getComputedStyle(row.node);
                 sizePlaceholder(row, rect.height, style);
                 row.scroll = Array.from(row.node.querySelectorAll('.stream-tool-body-scroll, pre'), node => ({node, top:node.scrollTop, left:node.scrollLeft}));
-                changes.push(() => row.node.replaceWith(row.placeholder));
+                changes.push(() => {
+                    row.node.replaceWith(row.placeholder);
+                    list.mounted.delete(row);
+                });
             }
         });
         batchRowChanges(list, () => changes.forEach(change => change()));
@@ -381,9 +442,8 @@
             // must be left to its worker rather than retried in this loop.
             for (let pass = 0; pass < list.rows.size; pass++) {
                 const exposed = [];
-                list.rows.forEach(row => {
+                windowRows(list, bounds.top, bounds.bottom).forEach((rect, row) => {
                     if (row.node?.isConnected && (!row.lazy || row.ready || (row.loading && !canRenderImmediately(row)))) return;
-                    const rect = element(row).getBoundingClientRect();
                     if (rect.bottom > bounds.top && rect.top < bounds.bottom) exposed.push(row);
                 });
                 if (!exposed.length) break;
@@ -395,7 +455,7 @@
         }
         observeRowLayout(list);
         list.scrollTop = list.messages.scrollTop;
-        list.rows.forEach(row => { if (row.loading) pending.push(row.loading); });
+        list.mounted.forEach(row => { if (row.loading) pending.push(row.loading); });
         list.observer.observe(list.messages, {childList:true, subtree:true});
         if (changes.length) list.schedule();
         return pending;
@@ -403,7 +463,7 @@
     window.refreshVirtualChatRows = function (root) {
         lists.forEach(list => { if (!list.messages.isConnected) destroy(list); });
         const messages = root?.matches?.(messagesSelector) ? root : root?.closest?.(messagesSelector);
-        if (messages) ensureList(messages).schedule();
+        if (messages) { const list = ensureList(messages); list.dirty = true; list.schedule(); }
     };
     // A hidden workspace has no viewport to render or restore scroll against.
     // Keep its initial hydration pending until resize makes that viewport real.
@@ -523,6 +583,7 @@
             }
             if (window.OVFileViewer?.commitStream) window.OVFileViewer.commitStream(fragment, owner);
             else owner.replaceChildren(fragment);
+            list.dirty = true;
             restore();
             if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
             return window.renderVisibleChatRows(messages);
