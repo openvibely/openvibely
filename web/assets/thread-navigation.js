@@ -22,6 +22,12 @@
         clearRefreshPreview?.();
         if (!messages?.checkVisibility?.({visibilityProperty: true}) || !messages.clientHeight) return;
         const bounds = messages.getBoundingClientRect();
+        const style = getComputedStyle(messages);
+        // A sanitized clone can have different overflow from the virtualized
+        // live transcript. Reserve its actual scrollbar space so classic
+        // scrollbars cannot change the width of the frozen conversation.
+        const scrollbar = messages.offsetWidth - messages.clientWidth -
+            parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth);
         const preview = messages.cloneNode(true);
         preview.removeAttribute('id');
         preview.removeAttribute('data-transcript-hydrating');
@@ -37,7 +43,9 @@
         });
         Object.assign(preview.style, {position: 'fixed', top: bounds.top + 'px', left: bounds.left + 'px',
             width: bounds.width + 'px', height: bounds.height + 'px', boxSizing: 'border-box',
-            margin: '0', zIndex: '10', pointerEvents: 'none', visibility: 'visible'});
+            margin: '0', zIndex: '10', pointerEvents: 'none', visibility: 'visible',
+            overflowY: 'hidden', scrollbarGutter: 'auto', paddingLeft: style.paddingLeft,
+            paddingRight: (parseFloat(style.paddingRight) + scrollbar) + 'px'});
         document.body.appendChild(preview);
         preview.scrollTop = messages.scrollTop;
         let observer = null, timer = null;
