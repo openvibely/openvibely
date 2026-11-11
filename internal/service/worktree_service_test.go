@@ -2014,6 +2014,16 @@ func TestCommitWorktreeChanges(t *testing.T) {
 }
 
 func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
+	// Isolate the fallback from the developer or runner's Git identity.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// Create repo WITHOUT git config (simulating VPS scenario)
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init")
@@ -2035,12 +2045,6 @@ func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
 		t.Fatalf("initial commit failed: %v\n%s", err, out)
 	}
 
-	// Verify no local user.email is configured in repo
-	cmd = exec.Command("git", "config", "--local", "user.email")
-	cmd.Dir = dir
-	out, _ := cmd.Output()
-	hasLocalConfig := len(strings.TrimSpace(string(out))) > 0
-
 	// Make a change and commit - should succeed even without local config
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("content"), 0644); err != nil {
 		t.Fatal(err)
@@ -2049,35 +2053,25 @@ func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
 		t.Fatalf("CommitWorktreeChanges failed (should auto-set config if needed): %v", err)
 	}
 
-	// If there was no local config before, verify bot config was auto-set
-	if !hasLocalConfig {
-		cmd = exec.Command("git", "config", "--local", "user.email")
+	// Defaults belong to the commit process, never shared repository config.
+	for _, key := range []string{"user.name", "user.email"} {
+		cmd = exec.Command("git", "config", "--local", "--get", key)
 		cmd.Dir = dir
-		out, _ := cmd.Output()
-		email := strings.TrimSpace(string(out))
-		// If local config was set, it should be the bot email
-		// If it's empty, that's ok too (means global config was used)
-		if email != "" && email != "bot@openvibely.ai" {
-			t.Errorf("expected bot@openvibely.ai or empty (using global) in local config, got: %s", email)
+		if out, err := cmd.Output(); err == nil || len(out) != 0 {
+			t.Fatalf("commit must not write %s to repository config: %s", key, out)
 		}
-
-		// Verify the effective config (local or global) allowed the commit
-		cmd = exec.Command("git", "config", "user.email")
-		cmd.Dir = dir
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		effectiveEmail := strings.TrimSpace(string(out))
-		if effectiveEmail == "" {
-			t.Error("expected some user.email configured (local or global)")
-		}
+	}
+	cmd = exec.Command("git", "log", "-1", "--format=%an <%ae>|%cn <%ce>")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) != "OpenVibely Bot <bot@openvibely.ai>|OpenVibely Bot <bot@openvibely.ai>" {
+		t.Fatalf("wrong process identity: %s: %v", out, err)
 	}
 
 	// Verify commit was made
 	cmd = exec.Command("git", "log", "--oneline", "-1")
 	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err = cmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
