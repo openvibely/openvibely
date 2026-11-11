@@ -156,15 +156,27 @@ func TestBrowserFunctional_ChangesSplitActionBranchDropdown(t *testing.T) {
 
 func TestBrowserFunctional_ChangesSplitActionRunningSettings(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	server := worktreeActionsFixture(t, "", nil, models.StatusRunning)
-	defer server.Close()
-	runComposerFocusCDP(t, chrome, server.URL+"/", "changes-running-settings", func(b *composerFocusCDP) {
-		b.waitFor("PR settings loaded", `String(document.querySelector('[data-changes-repo]')?.options.length>0&&document.querySelector('[data-changes-primary]').disabled)`, "true")
-		b.waitFor("both halves disabled", `String(document.querySelector('[data-changes-settings-toggle]').disabled&&document.querySelector('[data-changes-primary]').disabled)`, "true")
-		b.evaluate(`document.querySelector('[data-changes-settings-toggle]').click();document.querySelector('[data-changes-primary]').click();fetch('/fixture-state').then(r=>r.json()).then(s=>window.runningActions=s.actions.length);'ok'`)
-		b.waitFor("settings stay closed", `String(document.querySelector('[data-changes-settings-toggle]').getAttribute('aria-expanded')==='false')`, "true")
-		b.waitFor("no mutations", `String(window.runningActions===0)`, "true")
-	})
+	for _, surface := range []string{"toolbar", "composer"} {
+		t.Run(surface, func(t *testing.T) {
+			server := worktreeActionsFixture(t, "", nil, models.StatusRunning)
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL+"/", "changes-running-"+surface, func(b *composerFocusCDP) {
+				if surface == "composer" {
+					b.waitFor("workspace ready", `String(!!window.htmx&&!!document.querySelector('[data-changes-split]'))`, "true")
+					b.evaluate(`htmx.ajax('GET','/tasks/layer-task/changes?composer_action=1',{target:'#changes-content',swap:'innerHTML'});'ok'`)
+					b.waitFor("composer control loaded", `String(!!document.querySelector('[data-composer-action="true"]'))`, "true")
+				}
+				b.waitFor("settings enabled while action blocked", `String(document.querySelector('[data-changes-repo]')?.options.length>0&&!document.querySelector('[data-changes-settings-toggle]').disabled&&document.querySelector('[data-changes-primary]').disabled)`, "true")
+				b.click(`[data-changes-settings-toggle]`)
+				b.waitFor("settings open", `String(document.querySelector('[data-changes-settings-toggle]').getAttribute('aria-expanded')==='true')`, "true")
+				b.click(`[data-changes-mode="local"]`)
+				b.waitFor("local preferences saved during execution", `String(document.querySelector('[data-changes-primary]').textContent==='Merge'&&document.querySelector('[data-changes-save-state]').textContent==='Choices are remembered for this project.'&&document.querySelector('[data-changes-primary]').disabled&&!document.querySelector('[data-changes-settings-toggle]').disabled)`, "true")
+				b.waitFor("disabled action explains why", `(()=>{const el=document.querySelector('[data-changes-primary]');return String((el.title||el.dataset.ovTooltip||'').includes('Wait for the task to finish'));})()`, "true")
+				b.evaluate(`document.querySelector('[data-changes-primary]').click();fetch('/fixture-state').then(r=>r.json()).then(s=>window.runningActions=s.actions.length);'ok'`)
+				b.waitFor("no mutations", `String(window.runningActions===0)`, "true")
+			})
+		})
+	}
 }
 
 func TestBrowserFunctional_ChangesSplitActionWithoutNativePopover(t *testing.T) {
