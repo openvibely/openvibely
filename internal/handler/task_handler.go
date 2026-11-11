@@ -741,7 +741,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if c.QueryParam("from") == "new" {
 		destination := "/tasks/" + t.ID + "?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), projectID))
 		if isHTMX(c) {
-			c.Response().Header().Set("HX-Location", destination)
+			// Keep navigation inside the app shell. A bare HX-Location defaults
+			// to replacing body, including the native desktop controls.
+			location, _ := json.Marshal(map[string]string{
+				"path": destination, "target": "#main-content", "swap": "innerHTML",
+			})
+			c.Response().Header().Set("X-Created-Task-ID", t.ID)
+			c.Response().Header().Set("HX-Location", string(location))
 			return c.NoContent(http.StatusOK)
 		}
 		return c.Redirect(http.StatusSeeOther, destination)

@@ -212,9 +212,7 @@ func TestSwarmComposerUploadsSurviveCreationAndFollowup(t *testing.T) {
 			}
 			rec := send("/tasks?project_id="+project.ID+"&from=new&thread=1", form)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-			location, err := url.Parse(rec.Header().Get("HX-Location"))
-			require.NoError(t, err)
-			id := strings.TrimPrefix(location.Path, "/tasks/")
+			id := rec.Header().Get("X-Created-Task-ID")
 			require.NotEmpty(t, id)
 			files, err := h.attachmentRepo.ListByTask(context.Background(), id)
 			require.NoError(t, err)

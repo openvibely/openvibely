@@ -16,6 +16,11 @@ func TestPluginSettingsCardsAndDialogs(t *testing.T) {
 	for _, marker := range []string{`aria-label="Add page"`, `data-card-list-toolbar="plugin-pages"`, `id="plugin-describe-modal"`, `id="plugin-install-modal"`, `id="plugin-delete-` + env.inA.ID} {
 		require.Contains(t, rec.Body.String(), marker)
 	}
+	// Describe must use XHR: native WebKit asset transport cannot follow
+	// the redirect produced by a full-document task form submission.
+	require.Contains(t, rec.Body.String(), `hx-post="/tasks?from=new&amp;project_id=`+env.projA.ID+`" hx-target="#main-content"`)
+	require.Contains(t, rec.Body.String(), `hx-on:htmx:config-request="event.detail.parameters.prompt=`)
+	require.NotContains(t, rec.Body.String(), `<form method="post" action="/tasks`)
 	rec = env.do(t, http.MethodGet, base+"&search=nonexistent", "", nil)
 	require.NotContains(t, rec.Body.String(), `data-plugin-instance-row=`)
 	rec = env.do(t, http.MethodGet, base+"&search=sales", "", nil)

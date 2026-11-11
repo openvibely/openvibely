@@ -262,9 +262,13 @@ func TestAllProjectsResourceNavigationAndCreation(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/tasks?project_id="+models.AllProjectsID+"&from=new", strings.NewReader("destination_project="+second.ID+"&title=Describe+page&prompt=Build+a+custom+page&category=backlog&priority=2"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
 	app.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
-	target := rec.Header().Get("Location")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var location map[string]string
+	require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &location))
+	require.Equal(t, "#main-content", location["target"])
+	target := location["path"]
 	require.Contains(t, target, "?project_id="+models.AllProjectsID)
 	createdID := strings.TrimSuffix(strings.TrimPrefix(target, "/tasks/"), "?project_id="+models.AllProjectsID)
 	described, err := stores.Tasks.GetByID(t.Context(), createdID)
