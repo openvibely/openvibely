@@ -823,6 +823,9 @@ func (h *Handler) requirePluginAdmin(c echo.Context) (string, error) {
 	if h.organizationSvc != nil {
 		p, ok := models.PrincipalFromContext(c.Request().Context())
 		if !ok || !p.IsOrgAdmin() {
+			if ok && p.UserID != "" && c.Request().Method == http.MethodGet && c.Path() == "/settings/plugin-pages" {
+				return "", organizationSettingsAccessResponse(c)
+			}
 			return "", echo.NewHTTPError(http.StatusForbidden, "organization administrator required")
 		}
 	}

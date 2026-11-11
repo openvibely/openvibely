@@ -68,9 +68,14 @@ func TestViewerPermissionToastsInChrome(t *testing.T) {
     const count=denials.length;
     if(!await openVibelyPermissionErrors.fetch(response)||denials.length!==count+1)throw Error('Expected one permission toast: '+path);
   }
-  for(const path of ['/models','/agents','/skills','/personality']) {
+  for(const path of ['/models','/agents','/skills','/personality','/workers']) {
     const response=await fetch(path),count=denials.length;
-    if(response.status!==404||await openVibelyPermissionErrors.fetch(response)||denials.length!==count)throw Error('Hidden resource misclassified: '+path);
+    if(response.status!==403||!await openVibelyPermissionErrors.fetch(response)||denials.length!==count+1)throw Error('Missing settings permission toast: '+path);
+    if(!denials[count].includes('Organization admin access is required'))throw Error('Wrong settings permission explanation: '+path);
+  }
+  {
+    const response=await fetch('/tasks?project_id=missing-project'),count=denials.length;
+    if(response.status!==404||await openVibelyPermissionErrors.fetch(response)||denials.length!==count)throw Error('Hidden project misclassified');
   }
   window.showToast=originalToast;
   await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'pass'},body:'ok'});
