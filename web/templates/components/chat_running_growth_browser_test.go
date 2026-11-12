@@ -156,3 +156,43 @@ func TestBrowserFunctional_RunningPartialControls(t *testing.T) {
  return {};
  `)
 }
+
+// A later closing backtick can make an apparent tool opener literal Markdown.
+// Never seal that opener into the pending-result ledger before it is stable.
+func TestBrowserFunctional_RunningCheckpointUnclosedCodeSpan(t *testing.T) {
+	for _, mode := range []string{"compact", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			runIncrementalChatBrowser(t, fmt.Sprintf(`
+ document.documentElement.setAttribute('data-output-detail',%q);
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');
+ const pair=document.createElement('div');pair.dataset.execStatus='completed';messages.appendChild(pair);
+ const reference=document.createElement('div');pair.appendChild(reference);
+ const tools=node=>node._chatVirtualData.sourceModels.flatMap(row=>row.segments).filter(seg=>seg.type==='using').map(seg=>({name:seg.secondary,output:seg.resultOutput}));
+ const tick=String.fromCharCode(96);
+ for(const delimiter of [tick,tick+tick]) {
+  const node=document.createElement('div');stream.replaceChildren(node);
+  const prefix='[Using tool: shell | earlier]\n[Tool shell done]\nearlier output\n[/Tool]\n';
+  await renderLiveChatContent(node,prefix,false);
+  const checkpoint=node._chatParseCheckpoint.raw;
+  let text=prefix+delimiter+'example\n[Using tool: shell | fake]\n';
+  await renderLiveChatContent(node,text,false);
+  assert(node._chatParseCheckpoint.raw===checkpoint,'unfinished code span advanced checkpoint');
+  text+=delimiter+'\n[Using tool: shell | real]\n[Tool shell done]\nreal output\n[/Tool]\n';
+  await renderLiveChatContent(node,text,false);await renderStreamingContent(reference,text,false);
+  assert(JSON.stringify(tools(node))===JSON.stringify(tools(reference)),'result attached to code example: '+JSON.stringify(tools(node)));
+  assert(tools(node).length===2 && tools(node)[1].output==='real output\n','real tool lost its result');
+  assert(node._chatParseCheckpoint.raw.length>checkpoint.length,'closed code span prevented checkpoint progress');
+ }
+ // Backticks in tool data, complete code spans, and escaped literals must not
+ // keep ordinary completed history in the provisional suffix.
+ for(const prose of ['Complete '+tick+'code'+tick+'.\n','Escaped '+String.fromCharCode(92)+tick+'.\n']) {
+  const node=document.createElement('div');stream.replaceChildren(node);
+  const text=prose+'[Using tool: shell | echo '+tick+']\n[Tool shell done]\nopaque '+tick+'\n[/Tool]\n';
+  await renderLiveChatContent(node,text,false);
+  assert(node._chatParseCheckpoint?.raw===text,'safe Markdown or opaque tool data blocked checkpoint');
+ }
+ return {};
+ `, mode))
+		})
+	}
+}

@@ -5733,10 +5733,33 @@ templ ChatAutoScrollScript() {
                     function checkpointSegments() {
                         if (!incrementalProjection || options?.preparedSegments) return true;
                         var cut = 0, blocked = false;
+                        // An unmatched inline delimiter can turn later control markers
+                        // into literal code when its closer arrives. Keep that Markdown
+                        // provisional, while ignoring delimiters in opaque tool data and
+                        // already recognized code spans/fences.
+                        var protectedRanges = codeRanges.concat(segments.filter(function(seg) {
+                            return seg.type === 'using' || seg.type === 'tool_result';
+                        }).map(function(seg) { return {start:seg.index, end:seg.index + seg.length}; })).sort(function(a, b) { return a.start - b.start; });
+                        var checkpointLimit = textBuffer.length, protectedIndex = 0;
+                        var ticks = /`+/g, tick;
+                        while (!extendOpenResult && (tick = ticks.exec(textBuffer)) !== null) {
+                            while (protectedIndex < protectedRanges.length && protectedRanges[protectedIndex].end <= tick.index) protectedIndex++;
+                            if (protectedIndex < protectedRanges.length && protectedRanges[protectedIndex].start <= tick.index) {
+                                ticks.lastIndex = Math.max(ticks.lastIndex, protectedRanges[protectedIndex].end);
+                                continue;
+                            }
+                            var slashes = 0;
+                            for (var before = tick.index - 1; before >= 0 && textBuffer.charAt(before) === '\\'; before--) slashes++;
+                            // Escaping a run consumes only its first backtick.
+                            if (slashes % 2 && tick[0].length === 1) continue;
+                            checkpointLimit = tick.index;
+                            break;
+                        }
                         // Retain incomplete controls and trailing Markdown in the mutable suffix.
                         // A complete opener is also safe: result matching is ledger-wide.
                         segments.forEach(function(seg) {
                             var end = seg.index + (seg.length || 0);
+                            if (end > checkpointLimit) return;
                             var raw = extendOpenResult ? '' : textBuffer.slice(seg.index, end);
                             if (seg.type === 'compaction' && /\[Compaction started/.test(raw)) blocked = true;
                             if (seg.type === 'compaction_end' && /[\r\n]/.test(textBuffer.charAt(end))) { blocked = false; cut = end; }
