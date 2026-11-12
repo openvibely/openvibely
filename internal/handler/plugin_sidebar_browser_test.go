@@ -27,6 +27,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  try{
  if(document.readyState==='loading')await new Promise(r=>document.addEventListener('DOMContentLoaded',r,{once:true}));
  const checkSettings=()=>{
+  if(document.querySelector('#sidebar [data-nav-base="/themes"]').getAttribute('aria-current')!=='page')throw Error('Settings rail highlight missing');
   if(!document.documentElement.classList.contains('appearance-settings'))throw Error('Settings navigation reverted to tasks');
   if(document.getElementById('task-list-panel').getAttribute('aria-label')!=='Settings')throw Error('Wrong navigation context');
  };
@@ -89,6 +90,18 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  pageLink.click();
  await wait(()=>document.querySelector('#plugin-page-root'),'Page did not open');
  await wait(()=>document.querySelector('#plugin-startup')?.dataset.state==='loaded','Initial frame failed');
+ const checkPageSelection=()=>{
+  const selected=document.querySelectorAll('#sidebar [aria-current="page"]');
+  if(selected.length!==1 || selected[0].getAttribute('data-sidebar-path')!==location.pathname)throw Error('Wrong custom page selection');
+  if(getComputedStyle(selected[0]).backgroundColor==='rgba(0, 0, 0, 0)')throw Error('Custom page highlight invisible');
+  if(getComputedStyle(selected[0]).transitionDuration!=='0s')throw Error('Custom page highlight fades');
+ };
+ checkPageSelection();
+ // Replacing the asynchronously loaded rail must restore selection too.
+ const oldNavLink=document.querySelector('#plugin-pages-nav [data-sidebar-path]');
+ htmx.trigger(document.body,'plugin-nav-refresh');
+ await wait(()=>!oldNavLink.isConnected && document.querySelector('#plugin-pages-nav [aria-current="page"]'),'Refreshed rail selection missing');
+ checkPageSelection();
  const pageFrame=document.getElementById('plugin-frame');
  if(!pageFrame.hasAttribute('data-tooltip-disabled'))throw Error('Page frame tooltip enabled');
  await wait(()=>pageFrame.style.getPropertyValue('--superellipse-clip'),'Page corners not shaped');
@@ -103,6 +116,8 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  document.querySelector('#appearance-settings-nav a[data-nav-base="/settings/plugin-pages"]').click();
  await wait(()=>document.querySelector('#plugin-settings'),'Settings did not open');
  await new Promise(r=>setTimeout(r,400));
+ checkSettings();
+ if(document.querySelector('#plugin-pages-nav [aria-current="page"]'))throw Error('Custom page stayed selected after leaving');
  if(document.querySelector('#settings-retained-workspace #plugin-page-root'))throw Error('Plugin capability retained in settings');
  await clickAction('disable');
  await wait(()=>!document.querySelector('#plugin-pages-nav [data-plugin-nav-entry]'),'Disabled Sales still in rail');

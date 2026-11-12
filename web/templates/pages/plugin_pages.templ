@@ -111,6 +111,7 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 	for _, e := range entries {
 		<li data-plugin-nav-entry={ e.InstanceID }>
 			<a
+				data-sidebar-path={ "/p/" + url.PathEscape(e.InstanceID) }
 				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject))) }
 				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject)) }
 				aria-label={ e.Title + pluginNavProjectSuffix(e, showProject) }

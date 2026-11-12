@@ -1639,7 +1639,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background-color: var(--ov-l-surface-hover);
 					}
 					/* Prevent mouse-click focus from looking like a persistent active nav item (web parity with desktop). */
-					.sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible),
+					.sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible):not([aria-current="page"]),
 					.sidebar-aside .menu:not(.ov-menu) summary:focus:not(:focus-visible) {
 						background-color: transparent !important;
 						outline: none !important;
@@ -3251,6 +3251,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside .sidebar-inner::-webkit-scrollbar { display: none; }
 				html[data-shell-frame] .sidebar-aside .menu a { position: relative; opacity: .75; }
 				html[data-shell-frame] .sidebar-aside .menu a:hover { opacity: 1; }
+				/* Navigation highlights must not fade through the previously hovered/selected icon. */
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]) { transition: none; }
                 html[data-shell-frame] #alerts-nav-link[data-system-update-available="true"] { opacity: 1; }
                 .sidebar-update-dot { display: none; }
                 html[data-shell-frame] #alerts-nav-link[data-system-update-available="true"] .sidebar-update-dot {

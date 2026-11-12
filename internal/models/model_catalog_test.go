@@ -172,7 +172,7 @@ func TestProviderModelsReturnsDefensiveEffortCopies(t *testing.T) {
 }
 
 func TestAnthropicChoicesOrderedByVersionThenName(t *testing.T) {
-	want := []string{"claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5", "claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"}
+	want := []string{"claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-mythos-5-2", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5", "claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"}
 	got := ProviderModels(ProviderAnthropic)
 	if len(got) != len(want) {
 		t.Fatalf("choices = %d, want %d", len(got), len(want))
@@ -194,6 +194,22 @@ func TestClaudeFable52CatalogPolicy(t *testing.T) {
 	}
 	if !spec.SupportsFastMode || !spec.SupportsOAuth || !spec.SupportsNativeCompaction || !spec.RequiresAdaptiveThinking || !spec.UsesAdaptiveThinking || spec.SupportsTemperature {
 		t.Fatalf("unexpected Fable 5.2 capabilities: %+v", spec)
+	}
+	if spec.ContextWindow != standardAnthropicContext {
+		t.Fatalf("context budget = %d", spec.ContextWindow)
+	}
+}
+
+func TestClaudeMythos52CatalogPolicy(t *testing.T) {
+	spec, ok := LookupModel(ProviderAnthropic, "claude-mythos-5-2")
+	if !ok {
+		t.Fatal("Mythos 5.2 missing from catalog")
+	}
+	if spec.DefaultReasoningEffort != "medium" || spec.DefaultOutputTokens != 128000 || spec.MaxOutputTokens != 128000 {
+		t.Fatalf("unexpected Mythos 5.2 defaults: %+v", spec)
+	}
+	if !spec.SupportsFastMode || !spec.SupportsOAuth || !spec.SupportsNativeCompaction || !spec.RequiresAdaptiveThinking || !spec.UsesAdaptiveThinking || spec.SupportsTemperature {
+		t.Fatalf("unexpected Mythos 5.2 capabilities: %+v", spec)
 	}
 	if spec.ContextWindow != standardAnthropicContext {
 		t.Fatalf("context budget = %d", spec.ContextWindow)

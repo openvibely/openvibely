@@ -670,17 +670,24 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// flash as selected during HTMX navigation.
 					(function() {
 						function syncSidebarActiveNavigation() {
-							var currentPath = window.location.pathname;
-							document.querySelectorAll('[data-nav-base]').forEach(function(link) {
-								var base = link.getAttribute('data-nav-base');
-                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(currentPath));
+							var currentPath = new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href).pathname;
+							document.querySelectorAll('[data-nav-base], [data-sidebar-path]').forEach(function(link) {
+								var base = link.getAttribute('data-nav-base') || link.getAttribute('data-sidebar-path');
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/plugin-pages)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
+							if (window.syncPluginNavOverflowSelection) window.syncPluginNavOverflowSelection();
 						}
 						window.syncSidebarActiveNavigation = syncSidebarActiveNavigation;
 						syncSidebarActiveNavigation();
-						document.body.addEventListener('htmx:afterSettle', syncSidebarActiveNavigation);
+						document.addEventListener('DOMContentLoaded', syncSidebarActiveNavigation, {once: true});
+
+						// Update before the next paint, including cached views and history navigation.
+						// Waiting for afterSettle leaves the previous icon selected on the new page.
+						['htmx:afterSwap', 'htmx:pushedIntoHistory', 'htmx:replacedInHistory', 'htmx:historyRestore'].forEach(function(eventName) {
+							document.body.addEventListener(eventName, syncSidebarActiveNavigation);
+						});
 						window.addEventListener('popstate', syncSidebarActiveNavigation);
 					})();
 
