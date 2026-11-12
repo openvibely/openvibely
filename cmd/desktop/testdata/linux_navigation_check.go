@@ -30,15 +30,16 @@ func main() {
 	done := make(chan struct{}, 1)
 	var submissions atomic.Int32
 	var badForm atomic.Bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("REQUEST %s %s\n", r.Method, r.URL.Path)
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "application/javascript")
 			w.Write(htmx)
-		case "/login", "/logout", "/invite", "/tasks", "/automations/builder":
+		case "/login", "/logout", "/invite", "/tasks", "/automations/builder", "/organization", "/connect":
 			submissions.Add(1)
-			if r.Method != "POST" {
+			if r.Method != "POST" && mode != "get-307" {
 				badForm.Store(true)
 			}
 			if mode == "create" && (r.FormValue("title") != "Navigation test" || r.FormValue("category") != "active" || !strings.Contains(r.FormValue("prompt"), "Requirements: Test navigation")) {
@@ -51,6 +52,12 @@ func main() {
 			case "automation":
 				w.Header().Set("HX-Redirect", "/done")
 				w.WriteHeader(204)
+			case "get-307":
+				http.Redirect(w, r, "/done", 307)
+			case "organization":
+				w.Header().Set("HX-Location", `{"path":"/done","target":"#main-content","swap":"innerHTML"}`)
+			case "absolute":
+				http.Redirect(w, r, server.URL+"/done", 302)
 			case "original-create":
 				http.Redirect(w, r, "/done", 303)
 			default:
@@ -80,6 +87,14 @@ func main() {
 			attr := `method="post" action="` + endpoint + `"`
 			if mode == "automation" {
 				attr = `hx-post="/automations/builder" hx-target="#main-content"`
+			}
+			switch mode {
+			case "get-307":
+				attr = `method="get" action="/connect"`
+			case "organization":
+				attr = `hx-post="/organization" hx-target="#main-content"`
+			case "absolute":
+				attr = `method="post" action="/login"`
 			}
 			fmt.Fprintf(w, `<!doctype html><html><head><script src="/htmx.js"></script></head><body><main id="main-content"><dialog id="modal"><form %s><input name="title" value="Test"><button type="submit">Submit</button></form></dialog></main><script>window.addEventListener('load',()=>{modal.showModal();setTimeout(()=>document.querySelector('form').requestSubmit(),100);});</script></body></html>`, attr)
 		}
