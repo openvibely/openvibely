@@ -1344,11 +1344,44 @@ func scanExecutionsNewestFirstAsChronological(rows *sql.Rows) ([]models.Executio
 	return execs, nil
 }
 
+// UpdateDiffOutput retains one non-empty fallback per task. Empty live snapshots
+// still reach the broadcaster, but must not erase the saved review fallback.
 func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOutput string) error {
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE executions SET diff_output = ? WHERE id = ?`, diffOutput, id)
+	if diffOutput == "" {
+		return nil
+	}
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		return saveLatestDiffOutput(ctx, tx, id, diffOutput)
+	})
+}
+
+// The caller holds an immediate transaction so accepting a snapshot and clearing
+// older snapshots are atomic. Ordering matches GetLatestNonEmptyDiffOutput,
+// including executions that start in the same timestamp tick.
+func saveLatestDiffOutput(ctx context.Context, tx sqlExecutor, id, diffOutput string) error {
+	if diffOutput == "" {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE executions SET diff_output = ?
+		WHERE id = ? AND NOT EXISTS (
+			SELECT 1 FROM executions newer
+			WHERE newer.task_id = executions.task_id AND newer.diff_output != ''
+			AND (newer.started_at, newer.rowid) > (executions.started_at, executions.rowid)
+		)`, diffOutput, id)
 	if err != nil {
-		return fmt.Errorf("updating execution diff output: %w", err)
+		return fmt.Errorf("saving latest execution diff: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 0 {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE executions SET diff_output = ''
+		WHERE task_id = (SELECT task_id FROM executions WHERE id = ?)
+		AND diff_output != '' AND (started_at, rowid) < (
+			SELECT started_at, rowid FROM executions WHERE id = ?
+		)`, id, id)
+	if err != nil {
+		return fmt.Errorf("clearing older execution diffs: %w", err)
 	}
 	return nil
 }
@@ -1359,11 +1392,14 @@ func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskI
 		var id string
 		err := tx.QueryRowContext(ctx, `SELECT id FROM executions WHERE task_id=? AND prompt_sent=? AND status=? ORDER BY rowid DESC LIMIT 1`, parentTaskID, prompt, models.ExecCompleted).Scan(&id)
 		if err == sql.ErrNoRows {
-			err = tx.QueryRowContext(ctx, `INSERT INTO executions(id,task_id,status,prompt_sent,diff_output,duration_ms,completed_at) VALUES(lower(hex(randomblob(16))),?,?,?,?,?,datetime('now')) RETURNING id`, parentTaskID, models.ExecCompleted, prompt, diffOutput, durationMs).Scan(&id)
+			err = tx.QueryRowContext(ctx, `INSERT INTO executions(id,task_id,status,prompt_sent,duration_ms,completed_at) VALUES(lower(hex(randomblob(16))),?,?,?,?,datetime('now')) RETURNING id`, parentTaskID, models.ExecCompleted, prompt, durationMs).Scan(&id)
 		} else if err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE executions SET diff_output=?,duration_ms=?,completed_at=datetime('now') WHERE id=?`, diffOutput, durationMs, id)
+			_, err = tx.ExecContext(ctx, `UPDATE executions SET duration_ms=?,completed_at=datetime('now') WHERE id=?`, durationMs, id)
 		}
 		if err != nil {
+			return err
+		}
+		if err := saveLatestDiffOutput(ctx, tx, id, diffOutput); err != nil {
 			return err
 		}
 		return replaceDisplayOutput(ctx, tx, id, output)

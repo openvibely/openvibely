@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 228
+const latestMigrationVersion = 230
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
