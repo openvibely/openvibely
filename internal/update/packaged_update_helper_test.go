@@ -4,12 +4,66 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestExpectedHealthRecoversFromStartupConnectionRefusals(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ready":true,"version":"0.6.0"}`))
+	}))
+	defer server.Close()
+
+	// Inject refused connections before allowing a real HTTP exchange. This
+	// models startup without racing to close and rebind a reserved TCP port.
+	var attempts atomic.Int32
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if attempts.Add(1) <= 4 {
+				return nil, &net.OpError{Op: "dial", Net: network, Err: syscall.ECONNREFUSED}
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		},
+	}
+	defer transport.CloseIdleConnections()
+	// Four 250 ms polling intervals fit comfortably; the general exponential
+	// retry policy cannot reach the healthy fifth attempt within this budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := waitForExpectedHealth(ctx, server.URL, "0.6.0", &http.Client{Transport: transport}); err != nil {
+		t.Fatalf("replacement failed validation after startup connection refusals: %v (dial attempts: %d)", err, attempts.Load())
+	}
+	if got := attempts.Load(); got != 5 {
+		t.Fatalf("dial attempts = %d, want 4 refused connections followed by success", got)
+	}
+}
+
+func TestExpectedHealthPollsThroughStartupWithoutHTTPBackoff(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ready":true,"version":"0.6.0"}`))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := waitForExpectedHealth(ctx, server.URL, "0.6.0", server.Client()); err != nil {
+		t.Fatalf("healthy replacement missed validation deadline: %v", err)
+	}
+}
 
 func TestReadPackagedUpdateHelperStateFileRetriesTransientErrors(t *testing.T) {
 	attempts := 0
