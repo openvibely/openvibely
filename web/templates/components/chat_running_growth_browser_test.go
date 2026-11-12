@@ -258,3 +258,54 @@ func TestBrowserFunctional_RunningFullRowUpdatesStayBounded(t *testing.T) {
  `)
 	t.Log(string(report))
 }
+
+func TestBrowserFunctional_RunningProvisionalResultRollback(t *testing.T) {
+	for _, mode := range []string{"compact", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			runIncrementalChatBrowser(t, fmt.Sprintf(`
+ document.documentElement.setAttribute('data-output-detail',%q);
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');
+ const pair=document.createElement('div');pair.dataset.execStatus='completed';messages.appendChild(pair);
+ const reference=document.createElement('div');pair.appendChild(reference);
+ const tools=node=>node._chatVirtualData.sourceModels.flatMap(row=>row.segments).filter(seg=>seg.type==='using');
+ const shape=node=>JSON.stringify(tools(node).map(seg=>({name:seg.secondary,completed:seg.completed,linked:seg.resultLinked,status:seg.resultStatus,output:seg.resultOutput})));
+ const tick=String.fromCharCode(96);
+ for(const history of [0,100]) {
+  const node=document.createElement('div');stream.replaceChildren(node);
+  let text='[Using tool: read_file | actual]\n';
+  for(let i=0;i<history;i++)text+='[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+  await renderLiveChatContent(node,text,false);
+  // Mount the earlier call before the provisional suffix changes it, so the
+  // rollback must refresh existing DOM as well as its model and Compact label.
+  messages.scrollTop=0;await renderVisibleChatRows(messages);
+  const committed=node._chatParseCheckpoint.segments.find(seg=>seg.type==='using');
+  const saved=JSON.stringify(committed);
+  text+=tick+'example\n[Tool read_file error]\nnot a real result\n[/Tool]\n';
+  await renderLiveChatContent(node,text,false);await renderStreamingContent(reference,text,false);
+  assert(shape(node)===shape(reference),'provisional display differs from fresh parse');
+  assert(JSON.stringify(committed)===saved,'provisional matching mutated a committed call');
+  const snapshot=captureChatVirtualData(stream)[0], snapshotBefore=JSON.stringify(snapshot);
+  text+=tick+'\n';
+  await renderLiveChatContent(node,text,false);await renderStreamingContent(reference,text,false);
+  assert(shape(node)===shape(reference),'code example left a result on the real call: '+shape(node));
+  assert(!tools(node)[0].resultLinked,'fake result remained attached');
+  if(document.documentElement.getAttribute('data-output-detail')==='compact')assert(node._chatVirtualData.models[0].activitySummary.failures===0,'Compact retained fake failure count');
+  else {
+   messages.scrollTop=0;await renderVisibleChatRows(messages);
+   assert(!node._chatVirtualRows[0].node.textContent.includes('not a real result'),'retained row still displayed fake output');
+  }
+  // A genuine unfinished result must stay visible while growing, then commit
+  // to the original call exactly once. Snapshots retain their old revision.
+  for(const chunk of ['[Tool read_file done]\nreal',' output\n','[/Tool]\n']) {
+   text+=chunk;await renderLiveChatContent(node,text,false);await renderStreamingContent(reference,text,false);
+   assert(shape(node)===shape(reference),'genuine result pairing changed after '+chunk);
+   assert(JSON.stringify(snapshot)===snapshotBefore,'provisional overlay mutated navigation snapshot');
+  }
+  assert(tools(node)[0].resultOutput==='real output\n','actual result lost');
+  assert(node._chatParseCheckpoint.segments.find(seg=>seg.type==='using').resultOutput==='real output\n','closed result did not commit');
+ }
+ return {};
+ `, mode))
+		})
+	}
+}

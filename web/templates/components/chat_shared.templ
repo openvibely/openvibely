@@ -5386,10 +5386,11 @@ templ ChatAutoScrollScript() {
                         var significant = seg.type !== 'text' || seg.content.trim();
                         if (significant && ledger.lastUsing) {
                             if (!ledger.lastUsing.completed) {
-                                ledger.lastUsing._version = (ledger.lastUsing._version || 0) + 1;
-                                options.onToolChange?.(ledger.lastUsing);
+                                var lastUsing = options.projectTool ? options.projectTool(ledger.lastUsing) : ledger.lastUsing;
+                                lastUsing._version = (lastUsing._version || 0) + 1;
+                                lastUsing.completed = true;
+                                options.onToolChange?.(lastUsing);
                             }
-                            ledger.lastUsing.completed = true;
                             ledger.lastUsing = null;
                         }
                         if (seg.type === 'using') {
@@ -5401,6 +5402,7 @@ templ ChatAutoScrollScript() {
                             var queue = ledger.queues[seg.normalizedName || seg.name];
                             var using = queue?.shift();
                             if (using) {
+                                if (options.projectTool) using = options.projectTool(using);
                                 if (!using.resultLinked || using.resultStatus !== seg.status || using.resultOutput !== (seg.output || '')) {
                                     using._version = (using._version || 0) + 1;
                                     options.onToolChange?.(using);
@@ -5481,6 +5483,7 @@ templ ChatAutoScrollScript() {
                 if (checkpoint) textBuffer = sourceText.slice(checkpoint.raw.length);
                 var parseSource = textBuffer, normalizationEdits = [], nextCheckpoint = null, newSegments = null, committedSegments = null;
                 var previousProjection = container._chatVirtualData, changedTools = new Set(), rowDelta = null;
+                var provisionalTools = new Map();
                 var openResult = incrementalProjection && container._chatOpenResult;
                 if (openResult && (!sourceText.startsWith(openResult.source) || !checkpoint || checkpoint.raw.length !== openResult.offset)) openResult = null;
                 var extendOpenResult = openResult && !/\[\/Tool\][\t ]*(?=\r?$)/m.test(sourceText.slice(openResult.scanFrom));
@@ -5900,7 +5903,18 @@ templ ChatAutoScrollScript() {
                                 nextCheckpoint.ledger = ledger;
                                 ledger = copyLedger(ledger);
                             }
-                            return window.linkStreamingToolResults(nextCheckpoint ? newSegments.slice(committedSegments.length) : newSegments, Object.assign({}, options, {linkState:ledger, onToolChange:function(tool) { changedTools.add(tool); }}));
+                            // A later delimiter can reinterpret provisional results as
+                            // literal Markdown. Keep their effects out of committed
+                            // calls and replace only the affected display rows.
+                            previousProjection?._provisionalTools?.forEach(function(projected, tool) { changedTools.add(tool); });
+                            return window.linkStreamingToolResults(nextCheckpoint ? newSegments.slice(committedSegments.length) : newSegments, Object.assign({}, options, {
+                                linkState:ledger,
+                                projectTool:function(tool) {
+                                    if (!provisionalTools.has(tool)) provisionalTools.set(tool, Object.assign({}, tool));
+                                    changedTools.add(tool);
+                                    return provisionalTools.get(tool);
+                                }
+                            }));
                         }
 						return window.linkStreamingToolResults(segments, options);
 					}
@@ -5991,6 +6005,10 @@ templ ChatAutoScrollScript() {
                         result[index].segments.forEach(function(seg) { if (seg.type === 'using') indexes.set(seg, index); });
                     }
                     if (nextCheckpoint) nextCheckpoint.rowIndexes = indexes;
+                    provisionalTools.forEach(function(projected, tool) {
+                        var index = indexes.get(tool);
+                        if (index !== undefined) result[index] = Object.assign({}, result[index], {segments:[projected]});
+                    });
                     if (checkpoint && previousProjection) rowDelta = {base:previousProjection, start:changedFrom, changed:Array.from(changed)};
                     return result;
                 }
@@ -6011,6 +6029,9 @@ templ ChatAutoScrollScript() {
 				function renderPreparedSegments() {
 					if (virtualOwner && window.installChatVirtualRows) {
 						var data = cachedProjection || {key:projectionKey, source:sourceText, normalized:textBuffer, offset:options?.offset || 0, models:projectIncrementalRows(), incremental:incrementalProjection};
+                        // Provisional overlays are recomputed on each source revision;
+                        // snapshots contain the displayed rows, not mutable ledger state.
+                        if (!cachedProjection) Object.defineProperty(data, '_provisionalTools', {value:provisionalTools});
                         // Installation hints are transient, not navigation snapshot data.
                         if (!cachedProjection && rowDelta) Object.defineProperty(data, '_rowDelta', {value:rowDelta, configurable:true});
                         rowDelta = null; previousProjection = null;
