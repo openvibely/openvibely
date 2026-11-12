@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -64,7 +65,8 @@ func TestNativeDesktopNavigation(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, binary, mode, fixturePath, htmx, authBackend.BaseURL, t.TempDir())
+			profile := testutil.NativeBrowserTempDir(t)
+			command := exec.CommandContext(ctx, binary, mode, fixturePath, htmx, authBackend.BaseURL, profile)
 			output, err := command.CombinedOutput()
 			t.Logf("%s", output)
 			if err != nil {
