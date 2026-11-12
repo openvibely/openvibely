@@ -169,3 +169,10 @@ Use Tasks instead when you already know the exact unit of work and want board st
 Open **Settings → Appearance → Chat** to choose compact or full tool output. Compact output groups consecutive tool activity into expandable rows and is the default; existing saved choices are preserved. Expand activity to inspect tool details.
 
 Open **Settings → Shortcuts** for keyboard controls. Settings also contains the appearance controls and worker limits previously reached from separate navigation entries.
+
+## Pasted text and personal workspace chat
+
+Large pasted text appears as an editable card in Chat and task composers. Open the card to edit it or choose Show in composer to put it back in the text field. Accepted sends clear the submitted text and cards; failed sends retain them for retry.
+
+All projects Chat has separate history, pending messages, and model preferences for each signed-in user. Project Chat remains shared with authorized project members. Shared All projects history from before this change is accessible only to organization administrators.
+

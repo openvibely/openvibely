@@ -255,7 +255,7 @@ OAUTH_REDIRECT_MODE=auto
 
 Open **Settings → Organization** to manage the installation's organization, members, roles, and invitation links. Local authentication must be enabled to invite members. Invitations can grant member or admin access, expire after seven days, and can be revoked. Personal interface preferences follow each signed-in user, and conversation messages retain their sender identity.
 
-All members currently share access to all projects and global application operations. Roles restrict organization administration; they do not provide project-level isolation. Hosted SSO currently supports the workspace owner only, not multi-member invitations.
+Joining the organization grants no project access. Project owners and organization admins/owners assign viewer, editor, or maintainer roles in Project Settings → Sharing. Application permissions do not isolate agent processes or the filesystem; private-project creation remains unavailable. Hosted SSO currently supports the workspace owner only, not multi-member invitations.
 
 On upgrade, existing authenticated sessions must sign in again. Local `AUTH_USERNAME` and `AUTH_PASSWORD` initialize the owner account once; changing them later does not change its stored credentials. Password-change/reset UI is not yet available. Authentication cannot be disabled after adding other members.
 
