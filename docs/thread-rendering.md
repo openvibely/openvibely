@@ -29,5 +29,3 @@ go test ./web/templates/pages -run 'TestBrowserFunctional_(ThreadCacheAndVirtual
 go test ./web/templates/components -run 'TestBrowserFunctional_(LazyTranscript|VirtualizedCompletedTranscript|TranscriptScrollCoordinatorInChrome|IncrementalChatRendering|EarlierPrependPreservesMovingReader|EarlierLoaderContinuousUpwardInput)' -count=1
 go test ./internal/handler -run '^TestTask(LazyCachedNavigationInChrome|CachedNavigationRefreshInChrome)$' -count=1
 ```
-
-Live-growth measurements and remaining cumulative costs are documented in [Running-task output growth](performance/running-task-growth.md).
