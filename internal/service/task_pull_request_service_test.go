@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,6 +112,8 @@ func TestTaskPullRequestServiceOpenForTaskUsesCanonicalRepositoryMutationBoundar
 
 	leaseEntered := make(chan struct{})
 	releaseLease := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseLease) })
+	defer release()
 	leaseDone := make(chan error, 1)
 	go func() {
 		leaseDone <- WithRepositoryMutation(repoDir, func() error {
@@ -137,7 +140,7 @@ func TestTaskPullRequestServiceOpenForTaskUsesCanonicalRepositoryMutationBoundar
 		t.Fatalf("direct pull-request publication returned before lease release: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
-	close(releaseLease)
+	release()
 	select {
 	case err := <-leaseDone:
 		if err != nil {
@@ -146,10 +149,10 @@ func TestTaskPullRequestServiceOpenForTaskUsesCanonicalRepositoryMutationBoundar
 	case <-time.After(2 * time.Second):
 		t.Fatal("repository mutation lease did not finish")
 	}
+	// Publication may already have finished, leaving both channels ready. Check
+	// entry independently so select cannot mistake completion for missing entry.
 	select {
 	case <-publishEntered:
-	case err := <-openDone:
-		t.Fatalf("publication did not enter after lease release: %v", err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("publication did not resume after lease release")
 	}
