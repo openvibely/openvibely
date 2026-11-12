@@ -30,6 +30,19 @@ func main() {
 	done := make(chan struct{}, 1)
 	var submissions atomic.Int32
 	var badForm atomic.Bool
+	external := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/report" {
+			select {
+			case done <- struct{}{}:
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<!doctype html><html><body>External destination<script>fetch('/report')</script></body></html>`)
+	}))
+	defer external.Close()
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("REQUEST %s %s\n", r.Method, r.URL.Path)
@@ -49,6 +62,14 @@ func main() {
 			switch mode {
 			case "create":
 				w.Header().Set("HX-Location", `{"path":"/done","target":"#main-content","swap":"innerHTML"}`)
+			case "session-expired":
+				w.Header().Set("HX-Redirect", "/")
+				w.WriteHeader(http.StatusUnauthorized)
+			case "refresh":
+				w.Header().Set("HX-Refresh", "true")
+				w.WriteHeader(http.StatusNoContent)
+			case "external":
+				http.Redirect(w, r, external.URL+"/done", http.StatusFound)
 			case "automation":
 				w.Header().Set("HX-Redirect", "/done")
 				w.WriteHeader(204)
@@ -76,6 +97,10 @@ func main() {
 			w.WriteHeader(204)
 		default:
 			w.Header().Set("Content-Type", "text/html")
+			if mode == "refresh" && submissions.Load() == 1 {
+				fmt.Fprint(w, `<!doctype html><html><body>Reloaded<script>fetch('/report')</script></body></html>`)
+				return
+			}
 			if mode == "create" {
 				w.Write(fixture)
 				return
@@ -93,7 +118,9 @@ func main() {
 				attr = `method="get" action="/connect"`
 			case "organization":
 				attr = `hx-post="/organization" hx-target="#main-content"`
-			case "absolute":
+			case "session-expired", "refresh":
+				attr = `hx-post="/tasks" hx-target="#main-content"`
+			case "external", "absolute":
 				attr = `method="post" action="/login"`
 			}
 			fmt.Fprintf(w, `<!doctype html><html><head><script src="/htmx.js"></script></head><body><main id="main-content"><dialog id="modal"><form %s><input name="title" value="Test"><button type="submit">Submit</button></form></dialog></main><script>window.addEventListener('load',()=>{modal.showModal();setTimeout(()=>document.querySelector('form').requestSubmit(),100);});</script></body></html>`, attr)

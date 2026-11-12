@@ -49,7 +49,7 @@ func TestNativeLinuxNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"login", "logout", "invite", "original-create", "create", "automation", "get-307", "organization", "absolute"} {
+	for _, mode := range []string{"login", "logout", "invite", "original-create", "create", "automation", "get-307", "organization", "absolute", "session-expired", "refresh", "external"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 			defer cancel()
