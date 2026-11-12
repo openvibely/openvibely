@@ -6062,19 +6062,22 @@ templ ChatAutoScrollScript() {
 				prefixes.add(toolContainerKey);
 			}
             if (options?.activityShell) {
-                var activity = document.createElement('div'); activity.className = 'stream-activity';
                 var first = segments[0];
                 var firstKey = first.type === 'using' ? first.toolRenderID : 'thinking-' + ((first.index || 0) + (container._chatActivityOffset || 0));
                 var activityKey = (toolContainerKey || 'chat') + ':activity:' + firstKey;
+                var existingActivity = container.querySelector('.stream-activity');
+                if (existingActivity?.getAttribute('data-tool-disclosure-key') !== activityKey) existingActivity = null;
+                var activity = existingActivity || document.createElement('div'); activity.className = 'stream-activity';
+                activity._contentNeedsUpdate = true;
                 activity.setAttribute('data-tool-disclosure-key', activityKey);
                 if (options.activitySummary) activity._activitySummary = {count:options.activitySummary.count, failures:options.activitySummary.failures, running:options.activitySummary.running ? {name:toolDisplayName(options.activitySummary.running.name)} : null};
                 else activity._activityTools = segments.filter(function(seg) { return seg.type === 'using'; }).map(function(seg) {
                     return {name:toolDisplayName(seg.name), status:seg.completed ? (seg.resultStatus === 'error' ? 'error' : 'done') : 'running'};
                 });
-                var toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'stream-activity-summary';
+                var toggle = existingActivity?.querySelector('.stream-activity-summary') || document.createElement('button'); toggle.type = 'button'; toggle.className = 'stream-activity-summary';
                 toggle.innerHTML = '<span class="tool-disclosure-caret" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg></span><span class="stream-activity-label"></span>';
-                var content = document.createElement('div'); content.className = 'stream-activity-body';
-                activity.append(toggle, content);
+                var content = existingActivity?.querySelector('.stream-activity-body') || document.createElement('div'); content.className = 'stream-activity-body';
+                if (!existingActivity) activity.append(toggle, content);
                 activity._ensureActivityContent = function(expanded) {
                     if (!expanded) {
                         if (!activity._contentMounted) return;
@@ -6084,8 +6087,9 @@ templ ChatAutoScrollScript() {
                         activity._contentMounted = false;
                         return;
                     }
-                    if (activity._contentMounted) return;
+                    if (activity._contentMounted && !activity._contentNeedsUpdate) return;
                     activity._contentMounted = true;
+                    activity._contentNeedsUpdate = false;
                     // The group shell stays mounted; its expanded work keeps the usual
                     // per-tool virtual window instead of constructing the entire group.
                     var models = [], thinking = [];
@@ -6114,7 +6118,7 @@ templ ChatAutoScrollScript() {
                     if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(container);
                 };
                 var focused = container.contains(document.activeElement) && document.activeElement.matches('.stream-activity-summary');
-                container.replaceChildren(activity);
+                if (!existingActivity) container.replaceChildren(activity);
                 window.syncToolDisclosures(container);
                 if (focused) toggle.focus({preventScroll:true});
                 return true;
@@ -6175,49 +6179,96 @@ templ ChatAutoScrollScript() {
 			var pendingThinking = []; // accumulate consecutive thinking blocks
 			var pendingThinkingRenderedContent = null;
             var pendingThinkingID = 0;
+            var retainedThinking = [];
+            var previousThinking = new Map(Array.from(container.querySelectorAll('details.stream-thinking'), function(details) {
+                return [details.getAttribute('data-activity-id'), details];
+            }));
 			var pendingLargeToolOutputs = [];
 			function flushThinking() {
 				if (pendingThinking.length === 0) return;
 				// Merge all consecutive thinking blocks into one collapsible element
 				var merged = pendingThinking.join('\n\n');
 				pendingThinking = [];
-				var details = document.createElement('details');
-				details.className = 'stream-thinking';
-                details.setAttribute('data-activity-id', 'thinking-' + pendingThinkingID);
-				// Update persistent store when user toggles thinking section
-				details.addEventListener('toggle', persistThinkingStates);
-				var summary = document.createElement('summary');
-				summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
-				var body = document.createElement('div');
-				body.className = 'stream-thinking-body';
+                var thinkingID = 'thinking-' + pendingThinkingID;
+                var previous = previousThinking.get(thinkingID);
+                var details = previous || document.createElement('details');
+                var body = previous?.querySelector('.stream-thinking-body');
+                if (!previous) {
+                    details.className = 'stream-thinking';
+                    details.setAttribute('data-activity-id', thinkingID);
+                    details.addEventListener('toggle', persistThinkingStates);
+                    var summary = document.createElement('summary');
+                    summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
+                    body = document.createElement('div');
+                    body.className = 'stream-thinking-body';
+                    details.appendChild(summary); details.appendChild(body);
+                    details.addEventListener('toggle', function() { if (details.open) details._ensureThinkingContent(); });
+                }
                 var preparedThinking = pendingThinkingRenderedContent;
                 pendingThinkingRenderedContent = null;
-                details._ensureThinkingContent = function(synchronous) {
-                    if (details._thinkingMounted) {
-                        if (synchronous && details._thinkingPromise) body.innerHTML = window.renderChatMarkdown(merged);
-                        return details._thinkingPromise;
+                if (details._thinkingSource !== merged) {
+                    var wasMounted = previous && (details._thinkingMounted || body.childNodes.length > 0);
+                    details._thinkingSource = merged;
+                    details._thinkingGeneration = (details._thinkingGeneration || 0) + 1;
+                    details._thinkingMounted = false;
+                    details._thinkingPromise = null;
+                    function commitThinking(content) {
+                        if (content === null) return;
+                        if (typeof content === 'string') {
+                            var template = document.createElement('template');
+                            template.innerHTML = content;
+                            content = template.content;
+                        }
+                        // Adopt both synchronous and worker template nodes before
+                        // matching links against URLs resolved in the live document.
+                        var fragment = document.createDocumentFragment();
+                        fragment.appendChild(content);
+                        window.prepareChatMath?.(fragment, body);
+                        window.prepareChatSVG?.(fragment, body);
+                        window.OVFileViewer?.prepareStream(fragment, body);
+                        if (window.OVFileViewer?.commitStream) window.OVFileViewer.commitStream(fragment, body);
+                        else body.replaceChildren(fragment);
+                        if (details.isConnected) return window.renderMermaidDiagrams?.(details);
                     }
-                    details._thinkingMounted = true;
-                    if (preparedThinking !== null) {
-                        if (typeof preparedThinking === 'string') body.innerHTML = preparedThinking;
-                        else body.appendChild(preparedThinking);
-                    } else if (options?.virtualRow && !synchronous && merged.length >= 64 * 1024 && window.renderChatMarkdownAsync) {
-                        details._thinkingPromise = window.renderChatMarkdownAsync(merged, body).then(function(content) {
-                            if (typeof content === 'string') body.innerHTML = content;
-                            else if (content) body.replaceChildren(content);
-                            if (details.isConnected) return window.renderMermaidDiagrams?.(details);
-                        });
-                        return details._thinkingPromise;
-                    } else if (window.renderChatMarkdown) body.innerHTML = window.renderChatMarkdown(merged);
-                    else { body.textContent = merged; body.style.whiteSpace = 'pre-wrap'; }
-                    if (details.isConnected) return window.renderMermaidDiagrams?.(details);
-                };
-                details.addEventListener('toggle', function() { if (details.open) details._ensureThinkingContent(); });
-                if (!options?.virtualRow) details._ensureThinkingContent();
-				details.appendChild(summary);
-				details.appendChild(body);
-				renderFragment.appendChild(details);
-			}
+                    details._ensureThinkingContent = function(synchronous) {
+                        if (details._thinkingMounted) {
+                            if (synchronous && details._thinkingPromise) {
+                                // Printing owns this revision; a pending worker must
+                                // not replace the body again after the synchronous render.
+                                details._thinkingGeneration++;
+                                details._thinkingPromise = null;
+                                return commitThinking(window.renderChatMarkdown(merged));
+                            }
+                            return details._thinkingPromise;
+                        }
+                        details._thinkingMounted = true;
+                        if (preparedThinking !== null) return commitThinking(preparedThinking);
+                        if (options?.virtualRow && !synchronous && merged.length >= 64 * 1024 && window.renderChatMarkdownAsync) {
+                            var generation = details._thinkingGeneration;
+                            var pending = window.renderChatMarkdownAsync(merged, body).then(function(content) {
+                                if (details._thinkingGeneration === generation) return commitThinking(content);
+                            }).finally(function() {
+                                if (details._thinkingPromise === pending) details._thinkingPromise = null;
+                            });
+                            details._thinkingPromise = pending;
+                            return pending;
+                        }
+                        if (window.renderChatMarkdown) return commitThinking(window.renderChatMarkdown(merged));
+                        body.textContent = merged; body.style.whiteSpace = 'pre-wrap';
+                    };
+                    if (wasMounted || details.open || !options?.virtualRow) details._ensureThinkingContent();
+                }
+                if (previous) {
+                    // Fold the shell first, then move the live disclosure during
+                    // commit. Detaching it here would reload any embedded iframe.
+                    var shell = document.createElement('details');
+                    shell.className = 'stream-thinking';
+                    shell.setAttribute('data-activity-id', thinkingID);
+                    retainedThinking.push([shell, details]);
+                    renderFragment.appendChild(shell);
+                } else renderFragment.appendChild(details);
+            }
+
 			function flushText() {
 				if (!pendingText) return;
 					var t = cleanPreparedText(pendingText);
@@ -6703,6 +6754,11 @@ templ ChatAutoScrollScript() {
 				flushThinking();
 				flushText();
                 foldActivity();
+                retainedThinking.forEach(function(entry) {
+                    var marker = document.createComment('retained thinking');
+                    entry[0].replaceWith(marker);
+                    (renderFragment._fileStreamMoves ||= []).push([marker, entry[1]]);
+                });
 				container.classList.remove('whitespace-pre-wrap');
 				if (!options?.virtualRow) window.setChatRawContent(container, textBuffer);
 				if (window.prepareChatMath) window.prepareChatMath(renderFragment, container);
@@ -6720,7 +6776,13 @@ templ ChatAutoScrollScript() {
                 var focusedFoldKey = focusedToggle && container.contains(focusedToggle) && focusedToggle.matches('.stream-activity-summary') ? focusedToggle.parentElement.getAttribute('data-tool-disclosure-key') : null;
 				function commitContent() {
                     if (window.OVFileViewer?.commitStream) window.OVFileViewer.commitStream(renderFragment, container);
-                    else container.replaceChildren(renderFragment);
+                    else {
+                        retainedThinking.forEach(function(entry) {
+                            var move = renderFragment._fileStreamMoves.find(function(item) { return item[1] === entry[1]; });
+                            move[0].replaceWith(entry[1]);
+                        });
+                        container.replaceChildren(renderFragment);
+                    }
                 }
                 if (options?.virtualRow && window.preserveChatVirtualScroll) window.preserveChatVirtualScroll(container, function() { commitContent(); container.style.minHeight = ''; });
                 else commitContent();

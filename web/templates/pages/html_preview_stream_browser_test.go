@@ -303,3 +303,57 @@ func TestBrowserFunctional_HTMLPreviewDuplicateLinkSections(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_ThinkingPreviewPreservation(t *testing.T) {
+	for _, mode := range []string{"full", "compact"} {
+		for _, moves := range []string{"native", "fallback"} {
+			for _, size := range []string{"small", "worker"} {
+				t.Run(mode+"/"+moves+"/"+size, func(t *testing.T) {
+					runStreamingMathBrowser(t, func(b *composerFocusCDP) {
+						b.waitFor("renderer ready", `String(document.readyState==='complete' && !!window.OVFileViewer && !!window.renderLiveChatContent)`, "true")
+						b.evaluate(`window.thinkingSize='` + size + `';document.documentElement.setAttribute('data-output-detail','` + mode + `'); if('` + moves + `'==='fallback')Element.prototype.moveBefore=undefined; 'ready'`)
+						b.evaluateAwait(`(async()=>{
+ const root=document.getElementById('math-stream');root.parentElement.dataset.execStatus='running';
+ window.thinkingSource='[Thinking]\nPublished [Preview](/files/abcdef). Equation \\(x=1\\).\n';
+ await renderLiveChatContent(root,thinkingSource,false);
+ const activity=root.querySelector('.stream-activity'); if(activity&&document.documentElement.getAttribute('data-output-detail')==='compact'){activity.querySelector('.stream-activity-summary').click();await new Promise(resolve=>setTimeout(resolve,100));}
+ window.thinkingDetails=root.querySelector('details.stream-thinking');thinkingDetails.open=true;await thinkingDetails._ensureThinkingContent?.();
+ window.thinkingBody=thinkingDetails.querySelector('.stream-thinking-body');
+ const link=thinkingDetails.querySelector('a');link.dataset.fileLinkBound='true';link.dataset.filePreview='true';
+ const canvas=document.createElement('div');canvas.className='file-html-canvas';
+ window.thinkingFrame=document.createElement('iframe');thinkingFrame.setAttribute('sandbox','allow-scripts');
+ window.thinkingLoads=0;thinkingFrame.addEventListener('load',()=>thinkingLoads++);thinkingFrame.srcdoc='<html><body><input value="retained"></body></html>';
+ canvas.append(thinkingFrame);link.after(canvas);return 'ready';
+ })()`)
+						b.waitFor("thinking preview loaded", `String(thinkingLoads)`, "1")
+						b.waitFor("thinking equation", `String(!!thinkingBody.querySelector('[data-math-ready="true"] .katex'))`, "true")
+						result := b.evaluateAwait(`(async()=>{
+ const root=document.getElementById('math-stream'), equation=thinkingBody.querySelector('[data-math-ready]');
+ const assertPreview=()=>{if(root.querySelector('iframe')!==thinkingFrame||thinkingLoads!==1)throw Error('preview lost/reloaded: '+thinkingLoads);if(root.querySelector('[data-math-ready]')!==equation)throw Error('equation replaced');};
+ await renderLiveChatContent(root,thinkingSource+'\n',false);
+ await new Promise(resolve=>setTimeout(resolve,100));assertPreview();
+ if(root.querySelector('details.stream-thinking')!==thinkingDetails||thinkingDetails.querySelector('.stream-thinking-body')!==thinkingBody)throw Error('unchanged thinking replaced');
+
+ const changed=thinkingSource+'\nAdditional reasoning. '+(thinkingSize==='worker'?'Detailed reasoning. '.repeat(4000):'')+'\n[/Thinking]\n';
+ await renderLiveChatContent(root,changed,false);
+ await root.querySelector('details.stream-thinking')._ensureThinkingContent?.();
+ await new Promise(resolve=>setTimeout(resolve,100));assertPreview();
+ if(!root.textContent.includes('Additional reasoning.'))throw Error('changed thinking not rendered');
+ await renderLiveChatContent(root,changed+'[Using tool: shell | actual]\n',false);
+ await new Promise(resolve=>setTimeout(resolve,100));assertPreview();
+ root.parentElement.dataset.execStatus='completed';await renderLiveChatContent(root,changed+'[Using tool: shell | actual]\n',true,true);
+ await new Promise(resolve=>setTimeout(resolve,100));assertPreview();
+ await renderLiveChatContent(root,'Preview removed.',true,true);
+ if(root.querySelector('iframe'))throw Error('obsolete preview retained');
+ return 'pass';
+ })()`)
+						if result != "pass" {
+							t.Fatal(result)
+						}
+					})
+				})
+			}
+		}
+	}
+
+}

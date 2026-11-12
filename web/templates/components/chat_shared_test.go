@@ -43,14 +43,17 @@ func TestChatRenderingPathsUseBaseSafeMarkdownRenderer(t *testing.T) {
 	if strings.Contains(content, "function addInlineRanges(start, end)") || strings.Contains(content, "window.isInsideCode = function") {
 		t.Fatal("Chat streaming script must not redefine the base Markdown code-range helpers")
 	}
-	if strings.Count(content, "innerHTML = window.renderChatMarkdown(") != 5 {
+	if strings.Count(content, "innerHTML = window.renderChatMarkdown(") != 3 {
 		t.Fatalf("every shared streaming/hydration raw HTML assignment must use the safe Markdown renderer; got %d call sites", strings.Count(content, "innerHTML = window.renderChatMarkdown("))
+	}
+	if strings.Count(content, "commitThinking(window.renderChatMarkdown(merged))") != 2 {
+		t.Fatal("thinking updates must use the safe Markdown renderer before preserving media")
 	}
 	generated, err := os.ReadFile("chat_shared_templ.go")
 	if err != nil {
 		t.Fatalf("read generated Chat components: %v", err)
 	}
-	if strings.Count(string(generated), "innerHTML = window.renderChatMarkdown(") != 6 {
+	if strings.Count(string(generated), "innerHTML = window.renderChatMarkdown(") != 4 {
 		t.Fatalf("resume, streaming, and shared hydration paths must all use the safe Markdown renderer; got %d generated call sites", strings.Count(string(generated), "innerHTML = window.renderChatMarkdown("))
 	}
 	for _, unsafe := range []string{

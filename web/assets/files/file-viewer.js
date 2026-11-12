@@ -326,18 +326,21 @@
  function previewRows(owner,models){
   const result=new Map();
   if(owner.moveBefore)return result;
-  const candidates=Array.from(new Set(Array.from(owner.querySelectorAll('.file-html-canvas'),canvas=>canvas.closest('.chat-markdown')).filter(Boolean)));
+  // Thinking can be nested in an expanded Compact group. Retain this
+  // owner's entire row so neither the disclosure nor its iframe is detached.
+  const candidates=Array.from(new Set(Array.from(owner.querySelectorAll('.file-html-canvas'),canvas=>
+   canvas.closest('.stream-thinking-body')?(owner._chatVirtualRows?.find(row=>row.node?.contains(canvas))?.node||canvas.closest('details.stream-thinking')):canvas.closest('.chat-markdown')).filter(Boolean)));
   if(!candidates.length)return result;
   // Preserve the text section's position and source, including offscreen rows.
   // Identical links elsewhere in the response must not claim this section's iframe.
   const sourceOf=model=>model.segments.map(segment=>segment.content||'').join('').trim();
-  const prior=owner._chatVirtualRows?.filter(row=>row.model.kind==='text');
+  const prior=owner._chatVirtualRows?.filter(row=>row.model.segments.some(segment=>segment.type==='text'||segment.type==='thinking'));
   const blocks=Array.from(owner.querySelectorAll('.chat-markdown')).filter(node=>typeof node._chatMarkdownSource==='string');
   const origins=candidates.map(node=>{
    const ordinal=prior?prior.findIndex(row=>row.node===node||row.node?.contains(node)):blocks.indexOf(node);
-   return {node,ordinal,source:ordinal>=0&&prior?sourceOf(prior[ordinal].model):(node._chatMarkdownSource||'').trim()};
+   return {node,ordinal,source:ordinal>=0&&prior?sourceOf(prior[ordinal].model):(node._chatMarkdownSource||node._thinkingSource||node.querySelector('details.stream-thinking')?._thinkingSource||'').trim()};
   });
-  const texts=models.map((model,index)=>({model,index,source:sourceOf(model)})).filter(entry=>entry.model.kind==='text');
+  const texts=models.map((model,index)=>({model,index,source:sourceOf(model)})).filter(entry=>entry.model.segments.some(segment=>segment.type==='text'||segment.type==='thinking'));
   // Verify actual Markdown links as well: prose/code mentions are not previews.
   const identity=link=>new URL(link.getAttribute('href'),location.href).href+'\n'+link.textContent;
   const projected=new Map();
