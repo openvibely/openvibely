@@ -458,7 +458,7 @@ templ ThreadControllerScript() {
 						(pair && /^(completed|failed|cancelled)$/.test(pair.getAttribute('data-exec-status')));
 					if (terminal) {
 						delete container._incrementalChat;
-						renderPromise = window.renderStreamingContent(container, textBuffer, yieldBetweenBatches);
+						renderPromise = window.renderStreamingContent(container, textBuffer, yieldBetweenBatches, {terminal:true});
 					} else {
 						renderPromise = window.renderIncrementalChatContent(container, textBuffer || '', yieldBetweenBatches);
 					}

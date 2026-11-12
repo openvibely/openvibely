@@ -43,14 +43,14 @@ func TestChatRenderingPathsUseBaseSafeMarkdownRenderer(t *testing.T) {
 	if strings.Contains(content, "function addInlineRanges(start, end)") || strings.Contains(content, "window.isInsideCode = function") {
 		t.Fatal("Chat streaming script must not redefine the base Markdown code-range helpers")
 	}
-	if strings.Count(content, "innerHTML = window.renderChatMarkdown(") != 4 {
+	if strings.Count(content, "innerHTML = window.renderChatMarkdown(") != 5 {
 		t.Fatalf("every shared streaming/hydration raw HTML assignment must use the safe Markdown renderer; got %d call sites", strings.Count(content, "innerHTML = window.renderChatMarkdown("))
 	}
 	generated, err := os.ReadFile("chat_shared_templ.go")
 	if err != nil {
 		t.Fatalf("read generated Chat components: %v", err)
 	}
-	if strings.Count(string(generated), "innerHTML = window.renderChatMarkdown(") != 5 {
+	if strings.Count(string(generated), "innerHTML = window.renderChatMarkdown(") != 6 {
 		t.Fatalf("resume, streaming, and shared hydration paths must all use the safe Markdown renderer; got %d generated call sites", strings.Count(string(generated), "innerHTML = window.renderChatMarkdown("))
 	}
 	for _, unsafe := range []string{
@@ -3227,7 +3227,7 @@ func TestSharedTaskResultLinkConversionAvailableOnDirectTaskThreadLoad(t *testin
 	createDefinition := strings.Index(content, "window.convertTaskLinksInMessage = function(messageElement)")
 	editDefinition := strings.Index(content, "window.convertTaskEditLinksInMessage = function(messageElement)")
 	codeDefinition := strings.Index(content, "window.codeRanges = function(text, transcript)")
-	normalizeDefinition := strings.Index(content, "window.normalizeTranscriptMarkers = function(text, ranges)")
+	normalizeDefinition := strings.Index(content, "window.normalizeTranscriptMarkers = function(text, ranges, edits)")
 	hydration := strings.Index(content, "// Apply cleaning and scroll on load")
 	if normalizeToolTextDefinition == -1 || createDefinition == -1 || editDefinition == -1 || codeDefinition == -1 || normalizeDefinition == -1 {
 		t.Fatal("direct task-thread output must define task-result converters plus Markdown-aware transcript normalization without requiring a prior /chat load")
@@ -3973,7 +3973,7 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("generated streaming renderer must protect thinking, tool-use, and both tool-result controls inside Markdown code")
 	}
-	if !strings.Contains(content, "function(raw, tool, command, closing)") || strings.Count(content, "return window.replaceOutsideCode(text,") != 1 {
+	if !strings.Contains(content, "function(raw, tool, command, closing, index)") || strings.Count(content, "return window.replaceOutsideCode(text,") != 1 {
 		t.Fatal("generated transcript normalization must process tool and thinking aliases in one protected pass")
 	}
 }
@@ -4092,7 +4092,7 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 		t.Error("renderStreamingContent must not clear the live container before detached rendering completes")
 	}
 	for _, snippet := range []string{
-		"var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024",
+		"var shouldYieldPreparation = !options?.thinkingShell && yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024",
 		"window.codeRangesAsync(textBuffer, container, true)",
 		"targetProperty = 'thinkingRenderedContent'",
 		"pendingThinkingRenderedContent = seg.thinkingRenderedContent",
@@ -4126,7 +4126,7 @@ func TestRenderStreamingContent_PairsRepeatedToolResultsFIFOAndUsesStableToolIDs
 		"var toolUseQueues = Object.create(null)",
 		"calls: [], next: 0",
 		"queue.calls[queue.next++]",
-		"segments[si].toolRenderID = 'tool-' + (segments[si].index + (options ? options.offset : 0)) + '-' + toolRenderOrdinal++",
+		"segments[si].toolRenderID = 'tool-' + (segments[si].index + (options?.offset || 0)) + '-' + toolRenderOrdinal++",
 		"for (var si = segments.length - 1; si >= 0; si--)",
 		"window.linkStreamingToolResults(segments, options)",
 		"wrap.setAttribute('data-tool-render-id', seg.toolRenderID || '')",

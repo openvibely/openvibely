@@ -4953,10 +4953,13 @@ templ ChatAutoScrollScript() {
                         button.setAttribute('aria-expanded', String(expanded));
                         button.hidden = !compact;
                         group.querySelector('.stream-activity-body').hidden = !expanded;
-                        var tools = group._activityTools || Array.from(group.querySelectorAll('.stream-tool[data-tool-render-id]'));
+                        var summary = group._activitySummary;
+                        var tools = summary ? [] : (group._activityTools || Array.from(group.querySelectorAll('.stream-tool[data-tool-render-id]')));
                         var running = tools.find(function(tool) { return tool.status === 'running' || (tool.getAttribute && tool.getAttribute('data-tool-status') === 'running'); });
                         var failures = tools.filter(function(tool) { return tool.status === 'error' || (tool.getAttribute && tool.getAttribute('data-tool-status') === 'error'); }).length;
-                        var label = tools.length ? tools.length + (tools.length === 1 ? ' tool call' : ' tool calls') : 'Thinking';
+                        if (summary) { running = summary.running; failures = summary.failures; }
+                        var count = summary ? summary.count : tools.length;
+                        var label = count ? count + (count === 1 ? ' tool call' : ' tool calls') : 'Thinking';
                         if (failures) label += ' · ' + failures + ' failed';
                         var pair = group.closest('[data-exec-status]');
                         var terminal = pair ? /^(completed|failed|cancelled)$/.test(pair.getAttribute('data-exec-status')) : group.getAttribute('data-activity-terminal') === 'true';
@@ -5314,6 +5317,11 @@ templ ChatAutoScrollScript() {
 				return boundary;
 			};
 			window.renderIncrementalChatContent = async function(container, text, yieldBetweenBatches) {
+                // Row models can retain a logical group independently of parser checkpoints.
+                // Keep enhanced previews on their existing DOM-preserving path.
+                if (container.closest('[data-chat-transcript]') && !container.querySelector('.chat-svg-preview')) {
+                    return window.renderStreamingContent(container, text, yieldBetweenBatches);
+                }
                 // Rewrapping a loaded preview reloads it on engines without moveBefore.
                 if (!container.moveBefore && container.querySelector('.file-html-canvas')) {
                     delete container._incrementalChat;
@@ -5372,12 +5380,38 @@ templ ChatAutoScrollScript() {
 			};
 
 			window.linkStreamingToolResults = function(segments, options) {
-				var toolUseQueues = Object.create(null);
-				var toolRenderOrdinal = options ? options.ordinal : 0;
+				var ledger = options?.linkState;
+                if (ledger) {
+                    segments.forEach(function(seg) {
+                        var significant = seg.type !== 'text' || seg.content.trim();
+                        if (significant && ledger.lastUsing) {
+                            if (!ledger.lastUsing.completed) ledger.lastUsing._version = (ledger.lastUsing._version || 0) + 1;
+                            ledger.lastUsing.completed = true;
+                            ledger.lastUsing = null;
+                        }
+                        if (seg.type === 'using') {
+                            var name = seg.normalizedName || seg.name;
+                            seg.toolRenderID = 'tool-' + (seg.index + (options.offset || 0)) + '-' + ledger.ordinal++;
+                            (ledger.queues[name] ||= []).push(seg);
+                            ledger.lastUsing = seg;
+                        } else if (seg.type === 'tool_result') {
+                            var queue = ledger.queues[seg.normalizedName || seg.name];
+                            var using = queue?.shift();
+                            if (using) {
+                                if (!using.resultLinked || using.resultStatus !== seg.status || using.resultOutput !== (seg.output || '')) using._version = (using._version || 0) + 1;
+                                using.resultLinked = true; using.completed = true;
+                                using.resultStatus = seg.status; using.resultOutput = seg.output || '';
+                            }
+                        }
+                    });
+                    return true;
+                }
+                var toolUseQueues = Object.create(null);
+				var toolRenderOrdinal = options?.ordinal || 0;
 				for (var si = 0; si < segments.length; si++) {
 					if (segments[si].type === 'using') {
 						var usingName = segments[si].normalizedName || segments[si].name;
-						segments[si].toolRenderID = 'tool-' + (segments[si].index + (options ? options.offset : 0)) + '-' + toolRenderOrdinal++;
+						segments[si].toolRenderID = 'tool-' + (segments[si].index + (options?.offset || 0)) + '-' + toolRenderOrdinal++;
 						if (!toolUseQueues[usingName]) toolUseQueues[usingName] = { calls: [], next: 0 };
 						toolUseQueues[usingName].calls.push(segments[si]);
 						continue;
@@ -5427,12 +5461,24 @@ templ ChatAutoScrollScript() {
 				// Promoting an enhanced SVG to lazy rows discards its live figure and
 				// revokes the gallery's blob URL. Keep this segment on the DOM-preserving path.
 				var virtualOwner = !options?.virtualRow && container.closest('[data-chat-transcript]') &&
-					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable || document.documentElement.getAttribute('data-output-detail') === 'compact') &&
 					!container.querySelector('.chat-svg-preview');
 				var projectionKey = _thinkingStateKey(container);
 				var cachedProjection = virtualOwner && (container._chatVirtualData || window.findCachedChatVirtualData?.(projectionKey, textBuffer));
 				if (cachedProjection && cachedProjection.source !== textBuffer && cachedProjection.normalized !== textBuffer) cachedProjection = null;
-				var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024 || (options?.preparedSegments?.reduce(function(size, seg) { return size + (seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length; }, 0) || 0) >= 64 * 1024);
+                // Checkpoints end after closed controls, not after presentation groups.
+                // Unmatched calls remain in the segment ledger for later FIFO results.
+                var incrementalProjection = virtualOwner && !options?.terminal && /^(running|pending)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '');
+                if (!incrementalProjection || (container._chatParseSource && !sourceText.startsWith(container._chatParseSource))) { delete container._chatParseCheckpoint; delete container._chatOpenResult; }
+                container._chatParseSource = incrementalProjection ? sourceText : null;
+                var checkpoint = incrementalProjection && container._chatParseCheckpoint;
+                if (checkpoint && !sourceText.startsWith(checkpoint.raw)) { checkpoint = null; delete container._chatParseCheckpoint; }
+                if (checkpoint) textBuffer = sourceText.slice(checkpoint.raw.length);
+                var parseSource = textBuffer, normalizationEdits = [], nextCheckpoint = null, newSegments = null, committedSegments = null;
+                var openResult = incrementalProjection && container._chatOpenResult;
+                if (openResult && (!sourceText.startsWith(openResult.source) || !checkpoint || checkpoint.raw.length !== openResult.offset)) openResult = null;
+                var extendOpenResult = openResult && !/\[\/Tool\][\t ]*(?=\r?$)/m.test(sourceText.slice(openResult.scanFrom));
+                delete container._chatOpenResult;
+				var shouldYieldPreparation = !options?.thinkingShell && yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024 || (options?.preparedSegments?.reduce(function(size, seg) { return size + (seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length; }, 0) || 0) >= 64 * 1024);
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
@@ -5456,7 +5502,7 @@ templ ChatAutoScrollScript() {
 					var rawCodeRanges = [];
 					var codeRanges = [];
 					var transcriptToolRanges = [];
-					var segments = options?.preparedSegments ? options.preparedSegments.map(function(seg) { return Object.assign({}, seg); }) : [];
+					var segments = options?.preparedSegments ? ((options.activityShell || options.thinkingShell) ? options.preparedSegments : options.preparedSegments.map(function(seg) { return Object.assign({}, seg); })) : [];
 					function toolBlockRanges(text, protectedRanges) {
 						var ranges = [], protectedIndex = 0;
 						var opener = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?/gm;
@@ -5503,7 +5549,7 @@ templ ChatAutoScrollScript() {
 						return true;
 					}
 					function normalizePreparedText() {
-						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer, rawCodeRanges);
+						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer, rawCodeRanges, normalizationEdits);
 						return true;
 					}
 					function stripPreparedStatus() {
@@ -5684,6 +5730,57 @@ templ ChatAutoScrollScript() {
 						}
 						return true;
 					}
+                    function checkpointSegments() {
+                        if (!incrementalProjection || options?.preparedSegments) return true;
+                        var cut = 0, blocked = false;
+                        // Retain incomplete controls and trailing Markdown in the mutable suffix.
+                        // A complete opener is also safe: result matching is ledger-wide.
+                        segments.forEach(function(seg) {
+                            var end = seg.index + (seg.length || 0);
+                            var raw = extendOpenResult ? '' : textBuffer.slice(seg.index, end);
+                            if (seg.type === 'compaction' && /\[Compaction started/.test(raw)) blocked = true;
+                            if (seg.type === 'compaction_end' && /[\r\n]/.test(textBuffer.charAt(end))) { blocked = false; cut = end; }
+                            if (blocked) return;
+                            if (seg.type === 'using' && /[\r\n]/.test(textBuffer.charAt(end))) cut = end;
+                            if ((seg.type === 'tool_result' && /\[\/Tool\][\t ]*(?:\r\n|\r|\n)$/.test(raw)) ||
+                                (seg.type === 'thinking' && /\[\/Thinking\][\t ]*(?:\r\n|\r|\n)$/.test(raw))) cut = end;
+                        });
+                        // Translate the normalized checkpoint back to provider source offsets.
+                        // Legacy XML aliases change lengths; never use normalized offsets on raw input.
+                        var rawCut = cut, shift = 0;
+                        normalizationEdits.forEach(function(edit) {
+                            var normalizedStart = edit.start + shift;
+                            if (normalizedStart < cut && normalizedStart + edit.length > cut) rawCut = 0;
+                            else if (normalizedStart + edit.length <= cut) rawCut += edit.end - edit.start - edit.length;
+                            shift += edit.length - (edit.end - edit.start);
+                        });
+                        var last = segments[segments.length - 1];
+                        if (last?.type === 'tool_result' && (extendOpenResult || !/\[\/Tool\][\t ]*(?:\r\n|\r|\n)?$/.test(textBuffer.slice(last.index))) &&
+                            textBuffer === parseSource && !cut && (extendOpenResult || /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r?\n|\r(?=[^\n]))/.test(textBuffer.slice(last.index))) && segments.every(function(seg) { return seg === last || (seg.type === 'text' && !seg.content.trim()); })) {
+                            var scanBase = extendOpenResult ? openResult.scanFrom : (checkpoint?.raw.length || 0) + last.index;
+                            var scanTail = sourceText.slice(scanBase), bracket = scanTail.lastIndexOf('[');
+                            var scanFrom = bracket >= 0 && '[/Tool]'.startsWith(scanTail.slice(bracket)) ? scanBase + bracket : sourceText.length;
+                            container._chatOpenResult = {source:sourceText, offset:checkpoint?.raw.length || 0,
+                                scanFrom:scanFrom,
+                                segments:segments.map(function(seg) { return Object.assign({}, seg); })};
+                        }
+                        var base = checkpoint ? checkpoint.normalized.length : 0;
+                        var committed = segments.filter(function(seg) { return seg.index + (seg.length || seg.content?.length || 0) <= cut; });
+                        segments.forEach(function(seg) { seg.index += base; });
+                        var prior = checkpoint ? checkpoint.segments : [];
+                        if (rawCut > 0 && rawCut <= parseSource.length) {
+                            nextCheckpoint = {
+                                raw: (checkpoint ? checkpoint.raw : '') + parseSource.slice(0, rawCut),
+                                normalized: (checkpoint ? checkpoint.normalized : '') + textBuffer.slice(0, cut),
+                                segments: prior.concat(committed)
+                            };
+                        }
+                        newSegments = segments;
+                        committedSegments = committed;
+                        segments = prior.concat(segments);
+                        textBuffer = (checkpoint ? checkpoint.normalized : '') + textBuffer;
+                        return true;
+                    }
 					var markdownPreparationIndex = 0;
 					function cleanPreparedText(text) {
 						if (!text) return text;
@@ -5712,6 +5809,7 @@ templ ChatAutoScrollScript() {
 								source = cleanPreparedText(segment.content);
 								targetProperty = 'renderedContent';
 							} else if (segment.type === 'thinking') {
+                                if (options?.virtualRow) { markdownPreparationIndex++; continue; }
 								var thinkingParts = [];
 								var thinkingTarget = null;
 								var groupEnd = markdownPreparationIndex;
@@ -5760,6 +5858,20 @@ templ ChatAutoScrollScript() {
 						if (container.dataset?.outputWindow || container._outputWindowSeed) {
 							options = Object.assign({}, options, {offset: -textBuffer.length, ordinal: -segments.filter(function(seg) { return seg.type === 'using'; }).length});
 						}
+                        if (incrementalProjection && newSegments) {
+                            function copyLedger(ledger) {
+                                var queues = Object.create(null);
+                                if (ledger) Object.keys(ledger.queues).forEach(function(name) { queues[name] = ledger.queues[name].slice(); });
+                                return {queues:queues, ordinal:ledger ? ledger.ordinal : (options?.ordinal || 0), lastUsing:ledger?.lastUsing};
+                            }
+                            var ledger = copyLedger(checkpoint?.ledger);
+                            if (nextCheckpoint) {
+                                window.linkStreamingToolResults(committedSegments, Object.assign({}, options, {linkState:ledger}));
+                                nextCheckpoint.ledger = ledger;
+                                ledger = copyLedger(ledger);
+                            }
+                            return window.linkStreamingToolResults(nextCheckpoint ? newSegments.slice(committedSegments.length) : newSegments, Object.assign({}, options, {linkState:ledger}));
+                        }
 						return window.linkStreamingToolResults(segments, options);
 					}
 				var preparationPhases = [
@@ -5775,42 +5887,66 @@ templ ChatAutoScrollScript() {
 						collectLegacyToolResultMatches,
                         collectCompactionMatches,
 						buildSegments,
+                        checkpointSegments,
 						linkToolResults,
 						prepareLargeMarkdownSegments
 				];
 
-				function projectRows() {
-					var rows = [], text = '', thinking = [];
+				function projectRows(inputSegments) {
+                    var rowSegments = inputSegments || segments;
+					var rows = [], text = '', textStart = null, thinking = [];
 					function flushTextRow() {
-						if (cleanPreparedText(text)) rows.push({kind:'text', segments:[{type:'text',content:text}]});
-						text = '';
+						if (cleanPreparedText(text)) rows.push({kind:'text', segments:[{type:'text',content:text}], sourceIndex:textStart});
+						text = ''; textStart = null;
 					}
 					function flushThinkingRow() {
-						if (thinking.length) rows.push({kind:'thinking', segments:thinking});
+						if (thinking.length) rows.push({kind:'thinking', segments:thinking, sourceIndex:thinking[0].index});
 						thinking = [];
 					}
-					segments.forEach(function(seg, index) {
+					rowSegments.forEach(function(seg, index) {
 						if (seg.type === 'tool_result' || seg.type === 'compaction_end') return;
 						if (seg.type === 'text') {
 							var nextThinking = false;
-							for (var next = index + 1; next < segments.length; next++) {
-								if (segments[next].type === 'thinking') { nextThinking = true; break; }
-								if (segments[next].type !== 'text') break;
+							for (var next = index + 1; next < rowSegments.length; next++) {
+								if (rowSegments[next].type === 'thinking') { nextThinking = true; break; }
+								if (rowSegments[next].type !== 'text') break;
 							}
 							if (thinking.length && nextThinking && seg.content.trim().length < 100) thinking.push(seg);
-							else text += seg.content;
+							else { if (textStart === null) textStart = seg.index; text += seg.content; }
 						} else if (seg.type === 'thinking') {
 							if (!seg.content.trim()) return;
 							if (text.trim()) { flushThinkingRow(); flushTextRow(); }
 							thinking.push(seg);
 						} else {
 							flushThinkingRow(); flushTextRow();
-							rows.push({kind:seg.type, segments:[seg]});
+							rows.push({kind:seg.type, segments:[seg], sourceIndex:seg.index});
 						}
 					});
 					flushThinkingRow(); flushTextRow();
                     return rows;
-				}
+				}                function projectIncrementalRows() {
+                    var previous = checkpoint?.rows || [];
+                    // Only the final text/thinking rows can absorb newly parsed segments.
+                    var keep = Math.max(0, previous.length - 2);
+                    var prefix = previous.slice(0, keep);
+                    var pending = checkpoint ? checkpoint.segments.filter(function(seg) { return !previous[keep] || seg.index >= previous[keep].sourceIndex; }) : [];
+                    if (nextCheckpoint) {
+                        nextCheckpoint.rows = prefix.concat(projectRows(pending.concat(committedSegments)));
+                        container._chatParseCheckpoint = nextCheckpoint;
+                        var rows = nextCheckpoint.rows;
+                        keep = Math.max(0, rows.length - 2);
+                        return rows.slice(0, keep).concat(projectRows(nextCheckpoint.segments.filter(function(seg) { return !rows[keep] || seg.index >= rows[keep].sourceIndex; }).concat(newSegments.slice(committedSegments.length))));
+                    }
+                    return newSegments ? prefix.concat(projectRows(pending.concat(newSegments))) : projectRows();
+                }
+
+                if (extendOpenResult) {
+                    segments = openResult.segments.map(function(seg) { return Object.assign({}, seg); });
+                    var result = segments[segments.length - 1];
+                    result.output += sourceText.slice(openResult.source.length);
+                    result.length += sourceText.length - openResult.source.length;
+                    preparationPhases = [checkpointSegments, linkToolResults];
+                }
 				if (cachedProjection) {
 					preparationPhases = [];
 					textBuffer = cachedProjection.normalized;
@@ -5819,7 +5955,7 @@ templ ChatAutoScrollScript() {
 				}
 				function renderPreparedSegments() {
 					if (virtualOwner && window.installChatVirtualRows) {
-						var data = cachedProjection || {key:projectionKey, source:sourceText, normalized:textBuffer, offset:options?.offset || 0, models:projectRows()};
+						var data = cachedProjection || {key:projectionKey, source:sourceText, normalized:textBuffer, offset:options?.offset || 0, models:projectIncrementalRows(), incremental:incrementalProjection};
 						container.classList.remove('whitespace-pre-wrap');
 						window.setChatRawContent(container, textBuffer);
 						var toolStateKey = container._chatToolStateKey || projectionKey;
@@ -5828,7 +5964,7 @@ templ ChatAutoScrollScript() {
 							node._chatStreamStateKey = model.kind === 'thinking' ? toolStateKey + ':thinking:' + (data.offset + (model.segments[0].index || 0)) : projectionKey + ':row:' + index;
 							node._chatToolStateKey = toolStateKey;
                             node._chatActivityOffset = data.offset;
-							return window.renderStreamingContent(node, '', !synchronous, {virtualRow:true, preparedSegments:model.segments, activityShell:document.documentElement.getAttribute('data-output-detail') === 'compact' && (model.kind === 'using' || model.kind === 'thinking')});
+							return window.renderStreamingContent(node, '', !synchronous, {virtualRow:true, preparedSegments:model.segments, thinkingShell:model.kind === 'thinking', activitySummary:model.activitySummary, activityShell:document.documentElement.getAttribute('data-output-detail') === 'compact' && (model.kind === 'using' || model.kind === 'thinking')});
 						});
 					}
 			if (!options?.virtualRow && window.discardChatVirtualRows) window.discardChatVirtualRows(container);
@@ -5852,7 +5988,8 @@ templ ChatAutoScrollScript() {
                 var firstKey = first.type === 'using' ? first.toolRenderID : 'thinking-' + ((first.index || 0) + (container._chatActivityOffset || 0));
                 var activityKey = (toolContainerKey || 'chat') + ':activity:' + firstKey;
                 activity.setAttribute('data-tool-disclosure-key', activityKey);
-                activity._activityTools = segments.filter(function(seg) { return seg.type === 'using'; }).map(function(seg) {
+                if (options.activitySummary) activity._activitySummary = {count:options.activitySummary.count, failures:options.activitySummary.failures, running:options.activitySummary.running ? {name:toolDisplayName(options.activitySummary.running.name)} : null};
+                else activity._activityTools = segments.filter(function(seg) { return seg.type === 'using'; }).map(function(seg) {
                     return {name:toolDisplayName(seg.name), status:seg.completed ? (seg.resultStatus === 'error' ? 'error' : 'done') : 'running'};
                 });
                 var toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'stream-activity-summary';
@@ -5974,16 +6111,30 @@ templ ChatAutoScrollScript() {
 				summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
 				var body = document.createElement('div');
 				body.className = 'stream-thinking-body';
-				if (pendingThinkingRenderedContent !== null) {
-					if (typeof pendingThinkingRenderedContent === 'string') body.innerHTML = pendingThinkingRenderedContent;
-					else body.appendChild(pendingThinkingRenderedContent);
-					pendingThinkingRenderedContent = null;
-				} else if (window.renderChatMarkdown) {
-					body.innerHTML = window.renderChatMarkdown(merged);
-				} else {
-					body.textContent = merged;
-					body.style.whiteSpace = 'pre-wrap';
-				}
+                var preparedThinking = pendingThinkingRenderedContent;
+                pendingThinkingRenderedContent = null;
+                details._ensureThinkingContent = function(synchronous) {
+                    if (details._thinkingMounted) {
+                        if (synchronous && details._thinkingPromise) body.innerHTML = window.renderChatMarkdown(merged);
+                        return details._thinkingPromise;
+                    }
+                    details._thinkingMounted = true;
+                    if (preparedThinking !== null) {
+                        if (typeof preparedThinking === 'string') body.innerHTML = preparedThinking;
+                        else body.appendChild(preparedThinking);
+                    } else if (options?.virtualRow && !synchronous && merged.length >= 64 * 1024 && window.renderChatMarkdownAsync) {
+                        details._thinkingPromise = window.renderChatMarkdownAsync(merged, body).then(function(content) {
+                            if (typeof content === 'string') body.innerHTML = content;
+                            else if (content) body.replaceChildren(content);
+                            if (details.isConnected) return window.renderMermaidDiagrams?.(details);
+                        });
+                        return details._thinkingPromise;
+                    } else if (window.renderChatMarkdown) body.innerHTML = window.renderChatMarkdown(merged);
+                    else { body.textContent = merged; body.style.whiteSpace = 'pre-wrap'; }
+                    if (details.isConnected) return window.renderMermaidDiagrams?.(details);
+                };
+                details.addEventListener('toggle', function() { if (details.open) details._ensureThinkingContent(); });
+                if (!options?.virtualRow) details._ensureThinkingContent();
 				details.appendChild(summary);
 				details.appendChild(body);
 				renderFragment.appendChild(details);
@@ -6505,6 +6656,7 @@ templ ChatAutoScrollScript() {
 				var newThinkingSections = container.querySelectorAll('details.stream-thinking');
 				for (var ti = 0; ti < newThinkingSections.length && ti < prevThinkingStates.length; ti++) {
 				if (prevThinkingStates[ti]) {
+                    newThinkingSections[ti]._ensureThinkingContent?.();
 						newThinkingSections[ti].open = true;
 					}
 				}
@@ -6652,7 +6804,7 @@ templ ChatAutoScrollScript() {
 								continue;
 							}
 							result += text.substring(previous, match.index);
-							result += typeof replacement === 'function' ? replacement.apply(null, match) : replacement;
+							result += typeof replacement === 'function' ? replacement.apply(null, Array.from(match).concat(match.index)) : replacement;
 							previous = match.index + match[0].length;
 							if (match[0].length === 0) pattern.lastIndex++;
 						}
@@ -6745,13 +6897,14 @@ templ ChatAutoScrollScript() {
 				};
 
 				// Clean transcript control artifacts from chat message content.
-					window.normalizeTranscriptMarkers = function(text, ranges) {
+					window.normalizeTranscriptMarkers = function(text, ranges, edits) {
 						if (!text) return text;
 						var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
-						return window.replaceOutsideCode(text, /\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*|<\s*(\/?)\s*thinking\s*>/gi, function(raw, tool, command, closing) {
-							if (!tool) return closing ? '\n[/Thinking]\n' : '\n[Thinking]\n';
+						return window.replaceOutsideCode(text, /\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*|<\s*(\/?)\s*thinking\s*>/gi, function(raw, tool, command, closing, index) {
+                            function replacement(value) { if (edits) edits.push({start:index, end:index + raw.length, length:value.length}); return value; }
+							if (!tool) return replacement(closing ? '\n[/Thinking]\n' : '\n[Thinking]\n');
 							command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
-							return '\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n';
+							return replacement('\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n');
 						}, protectedRanges);
 				};
 			window.cleanTranscriptControls = function(text, noTrim, statusAlreadyScoped) {

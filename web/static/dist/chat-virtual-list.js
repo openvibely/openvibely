@@ -500,14 +500,46 @@
         const compact = !data.ungrouped && document.documentElement.getAttribute('data-output-detail') === 'compact';
         data.sourceModels ||= data.models;
         if (data.activityMode !== compact) {
-            const grouped = [];
-            data.sourceModels.forEach(model => {
-                const previous = grouped[grouped.length - 1];
-                if (compact && (model.kind === 'using' || model.kind === 'thinking') && previous && (previous.kind === 'using' || previous.kind === 'thinking')) {
+            let grouped = [], start = 0, checkpoints = [];
+            const prior = owner._chatVirtualData;
+            if (compact && data.incremental && prior?.activityMode && prior.groupCheckpoints) {
+                // Keep aggregate counts at source-row boundaries. Appending to one
+                // Compact group need not enumerate all its tools to rebuild its label.
+                while (start < data.sourceModels.length && start < prior.sourceModels.length &&
+                    data.sourceModels[start] === prior.sourceModels[start] &&
+                    prior.groupCheckpoints[start].version === data.sourceModels[start].segments[0]?._version) start++;
+                if (start) {
+                    const saved = prior.groupCheckpoints[start - 1];
+                    grouped = prior.models.slice(0, saved.group + 1);
+                    const last = grouped[saved.group];
+                    grouped[saved.group] = {...last, segments:last.segments.slice(0, saved.length), activitySummary:{...saved.summary}};
+                    checkpoints = prior.groupCheckpoints.slice(0, start);
+                }
+            }
+            for (let index = start; index < data.sourceModels.length; index++) {
+                const model = data.sourceModels[index];
+                let previous = grouped[grouped.length - 1];
+                const work = model.kind === 'using' || model.kind === 'thinking';
+                if (compact && work && previous && (previous.kind === 'using' || previous.kind === 'thinking')) {
                     previous.segments.push(...model.segments);
                     delete previous.height;
-                } else grouped.push(compact ? {...model, segments: model.segments.slice()} : model);
-            });
+                } else {
+                    previous = compact ? {...model, segments:model.segments.slice(), activitySummary:{count:0, failures:0, running:null}} : model;
+                    grouped.push(previous);
+                }
+                if (compact) {
+                    if (work) model.segments.forEach(seg => {
+                        if (seg.type !== 'using') return;
+                        const summary = previous.activitySummary;
+                        summary.count++;
+                        if (seg.resultStatus === 'error') summary.failures++;
+                        if (!seg.completed && !summary.running) summary.running = seg;
+                    });
+                    checkpoints.push({group:grouped.length - 1, length:previous.segments.length,
+                        summary:{...previous.activitySummary}, version:model.segments[0]?._version});
+                }
+            }
+            data.groupCheckpoints = checkpoints;
             data.models = grouped;
             data.activityMode = compact;
         }
@@ -520,6 +552,46 @@
             const list = ensureList(messages);
             const width = messages.clientWidth;
             const restore = saveAnchor(list);
+            // Live projections retain completed model identities. Update changed rows
+            // in place instead of detaching the entire response for every delta.
+            const previous = owner._chatVirtualRows;
+            if (data.incremental && previous && owner._chatVirtualData?.activityMode === data.activityMode && !previews.size &&
+                !owner.querySelector('.file-html-canvas, .chat-svg-preview')) {
+                owner._chatVirtualData = data;
+                const rows = data.models.map((model, index) => {
+                    let row = previous[index];
+                    const version = model.segments.length === 1 ? model.segments[0]._version : undefined;
+                    if (row) {
+                        if (row.model !== model || row.version !== version) {
+                            row.generation = (row.generation || 0) + 1;
+                            row.ready = false;
+                            row.loading = null;
+                            row.sourceSize = undefined;
+                            if (!row.node?.isConnected) sizePlaceholder(row, estimate(model, width));
+                        }
+                        Object.assign(row, {model, version, render});
+                    } else {
+                        const placeholder = document.createElement('div');
+                        placeholder.setAttribute('data-virtual-chat-row', String(++nextID));
+                        placeholder.setAttribute('data-chat-lazy-row', String(index));
+                        placeholder.setAttribute('aria-hidden', 'true');
+                        row = {lazy:true, owner, model, version, index, render, placeholder, node:null, ready:false};
+                        sizePlaceholder(row, estimate(model, width));
+                        list.rows.set(placeholder, row);
+                        owner.appendChild(placeholder);
+                    }
+                    return row;
+                });
+                previous.slice(rows.length).forEach(row => {
+                    row.generation = (row.generation || 0) + 1;
+                    list.rows.delete(row.placeholder);
+                    row.node?.remove(); row.placeholder.remove();
+                });
+                owner._chatVirtualRows = rows;
+                restore();
+                if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
+                return window.renderVisibleChatRows(messages);
+            }
             // Prepending a byte window shifts row indexes. Reusing those nodes would
             // apply one tool's DOM/scroll state to another; new nodes recover state
             // by stable tool ID. Ordinary refreshes retain their existing reuse path.
@@ -541,20 +613,24 @@
             const reused = [];
             owner._chatVirtualData = data;
             owner.setAttribute('data-chat-virtual-owner', 'true');
+            const previousRows = owner._chatVirtualRows || [];
             owner._chatVirtualRows = data.models.map((model, index) => {
-                const placeholder = document.createElement('div');
+                const previousRow = previousRows[index];
+                const version = model.segments.length === 1 ? model.segments[0]._version : undefined;
+                const unchanged = !shiftedWindow && previousRow?.model === model && previousRow.version === version;
+                const placeholder = unchanged ? previousRow.placeholder : document.createElement('div');
                 placeholder.setAttribute('data-virtual-chat-row', String(++nextID));
                 placeholder.setAttribute('data-chat-lazy-row', String(index));
                 placeholder.setAttribute('aria-hidden', 'true');
                 const indexed = old.get(index);
-                const prior = previews.get(index) || (previewAncestors.has(indexed) ? null : indexed);
+                const prior = previews.get(index) || (unchanged && previousRow.node) || (previewAncestors.has(indexed) ? null : indexed);
                 const node = prior && !prior.hasAttribute('data-virtual-chat-row') ? prior : null;
                 if (!model.height && prior?.dataset.chatRowHeight) {
                     model.height = Number(prior.dataset.chatRowHeight);
                     model.width = Number(prior.dataset.chatRowWidth);
                 }
                 if (node) node.setAttribute('data-chat-lazy-row', String(index));
-                const row = {lazy:true, owner, model, index, render, placeholder, node, ready:false};
+                const row = unchanged ? Object.assign(previousRow, {render, node}) : {lazy:true, owner, model, index, render, placeholder, node, ready:false, version};
                 if (focusedActivityKey) row.restoreFocus = () => {
                     if (!focusedActivityKey || !row.node?.isConnected) return;
                     const fold = Array.from(row.node.querySelectorAll('[data-tool-disclosure-key]')).find(el => el.getAttribute('data-tool-disclosure-key') === focusedActivityKey);
@@ -608,7 +684,12 @@
     window.captureChatVirtualData = function (root) {
         // Expanded activity bodies are derived from the outer transcript models.
         // They have no source/key and must not be retained as standalone snapshots.
-        return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(data => data && !data.ungrouped);
+        return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(data => data && !data.ungrouped).map(data => {
+            // Live FIFO matching updates existing tool models. Navigation snapshots
+            // must not acquire later results while retaining an older source revision.
+            if (!data.incremental) return data;
+            return window.structuredClone ? structuredClone(data) : JSON.parse(JSON.stringify(data));
+        });
     };
     // Query transcript content in display order without mounting offscreen rows.
     // Unrendered models can be projected by the caller into lightweight elements.
@@ -660,7 +741,10 @@
         scrollRestores.forEach(restore => restore());
         restoreScroll(restored);
         anchors.forEach(restore => restore());
-        return Promise.all(pending);
+        if (options?.synchronousThinking) root.querySelectorAll('details.stream-thinking').forEach(details => details._ensureThinkingContent?.(true));
+        return Promise.all(pending).then(() => {
+            if (options?.renderLazy !== false) return Promise.all(Array.from(root.querySelectorAll('details.stream-thinking'), details => details._ensureThinkingContent?.(options?.synchronousThinking)));
+        });
     };
     window.cloneVirtualChatRows = function (source, clone) {
         clone.querySelectorAll('[data-chat-preview-pool]').forEach(pool => pool.remove());
@@ -716,7 +800,7 @@
             else list.schedule();
         });
     });
-    window.addEventListener('beforeprint', () => { suspended = true; window.materializeVirtualChatRows(document.body); });
+    window.addEventListener('beforeprint', () => { suspended = true; window.materializeVirtualChatRows(document.body, {synchronousThinking:true}); });
     window.addEventListener('afterprint', () => { suspended = false; lists.forEach(list => list.schedule()); });
     window.addEventListener('resize', () => lists.forEach(list => list.schedule()));
 })();

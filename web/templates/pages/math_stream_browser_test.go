@@ -126,14 +126,16 @@ func TestBrowserFunctional_StreamingMathPendingRefresh(t *testing.T) {
      // arrive before those rows get a viewport in which to render.
      messages.setAttribute('data-transcript-hydrating','true');
      await renderStreamingContent(root,window.mathSource,false);
-     if(!root._chatMathNodes?.size)throw Error('equation not saved before mounting');
+     // Retained live rows need no detached equation pool. Both paths must keep
+     // the exact styled node until the updated row is mounted.
+     if(!root._chatMathNodes?.size && !root.contains(original))throw Error('equation not saved before mounting');
      await renderStreamingContent(root,window.mathSource,false);
-     if(!root._chatMathNodes?.size)throw Error('unchanged refresh discarded pending equation');
+     if(!root._chatMathNodes?.size && !root.contains(original))throw Error('unchanged refresh discarded pending equation');
      const changed=` + replacement + `;
      const next=changed?'Replacement \\(y=2\\).':window.mathSource+' More text.';
      await renderStreamingContent(root,next,false);
      if(changed && (root._chatMathNodes || root._chatMathSource))throw Error('replacement retained stale equation pool');
-     if(!changed && !root._chatMathNodes?.size)throw Error('appended text discarded pending equation');
+     if(!changed && !root._chatMathNodes?.size && !root.contains(original))throw Error('appended text discarded pending equation');
      messages.removeAttribute('data-transcript-hydrating');
      await renderVisibleChatRows(messages);
      const equation=root.querySelector('[data-math-ready]');

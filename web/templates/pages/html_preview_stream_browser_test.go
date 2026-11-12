@@ -44,12 +44,14 @@ func TestBrowserFunctional_StreamingHTMLPreview(t *testing.T) {
  const tools=Array.from({length:160},(_,i)=>'[Using tool: bash | echo '+i+']\n[Tool bash done]\nresult '+i+'\n[/Tool]\n').join('');
  const pendingSource=finalSource+' Additional text.\n\n'+tools;
  await renderStreamingContent(root,pendingSource,false,{stable:true});
- if(!root._filePreviewPool?.contains(previewFrame))throw Error('missing pending preview');
+ // A live row can now retain its preview directly during hydration; a pool
+ // is only required when the old row is being replaced.
+ if(!root.contains(previewFrame))throw Error('missing pending preview');
  const snapshot=root.cloneNode(true);cloneVirtualChatRows(root,snapshot);
  if(snapshot.querySelector('[data-chat-preview-pool]'))throw Error('pending preview leaked into snapshot');
  await renderStreamingContent(root,pendingSource,false,{stable:true});
  await renderStreamingContent(root,pendingSource+' Done.',false,{stable:true});
- if(!root._filePreviewPool?.contains(previewFrame))throw Error('refresh discarded pending preview');
+ if(!root.contains(previewFrame))throw Error('refresh discarded pending preview');
  messages.removeAttribute('data-transcript-hydrating');
  await renderVisibleChatRows(messages);
  await new Promise(resolve=>setTimeout(resolve,100));
