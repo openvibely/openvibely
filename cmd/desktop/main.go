@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -232,28 +230,6 @@ func startDesktopBackend(ctx context.Context, cfg *config.Config) (*desktopBacke
 	}, nil
 }
 
-func desktopAssetProxy(backendURL *url.URL) http.Handler {
-	proxy := httputil.NewSingleHostReverseProxy(backendURL)
-	proxy.FlushInterval = -1
-	director := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		director(r)
-		// Identify documents requested through the native window, not the server mode.
-		r.Header.Set("X-OpenVibely-Native-Window", "1")
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Wails' streaming WebView bodies can omit Content-Length. ReverseProxy
-		// drops bodies with length zero, so mark a supplied body as unknown-length
-		// before it clones the request (its Director runs too late).
-		if r.ContentLength == 0 && r.Body != nil && r.Body != http.NoBody {
-			r = r.Clone(r.Context())
-			r.ContentLength = -1
-			r.Header.Del("Content-Length")
-		}
-		proxy.ServeHTTP(w, r)
-	})
-}
-
 func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.Coordinator) error {
 	backendURL, err := url.Parse(baseURL)
 	if err != nil {
@@ -306,7 +282,7 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		BackgroundType: backgroundType,
 		Name:           "main",
 		Title:          "OpenVibely",
-		// WebKit's native asset transport cannot follow the root's /chat redirect.
+		// Open the workspace directly instead of taking an extra redirect through root.
 		URL:       "/chat",
 		Width:     1280,
 		Height:    820,
