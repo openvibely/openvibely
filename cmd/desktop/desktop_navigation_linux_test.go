@@ -49,11 +49,12 @@ func TestNativeLinuxNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"login", "logout", "invite", "original-create", "create", "automation", "get-307", "organization", "absolute", "session-expired", "refresh", "external"} {
+	authBackend := desktopAuthBackend(t)
+	for _, mode := range []string{"auth", "login", "logout", "invite", "original-create", "create", "automation", "get-307", "organization", "absolute", "session-expired", "refresh", "external"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, binary, mode, fixturePath, htmx)
+			command := exec.CommandContext(ctx, binary, mode, fixturePath, htmx, authBackend.BaseURL)
 			output, err := command.CombinedOutput()
 			t.Logf("%s", output)
 			if err != nil {

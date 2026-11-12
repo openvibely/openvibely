@@ -126,6 +126,8 @@ func TestDesktopProxyRedirectDoesNotReplayForm(t *testing.T) {
 	defer backend.Close()
 	target, _ := url.Parse(backend.URL)
 	req := navigationRequest("POST")
+	req.Host = "localhost"
+	req.Header.Set("Origin", "wails://localhost")
 	req.Body = io.NopCloser(strings.NewReader("username=test"))
 	req.ContentLength = 0 // Native streaming request body.
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -133,5 +135,50 @@ func TestDesktopProxyRedirectDoesNotReplayForm(t *testing.T) {
 	desktopAssetProxy(target).ServeHTTP(rec, req)
 	if calls != 1 || rec.Code != 200 || len(rec.Result().Cookies()) != 1 || !strings.Contains(rec.Body.String(), `window.location.replace("/chat")`) {
 		t.Fatalf("calls=%d status=%d response=%s", calls, rec.Code, rec.Body.String())
+	}
+}
+
+func TestDesktopProxySessionBoundaries(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "secret", Path: "/", HttpOnly: true})
+		case "/logout":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+		default:
+			w.Write([]byte(r.Header.Get("Cookie")))
+		}
+	}))
+	defer backend.Close()
+	target, _ := url.Parse(backend.URL)
+	proxy := desktopAssetProxy(target)
+	request := func(path string, origins []string, cookie string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "wails://localhost"+path, nil)
+		req.Header["Origin"] = origins
+		if cookie != "" {
+			req.Header.Set("Cookie", cookie)
+		}
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+		return rec
+	}
+	trusted := []string{"wails://localhost"}
+	if got := request("/login", trusted, ""); got.Code != 200 {
+		t.Fatal(got.Code)
+	}
+	if got := request("/inspect", trusted, "theme=light").Body.String(); got != "theme=light; session=secret" {
+		t.Fatalf("session missing: %q", got)
+	}
+	for _, origins := range [][]string{{"null"}, {"https://evil.example"}, {"wails://localhost", "https://evil.example"}, {"wails://localhost/"}} {
+		if got := request("/inspect", origins, "session=secret").Body.String(); got != "" {
+			t.Fatalf("session leaked for %v: %q", origins, got)
+		}
+		if got := request("/login", origins, ""); got.Code != 403 {
+			t.Fatalf("untrusted login accepted for %v", origins)
+		}
+	}
+	request("/logout", trusted, "")
+	if got := request("/inspect", trusted, "session=secret; theme=dark").Body.String(); got != "theme=dark" {
+		t.Fatalf("stale session restored: %q", got)
 	}
 }

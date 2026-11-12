@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
@@ -43,9 +44,36 @@ func main() {
 		fmt.Fprint(w, `<!doctype html><html><body>External destination<script>fetch('/report')</script></body></html>`)
 	}))
 	defer external.Close()
+	var authBackend http.Handler
+	if mode == "auth" {
+		target, err := url.Parse(os.Args[4])
+		if err != nil {
+			panic(err)
+		}
+		authBackend = httputil.NewSingleHostReverseProxy(target)
+	}
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("REQUEST %s %s\n", r.Method, r.URL.Path)
+		if mode == "auth" && r.URL.Path != "/report" {
+			if r.URL.Path == "/start" {
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprint(w, nativeAuthDocument)
+			} else if r.URL.Path == "/failure" {
+				badForm.Store(true)
+				fmt.Printf("AUTH FAILED: %s\n", r.URL.RawQuery)
+				select {
+				case done <- struct{}{}:
+				default:
+				}
+			} else {
+				if r.URL.Path == "/login" && r.Method == "POST" {
+					submissions.Add(1)
+				}
+				authBackend.ServeHTTP(w, r)
+			}
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "application/javascript")
@@ -155,3 +183,37 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// Run against the actual application handlers, not the redirect fixtures above.
+const nativeAuthDocument = `<!doctype html><html><body>Authentication check<script type="module">
+(async()=>{
+ const runtime = await import('/wails/runtime.js');
+ if (!runtime.Window || !runtime.Events) throw Error('native runtime missing');
+ await runtime.Events.Emit('desktop:auth-test', {});
+ if(typeof await runtime.Window.IsMaximised() !== 'boolean') throw Error('native window API failed');
+ async function request(path, form, expected) {
+  const options = form === null ? {} : {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(form)};
+  if(path === '/events/native-ticket') options.headers['X-OpenVibely-Live']='1';
+  const r = await fetch(path, options);
+  if(r.status !== expected) throw Error(path+': '+r.status+' expected '+expected);
+  return r.text();
+ }
+ await request('/login', {username:'alice',password:'alice-password-long'},302);
+ const owner = JSON.parse(await request('/auth/me',null,200));
+ if(owner.role !== 'owner') throw Error('owner session missing');
+ await request('/events/native-ticket',{},200);
+ const html = await request('/organization/invitations',{role:'member'},200);
+ const token = html.match(/\/invite\?token=([A-Za-z0-9_-]+)/);
+ if(!token) throw Error('invitation missing');
+ await request('/logout',{},302);
+ await request('/auth/me',null,401);
+ await request('/invite',{token:token[1],username:'native-member',password:'native-member-password'},303);
+ const member=JSON.parse(await request('/auth/me',null,200));
+ if(member.role !== 'member') throw Error('member session missing');
+ await request('/logout',{},302);
+ await request('/auth/me',null,401);
+ await runtime.Events.Emit('desktop:auth-test', {});
+ if(typeof await runtime.Window.IsMaximised() !== 'boolean') throw Error('native window API failed');
+ await fetch('/report');
+})().catch(e=>fetch('/failure?error='+encodeURIComponent(e.message)));
+</script></body></html>`
