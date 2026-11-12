@@ -1,6 +1,6 @@
-// Built with the production desktop_proxy.go by TestNativeLinuxNavigation.
-// Each process owns only a disposable window and a fake backend; it does not
-// connect to the running app or send keyboard/pointer events to the desktop.
+// Built with the production desktop_proxy.go by TestNativeDesktopNavigation.
+// Each process owns a disposable window and fixture proxy. Authentication
+// uses the isolated real backend started by the test. No running app is used.
 package main
 
 import (
@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -156,8 +157,23 @@ func main() {
 	}))
 	defer server.Close()
 	target, _ := url.Parse(server.URL)
-	app := application.New(application.Options{Name: "OpenVibely navigation test", Assets: application.AssetOptions{Handler: desktopAssetProxy(target)}})
-	win := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "probe", Title: "Navigation test", URL: "/start", Width: 450, Height: 250, Frameless: true, BackgroundType: application.BackgroundTypeTransparent})
+	app := application.New(application.Options{
+		Name:    "OpenVibely navigation test",
+		Assets:  application.AssetOptions{Handler: desktopAssetProxy(target)},
+		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
+		Windows: application.WindowsOptions{WebviewUserDataPath: os.Args[5]},
+	})
+	// Use the production platform-specific window options.
+	background := application.BackgroundTypeSolid
+	if runtime.GOOS == "linux" {
+		background = application.BackgroundTypeTransparent
+	}
+	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name: "probe", Title: "Navigation test", URL: "/start", Width: 450, Height: 250,
+		Frameless: true, BackgroundType: background,
+		Mac:     application.MacWindow{CornerRadius: 20},
+		Windows: application.WindowsWindow{WebView2CompositionHosting: true},
+	})
 	var passed bool
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		go func() {
@@ -165,12 +181,12 @@ func main() {
 			select {
 			case <-done:
 				reached = true
-			case <-time.After(10 * time.Second):
+			case <-time.After(30 * time.Second):
 			}
 			time.AfterFunc(200*time.Millisecond, func() {
 				application.InvokeAsync(func() {
 					passed = reached && win.IsVisible() && submissions.Load() == 1 && !badForm.Load()
-					fmt.Printf("RESULT mode=%s reached=%t visible=%t submissions=%d validForm=%t\n", mode, reached, win.IsVisible(), submissions.Load(), !badForm.Load())
+					fmt.Printf("RESULT platform=%s/%s mode=%s reached=%t visible=%t submissions=%d validForm=%t\n", runtime.GOOS, runtime.GOARCH, mode, reached, win.IsVisible(), submissions.Load(), !badForm.Load())
 					app.Quit()
 				})
 			})
@@ -195,7 +211,10 @@ const nativeAuthDocument = `<!doctype html><html><body>Authentication check<scri
   const options = form === null ? {} : {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(form)};
   if(path === '/events/native-ticket') options.headers['X-OpenVibely-Live']='1';
   const r = await fetch(path, options);
-  if(r.status !== expected) throw Error(path+': '+r.status+' expected '+expected);
+  // WebView2 follows fetch redirects; custom-scheme WebKit may return the
+  // original 302/303. In either case, verify the actual session below.
+  const redirected = (expected === 302 || expected === 303) && r.status === 200 && r.redirected;
+  if(r.status !== expected && !redirected) throw Error(path+': '+r.status+' expected '+expected+' or its followed redirect');
   return r.text();
  }
  await request('/login', {username:'alice',password:'alice-password-long'},302);

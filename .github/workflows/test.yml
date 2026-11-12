@@ -288,6 +288,11 @@ jobs:
         if: runner.os == 'Linux'
         run: openbox >/tmp/openvibely-native-chat-wm.log 2>&1 &
 
+      - name: Test native desktop navigation and authentication
+        env:
+          OPENVIBELY_RUN_NATIVE_UI: "1"
+        run: go test ./cmd/desktop -run '^TestNativeDesktopNavigation$' -v -count=1 -timeout 900s
+
       - name: Test native Wails desktop scrolling and alignment
         env:
           OPENVIBELY_RUN_NATIVE_UI: "1"

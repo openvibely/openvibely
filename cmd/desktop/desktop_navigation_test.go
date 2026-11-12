@@ -1,5 +1,3 @@
-//go:build linux
-
 package main
 
 import (
@@ -8,18 +6,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-func TestNativeLinuxNavigation(t *testing.T) {
+// The same scenarios run on every native OS/architecture in the CI matrix.
+// Only the executable build and native window setup vary by platform.
+func TestNativeDesktopNavigation(t *testing.T) {
 	if os.Getenv("OPENVIBELY_RUN_NATIVE_UI") != "1" {
-		t.Skip("set OPENVIBELY_RUN_NATIVE_UI=1 with a display and GTK3/WebKit installed")
+		t.Skip("set OPENVIBELY_RUN_NATIVE_UI=1 with a native desktop session (Linux requires GTK3/WebKit and a display)")
 	}
 	dir := t.TempDir()
-	for _, source := range []string{"desktop_proxy.go", "testdata/linux_navigation_check.go"} {
+	for _, source := range []string{"desktop_proxy.go", "testdata/navigation_check.go"} {
 		data, err := os.ReadFile(source)
 		if err != nil {
 			t.Fatal(err)
@@ -28,10 +29,19 @@ func TestNativeLinuxNavigation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	binary := filepath.Join(dir, "navigation-check")
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	name := "navigation-check"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	binary := filepath.Join(dir, name)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, "go", "build", "-tags", "gtk3", "-o", binary, filepath.Join(dir, "linux_navigation_check.go"), filepath.Join(dir, "desktop_proxy.go"))
+	args := []string{"build"}
+	if runtime.GOOS == "linux" {
+		args = append(args, "-tags", "gtk3")
+	}
+	args = append(args, "-o", binary, filepath.Join(dir, "navigation_check.go"), filepath.Join(dir, "desktop_proxy.go"))
+	command := exec.CommandContext(ctx, "go", args...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build native navigation check: %v\n%s", err, output)
 	}
@@ -52,13 +62,13 @@ func TestNativeLinuxNavigation(t *testing.T) {
 	authBackend := desktopAuthBackend(t)
 	for _, mode := range []string{"auth", "login", "logout", "invite", "original-create", "create", "automation", "get-307", "organization", "absolute", "session-expired", "refresh", "external"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, binary, mode, fixturePath, htmx, authBackend.BaseURL)
+			command := exec.CommandContext(ctx, binary, mode, fixturePath, htmx, authBackend.BaseURL, t.TempDir())
 			output, err := command.CombinedOutput()
 			t.Logf("%s", output)
 			if err != nil {
-				t.Fatalf("native navigation failed: %v", err)
+				t.Fatalf("native navigation failed on %s/%s: %v", runtime.GOOS, runtime.GOARCH, err)
 			}
 		})
 	}
