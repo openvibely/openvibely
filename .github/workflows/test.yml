@@ -327,6 +327,12 @@ jobs:
           OPENVIBELY_RUN_NATIVE_UI: "1"
         run: go test -tags=openvibely_native_ui ./web/templates/pages -run '^TestNativeWebKitStorageIsolation$' -count=1 -timeout=120s
 
+      - name: Test native macOS desktop authentication
+        if: runner.os == 'macOS'
+        env:
+          OPENVIBELY_RUN_NATIVE_UI: "1"
+        run: go test -tags=openvibely_native_ui ./cmd/desktop -run '^TestDesktopAuthenticationInNativeWebView$' -count=1 -timeout=120s
+
       - name: Test native Windows storage isolation
         if: runner.os == 'Windows'
         env:

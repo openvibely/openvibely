@@ -111,8 +111,8 @@ func TestDesktopNavigationRedirectLeavesOtherResponsesAlone(t *testing.T) {
 }
 
 func TestDesktopProxyRedirectDoesNotReplayForm(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("Linux custom-scheme workaround")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("WebKit custom-scheme workaround")
 	}
 	calls := 0
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

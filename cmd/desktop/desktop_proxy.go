@@ -40,7 +40,7 @@ func desktopAssetProxy(backendURL *url.URL) http.Handler {
 			}
 			cookieMu.Unlock()
 		}
-		if runtime.GOOS == "linux" {
+		if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
 			return desktopNavigationRedirect(response)
 		}
 		return nil
@@ -101,7 +101,7 @@ func desktopAssetProxy(backendURL *url.URL) http.Handler {
 	})
 }
 
-// WebKitGTK's custom-scheme transport delivers HTTP redirects as documents
+// WebKit's custom-scheme transport delivers HTTP redirects as documents
 // instead of following them. Navigate from a small document on the Wails origin
 // so the browser changes the address normally. The proxy handles session cookies.
 // Do not translate fetch/HTMX responses or replay method-preserving POSTs.

@@ -7,12 +7,54 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
 )
+
+func TestDesktopAuthenticatedStartupNavigation(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("custom-scheme WebKit navigation")
+	}
+	backend := desktopAuthBackend(t)
+	target, _ := url.Parse(backend.BaseURL)
+	proxy := desktopAssetProxy(target)
+	navigate := func(method, path, form string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "wails://localhost"+path, strings.NewReader(form))
+		req.Header.Set("Accept", "text/html,application/xhtml+xml")
+		req.Header.Set("Upgrade-Insecure-Requests", "1")
+		if method == http.MethodPost {
+			req.Header.Set("Origin", "wails://localhost")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s returned %d, Location %q: %s", method, path, rec.Code, rec.Header().Get("Location"), rec.Body.String())
+		}
+		return rec
+	}
+	startup := navigate(http.MethodGet, "/chat", "")
+	if !strings.Contains(startup.Body.String(), `window.location.replace("/login?next=L2NoYXQ")`) {
+		t.Fatalf("startup did not navigate to login: %s", startup.Body.String())
+	}
+	loginPage := navigate(http.MethodGet, "/login?next=L2NoYXQ", "")
+	if !strings.Contains(loginPage.Body.String(), `action="/login"`) {
+		t.Fatal("login form missing")
+	}
+	login := navigate(http.MethodPost, "/login", "username=alice&password=alice-password-long&next=L2NoYXQ")
+	if !strings.Contains(login.Body.String(), `window.location.replace("/chat")`) {
+		t.Fatalf("login did not return to chat: %s", login.Body.String())
+	}
+	chat := navigate(http.MethodGet, "/chat", "")
+	if !strings.Contains(chat.Body.String(), `id="main-content"`) {
+		t.Fatal("authenticated workspace missing")
+	}
+}
 
 // Exercise the production backend, including CSRF checks, persisted sessions,
 // invitation acceptance and logout, without a browser-side cookie jar.
