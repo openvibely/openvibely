@@ -57,6 +57,6 @@ func TestBrowserFunctional_PersonalGitHubIdentityLookup(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chatNavigationChromePath(t), server.URL, "github-personal-identity", func(b *composerFocusCDP) {
-		b.waitFor("GitHub identity lookup", `document.getElementById('result').textContent`, "pass")
+		b.waitFor("GitHub identity lookup", `document.getElementById('result')?.textContent ?? ''`, "pass")
 	})
 }
