@@ -305,7 +305,7 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if len(entries) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<li class=\"sidebar-divider\" style=\"display:block!important;border-top:1px solid currentColor;opacity:.2;margin:8px 4px\" role=\"separator\"></li><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Pages</span></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<li class=\"sidebar-divider\" style=\"display:block!important;border-top:1px solid currentColor;opacity:.1;margin:6px 4px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent);mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent)\" role=\"separator\"></li><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Pages</span></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

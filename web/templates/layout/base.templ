@@ -1446,6 +1446,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					margin: 0 !important;
 					width: 2.5rem !important;
 				}
+				/* The outer menu adds 2px before the nested page list. Cancel it so
+				   the divider sits equally far from both neighboring hover areas. */
+				body.sidebar-collapsed-pending .sidebar-aside .menu li.plugin-pages-nav-wrap:not(.sidebar-divider),
+				.sidebar-aside.sidebar-collapsed .menu li.plugin-pages-nav-wrap:not(.sidebar-divider) {
+					margin-top: -2px !important;
+				}
 				body.sidebar-collapsed-pending .sidebar-aside .menu :where(li ul),
 					.sidebar-aside.sidebar-collapsed .menu :where(li ul) {
 					padding: 0 !important;

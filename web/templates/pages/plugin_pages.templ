@@ -105,7 +105,7 @@ func pluginNavScope(e PluginNavEntry, allProjects bool) string {
 
 templ PluginNav(entries []PluginNavEntry, showProject bool) {
 	if len(entries) > 0 {
-		<li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.2;margin:8px 4px" role="separator"></li>
+		<li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.1;margin:6px 4px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent);mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent)" role="separator"></li>
 		<li class="menu-title sidebar-hide-collapsed"><span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Pages</span></li>
 	}
 	for _, e := range entries {
