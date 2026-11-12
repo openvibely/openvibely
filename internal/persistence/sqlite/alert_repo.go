@@ -729,8 +729,8 @@ func (r *AlertRepo) ReleaseClaim(ctx context.Context, projectID, id, claimant st
 	return r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
 		result, err := conn.ExecContext(ctx, `UPDATE alerts SET processing_state = 'unclaimed', claimant = NULL,
 			claimed_at = NULL, claim_expires_at = NULL, processing_error = '', updated_at = CURRENT_TIMESTAMP
-			WHERE project_id = ? AND id = ? AND processing_state = 'claimed' AND claimant = ? AND implementation_task_id IS NULL`,
-			projectID, id, claimant)
+			WHERE project_id = ? AND id = ? AND processing_state = 'claimed' AND claimant = ? AND implementation_task_id IS NULL
+			AND claim_expires_at > ?`, projectID, id, claimant, time.Now().UTC())
 		if err != nil {
 			return fmt.Errorf("releasing alert claim: %w", err)
 		}
@@ -755,7 +755,8 @@ func (r *AlertRepo) LinkImplementationTask(ctx context.Context, projectID, id, c
 		result, err := conn.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, implementation_task_was_linked = 1,
 			processing_state = 'implementation_task_linked', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE project_id = ? AND id = ? AND processing_state = 'claimed' AND claimant = ?
-			AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND project_id = ?)`, taskID, projectID, id, claimant, taskID, projectID)
+			AND claim_expires_at > ? AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND project_id = ?)`,
+			taskID, projectID, id, claimant, time.Now().UTC(), taskID, projectID)
 		if err != nil {
 			return fmt.Errorf("linking implementation task: %w", err)
 		}
@@ -793,8 +794,10 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 		var linked sql.NullString
 		var state models.AlertProcessingState
 		var storedClaimant string
-		if err := conn.QueryRowContext(ctx, `SELECT implementation_task_id, processing_state, COALESCE(claimant, '')
-			FROM alerts WHERE project_id = ? AND id = ?`, projectID, alertID).Scan(&linked, &state, &storedClaimant); err != nil {
+		var activeClaim bool
+		if err := conn.QueryRowContext(ctx, `SELECT implementation_task_id, processing_state, COALESCE(claimant, ''),
+			COALESCE(claim_expires_at > ?, 0)
+			FROM alerts WHERE project_id = ? AND id = ?`, time.Now().UTC(), projectID, alertID).Scan(&linked, &state, &storedClaimant, &activeClaim); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return persistence.ErrAlertNotFound
 			}
@@ -811,6 +814,9 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 		}
 		if state != models.AlertProcessingClaimed || storedClaimant != claimant {
 			return errors.New("alert is not claimed by this caller")
+		}
+		if !activeClaim {
+			return errors.New("alert claim has expired")
 		}
 		var displayOrder int
 		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'backlog'`, projectID).Scan(&displayOrder); err != nil {
@@ -861,8 +867,9 @@ func (r *AlertRepo) MarkProcessing(ctx context.Context, projectID, id, claimant 
 		result, err := conn.ExecContext(ctx, `UPDATE alerts SET processing_state = ?, processing_error = ?,
 			claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE project_id = ? AND id = ? AND claimant = ? AND processing_state IN ('claimed', 'implementation_task_linked', 'failed')
-			AND (? <> 'completed' OR implementation_task_was_linked = 1)`,
-			state, strings.TrimSpace(message), projectID, id, claimant, state)
+			AND (? <> 'completed' OR implementation_task_was_linked = 1)
+			AND (processing_state <> 'claimed' OR claim_expires_at > ?)`,
+			state, strings.TrimSpace(message), projectID, id, claimant, state, time.Now().UTC())
 		if err != nil {
 			return fmt.Errorf("marking alert processing: %w", err)
 		}

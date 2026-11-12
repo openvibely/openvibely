@@ -307,6 +307,135 @@ func TestAlertRepo_ProjectIsolationAndActionableLifecycle(t *testing.T) {
 	}
 }
 
+func createApprovedClaimedAlertForTest(t *testing.T, repo *AlertRepo, projectID, claimant, title string) *models.Alert {
+	t.Helper()
+	ctx := context.Background()
+	alert := &models.Alert{
+		ProjectID:       projectID,
+		Title:           title,
+		DecisionState:   models.AlertDecisionPending,
+		ProcessingState: models.AlertProcessingUnclaimed,
+	}
+	if _, err := repo.CreateIdempotent(ctx, alert); err != nil {
+		t.Fatalf("creating alert: %v", err)
+	}
+	if err := repo.SetDecision(ctx, projectID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatalf("approving alert: %v", err)
+	}
+	if _, err := repo.ClaimApproved(ctx, projectID, alert.ID, claimant, time.Hour); err != nil {
+		t.Fatalf("claiming alert: %v", err)
+	}
+	return alert
+}
+
+func expireAlertClaimForTest(t *testing.T, db *sql.DB, alertID string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `UPDATE alerts SET claim_expires_at = datetime('now', '-1 minute') WHERE id = ?`, alertID); err != nil {
+		t.Fatalf("expiring alert claim: %v", err)
+	}
+}
+
+func TestAlertRepo_ExpiredClaimCannotMutateUnlinkedAlert(t *testing.T) {
+	for _, action := range []string{"create-task", "link-task", "mark-failed", "release"} {
+		t.Run(action, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			repo := NewAlertRepo(db)
+			project := createTestProject(t, NewProjectRepo(db))
+			ctx := context.Background()
+			const claimant = "stale-worker"
+			alert := createApprovedClaimedAlertForTest(t, repo, project.ID, claimant, "Expired claim "+action)
+			staleTask := &models.Task{
+				ProjectID: project.ID, Title: "Existing task for expired claim", Category: models.CategoryBacklog,
+				Priority: 2, Status: models.StatusPending, Prompt: "Existing task", ChainConfig: "{}", SwarmConfig: "{}",
+			}
+			if err := NewTaskRepo(db, nil).Create(ctx, staleTask); err != nil {
+				t.Fatalf("creating existing task: %v", err)
+			}
+			expireAlertClaimForTest(t, db, alert.ID)
+
+			var err error
+			switch action {
+			case "create-task":
+				_, err = repo.CreateImplementationTask(ctx, project.ID, alert.ID, claimant, models.AlertImplementationTaskInput{
+					Title: "Stale worker task", Prompt: "This task must not be created.", Priority: 2,
+				})
+			case "link-task":
+				err = repo.LinkImplementationTask(ctx, project.ID, alert.ID, claimant, staleTask.ID)
+			case "mark-failed":
+				err = repo.MarkProcessing(ctx, project.ID, alert.ID, claimant, models.AlertProcessingFailed, "stale worker failed")
+			case "release":
+				err = repo.ReleaseClaim(ctx, project.ID, alert.ID, claimant)
+			}
+			if err == nil {
+				t.Fatalf("expired claim unexpectedly allowed %s", action)
+			}
+
+			stored, err := repo.GetByIDForProject(ctx, project.ID, alert.ID)
+			if err != nil {
+				t.Fatalf("reading alert after rejected mutation: %v", err)
+			}
+			if stored.ProcessingState != models.AlertProcessingClaimed || stored.Claimant != claimant || stored.ImplementationTaskID != nil {
+				t.Fatalf("rejected %s changed alert: state=%q claimant=%q task=%v", action, stored.ProcessingState, stored.Claimant, stored.ImplementationTaskID)
+			}
+			var created int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND title = 'Stale worker task'`, project.ID).Scan(&created); err != nil {
+				t.Fatalf("counting stale tasks: %v", err)
+			}
+			if created != 0 {
+				t.Fatalf("expired claim created %d implementation tasks", created)
+			}
+		})
+	}
+}
+
+func TestAlertRepo_ReclaimedAlertRejectsFormerClaimant(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAlertRepo(db)
+	project := createTestProject(t, NewProjectRepo(db))
+	ctx := context.Background()
+	alert := createApprovedClaimedAlertForTest(t, repo, project.ID, "worker-a", "Reclaimed alert")
+	staleTask := &models.Task{
+		ProjectID: project.ID, Title: "Task for new claimant", Category: models.CategoryBacklog,
+		Priority: 2, Status: models.StatusPending, Prompt: "Implementation", ChainConfig: "{}", SwarmConfig: "{}",
+	}
+	if err := NewTaskRepo(db, nil).Create(ctx, staleTask); err != nil {
+		t.Fatalf("creating task for new claimant: %v", err)
+	}
+	expireAlertClaimForTest(t, db, alert.ID)
+	if _, err := repo.ClaimApproved(ctx, project.ID, alert.ID, "worker-b", time.Hour); err != nil {
+		t.Fatalf("reclaiming expired alert: %v", err)
+	}
+	if _, err := repo.CreateImplementationTask(ctx, project.ID, alert.ID, "worker-a", models.AlertImplementationTaskInput{
+		Title: "Former claimant task", Prompt: "Must be rejected", Priority: 2,
+	}); err == nil {
+		t.Fatal("former claimant unexpectedly created an implementation task")
+	}
+	if err := repo.LinkImplementationTask(ctx, project.ID, alert.ID, "worker-a", staleTask.ID); err == nil {
+		t.Fatal("former claimant unexpectedly linked an implementation task")
+	}
+	if err := repo.MarkProcessing(ctx, project.ID, alert.ID, "worker-a", models.AlertProcessingFailed, "stale failure"); err == nil {
+		t.Fatal("former claimant unexpectedly changed processing state")
+	}
+	created, err := repo.CreateImplementationTask(ctx, project.ID, alert.ID, "worker-b", models.AlertImplementationTaskInput{
+		Title: "Current claimant task", Prompt: "Implement the approved change", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("current claimant could not create implementation task: %v", err)
+	}
+	retried, err := repo.CreateImplementationTask(ctx, project.ID, alert.ID, "worker-b", models.AlertImplementationTaskInput{
+		Title: "Duplicate task must not be created", Prompt: "duplicate", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("idempotent retry after linkage: %v", err)
+	}
+	if retried.ID != created.ID {
+		t.Fatalf("idempotent retry returned task %s, want %s", retried.ID, created.ID)
+	}
+	if err := repo.MarkProcessing(ctx, project.ID, alert.ID, "worker-b", models.AlertProcessingCompleted, "done"); err != nil {
+		t.Fatalf("current claimant could not complete linked alert: %v", err)
+	}
+}
+
 func TestAlertRepo_CompletedProcessingRequiresImplementationTaskHistory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewAlertRepo(db)
