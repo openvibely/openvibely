@@ -196,3 +196,65 @@ func TestBrowserFunctional_RunningCheckpointUnclosedCodeSpan(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_RunningFullRowUpdatesStayBounded(t *testing.T) {
+	report := runIncrementalChatBrowser(t, `
+ document.documentElement.setAttribute('data-output-detail','full');
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
+ const call=i=>'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ let text='[Using tool: read_file | pending]\n';
+ let count=0, reads=0, geometry=0;
+ const rect=Element.prototype.getBoundingClientRect;
+ Element.prototype.getBoundingClientRect=function(){if(this.hasAttribute('data-virtual-chat-row')||this.hasAttribute('data-chat-lazy-row'))geometry++;return rect.call(this)};
+ const reports=[];
+ for(const size of [200,1000,5000]) {
+  while(count<size)text+=call(count++);
+  await renderLiveChatContent(stream,text,false);
+  messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);await paint();
+  const old=stream._chatVirtualRows[20], model=old.model;
+  // Count model visits as well as geometry, including scheduled frames after
+  // the render promise resolves. Neither should enumerate completed history.
+  stream._chatVirtualRows.forEach(row=>{
+   if(row.auditWatched)return;row.auditWatched=true;
+   let value=row.model;
+   Object.defineProperty(row,'model',{get(){reads++;return value},set(next){value=next},configurable:true});
+  });
+  reads=0;geometry=0;const started=performance.now();
+  text+=call(count++);await renderLiveChatContent(stream,text,false);
+  const updateMS=performance.now()-started;
+  await paint();await paint();
+  reports.push({size,reads,geometry,updateMS});
+  assert(reads<150,'live update visited completed row models: '+JSON.stringify(reports));
+  assert(geometry<1800,'live update scanned offscreen geometry: '+JSON.stringify(reports));
+  assert(stream._chatVirtualRows[20]===old && old.model===model,'completed row was replaced');
+  assert(Math.abs(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<3,'append lost bottom following');
+ }
+ // Render the earlier invocation before returning to the tail, so a late
+ // result must invalidate retained DOM as well as updating its source model.
+ messages.scrollTop=0;await renderVisibleChatRows(messages);await paint();
+ const earlier=stream._chatVirtualRows[0];
+ assert(earlier.ready && !earlier.node.textContent.includes('late file contents'),'invalid late-result fixture');
+ messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);await paint();
+ text+='[Tool read_file done]\nlate file contents\n[/Tool]\n';
+ await renderLiveChatContent(stream,text,false);
+ assert(earlier.model.segments[0].resultOutput==='late file contents\n','late result missing from earlier row');
+ assert(!earlier.ready,'offscreen row was not invalidated for its late result');
+ messages.scrollTop=0;await renderVisibleChatRows(messages);await paint();
+ assert(earlier.node.textContent.includes('late file contents'),'earlier row kept stale DOM');
+ const anchor=earlier.node.getBoundingClientRect().top;
+ text+=call(count++);await renderLiveChatContent(stream,text,false);await paint();
+ assert(Math.abs(earlier.node.getBoundingClientRect().top-anchor)<3,'update moved reader away from history');
+ assert(stream.querySelectorAll('.stream-tool').length<20,'live path lost mounted-row bound');
+ await materializeVirtualChatRows(messages);
+ assert(stream.querySelectorAll('.stream-tool').length===count+1,'materialization skipped completed history');
+ // A sibling execution arriving between frames must still be collected.
+ messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);await paint();
+ const sibling=document.createElement('div');sibling.setAttribute('data-execution-pair','true');sibling.dataset.execStatus='completed';
+ sibling.innerHTML='<div class="chat-markdown">New sibling execution</div>';messages.prepend(sibling);
+ await Promise.resolve(); // Deliver the observer callback, before its scheduled frame.
+ text+=call(count++);await renderLiveChatContent(stream,text,false);await paint();
+ assert(!sibling.querySelector('.chat-markdown'),'new offscreen execution was omitted from row collection');
+ return reports;
+ `)
+	t.Log(string(report))
+}

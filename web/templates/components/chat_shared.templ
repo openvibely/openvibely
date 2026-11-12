@@ -5385,7 +5385,10 @@ templ ChatAutoScrollScript() {
                     segments.forEach(function(seg) {
                         var significant = seg.type !== 'text' || seg.content.trim();
                         if (significant && ledger.lastUsing) {
-                            if (!ledger.lastUsing.completed) ledger.lastUsing._version = (ledger.lastUsing._version || 0) + 1;
+                            if (!ledger.lastUsing.completed) {
+                                ledger.lastUsing._version = (ledger.lastUsing._version || 0) + 1;
+                                options.onToolChange?.(ledger.lastUsing);
+                            }
                             ledger.lastUsing.completed = true;
                             ledger.lastUsing = null;
                         }
@@ -5398,7 +5401,10 @@ templ ChatAutoScrollScript() {
                             var queue = ledger.queues[seg.normalizedName || seg.name];
                             var using = queue?.shift();
                             if (using) {
-                                if (!using.resultLinked || using.resultStatus !== seg.status || using.resultOutput !== (seg.output || '')) using._version = (using._version || 0) + 1;
+                                if (!using.resultLinked || using.resultStatus !== seg.status || using.resultOutput !== (seg.output || '')) {
+                                    using._version = (using._version || 0) + 1;
+                                    options.onToolChange?.(using);
+                                }
                                 using.resultLinked = true; using.completed = true;
                                 using.resultStatus = seg.status; using.resultOutput = seg.output || '';
                             }
@@ -5474,6 +5480,7 @@ templ ChatAutoScrollScript() {
                 if (checkpoint && !sourceText.startsWith(checkpoint.raw)) { checkpoint = null; delete container._chatParseCheckpoint; }
                 if (checkpoint) textBuffer = sourceText.slice(checkpoint.raw.length);
                 var parseSource = textBuffer, normalizationEdits = [], nextCheckpoint = null, newSegments = null, committedSegments = null;
+                var previousProjection = container._chatVirtualData, changedTools = new Set(), rowDelta = null;
                 var openResult = incrementalProjection && container._chatOpenResult;
                 if (openResult && (!sourceText.startsWith(openResult.source) || !checkpoint || checkpoint.raw.length !== openResult.offset)) openResult = null;
                 var extendOpenResult = openResult && !/\[\/Tool\][\t ]*(?=\r?$)/m.test(sourceText.slice(openResult.scanFrom));
@@ -5889,11 +5896,11 @@ templ ChatAutoScrollScript() {
                             }
                             var ledger = copyLedger(checkpoint?.ledger);
                             if (nextCheckpoint) {
-                                window.linkStreamingToolResults(committedSegments, Object.assign({}, options, {linkState:ledger}));
+                                window.linkStreamingToolResults(committedSegments, Object.assign({}, options, {linkState:ledger, onToolChange:function(tool) { changedTools.add(tool); }}));
                                 nextCheckpoint.ledger = ledger;
                                 ledger = copyLedger(ledger);
                             }
-                            return window.linkStreamingToolResults(nextCheckpoint ? newSegments.slice(committedSegments.length) : newSegments, Object.assign({}, options, {linkState:ledger}));
+                            return window.linkStreamingToolResults(nextCheckpoint ? newSegments.slice(committedSegments.length) : newSegments, Object.assign({}, options, {linkState:ledger, onToolChange:function(tool) { changedTools.add(tool); }}));
                         }
 						return window.linkStreamingToolResults(segments, options);
 					}
@@ -5949,18 +5956,43 @@ templ ChatAutoScrollScript() {
                     return rows;
 				}                function projectIncrementalRows() {
                     var previous = checkpoint?.rows || [];
-                    // Only the final text/thinking rows can absorb newly parsed segments.
+                    // Completed segments are sorted by source position. Locate the
+                    // mutable tail without visiting every completed segment.
+                    function suffix(items, row) {
+                        if (!row) return items;
+                        var low = 0, high = items.length;
+                        while (low < high) {
+                            var middle = (low + high) >>> 1;
+                            if (items[middle].index < row.sourceIndex) low = middle + 1;
+                            else high = middle;
+                        }
+                        return items.slice(low);
+                    }
                     var keep = Math.max(0, previous.length - 2);
+                    var changedFrom = keep;
                     var prefix = previous.slice(0, keep);
-                    var pending = checkpoint ? checkpoint.segments.filter(function(seg) { return !previous[keep] || seg.index >= previous[keep].sourceIndex; }) : [];
+                    var pending = checkpoint ? suffix(checkpoint.segments, previous[keep]) : [];
+                    var result;
                     if (nextCheckpoint) {
                         nextCheckpoint.rows = prefix.concat(projectRows(pending.concat(committedSegments)));
                         container._chatParseCheckpoint = nextCheckpoint;
                         var rows = nextCheckpoint.rows;
                         keep = Math.max(0, rows.length - 2);
-                        return rows.slice(0, keep).concat(projectRows(nextCheckpoint.segments.filter(function(seg) { return !rows[keep] || seg.index >= rows[keep].sourceIndex; }).concat(newSegments.slice(committedSegments.length))));
+                        changedFrom = Math.min(changedFrom, keep);
+                        result = rows.slice(0, keep).concat(projectRows(suffix(nextCheckpoint.segments, rows[keep]).concat(newSegments.slice(committedSegments.length))));
+                    } else result = newSegments ? prefix.concat(projectRows(pending.concat(newSegments))) : projectRows();
+                    var indexes = checkpoint?.rowIndexes || new WeakMap();
+                    var changed = new Set();
+                    changedTools.forEach(function(tool) {
+                        var index = indexes.get(tool);
+                        if (index !== undefined && index < changedFrom) changed.add(index);
+                    });
+                    for (var index = changedFrom; index < result.length; index++) {
+                        result[index].segments.forEach(function(seg) { if (seg.type === 'using') indexes.set(seg, index); });
                     }
-                    return newSegments ? prefix.concat(projectRows(pending.concat(newSegments))) : projectRows();
+                    if (nextCheckpoint) nextCheckpoint.rowIndexes = indexes;
+                    if (checkpoint && previousProjection) rowDelta = {base:previousProjection, start:changedFrom, changed:Array.from(changed)};
+                    return result;
                 }
 
                 if (extendOpenResult) {
@@ -5979,6 +6011,9 @@ templ ChatAutoScrollScript() {
 				function renderPreparedSegments() {
 					if (virtualOwner && window.installChatVirtualRows) {
 						var data = cachedProjection || {key:projectionKey, source:sourceText, normalized:textBuffer, offset:options?.offset || 0, models:projectIncrementalRows(), incremental:incrementalProjection};
+                        // Installation hints are transient, not navigation snapshot data.
+                        if (!cachedProjection && rowDelta) Object.defineProperty(data, '_rowDelta', {value:rowDelta, configurable:true});
+                        rowDelta = null; previousProjection = null;
 						container.classList.remove('whitespace-pre-wrap');
 						window.setChatRawContent(container, textBuffer);
 						var toolStateKey = container._chatToolStateKey || projectionKey;
