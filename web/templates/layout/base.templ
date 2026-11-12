@@ -3268,7 +3268,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     pointer-events: none;
                 }
 				html[data-shell-frame] .sidebar-aside .menu a svg { width: 1.125rem; height: 1.125rem; }
-				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background: color-mix(in srgb, oklch(var(--bc)) 10%, transparent); }
+				/* Match task rows and override menu/theme press and focus backgrounds.
+				   Pointer focus alone must not leave an old destination highlighted. */
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]) { background-color: transparent !important; }
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]):is(:hover, :active, :focus-visible) { opacity: 1; color: oklch(var(--bc)); background-color: oklch(var(--bc) / .06) !important; }
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path])[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background-color: var(--shell-row-selected) !important; }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] svg { color: inherit; }
 				html[data-shell-frame] .sidebar-aside .sidebar-footer { justify-content: center; padding: 6px 0 10px; min-height: 0; border: 0; }
 				/* Keep the lowered Settings hit area inset from the viewport edge. */
