@@ -184,7 +184,7 @@ func TestExecutableUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T)
 func TestPackagedRestartCommandPreservesHealthPortForRelaunch(t *testing.T) {
 	if _, ok := os.LookupEnv("OPENVIBELY_TEST_HELPER_PRINT_PORT"); ok {
 		if len(os.Args) > 3 {
-			_ = os.WriteFile(os.Args[3], []byte(os.Getenv("PORT")), 0o600)
+			_ = os.WriteFile(os.Args[3], []byte(os.Getenv("PORT")+"|"+os.Getenv("OPENVIBELY_NO_BROWSER")), 0o600)
 		}
 		time.Sleep(30 * time.Second)
 		return
@@ -193,6 +193,7 @@ func TestPackagedRestartCommandPreservesHealthPortForRelaunch(t *testing.T) {
 	root := t.TempDir()
 	portFile := filepath.Join(root, "port.txt")
 	t.Setenv("OPENVIBELY_TEST_HELPER_PRINT_PORT", "1")
+	t.Setenv("OPENVIBELY_NO_BROWSER", "false")
 	cfg := ExecutableUpdateHelperConfig{
 		Current:          os.Args[0],
 		HealthURL:        "http://127.0.0.1:45678/api/system/health",
@@ -218,14 +219,14 @@ func TestPackagedRestartCommandPreservesHealthPortForRelaunch(t *testing.T) {
 		data, err := os.ReadFile(portFile)
 		lastData = data
 		lastErr = err
-		if err == nil && string(data) == "45678" {
+		if err == nil && string(data) == "45678|true" {
 			return
 		}
 		if time.Now().After(deadline) {
 			if lastErr != nil {
 				t.Fatalf("child did not write port file: %v", lastErr)
 			}
-			t.Fatalf("PORT = %q, want 45678", lastData)
+			t.Fatalf("PORT|OPENVIBELY_NO_BROWSER = %q, want 45678|true", lastData)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
