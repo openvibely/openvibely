@@ -4048,6 +4048,10 @@ const docTemplate = `{
                     "description": "Derived: task has a non-cleared persisted goal",
                     "type": "boolean"
                 },
+                "has_open_pull_request": {
+                    "description": "Derived from the linked PR record",
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "string"
                 },
