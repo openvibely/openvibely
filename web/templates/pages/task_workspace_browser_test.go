@@ -1032,11 +1032,13 @@ func TestBrowserFunctional_ComposerActionTaskNavigation(t *testing.T) {
 		b.waitFor("fragment uses new task action URL", `String(document.querySelector('#composer-changes-action [data-changes-split]')?.dataset.taskId==='ready')`, "true")
 		b.evaluate(`htmx.ajax('GET','/tasks/merged/activity',{target:'#thread-content',swap:'innerHTML'}); 'swapped'`)
 		b.waitFor("merged fragment cannot retain ready action", `String(document.querySelector('#task-change-activity')?.dataset.taskId==='merged' && document.getElementById('composer-changes-action')?.textContent.trim()==='')`, "true")
-		b.evaluate(`window.openVibelyNavigate('/tasks/ready'); 'navigated'`)
+		// Await each navigation: a cached preview satisfies the waits before the
+		// authoritative response replaces #main-content and any injected fixture.
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/ready').then(() => 'navigated')`)
 		b.waitFor("unmerged action belongs to destination", `String(document.querySelector('#composer-changes-action [data-changes-split]')?.dataset.taskId==='ready')`, "true")
-		b.evaluate(`window.openVibelyNavigate('/tasks/merged'); 'navigated'`)
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/merged').then(() => 'navigated')`)
 		b.waitFor("merged action stays absent on navigation", `String(document.querySelector('#task-change-activity')?.dataset.taskId==='merged' && document.getElementById('composer-changes-action')?.textContent.trim()==='')`, "true")
-		b.evaluate(`window.openVibelyNavigate('/tasks/ready'); 'navigated'`)
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/ready').then(() => 'navigated')`)
 		b.waitFor("ready again", `String(document.querySelector('#composer-changes-action [data-changes-split]')?.dataset.taskId==='ready')`, "true")
 		merged.Store(true)
 		// Restart the workspace controller around a retained composer, as on a

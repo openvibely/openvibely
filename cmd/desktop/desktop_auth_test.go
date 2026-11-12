@@ -135,11 +135,19 @@ func desktopAuthBackend(t *testing.T) *desktopBackend {
 	updates := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(updates.Close)
 	root := t.TempDir()
-	backend, err := startDesktopBackend(context.Background(), &config.Config{
+	cfg := &config.Config{
 		Mode: config.ModeDesktop, Port: "0", Environment: "test",
 		DatabasePath: filepath.Join(root, "test.db"), ProjectRepoRoot: filepath.Join(root, "repos"), AppDataDir: filepath.Join(root, "appdata"), UpdateServiceURL: updates.URL,
 		AuthEnabled: true, AuthMode: auth.AuthModeLocal, AuthUsername: "alice", AuthPassword: "alice-password-long", AuthSessionSecret: "desktop-test-secret",
-	})
+	}
+	// Keep state out of the working directory (the source tree): concurrent test
+	// processes would otherwise share its plugin root and race to migrate ./uploads.
+	t.Setenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION", "1")
+	t.Setenv("OPENVIBELY_PLUGIN_ROOT", "")
+	if err := ensureDesktopPluginRoot(cfg); err != nil {
+		t.Fatal(err)
+	}
+	backend, err := startDesktopBackend(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
