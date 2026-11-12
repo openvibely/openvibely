@@ -156,6 +156,7 @@ RUN printf '%s\n' \
 COPY --from=builder /out/openvibely /openvibely
 
 ENV PORT=3001 \
+    OPENVIBELY_NO_BROWSER=true \
     OPENVIBELY_APP_DATA_DIR=/data \
     DATABASE_PATH=/data/openvibely.db \
     PROJECT_REPO_ROOT=/data/repos \

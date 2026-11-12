@@ -994,8 +994,10 @@ func packagedRestartCommand(cfg ExecutableUpdateHelperConfig) func(string, strin
 		cmd := exec.Command(cfg.Current, arguments[1:]...)
 		cmd.Args[0] = arguments[0]
 		cmd.Dir = cfg.WorkingDirectory
+		// Updates and rollback recovery must not open another browser tab.
+		cmd.Env = append(os.Environ(), "OPENVIBELY_NO_BROWSER=true")
 		if health, err := url.Parse(cfg.HealthURL); err == nil && health.Port() != "" {
-			cmd.Env = append(os.Environ(), "PORT="+health.Port())
+			cmd.Env = append(cmd.Env, "PORT="+health.Port())
 		}
 		if err := cmd.Start(); err != nil {
 			return nil, err

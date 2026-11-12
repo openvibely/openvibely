@@ -13,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/server"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/pkg/browser"
 )
 
 // @title OpenVibely API
@@ -87,7 +88,14 @@ func main() {
 	// Wait for termination signal or an update helper handoff.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	log.Printf("OpenVibely UI: %s/chat", inst.BaseURL)
+	go func() {
+		if err := openStartupBrowser(ctx, inst.BaseURL, os.Getenv("OPENVIBELY_NO_BROWSER"), browser.OpenURL); err != nil && ctx.Err() == nil {
+			log.Printf("Browser auto-open unavailable: %v; open %s/chat manually", err, inst.BaseURL)
+		}
+	}()
 	waitForShutdown(sigCh, inst.ShutdownRequested)
+	cancel()
 
 	inst.Shutdown()
 }
