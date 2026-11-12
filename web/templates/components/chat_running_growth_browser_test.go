@@ -309,3 +309,34 @@ func TestBrowserFunctional_RunningProvisionalResultRollback(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_RunningInterruptedLateResult(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ document.documentElement.setAttribute('data-output-detail','full');
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');
+ let text='[Using tool: read_file | pending]\n';
+ for(let i=0;i<30;i++)text+='[Using tool: shell | echo '+i+']\n[Tool shell done]\nokay\n[/Tool]\n';
+ await renderLiveChatContent(stream,text,false);messages.scrollTop=0;await renderVisibleChatRows(messages);
+ const first=stream._chatVirtualRows[0];assert(first.ready,'initial first row not mounted');
+ const original=window.linkStreamingToolResults;let followup=null;
+ const result='LATE RESULT '+('x'.repeat(70000));
+ const update=text+'[Tool read_file done]\n'+result+'\n[/Tool]\n';
+ window.linkStreamingToolResults=function(segments,options){
+  const value=original(segments,options);
+  if(!followup&&options?.linkState&&segments.some(s=>s.type==='tool_result'&&s.name==='read_file')) {
+   followup=Promise.resolve().then(()=>renderLiveChatContent(stream,update+'\nFollowing prose.',false));
+  }
+  return value;
+ };
+ await renderLiveChatContent(stream,update,true);assert(followup,'followup not triggered');await followup;
+ await renderVisibleChatRows(messages);
+ assert(stream._chatVirtualRows[0].model.segments[0].resultOutput?.trim()===result,'model result missing');
+ assert(stream._chatVirtualRows[0].node.textContent.includes('LATE RESULT'),'cancelled update left first row stale');
+ assert(stream._chatDirtyTools.size===0,'installed tool changes retained');
+ const current=stream._chatVirtualRows[0].node.querySelector('.stream-tool');
+ await renderLiveChatContent(stream,update+'\nFollowing prose. More.',false);
+ assert(stream._chatVirtualRows[0].node.querySelector('.stream-tool')===current,'settled tool row rebuilt on unrelated append');
+ assert(stream._chatDirtyTools.size===0,'unrelated update created dirty tools');
+ return {};
+ `)
+}

@@ -5476,12 +5476,15 @@ templ ChatAutoScrollScript() {
                 // Checkpoints end after closed controls, not after presentation groups.
                 // Unmatched calls remain in the segment ledger for later FIFO results.
                 var incrementalProjection = virtualOwner && !options?.terminal && /^(running|pending)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '');
-                if (!incrementalProjection || (container._chatParseSource && !sourceText.startsWith(container._chatParseSource))) { delete container._chatParseCheckpoint; delete container._chatOpenResult; }
+                if (!incrementalProjection || (container._chatParseSource && !sourceText.startsWith(container._chatParseSource))) { delete container._chatParseCheckpoint; delete container._chatOpenResult; delete container._chatDirtyTools; }
                 container._chatParseSource = incrementalProjection ? sourceText : null;
                 var checkpoint = incrementalProjection && container._chatParseCheckpoint;
                 if (checkpoint && !sourceText.startsWith(checkpoint.raw)) { checkpoint = null; delete container._chatParseCheckpoint; }
                 if (checkpoint) textBuffer = sourceText.slice(checkpoint.raw.length);
                 var parseSource = textBuffer, normalizationEdits = [], nextCheckpoint = null, newSegments = null, committedSegments = null;
+                // Committed tool mutations can outlive an interrupted preparation phase.
+                // Retain their versions until a successful row installation owns them.
+                var dirtyTools = incrementalProjection ? (container._chatDirtyTools ||= new Map()) : null;
                 var previousProjection = container._chatVirtualData, changedTools = new Set(), rowDelta = null;
                 var provisionalTools = new Map();
                 var openResult = incrementalProjection && container._chatOpenResult;
@@ -5899,7 +5902,7 @@ templ ChatAutoScrollScript() {
                             }
                             var ledger = copyLedger(checkpoint?.ledger);
                             if (nextCheckpoint) {
-                                window.linkStreamingToolResults(committedSegments, Object.assign({}, options, {linkState:ledger, onToolChange:function(tool) { changedTools.add(tool); }}));
+                                window.linkStreamingToolResults(committedSegments, Object.assign({}, options, {linkState:ledger, onToolChange:function(tool) { changedTools.add(tool); dirtyTools.set(tool, tool._version); }}));
                                 nextCheckpoint.ledger = ledger;
                                 ledger = copyLedger(ledger);
                             }
@@ -5997,6 +6000,7 @@ templ ChatAutoScrollScript() {
                     } else result = newSegments ? prefix.concat(projectRows(pending.concat(newSegments))) : projectRows();
                     var indexes = checkpoint?.rowIndexes || new WeakMap();
                     var changed = new Set();
+                    dirtyTools?.forEach(function(version, tool) { changedTools.add(tool); });
                     changedTools.forEach(function(tool) {
                         var index = indexes.get(tool);
                         if (index !== undefined && index < changedFrom) changed.add(index);
@@ -6039,12 +6043,21 @@ templ ChatAutoScrollScript() {
 						window.setChatRawContent(container, textBuffer);
 						var toolStateKey = container._chatToolStateKey || projectionKey;
 						// Models contain only source data and measurements; no rendered DOM.
-						return window.installChatVirtualRows(container, data, function(node, model, index, synchronous) {
+						var installedToolVersions = dirtyTools ? new Map(dirtyTools) : null;
+                        var installation = window.installChatVirtualRows(container, data, function(node, model, index, synchronous) {
 							node._chatStreamStateKey = model.kind === 'thinking' ? toolStateKey + ':thinking:' + (data.offset + (model.segments[0].index || 0)) : projectionKey + ':row:' + index;
 							node._chatToolStateKey = toolStateKey;
                             node._chatActivityOffset = data.offset;
 							return window.renderStreamingContent(node, '', !synchronous, {virtualRow:true, preparedSegments:model.segments, thinkingShell:model.kind === 'thinking', activitySummary:model.activitySummary, activityShell:document.documentElement.getAttribute('data-output-detail') === 'compact' && (model.kind === 'using' || model.kind === 'thinking')});
 						});
+                        return Promise.resolve(installation).then(function(installed) {
+                            if (installed !== false && container._streamRenderVersion === renderVersion && container._chatVirtualData === data) {
+                                installedToolVersions?.forEach(function(version, tool) {
+                                    if (dirtyTools.get(tool) === version) dirtyTools.delete(tool);
+                                });
+                            }
+                            return installed;
+                        });
 					}
 			if (!options?.virtualRow && window.discardChatVirtualRows) window.discardChatVirtualRows(container);
 			if (!options?.virtualRow && window.materializeVirtualChatRows) window.materializeVirtualChatRows(container, {renderLazy:false});
