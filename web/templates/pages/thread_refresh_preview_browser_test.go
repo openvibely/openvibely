@@ -64,8 +64,8 @@ func TestBrowserFunctional_ThreadRefreshPreviewIsDisplayOnly(t *testing.T) {
 		if got := b.evaluate(`String(refreshPreviewMutations===0 && refreshPreviewFixture.innerHTML===refreshPreviewOriginal)`); got != "true" {
 			t.Fatal("background renderers changed the display-only preview")
 		}
-		// The same elements outside the preview must still be enhanced normally.
-		b.evaluate(`refreshPreviewObserver.disconnect();refreshPreviewFixture.removeAttribute('data-thread-refresh-preview');refreshPreviewFixture.append(document.createTextNode('live'));'ready'`)
+		// Mount the same elements as ordinary content so incremental discovery sees them.
+		b.evaluate(`refreshPreviewObserver.disconnect();refreshPreviewFixture.remove();refreshPreviewFixture.removeAttribute('data-thread-refresh-preview');document.body.append(refreshPreviewFixture);'ready'`)
 		b.waitFor("ordinary file and SVG rendering", `String(!!refreshPreviewFixture.querySelector('a[data-image-gallery-item]') && !!refreshPreviewFixture.querySelector('.chat-svg-preview img[src^="blob:"]') && !!refreshPreviewFixture.querySelector('[data-math-ready="true"]'))`, "true")
 		if metadata.Load() != 1 {
 			t.Fatalf("ordinary file link metadata requests = %d, want 1", metadata.Load())

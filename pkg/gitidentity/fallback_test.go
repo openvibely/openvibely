@@ -46,7 +46,7 @@ func TestCommitIdentityFallback(t *testing.T) {
 				gitRun(t, dir, context.Background(), "config", "user.email", tc.repoEmail)
 			}
 			before, _ := os.ReadFile(filepath.Join(dir, ".git", "config"))
-			ctx := WithResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{Name: tc.appName, Email: tc.appEmail}, nil })
+			ctx := testResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{Name: tc.appName, Email: tc.appEmail}, nil })
 			// -C must select the actual repository for local and conditional config.
 			gitRun(t, t.TempDir(), ctx, "-C", dir, "commit", "--allow-empty", "-m", "fallback")
 			want := tc.wantName + " <" + tc.wantEmail + ">"
@@ -104,7 +104,7 @@ func TestCommitIdentityPreservesGitConfigPrecedence(t *testing.T) {
 			case "environment-parameters":
 				t.Setenv("GIT_CONFIG_PARAMETERS", configParameters(append(fields, [2]string{"credential.helper", "!exit 99"})))
 			}
-			ctx := WithResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{}, nil })
+			ctx := testResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{}, nil })
 			gitRun(t, dir, ctx, append(prefix, "commit", "--allow-empty", "-m", "identity")...)
 			if got := gitRun(t, dir, ctx, "log", "-1", "--format=%an <%ae>|%cn <%ce>"); got != "Actual Author <author@example.com>|Actual Committer <committer@example.com>" {
 				t.Fatalf("incorrect role identities: %s", got)
@@ -135,7 +135,7 @@ func TestCommitIdentityGlobalOptionsSelectTargetRepository(t *testing.T) {
 	for _, option := range []string{"-P", "-p", "--no-pager", "--no-replace-objects", "--no-optional-locks"} {
 		for _, appName := range []string{"", "App User"} {
 			t.Run(option+"/"+appName, func(t *testing.T) {
-				ctx := WithResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{Name: appName}, nil })
+				ctx := testResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{Name: appName}, nil })
 				gitRun(t, base, ctx, option, "-C", target, "commit", "--allow-empty", "-m", "target identity")
 				name := "Target User"
 				if appName != "" {
@@ -185,7 +185,7 @@ func TestCommitIdentityEnvironmentConditionalInclude(t *testing.T) {
 			} else {
 				t.Setenv("GIT_CONFIG_PARAMETERS", configParameters([][2]string{{"include.path", conditional}}))
 			}
-			ctx := WithResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{}, nil })
+			ctx := testResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{}, nil })
 			for _, tc := range []struct{ dir, want string }{{target, "Included User <included@example.com>"}, {base, "Base User <base@example.com>"}} {
 				gitRun(t, base, ctx, "-P", "-C", tc.dir, "commit", "--allow-empty", "-m", "conditional identity")
 				if got := gitRun(t, tc.dir, ctx, "log", "-1", "--format=%an <%ae>|%cn <%ce>"); got != tc.want+"|"+tc.want {
@@ -224,7 +224,7 @@ func TestCommitIdentityEmailEnvironmentFallback(t *testing.T) {
 			if tc.repoEmail != "" {
 				gitRun(t, dir, context.Background(), "config", "user.email", tc.repoEmail)
 			}
-			ctx := WithResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{Email: tc.appEmail}, nil })
+			ctx := testResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{Email: tc.appEmail}, nil })
 			gitRun(t, dir, ctx, "commit", "--allow-empty", "-m", "EMAIL fallback")
 			if got := gitRun(t, dir, ctx, "log", "-1", "--format=%ae|%ce"); got != tc.want+"|"+tc.want {
 				t.Fatalf("emails = %q, want %q", got, tc.want+"|"+tc.want)
@@ -263,7 +263,7 @@ func TestCommitIdentityBotFallback(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := WithResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{Name: tc.appName}, nil })
+			ctx := testResolver(t.Context(), func(context.Context) (Identity, error) { return Identity{Name: tc.appName}, nil })
 			gitRun(t, dir, ctx, "commit", "--allow-empty", "-m", "base")
 			gitRun(t, dir, ctx, "checkout", "-b", "topic")
 			gitRun(t, dir, ctx, "commit", "--allow-empty", "-m", "topic")
