@@ -224,6 +224,12 @@ func TestBrowserFunctional_HTMLPreviewFallbackOwnership(t *testing.T) {
 					if result != "true" {
 						t.Fatal("return to compact mode lost preview or lazy tools")
 					}
+					b.evaluate(`root.querySelector('.stream-activity-summary').click();'expanded'`)
+					b.waitFor("all tools restored", `String(root.querySelectorAll('.stream-tool').length)`, "3")
+					result = b.evaluate(`(()=>{root.querySelector('.stream-activity-summary').click();return String(root.querySelectorAll('.stream-tool').length===0&&frame.isConnected&&loads===1)})()`)
+					if result != "true" {
+						t.Fatal("repeated collapse retained tools or disturbed preview")
+					}
 				}
 			})
 		})

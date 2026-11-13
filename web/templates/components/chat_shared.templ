@@ -6084,7 +6084,9 @@ templ ChatAutoScrollScript() {
                 if (!existingActivity) activity.append(toggle, content);
                 activity._ensureActivityContent = function(expanded) {
                     if (!expanded) {
-                        if (!activity._contentMounted) return;
+                        // Full-mode groups already contain rendered tools but have
+                        // no lazy mounted flag when adopted by a Compact shell.
+                        if (!activity._contentMounted && !content.hasChildNodes()) return;
                         activity._contentGeneration = (activity._contentGeneration || 0) + 1;
                         if (content.hasAttribute('data-chat-virtual-owner')) window.discardChatVirtualRows(content);
                         content.replaceChildren();
