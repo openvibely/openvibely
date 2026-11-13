@@ -226,6 +226,7 @@ type githubAppConfig struct {
 }
 
 type GitHubService struct {
+	gitRuntime              *gitidentity.Runtime
 	gitRunIdentities        persistence.RunIdentityStore
 	personalConnections     persistence.GitHubConnectionStore
 	credentialOrganizations persistence.OrganizationStore
@@ -243,6 +244,9 @@ type GitHubService struct {
 	runGit                  runGitFunc
 	nowFn                   func() time.Time
 }
+
+// SetGitRuntime configures wrapper storage before serving requests.
+func (s *GitHubService) SetGitRuntime(runtime *gitidentity.Runtime) { s.gitRuntime = runtime }
 
 // SetCredentialAuthorization enables fresh identity checks on connection lifecycle calls.
 // Configure once before serving requests.

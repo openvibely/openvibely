@@ -102,16 +102,8 @@ RUN dnf -y upgrade --refresh --setopt=install_weak_deps=False \
  && dnf clean all \
  && rm -rf /var/cache/dnf
 
-ARG GO_VERSION=1.27.4
-ARG TARGETARCH
-RUN case "${TARGETARCH:-amd64}" in \
-      amd64) go_arch=amd64 ;; \
-      arm64) go_arch=arm64 ;; \
-      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
- && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o /tmp/go.tgz \
- && tar -C /usr/local -xzf /tmp/go.tgz \
- && rm /tmp/go.tgz
+# Reuse the matching architecture's toolchain without extracting it under emulation.
+COPY --from=builder /usr/local/go /usr/local/go
 
 ARG COREPACK_VERSION=0.34.0
 ARG TYPESCRIPT_VERSION=5.9.3

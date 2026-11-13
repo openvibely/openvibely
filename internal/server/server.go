@@ -40,6 +40,7 @@ import (
 	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/pkg/agenttools"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 
 	_ "github.com/openvibely/openvibely/docs" // Swagger docs
 )
@@ -470,6 +471,10 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
+	gitRuntime, err := gitidentity.Prepare(filepath.Join(cfg.AppDataDir, "runtime", "git"))
+	if err != nil {
+		return nil, err
+	}
 	if cfg.AuthMode != auth.AuthModeHostedSSO {
 		if err := config.ValidateAppBaseURL(os.Getenv("APP_BASE_URL")); err != nil {
 			applog.Infof("warning: %v", err)
@@ -804,6 +809,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		cfg.GitHubAppPrivateKey,
 		cfg.ProjectRepoRoot,
 	)
+	githubSvc.SetGitRuntime(gitRuntime)
 	githubSvc.SetCredentialAuthorization(stores.Organizations, cfg.AuthMode == auth.AuthModeDisabled)
 	githubSvc.SetPersonalConnections(stores.GitHubConnections)
 	agentplugins.SetGitContextResolver(githubSvc.GitContext)
