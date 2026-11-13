@@ -29,6 +29,9 @@ type desktopProcess struct {
 	done         chan struct{}
 	lastActivity time.Time
 	requests     int
+	// reaping is set while idle cleanup checks or stops this desktop and is
+	// closed when it finishes; requests for this desktop wait on it.
+	reaping chan struct{}
 }
 
 func desktopRoutes(mux *http.ServeMux) {
@@ -68,9 +71,24 @@ func desktopRoutes(mux *http.ServeMux) {
 		json.NewEncoder(w).Encode(out)
 	})
 
-	ensure := func(name string) (*desktopProcess, error) {
+	ensure := func(ctx context.Context, name string) (*desktopProcess, error) {
 		mu.Lock()
 		defer mu.Unlock()
+		for {
+			p := sessions[name]
+			if p == nil || p.reaping == nil {
+				break
+			}
+			reaping := p.reaping
+			mu.Unlock()
+			select {
+			case <-reaping:
+			case <-ctx.Done():
+				mu.Lock()
+				return nil, fmt.Errorf("Desktop is stopping; retry shortly")
+			}
+			mu.Lock()
+		}
 		if p := sessions[name]; p != nil {
 			select {
 			case <-p.done:
@@ -135,7 +153,7 @@ func desktopRoutes(mux *http.ServeMux) {
 			w.WriteHeader(204)
 			return
 		}
-		p, err := ensure(name)
+		p, err := ensure(r.Context(), name)
 		if err != nil {
 			http.Error(w, err.Error(), 503)
 			return
