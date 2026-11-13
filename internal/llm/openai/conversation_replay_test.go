@@ -76,7 +76,7 @@ func TestOrdinaryFollowupRetainsSkillResults(t *testing.T) {
 						return []string{`{"choices":[{"delta":{"content":"Done"},"finish_reason":"stop"}]}`}
 					}
 					if tool {
-						return []string{`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"skill-call","name":"skill_view","arguments":"{}"}}`, `{"type":"response.completed","response":{"id":"r1","status":"completed"}}`}
+						return []string{`{"type":"response.output_item.done","output_index":0,"item":{"id":"empty-text","type":"message","role":"assistant","content":[{"type":"output_text","text":""}]}}`, `{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"skill-call","name":"skill_view","arguments":"{}"}}`, `{"type":"response.completed","response":{"id":"r1","status":"completed"}}`}
 					}
 					return []string{`{"type":"response.completed","response":{"id":"r2","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done"}]}]}}`}
 				}
@@ -165,6 +165,9 @@ func TestOrdinaryFollowupRetainsSkillResults(t *testing.T) {
 					require.NotEmpty(t, saved[exec.ID])
 					if phase == 0 {
 						require.Contains(t, saved[exec.ID][0].TranscriptJSON, "UNIQUE_SKILL_INSTRUCTIONS")
+						if transport != "completions" {
+							assertEmptyResponsesText(t, saved[exec.ID][0].TranscriptJSON)
+						}
 					}
 					exec.ReplayMessages = saved[exec.ID]
 					exec.Status = models.ExecCompleted
@@ -172,6 +175,9 @@ func TestOrdinaryFollowupRetainsSkillResults(t *testing.T) {
 				}
 				require.Contains(t, followup, "UNIQUE_SKILL_INSTRUCTIONS")
 				require.Contains(t, followup, "skill-call")
+				if transport != "completions" {
+					assertEmptyResponsesText(t, followup)
+				}
 			})
 		}
 	}
@@ -258,4 +264,32 @@ func TestMainChatSavesOnlyNewExchange(t *testing.T) {
 		e.ReplayMessages = saved[e.ID]
 		history = append(history, e)
 	}
+}
+
+// Inspect decoded JSON so an absent text field cannot pass as an empty Go string.
+func assertEmptyResponsesText(t *testing.T, raw string) {
+	t.Helper()
+	var value any
+	require.NoError(t, json.Unmarshal([]byte(raw), &value))
+	found := false
+	var visit func(any)
+	visit = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if v["type"] == "message" && v["id"] == "empty-text" {
+				found = true
+				require.Equal(t, "assistant", v["role"])
+				require.Equal(t, []any{map[string]any{"type": "output_text", "text": ""}}, v["content"])
+			}
+			for _, child := range v {
+				visit(child)
+			}
+		case []any:
+			for _, child := range v {
+				visit(child)
+			}
+		}
+	}
+	visit(value)
+	require.True(t, found, "empty assistant output must survive persistence and replay")
 }
