@@ -549,7 +549,28 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 			fileEvents <- `{"type":"file_modified","task_id":"workspace-task","project_id":"workspace-project"}`
 			comments := map[string]string{"queued": "1 comment", "running": "2 comments", "completed": ""}[status]
 			b.waitFor(status+" summary applied", `document.querySelector('[data-change-comments]').textContent`, comments)
-			b.waitFor("empty diff control visibility while "+status, `String(document.getElementById('task-change-activity').checkVisibility())`, fmt.Sprint(status != "completed"))
+			b.waitFor("empty task stays hidden while "+status, `String(document.getElementById('task-change-activity').checkVisibility())`, "false")
+		}
+		for _, step := range []struct {
+			status  string
+			files   int32
+			visible bool
+		}{
+			{"completed", 3, true}, // Earlier runs have changes available to review.
+			{"queued", 0, true},
+			{"running", 0, true},   // A temporary empty summary must not remove navigation.
+			{"completed", 3, true}, // Task-wide changes remain after a no-op rerun.
+			{"running", 0, true},
+			{"completed", 0, false}, // Hide only once the task-wide summary is empty at rest.
+			{"queued", 0, false},    // A later empty run must not resurrect the control.
+			{"completed", 0, false},
+		} {
+			files.Store(step.files)
+			summaryStatus.Store(step.status)
+			fileEvents <- `{"type":"file_modified","task_id":"workspace-task","project_id":"workspace-project"}`
+			comments := map[string]string{"queued": "1 comment", "running": "2 comments", "completed": ""}[step.status]
+			b.waitFor("rerun summary applied", `document.querySelector('[data-change-files]').textContent + ':' + document.querySelector('[data-change-comments]').textContent`, fmt.Sprintf("%d files:%s", step.files, comments))
+			b.waitFor("rerun diff visibility", `String(document.getElementById('task-change-activity').checkVisibility())`, fmt.Sprint(step.visible))
 		}
 		b.waitFor("panel closed", `String(document.getElementById('task-details-panel').hidden)`, "true")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
