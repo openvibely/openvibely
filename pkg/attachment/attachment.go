@@ -59,6 +59,12 @@ var commonMediaTypes = map[string]string{
 	".conf": "text/plain",
 }
 
+// IsTextMediaType reports whether a media type is supported as inline text.
+// It recognizes the text/ prefix and exact application/json value without normalization.
+func IsTextMediaType(mediaType string) bool {
+	return strings.HasPrefix(mediaType, "text/") || mediaType == "application/json"
+}
+
 // MediaTypes returns the shared mappings plus the provider-specific mappings.
 func MediaTypes(additional map[string]string) map[string]string {
 	mediaTypes := make(map[string]string, len(commonMediaTypes)+len(additional))
