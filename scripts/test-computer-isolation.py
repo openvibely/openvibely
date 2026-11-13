@@ -4,6 +4,7 @@
 Usage: python3 scripts/test-computer-isolation.py IMAGE
 Requires Docker; the image must be built from packaging/computer/Dockerfile.
 """
+from concurrent.futures import ThreadPoolExecutor
 import json
 import secrets
 import socket
@@ -90,8 +91,9 @@ const {chromium}=require('/opt/browser/node_modules/playwright');
         raise AssertionError('Unauthenticated router access')
     except urllib.error.HTTPError as error:
         assert error.code == 403
-    ready('task-a')
-    ready('task-b')
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(ready, ['task-a', 'task-b']))
+    print('PASS: concurrent desktop startups', flush=True)
     assert request('/desktops/task-a/files?path=Files/legacy.txt') == b'legacy\n'
     assert docker('exec', name, 'stat', '-c', '%h', '/home/ubuntu/.desktops/task-a/home/Files/legacy.txt') == '1'
     request('/desktops/task-b/files?path=Files/private.txt', b'B-private', 'PUT')

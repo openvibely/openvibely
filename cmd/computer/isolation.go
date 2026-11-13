@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -197,9 +198,13 @@ func taskWriteFile(root *os.Root, path string, data []byte) error {
 	return err
 }
 
+var desktopIdentityMu sync.Mutex
+
 // Registry persists the UID binding, preventing hash collisions from giving a
-// later task access to an older task's retained files. Caller serializes starts.
+// later task access to an older task's retained files.
 func registerDesktopIdentity(name string) error {
+	desktopIdentityMu.Lock()
+	defer desktopIdentityMu.Unlock()
 	path := "/home/ubuntu/.ov-desktop-identities.json"
 	if info, err := os.Lstat(path); err == nil {
 		stat, ok := info.Sys().(*syscall.Stat_t)

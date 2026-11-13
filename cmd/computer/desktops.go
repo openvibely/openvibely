@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -37,8 +36,22 @@ type desktopProcess struct {
 func desktopRoutes(mux *http.ServeMux) {
 	var mu sync.Mutex
 	sessions := map[string]*desktopProcess{}
+	manager := &desktopManager{mu: &mu, sessions: sessions, starting: map[string]*desktopStart{}, deleting: map[string]bool{}, start: startIsolatedDesktop}
 	registerDesktopReaper(mux, &mu, sessions)
 	mux.HandleFunc("POST /desktop-shutdown", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if manager.stopping {
+			mu.Unlock()
+			http.Error(w, "Computer is stopping", 503)
+			return
+		}
+		manager.stopping = true
+		mu.Unlock()
+		defer func() { mu.Lock(); manager.stopping = false; mu.Unlock() }()
+		if err := manager.waitStarts(r.Context(), ""); err != nil {
+			http.Error(w, err.Error(), 503)
+			return
+		}
 		mu.Lock()
 		all := []*desktopProcess{}
 		for _, p := range sessions {
@@ -71,74 +84,6 @@ func desktopRoutes(mux *http.ServeMux) {
 		json.NewEncoder(w).Encode(out)
 	})
 
-	ensure := func(ctx context.Context, name string, activity bool) (*desktopProcess, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		// Status polling must neither wake a stopped desktop nor delay shutdown.
-		if !activity {
-			p := sessions[name]
-			if p == nil || p.reaping != nil {
-				return nil, nil
-			}
-			select {
-			case <-p.done:
-				return nil, nil
-			default:
-			}
-		}
-		for {
-			p := sessions[name]
-			if p == nil || p.reaping == nil {
-				break
-			}
-			reaping := p.reaping
-			mu.Unlock()
-			select {
-			case <-reaping:
-			case <-ctx.Done():
-				mu.Lock()
-				return nil, fmt.Errorf("Desktop is stopping; retry shortly")
-			}
-			mu.Lock()
-		}
-		if p := sessions[name]; p != nil {
-			select {
-			case <-p.done:
-				delete(sessions, name)
-			default:
-				p.requests++
-				if activity {
-					p.lastActivity = time.Now()
-				}
-				return p, nil
-			}
-		}
-		for key, p := range sessions {
-			select {
-			case <-p.done:
-				delete(sessions, key)
-			default:
-			}
-		}
-		if len(sessions) >= 32 {
-			return nil, fmt.Errorf("All 32 desktop slots are occupied. Close unused viewers or wait for the idle timeout; active desktops are kept running.")
-		}
-		uid := desktopUID(name)
-		for key, existing := range sessions {
-			if key != name && existing.uid == uid {
-				return nil, fmt.Errorf("desktop identity collision")
-			}
-		}
-		p, err := startIsolatedDesktop(name)
-		if err != nil {
-			return nil, err
-		}
-		p.uid = uid
-		p.requests = 1
-		p.lastActivity = time.Now()
-		sessions[name] = p
-		return p, nil
-	}
 	mux.HandleFunc("/desktops/", func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/desktops/"), "/", 2)
 		if len(parts) != 2 || !desktopName.MatchString(parts[0]) || !strings.HasPrefix(parts[0], "task-") {
@@ -147,6 +92,19 @@ func desktopRoutes(mux *http.ServeMux) {
 		}
 		name := parts[0]
 		if r.Method == "DELETE" && parts[1] == "" {
+			mu.Lock()
+			if manager.deleting[name] {
+				mu.Unlock()
+				http.Error(w, "Desktop is stopping", 503)
+				return
+			}
+			manager.deleting[name] = true
+			mu.Unlock()
+			defer func() { mu.Lock(); delete(manager.deleting, name); mu.Unlock() }()
+			if err := manager.waitStarts(r.Context(), name); err != nil {
+				http.Error(w, err.Error(), 503)
+				return
+			}
 			mu.Lock()
 			p := sessions[name]
 			mu.Unlock()
@@ -168,7 +126,7 @@ func desktopRoutes(mux *http.ServeMux) {
 			return
 		}
 		activity := !(r.Method == http.MethodGet && parts[1] == "jobs")
-		p, err := ensure(r.Context(), name, activity)
+		p, err := manager.ensure(r.Context(), name, activity)
 		if err != nil {
 			http.Error(w, err.Error(), 503)
 			return

@@ -110,7 +110,13 @@ times start a fresh idle interval. Protected desktops have their activity clock
 refreshed during each maintenance sweep. The oldest eligible desktops stop first;
 no active desktop is evicted to make room at the 32-desktop limit.
 
-The live isolation script also checks idle shutdown and restoration, Never,
+Desktop startup reserves one of the 32 slots under the registry lock, then
+creates namespaces and networking without holding that lock. Requests for the
+same desktop share its startup result; requests for other desktops proceed.
+Failed startups release their slots. Shutdown and deletion wait for pending
+starts before stopping them, and persistent UID registration has its own lock.
+
+The live isolation script also checks concurrent startup, idle shutdown and restoration, Never,
 viewer protection, background commands, and saved login/file persistence.
 
 ## One desktop idle timer
