@@ -68,7 +68,7 @@ func rebuildFrom(ctx context.Context, tx Executor, id string, pos int64, item st
 	if err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT head.position,head.item_id,head.display_bytes,COALESCE(json_extract(base.payload,'$.type'),''),COALESCE(json_extract(base.payload,'$.name'),''),(instr(base.payload,'<')>0 OR instr(base.payload,'\u003c')>0 OR instr(base.payload,'\u003C')>0 OR instr(head.payload,'<')>0 OR instr(head.payload,'\u003c')>0 OR instr(head.payload,'\u003C')>0)
+	rows, err := tx.QueryContext(ctx, `SELECT head.position,head.item_id,head.display_bytes,COALESCE(json_extract(base.payload,'$.type'),''),COALESCE(json_extract(base.payload,'$.name'),''),instr((`+ItemTextSQL+`),'<proposed_plan>')>0,substr((`+ItemTextSQL+`),-14)
  FROM conversation_items head JOIN conversation_items base ON base.sequence=COALESCE(NULLIF(head.snapshot_sequence,0),head.sequence)
  WHERE head.execution_id=? AND head.generation=0 AND head.lane='display' AND head.is_current=1 AND head.operation!='remove' AND (head.position,head.item_id)>=(?,?) ORDER BY head.position,head.item_id`, id, pos, item)
 	if err != nil {
@@ -86,11 +86,12 @@ func rebuildFrom(ctx context.Context, tx Executor, id string, pos int64, item st
 	for rows.Next() {
 		var pos, size int64
 		var item, kind, name string
+		var tail string
 		var marker bool
-		if err = rows.Scan(&pos, &item, &size, &kind, &name, &marker); err != nil {
+		if err = rows.Scan(&pos, &item, &size, &kind, &name, &marker, &tail); err != nil {
 			break
 		}
-		hasPlan = hasPlan || marker
+		hasPlan = hasPlan || marker || mayStartPlan(tail)
 		if open == 0 {
 			groups = append(groups, group{pos: pos, item: item})
 		}
@@ -144,4 +145,16 @@ func rebuildFrom(ctx context.Context, tx Executor, id string, pos int64, item st
 		return RefreshPlan(ctx, tx, id)
 	}
 	return nil
+}
+
+// Only a real opening tag or an unfinished opening tag at the end can
+// introduce a plan. Use rendered text so JSON escapes and append deltas
+// behave exactly like the projection reader.
+func mayStartPlan(text string) bool {
+	const tag = "<proposed_plan>"
+	if strings.Contains(text, tag) {
+		return true
+	}
+	i := strings.LastIndexByte(text, '<')
+	return i >= 0 && strings.HasPrefix(tag, text[i:])
 }
