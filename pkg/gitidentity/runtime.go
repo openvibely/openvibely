@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 )
+
+var installMu sync.Mutex
 
 // Prepare installs the embedded wrapper at a stable absolute path. Identical
 // content is reused; changed files are replaced atomically. Instances sharing
@@ -27,6 +30,12 @@ func Prepare(destination string) (*Runtime, error) {
 }
 
 func install(destination string) error {
+	// Finish publishing all wrappers before another startup checks their content.
+	// Concurrent installers can otherwise both replace the same executable while
+	// a caller that has already returned from Prepare starts running it.
+	installMu.Lock()
+	defer installMu.Unlock()
+
 	if err := os.MkdirAll(filepath.Join(destination, "bin"), 0700); err != nil {
 		return err
 	}

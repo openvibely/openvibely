@@ -66,12 +66,13 @@ func TestRuntimeConcurrentStartupAndReuse(t *testing.T) {
 		t.Skip("POSIX shell integration")
 	}
 	install := filepath.Join(t.TempDir(), "app data with spaces", "runtime", "git")
-	repoA, repoB := t.TempDir(), t.TempDir()
 	t.Setenv("TMPDIR", "/does-not-exist")
 	var wg sync.WaitGroup
-	for n, name := range []string{"Alice", "Bob"} {
-		repo := []string{repoA, repoB}[n]
+	start := make(chan struct{})
+	for _, name := range []string{"Alice", "Bob", "Carol", "Dave"} {
+		repo := t.TempDir()
 		wg.Go(func() {
+			<-start
 			rt, err := Prepare(install)
 			if err != nil {
 				t.Error(err)
@@ -97,6 +98,7 @@ func TestRuntimeConcurrentStartupAndReuse(t *testing.T) {
 			}
 		})
 	}
+	close(start)
 	wg.Wait()
 	rt, err := Prepare(install)
 	if err != nil {
