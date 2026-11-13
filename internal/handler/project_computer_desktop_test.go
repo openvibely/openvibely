@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 func TestComputerDesktopTicketsAreScopedOneUseAndExpire(t *testing.T) {
@@ -16,12 +17,12 @@ func TestComputerDesktopTicketsAreScopedOneUseAndExpire(t *testing.T) {
 	e.Use(h.AuthMiddleware())
 	e.GET("/computer-stream", func(c echo.Context) error {
 		ticket, ok := c.Get(computerTicketContextKey).(computerStreamTicket)
-		if !ok || ticket.ProjectID != "project" || ticket.Mode != "view" || ticket.TaskID != "task" {
+		if !ok || ticket.ProjectID != "project" || ticket.Mode != "view" || ticket.TaskID != "task" || ticket.Principal.UserID != "bob" {
 			t.Error("ticket scope lost")
 		}
 		return c.NoContent(204)
 	})
-	token, err := h.issueComputerTicket("project", "view", "task")
+	token, err := h.issueComputerTicket(models.WithPrincipal(t.Context(), models.Principal{UserID: "bob"}), "project", "view", "task")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +47,7 @@ func TestComputerDesktopTicketsAreScopedOneUseAndExpire(t *testing.T) {
 	if code := request("computer-ticket.expired"); code != 403 {
 		t.Fatal(code)
 	}
-	token, err = h.issueComputerTicket("project", "view", "task")
+	token, err = h.issueComputerTicket(models.WithPrincipal(t.Context(), models.Principal{UserID: "bob"}), "project", "view", "task")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,17 +26,15 @@ func (h *Handler) computerProject(c echo.Context) error {
 		return echo.NewHTTPError(404, "Project not found")
 	}
 	// A desktop provides shell and signed-in browser access, so even viewing it
-	// requires editor access. Native stream tickets carry that prior approval.
+	// requires editor access, including connections using native stream tickets.
 	if h.projectAccessSvc != nil {
-		if _, ticket := c.Get(computerTicketContextKey).(computerStreamTicket); !ticket {
-			permission := authz.Edit
-			switch c.Param("action") {
-			case "enable", "disable", "time-zone", "idle-timeout":
-				permission = authz.Manage
-			}
-			if err := h.projectAccessSvc.Require(c.Request().Context(), c.Param("id"), permission); err != nil {
-				return err
-			}
+		permission := authz.Edit
+		switch c.Param("action") {
+		case "enable", "disable", "time-zone", "idle-timeout":
+			permission = authz.Manage
+		}
+		if err := h.projectAccessSvc.Require(c.Request().Context(), c.Param("id"), permission); err != nil {
+			return err
 		}
 	}
 	if taskID := c.QueryParam("task_id"); taskID != "" {
@@ -91,7 +89,7 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 		if state.Held && !state.TakeoverPending {
 			mode = "control"
 		}
-		ticket, err := h.issueComputerTicket(c.Param("id"), mode, c.QueryParam("task_id"))
+		ticket, err := h.issueComputerTicket(c.Request().Context(), c.Param("id"), mode, c.QueryParam("task_id"))
 		if err != nil {
 			return echo.NewHTTPError(429, err.Error())
 		}
@@ -167,6 +165,12 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 	return c.JSON(200, map[string]bool{"ok": true})
 }
 func (h *Handler) ProjectComputerStream(c echo.Context) error {
+	ctx, cancel, err := h.computerStreamAccess(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	c.SetRequest(c.Request().WithContext(ctx))
 	if err := h.computerProject(c); err != nil {
 		return err
 	}
@@ -179,8 +183,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 		return echo.NewHTTPError(404)
 	}
 	id := c.Param("id")
-	ctx, cancel := context.WithCancel(c.Request().Context())
-	defer cancel()
+
 	if mode == "control" {
 		if err := h.computerService(c).WithHumanInput(ctx, id, func() error { return nil }); err != nil {
 			return echo.NewHTTPError(409, err.Error())

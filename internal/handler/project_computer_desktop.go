@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"github.com/openvibely/openvibely/internal/models"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 // project/mode scope across origins without sharing a session cookie.
 type computerStreamTicket struct {
 	ProjectID, Mode, TaskID string
+	Principal               models.Principal
 	Expires                 time.Time
 }
 
@@ -26,7 +29,7 @@ func (h *Handler) SetComputerDesktopBackendURL(base string) {
 		h.computerDesktopURL = base
 	}
 }
-func (h *Handler) issueComputerTicket(projectID, mode string, taskIDs ...string) (string, error) {
+func (h *Handler) issueComputerTicket(ctx context.Context, projectID, mode string, taskIDs ...string) (string, error) {
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return "", err
@@ -50,7 +53,8 @@ func (h *Handler) issueComputerTicket(projectID, mode string, taskIDs ...string)
 	if len(taskIDs) > 0 {
 		taskID = taskIDs[0]
 	}
-	h.computerTickets[token] = computerStreamTicket{TaskID: taskID, ProjectID: projectID, Mode: mode, Expires: now.Add(30 * time.Second)}
+	principal, _ := models.PrincipalFromContext(ctx)
+	h.computerTickets[token] = computerStreamTicket{Principal: principal, TaskID: taskID, ProjectID: projectID, Mode: mode, Expires: now.Add(30 * time.Second)}
 	return "computer-ticket." + token, nil
 }
 func (h *Handler) consumeComputerTicket(c echo.Context) bool {
@@ -80,6 +84,7 @@ func (h *Handler) ProjectComputerNativeStream(c echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(403, "Computer viewer ticket required")
 	}
+	c.SetRequest(c.Request().WithContext(models.WithPrincipal(c.Request().Context(), ticket.Principal)))
 	q := c.Request().URL.Query()
 	q.Set("task_id", ticket.TaskID)
 	c.Request().URL.RawQuery = q.Encode()
