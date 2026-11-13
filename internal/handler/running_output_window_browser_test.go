@@ -1,0 +1,247 @@
+package handler
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"html"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/stretchr/testify/require"
+)
+
+// Exercise actual HTTP hydration, history endpoint, websocket offsets and renderer
+// together: a synthetic renderer-only fixture cannot detect replaying omitted bytes.
+func TestRunningOutputWindowInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser")
+	}
+	for _, mode := range []string{"compact", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			chrome := findChromeForBrowserTest(t)
+			if chrome == "" {
+				t.Skip("Chrome unavailable")
+			}
+			h, e, configs := setupTestHandler(t)
+			e.Use(h.AuthMiddleware())
+			h.SetExecutionStreamHub(events.NewExecutionStreamHub())
+			h.broadcaster = events.NewBroadcaster()
+			h.chatBroadcaster = events.NewChatBroadcaster()
+			h.fileChangeBroadcaster = events.NewFileChangeBroadcaster()
+			agent := createAgent(t, configs)
+			project := createProject(t, h, "Running window")
+			task := createTask(t, h, project.ID, "Large running task", func(task *models.Task) { task.Status = models.StatusRunning; task.Category = models.CategoryActive })
+			other := createTask(t, h, project.ID, "Navigation target")
+			execution := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning })
+			var source strings.Builder
+			source.WriteString("[Using tool: read_file | pending]\n")
+			for i := 0; i < 5000; i++ {
+				fmt.Fprintf(&source, "[Using tool: shell | echo %d]\n[Tool shell done]\nresult %d\n[/Tool]\n", i, i)
+			}
+			source.WriteString("Current live tail\n")
+			require.NoError(t, h.execRepo.AppendOutput(t.Context(), execution.ID, source.String()))
+			delta := "[Tool read_file done]\nLATE_RESULT\n[/Tool]\nUPDATED_TAIL\n"
+			results := make(chan string, 1)
+			fullSeed := os.Getenv("OV_RUNNING_WINDOW_FULL_SEED") == "1"
+			var chromePID, htmlBytes, appends atomic.Int64
+			resumedDelta := "AFTER_REOPEN\n"
+			pageDelta := "\nDURING_PAGE\n"
+			var paged atomic.Bool
+			path := "/tasks/" + task.ID
+			script := fmt.Sprintf(`<script>
+ window.addEventListener('DOMContentLoaded',()=>{(async()=>{
+ const assert=(ok,label)=>{if(!ok)throw Error(label)};
+ const pause=()=>new Promise(r=>setTimeout(r,30));
+ const until=async(fn,label)=>{const end=performance.now()+15000;while(!fn()){if(performance.now()>end)throw Error('timeout '+label);await pause()}};
+ const node=()=>document.getElementById('streaming-message-'+%q);
+ await until(()=>node()?._chatVirtualData,'initial rows');
+ const n=node(),initial=n.getAttribute('data-raw-content'),fullSeed=%t;
+ await until(()=>document.getElementById('task-thread-messages')?.dataset.transcriptHydrating!=='true' && !window._chatContentRenderActive && !window._chatContentRenderQueue?.length,'hydration');
+ const openingMS=performance.now();
+ window.gc?.();await pause();window.gc?.();
+ assert(fullSeed||window._windowStreamBytes===0,'omitted output was replayed over websocket');
+ const initialMetrics={streamBytes:window._windowStreamBytes,openingMS,heap:performance.memory?.usedJSHeapSize,dom:document.querySelectorAll('*').length,...await (await fetch('/fixture-memory')).json()};
+ assert(fullSeed||initial.length<15000,'HTTP seed includes entire output: '+initial.length);
+ assert(fullSeed||(!initial.includes('echo 0]')&&initial.includes('echo 4999]')),'wrong initial window');
+ assert(Number(n.dataset.initialByteLength)===%d,'wrong absolute offset');
+ await fetch('/fixture-append',{method:'POST'});
+ await until(()=>n.getAttribute('data-raw-content').includes('UPDATED_TAIL'),'incoming update');
+ assert(fullSeed||n.getAttribute('data-raw-content').length<16000,'background replay downloaded omitted history');
+ if(!fullSeed){
+ const before=n.dataset.outputWindow;
+ const messages=document.getElementById('task-thread-messages');
+ messages.scrollTop=0;messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));
+ await until(()=>n.dataset.outputWindow!==before,'older output');
+ await until(()=>n.getAttribute('data-raw-content').includes('DURING_PAGE'),'update during paging');
+ assert(n.getAttribute('data-raw-content').includes('UPDATED_TAIL'),'paging dropped stream delta');
+ assert((n.getAttribute('data-raw-content').match(/pending\]/g)||[]).length===1,'paging duplicated pending call');
+ assert(Number(n.dataset.initialByteLength)===%d,'paging changed absolute stream offset');
+ }
+ await openVibelyNavigate(%q);
+ await until(()=>document.getElementById('task-thread-view')?.dataset.taskId===%q,'navigate away');
+ await openVibelyNavigate(%q);
+ await until(()=>node()?._sseConnected,'resume bounded view');
+ const reopened=node();
+ await fetch('/fixture-append',{method:'POST'});
+ await until(()=>reopened.getAttribute('data-raw-content').includes('AFTER_REOPEN'),'update after reopen');
+ assert(fullSeed||reopened.getAttribute('data-raw-content').length<16000,'reopening retained browsed history or replayed omitted output');
+ await fetch('/fixture-complete',{method:'POST'});
+ await until(()=>document.querySelector('[data-exec-id="'+%q+'"][data-exec-status="completed"]'),'completion');
+ return {...initialMetrics,seedBytes:new TextEncoder().encode(initial).length,fullBytes:%d};
+ })().then(report=>fetch('/browser-result',{method:'POST',body:JSON.stringify(report)})).catch(error=>fetch('/browser-result',{method:'POST',body:'FAIL '+error.stack}));});
+ </script>`, execution.ID, fullSeed, len(source.String()), len(source.String())+len(delta)+len(pageDelta), "/tasks/"+other.ID, other.ID, path, execution.ID, len(source.String()))
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/fixture-memory":
+					_ = json.NewEncoder(w).Encode(map[string]int64{"chromeRSS": runningWindowRSS(int(chromePID.Load())), "htmlBytes": htmlBytes.Load()})
+					return
+				case "/browser-result":
+					var buf bytes.Buffer
+					_, _ = buf.ReadFrom(r.Body)
+					select {
+					case results <- buf.String():
+					default:
+					}
+					w.WriteHeader(204)
+					return
+				case "/fixture-append":
+					text := delta
+					end := len(source.String()) + len(delta)
+					if appends.Add(1) > 1 {
+						text = resumedDelta
+						end += len(resumedDelta)
+						if paged.Load() {
+							end += len(pageDelta)
+						}
+					}
+					if err := h.execRepo.AppendOutput(r.Context(), execution.ID, text); err != nil {
+						http.Error(w, err.Error(), 500)
+						return
+					}
+					h.executionStreamHub.Publish(events.ExecutionStreamEvent{ExecID: execution.ID, Type: events.ExecutionStreamPersisted, Offset: end})
+					w.WriteHeader(204)
+					return
+				case "/fixture-complete":
+					output := source.String() + delta
+					if paged.Load() {
+						output += pageDelta
+					}
+					output += resumedDelta
+					if err := h.execRepo.Complete(r.Context(), execution.ID, models.ExecCompleted, output, "", 0, 0); err != nil {
+						http.Error(w, err.Error(), 500)
+						return
+					}
+					h.executionStreamHub.CloseTerminal(execution.ID, models.ExecCompleted, "")
+					w.WriteHeader(204)
+					return
+				}
+				if r.URL.Path == "/chat/output/"+execution.ID && r.URL.Query().Get("before") != "0" && paged.CompareAndSwap(false, true) {
+					if err := h.execRepo.AppendOutput(r.Context(), execution.ID, pageDelta); err != nil {
+						http.Error(w, err.Error(), 500)
+						return
+					}
+					h.executionStreamHub.Publish(events.ExecutionStreamEvent{ExecID: execution.ID, Type: events.ExecutionStreamPersisted, Offset: len(source.String()) + len(delta) + len(pageDelta)})
+				}
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path == path && r.Header.Get("HX-Request") == "" {
+					rec := httptest.NewRecorder()
+					e.ServeHTTP(rec, r)
+					document := strings.Replace(rec.Body.String(), "<head>", fmt.Sprintf(`<head><script>
+localStorage.setItem('openvibely.outputDetail',%q);
+window._windowStreamBytes=0;
+const OriginalWebSocket=window.WebSocket;
+window.WebSocket=class extends OriginalWebSocket {
+ constructor(...args){super(...args);this.addEventListener('message',e=>{try{const f=JSON.parse(e.data);if(f.event==='message')window._windowStreamBytes+=new TextEncoder().encode(f.data||'').length}catch(_){}})}
+};
+</script>`, mode), 1)
+					w.Header().Set("Content-Type", "text/html")
+					if fullSeed {
+						// Measurement control: identical renderer/page, but the old
+						// full HTTP seed. No production feature flag is introduced.
+						id := `id="streaming-message-` + execution.ID + `"`
+						start := strings.Index(document, id)
+						end := start + strings.Index(document[start:], ">")
+						tag := document[start:end]
+						for name, value := range map[string]string{"data-raw-content": source.String(), "data-output-context": "", "data-output-window": ""} {
+							re := regexp.MustCompile(name + `="[^"]*"`)
+							tag = re.ReplaceAllStringFunc(tag, func(string) string { return name + `="` + html.EscapeString(value) + `"` })
+						}
+						document = document[:start] + tag + document[end:]
+					}
+					document = strings.Replace(document, "</body>", script+"</body>", 1)
+					htmlBytes.Store(int64(len(document)))
+					_, _ = w.Write([]byte(document))
+					return
+				}
+				e.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--enable-precise-memory-info", "--js-flags=--expose-gc", "--window-size=1280,900", server.URL+path)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			require.NoError(t, startHandlerBrowserProcess(t, cmd))
+			chromePID.Store(int64(cmd.Process.Pid))
+			result := waitPagedBrowserResult(ctx, nil, results, 45*time.Second)
+			stopHandlerBrowserProcess(t, cmd)
+			require.True(t, strings.HasPrefix(result, "{"), result+stderr.String())
+			t.Log(result)
+		})
+	}
+}
+
+// Summed process-tree RSS is diagnostic, not an assertion or physical RAM total.
+func runningWindowRSS(root int) int64 {
+	data, err := exec.Command("ps", "-axo", "pid=,ppid=,rss=").Output()
+	if err != nil {
+		return -1
+	}
+	type proc struct {
+		pid, parent int
+		rss         int64
+	}
+	var all []proc
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		pid, _ := strconv.Atoi(fields[0])
+		parent, _ := strconv.Atoi(fields[1])
+		rss, _ := strconv.ParseInt(fields[2], 10, 64)
+		all = append(all, proc{pid, parent, rss * 1024})
+	}
+	owned := map[int]bool{root: true}
+	for changed := true; changed; {
+		changed = false
+		for _, p := range all {
+			if owned[p.parent] && !owned[p.pid] {
+				owned[p.pid] = true
+				changed = true
+			}
+		}
+	}
+	var total int64
+	for _, p := range all {
+		if owned[p.pid] {
+			total += p.rss
+		}
+	}
+	return total
+}

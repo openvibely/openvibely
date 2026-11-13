@@ -59,7 +59,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 			} else if exec.Status == models.ExecCancelled {
 				@components.ChatBubbleError("Assistant", "Cancelled", exec.Output, exec.DisplayTail)
 			} else if exec.Status == models.ExecRunning {
-				@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
+				@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "", exec.DisplayTail)
 			}
 		</div>
 	}
@@ -134,7 +134,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							} else if exec.Status == models.ExecCancelled {
 								@components.ChatBubbleError("Assistant", "Cancelled", exec.Output, exec.DisplayTail)
 							} else if exec.Status == models.ExecRunning {
-								@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
+								@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "", exec.DisplayTail)
 							}
 							for _, req := range chatInputRequestsForExec(inputRequests, exec.ID) {
 								@ChatInputRequestCard(req)

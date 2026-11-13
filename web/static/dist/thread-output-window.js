@@ -18,7 +18,9 @@
                 text: node.getAttribute('data-raw-content') || '',
                 cursor: node.dataset.outputWindow,
                 revision: node.getAttribute('data-raw-revision') || '',
-                byteLength: node.hasAttribute('data-initial-byte-length') ? Number(node.getAttribute('data-initial-byte-length')) : undefined
+                byteLength: node.hasAttribute('data-initial-byte-length') ? Number(node.getAttribute('data-initial-byte-length')) : undefined,
+                offset: node.getAttribute('data-initial-byte-length'),
+                context: node.dataset.outputContext || ''
             };
         });
         for (const [node, controller] of pending) {
@@ -40,11 +42,23 @@
             new URLSearchParams({before, revision, project_id: project}), {signal: controller.signal});
         async function apply(page, replace) {
             const height = messages.scrollHeight;
-            if (!replace) node._prependOutputHistory?.(page.text);
-            const text = page.text + (replace ? '' : (node.getAttribute('data-raw-content') || ''));
+            const oldContext = node.dataset.outputContext || '';
+            const existing = node.getAttribute('data-raw-content') || '';
+            const text = page.text + (replace ? '' : existing.slice(oldContext.length));
+            node.dataset.outputContext = page.context || '';
+            if (replace && node.dataset.streamingResume === 'true') {
+                // A rewritten live source requires a fresh HTTP seed and stream
+                // offset together. Never splice it into an active subscription.
+                if (window.openVibelyNavigate) await window.openVibelyNavigate(location.pathname + location.search);
+                else window.location.reload();
+                return;
+            }
             const rawRevision = window.setChatRawContent(node, text);
             cursor = page.before !== '0' ? page.before + ':' + page.revision : '';
             node.dataset.outputWindow = cursor;
+            const hint = node.parentElement?.querySelector('[data-output-window-hint]');
+            if (hint) hint.hidden = !cursor;
+            node.dispatchEvent(new CustomEvent('chat-output-prepend', {detail:{text}}));
             if (replace) {
                 // Invalidate the old navigation seed too; never cache a mixture
                 // of the obsolete response and newly fetched history.
@@ -88,7 +102,7 @@
         if (messages.dataset.transcriptHydrating === 'true') return;
         const bounds = messages.getBoundingClientRect();
         for (const node of messages.querySelectorAll(selector)) {
-            if (!node.dataset.outputWindow) continue;
+            if (!node.dataset.outputWindow || node.dataset.outputWindow.startsWith('0:')) continue;
             const rect = node.getBoundingClientRect();
             if (rect.top >= bounds.top - 400 && rect.top <= bounds.bottom && rect.bottom > bounds.top) {
                 void load(node, messages);

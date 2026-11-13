@@ -20,6 +20,7 @@ type DisplayTail struct {
 	EndOffset int64  `json:"end_offset,string"`
 	Plan      string `json:"plan,omitempty"`
 	Text      string `json:"text"`
+	Context   string `json:"context,omitempty"`
 	Before    int64  `json:"before,string"`
 	Revision  string `json:"revision"`
 }

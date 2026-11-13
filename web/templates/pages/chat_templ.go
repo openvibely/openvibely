@@ -207,7 +207,7 @@ func ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[str
 					return templ_7745c5c3_Err
 				}
 			} else if exec.Status == models.ExecRunning {
-				templ_7745c5c3_Err = components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "").Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "", exec.DisplayTail).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -448,7 +448,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 						return templ_7745c5c3_Err
 					}
 				} else if exec.Status == models.ExecRunning {
-					templ_7745c5c3_Err = components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "").Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "", exec.DisplayTail).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

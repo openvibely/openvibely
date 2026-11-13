@@ -16,6 +16,34 @@ Height corrections preserve the visible row or bottom pin. Width changes invalid
 
 Cold transcript history is revealed together after its visible window has rendered and height estimates have settled, without waiting for fonts or attachment images. Data-only cached transcripts follow the same rule: the stripped shell stays hidden until its visible rows and scroll position are ready, without waiting for the server refresh. Already-rendered content stays visible during hydration. Visibility uses the `data-transcript-hydrating` attribute rather than an inline style, so HTMX's delayed style settling cannot hide a completed transcript again. The existing layout observer follows late growth only while the user is pinned to the bottom. Deferred image-scroll callbacks recheck that the original transcript is still mounted and that the reader still wants to follow output.
 
+## Running output windows
+
+Running executions initially send the newest 75 parsed display items, targeting
+1 MiB of source. A tool header and its result are separate items. Earlier pending
+call headers and an active compaction marker are included as boundary context;
+completed intervening calls do not keep the entire history in the browser.
+The resume byte offset is the end of the original transcript, not the size of
+this smaller display seed. Windowed views bypass the full-source snapshot
+subscription, and discovery does not replay their omitted prefix in the background.
+
+Upward scrolling requests earlier windows through `/chat/output/:id`. The cursor
+contains a source byte boundary and a digest of the initial prefix: appends keep
+it valid, while rewritten output conflicts instead of mixing revisions. Paging
+replaces the previous boundary context and keeps incoming deltas and the stream
+position intact. Navigation caches the latest seed and its absolute offset,
+excluding history browsed during that visit. Normal full-source snapshots remain
+in use for small executions. If history conflicts while a windowed execution is
+still streaming, normal thread navigation refreshes the seed and subscription
+while retaining composer state.
+
+The limits are soft: one indivisible result/thinking/Markdown block, pending-call
+headers, plan content, or ambiguous Markdown/legacy controls can exceed them.
+The server currently reads and parses the entire raw transcript to locate safe
+boundaries; this reduces client transfer and rendering, not server scan cost.
+The open view also continues accumulating subsequent deltas. Find/selection/print
+materialize loaded rows; fetching all unloaded history for those actions is not
+implemented. Export/provider replay APIs remain complete.
+
 ## Limits
 
 A cold open still renders and parses the bounded execution history from the page response. Control-marker parsing still covers the loaded source, but Markdown parsing and HTML construction are deferred for offscreen rows. A single uninterrupted Markdown message remains one row and is fully parsed when that row enters the window. Visited offscreen nodes are retained for the lifetime of the mounted transcript. These changes do not add background subscriptions to unopened threads or replace snapshot refreshes with event-sequence synchronization.

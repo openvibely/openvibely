@@ -38,7 +38,12 @@ templ ThreadControllerScript() {
         };
         controller.attach = function(id, project, seed, container, offset) {
             controller.detach(container);
-            var source = window.openVibelyThreadCache
+            // The shared cache currently indexes a full transcript from byte zero.
+            // A bounded view must subscribe at its absolute stream offset instead
+            // of silently replaying all omitted history into that cache.
+            var bounded = container && (container.dataset.outputWindow || '').indexOf(':live-') >= 0;
+            if (bounded) window.openVibelyThreadCache?.suppressReplay(id, project);
+            var source = window.openVibelyThreadCache && !bounded
                 ? window.openVibelyThreadCache.execution(id, project, seed, container, offset)
                 : window.openVibelyLive.execution(id, offset, project);
             if (!container) return source;

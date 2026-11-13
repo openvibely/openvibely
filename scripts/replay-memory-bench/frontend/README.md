@@ -78,3 +78,23 @@ Check the summary calculations without launching Chrome:
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   -s scripts/replay-memory-bench/frontend -p 'test_*.py'
 ```
+
+### Running-turn HTTP loading
+
+The renderer harness above does not measure application loading. The handler test
+below loads a real task page, uses the production websocket and history endpoint,
+and exercises concurrent paging, late results, navigation, and completion:
+
+```sh
+go test ./internal/handler -run '^TestRunningOutputWindowInChrome$' -count=5 -v > /tmp/running-window.log
+OV_RUNNING_WINDOW_FULL_SEED=1 go test ./internal/handler -run '^TestRunningOutputWindowInChrome$' -count=5 -v > /tmp/running-full-seed.log
+```
+
+The second command is a test-only control: it substitutes the full transcript in
+the initial HTML while retaining the same current renderer. It is **not a Git
+revision comparison**. Both cases use 5,000 calls plus an earlier pending tool.
+Diagnostics report time from navigation start to hydrated rows, uncompressed HTML
+and transcript bytes, retained JS heap after GC, DOM count, and one sampled Chrome
+process-tree RSS total. RSS is absolute (not baseline-adjusted), can double-count
+shared memory, and is not a peak. These are local-fixture measurements, not real
+network latency. Timing/RSS values are reported rather than used as CI thresholds.

@@ -222,6 +222,16 @@ func displayTailCursor(tails []*models.DisplayTail) string {
 	return fmt.Sprintf("%d:%s", tails[0].Before, tails[0].Revision)
 }
 
+func displayTailOffset(text string, tails []*models.DisplayTail) string {
+ if len(tails)>0 && tails[0]!=nil && strings.HasPrefix(tails[0].Revision, "live-") { return fmt.Sprint(tails[0].EndOffset) }
+ return fmt.Sprint(len(text))
+}
+
+func displayTailContext(tails []*models.DisplayTail) string {
+ if len(tails)>0 && tails[0]!=nil { return tails[0].Context }
+ return ""
+}
+
 templ ChatBubble(role, content string, author ...string) {
 	@chatBubble(role, content, author, nil)
 }
@@ -809,12 +819,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 // Content is stored in data-raw-content (not as text content) so it renders formatted
 // immediately via the inline script, matching ChatBubble's pattern. This prevents
 // raw/unformatted text flash on hard refresh.
-func displayResumeOffset(content string, tails []*models.DisplayTail) int64 {
- if len(tails)>0 && tails[0]!=nil { return tails[0].EndOffset }
- return int64(len(content))
-}
-
-templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID, pausePollingTargetID string, tails ...*models.DisplayTail) {
+templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID, pausePollingTargetID string, tail ...*models.DisplayTail) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
@@ -827,7 +832,10 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 				</div>
 			}
 			<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-			<div id={ "streaming-message-" + execID } class={ "chat-stream-content leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-output-window={ displayTailCursor(tails) } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", displayResumeOffset(partialContent, tails)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ partialContent } style="word-wrap: break-word;"></div>
+            if len(tail) > 0 && tail[0] != nil && tail[0].Before > 0 {
+                <div data-output-window-hint class="text-xs opacity-50 mb-2">Showing recent output. Scroll up for earlier activity.</div>
+            }
+			<div id={ "streaming-message-" + execID } class={ "chat-stream-content leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-output-window={ displayTailCursor(tail) } data-output-context={ displayTailContext(tail) } data-exec-id={ execID } data-initial-byte-length={ displayTailOffset(partialContent, tail) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ partialContent } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -892,11 +900,14 @@ templ ChatStreamingResumeInitScript() {
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
 					var cumulativeContent = container.getAttribute('data-raw-content') || '';
-                    container._prependOutputHistory = function(text) { cumulativeContent = text + cumulativeContent; };
 					var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;
 					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
 					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
-					function persistResumeStreamState(active) {
+					container.addEventListener('chat-output-prepend', function(event) {
+                        cumulativeContent = event.detail.text;
+                        persistResumeStreamState(!streamTerminalHandled);
+                    });
+                    function persistResumeStreamState(active) {
 						container.setAttribute('data-raw-content', cumulativeContent);
 						container.setAttribute('data-initial-byte-length', String(streamOffset));
 						if (active) container.setAttribute('data-streaming-resume', 'true');
@@ -1143,11 +1154,16 @@ templ ChatStreamingResumeInitScript() {
 					var streamTerminalHandled = false;
 					function connectResumeExecutionStream() {
 							eventSource = window.openVibelyThreadController.attach(execId, streamProjectID, cumulativeContent, container, streamOffset);
-							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); persistResumeStreamState(true); });
+							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); container.dataset.outputWindow = ''; container.dataset.outputContext = ''; delete container._outputWindowSeed; persistResumeStreamState(true); });
 							registerResumeEventSource(eventSource);
 
 							eventSource.onmessage = function(event) {
 								cumulativeContent += event.data;
+                                if (container._outputWindowSeed) {
+                                    container._outputWindowSeed.text += event.data;
+                                    container._outputWindowSeed.offset = streamOffset + utf8ByteLength(event.data);
+                                    container._outputWindowSeed.revision = 'live-' + container._outputWindowSeed.offset;
+                                }
 								streamOffset += utf8ByteLength(event.data);
 								persistResumeStreamState(true);
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
@@ -7097,7 +7113,7 @@ templ ChatAutoScrollScript() {
 				// After morph:outerHTML replaces JS-formatted content with server-rendered empty divs,
 				// these need to be re-rendered using the raw content stored in the data attribute.
 				container.querySelectorAll('.chat-stream-content[data-raw-content]').forEach(function(el) {
-                    if (el.getAttribute('data-streaming-resume')) return;
+                    if (el.hasAttribute('data-streaming-resume')) return;
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');

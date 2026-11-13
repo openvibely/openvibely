@@ -197,10 +197,12 @@ func TestDisplayWindowCompletionSnapshot(t *testing.T) {
 		require.NotNil(t, got.execution)
 		require.Equal(t, exec.ID, got.execution.ID)
 		if got.execution.Status == models.ExecRunning {
-			require.NotNil(t, got.execution.DisplayTail)
-			require.Equal(t, int64(len(output)), got.execution.DisplayTail.EndOffset, "live resume uses the full durable offset, not the visible suffix length")
-			require.True(t, strings.HasSuffix(output, got.execution.Output))
-			require.True(t, strings.HasSuffix(output, got.execution.Output))
+			if tail := got.execution.DisplayTail; tail != nil {
+				require.Equal(t, int64(len(output)), tail.EndOffset)
+				require.Equal(t, output[tail.Before:], strings.TrimPrefix(got.execution.Output, tail.Context))
+			} else {
+				require.Equal(t, output, got.execution.Output)
+			}
 		} else {
 			require.Equal(t, models.ExecCompleted, got.execution.Status)
 			require.NotNil(t, got.execution.DisplayTail)

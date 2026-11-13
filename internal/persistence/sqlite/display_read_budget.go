@@ -14,6 +14,10 @@ import (
 // and the output cursor in the same snapshot. It avoids loading the latest window
 // merely to fetch the preceding one.
 func (r *ExecutionRepo) ReadProjectDisplayTail(ctx context.Context, projectID, id string, before int64, budget int) (models.DisplayTail, error) {
+	return r.ReadProjectDisplayTailRevision(ctx, projectID, id, before, budget, "")
+}
+
+func (r *ExecutionRepo) ReadProjectDisplayTailRevision(ctx context.Context, projectID, id string, before int64, budget int, revision string) (models.DisplayTail, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return models.DisplayTail{}, err
@@ -26,7 +30,7 @@ func (r *ExecutionRepo) ReadProjectDisplayTail(ctx context.Context, projectID, i
 	if !exists {
 		return models.DisplayTail{}, persistence.ErrNotFound
 	}
-	result, err := readDisplayTail(ctx, tx, id, before, budget)
+	result, err := readDisplayTailRevision(ctx, tx, id, before, budget, revision)
 	if err != nil {
 		return result, err
 	}
@@ -34,7 +38,22 @@ func (r *ExecutionRepo) ReadProjectDisplayTail(ctx context.Context, projectID, i
 }
 
 func readDisplayTail(ctx context.Context, tx sqlExecutor, id string, before int64, budget int) (models.DisplayTail, error) {
+	return readDisplayTailRevision(ctx, tx, id, before, budget, "")
+}
+
+func readDisplayTailRevision(ctx context.Context, tx sqlExecutor, id string, before int64, budget int, revision string) (models.DisplayTail, error) {
 	result := models.DisplayTail{}
+	var status string
+	if err := tx.QueryRowContext(ctx, "SELECT status FROM executions WHERE id=?", id).Scan(&status); err != nil {
+		return result, err
+	}
+	if status == "running" || strings.HasPrefix(revision, "live-") {
+		var output string
+		if err := tx.QueryRowContext(ctx, `SELECT `+displayOutputSQL+` FROM executions WHERE id=?`, id).Scan(&output); err != nil {
+			return result, err
+		}
+		return runningDisplayWindow(output, before, budget, revision)
+	}
 	if budget <= 0 {
 		budget = 1
 	}
