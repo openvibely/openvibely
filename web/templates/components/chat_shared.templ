@@ -53,6 +53,8 @@ func ChatExecutionRevision(exec models.Execution) string {
  write(exec.AuthorName)
  }
 	write(exec.Output)
+    if exec.DisplayPlan != "" { write(exec.DisplayPlan) }
+    if exec.DisplayTail != nil {write(fmt.Sprint(exec.DisplayTail.Before)); write(exec.DisplayTail.Revision)}
 	write(exec.ErrorMessage)
 	write(fmt.Sprintf("%t", exec.IsFollowup))
 	return fmt.Sprintf("%016x", hash)
@@ -807,7 +809,12 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 // Content is stored in data-raw-content (not as text content) so it renders formatted
 // immediately via the inline script, matching ChatBubble's pattern. This prevents
 // raw/unformatted text flash on hard refresh.
-templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID, pausePollingTargetID string) {
+func displayResumeOffset(content string, tails []*models.DisplayTail) int64 {
+ if len(tails)>0 && tails[0]!=nil { return tails[0].EndOffset }
+ return int64(len(content))
+}
+
+templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID, pausePollingTargetID string, tails ...*models.DisplayTail) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
@@ -820,7 +827,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 				</div>
 			}
 			<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-			<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+			<div id={ "streaming-message-" + execID } class={ "chat-stream-content leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-output-window={ displayTailCursor(tails) } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", displayResumeOffset(partialContent, tails)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -885,6 +892,7 @@ templ ChatStreamingResumeInitScript() {
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
 					var cumulativeContent = container.getAttribute('data-raw-content') || '';
+                    container._prependOutputHistory = function(text) { cumulativeContent = text + cumulativeContent; };
 					var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;
 					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
 					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
@@ -1408,8 +1416,15 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 	} else if exec.Status == models.ExecCancelled {
 		@ChatBubbleError("Assistant", "Cancelled", exec.Output, exec.DisplayTail)
 	} else if exec.Status == models.ExecRunning {
-		@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
+		@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID, exec.DisplayTail)
 	}
+    if exec.DisplayTail != nil && exec.DisplayPlan != "" && !strings.Contains(exec.Output, strings.TrimSpace(exec.DisplayPlan)) {
+        <div data-execution-plan="true" class="rounded-xl p-4">
+            <div class="text-xs font-semibold opacity-50 mb-2">Plan</div>
+            <div class="chat-stream-content" data-raw-revision={ chatContentRevision(exec.DisplayPlan) } data-raw-content={ NormalizeDisplayMarkers(exec.DisplayPlan) }></div>
+        </div>
+    }
+
 }
 
 templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string) {
@@ -6814,6 +6829,7 @@ templ ChatAutoScrollScript() {
 				// After morph:outerHTML replaces JS-formatted content with server-rendered empty divs,
 				// these need to be re-rendered using the raw content stored in the data attribute.
 				container.querySelectorAll('.chat-stream-content[data-raw-content]').forEach(function(el) {
+                    if (el.getAttribute('data-streaming-resume')) return;
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');

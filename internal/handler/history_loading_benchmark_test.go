@@ -36,7 +36,7 @@ func TestHistoryLoadingHarness(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, n, 128)
 	mode := os.Getenv("OV_HISTORY_MODE")
-	require.Contains(t, []string{"completed", "running", "plan"}, mode)
+	require.Contains(t, []string{"completed", "running", "plan", "raw-running"}, mode)
 	h, app, configs, stores := setupTestHandlerWithStores(t, teststores.WithProductionTopology(), teststores.WithIOCounting())
 	agent := createAgent(t, configs)
 	project := createProject(t, h, "Synthetic history benchmark")
@@ -50,6 +50,12 @@ func TestHistoryLoadingHarness(t *testing.T) {
 			if mode == "plan" && i == 0 {
 				text = "<proposed_plan>synthetic plan</proposed_plan>\n" + text
 			}
+			if mode == "raw-running" {
+				text = "[Using tool: shell | echo]\n[Tool shell done]\n" + text + "[/Tool]\n"
+				require.NoError(t, h.execRepo.AppendOutput(t.Context(), execution.ID, text))
+				want.WriteString(text)
+				continue
+			}
 			want.WriteString(text)
 			raw, err := json.Marshal(map[string]string{"type": "text", "text": text})
 			require.NoError(t, err)
@@ -58,7 +64,7 @@ func TestHistoryLoadingHarness(t *testing.T) {
 		_, err = h.execRepo.AppendConversationChanges(t.Context(), models.ConversationOwner{ExecutionID: execution.ID}, changes)
 		require.NoError(t, err)
 	}
-	if mode != "running" {
+	if mode != "running" && mode != "raw-running" {
 		require.NoError(t, h.execRepo.Complete(t.Context(), execution.ID, models.ExecCompleted, "", "", 0, 0))
 	}
 	expected := want.String()

@@ -905,7 +905,7 @@ func chatHistoryHasPlanCompletion(history []models.Execution) bool {
 	for i := len(history) - 1; i >= 0; i-- {
 		exec := history[i]
 		if exec.Status == models.ExecCompleted && exec.Output != "" {
-			return strings.Contains(exec.Output, "<proposed_plan>")
+			return exec.DisplayPlan != "" || strings.Contains(exec.Output, "<proposed_plan>")
 		}
 	}
 	return false

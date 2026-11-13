@@ -15,6 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--sizes', default='1000,10000,45000', help='display blocks per execution')
+    parser.add_argument('--modes', default='completed,running,plan', help='comma-separated completed,running,plan,raw-running')
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--smoke', action='store_true', help='small correctness validation only')
     args = parser.parse_args()
@@ -24,6 +25,9 @@ def main():
         parser.error('sizes must be integers')
     if not sizes or min(sizes) < 128 or args.runs < 1:
         parser.error('sizes >=128 and runs >=1 required')
+    modes = args.modes.split(',')
+    if not modes or any(m not in ('completed','running','plan','raw-running') for m in modes):
+        parser.error('invalid mode')
     output = args.output.resolve()
     if output == ROOT or ROOT in output.parents:
         parser.error('results must be outside repository')
@@ -32,7 +36,7 @@ def main():
     manifest = {'revision': subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
                 'dirty': bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT)),
                 'host':platform.platform(), 'go':subprocess.check_output(['go','version'],text=True).strip(),
-                'smoke':args.smoke, 'sizes':sizes, 'runs':1 if args.smoke else args.runs,
+                'modes':modes, 'smoke':args.smoke, 'sizes':sizes, 'runs':1 if args.smoke else args.runs,
                 'database':'temporary file-backed SQLite, production reader/writer topology',
                 'limitations':'server HTTP only; forced GC before samples; filesystem cache not flushed; driver rows, not SQLite internal visits'}
     files=[Path(__file__).resolve(),ROOT/'internal/handler/history_loading_benchmark_test.go']
@@ -43,7 +47,7 @@ def main():
         binary=Path(scratch)/'handler.test'
         subprocess.run(['go','test','-c','-o',str(binary),'./internal/handler'],cwd=ROOT,env=env,check=True)
         for run in range(manifest['runs']):
-            modes=['completed','running','plan']
+            modes=list(manifest['modes'])
             if run%2: modes.reverse()
             for size in sizes:
                 for mode in modes:
