@@ -40,6 +40,7 @@ type ProjectComputerStore interface {
 	TransferRoot(ctx context.Context, projectID string) (string, error)
 	Attachments() AttachmentStore
 	CreateChromeGrant(ctx context.Context, id, scope string, selections []models.ChromeCookieSelection, expires int64) (*models.ComputerChromeGrant, error)
+	ChromeGrantsPage(ctx context.Context, id string, offset int) ([]models.ComputerChromeGrant, error)
 	ChromeGrants(ctx context.Context, id string) ([]models.ComputerChromeGrant, error)
 	ChromeGrant(ctx context.Context, id, grantID string) (*models.ComputerChromeGrant, error)
 	RecordChromeInstall(ctx context.Context, id, grantID string) error

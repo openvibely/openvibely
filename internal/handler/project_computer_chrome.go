@@ -6,6 +6,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 )
@@ -81,6 +82,14 @@ func (h *Handler) ProjectComputerChromeGrants(c echo.Context) error {
 		return echo.NewHTTPError(403)
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
+	offset := 0
+	if raw := c.QueryParam("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > int(^uint(0)>>1)-200 {
+			return echo.NewHTTPError(400, "Invalid permissions page")
+		}
+		offset = parsed
+	}
 	if c.Request().Method == "POST" {
 		var input struct {
 			ID string `json:"grant_id"`
@@ -92,9 +101,9 @@ func (h *Handler) ProjectComputerChromeGrants(c echo.Context) error {
 			return echo.NewHTTPError(400, err.Error())
 		}
 	}
-	grants, err := h.computerService(c).ChromeGrants(c.Request().Context(), c.Param("id"))
+	grants, more, err := h.computerService(c).ChromeGrantsPage(c.Request().Context(), c.Param("id"), offset)
 	if err != nil {
 		return err
 	}
-	return c.JSON(200, map[string]any{"grants": grants})
+	return c.JSON(200, map[string]any{"grants": grants, "offset": offset, "has_more": more, "next_offset": offset + len(grants)})
 }

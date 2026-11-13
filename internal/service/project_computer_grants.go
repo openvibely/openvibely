@@ -289,3 +289,12 @@ func (s *ProjectComputerService) grantLock(id string) *sync.Mutex {
 	lock, _ := s.locks.LoadOrStore("chrome-grants:"+id, &sync.Mutex{})
 	return lock.(*sync.Mutex)
 }
+
+func (s *ProjectComputerService) ChromeGrantsPage(ctx context.Context, id string, offset int) ([]models.ComputerChromeGrant, bool, error) {
+	grants, err := s.repo.ChromeGrantsPage(ctx, id, offset)
+	more := len(grants) > 200
+	if more {
+		grants = grants[:200]
+	}
+	return grants, more, err
+}

@@ -41,6 +41,23 @@ func TestComputerChromeRevokeGrantOutsideListWindow(t *testing.T) {
 	for _, g := range listed {
 		require.NotEqual(t, old.ID, g.ID)
 	}
+	first, more, err := svc.ChromeGrantsPage(t.Context(), project.ID, 0)
+	require.NoError(t, err)
+	require.True(t, more)
+	require.Len(t, first, 200)
+	second, more, err := svc.ChromeGrantsPage(t.Context(), project.ID, 200)
+	require.NoError(t, err)
+	require.False(t, more)
+	require.Len(t, second, 2)
+	seen := map[string]bool{}
+	for _, g := range append(first, second...) {
+		require.False(t, seen[g.ID])
+		seen[g.ID] = true
+	}
+	require.True(t, seen[old.ID], "non-expiring grant must be accessible through pagination")
+	repeat, _, err := svc.ChromeGrantsPage(t.Context(), project.ID, 0)
+	require.NoError(t, err)
+	require.Equal(t, first, repeat, "expiry ties need stable ordering")
 	found, err := svc.repo.ChromeGrant(t.Context(), project.ID, old.ID)
 	require.NoError(t, err)
 	require.Equal(t, picks, found.Selections)
@@ -66,4 +83,12 @@ func TestComputerChromeRevokeGrantOutsideListWindow(t *testing.T) {
 	found, err = scoped.repo.ChromeGrant(t.Context(), project.ID, shared.ID)
 	require.NoError(t, err)
 	require.Equal(t, shared.ID, found.ID)
+	visible, more, err := scoped.ChromeGrantsPage(t.Context(), project.ID, 0)
+	require.NoError(t, err)
+	require.False(t, more)
+	require.Len(t, visible, 1)
+	require.Equal(t, shared.ID, visible[0].ID)
+	visible, _, err = scoped.ChromeGrantsPage(t.Context(), "another-project", 0)
+	require.NoError(t, err)
+	require.Empty(t, visible)
 }
