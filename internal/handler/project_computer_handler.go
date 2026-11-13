@@ -89,7 +89,7 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "ready": h.computerService(c).Ready(c.Request().Context(), c.Param("id")), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": h.computerService(c).ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
 	if h.desktopMode && h.computerDesktopURL != "" && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1" && status["ready"] == true {
 		mode := "view"
-		if state.Held && !state.TakeoverPending {
+		if c.QueryParam("viewer_mode") == "control" && state.Held && !state.TakeoverPending {
 			mode = "control"
 		}
 		ticket, err := h.issueComputerTicket(c.Request().Context(), c.Param("id"), mode, c.QueryParam("task_id"), c.QueryParam("viewer_id"))
