@@ -48,3 +48,42 @@ go build ./cmd/server
 go test ./web/templates/components ./web/templates/pages \
   -run 'TestBrowserFunctional_(Virtual|LazyTranscript|HiddenVirtual|SelectAll|Compact|Paging|ThreadCache|Earlier|Upward|ColdThread)' -count=1
 ```
+
+## Memory impact
+
+Memory was measured separately after rebasing onto local main `e16aa84df`, using that commit's unmodified virtual-list source as the baseline. The timing results above were not rerun or replaced. The memory run used the same machine and Chrome version, with **10 paired trials per row count**, alternating version order. Every individual trial started a fresh Chrome process and profile. The fixture uses the same 100px rows, 900px viewport, and 25-position scroll sequence, with visible-content and mounted-row assertions.
+
+Snapshots were taken before installing rows, after installation, after scrolling, and after removing the transcript and disposing its virtual list. Each snapshot followed two forced garbage collections. These are retained-memory measurements, not peak allocations during a frame, and the fixture contains short text rather than real message bodies or media.
+
+Median V8 used heap (`Runtime.getHeapUsage.usedSize`), including fixture/script overhead:
+
+| Rows | Before: initial | After: initial | Before: after scrolling | After: after scrolling | Median paired increase after scrolling |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 200 | 712.5 KiB | 725.6 KiB | 746.8 KiB | 767.9 KiB | 21.1 KiB |
+| 1,000 | 871.1 KiB | 899.1 KiB | 909.1 KiB | 947.7 KiB | 38.6 KiB |
+| 5,000 | 1,694.4 KiB | 1,804.7 KiB | 1,728.9 KiB | 1,853.7 KiB | 125.0 KiB |
+
+The added index and tracking structures therefore have a measurable JavaScript memory cost: approximately **0.12 MiB at 5,000 rows after scrolling**. Median paired differences need not exactly equal differences between the two medians.
+
+JavaScript heap is not the whole cost. Chrome's experimental `embedderHeapUsedSize` counter was unchanged initially, but its median paired increase after scrolling was 33.2, 59.9, and 70.0 KiB respectively. Backing storage increased by approximately 3.0 KiB at each size. These counters are recorded separately in the raw results; they are not a complete accounting of browser memory.
+
+Process RAM was also measured using `ps` RSS summed over this fresh browser's renderer processes:
+
+| Rows | Before: renderer RSS after scrolling | After: renderer RSS after scrolling |
+| ---: | ---: | ---: |
+| 200 | 456.8 MiB | 451.1 MiB |
+| 1,000 | 464.1 MiB | 454.1 MiB |
+| 5,000 | 480.3 MiB | 466.0 MiB |
+
+Every post-scroll sample had five renderer processes. One pre-installation sample had four; raw results preserve this rather than excluding it. RSS includes allocator reservations, shared pages, and other renderer overhead, and is noisier than the heap counters. The lower observed RSS does **not** establish a guaranteed whole-app RAM saving. It does show that the extra retained JavaScript heap did not produce an observed increase in post-scroll renderer RSS in these trials.
+
+Both versions retained identical DOM-node counts at each fixture size and 12 mounted rows after scrolling. After transcript removal, both returned to 11 DOM nodes, nine event listeners, and zero mounted rows. The remaining paired JavaScript heap differences were 10.7, 8.3, and 6.5 KiB, rather than increasing with transcript size. Native heap differences remained approximately 33–70 KiB after removal; these measurements do not identify their allocation sources or prove absence of all leaks.
+
+[Raw snapshots and summaries](transcript-scroll-memory-results.json) include source SHA-256 hashes, Chrome versions, process counts, and every trial. Reproduce with Node 22+ and Chrome installed (`CHROME_PATH` optionally selects the executable):
+
+```sh
+git show e16aa84df:web/assets/chat-virtual-list.js > /tmp/chat-virtual-list-memory-baseline.js
+node scripts/benchmark-transcript-memory.mjs \
+  /tmp/chat-virtual-list-memory-baseline.js \
+  /tmp/transcript-scroll-memory-results.json 10
+```

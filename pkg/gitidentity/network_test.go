@@ -28,7 +28,7 @@ func TestNetworkCredentialsOverrideSavedRepositoryHeaders(t *testing.T) {
 	defer server.Close()
 	endpoint := server.URL + "/acme/app.git"
 	u, _ := url.Parse(server.URL)
-	ctx := WithResolver(context.Background(), func(context.Context) (Identity, error) {
+	ctx := testResolver(context.Background(), func(context.Context) (Identity, error) {
 		return Identity{Name: "Alice", Email: "alice@example.com", Host: u.Host, Token: "alice-token"}, nil
 	})
 	dir := t.TempDir()

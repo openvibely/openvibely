@@ -66,11 +66,9 @@ func ExecuteCreateSwarmTaskRuntime(ctx context.Context, opts CreateSwarmTaskRunt
 	if priority < 1 || priority > 4 {
 		return nil, "", fmt.Errorf("create_swarm_task: priority must be between 1 and 4")
 	}
-	tag := models.TaskTag(strings.TrimSpace(req.Tag))
-	switch tag {
-	case models.TagNone, models.TagFeature, models.TagBug:
-	default:
-		return nil, "", fmt.Errorf("create_swarm_task: tag must be bug or feature")
+	tag, tagErr := models.NormalizeTaskTag(req.Tag)
+	if tagErr != nil {
+		return nil, "", tagErr
 	}
 	reviewerEnabled := true
 	if req.ReviewerEnabled != nil {

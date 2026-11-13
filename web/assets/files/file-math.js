@@ -1,11 +1,16 @@
 (()=>{
  let load,ready=false;
+ const pending=new Set(),selector='[data-math-tex]:not([data-math-ready])';
  function library(){
   if(load)return load;
   load=Promise.all([
    new Promise((resolve,reject)=>{const css=document.createElement('link');css.rel='stylesheet';css.href='/static/vendor/katex.min.css';css.onload=resolve;css.onerror=reject;document.head.append(css)}),
    window.katex?Promise.resolve():new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/static/vendor/katex.min.js';script.onload=resolve;script.onerror=reject;document.head.append(script)})
-  ]).then(()=>{ready=true;scan()}).catch(()=>{load=null});
+  ]).then(()=>{
+   ready=true;
+   for(const node of pending)if(node.isConnected)typeset(node);
+   pending.clear();
+  }).catch(()=>{load=null});
   return load;
  }
  const key=node=>JSON.stringify([node.dataset.mathDisplay,node.dataset.mathTex]);
@@ -49,12 +54,25 @@
    if(old)node.replaceWith(old);else typeset(node);
   });
  };
- function scan(){
-  const nodes=Array.from(document.querySelectorAll('[data-math-tex]:not([data-math-ready])')).filter(node=>!node.closest('[data-thread-refresh-preview]'));
-  if(!nodes.length)return;
-  if(!ready){library();return}
-  nodes.forEach(typeset);
+ function discover(node){
+  if(node.dataset.mathReady||node.closest('[data-thread-refresh-preview]'))return;
+  if(ready)typeset(node);
+  else{pending.add(node);library()}
+ }
+ function scan(root){
+  if(root.nodeType===1){
+   if(!root.isConnected)return;
+   if(root.hasAttribute('data-math-tex')&&!root.hasAttribute('data-math-ready'))discover(root);
+   if(!root.childElementCount)return;
+  }
+  root.querySelectorAll(selector).forEach(discover);
  }
  // Mutation observers run before paint; do not defer math to another animation frame.
- new MutationObserver(scan).observe(document.body,{subtree:true,childList:true});scan();
+ new MutationObserver(records=>{
+  // Keep failed/in-flight loads retryable without retaining discarded chat rows.
+  for(const node of pending)if(!node.isConnected)pending.delete(node);
+  for(const record of records)for(const node of record.addedNodes)if(node.nodeType===1)scan(node);
+ }).observe(document.body,{subtree:true,childList:true});
+ // Existing markup is the only discovery that needs a document-wide query.
+ scan(document);
 })();

@@ -446,6 +446,8 @@ func isSwarmTaskForm(c echo.Context) bool {
 
 func taskRequiredFieldHTTPError(err error) *echo.HTTPError {
 	switch {
+	case errors.Is(err, models.ErrInvalidTaskTag):
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrTaskTitleRequired):
 		return echo.NewHTTPError(http.StatusBadRequest, "Task title is required")
 	case errors.Is(err, service.ErrTaskPromptRequired):
@@ -1668,7 +1670,9 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	// consistent with drag/drop transitions.
 	task.Category = oldCategory
 	task.Prompt = c.FormValue("prompt")
-	task.Tag = models.TaskTag(c.FormValue("tag"))
+	if _, present := c.Request().Form["tag"]; present {
+		task.Tag = models.TaskTag(c.FormValue("tag"))
+	}
 	priorityValue := strings.TrimSpace(c.FormValue("priority"))
 	priority, err := strconv.Atoi(priorityValue)
 	if priorityValue == "" || err != nil {

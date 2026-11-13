@@ -1188,10 +1188,10 @@ func TestRegistry_CreateSwarmTaskSchemaIncludesMetadataOptions(t *testing.T) {
 	if !ok {
 		t.Fatal("missing tag schema")
 	}
-	enum, ok := tag["enum"].([]any)
-	if !ok || len(enum) != 2 || enum[0] != "bug" || enum[1] != "feature" {
-		t.Fatalf("tag schema should advertise bug/feature, got %#v", tag["enum"])
+	if _, fixed := tag["enum"]; fixed || tag["type"] != "string" {
+		t.Fatalf("tag must accept custom strings: %#v", tag)
 	}
+
 	agentID, ok := props["agent_id"].(map[string]any)
 	if !ok {
 		t.Fatal("missing agent_id property")

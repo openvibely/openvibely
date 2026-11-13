@@ -1035,6 +1035,11 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 		}
 	}
 
+	tag, tagErr := models.NormalizeTaskTag(string(t.Tag))
+	if tagErr != nil {
+		return tagErr
+	}
+	t.Tag = tag
 	// Get the max display_order for this project and category, then add 1
 	var maxOrder sql.NullInt64
 	err := exec.QueryRowContext(ctx,
