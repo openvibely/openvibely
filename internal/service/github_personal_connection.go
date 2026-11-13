@@ -136,6 +136,7 @@ func (s *GitHubService) GitContext(ctx context.Context) context.Context {
 	if configErr == nil && modeErr == nil && mode == GitHubAuthModeApp {
 		return ctx
 	}
+	ctx = gitidentity.WithRuntime(ctx, s.gitRuntime)
 	return gitidentity.WithResolver(ctx, func(operation context.Context) (gitidentity.Identity, error) {
 		if configErr != nil {
 			return gitidentity.Identity{}, configErr
