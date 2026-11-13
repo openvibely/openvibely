@@ -47,6 +47,9 @@ func TruncateToolSecondary(value string, max int) string {
 
 // WriteEvent maps canonical events to writer output/state in one place.
 func WriteEvent(writer *Writer, event Event, skipThinking bool) {
+	if writer.eventStructured(event, skipThinking) {
+		return
+	}
 	switch event.Type {
 	case EventTextDelta:
 		if event.Text == "" {

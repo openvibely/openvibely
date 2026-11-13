@@ -6,7 +6,7 @@ Run explicitly:
 OV_INCREMENTAL_DISPLAY_EXPERIMENT=1 go test ./internal/llm/stream -run '^TestIncrementalDisplayExperiment$' -count=3 -v
 ```
 
-Production code is unchanged. The opt-in test compares the existing stream writer with direct, incremental writes through the existing `AppendConversationChanges` API. Each run uses a fresh file-backed SQLite database with production reader/writer routing.
+The initial experiment left production unchanged. The opt-in test originally compared the existing stream writer with direct, incremental writes through the existing `AppendConversationChanges` API. Each run uses a fresh file-backed SQLite database with production reader/writer routing.
 
 Fixture: 128 complete groups containing assistant text, a tool invocation, and a roughly 288 KiB tool result; 37,756,946 bytes total (36 MiB). The incremental variant parses only the just-completed group, writes its structured records, and releases it. The baseline retains the full output in the actual stream Writer, periodically appends raw chunks, and calls Flush before completion. Both use identical output and finish with Complete. Assertions verify reconnect byte offsets and exact final transcript hashes.
 
@@ -23,7 +23,7 @@ Three sequential repetitions, medians:
 
 Negative heap deltas reflect collection of setup allocations, not negative memory usage. Allocation totals include reconnect checks and fixture/group preparation, but exclude the final validation read. There is no peak-RSS or CPU-time measurement. Times are wall-clock durations. The structured write timing varied (616–873 ms).
 
-## Limits and remaining integration
+## Initial experiment limitations
 
 This isolates storage of completed display groups; it is not an end-to-end task implementation or a provider-memory benchmark. The current providers' conversation state and text-only response buffers are not modeled. Streaming partial text still needs durable storage and retry-safe promotion into structured rows. Compaction inspects the full display text, and adapters return full output to service/handler callers; those interfaces must be addressed to prevent recreating the same full buffer elsewhere. Tests must cover plans, pagination, compaction, disconnects, cancellation, crashes, and retry duplication before replacing the production writer.
 
@@ -62,3 +62,47 @@ This is still test-only. It does not implement a background queue, incremental
 partial-message persistence, compaction mapping, or the adapter/service API
 changes required to stop returning a whole display transcript. Passing these
 checks is not proof that production output can yet drop its buffer.
+
+
+## Integrated native-adapter writer
+
+The `integrated` mode now exercises the shared structured Writer used by OpenAI,
+Anthropic, and Compatible. It maps canonical events directly to display records,
+saves unfinished records on the existing background timer, appends text deltas,
+and releases completed records after acknowledgement. A retry repeats the exact
+mutation ID and payload after an uncertain acknowledgement. The raw-command
+writer retains its legacy behavior.
+
+The live browser text and absolute byte offsets are unchanged. Finalization seals
+the display digest rather than reparsing the whole transcript. No schema change
+is required. Cancellation flushes with a context independent of the cancelled
+request; writes after execution completion are rejected.
+
+Existing adapter return contracts and compaction inspection still materialize
+full output explicitly from storage. Thus completion can temporarily use memory
+proportional to the transcript. The assistant-only result buffer and model
+conversation state are unchanged. A single unfinished message is still retained;
+this is not a total memory cap. Failed writes retain pending data for retry rather
+than silently dropping it. At 4 MiB of unsaved data the caller also attempts a
+flush, applying storage backpressure during large bursts.
+
+The updated benchmark includes the full-output completion read for both real
+writers. Its per-group flushes are synchronous to make write measurements
+comparable; background scheduling and UI latency are not benchmarked. Separate
+correctness tests exercise the background timer and live writes during a blocked
+save. Do not compare prototype finalization numbers with integrated finalization
+without accounting for that explicit full-output read.
+
+Latest integrated comparison (36 MiB, three-run medians):
+
+| Metric | Legacy writer | Integrated writer |
+| --- | ---: | ---: |
+| Extra retained display heap before completion | 40.18 MiB | Approximately zero (-0.35 MiB measured) |
+| Cumulative allocations through completion | 726.03 MiB | 487.39 MiB |
+| Preparing and saving all groups | 452.23 ms | 637.16 ms |
+| Completion, including full-output read | 569.49 ms | 143.58 ms |
+| Full experiment including checks | 1086.99 ms | 871.75 ms |
+
+All twelve cases (four approaches, three runs) passed. These timings are not
+CPU time or UI latency, and the retained-heap result excludes model context and
+the assistant-only result buffer. Peak process memory was not measured.

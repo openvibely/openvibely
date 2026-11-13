@@ -1733,9 +1733,14 @@ func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (l
 func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest, triggerErrors ...error) (compactedRequest llmcontracts.AgentRequest, compactErr error) {
 	// This writer completes before the retry adapter seeds its transcript.
 	if req.ExecID != "" && s != nil && s.execRepo != nil {
-		writer := llmstream.NewWriterWithPublisher(req.ExecID, "", s.execRepo, req.Ctx, 500*time.Millisecond, s.executionStreamHub)
+		writer := llmstream.NewStructuredWriterWithPublisher(req.ExecID, "", s.execRepo, req.Ctx, 500*time.Millisecond, s.executionStreamHub)
 		finish := llmcontracts.BeginCompaction(llmstream.CompactionReporter(writer, nil))
-		defer func() { finish(compactErr == nil); writer.Flush(); writer.Stop() }()
+		defer func() {
+			finish(compactErr == nil)
+			writer.Flush()
+			compactErr = errors.Join(compactErr, writer.PersistenceError())
+			writer.Stop()
+		}()
 	}
 	req = restoreCurrentSteeringForRecovery(req)
 	history := append([]models.Execution(nil), req.ChatHistory...)

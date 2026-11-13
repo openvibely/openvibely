@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
@@ -580,7 +581,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, toolPolicy)
 
-	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
+	sw := llmstream.NewStructuredWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 	inThinking := false
 
@@ -666,6 +667,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		}})
 	if err != nil {
 		sw.Flush()
+		err = errors.Join(err, sw.PersistenceError())
 		applog.Infof("[openai-adapter] CallStreaming error: %v", err)
 		return "", "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
 	}
@@ -676,7 +678,10 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 
 	sw.Flush()
 
-	output := sw.String()
+	output, outputErr := sw.Result()
+	if outputErr != nil {
+		return "", "", llmusage.FromTotal(0), outputErr
+	}
 	textOnly := sw.TextString()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
 	recordOpenAINativeCompactionState(&usage, resp)
@@ -728,7 +733,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, toolPolicy)
 
-	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
+	sw := llmstream.NewStructuredWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 	chatInThinking := false
 
@@ -816,6 +821,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		}})
 	if err != nil {
 		sw.Flush()
+		err = errors.Join(err, sw.PersistenceError())
 		applog.Infof("[openai-adapter] CallChatStreaming error: %v", err)
 		return "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
 	}
@@ -826,7 +832,10 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	sw.Flush()
 
-	output := sw.String()
+	output, outputErr := sw.Result()
+	if outputErr != nil {
+		return "", llmusage.FromTotal(0), outputErr
+	}
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
 	recordOpenAINativeCompactionState(&usage, resp)
 	applog.Debugf("[openai-adapter] CallChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
@@ -865,7 +874,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate))
 
-	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
+	sw := llmstream.NewStructuredWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
@@ -903,12 +912,16 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	err = a.saveCompletionsHistory(ctx, execID, client, err)
 	if err != nil {
 		sw.Flush()
+		err = errors.Join(err, sw.PersistenceError())
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("completions API: %w", err)
 	}
 
 	sw.Flush()
 
-	output := sw.String()
+	output, outputErr := sw.Result()
+	if outputErr != nil {
+		return "", "", llmusage.FromTotal(0), outputErr
+	}
 	textOnly := sw.TextString()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
 	applog.Debugf("[openai-adapter] CallCompletionsStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
@@ -951,7 +964,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(isTaskFollowup, chatMode))
 
-	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
+	sw := llmstream.NewStructuredWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
@@ -991,12 +1004,16 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	err = a.saveCompletionsHistory(ctx, execID, client, err)
 	if err != nil {
 		sw.Flush()
+		err = errors.Join(err, sw.PersistenceError())
 		return "", llmusage.FromTotal(0), fmt.Errorf("completions API: %w", err)
 	}
 
 	sw.Flush()
 
-	output := sw.String()
+	output, outputErr := sw.Result()
+	if outputErr != nil {
+		return "", llmusage.FromTotal(0), outputErr
+	}
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
 	applog.Debugf("[openai-adapter] CallCompletionsChatStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
 	if isMaxTokensStopReason(resp.StopReason) {

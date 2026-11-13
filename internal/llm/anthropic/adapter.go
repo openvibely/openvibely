@@ -588,7 +588,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
-	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
+	sw := llmstream.NewStructuredWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
@@ -656,13 +656,17 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	resp, err := client.SendAgentic(ctx, message, opts)
 	if err != nil {
 		sw.Flush()
+		err = errors.Join(err, sw.PersistenceError())
 		applog.Infof("[anthropic] callChatStreaming error: %v", err)
 		return "", "", anthropicContextUsage(resp), fmt.Errorf("anthropicclient agentic chat streaming call: %w", err)
 	}
 
 	sw.Flush()
 
-	output := sw.String()
+	output, outputErr := sw.Result()
+	if outputErr != nil {
+		return "", "", llmusage.FromTotal(0), outputErr
+	}
 	textOnly := sw.TextString()
 	usage := anthropicContextUsage(resp)
 	if compactionSummary != "" || usage.NativeCompactionStateJSON != "" {
@@ -698,7 +702,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
-	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
+	sw := llmstream.NewStructuredWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
@@ -766,13 +770,17 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	resp, err := client.SendAgentic(ctx, fullPrompt, opts)
 	if err != nil {
 		sw.Flush()
+		err = errors.Join(err, sw.PersistenceError())
 		applog.Infof("[anthropic] callStreaming error: %v", err)
 		return "", "", anthropicContextUsage(resp), fmt.Errorf("anthropicclient agentic streaming call: %w", err)
 	}
 
 	sw.Flush()
 
-	output := sw.String()
+	output, outputErr := sw.Result()
+	if outputErr != nil {
+		return "", "", llmusage.FromTotal(0), outputErr
+	}
 	textOnly := sw.TextString()
 	usage := anthropicContextUsage(resp)
 	if compactionSummary != "" || usage.NativeCompactionStateJSON != "" {

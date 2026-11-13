@@ -32,6 +32,8 @@ type ExecutionStreamPublisher interface {
 // deltas in the visible/persisted stream unless the caller adds rollback/reset
 // behavior before writing retry output.
 type Writer struct {
+	structured            *structuredState
+	inspectionErr         error
 	buf                   strings.Builder
 	textBuf               strings.Builder // text-only content (no thinking blocks, no tool markers)
 	mu                    sync.Mutex
@@ -57,7 +59,17 @@ func NewWriterWithPublisher(execID, taskID string, repo persistence.ExecutionSto
 	return newWriterWithOutputRepo(execID, taskID, outputRepo, ctx, interval, publisher)
 }
 
+// NewStructuredWriterWithPublisher uses structured display storage for native
+// event-producing adapters. Legacy/raw command streams retain NewWriterWithPublisher.
+func NewStructuredWriterWithPublisher(execID, taskID string, repo persistence.ExecutionStore, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {
+	return newWriter(execID, taskID, repo, ctx, interval, publisher, true)
+}
+
 func newWriterWithOutputRepo(execID, taskID string, repo executionOutputRepo, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {
+	return newWriter(execID, taskID, repo, ctx, interval, publisher, false)
+}
+
+func newWriter(execID, taskID string, repo executionOutputRepo, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher, structured bool) *Writer {
 	sw := &Writer{
 		execID:    execID,
 		taskID:    taskID,
@@ -82,6 +94,9 @@ func newWriterWithOutputRepo(execID, taskID string, repo executionOutputRepo, ct
 		}
 	}
 
+	if structured && repo != nil && execID != "" {
+		sw.enableStructured(sw.buf.String())
+	}
 	go sw.periodicFlush()
 	return sw
 }
@@ -105,6 +120,10 @@ func (w *Writer) periodicFlush() {
 }
 
 func (w *Writer) flushPeriodicOnce() {
+	if w.structured != nil {
+		w.flushStructured(false)
+		return
+	}
 	w.flushMu.Lock()
 	defer w.flushMu.Unlock()
 
@@ -139,6 +158,10 @@ func pendingOutputDelta(buf *strings.Builder, offset int) string {
 }
 
 func (w *Writer) Write(p []byte) (int, error) {
+	if w.structured != nil {
+		_, err := w.WriteString(string(p))
+		return len(p), err
+	}
 	if !utf8.Valid(p) {
 		if _, err := w.WriteString(string(p)); err != nil {
 			return 0, err
@@ -174,6 +197,9 @@ func (w *Writer) Write(p []byte) (int, error) {
 // WriteString shares immutable text with subscribers while the builders retain
 // their own appended output. Byte callers keep Write's copying semantics.
 func (w *Writer) WriteString(text string) (int, error) {
+	if w.structured != nil {
+		return w.writeStructuredRaw(text)
+	}
 	// Byte offsets published live must equal the stored text, so repair raw
 	// tool bytes before either side counts them.
 	text = strings.ToValidUTF8(text, "\uFFFD")
@@ -207,6 +233,10 @@ func (w *Writer) Stop() {
 // for existing readers. Both writes use a detached context so they can finish
 // after an HTTP client disconnect cancels the original context.
 func (w *Writer) Flush() {
+	if w.structured != nil {
+		w.flushStructured(true)
+		return
+	}
 	w.flushMu.Lock()
 	defer w.flushMu.Unlock()
 
@@ -248,6 +278,15 @@ func (w *Writer) Flush() {
 }
 
 func (w *Writer) String() string {
+	if w.structured != nil {
+		output, err := w.Output()
+		if err != nil {
+			w.mu.Lock()
+			w.inspectionErr = err
+			w.mu.Unlock()
+		}
+		return output
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.String()

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -14,15 +15,14 @@ import (
 	"github.com/openvibely/openvibely/internal/transcript"
 )
 
-// This experiment deliberately does not change the production writer. It tests
-// whether existing structured storage can replace the accumulated display buffer
-// for complete groups. Partial-message recovery and adapter return values still
-// need integration before this is a production alternative.
+// Compare the legacy writer, two storage prototypes, and the integrated writer.
+// This measures completed-group storage; separate tests exercise the background
+// timer, partial messages, cancellation, and uncertain acknowledgements.
 func TestIncrementalDisplayExperiment(t *testing.T) {
 	if os.Getenv("OV_INCREMENTAL_DISPLAY_EXPERIMENT") != "1" {
 		t.Skip("opt-in file-backed display persistence experiment")
 	}
-	for _, mode := range []string{"buffered", "structured", "direct-events"} {
+	for _, mode := range []string{"buffered", "structured", "direct-events", "integrated"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			env := teststores.New(t, teststores.WithProductionTopology())
@@ -47,6 +47,13 @@ func TestIncrementalDisplayExperiment(t *testing.T) {
 				writer = newWriterWithOutputRepo(exec.ID, task.ID, measuredRepo, ctx, time.Hour, nil)
 				defer writer.Stop()
 			}
+			if mode == "integrated" {
+				writer = newWriter(exec.ID, task.ID, &structuredBenchmarkRepo{benchmarkOutputRepo: measuredRepo, store: env.Executions.(StructuredOutputStore)}, ctx, time.Hour, nil, true)
+				defer writer.Stop()
+				if writer.structured == nil {
+					t.Fatal("integrated path disabled")
+				}
+			}
 			expected := sha256.New()
 			runtime.GC()
 			var before, live, end runtime.MemStats
@@ -60,7 +67,13 @@ func TestIncrementalDisplayExperiment(t *testing.T) {
 				total += len(group)
 				at := time.Now()
 				if writer != nil {
-					writer.WriteString(group)
+					if mode == "integrated" {
+						for _, event := range []Event{{Type: EventTextDelta, Text: fmt.Sprintf("answer %d", i)}, {Type: EventToolUse, ToolName: "shell", Secondary: "test"}, {Type: EventToolResult, ToolName: "shell", Output: body}} {
+							WriteEvent(writer, event, false)
+						}
+					} else {
+						writer.WriteString(group)
+					}
 					writer.flushPeriodicOnce()
 				} else {
 					var items []transcript.DisplayItem
@@ -114,7 +127,14 @@ func TestIncrementalDisplayExperiment(t *testing.T) {
 			if writer != nil {
 				writer.Flush()
 			}
-			if err := env.Executions.Complete(ctx, exec.ID, models.ExecCompleted, "", "", 0, 0); err != nil {
+			var completionOutput string
+			if writer != nil {
+				completionOutput, err = writer.Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := env.Executions.Complete(ctx, exec.ID, models.ExecCompleted, completionOutput, "", 0, 0); err != nil {
 				t.Fatal(err)
 			}
 			finishTime := time.Since(finishStart)
@@ -132,4 +152,22 @@ func TestIncrementalDisplayExperiment(t *testing.T) {
 			runtime.KeepAlive(writer)
 		})
 	}
+}
+
+type structuredBenchmarkRepo struct {
+	*benchmarkOutputRepo
+	store StructuredOutputStore
+}
+
+func (r *structuredBenchmarkRepo) StartStructuredOutput(ctx context.Context, id string) (int64, error) {
+	return r.store.StartStructuredOutput(ctx, id)
+}
+func (r *structuredBenchmarkRepo) SealStructuredOutput(ctx context.Context, id string, digest []byte, total int) error {
+	return r.store.SealStructuredOutput(ctx, id, digest, total)
+}
+func (r *structuredBenchmarkRepo) AppendStructuredOutput(ctx context.Context, id string, c []models.ConversationChange) ([]models.ConversationChange, error) {
+	start := time.Now()
+	result, err := r.store.AppendStructuredOutput(ctx, id, c)
+	r.writeTime += time.Since(start)
+	return result, err
 }

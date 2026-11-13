@@ -27,6 +27,9 @@ func CompactionReporter(writer *Writer, inThinking *bool) func(llmcontracts.Comp
 			*inThinking = false
 			WriteEvent(writer, Event{Type: EventThinkingEnd}, false)
 		}
+		if writer.writeStructuredCompaction(progress) {
+			return
+		}
 		switch progress.State {
 		case "started":
 			writer.Write([]byte("\n[Compaction started]\n"))

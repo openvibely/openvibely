@@ -384,7 +384,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		return "", "", llmusage.FromTotal(0), err
 	}
 
-	sw := llmstream.NewWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
+	sw := llmstream.NewStructuredWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
@@ -415,10 +415,15 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
+		err = errors.Join(err, sw.PersistenceError())
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
 	}
 	sw.Flush()
-	return sw.String(), sw.TextString(), usageFromResponse(resp), stopError(resp.StopReason)
+	output, outputErr := sw.Result()
+	if outputErr != nil {
+		return "", "", llmcontracts.Usage{}, outputErr
+	}
+	return output, sw.TextString(), usageFromResponse(resp), stopError(resp.StopReason)
 }
 
 func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, string, llmcontracts.Usage, error) {
@@ -446,7 +451,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		return "", "", llmusage.FromTotal(0), err
 	}
 
-	sw := llmstream.NewWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
+	sw := llmstream.NewStructuredWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
@@ -477,10 +482,15 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
+		err = errors.Join(err, sw.PersistenceError())
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
 	}
 	sw.Flush()
-	return sw.String(), sw.TextString(), usageFromResponse(resp), stopError(resp.StopReason)
+	output, outputErr := sw.Result()
+	if outputErr != nil {
+		return "", "", llmcontracts.Usage{}, outputErr
+	}
+	return output, sw.TextString(), usageFromResponse(resp), stopError(resp.StopReason)
 }
 
 func compatibleTemperature(agent models.LLMConfig) float64 {
