@@ -10,22 +10,15 @@ import (
 	"unsafe"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence/displayindex"
 	"github.com/openvibely/openvibely/internal/transcript"
 )
 
 // displayItemTextSQL renders one current display head (aliased head, with its
 // snapshot aliased base). displayBytesSQL stores the UTF-8 length of
 // this value in display_bytes; both must change together.
-const displayItemBodySQL = `CASE WHEN head.snapshot_sequence=0 OR head.snapshot_sequence=head.sequence
- THEN COALESCE(json_extract(base.payload,'$.text'),'')
- ELSE COALESCE((SELECT group_concat(part,'') FROM (
- SELECT json_extract(delta.payload,'$.text') AS part FROM conversation_items delta
- WHERE delta.execution_id=head.execution_id AND delta.generation=head.generation AND delta.lane='display' AND delta.item_id=head.item_id AND delta.sequence>=head.snapshot_sequence AND delta.sequence<=head.sequence ORDER BY delta.sequence)),'') END`
-
-const displayItemTextSQL = `COALESCE(json_extract(base.payload,'$.prefix'),'') ||
- CASE WHEN json_extract(base.payload,'$.type')='tool_result' AND COALESCE(json_extract(base.payload,'$.encoded'),0)=0
- THEN replace(replace((` + displayItemBodySQL + `),'&','&amp;'),'[','&#91;')
- ELSE (` + displayItemBodySQL + `) END || COALESCE(json_extract(base.payload,'$.suffix'),'')`
+const displayItemBodySQL = displayindex.ItemBodySQL
+const displayItemTextSQL = displayindex.ItemTextSQL
 
 // Execution reads and text exports project current display items into the output
 // string expected by existing callers. Live reconnects use ReadOutputAfter.
@@ -58,10 +51,16 @@ func replaceDisplayOutput(ctx context.Context, tx sqlExecutor, id, output string
 	if err != nil {
 		return err
 	}
-	if err := replaceFinalizedDisplay(ctx, tx, id, records); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM execution_stream_text WHERE execution_id=?`, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM execution_stream_text WHERE execution_id=?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM execution_stream_groups WHERE execution_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM execution_stream_page_state WHERE execution_id=?`, id); err != nil {
+		return err
+	}
+	if err := replaceFinalizedDisplay(ctx, tx, id, records); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE executions SET display_digest=?,display_has_plan=? WHERE id=?`, digest[:], strings.Contains(output, "<proposed_plan>"), id)
@@ -77,10 +76,22 @@ func (r *ExecutionRepo) AppendOutput(ctx context.Context, id, output string) err
 	if output == "" {
 		return nil
 	}
-	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO execution_stream_text(execution_id,end_offset,text)
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		inserted, err := tx.ExecContext(ctx, `INSERT INTO execution_stream_text(execution_id,end_offset,text)
  SELECT id,COALESCE((SELECT end_offset FROM execution_stream_text WHERE execution_id=executions.id ORDER BY end_offset DESC LIMIT 1),0)+?,?
  FROM executions WHERE id=? AND status='running'`, len(output), output, id)
-	return err
+		if err != nil {
+			return err
+		}
+		count, err := inserted.RowsAffected()
+		if err != nil || count == 0 {
+			return err
+		}
+		if err := displayindex.RefreshStreamPlan(ctx, tx, id, output); err != nil {
+			return err
+		}
+		return displayindex.IndexStream(ctx, tx, id, strings.Contains(output, "[/Tool]") || strings.Contains(output, "[/Thinking]"))
+	})
 }
 
 func (r *ExecutionRepo) FinalizeOutput(ctx context.Context, id, output string) error {

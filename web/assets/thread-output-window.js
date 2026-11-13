@@ -17,7 +17,8 @@
             node._outputWindowSeed = {
                 text: node.getAttribute('data-raw-content') || '',
                 cursor: node.dataset.outputWindow,
-                revision: node.getAttribute('data-raw-revision') || ''
+                revision: node.getAttribute('data-raw-revision') || '',
+                byteLength: node.hasAttribute('data-initial-byte-length') ? Number(node.getAttribute('data-initial-byte-length')) : undefined
             };
         });
         for (const [node, controller] of pending) {
@@ -39,6 +40,7 @@
             new URLSearchParams({before, revision, project_id: project}), {signal: controller.signal});
         async function apply(page, replace) {
             const height = messages.scrollHeight;
+            if (!replace) node._prependOutputHistory?.(page.text);
             const text = page.text + (replace ? '' : (node.getAttribute('data-raw-content') || ''));
             const rawRevision = window.setChatRawContent(node, text);
             cursor = page.before !== '0' ? page.before + ':' + page.revision : '';
@@ -60,6 +62,9 @@
             let response = await request(before, revision);
             if (!current()) return;
             if (response.status === 409) {
+                // The live subscription owns the current suffix and absolute
+                // offset. A refresh must not replace it with an older HTTP snapshot.
+                if (node.dataset.streamingResume === 'true') return;
                 response = await request('0', '');
                 if (!response.ok || !current()) return;
                 const latest = await response.json();

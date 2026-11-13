@@ -38,75 +38,69 @@ func readDisplayTail(ctx context.Context, tx sqlExecutor, id string, before int6
 	if budget <= 0 {
 		budget = 1
 	}
-	// Small responses and live streams need no per-row materialization in Go.
-	// SQLite checks indexed byte metadata first, and only assembles full output
-	// when it fits (or a live/cancelled raw stream requires it). Plan-bearing
-	// responses remain complete: existing approval controls inspect their raw text.
-	// Older/edited rows without plan metadata fall back to inspecting public text.
+	// A plan is a separate projection: surrounding history need not be loaded
+	// just to preserve approval content. Raw unfinished streams still require
+	// their parsing context until safe stream boundaries are available.
 	var complete sql.NullString
 	queryHead := `SELECT CASE WHEN display_digest IS NOT NULL THEN hex(display_digest) ELSE 'seq-'||COALESCE((SELECT MAX(sequence) FROM conversation_items WHERE execution_id=executions.id AND lane='display'),0) END,
-      CASE WHEN status IN ('running','queued') OR EXISTS(SELECT 1 FROM execution_stream_text WHERE execution_id=executions.id) OR (?=0 AND (COALESCE(display_has_plan,
-        EXISTS(SELECT 1 FROM conversation_items head JOIN conversation_items base ON base.sequence=COALESCE(NULLIF(head.snapshot_sequence,0),head.sequence)
-          WHERE head.execution_id=executions.id AND head.generation=0 AND head.lane='display' AND head.is_current=1 AND head.operation!='remove' AND instr(` + displayItemTextSQL + `,'<proposed_plan>')>0))=1
-        OR COALESCE((SELECT SUM(display_bytes) FROM conversation_items WHERE execution_id=executions.id AND generation=0 AND lane='display' AND is_current=1 AND operation!='remove'),0)
-        + COALESCE((SELECT end_offset FROM execution_stream_text WHERE execution_id=executions.id ORDER BY end_offset DESC LIMIT 1),0) <= ?)) THEN ` + displayOutputSQL + ` END
+      CASE WHEN (?=0 AND COALESCE((SELECT end_bytes FROM execution_display_groups WHERE execution_id=executions.id ORDER BY first_position DESC,first_item DESC LIMIT 1),0)+COALESCE((SELECT end_offset FROM execution_stream_text WHERE execution_id=executions.id ORDER BY end_offset DESC LIMIT 1),0)<=?) THEN ` + displayOutputSQL + ` END,
+      COALESCE((SELECT end_bytes FROM execution_display_groups WHERE execution_id=executions.id ORDER BY first_position DESC,first_item DESC LIMIT 1),0)+COALESCE((SELECT end_offset FROM execution_stream_text WHERE execution_id=executions.id ORDER BY end_offset DESC LIMIT 1),0),
+      CASE WHEN ?=0 THEN COALESCE((SELECT content FROM execution_display_plans WHERE execution_id=executions.id),'') ELSE '' END
       FROM executions WHERE id=?`
-	if err := tx.QueryRowContext(ctx, queryHead, before, budget, id).Scan(&result.Revision, &complete); err != nil {
+	if err := tx.QueryRowContext(ctx, queryHead, before, budget, before, id).Scan(&result.Revision, &complete, &result.EndOffset, &result.Plan); err != nil {
 		return result, err
 	}
 	if complete.Valid {
 		result.Text = complete.String
 		return result, nil
 	}
-	const filter = `execution_id=? AND generation=0 AND lane='display' AND is_current=1 AND operation!='remove'`
-	query := `SELECT head.sequence,head.display_bytes,COALESCE(json_extract(base.payload,'$.type'),''),COALESCE(json_extract(base.payload,'$.name'),'')
- FROM conversation_items head JOIN conversation_items base ON base.sequence=COALESCE(NULLIF(head.snapshot_sequence,0),head.sequence)
- WHERE head.execution_id=? AND head.generation=0 AND head.lane='display' AND head.is_current=1 AND head.operation!='remove'`
-	args := []any{id}
-	if before != 0 {
-		var pos int64
-		var item string
-		if err := tx.QueryRowContext(ctx, `SELECT position,item_id FROM conversation_items WHERE `+filter+` AND sequence=?`, id, before).Scan(&pos, &item); err != nil {
+	if before <= 0 {
+		handled, err := readStreamDisplayTail(ctx, tx, id, before, budget, &result)
+		if err != nil || handled {
 			return result, err
 		}
-		query += ` AND (head.position<? OR (head.position=? AND head.item_id<?))`
-		args = append(args, pos, pos, item)
+		if before == -1 {
+			before = 0
+		}
 	}
-	query += ` ORDER BY head.position,head.item_id`
-	rows, err := tx.QueryContext(ctx, query, args...)
+
+	// The write path records safe tool-group boundaries. Seek those boundaries
+	// backwards; do not materialize metadata for the rest of the transcript.
+	var beforePos int64
+	var beforeItem string
+	if before != 0 {
+		if err := tx.QueryRowContext(ctx, `SELECT position,item_id FROM conversation_items WHERE execution_id=? AND generation=0 AND lane='display' AND is_current=1 AND operation!='remove' AND sequence=?`, id, before).Scan(&beforePos, &beforeItem); err != nil {
+			return result, err
+		}
+	}
+	q := `SELECT first_position,first_item,byte_count FROM execution_display_groups WHERE execution_id=?`
+	args := []any{id}
+	if before != 0 {
+		q += ` AND (first_position,first_item)<(?,?)`
+		args = append(args, beforePos, beforeItem)
+	}
+	q += ` ORDER BY first_position DESC,first_item DESC`
+	rows, err := tx.QueryContext(ctx, q, args...)
 	if err != nil {
 		return result, err
 	}
-	// Only split where all preceding tool calls are complete. A result must
-	// retain its call, including the earlier calls in a parallel FIFO queue.
-	// Unmatched/aliased markers conservatively keep a larger group intact.
-	type group struct{ first, bytes int }
-	var groups []group
-	var sequences []int64
-	pending := make(map[string]int)
-	open := 0
+	var firstPos int64
+	var firstItem string
+	used, count, earlier := 0, 0, false
 	for rows.Next() {
-		var seq int64
+		var pos int64
+		var item string
 		var size int
-		var kind, name string
-		if err = rows.Scan(&seq, &size, &kind, &name); err != nil {
+		if err = rows.Scan(&pos, &item, &size); err != nil {
 			break
 		}
-		if open == 0 {
-			groups = append(groups, group{first: len(sequences)})
+		if count > 0 && used+size > budget {
+			earlier = true
+			break
 		}
-		sequences = append(sequences, seq)
-		groups[len(groups)-1].bytes += size
-		switch kind {
-		case "using":
-			pending[name]++
-			open++
-		case "tool_result":
-			if pending[name] > 0 {
-				pending[name]--
-				open--
-			}
-		}
+		firstPos, firstItem = pos, item
+		used += size
+		count++
 	}
 	if err == nil {
 		err = rows.Err()
@@ -115,50 +109,42 @@ func readDisplayTail(ctx context.Context, tx sqlExecutor, id string, before int6
 	if err != nil {
 		return result, err
 	}
-	if len(sequences) == 0 {
+	if count == 0 {
 		return result, nil
 	}
-	used, first := 0, len(sequences)
-	for i := len(groups) - 1; i >= 0; i-- {
-		if first < len(sequences) && used+groups[i].bytes > budget {
-			break
-		}
-		used += groups[i].bytes
-		first = groups[i].first
+	q = `SELECT head.sequence,` + displayItemTextSQL + ` FROM conversation_items head JOIN conversation_items base ON base.sequence=COALESCE(NULLIF(head.snapshot_sequence,0),head.sequence)
+ WHERE head.execution_id=? AND head.generation=0 AND head.lane='display' AND head.is_current=1 AND head.operation!='remove' AND (head.position,head.item_id)>=(?,?)`
+	args = []any{id, firstPos, firstItem}
+	if before != 0 {
+		q += ` AND (head.position,head.item_id)<(?,?)`
+		args = append(args, beforePos, beforeItem)
 	}
-	if first > 0 {
-		result.Before = sequences[first]
+	q += ` ORDER BY head.position,head.item_id`
+	rows, err = tx.QueryContext(ctx, q, args...)
+	if err != nil {
+		return result, err
 	}
-	sequences = sequences[first:]
-	// Fetch payloads only for the selected complete groups. SQL batches are an
-	// implementation detail, not another visible item-count limit.
 	var text strings.Builder
 	text.Grow(used)
-	for start := 0; start < len(sequences); start += 256 {
-		batch := sequences[start:min(start+256, len(sequences))]
-		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
-		args = make([]any, len(batch))
-		for i, seq := range batch {
-			args[i] = seq
+	first := true
+	for rows.Next() {
+		var seq int64
+		var part string
+		if err = rows.Scan(&seq, &part); err != nil {
+			break
 		}
-		rows, err = tx.QueryContext(ctx, `SELECT `+displayItemTextSQL+` FROM conversation_items head JOIN conversation_items base ON base.sequence=COALESCE(NULLIF(head.snapshot_sequence,0),head.sequence) WHERE head.sequence IN (`+placeholders+`) ORDER BY head.position,head.item_id`, args...)
-		if err != nil {
-			return result, err
+		if first && earlier {
+			result.Before = seq
 		}
-		for rows.Next() {
-			var part string
-			if err = rows.Scan(&part); err != nil {
-				break
-			}
-			text.WriteString(part)
-		}
-		if err == nil {
-			err = rows.Err()
-		}
-		rows.Close()
-		if err != nil {
-			return result, err
-		}
+		first = false
+		text.WriteString(part)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		return result, err
 	}
 	result.Text = text.String()
 	return result, err
@@ -212,6 +198,7 @@ func (r *ExecutionRepo) ListDisplayExecutions(ctx context.Context, projectID, ta
 			return nil, false, fmt.Errorf("read display tail: %w", err)
 		}
 		execs[i].Output = tail.Text
+		execs[i].DisplayPlan = tail.Plan
 		if tail.Before != 0 {
 			execs[i].DisplayTail = &tail
 		}
@@ -243,6 +230,7 @@ func (r *ExecutionRepo) GetDisplayExecutionTail(ctx context.Context, id string) 
 		return nil, err
 	}
 	execution.Output = tail.Text
+	execution.DisplayPlan = tail.Plan
 	if tail.Before != 0 {
 		execution.DisplayTail = &tail
 	}

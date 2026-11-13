@@ -268,3 +268,54 @@ func TestBrowserFunctional_ByteWindowStaleCursorRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_ByteWindowCachesMatchingResumeOffset(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projects := []models.Project{{ID: "resume-a", Name: "A"}, {ID: "resume-b", Name: "B"}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path != "/chat" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		project := r.URL.Query().Get("project_id")
+		history := []models.Execution{{ID: "resume-exec", TaskID: "resume-task", Status: models.ExecCompleted, Output: "visible café suffix", StartedAt: time.Unix(1, 0), DisplayTail: &models.DisplayTail{Before: 123, Revision: "resume", EndOffset: 9000000}}}
+		if project == "resume-b" {
+			history = nil
+		}
+		var html strings.Builder
+		if r.Header.Get("HX-Request") == "true" {
+			_ = ChatContent(nil, history, project, nil, nil, nil, false, false, 5).Render(r.Context(), &html)
+		} else {
+			_ = Chat(projects, project, nil, history, nil, nil, nil, false, false, 5).Render(r.Context(), &html)
+		}
+		// Exercise navigation caching without a real model stream. The live view's
+		// source and absolute-offset attributes use the same cache path.
+		body := strings.ReplaceAll(html.String(), `class="chat-stream-content"`, `class="chat-stream-content" data-initial-byte-length="9000000"`)
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id=resume-a", "window-resume-offset", func(b *composerFocusCDP) {
+		b.waitFor("window initialized", `String(!!document.querySelector('.chat-stream-content')?._outputWindowSeed)`, "true")
+		b.waitFor("fresh offset", `document.querySelector('.chat-stream-content').getAttribute('data-initial-byte-length')`, "9000000")
+		// Simulate new live output and older-page loading after the original seed.
+		b.evaluate(`(()=>{const n=document.querySelector('.chat-stream-content');n.setAttribute('data-raw-content','older output\nvisible café suffix\nnew live output');n.setAttribute('data-initial-byte-length','9000016');return 'updated';})()`)
+		b.evaluate(`window.openVibelyNavigate('/chat?project_id=resume-b'); 'away'`)
+		b.waitFor("away", `document.getElementById('chat-page-root').dataset.projectId`, "resume-b")
+		b.waitFor("matching cached pair", `String(Array.from(window.openVibelyThreadCache.pages.values()).some(p=>p.sources.some(s=>s.text==='visible café suffix'&&s.byteLength===9000000)))`, "true")
+		b.evaluate(`window.openVibelyNavigate('/chat?project_id=resume-a'); 'back'`)
+		b.waitFor("cached return", `document.getElementById('chat-page-root').dataset.projectId`, "resume-a")
+		b.waitFor("cached absolute offset", `document.querySelector('.chat-stream-content').getAttribute('data-initial-byte-length')`, "9000000")
+		b.waitFor("matching cached source", `document.querySelector('.chat-stream-content').getAttribute('data-raw-content')`, "visible café suffix")
+		b.evaluate(`(()=>{const calls=[];window.openVibelyLive.execution=(...args)=>{calls.push(args);return {close(){}}};const n=document.querySelector('.chat-stream-content');window.openVibelyThreadCache.execution('resume-exec','resume-a',n.getAttribute('data-raw-content'),n,Number(n.getAttribute('data-initial-byte-length')));window.resumeAuditCalls=calls;return 'subscribed';})()`)
+		b.waitFor("transport absolute cursor", `String(window.resumeAuditCalls[0][1])`, "9000000")
+		b.evaluate(`window.openVibelyNavigate('/chat?project_id=resume-b'); 'away again'`)
+		b.waitFor("away again", `document.getElementById('chat-page-root').dataset.projectId`, "resume-b")
+		b.evaluate(`window.openVibelyThreadCache.pages.clear(); window.openVibelyNavigate('/chat?project_id=resume-a'); 'uncached'`)
+		b.waitFor("uncached return", `document.getElementById('chat-page-root').dataset.projectId`, "resume-a")
+		b.waitFor("fresh server cursor", `document.querySelector('.chat-stream-content').getAttribute('data-initial-byte-length')`, "9000000")
+	})
+}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/persistence/displayindex"
 )
 
 var ErrConversationConflict = persistence.ErrConversationConflict
@@ -221,6 +222,20 @@ func appendConversationChangesEncoded(ctx context.Context, tx sqlExecutor, owner
 			}
 		}
 		result = append(result, change)
+	}
+	if owner.ExecutionID != "" {
+		var first *models.ConversationChange
+		for i := range changes {
+			c := &changes[i]
+			if c.Lane == models.ConversationDisplay && c.Generation == 0 && (first == nil || c.Position < first.Position || (c.Position == first.Position && c.ItemID < first.ItemID)) {
+				first = c
+			}
+		}
+		if first != nil {
+			if err := displayindex.Refresh(ctx, tx, owner.ExecutionID, first.Position, first.ItemID, changes); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return result, nil
 }

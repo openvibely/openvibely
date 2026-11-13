@@ -30,6 +30,7 @@ type SQLStatementCounter struct {
 	enabled           bool
 	statements        []string
 	selectedTextBytes int
+	returnedRows      int
 	observer          func(context.Context, string)
 	rowsCloseObserver func(context.Context, string)
 }
@@ -45,6 +46,7 @@ func (c *SQLStatementCounter) Reset() {
 	defer c.mu.Unlock()
 	c.statements = nil
 	c.selectedTextBytes = 0
+	c.returnedRows = 0
 }
 
 func (c *SQLStatementCounter) Statements() []string {
@@ -281,6 +283,11 @@ func (r *statementCountingRows) Next(dest []driver.Value) error {
 	err := r.Rows.Next(dest)
 	if err == nil {
 		r.counter.recordSelectedTextBytes(dest)
+		r.counter.mu.Lock()
+		if r.counter.enabled {
+			r.counter.returnedRows++
+		}
+		r.counter.mu.Unlock()
 	}
 	return err
 }
@@ -546,4 +553,11 @@ func seedTestDefaultAgent(tb testing.TB, db *sql.DB) {
 	`); err != nil {
 		tb.Fatalf("failed to seed default test agent: %v", err)
 	}
+}
+
+// ReturnedRows counts driver rows, not SQLite internal index visits.
+func (c *SQLStatementCounter) ReturnedRows() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.returnedRows
 }

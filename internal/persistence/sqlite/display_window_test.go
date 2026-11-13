@@ -57,8 +57,19 @@ func TestDisplayExecutionKeepsEarlierPlanContent(t *testing.T) {
 		}
 		tail, err := repo.GetDisplayExecutionTail(t.Context(), owner.ExecutionID)
 		require.NoError(t, err)
-		require.Equal(t, output, tail.Output, "plan approval must see the marker even outside the byte window")
-		require.Nil(t, tail.DisplayTail)
+		require.Less(t, len(tail.Output), len(output))
+		require.Equal(t, "<proposed_plan>Earlier plan</proposed_plan>\n", tail.DisplayPlan)
+		require.NotNil(t, tail.DisplayTail)
+		// Older pages still contain the original plan exactly once.
+		joined := tail.Output
+		cursor := tail.DisplayTail.Before
+		for cursor != 0 {
+			page, err := repo.ReadProjectDisplayTail(t.Context(), "default", owner.ExecutionID, cursor, 1024*1024)
+			require.NoError(t, err)
+			joined = page.Text + joined
+			cursor = page.Before
+		}
+		require.Equal(t, output, joined)
 	}
 }
 
@@ -186,8 +197,10 @@ func TestDisplayWindowCompletionSnapshot(t *testing.T) {
 		require.NotNil(t, got.execution)
 		require.Equal(t, exec.ID, got.execution.ID)
 		if got.execution.Status == models.ExecRunning {
-			require.Nil(t, got.execution.DisplayTail, "a running seed must never be a finalized suffix")
-			require.Equal(t, output, got.execution.Output)
+			require.NotNil(t, got.execution.DisplayTail)
+			require.Equal(t, int64(len(output)), got.execution.DisplayTail.EndOffset, "live resume uses the full durable offset, not the visible suffix length")
+			require.True(t, strings.HasSuffix(output, got.execution.Output))
+			require.True(t, strings.HasSuffix(output, got.execution.Output))
 		} else {
 			require.Equal(t, models.ExecCompleted, got.execution.Status)
 			require.NotNil(t, got.execution.DisplayTail)

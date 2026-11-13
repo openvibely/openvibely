@@ -22,7 +22,7 @@ func (h *Handler) ChatOutputBefore(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound)
 	}
 	before, err := strconv.ParseInt(c.QueryParam("before"), 10, 64)
-	if err != nil || before < 0 {
+	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid output cursor")
 	}
 	store, ok := h.execRepo.(interface {

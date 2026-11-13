@@ -176,7 +176,15 @@
         project = projectID(project);
         const seedBytes = encoder.encode(seed || '').length;
         const offset = Number.isSafeInteger(initialOffset) && initialOffset >= 0 ? initialOffset : seedBytes;
+        // A windowed seed is a suffix, not a canonical transcript prefix.
+        // Subscribe at its absolute cursor rather than replaying omitted history.
         if (!project) return window.openVibelyLive.execution(id, offset, project);
+        if (container?.getAttribute?.('data-output-window')) {
+            const key = runKey(project, id), existing = runs.get(key);
+            if (existing) discard(existing);
+            suppressedExecutions.add(key);
+            return window.openVibelyLive.execution(id, offset, project);
+        }
         const root = container?.closest('[data-task-id]');
         const task = container?.closest('#chat-page-root') ? 'chat' : (root?.getAttribute('data-task-id') || '');
         // HTML can contain normalized legacy markers, whose display bytes are

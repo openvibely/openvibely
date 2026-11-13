@@ -6,6 +6,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/persistence/displayindex"
 )
 
 // Final output is a complete authoritative message set. The owning transaction
@@ -45,5 +46,5 @@ func replaceFinalizedDisplay(ctx context.Context, tx sqlExecutor, id string, rec
 		}
 		start = end
 	}
-	return nil
+	return displayindex.Rebuild(ctx, tx, id)
 }

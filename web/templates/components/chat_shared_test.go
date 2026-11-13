@@ -6598,3 +6598,20 @@ func TestTaskFilesListIncludesGeneratedOutputs(t *testing.T) {
 		t.Fatalf("missing generated output: %s", content)
 	}
 }
+
+func TestWindowedExecutionKeepsPlanAndAbsoluteResumeCursor(t *testing.T) {
+	for _, status := range []models.ExecutionStatus{models.ExecCompleted, models.ExecRunning} {
+		execution := models.Execution{ID: "windowed", Status: status, Output: "recent suffix", DisplayPlan: "<proposed_plan>complete approval</proposed_plan>", DisplayTail: &models.DisplayTail{Before: 42, Revision: "revision", EndOffset: 9000000}}
+		var out bytes.Buffer
+		if err := ChatExecutionPair(execution, nil, []models.Execution{execution}, 0, false, nil, "messages", "thread", "project").Render(context.Background(), &out); err != nil {
+			t.Fatal(err)
+		}
+		html := out.String()
+		if !strings.Contains(html, "complete approval") || !strings.Contains(html, `data-execution-plan="true"`) {
+			t.Fatal("window omitted approval plan")
+		}
+		if status == models.ExecRunning && !strings.Contains(html, `data-initial-byte-length="9000000"`) {
+			t.Fatal("stream cursor used suffix length")
+		}
+	}
+}

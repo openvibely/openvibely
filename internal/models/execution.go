@@ -17,12 +17,15 @@ const (
 
 // DisplayTail describes a bounded public view, never provider replay state.
 type DisplayTail struct {
-	Text     string `json:"text"`
-	Before   int64  `json:"before,string"`
-	Revision string `json:"revision"`
+	EndOffset int64  `json:"end_offset,string"`
+	Plan      string `json:"plan,omitempty"`
+	Text      string `json:"text"`
+	Before    int64  `json:"before,string"`
+	Revision  string `json:"revision"`
 }
 
 type Execution struct {
+	DisplayPlan  string       `json:"-"`
 	DisplayTail  *DisplayTail `json:"-"`
 	AuthorUserID string       `json:"author_user_id,omitempty"`
 	AuthorName   string       `json:"author_name,omitempty"`

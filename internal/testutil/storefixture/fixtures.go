@@ -365,6 +365,7 @@ type IOStats struct {
 	ExecutionHistoryReads int
 	Requests              int
 	ReadTextBytes         int
+	ReturnedRows          int // Driver-returned rows, not SQLite internal scan steps.
 }
 
 type ReadOperation string

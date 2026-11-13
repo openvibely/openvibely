@@ -111,7 +111,8 @@ func TestOutputWindowProjectScopeAndContinuation(t *testing.T) {
 	require.Equal(t, tail.Before, latest.Before)
 	require.Equal(t, tail.Revision, latest.Revision)
 	require.Equal(t, execution.Output, latest.Text)
-	for _, cursor := range []string{"", "-1", "invalid"} {
+	require.Equal(t, http.StatusConflict, htmxGet(e, fmt.Sprintf("/chat/output/%s?before=-1&project_id=%s", execution.ID, project.ID)).Code)
+	for _, cursor := range []string{"", "invalid"} {
 		require.Equal(t, http.StatusBadRequest, htmxGet(e, fmt.Sprintf("/chat/output/%s?before=%s&project_id=%s", execution.ID, cursor, project.ID)).Code)
 	}
 }
