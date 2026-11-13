@@ -1,7 +1,7 @@
 FROM golang:1.27.1 AS builder
 WORKDIR /src
 COPY cmd/computer/ ./
-RUN go mod init openvibely.local/computer && CGO_ENABLED=0 go build -o /computer .
+RUN go mod init openvibely.local/computer && go get github.com/coder/websocket@v1.8.15 && CGO_ENABLED=0 go build -o /computer .
 
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive DISPLAY=:99 PLAYWRIGHT_BROWSERS_PATH=/opt/browsers

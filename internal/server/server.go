@@ -1139,6 +1139,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		hostedPendingStore = auth.NewPendingStore(srvCtx, time.Now)
 	}
 
+	llmSvc.ProjectComputerService().StartIdleMaintenance(srvCtx)
 	backend.StartMaintenance(srvCtx)
 	updateDrain.StartExpirySupervisor(srvCtx)
 	workerSvc.Start(srvCtx)

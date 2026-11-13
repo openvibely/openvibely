@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
+	"github.com/openvibely/openvibely/internal/models"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +92,7 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 		if state.Held && !state.TakeoverPending {
 			mode = "control"
 		}
-		ticket, err := h.issueComputerTicket(c.Request().Context(), c.Param("id"), mode, c.QueryParam("task_id"))
+		ticket, err := h.issueComputerTicket(c.Request().Context(), c.Param("id"), mode, c.QueryParam("task_id"), c.QueryParam("viewer_id"))
 		if err != nil {
 			return echo.NewHTTPError(429, err.Error())
 		}
@@ -119,6 +122,9 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 	defer cancel()
 	var err error
 	switch c.Param("action") {
+	case "viewer-activity":
+		principal, _ := models.PrincipalFromContext(ctx)
+		err = h.computerService(c).ViewerActivity(ctx, c.Param("id"), principal.UserID, c.QueryParam("viewer_id"))
 	case "idle-timeout":
 		minutes, parseErr := strconv.Atoi(c.FormValue("idle_minutes"))
 		if parseErr != nil {
@@ -149,7 +155,7 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 			return h.taskSvc.InterruptForComputer(ctx, c.QueryParam("task_id"))
 		})
 	case "release":
-		err = h.computerService(c).Control(ctx, c.Param("id"), false, nil)
+		_, err = h.computerService(c).ReleaseUnviewed(ctx, c.Param("id"), true)
 	default:
 		return echo.NewHTTPError(404)
 	}
@@ -202,8 +208,42 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	} else {
 		u.Scheme = "ws"
 	}
+	state, err := h.computerService(c).Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	session := c.QueryParam("viewer_id")
+	if session == "" {
+		session = rand.Text()
+	}
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]{16,64}$`).MatchString(session) {
+		return echo.NewHTTPError(400, "Invalid viewer session")
+	}
+	principal, _ := models.PrincipalFromContext(ctx)
+	svc := h.computerService(c)
+	token, detach, err := svc.RegisterViewer(id, principal.UserID, session, mode == "control", cancel)
+	if err != nil {
+		return echo.NewHTTPError(409, err.Error())
+	}
+	taskID := c.QueryParam("task_id")
+	defer func() {
+		detach()
+		if mode == "control" {
+			go func() {
+				// Allow a transient reconnect or view/control switch to settle first.
+				timer := time.NewTimer(2 * time.Second)
+				defer timer.Stop()
+				<-timer.C
+				cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+				defer stop()
+				if released, err := svc.ReleaseUnviewed(cleanup, id); err == nil && released {
+					h.PromoteQueuedTaskThreadInput(taskID)
+				}
+			}()
+		}
+	}()
 	u.Path = strings.TrimRight(u.Path, "/") + "/rfb-" + mode
-	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}}, Subprotocols: []string{"binary"}})
+	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}, "X-OV-Viewer-ID": {token}, "X-OV-Viewer-Idle-Seconds": {strconv.Itoa(state.IdleMinutes * 60)}}, Subprotocols: []string{"binary"}})
 	if err != nil {
 		return echo.NewHTTPError(502, "Computer viewer unavailable")
 	}
@@ -245,7 +285,10 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 			}
 		}
 	}()
-	<-done
+	streamErr := <-done
+	if websocket.CloseStatus(streamErr) == 4001 {
+		downstream.Close(websocket.StatusCode(4001), "viewer-idle")
+	}
 	cancel()
 	return nil
 }

@@ -63,9 +63,7 @@ func (s *ProjectComputerService) Connection(ctx context.Context, id string) (Com
 		return ComputerConnection{}, errors.New("computer provider differs from this installation")
 	}
 	conn, err := s.provisioner.Resolve(ctx, id)
-	if err == nil {
-		s.startIdleMonitor(id)
-	}
+
 	if err == nil && s.taskID != "" {
 		conn.Endpoint += "/desktops/" + ComputerDesktopID(s.taskID)
 		stale, cleanupErr := s.repo.ExpiredChromeInstallations(ctx, id)
@@ -166,7 +164,7 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 			if err := s.requireIsolation(data); err != nil {
 				return err
 			}
-			s.startIdleMonitor(id)
+
 			return nil
 		}
 		select {
@@ -741,10 +739,11 @@ func (s *ProjectComputerService) requireIsolation(data []byte) error {
 	switch s.provisioner.(type) {
 	case *LocalComputerProvisioner, *HostedComputerProvisioner:
 		var health struct {
-			Isolation int `json:"isolation"`
+			Isolation  int `json:"isolation"`
+			ViewerIdle int `json:"viewer_idle"`
 		}
-		if json.Unmarshal(data, &health) != nil || health.Isolation != 1 {
-			return errors.New("update the project computer image: isolated task desktops are required")
+		if json.Unmarshal(data, &health) != nil || health.Isolation != 1 || health.ViewerIdle != 1 {
+			return errors.New("update the project computer image: isolated task desktops and viewer idle timeouts are required")
 		}
 	}
 	return nil

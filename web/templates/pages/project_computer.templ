@@ -90,17 +90,23 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      if(!root || root.dataset.bound) return;
      root.dataset.bound='true';
      const base='/projects/'+encodeURIComponent(root.dataset.computerProject)+'/computer';
-     const scoped=path=>base+path+(root.dataset.computerTask?'?task_id='+encodeURIComponent(root.dataset.computerTask):'');
+     const viewerID=crypto.randomUUID();
+     const scoped=path=>base+path+'?viewer_id='+viewerID+(root.dataset.computerTask?'&task_id='+encodeURIComponent(root.dataset.computerTask):'');
      const dialog=root.querySelector('[data-computer-dialog]');
      const homes=[];
      const expand=root.querySelector('[data-computer-preview-open]');
-     function openViewer(){if(dialog.open || closing)return;takeoverRequested=true;for(const node of [root.querySelector('[data-computer-status]'),root.querySelector('[data-computer-login]'),root.querySelector('[data-computer-files]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();refresh();}
+     function openViewer(){if(closing)return;idleDisconnected=false;reconnect.hidden=true;if(dialog.open){takeoverRequested=true;refresh();return;}takeoverRequested=true;for(const node of [root.querySelector('[data-computer-status]'),root.querySelector('[data-computer-login]'),root.querySelector('[data-computer-files]'),reconnect,screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();refresh();}
      root.querySelector('[data-computer-preview-open]').onclick=openViewer;
      root.querySelector('[data-computer-close]').onclick=()=>{dialog.close();finishViewer();};
      dialog.addEventListener('close',finishViewer);
      async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;takeoverRequested=false;closing=true;recording=false;renderDemo();disconnect(true);for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='220px';expand.focus();try{if(controlPromise)await controlPromise;const res=await fetch(scoped('/status'),{cache:'no-store'});if(!res.ok)throw Error('Could not check computer control. Reopen the viewer and try exiting again.');const state=await res.json();if((state.held||state.takeover_pending)&&!state.handoff_kind){const released=await fetch(scoped('/release'),{method:'POST'});if(!released.ok)throw Error('Could not return computer control. Reopen the viewer and try exiting again.');}}catch(e){status.textContent=e.message;return;}finally{closing=false;}await refresh();return true;}
      const status=root.querySelector('[data-computer-status]');
      const screen=root.querySelector('[data-computer-screen]');
+     let idleDisconnected=false,lastActivitySent=0;
+     const reconnect=document.createElement('button');reconnect.dataset.computerReconnect='';reconnect.type='button';reconnect.className='btn btn-sm';reconnect.textContent='Reconnect computer';reconnect.hidden=true;screen.before(reconnect);
+     reconnect.onclick=()=>{idleDisconnected=false;reconnect.hidden=true;takeoverRequested=dialog.open;refresh();};
+     function userActivity(event){if(!event.isTrusted||!connected||idleDisconnected||Date.now()-lastActivitySent<5000)return;lastActivitySent=Date.now();fetch(scoped('/viewer-activity'),{method:'POST'}).catch(()=>{});}
+     for(const event of ['pointerdown','pointermove','keydown','wheel','paste'])root.addEventListener(event,userActivity,{capture:true,passive:true});
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, takeoverRequested=false, closing=false, controlPromise=null, retained=null, frameTimer=null;
      const clipboardButton=root.querySelector('[data-computer-clipboard]');
@@ -200,6 +206,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       frameTimer=setTimeout(()=>revealFrame(epoch),50);
      }
      async function viewer(held,state){
+      if(idleDisconnected)return;
       held=held && dialog.open;
       const next=held?'control':'view';
       if(rfb && mode===next)return;
@@ -215,11 +222,12 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;connectionMessage='';reportConnection();if(held)installKeyboard();});
       rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;clipboard=event.detail.text;clipboardButton.disabled=!clipboard;if(document.hasFocus())navigator.clipboard?.writeText(clipboard).catch(()=>{status.textContent='Use Copy clipboard to copy the remote selection.';});});
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;connectionMessage='Desktop authentication failed. Reconnecting…';reportConnection();}});
-      rfb.addEventListener('disconnect',()=>{if(epoch===generation){connected=false;rfb=null;mode='';clipboard='';clipboardButton.disabled=true;recording=false;renderDemo();connectionMessage='Desktop disconnected. Reconnecting…';reportConnection();}});
+      rfb.addEventListener('disconnect',event=>{if(epoch===generation){if(event.detail?.code===4001){idleDisconnected=true;reconnect.hidden=false;takeoverRequested=false;generationAbort?.abort();}connected=false;rfb=null;mode='';clipboard='';clipboardButton.disabled=true;recording=false;renderDemo();connectionMessage=idleDisconnected?'Disconnected due to inactivity. Click Reconnect computer.':'Desktop disconnected. Reconnecting…';reportConnection();}});
      }
      function disconnect(preserve=false){++generation;connected=false;clipboard='';clipboardButton.disabled=true;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(preserve)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(preserve && retained)screen.append(retained);else{retained?.remove();retained=null;}}
      async function refresh(){
       if(closed || pending || closing)return;
+      if(idleDisconnected){reportConnection();return;}
  if(!visible()){disconnect();return;}
       const version=++refreshVersion;
       try{
@@ -285,7 +293,7 @@ templ ProjectComputerToggle(projectID string) {
  <div data-computer-preference={projectID} class="mb-4">
  <label class="label cursor-pointer justify-start gap-2"><input type="checkbox" class="toggle toggle-sm" data-computer-enabled disabled/><span>Project computer</span></label>
  <p class="text-xs opacity-70">Enable for all tasks in this project. Starts automatically when used.</p>
- <label>Stop unused desktops after <select class="select select-bordered" data-computer-idle disabled><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="0">Never</option></select></label>
+ <label>Disconnect idle viewers and stop unused desktops after <select class="select select-bordered" data-computer-idle disabled><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="0">Never</option></select></label>
  <p class="text-xs opacity-70">Active tasks, open viewers, private requests and running commands stay open. Idle shutdown keeps saved files and browser logins, but closes apps and loses unsaved work. Open the Computer tab to restart.</p>
  <label>Desktop time zone <select class="select select-bordered" data-computer-time-zone disabled><option value="UTC">UTC</option></select></label>
  <button type="button" class="btn btn-sm" data-computer-time-zone-restart>Apply to desktop</button>

@@ -21,42 +21,43 @@ func (s *ProjectComputerService) SetIdleMinutes(ctx context.Context, id string, 
 	if err := root.repo.Configure(ctx, id, s.provisioner.Provider()); err != nil {
 		return err
 	}
-	return root.repo.SetIdleMinutes(ctx, id, minutes)
+	if err := root.repo.SetIdleMinutes(ctx, id, minutes); err != nil {
+		return err
+	}
+	return root.updateViewerPolicy(ctx, id, minutes)
 }
 
-func (s *ProjectComputerService) startIdleMonitor(id string) {
-	// Only real runtimes implement the supervisor protocol. Avoid starting timers
-	// for lightweight injected provisioners used by tests and integrations.
-	switch s.provisioner.(type) {
-	case *LocalComputerProvisioner, *HostedComputerProvisioner:
-	default:
-		return
-	}
-	key := "idle-monitor:" + id
-	if _, loaded := s.active.LoadOrStore(key, true); loaded {
-		return
-	}
-	root := *s
-	root.taskID = ""
-	root.repo = s.projects.Computers()
-	go func() {
-		defer root.active.Delete(key)
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-			_, err := root.provisioner.Resolve(ctx, id)
-			if err == nil {
-				_ = root.reapIdleDesktops(ctx, id)
-			}
-			cancel()
-			// A stopped/deleted project should not retain a permanent timer. Any later
-			// computer connection starts the monitor again. Failures never delete data.
-			if err != nil {
-				return
+// StartIdleMaintenance reconciles existing computers on startup and retries
+// transient failures on subsequent sweeps. Its lifetime follows the server.
+func (s *ProjectComputerService) StartIdleMaintenance(ctx context.Context) {
+	go s.runIdleMaintenance(ctx, time.Minute)
+}
+func (s *ProjectComputerService) runIdleMaintenance(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		projects, err := s.projects.List(ctx)
+		if err == nil {
+			for _, project := range projects {
+				id := project.ID
+				key := "idle-maintenance:" + id
+				if _, busy := s.active.LoadOrStore(key, true); busy {
+					continue
+				}
+				go func() {
+					defer s.active.Delete(key)
+					sweep, cancel := context.WithTimeout(ctx, 45*time.Second)
+					defer cancel()
+					_ = s.reapIdleDesktops(sweep, id)
+				}()
 			}
 		}
-	}()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *ProjectComputerService) reapIdleDesktops(ctx context.Context, id string) error {
@@ -70,7 +71,7 @@ func (s *ProjectComputerService) reapIdleDesktops(ctx context.Context, id string
 	if err != nil {
 		return err
 	}
-	if state.IdleMinutes == 0 || state.Held || state.TakeoverPending || state.HandoffKind != "" {
+	if !state.Enabled || state.IdleMinutes == 0 || state.Held || state.TakeoverPending || state.HandoffKind != "" {
 		return nil
 	}
 	ids, err := root.repo.IdleDesktopCandidates(ctx, id)

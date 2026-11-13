@@ -18,6 +18,7 @@ import (
 // project/mode scope across origins without sharing a session cookie.
 type computerStreamTicket struct {
 	ProjectID, Mode, TaskID string
+	ViewerID                string
 	Principal               models.Principal
 	Expires                 time.Time
 }
@@ -53,8 +54,12 @@ func (h *Handler) issueComputerTicket(ctx context.Context, projectID, mode strin
 	if len(taskIDs) > 0 {
 		taskID = taskIDs[0]
 	}
+	viewerID := ""
+	if len(taskIDs) > 1 {
+		viewerID = taskIDs[1]
+	}
 	principal, _ := models.PrincipalFromContext(ctx)
-	h.computerTickets[token] = computerStreamTicket{Principal: principal, TaskID: taskID, ProjectID: projectID, Mode: mode, Expires: now.Add(30 * time.Second)}
+	h.computerTickets[token] = computerStreamTicket{ViewerID: viewerID, Principal: principal, TaskID: taskID, ProjectID: projectID, Mode: mode, Expires: now.Add(30 * time.Second)}
 	return "computer-ticket." + token, nil
 }
 func (h *Handler) consumeComputerTicket(c echo.Context) bool {
@@ -87,6 +92,7 @@ func (h *Handler) ProjectComputerNativeStream(c echo.Context) error {
 	c.SetRequest(c.Request().WithContext(models.WithPrincipal(c.Request().Context(), ticket.Principal)))
 	q := c.Request().URL.Query()
 	q.Set("task_id", ticket.TaskID)
+	q.Set("viewer_id", ticket.ViewerID)
 	c.Request().URL.RawQuery = q.Encode()
 	c.SetParamNames("id", "mode")
 	c.SetParamValues(ticket.ProjectID, ticket.Mode)

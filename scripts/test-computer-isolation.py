@@ -139,6 +139,7 @@ printf boundary-checks-passed
             key = base64.b64encode(secrets.token_bytes(16)).decode()
             handshake = (f'GET /desktops/task-b/rfb-{mode} HTTP/1.1\r\n'
                          f'Host: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\n'
+                         f'X-OV-Viewer-ID: live-{mode}\r\nX-OV-Viewer-Idle-Seconds: 1800\r\n'
                          'Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n'
                          f'Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Protocol: binary\r\n\r\n')
             stream.sendall(handshake.encode())

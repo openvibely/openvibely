@@ -112,3 +112,33 @@ no active desktop is evicted to make room at the 32-desktop limit.
 
 The live isolation script also checks idle shutdown and restoration, Never,
 viewer protection, background commands, and saved login/file persistence.
+
+## Viewer inactivity
+
+The same project timeout applies to individual viewer sessions. The desktop
+helper owns their clocks. Each app connection supplies a random internal lease
+ID and the policy through trusted headers. The app binds activity requests to
+the authenticated user, project, task, and browser viewer ID; the helper is not
+reachable directly from task shells. Real pointer, keyboard, scroll, and paste
+activity in the Computer panel resets that viewer's clock (throttled to once per
+five seconds). This includes interacting with file controls. Polling, screen
+updates, WebSocket maintenance, and agent traffic never renew viewer leases.
+Changing the timeout updates open leases without treating the change as activity.
+
+An expired viewer receives WebSocket close code 4001. OV forwards that code and
+noVNC exposes it in the disconnect event. The panel stops automatic retries and
+status polling, and offers an explicit Reconnect button. Ordinary network errors
+still reconnect. A new connection gets a fresh inactivity interval. No OV or
+website logout takes place and no browser profile is removed.
+
+After a controlling connection closes, OV allows two seconds for a replacement,
+then releases ordinary takeover only if no controlling viewers remain. It never
+clears private handoffs or a pending takeover automatically. Takeover release
+uses the existing queued continuation path. Closing a viewer does not itself
+stop its desktop; the separate desktop idle policy still protects agent work,
+background commands, and private handoffs.
+
+Idle desktop maintenance is reconciled at server startup and once per minute,
+with a bounded per-project sweep and retries after transient failures. It follows
+the server context rather than the lifetime of any particular connection. Runtime
+health advertises `viewer_idle: 1`; older images must be updated before use.
