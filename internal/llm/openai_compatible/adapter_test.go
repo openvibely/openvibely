@@ -1345,6 +1345,7 @@ func TestAdapterPersistsToolsAcrossFollowupsAndCancellation(t *testing.T) {
 					require.NoError(t, err)
 					require.Len(t, replay[execution.ID], 1)
 					require.Contains(t, replay[execution.ID][0].TranscriptJSON, "loaded skill instructions")
+					assertEmptyToolMessage(t, replay[execution.ID][0].TranscriptJSON)
 					// The service supplies persisted replay before the adapter runs.
 					execution.ReplayMessages = replay[execution.ID]
 					_, err = New(stores.Executions, nil).Call(ctx, llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, Message: "continue", Followup: true, ChatHistory: []models.Execution{*execution}, Agent: agent}, ".")
@@ -1354,6 +1355,7 @@ func TestAdapterPersistsToolsAcrossFollowupsAndCancellation(t *testing.T) {
 					require.Contains(t, string(data), "loaded skill instructions")
 					require.Contains(t, string(data), "skill-call")
 					require.Contains(t, string(data), "original thinking sentinel")
+					assertEmptyToolMessage(t, string(data))
 				})
 			}
 		}
@@ -1365,4 +1367,23 @@ func TestCanonicalResultPreservesEmptyAssistantText(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, res.Output)
 	require.Empty(t, res.TextOnlyOutput, "a tool-only transcript is not assistant text")
+}
+
+func assertEmptyToolMessage(t *testing.T, raw string) {
+	t.Helper()
+	var messages []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(raw), &messages))
+	found := false
+	for _, message := range messages {
+		calls, ok := message["tool_calls"].([]any)
+		if message["role"] != "assistant" || !ok || len(calls) == 0 {
+			continue
+		}
+		found = true
+		require.Contains(t, message, "content")
+		require.Equal(t, "", message["content"])
+		require.Equal(t, "original thinking sentinel", message["reasoning_content"])
+		require.Equal(t, []any{map[string]any{"id": "skill-call", "type": "function", "function": map[string]any{"name": "skill_view", "arguments": "{}"}}}, calls)
+	}
+	require.True(t, found, "empty assistant tool message must survive persistence and replay")
 }

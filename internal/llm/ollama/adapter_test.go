@@ -103,7 +103,7 @@ func TestSkillAndImageToolsPersistAndReplay(t *testing.T) {
 			if calls == 2 {
 				name = "view_image"
 			}
-			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_%d\",\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", calls, name)
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"tool reasoning\",\"tool_calls\":[{\"index\":0,\"id\":\"call_%d\",\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", calls, name)
 		} else {
 			io.WriteString(w, done)
 		}
@@ -143,6 +143,8 @@ func TestSkillAndImageToolsPersistAndReplay(t *testing.T) {
 	req.Message = "follow up"
 	replay, err := env.Executions.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
 	require.NoError(t, err)
+	require.Len(t, replay[exec.ID], 1)
+	assertOllamaEmptyToolMessages(t, replay[exec.ID][0].TranscriptJSON)
 	for i := range history {
 		history[i].ReplayMessages = replay[history[i].ID]
 	}
@@ -150,6 +152,11 @@ func TestSkillAndImageToolsPersistAndReplay(t *testing.T) {
 	_, err = adapter.Call(ctx, req, t.TempDir(), nil)
 	require.NoError(t, err)
 	require.Len(t, wires, 4)
+	var request struct {
+		Messages json.RawMessage `json:"messages"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(wires[3]), &request))
+	assertOllamaEmptyToolMessages(t, string(request.Messages))
 	require.Contains(t, wires[3], `"tool_call_id":"call_1"`)
 	require.Contains(t, wires[3], "loaded skill instructions sentinel")
 	require.Contains(t, wires[3], "data:image/png;base64,"+encoded)
@@ -209,4 +216,27 @@ func TestCancellationDuringStream(t *testing.T) {
 	_, err := New(nil, nil).Call(ctx, contracts.AgentRequest{Operation: contracts.OperationDirect, Message: "hello", Agent: config(srv.URL)}, t.TempDir(), nil)
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func assertOllamaEmptyToolMessages(t *testing.T, raw string) {
+	t.Helper()
+	var messages []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(raw), &messages))
+	seen := map[string]string{}
+	for _, message := range messages {
+		calls, ok := message["tool_calls"].([]any)
+		if message["role"] != "assistant" || !ok || len(calls) == 0 {
+			continue
+		}
+		require.Contains(t, message, "content")
+		require.Equal(t, "", message["content"])
+		require.Equal(t, "tool reasoning", message["reasoning_content"])
+		require.Len(t, calls, 1)
+		call := calls[0].(map[string]any)
+		require.Equal(t, "function", call["type"])
+		function := call["function"].(map[string]any)
+		require.Equal(t, "{}", function["arguments"])
+		seen[call["id"].(string)] = function["name"].(string)
+	}
+	require.Equal(t, map[string]string{"call_1": "skill_view", "call_2": "view_image"}, seen)
 }
