@@ -208,10 +208,6 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	} else {
 		u.Scheme = "ws"
 	}
-	state, err := h.computerService(c).Get(ctx, id)
-	if err != nil {
-		return err
-	}
 	session := c.QueryParam("viewer_id")
 	if session == "" {
 		session = rand.Text()
@@ -242,8 +238,10 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 			}()
 		}
 	}()
+	// Zero also disables inactivity expiry when connecting to an older helper.
+	// An open viewer is activity; only the desktop idle timer may stop it.
 	u.Path = strings.TrimRight(u.Path, "/") + "/rfb-" + mode
-	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}, "X-OV-Viewer-ID": {token}, "X-OV-Viewer-Idle-Seconds": {strconv.Itoa(state.IdleMinutes * 60)}}, Subprotocols: []string{"binary"}})
+	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}, "X-OV-Viewer-ID": {token}, "X-OV-Viewer-Idle-Seconds": {"0"}}, Subprotocols: []string{"binary"}})
 	if err != nil {
 		return echo.NewHTTPError(502, "Computer viewer unavailable")
 	}

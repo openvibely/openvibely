@@ -71,9 +71,21 @@ func desktopRoutes(mux *http.ServeMux) {
 		json.NewEncoder(w).Encode(out)
 	})
 
-	ensure := func(ctx context.Context, name string) (*desktopProcess, error) {
+	ensure := func(ctx context.Context, name string, activity bool) (*desktopProcess, error) {
 		mu.Lock()
 		defer mu.Unlock()
+		// Status polling must neither wake a stopped desktop nor delay shutdown.
+		if !activity {
+			p := sessions[name]
+			if p == nil || p.reaping != nil {
+				return nil, nil
+			}
+			select {
+			case <-p.done:
+				return nil, nil
+			default:
+			}
+		}
 		for {
 			p := sessions[name]
 			if p == nil || p.reaping == nil {
@@ -95,7 +107,9 @@ func desktopRoutes(mux *http.ServeMux) {
 				delete(sessions, name)
 			default:
 				p.requests++
-				p.lastActivity = time.Now()
+				if activity {
+					p.lastActivity = time.Now()
+				}
 				return p, nil
 			}
 		}
@@ -153,12 +167,25 @@ func desktopRoutes(mux *http.ServeMux) {
 			w.WriteHeader(204)
 			return
 		}
-		p, err := ensure(r.Context(), name)
+		activity := !(r.Method == http.MethodGet && parts[1] == "jobs")
+		p, err := ensure(r.Context(), name, activity)
 		if err != nil {
 			http.Error(w, err.Error(), 503)
 			return
 		}
-		defer func() { mu.Lock(); p.requests--; p.lastActivity = time.Now(); mu.Unlock() }()
+		if p == nil {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"jobs":[],"shell_processes_running":false}`)
+			return
+		}
+		defer func() {
+			mu.Lock()
+			p.requests--
+			if activity {
+				p.lastActivity = time.Now()
+			}
+			mu.Unlock()
+		}()
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
 		transport := desktopTransport(name)

@@ -165,6 +165,8 @@ printf boundary-checks-passed
     print('PASS: cancel-all stops detached shell processes', flush=True)
     # Keep task B alive while stopping/restarting A; retained files survive.
     request('/desktops/task-a/', method='DELETE')
+    assert json.loads(request('/desktops/task-a/jobs'))['jobs'] == []
+    assert 'task-a' not in json.loads(request('/desktop-sessions')), 'Polling must not wake a stopped desktop'
     ready('task-a')
     assert request('/desktops/task-a/files?path=Files/result.txt') == b'durable'
     browser_fixture('task-a', 'present')
@@ -173,6 +175,8 @@ printf boundary-checks-passed
     port = json.loads(docker('inspect', name))[0]['NetworkSettings']['Ports']['8090/tcp'][0]['HostPort']
     base = 'http://127.0.0.1:' + port
     ready()
+    assert json.loads(request('/desktops/task-a/jobs'))['jobs'] == []
+    assert 'task-a' not in json.loads(request('/desktop-sessions')), 'Polling must not wake a stopped desktop'
     ready('task-a')
     assert request('/desktops/task-a/files?path=Files/result.txt') == b'durable'
     browser_fixture('task-a', 'present')
@@ -193,9 +197,13 @@ printf boundary-checks-passed
     assert reap() == [], 'Background command must prevent shutdown'
     time.sleep(3.2)
     assert reap() == [], 'Newly finished command must receive its full idle interval'
-    time.sleep(1.2)
-    assert reap() == ['task-a'], 'Idle desktop must release its slot'
+    for _ in range(7):
+        request('/desktops/task-a/jobs')
+        time.sleep(.2)
+    assert reap() == ['task-a'], 'Automatic jobs polling must not reset idle timeout'
     assert 'task-a' not in json.loads(request('/desktop-sessions'))
+    assert json.loads(request('/desktops/task-a/jobs'))['jobs'] == []
+    assert 'task-a' not in json.loads(request('/desktop-sessions')), 'Polling must not wake a stopped desktop'
     ready('task-a')
     assert request('/desktops/task-a/files?path=Files/result.txt') == b'durable'
     browser_fixture('task-a', 'present')

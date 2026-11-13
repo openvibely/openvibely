@@ -113,32 +113,24 @@ no active desktop is evicted to make room at the 32-desktop limit.
 The live isolation script also checks idle shutdown and restoration, Never,
 viewer protection, background commands, and saved login/file persistence.
 
-## Viewer inactivity
+## One desktop idle timer
 
-The same project timeout applies to individual viewer sessions. The desktop
-helper owns their clocks. Each app connection supplies a random internal lease
-ID and the policy through trusted headers. The app binds activity requests to
-the authenticated user, project, task, and browser viewer ID; the helper is not
-reachable directly from task shells. Real pointer, keyboard, scroll, and paste
-activity in the Computer panel resets that viewer's clock (throttled to once per
-five seconds). This includes interacting with file controls. Polling, screen
-updates, WebSocket maintenance, and agent traffic never renew viewer leases.
-Changing the timeout updates open leases without treating the change as activity.
+Visible previews and open desktop viewers protect the desktop for the entire
+connection lifetime. No viewer inactivity timeout applies; watching without
+clicking or typing is active use. The UI disconnects hidden viewers. Ordinary
+network errors reconnect automatically. Legacy idle-close handling is retained
+for compatibility, but new connections send a zero viewer timeout to older helpers.
 
-An expired viewer receives WebSocket close code 4001. OV forwards that code and
-noVNC exposes it in the disconnect event. The panel stops automatic retries and
-status polling, and offers an explicit Reconnect button. Ordinary network errors
-still reconnect. A new connection gets a fresh inactivity interval. No OV or
-website logout takes place and no browser profile is removed.
+The desktop idle timer starts after the last viewer or operation finishes.
+Active tasks, private handoffs, and running commands protect the desktop.
+Automatic command-status polling neither resets the clock nor starts a stopped
+desktop. The timeout defaults to 30 minutes, with a configurable Never option.
+Stopping preserves files and browser profiles, not running apps or unsaved work.
 
 After a controlling connection closes, OV allows two seconds for a replacement,
-then releases ordinary takeover only if no controlling viewers remain. It never
-clears private handoffs or a pending takeover automatically. Takeover release
-uses the existing queued continuation path. Closing a viewer does not itself
-stop its desktop; the separate desktop idle policy still protects agent work,
-background commands, and private handoffs.
+then releases ordinary takeover if no controlling viewers remain. Private
+handoffs and pending takeovers remain paused for explicit action.
 
-Idle desktop maintenance is reconciled at server startup and once per minute,
-with a bounded per-project sweep and retries after transient failures. It follows
-the server context rather than the lifetime of any particular connection. Runtime
-health advertises `viewer_idle: 1`; older images must be updated before use.
+Idle maintenance reconciles at server startup and once per minute and retries
+transient failures. The helper checks live connections and jobs before stopping
+a desktop. Viewing it again or using a computer tool starts it with saved data.

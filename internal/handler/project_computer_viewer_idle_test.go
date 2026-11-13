@@ -22,7 +22,7 @@ func TestComputerViewerIdleReasonAndAutomaticHandback(t *testing.T) {
 	defer cancel()
 	expire := make(chan struct{})
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-OV-Viewer-ID") == "" || r.Header.Get("X-OV-Viewer-Idle-Seconds") != "1800" {
+		if r.Header.Get("X-OV-Viewer-ID") == "" || r.Header.Get("X-OV-Viewer-Idle-Seconds") != "0" {
 			http.Error(w, "missing policy", 400)
 			return
 		}

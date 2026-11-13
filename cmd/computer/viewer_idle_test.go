@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestViewerIdleIgnoresFramesAndProtectsOtherSessions(t *testing.T) {
+func TestVisibleViewerStaysConnectedWithoutUserInput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,13 +52,10 @@ func TestViewerIdleIgnoresFramesAndProtectsOtherSessions(t *testing.T) {
 	defer idle.CloseNow()
 	never := dial("never", "0")
 	defer never.CloseNow()
-	for {
-		_, _, err := idle.Read(ctx)
-		if err != nil {
-			if websocket.CloseStatus(err) != viewerIdleClose {
-				t.Fatal(err)
-			}
-			break
+	until := time.Now().Add(2200 * time.Millisecond)
+	for time.Now().Before(until) {
+		if _, _, err := idle.Read(ctx); err != nil {
+			t.Fatalf("visible viewer disconnected without user input: %v", err)
 		}
 	}
 	if _, _, err := never.Read(ctx); err != nil {

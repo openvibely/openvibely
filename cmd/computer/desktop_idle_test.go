@@ -3,6 +3,9 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,5 +88,22 @@ func TestReapReleasesDesktopThatIsStillBusy(t *testing.T) {
 	}
 	if sessions["task-a"] != p || p.reaping != nil {
 		t.Fatal("busy desktop was not kept and released")
+	}
+}
+
+func TestJobsPollingDoesNotStartDesktop(t *testing.T) {
+	mux := http.NewServeMux()
+	desktopRoutes(mux)
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/desktops/task-unused/jobs", nil))
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"jobs":[]`) {
+			t.Fatalf("poll attempted desktop startup: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/desktop-sessions", nil))
+	if strings.TrimSpace(rec.Body.String()) != "{}" {
+		t.Fatal(rec.Body.String())
 	}
 }

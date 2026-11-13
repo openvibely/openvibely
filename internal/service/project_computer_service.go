@@ -743,7 +743,7 @@ func (s *ProjectComputerService) requireIsolation(data []byte) error {
 			ViewerIdle int `json:"viewer_idle"`
 		}
 		if json.Unmarshal(data, &health) != nil || health.Isolation != 1 || health.ViewerIdle != 1 {
-			return errors.New("update the project computer image: isolated task desktops and viewer idle timeouts are required")
+			return errors.New("update the project computer image: isolated task desktops and viewer connection tracking are required")
 		}
 	}
 	return nil

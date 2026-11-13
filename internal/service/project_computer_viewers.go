@@ -93,7 +93,7 @@ func (s *ProjectComputerService) ReleaseUnviewed(ctx context.Context, id string,
 	return true, s.repo.SetTakeoverPending(ctx, id, false)
 }
 
-func (s *ProjectComputerService) updateViewerPolicy(ctx context.Context, id string, minutes int) error {
+func (s *ProjectComputerService) updateViewerPolicy(ctx context.Context, id string, _ int) error {
 	var viewers []*computerViewer
 	s.active.Range(func(key, value any) bool {
 		if strings.HasPrefix(key.(string), "viewer:"+id+":") {
@@ -115,7 +115,8 @@ func (s *ProjectComputerService) updateViewerPolicy(ctx context.Context, id stri
 		if v.TaskID != "" {
 			scoped.Endpoint += "/desktops/" + ComputerDesktopID(v.TaskID)
 		}
-		body, _ := json.Marshal(map[string]any{"id": v.Token, "idle_seconds": minutes * 60})
+		// Keep older helpers from expiring a visible viewer when settings change.
+		body, _ := json.Marshal(map[string]any{"id": v.Token, "idle_seconds": 0})
 		if _, err := s.request(ctx, scoped, "POST", "/viewer-policy", body); err != nil {
 			return errors.New("timeout saved; reconnect viewers to apply it")
 		}

@@ -115,22 +115,10 @@ func (v *viewerLeases) proxy(w http.ResponseWriter, r *http.Request, target stri
 	}
 	go copyFrames(downstream, upstream)
 	go copyFrames(upstream, downstream)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			v.Lock()
-			expired := lease.timeout > 0 && time.Since(lease.last) >= lease.timeout
-			v.Unlock()
-			if expired {
-				downstream.Close(viewerIdleClose, "viewer-idle")
-				return
-			}
-		}
+	// A connected viewer protects its desktop, even without keyboard or mouse
+	// input. Only the desktop reaper owns an inactivity timer.
+	select {
+	case <-done:
+	case <-ctx.Done():
 	}
 }
