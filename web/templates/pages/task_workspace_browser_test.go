@@ -479,6 +479,8 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 	}
 	var summaryRequests, diffRequests, threadRequests atomic.Int32
 	var files atomic.Int32
+	var summaryStatus atomic.Value
+	summaryStatus.Store("completed")
 	fileEvents := make(chan string, 30)
 	executions := []models.Execution{}
 	for i := 0; i < 20; i++ {
@@ -520,7 +522,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		case "/tasks/workspace-task/changes/summary":
 			summaryRequests.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"files":%d,"insertions":51,"deletions":12,"status":"completed","duration":"12m 41s","review_comments":0}`, files.Load())
+			fmt.Fprintf(w, `{"files":%d,"insertions":51,"deletions":12,"status":%q,"duration":"12m 41s","review_comments":0}`, files.Load(), summaryStatus.Load())
 		case "/tasks/workspace-task/changes":
 			if r.URL.Query().Get("composer_action") == "1" {
 				fmt.Fprint(w, render(ComposerChangesAction(task, nil, true, false)))
@@ -538,6 +540,11 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/workspace-task?from=alerts", "task-workspace", func(b *composerFocusCDP) {
 		b.waitFor("thread mounted", `String(Boolean(document.getElementById('task-message-input')))`, "true")
 		b.waitFor("no empty activity row", `String(document.getElementById('task-change-activity').hidden)`, "true")
+		for _, status := range []string{"queued", "running", "completed"} {
+			summaryStatus.Store(status)
+			fileEvents <- `{"type":"file_modified","task_id":"workspace-task","project_id":"workspace-project"}`
+			b.waitFor("empty diff control visibility while "+status, `String(document.getElementById('task-change-activity').checkVisibility())`, fmt.Sprint(status != "completed"))
+		}
 		b.waitFor("panel closed", `String(document.getElementById('task-details-panel').hidden)`, "true")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.click("#task-details-opener")
