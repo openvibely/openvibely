@@ -18,7 +18,7 @@ type planReadCounter struct {
 }
 
 func (a *planReadCounter) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	if strings.HasPrefix(q, "SELECT head.position,"+displayindex.ItemTextSQL) {
+	if strings.HasPrefix(q, "SELECT * FROM (SELECT head.position,"+displayindex.ItemTextSQL) {
 		a.fullPlanReads++
 	}
 	return a.DB.QueryContext(ctx, q, args...)
@@ -81,5 +81,22 @@ func TestDisplayPlanEveryOpeningTagSplit(t *testing.T) {
 				t.Fatalf("missing plan: %q", page.Plan)
 			}
 		})
+	}
+}
+
+func TestDisplayClosedLivePlanSkipsOrdinaryRefresh(t *testing.T) {
+	db, repo, owner := conversationTestRepo(t)
+	requirePlan := "<proposed_plan>approval</proposed_plan>"
+	if err := repo.AppendOutput(t.Context(), owner.ExecutionID, requirePlan); err != nil {
+		t.Fatal(err)
+	}
+	counter := &planReadCounter{DB: db}
+	for _, text := range []string{"ordinary output", "a < b", "<div>HTML</div>"} {
+		if err := displayindex.RefreshStreamPlan(t.Context(), counter, owner.ExecutionID, text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if counter.fullPlanReads != 0 {
+		t.Fatalf("closed plan triggered %d full reads", counter.fullPlanReads)
 	}
 }

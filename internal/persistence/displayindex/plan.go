@@ -16,9 +16,11 @@ const ItemTextSQL = `COALESCE(json_extract(base.payload,'$.prefix'),'') ||
  THEN replace(replace((` + ItemBodySQL + `),'&','&amp;'),'[','&#91;')
  ELSE (` + ItemBodySQL + `) END || COALESCE(json_extract(base.payload,'$.suffix'),'')`
 
-// RefreshPlan stores only the plan, not its surrounding execution output.
+// RefreshPlan stores only plans from structured history and its live suffix.
+// Live positions sort after every structured position, but below the sentinel
+// used for an unfinished marker/plan, so later structured edits rebuild them.
 func RefreshPlan(ctx context.Context, tx Executor, id string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT head.position,`+ItemTextSQL+` FROM conversation_items head JOIN conversation_items base ON base.sequence=COALESCE(NULLIF(head.snapshot_sequence,0),head.sequence) WHERE head.execution_id=? AND head.generation=0 AND head.lane='display' AND head.is_current=1 AND head.operation!='remove' ORDER BY head.position,head.item_id`, id)
+	rows, err := tx.QueryContext(ctx, `SELECT * FROM (SELECT head.position,`+ItemTextSQL+` FROM conversation_items head JOIN conversation_items base ON base.sequence=COALESCE(NULLIF(head.snapshot_sequence,0),head.sequence) WHERE head.execution_id=? AND head.generation=0 AND head.lane='display' AND head.is_current=1 AND head.operation!='remove' ORDER BY head.position,head.item_id) UNION ALL SELECT 9223372036854775806,text FROM (SELECT text FROM execution_stream_text WHERE execution_id=? ORDER BY end_offset)`, id, id)
 	if err != nil {
 		return err
 	}
@@ -80,4 +82,26 @@ func RefreshPlan(ctx context.Context, tx Executor, id string) error {
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO execution_display_plans(execution_id,content,last_position) VALUES(?,?,?) ON CONFLICT(execution_id) DO UPDATE SET content=excluded.content,last_position=excluded.last_position`, id, result.String(), lastPosition)
 	return err
+}
+
+// RefreshStreamPlan skips ordinary chunks once any partial opening tag has
+// been resolved. The existing projection records unfinished plans/tags.
+func RefreshStreamPlan(ctx context.Context, tx Executor, id, chunk string) error {
+	refresh := mayStartPlan(chunk)
+	if !refresh {
+		rows, err := tx.QueryContext(ctx, `SELECT 1 FROM execution_display_plans WHERE execution_id=? AND last_position=?`, id, int64(1<<63-1))
+		if err != nil {
+			return err
+		}
+		refresh = rows.Next()
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+	}
+	if refresh {
+		return RefreshPlan(ctx, tx, id)
+	}
+	return nil
 }

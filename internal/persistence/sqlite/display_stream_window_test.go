@@ -131,3 +131,43 @@ func TestDisplayIndexFollowsEditsAndRemoval(t *testing.T) {
 	require.NoError(t, err)
 	check()
 }
+
+func TestDisplayLivePlanRemainsOutsideWindow(t *testing.T) {
+	_, repo, owner := conversationTestRepo(t)
+	ctx := t.Context()
+	var full strings.Builder
+	appendText := func(text string) {
+		t.Helper()
+		require.NoError(t, repo.AppendOutput(ctx, owner.ExecutionID, text))
+		full.WriteString(text)
+	}
+	// Both opening and closing markers arrive one byte at a time.
+	plan := "<proposed_plan>keep this approval</proposed_plan>"
+	for _, r := range plan {
+		appendText(string(r))
+	}
+	for i := 0; i < 40; i++ {
+		appendText("text\n[Using tool: shell | echo]\n[Tool shell done]\n" + strings.Repeat("result\n", 1200) + "[/Tool]\n")
+	}
+	page, err := repo.ReadProjectDisplayTail(ctx, "default", owner.ExecutionID, 0, 65536)
+	require.NoError(t, err)
+	require.NotZero(t, page.Before)
+	require.NotContains(t, page.Text, "keep this approval")
+	require.Equal(t, plan+"\n", page.Plan)
+	// Finalization replaces stream storage; it must not duplicate the plan.
+	require.NoError(t, repo.Complete(ctx, owner.ExecutionID, models.ExecCompleted, full.String(), "", 0, 0))
+	page, err = repo.ReadProjectDisplayTail(ctx, "default", owner.ExecutionID, 0, 65536)
+	require.NoError(t, err)
+	require.Equal(t, plan+"\n", page.Plan)
+}
+
+func TestDisplayPlanSpansStructuredAndLiveOutput(t *testing.T) {
+	_, repo, owner := conversationTestRepo(t)
+	c := conversationChange("prefix", "prefix", `{"type":"text","text":"<proposed_"}`)
+	_, err := repo.AppendConversationChanges(t.Context(), owner, []models.ConversationChange{c})
+	require.NoError(t, err)
+	require.NoError(t, repo.AppendOutput(t.Context(), owner.ExecutionID, "plan>approval</proposed_plan>"))
+	page, err := repo.ReadProjectDisplayTail(t.Context(), "default", owner.ExecutionID, 0, 1)
+	require.NoError(t, err)
+	require.Equal(t, "<proposed_plan>approval</proposed_plan>\n", page.Plan)
+}

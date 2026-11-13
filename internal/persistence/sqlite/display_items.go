@@ -51,9 +51,6 @@ func replaceDisplayOutput(ctx context.Context, tx sqlExecutor, id, output string
 	if err != nil {
 		return err
 	}
-	if err := replaceFinalizedDisplay(ctx, tx, id, records); err != nil {
-		return err
-	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM execution_stream_text WHERE execution_id=?`, id); err != nil {
 		return err
 	}
@@ -61,6 +58,9 @@ func replaceDisplayOutput(ctx context.Context, tx sqlExecutor, id, output string
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM execution_stream_page_state WHERE execution_id=?`, id); err != nil {
+		return err
+	}
+	if err := replaceFinalizedDisplay(ctx, tx, id, records); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE executions SET display_digest=?,display_has_plan=? WHERE id=?`, digest[:], strings.Contains(output, "<proposed_plan>"), id)
@@ -77,10 +77,17 @@ func (r *ExecutionRepo) AppendOutput(ctx context.Context, id, output string) err
 		return nil
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO execution_stream_text(execution_id,end_offset,text)
+		inserted, err := tx.ExecContext(ctx, `INSERT INTO execution_stream_text(execution_id,end_offset,text)
  SELECT id,COALESCE((SELECT end_offset FROM execution_stream_text WHERE execution_id=executions.id ORDER BY end_offset DESC LIMIT 1),0)+?,?
  FROM executions WHERE id=? AND status='running'`, len(output), output, id)
 		if err != nil {
+			return err
+		}
+		count, err := inserted.RowsAffected()
+		if err != nil || count == 0 {
+			return err
+		}
+		if err := displayindex.RefreshStreamPlan(ctx, tx, id, output); err != nil {
 			return err
 		}
 		return displayindex.IndexStream(ctx, tx, id, strings.Contains(output, "[/Tool]") || strings.Contains(output, "[/Thinking]"))

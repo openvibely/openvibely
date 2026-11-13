@@ -62,6 +62,9 @@ func upDisplayPageBoundaries(ctx context.Context, tx *sql.Tx) error {
 		if err = displayindex.IndexStream(ctx, tx, id, true); err != nil {
 			return err
 		}
+		if err = displayindex.RefreshPlan(ctx, tx, id); err != nil {
+			return err
+		}
 	}
 
 	return nil
