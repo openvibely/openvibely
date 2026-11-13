@@ -46,8 +46,7 @@ func IsImageMediaType(mediaType string) bool {
 
 // IsTextMediaType returns true if the media type is a text/code type.
 func IsTextMediaType(mediaType string) bool {
-	return strings.HasPrefix(mediaType, "text/") ||
-		mediaType == "application/json"
+	return attachment.IsTextMediaType(mediaType)
 }
 
 // NewFileAttachment creates a FileAttachment from a file path.

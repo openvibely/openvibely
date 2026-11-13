@@ -135,3 +135,33 @@ func TestUnsupportedFileTypeError(t *testing.T) {
 		t.Errorf("no-extension error = %q", got)
 	}
 }
+
+func TestIsTextMediaType(t *testing.T) {
+	for _, tt := range []struct {
+		mediaType string
+		want      bool
+	}{
+		{"text/plain", true},
+		{"text/markdown", true},
+		{"text/x-go", true},
+		{"text/", true},
+		{"text/plain; charset=utf-8", true},
+		{"application/json", true},
+		{"image/png", false},
+		{"application/pdf", false},
+		{"application/x-ndjson", false},
+		{"application/octet-stream", false},
+		{"application/json; charset=utf-8", false},
+		{"application/ld+json", false},
+		{"Text/plain", false},
+		{" text/plain", false},
+		{"application/json ", false},
+		{"", false},
+	} {
+		t.Run(tt.mediaType, func(t *testing.T) {
+			if got := IsTextMediaType(tt.mediaType); got != tt.want {
+				t.Errorf("IsTextMediaType(%q) = %v, want %v", tt.mediaType, got, tt.want)
+			}
+		})
+	}
+}

@@ -855,3 +855,46 @@ func TestCompletionsToolBoundarySteering(t *testing.T) {
 		})
 	}
 }
+
+func TestSendCompletions_InlineTextMedia(t *testing.T) {
+	for _, mediaType := range []string{"text/plain", "text/markdown", "application/json", "application/x-ndjson", "application/octet-stream"} {
+		t.Run(mediaType, func(t *testing.T) {
+			att := &FileAttachment{FileName: "sample", MediaType: mediaType, Data: []byte("{\"value\": \"hello\"}\n")}
+			client := NewWithCompatibleAPIKey("test-key", "https://compatible.test/v1", "", "")
+			calls := 0
+			client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				var body struct {
+					Messages []struct {
+						Role    string
+						Content json.RawMessage
+					}
+				}
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				want := []map[string]any{
+					{"type": "text", "text": "read attachment"},
+				}
+				if mediaType != "application/x-ndjson" && mediaType != "application/octet-stream" {
+					want = append(want, map[string]any{"type": "text", "text": "--- File: sample ---\n{\"value\": \"hello\"}\n\n--- End of sample ---"})
+				}
+				var content []map[string]any
+				if len(body.Messages) != 2 {
+					t.Fatalf("unexpected messages: %#v", body.Messages)
+				}
+				if err := json.Unmarshal(body.Messages[1].Content, &content); err != nil {
+					t.Fatal(err)
+				}
+				if body.Messages[1].Role != "user" || !reflect.DeepEqual(content, want) {
+					t.Fatalf("unexpected messages: %#v", body.Messages)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))}, nil
+			})}
+			_, err := client.SendCompletions(context.Background(), "read attachment", &CompletionsOptions{DisableTools: true, Attachments: []*FileAttachment{att}})
+			if err != nil || calls != 1 {
+				t.Fatalf("SendCompletions error = %v, requests = %d; want nil, 1", err, calls)
+			}
+		})
+	}
+}

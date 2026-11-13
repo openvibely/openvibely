@@ -75,11 +75,20 @@ func TestIsTextMediaType(t *testing.T) {
 		want      bool
 	}{
 		{"text/plain", true},
-		{"text/x-go", true},
 		{"text/markdown", true},
+		{"text/x-go", true},
+		{"text/", true},
+		{"text/plain; charset=utf-8", true},
 		{"application/json", true},
 		{"image/png", false},
 		{"application/pdf", false},
+		{"application/x-ndjson", false},
+		{"application/octet-stream", false},
+		{"application/json; charset=utf-8", false},
+		{"application/ld+json", false},
+		{"Text/plain", false},
+		{" text/plain", false},
+		{"application/json ", false},
 		{"", false},
 	}
 
@@ -384,5 +393,24 @@ func TestToInputContent_ImageLoadFailure(t *testing.T) {
 	content, err := att.toInputContent()
 	if content != nil || !errors.Is(err, os.ErrNotExist) || !strings.HasPrefix(err.Error(), "read attachment "+path+":") {
 		t.Fatalf("toInputContent = %v, %v; want nil content and original read error", content, err)
+	}
+}
+
+func TestInlineTextMediaSerialization(t *testing.T) {
+	for _, mediaType := range []string{"text/plain", "text/markdown", "application/json", "application/x-ndjson", "application/octet-stream"} {
+		t.Run(mediaType, func(t *testing.T) {
+			att := &FileAttachment{FileName: "sample", MediaType: mediaType, Data: []byte("{\"value\": \"hello\"}\n")}
+			content, err := att.toInputContent()
+			if mediaType == "application/x-ndjson" || mediaType == "application/octet-stream" {
+				if content != nil || err == nil || err.Error() != "unsupported attachment media type \""+mediaType+"\"" {
+					t.Fatalf("unsupported media: content = %#v, error = %v", content, err)
+				}
+				return
+			}
+			want := "--- File: sample ---\n{\"value\": \"hello\"}\n\n--- End of sample ---"
+			if err != nil || len(content) != 2 || content["type"] != "input_text" || content["text"] != want {
+				t.Fatalf("content = %#v, error = %v; want input_text with %q", content, err, want)
+			}
+		})
 	}
 }
