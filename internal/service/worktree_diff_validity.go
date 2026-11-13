@@ -60,7 +60,8 @@ type diffInvalidator interface {
 }
 
 // InvalidateEmptyTaskDiff is for successful execution finalization only, never
-// periodic snapshots. Already integrated work remains reviewable after merging.
+// periodic snapshots. A recorded merge keeps integrated work reviewable; equal
+// branch tips alone do not prove that a merge happened.
 func InvalidateEmptyTaskDiff(ctx context.Context, store diffInvalidator, task *models.Task, execID, repoDir string) error {
 	if task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || repoDir == "" || task.MergeStatus == models.MergeStatusMerged {
 		return nil
@@ -73,20 +74,8 @@ func InvalidateEmptyTaskDiff(ctx context.Context, store diffInvalidator, task *m
 	if err != nil || !empty {
 		return err
 	}
-	// Use an error-aware ancestry check: a failed Git read is not proof that
-	// changes were reverted rather than merged.
-	cmd := diffGitCommand(ctx, "merge-base", "--is-ancestor", task.WorktreeBranch, target)
-	cmd.Dir = repoDir
-	err = cmd.Run()
-	if err == nil {
-		return nil
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-		return err
+	if store == nil {
+		return fmt.Errorf("diff store unavailable")
 	}
 	return store.InvalidateDiffOutput(ctx, execID)
 }

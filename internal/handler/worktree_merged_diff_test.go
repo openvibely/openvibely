@@ -1471,7 +1471,7 @@ func TestHandler_ActiveEmptyWorktreeKeepsSavedReviewChanges(t *testing.T) {
 }
 
 func TestHandler_FinalDiffValidityAcrossReruns(t *testing.T) {
-	for _, scenario := range []string{"reverted", "noop", "merged"} {
+	for _, scenario := range []string{"reverted", "uncommitted-undo", "noop", "merged"} {
 		t.Run(scenario, func(t *testing.T) {
 			h, _, _, db := setupTestHandlerWithStores(t)
 			defer db.Close()
@@ -1484,8 +1484,10 @@ func TestHandler_FinalDiffValidityAcrossReruns(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(worktree, "change.txt"), []byte("task change\n"), 0644); err != nil {
 				t.Fatal(err)
 			}
-			runGit(t, worktree, "add", "change.txt")
-			runGit(t, worktree, "commit", "-m", "task change")
+			if scenario != "uncommitted-undo" {
+				runGit(t, worktree, "add", "change.txt")
+				runGit(t, worktree, "commit", "-m", "task change")
+			}
 			project := &models.Project{Name: "Validity", RepoPath: repoDir}
 			if err := h.projectRepo.Create(ctx, project); err != nil {
 				t.Fatal(err)
@@ -1512,8 +1514,16 @@ func TestHandler_FinalDiffValidityAcrossReruns(t *testing.T) {
 			switch scenario {
 			case "reverted":
 				runGit(t, worktree, "revert", "--no-edit", "HEAD")
+			case "uncommitted-undo":
+				if err := os.Remove(filepath.Join(worktree, "change.txt")); err != nil {
+					t.Fatal(err)
+				}
 			case "merged":
 				runGit(t, repoDir, "merge", "--ff-only", branch)
+				task.MergeStatus = models.MergeStatusMerged
+				if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, task.MergeStatus); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err := h.completeWithSuccessWithPRReconciliation(ctx, current.ID, task.ID, "done", worktree, 0, 1, false); err != nil {
 				t.Fatal(err)
@@ -1522,7 +1532,7 @@ func TestHandler_FinalDiffValidityAcrossReruns(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if (got == "") != (scenario == "reverted") {
+			if (got == "") != (scenario == "reverted" || scenario == "uncommitted-undo") {
 				t.Fatalf("saved diff after %s: %q", scenario, got)
 			}
 			// A later empty run must not revive a deliberately removed diff, while
@@ -1532,7 +1542,7 @@ func TestHandler_FinalDiffValidityAcrossReruns(t *testing.T) {
 				t.Fatal(err)
 			}
 			got = h.resolveTaskChangesDiffOutput(ctx, task)
-			if (got == "") != (scenario == "reverted") {
+			if (got == "") != (scenario == "reverted" || scenario == "uncommitted-undo") {
 				t.Fatalf("rerun diff after %s: %q", scenario, got)
 			}
 		})
