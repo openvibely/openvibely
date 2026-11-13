@@ -1329,7 +1329,6 @@ templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, 
  }
  Steering pending</div>
 			<div class="truncate" data-pending-input-content>{ message }</div>
-			<div class="text-xs opacity-60">Will be applied before the active run's next model step.</div>
 		</div>
 		if hasAttachments {
 			@pendingAttachmentBadge("Attachments included", "Attachments included with this steering instruction")

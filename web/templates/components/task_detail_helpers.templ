@@ -1198,10 +1198,6 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							preview.textContent = data.message || '';
 						preview.setAttribute('data-pending-input-content', '');
 							content.appendChild(preview);
-							var hint = document.createElement('div');
-							hint.className = 'text-xs opacity-60';
-							hint.textContent = 'Will be applied before the active run\'s next model step.';
-							content.appendChild(hint);
 							var actionWrap = document.createElement('div');
 							actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
 							var cancelBtn = document.createElement('button');
