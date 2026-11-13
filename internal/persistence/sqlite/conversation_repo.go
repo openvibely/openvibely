@@ -232,7 +232,7 @@ func appendConversationChangesEncoded(ctx context.Context, tx sqlExecutor, owner
 			}
 		}
 		if first != nil {
-			if err := displayindex.Refresh(ctx, tx, owner.ExecutionID, first.Position, first.ItemID); err != nil {
+			if err := displayindex.Refresh(ctx, tx, owner.ExecutionID, first.Position, first.ItemID, changes); err != nil {
 				return nil, err
 			}
 		}

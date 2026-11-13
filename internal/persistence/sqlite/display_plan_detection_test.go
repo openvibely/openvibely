@@ -46,7 +46,7 @@ func TestDisplayOrdinaryMarkupDoesNotReadFullPlanHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		a := &planReadCounter{DB: db}
-		if err := displayindex.Refresh(t.Context(), a, owner.ExecutionID, c.Position, item); err != nil {
+		if err := displayindex.Refresh(t.Context(), a, owner.ExecutionID, c.Position, item, []models.ConversationChange{c}); err != nil {
 			t.Fatal(err)
 		}
 		if a.fullPlanReads != 0 {
@@ -98,5 +98,61 @@ func TestDisplayClosedLivePlanSkipsOrdinaryRefresh(t *testing.T) {
 	}
 	if counter.fullPlanReads != 0 {
 		t.Fatalf("closed plan triggered %d full reads", counter.fullPlanReads)
+	}
+}
+
+func TestDisplayPlanAppendsBeforeSuffix(t *testing.T) {
+	_, repo, owner := conversationTestRepo(t)
+	c := conversationChange("base", "body", `{"type":"text","text":"<proposed_","suffix":"\n"}`)
+	changes, err := repo.AppendConversationChanges(t.Context(), owner, []models.ConversationChange{c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, part := range []string{"pl", "an>", "approval</proposed_plan>"} {
+		c.Operation = models.ConversationAppend
+		c.PreviousRevision = changes[0].Sequence
+		c.MutationID = fmt.Sprint("append", i)
+		c.Payload, _ = json.Marshal(map[string]string{"text": part})
+		changes, err = repo.AppendConversationChanges(t.Context(), owner, []models.ConversationChange{c})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := repo.ReadProjectDisplayTail(t.Context(), "default", owner.ExecutionID, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Plan != "<proposed_plan>approval</proposed_plan>\n" {
+		t.Fatalf("missing appended plan: %q", page.Plan)
+	}
+}
+
+type noReconstructionExecutor struct {
+	*sql.DB
+	t *testing.T
+}
+
+func (a *noReconstructionExecutor) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	if strings.Contains(q, "group_concat") {
+		a.t.Errorf("ordinary append reconstructed history: %s", q)
+	}
+	return a.DB.QueryContext(ctx, q, args...)
+}
+func TestDisplayOrdinaryAppendDoesNotReconstructBody(t *testing.T) {
+	db, repo, owner := conversationTestRepo(t)
+	c := conversationChange("base", "body", `{"type":"text","text":"`+strings.Repeat("a", 512*1024)+`"}`)
+	changes, err := repo.AppendConversationChanges(t.Context(), owner, []models.ConversationChange{c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Operation = models.ConversationAppend
+	c.PreviousRevision = changes[0].Sequence
+	c.MutationID = "append"
+	c.Payload = []byte(`{"text":"ordinary new text"}`)
+	if _, err = repo.AppendConversationChanges(t.Context(), owner, []models.ConversationChange{c}); err != nil {
+		t.Fatal(err)
+	}
+	if err = displayindex.Refresh(t.Context(), &noReconstructionExecutor{db, t}, owner.ExecutionID, 0, "body", []models.ConversationChange{c}); err != nil {
+		t.Fatal(err)
 	}
 }
