@@ -2227,9 +2227,9 @@ func TestMigrations_AgentsTableDoesNotContainColorColumn(t *testing.T) {
 	}
 }
 
-// TestMigration012_CheckConstraints verifies that migration 012 properly
-// adds CHECK constraints to the tasks table.
-func TestMigration012_CheckConstraints(t *testing.T) {
+// TestMigrations_TaskConstraints verifies that the latest schema enforces task
+// category and status constraints while allowing custom tags since migration 229.
+func TestMigrations_TaskConstraints(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -2260,10 +2260,10 @@ func TestMigration012_CheckConstraints(t *testing.T) {
 		t.Fatal("expected error for invalid status, got nil")
 	}
 
-	// Test tag CHECK constraint
-	_, err = db.Exec(`INSERT INTO tasks (id, project_id, title, tag) VALUES ('t3', 'test-proj', 'Test 3', 'invalid-tag')`)
-	if err == nil {
-		t.Fatal("expected error for invalid tag, got nil")
+	// Custom tags are allowed by migration 229.
+	_, err = db.Exec(`INSERT INTO tasks (id, project_id, title, tag) VALUES ('t3', 'test-proj', 'Test 3', 'docs/security')`)
+	if err != nil {
+		t.Fatalf("expected custom tag insert to succeed: %v", err)
 	}
 
 	// Valid inserts should succeed
