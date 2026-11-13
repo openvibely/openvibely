@@ -17,13 +17,13 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == update.ExecutableUpdateHelperCommand {
-		runExecutableUpdateHelper()
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == update.AppBundleUpdateHelperCommand {
-		runAppBundleUpdateHelper()
-		return
+	if len(os.Args) > 1 {
+		if handled, err := update.RunPackagedUpdateHelperCommand(context.Background(), os.Args[1], os.Args[2:], os.Stdin, update.PackagedUpdateHelperOptions{AppBundle: true}); handled {
+			if err != nil {
+				fatal(err)
+			}
+			return
+		}
 	}
 	if len(os.Args) != 4 || os.Args[1] != "serve" || os.Args[2] != "--listen" {
 		fatal(fmt.Errorf("usage: %s serve --listen host:port", os.Args[0]))
@@ -100,42 +100,6 @@ func exitAfterHealthChecks() *int {
 		count = 1
 	}
 	return &count
-}
-
-func runExecutableUpdateHelper() {
-	cfg, err := update.ParseExecutableUpdateHelperArgs(os.Args[2:])
-	if err == nil {
-		if cfg.RelaunchMetadataPath != "" {
-			err = update.LoadExecutableUpdateHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
-		} else {
-			err = update.LoadExecutableUpdateHelperRelaunch(os.Stdin, &cfg)
-		}
-	}
-	if err := update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout); err != nil {
-		fatal(err)
-	}
-	if err == nil {
-		err = update.RunExecutableUpdateHelper(context.Background(), cfg)
-	}
-	if err != nil {
-		fatal(err)
-	}
-}
-
-func runAppBundleUpdateHelper() {
-	cfg, err := update.ParseAppBundleUpdateHelperArgs(os.Args[2:])
-	if err == nil {
-		err = update.LoadAppBundleUpdateHelperRelaunch(os.Stdin, &cfg)
-	}
-	if err := update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout); err != nil {
-		fatal(err)
-	}
-	if err == nil {
-		err = update.RunAppBundleUpdateHelper(context.Background(), cfg)
-	}
-	if err != nil {
-		fatal(err)
-	}
 }
 
 func fatal(err error) {

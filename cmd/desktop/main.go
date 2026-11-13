@@ -71,52 +71,7 @@ func runPackagedUpdateHelperCommand(ctx context.Context, args []string, stdin io
 	if len(args) < 2 {
 		return false, nil
 	}
-	switch args[1] {
-	case update.AppBundleUpdateHelperCommand:
-		cfg, err := update.ParseAppBundleUpdateHelperArgs(args[2:])
-		if err == nil {
-			err = update.LoadAppBundleUpdateHelperRelaunch(stdin, &cfg)
-		}
-		if err == nil {
-			err = applyAppBundleUpdateIntegrationTimeouts(&cfg)
-		}
-		if err == nil {
-			err = update.RunAppBundleUpdateHelper(ctx, cfg)
-		}
-		return true, err
-	case update.ExecutableUpdateHelperCommand:
-		cfg, err := update.ParseExecutableUpdateHelperArgs(args[2:])
-		if err == nil {
-			if cfg.RelaunchMetadataPath != "" {
-				err = update.LoadExecutableUpdateHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
-			} else {
-				err = update.LoadExecutableUpdateHelperRelaunch(stdin, &cfg)
-			}
-		}
-		if err == nil {
-			err = applyUpdateIntegrationTimeouts(&cfg)
-		}
-		if err == nil {
-			err = update.RunExecutableUpdateHelper(ctx, cfg)
-		}
-		return true, err
-	default:
-		return false, nil
-	}
-}
-
-func applyUpdateIntegrationTimeouts(cfg *update.ExecutableUpdateHelperConfig) error {
-	if cfg == nil {
-		return nil
-	}
-	return update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout)
-}
-
-func applyAppBundleUpdateIntegrationTimeouts(cfg *update.AppBundleUpdateHelperConfig) error {
-	if cfg == nil {
-		return nil
-	}
-	return update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout)
+	return update.RunPackagedUpdateHelperCommand(ctx, args[1], args[2:], stdin, update.PackagedUpdateHelperOptions{AppBundle: true})
 }
 
 func ensureDesktopPluginRoot(cfg *config.Config) error {

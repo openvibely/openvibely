@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,37 +15,16 @@ import (
 	"github.com/openvibely/openvibely/internal/update"
 )
 
-func TestApplyUpdateIntegrationTimeouts(t *testing.T) {
-	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "2500")
-	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "7500")
-	cfg := update.ExecutableUpdateHelperConfig{
-		WaitTimeout:       11 * time.Second,
-		ValidationTimeout: 22 * time.Second,
-	}
-
-	applyUpdateIntegrationTimeouts(&cfg)
-
-	if cfg.WaitTimeout != 2500*time.Millisecond {
-		t.Fatalf("wait timeout = %s, want %s", cfg.WaitTimeout, 2500*time.Millisecond)
-	}
-	if cfg.ValidationTimeout != 7500*time.Millisecond {
-		t.Fatalf("validation timeout = %s, want %s", cfg.ValidationTimeout, 7500*time.Millisecond)
-	}
-}
-
-func TestApplyUpdateIntegrationTimeoutsNilConfig(t *testing.T) {
-	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "not-a-duration")
-	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "not-a-duration")
-	applyUpdateIntegrationTimeouts(nil)
-}
-
-func TestServerInvalidTimeoutsFatalBeforeHelper(t *testing.T) {
+func TestServerInvalidInputsFatalBeforeHelper(t *testing.T) {
 	tests := []struct {
-		name    string
-		envName string
-		value   string
-		want    string
+		name         string
+		inputFailure string
+		envName      string
+		value        string
+		want         string
 	}{
+		{name: "arguments", inputFailure: "arguments", want: "invalid executable-update-helper arguments"},
+		{name: "metadata", inputFailure: "metadata", want: "relaunch metadata"},
 		{name: "wait timeout", envName: "OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", value: "not-a-duration", want: "parse update integration wait timeout"},
 		{name: "validation timeout", envName: "OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", value: "not-a-duration", want: "parse update integration validation timeout"},
 	}
@@ -58,7 +38,7 @@ func TestServerInvalidTimeoutsFatalBeforeHelper(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			args, err := json.Marshal([]string{
+			helperArgs := []string{
 				update.ExecutableUpdateHelperCommand,
 				"--parent-pid", "99999999",
 				"--current", filepath.Join(root, "current"),
@@ -68,7 +48,14 @@ func TestServerInvalidTimeoutsFatalBeforeHelper(t *testing.T) {
 				"--expected-version", "0.6.0",
 				"--previous-version", "0.5.0",
 				"--outcome-id", "server-invalid-timeout",
-			})
+			}
+			if test.inputFailure == "arguments" {
+				helperArgs = append(helperArgs, "--invalid")
+			}
+			if test.inputFailure == "metadata" {
+				metadata = []byte(`{}`)
+			}
+			args, err := json.Marshal(helperArgs)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -78,9 +65,11 @@ func TestServerInvalidTimeoutsFatalBeforeHelper(t *testing.T) {
 				"OPENVIBELY_SERVER_HELPER_ARGS="+string(args),
 				"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=",
 				"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=",
-				test.envName+"="+test.value,
 				"OPENVIBELY_UPDATE_INTEGRATION_HELPER_LOG=1",
 			)
+			if test.envName != "" {
+				cmd.Env = append(cmd.Env, test.envName+"="+test.value)
+			}
 			cmd.Stdin = strings.NewReader(string(metadata))
 			output, runErr := cmd.CombinedOutput()
 			if runErr == nil {
@@ -136,5 +125,21 @@ func TestRunHealthcheck(t *testing.T) {
 	defer srv.Close()
 	if err := runHealthcheck(srv.URL+"/api/system/health", srv.Client()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServerPackagedHelperCommandRouting(t *testing.T) {
+	for _, args := range [][]string{
+		{"server"}, {"server", "serve"}, {"server", "healthcheck"},
+		{"server", update.AppBundleUpdateHelperCommand, "--invalid"},
+	} {
+		handled, err := runPackagedUpdateHelperCommand(context.Background(), args, nil)
+		if handled || err != nil {
+			t.Fatalf("args %v: handled=%t err=%v", args, handled, err)
+		}
+	}
+	handled, err := runPackagedUpdateHelperCommand(context.Background(), []string{"server", update.ExecutableUpdateHelperCommand, "--invalid"}, nil)
+	if !handled || err == nil {
+		t.Fatalf("executable helper: handled=%t err=%v", handled, err)
 	}
 }
