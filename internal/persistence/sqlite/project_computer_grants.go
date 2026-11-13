@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"github.com/openvibely/openvibely/internal/models"
@@ -57,16 +58,21 @@ func (r *ProjectComputerRepo) ChromeGrants(ctx context.Context, id string) ([]mo
 	return out, rows.Err()
 }
 func (r *ProjectComputerRepo) ChromeGrant(ctx context.Context, id, grantID string) (*models.ComputerChromeGrant, error) {
-	grants, err := r.ChromeGrants(ctx, id)
+	// A specific grant must remain addressable regardless of list pagination,
+	// expiry or revocation. Preserve the same project/task visibility as the list.
+	var grant models.ComputerChromeGrant
+	var raw string
+	err := r.db.QueryRowContext(ctx, `SELECT id,project_id,task_id,scope,selections,expires_at,revoked,one_time FROM computer_chrome_grants WHERE id=? AND project_id=? AND (scope='project' OR task_id=?)`, grantID, id, r.taskID).Scan(&grant.ID, &grant.ProjectID, &grant.TaskID, &grant.Scope, &raw, &grant.ExpiresAt, &grant.Revoked, &grant.OneTime)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errors.New("Chrome grant not found for this task")
+	}
 	if err != nil {
 		return nil, err
 	}
-	for _, g := range grants {
-		if g.ID == grantID {
-			return &g, nil
-		}
+	if err = json.Unmarshal([]byte(raw), &grant.Selections); err != nil {
+		return nil, err
 	}
-	return nil, errors.New("Chrome grant not found for this task")
+	return &grant, nil
 }
 func (r *ProjectComputerRepo) RecordChromeInstall(ctx context.Context, id, grantID string) error {
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
