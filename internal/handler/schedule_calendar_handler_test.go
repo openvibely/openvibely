@@ -90,3 +90,24 @@ func TestScheduleCalendarRoutesPersistAndRenderState(t *testing.T) {
 	require.Contains(t, page.Body.String(), fmt.Sprint(action.Skips[0].StartAt))
 	require.Contains(t, page.Body.String(), "schedule-calendar-controls")
 }
+
+func TestScheduleCalendarRejectsNoOpRestore(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	project := tc.CreateProject().Build()
+	post := func(projectID string, action models.ScheduleCalendarAction) *httptest.ResponseRecorder {
+		data, err := json.Marshal(action)
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, "/schedule/calendar-action?project_id="+projectID, bytes.NewReader(data))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		tc.echo.ServeHTTP(rec, req)
+		return rec
+	}
+	require.Equal(t, http.StatusOK, post(project.ID, models.ScheduleCalendarAction{Action: "pause_all"}).Code)
+	start := time.Now().Add(time.Hour).Unix()
+	for _, scope := range []string{project.ID, models.AllProjectsID} {
+		rec := post(scope, models.ScheduleCalendarAction{Action: "restore", Skips: []models.ScheduleSkip{{StartAt: start, EndAt: start + 1}}})
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), "no skipped runs to restore")
+	}
+}
