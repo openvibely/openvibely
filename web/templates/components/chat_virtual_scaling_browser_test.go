@@ -71,7 +71,7 @@ func TestBrowserPerformance_VirtualScrollRowCountScaling(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/fixture" {
-			fmt.Fprint(w, `<!doctype html><style>body{margin:0}#messages{height:900px;overflow:auto;width:800px} [data-chat-lazy-row]{box-sizing:border-box}</style><div id="messages" data-chat-transcript><div id="owner"></div></div><script>
+			fmt.Fprint(w, `<!doctype html><style>body{margin:0}#messages{height:900px;overflow:auto;scrollbar-gutter:stable;width:800px;box-sizing:border-box;border-right:15px solid transparent} [data-chat-lazy-row]{box-sizing:border-box}</style><div id="messages" data-chat-transcript><div id="owner"></div></div><script>
 window.rowReads=0; window.samples=[]; window.measuring=false;window.workDepth=0;window.workMS=0;
 function recordFrame(){
  if(window.measuring && (window.workMS || window.rowReads))window.samples.push({ms:window.workMS,reads:window.rowReads});
@@ -84,7 +84,11 @@ Element.prototype.getBoundingClientRect=function(){if(this.hasAttribute('data-ch
 const messages=document.getElementById('messages'), owner=document.getElementById('owner');
 const paint=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 window.run=async function(count){
-const models=Array.from({length:count},(_,i)=>({kind:'text',height:100,width:800,segments:[{content:'Row '+i}]}));
+// Reserve the scrollbar gutter before measuring so insertion cannot change width.
+// The fixture border also exercises a client width different from its CSS width
+// on platforms with overlay scrollbars. Keep estimates equal to rendered heights.
+const width=messages.clientWidth;
+const models=Array.from({length:count},(_,i)=>({kind:'text',height:100,width,segments:[{content:'Row '+i}]}));
 await installChatVirtualRows(owner,{models,ungrouped:true},(node,model,index)=>{node.style.height='100px';node.textContent='Row '+index});
 await paint(); await paint();
 // Same physical offsets and direction changes in each version; include distant
