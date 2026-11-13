@@ -357,3 +357,44 @@ func TestBrowserFunctional_ThinkingPreviewPreservation(t *testing.T) {
 	}
 
 }
+
+// A connected preview must not turn an append into a rebuild of completed rows.
+func TestBrowserFunctional_StreamingPreviewDeltaRows(t *testing.T) {
+	for _, moves := range []string{"native", "fallback"} {
+		t.Run(moves, func(t *testing.T) {
+			runStreamingMathBrowser(t, func(b *composerFocusCDP) {
+				b.waitFor("renderer ready", `String(document.readyState==='complete' && !!window.OVFileViewer && !!window.renderLiveChatContent)`, "true")
+				b.evaluate(`document.documentElement.setAttribute('data-output-detail','full'); if('` + moves + `'==='fallback')Element.prototype.moveBefore=undefined; 'ready'`)
+				result := b.evaluateAwait(`(async()=>{
+ const root=document.getElementById('math-stream');root.parentElement.dataset.execStatus='running';
+ root.parentElement.style.cssText='height:500px;overflow:auto;width:640px';
+ const call=i=>'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ let text=Array.from({length:1000},(_,i)=>call(i)).join('')+'\n[Preview](/files/abcdef)\n';
+ await renderLiveChatContent(root,text,false);
+ const messages=root.closest('[data-chat-transcript]');
+ for(let i=0;i<3;i++){messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);await new Promise(r=>requestAnimationFrame(r));}
+ const link=root.querySelector('a[href="/files/abcdef"]');if(!link)throw Error('preview link missing');
+ link.dataset.fileLinkBound='true';link.dataset.filePreview='true';
+ const canvas=document.createElement('div');canvas.className='file-html-canvas';
+ const frame=document.createElement('iframe');frame.srcdoc='<input value="retained">';let loads=0;
+ frame.addEventListener('load',()=>loads++);canvas.append(frame);link.after(canvas);
+ await new Promise(r=>setTimeout(r,100));
+ const previewRow=root._chatVirtualRows.find(row=>row.node?.contains(frame));
+ const untouched=root._chatVirtualRows[20];let reads=0;
+ root._chatVirtualRows.forEach(row=>{let value=row.model;Object.defineProperty(row,'model',{get(){reads++;return value},set(next){value=next},configurable:true});});
+ text+=call(1000);await renderLiveChatContent(root,text,false);await new Promise(r=>setTimeout(r,100));
+ if(root.querySelector('iframe')!==frame||loads!==1)throw Error('preview replaced or reloaded');
+ if(root._chatVirtualRows[20]!==untouched||!root._chatVirtualRows.includes(previewRow))throw Error('rows rebuilt');
+ // The older-browser relocation planner still reads models to identify previews.
+ if(root.moveBefore&&reads>150)throw Error('completed history visited: '+reads);
+ await renderLiveChatContent(root,'Removed preview.',true,true);
+ if(root.querySelector('iframe'))throw Error('obsolete preview retained');
+ return 'pass';
+ })()`)
+				if result != "pass" {
+					t.Fatal(result)
+				}
+			})
+		})
+	}
+}

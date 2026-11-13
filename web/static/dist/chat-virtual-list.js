@@ -574,17 +574,21 @@
             const delta = !compact && data.incremental && data._rowDelta?.base === owner._chatVirtualData &&
                 owner._chatVirtualData?.activityMode === false ? data._rowDelta : null;
             delete data._rowDelta;
+            // Incremental installation leaves existing row nodes connected. A
+            // preview needs the relocation fallback only when its destination
+            // differs from the row that already owns it.
+            const stablePreviews = Array.from(previews).every(([index, node]) =>
+                owner._chatVirtualRows?.[index]?.node?.contains(node));
+            const incrementalMedia = stablePreviews && !owner.querySelector('.chat-svg-preview');
             const externalChanges = list.observer.takeRecords().some(record => !record.target.closest?.('[data-chat-lazy-row]'));
             list.liveUpdates = !!(delta && list.owners?.has(owner) && list.mountedRows && !externalChanges && !list.topologyDirty &&
-                list.width === width && messages.getAttribute('data-transcript-hydrating') !== 'true' && !previews.size &&
-                !owner.querySelector('.file-html-canvas, .chat-svg-preview'));
+                list.width === width && messages.getAttribute('data-transcript-hydrating') !== 'true' && incrementalMedia);
             list.observer.disconnect();
             const restore = saveAnchor(list);
             // Live projections retain completed model identities. Update changed rows
             // in place instead of detaching the entire response for every delta.
             const previous = owner._chatVirtualRows;
-            if (data.incremental && previous && owner._chatVirtualData?.activityMode === data.activityMode && !previews.size &&
-                !owner.querySelector('.file-html-canvas, .chat-svg-preview')) {
+            if (data.incremental && previous && owner._chatVirtualData?.activityMode === data.activityMode && incrementalMedia) {
                 owner._chatVirtualData = data;
                 const rows = previous;
                 const update = index => {
