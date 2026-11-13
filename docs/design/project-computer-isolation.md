@@ -142,3 +142,15 @@ handoffs and pending takeovers remain paused for explicit action.
 Idle maintenance reconciles at server startup and once per minute and retries
 transient failures. The helper checks live connections and jobs before stopping
 a desktop. Viewing it again or using a computer tool starts it with saved data.
+
+## Deleted task reconciliation
+
+The same startup/minute maintenance loop asks each configured helper for its
+running desktops, then reads the complete current project task list. Desktops
+whose tasks no longer exist are stopped through the existing desktop DELETE
+endpoint, which preserves their saved directories. This is independent of the
+idle timeout and project enable switch. Existing tasks remain protected even
+without a computer-session row. Failure to list desktops or read tasks stops
+nothing. Failed DELETE requests are rediscovered on later sweeps, including
+after an OV restart; no in-memory deletion queue is required. Reconciliation
+never starts a stopped project computer.

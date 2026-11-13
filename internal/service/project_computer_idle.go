@@ -48,6 +48,7 @@ func (s *ProjectComputerService) runIdleMaintenance(ctx context.Context, interva
 					defer s.active.Delete(key)
 					sweep, cancel := context.WithTimeout(ctx, 45*time.Second)
 					defer cancel()
+					_ = s.reconcileDeletedDesktops(sweep, id)
 					_ = s.reapIdleDesktops(sweep, id)
 				}()
 			}

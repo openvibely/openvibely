@@ -231,3 +231,21 @@ func (r *ProjectComputerRepo) IdleDesktopCandidates(ctx context.Context, id stri
 	}
 	return ids, rows.Err()
 }
+
+// Include all tasks, even those without a session row or with idle cleanup disabled.
+func (r *ProjectComputerRepo) TaskIDsForDesktopCleanup(ctx context.Context, id string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM tasks WHERE project_id=?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var task string
+		if err := rows.Scan(&task); err != nil {
+			return nil, err
+		}
+		ids = append(ids, task)
+	}
+	return ids, rows.Err()
+}
