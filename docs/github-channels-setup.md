@@ -99,3 +99,10 @@ The card shows one of:
 - Save fails in PAT mode: token is required.
 - Save fails in App mode: App ID, slug, and private key are required.
 - App mode stays not connected: run `Connect` from the card and complete install callback.
+
+## Personal credentials and fork pull requests
+
+Signed-in users can configure their own GitHub token, Commit author, and Commit email in the GitHub channel settings. Use Look up GitHub identity to fill identity details from GitHub. Personal credentials are kept separate from other users' credentials.
+
+Task Changes controls let you select the local merge method and target branch, or create a pull request to the selected repository and branch. When direct pushes are unavailable, eligible personal-token workflows can publish through a personal fork. Fork pull requests preserve local commit history and link back to the task. The task status displays an open pull request indicator when applicable.
+

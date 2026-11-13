@@ -2,6 +2,7 @@ package pages
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -133,7 +134,21 @@ func TestBrowserFunctional_SidebarHighlightFollowsNavigationBeforeSettle(t *test
 			}));
 		}); 'ok'`)
 		for i, path := range []string{"/automations", "/tasks"} {
-			b.click(fmt.Sprintf(`#sidebar [data-nav-base=%q]`, path))
+			b.evaluate(fmt.Sprintf(`window.railTarget = document.querySelector('#sidebar [data-nav-base=%q]'); 'ok'`, path))
+			raw := b.evaluate(`(()=>{const r=railTarget.getBoundingClientRect();return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2});})()`)
+			var point struct {
+				X float64 `json:"x"`
+				Y float64 `json:"y"`
+			}
+			if err := json.Unmarshal([]byte(raw), &point); err != nil {
+				t.Fatal(err)
+			}
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+			b.evaluate(`window.railHover = getComputedStyle(railTarget).backgroundColor; 'ok'`)
+			b.waitFor("hover visible and distinct from selection", `String(railHover !== 'rgba(0, 0, 0, 0)' && railHover !== getComputedStyle(document.querySelector('#sidebar [aria-current="page"]')).backgroundColor)`, "true")
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+			b.waitFor("mouse-down preserves hover background", `String(document.activeElement === railTarget && railTarget.matches(':active') && getComputedStyle(railTarget).backgroundColor === railHover)`, "true")
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
 			want := fmt.Sprintf(`{"path":%q,"selected":[%q],"visible":true,"instant":true}`, path, path)
 			b.waitFor("correct highlight immediately after swap", fmt.Sprintf(`String(railSamples[%d])`, i), want)
 			b.waitFor("navigation settled", `String(!document.querySelector('#main-content.htmx-settling'))`, "true")

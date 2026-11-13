@@ -1636,7 +1636,7 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 		"display: none !important;",
 		".sidebar-aside.sidebar-collapsed [data-tip]:hover::after {",
 		"opacity: 0 !important;",
-		".sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible):not([aria-current=\"page\"]),",
+		".sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible):not(:hover):not(:active):not([aria-current=\"page\"]),",
 		".sidebar-aside .menu:not(.ov-menu) summary:focus:not(:focus-visible) {",
 		"background-color: transparent !important;",
 	}

@@ -1,8 +1,14 @@
-# Plugin pages
+# Custom pages
 
 Plugin pages let a project add its own page to the OpenVibely left rail. A page runs as a sandboxed iframe inside the main content area. Every page has side chat that knows which page it is on. Pages can also provide a local backend process, shared operations for page buttons and the assistant, and live refresh events.
 
 The primary workflow is to ask an agent in a task thread to create a page. The agent writes and validates the bundle and publishes it into that task's project; users do not need to author packages or manually import them. OpenVibely does not need Node at runtime. There is no marketplace.
+
+## Create and manage pages
+
+Open Settings → Custom pages and choose Describe to request a page. Select its destination project and submit the description; OpenVibely starts a task to build it. Installed pages appear in the left navigation or More pages menu. Use the settings cards to search, enable, disable, or remove pages. Install package accepts a folder upload or an advanced server folder path.
+
+Use the page side chat to ask questions or request edits. It supports model selection, attachments, clarification questions, queued follow-ups, steering, and saved history. Publishing an edit refreshes the page while preserving its conversation and data. Disabling a page stops its AI work and backend; removing an instance deletes its saved state and chat.
 
 ## Create a page through a task
 
@@ -72,7 +78,7 @@ Validation is strict:
 | --- | --- |
 | `storage` | Lets the backend persist per-instance state (max 1 MiB) |
 | `events` | Lets the plugin publish and subscribe to live refresh events. Required for any `emits`. |
-| `agent` | Enables the side chat and `analyze.request` |
+| `agent` | Legacy compatibility declaration; every enabled page has side chat |
 | `backend.exec` | Runs the backend executable. Starts when the page is enabled. |
 
 Operation `kind` is either `read` or `action`. Agent tool calls run directly, like other OV tools; there is no per-action confirmation.
@@ -159,9 +165,9 @@ In All Projects the left rail lists every enabled page, labelled with its owning
 ## Side chat
 
 The "Chat about this page" panel reuses the standard chat message components and streaming pipeline (`startStreamingResponse`, live execution streams, Stop and cancellation).
-- **Persistence:** each instance has one persisted conversation task, stored in the hidden `freezer` category. The conversation resumes when you reopen the page. Provider transport sessions, saved provider state, and compaction summaries use `task:<conversation-task-id>`, separate from every other page and from normal `chat:project:<project-id>` chat. This scope survives restarts without switching the page chat to coding-agent prompts. Previously shared project checkpoints are not copied into page conversations; existing page message history remains available.
+- **Persistence:** each instance has one persisted conversation task, stored in the hidden `page_chat` category. The conversation resumes when you reopen the page. Provider transport sessions, saved provider state, and compaction summaries use `task:<conversation-task-id>`, separate from every other page and from normal `chat:project:<project-id>` chat. This scope survives restarts without switching the page chat to coding-agent prompts. Previously shared project checkpoints are not copied into page conversations; existing page message history remains available.
 - **Context:** each turn stores a snapshot of the page's explicitly shared context (`page_turn_contexts`). That snapshot is injected into the system context with provenance, fenced as `<untrusted_page_context>` data. OpenVibely never reads or scrapes the iframe's DOM.
-- **Tools:** page tools (`page_<operation>`) are built server-side from the manifest. Each tool call re-resolves and re-authorizes the instance. Agent calls to actions wait for Approve or Deny in the page.
+- **Tools:** page tools (`page_<operation>`) are built server-side from the manifest. Each tool call re-resolves and re-authorizes the instance. Agent calls to actions run directly under the current project permissions.
 - **In-page analysis:** `analyze.request` runs the same kind of turn and streams `analysis.delta` messages into the page.
 
 ## Test fixture
@@ -193,7 +199,7 @@ The plugin adapter is `internal/pageplugins/conversation.go`. Shared persistence
 
 ## Known limitations
 
-- Installation is from a local directory or the bundled example only. There is no upload and no signing.
+- Install an existing package by uploading its folder or specifying a server folder path. Packages are not signed; no example page is bundled.
 - Backends are not OS-sandboxed (see above). Frontend-only plugins and builtins never execute code on the host.
 - Page contexts are kept in memory and are lost on restart.
 - The side chat supports the shared composer's model selection and attachments. It runs one turn at a time per instance; follow-up messages wait in the durable input queue with their submitting identity and page context snapshot. Stop and disable cancel pending messages for that page.

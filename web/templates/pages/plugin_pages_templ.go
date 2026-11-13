@@ -305,7 +305,7 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if len(entries) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<li class=\"sidebar-divider\" style=\"display:block!important;border-top:1px solid currentColor;opacity:.2;margin:8px 4px\" role=\"separator\"></li><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Pages</span></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<li class=\"sidebar-divider\" style=\"display:block!important;border-top:1px solid currentColor;opacity:.1;margin:6px 4px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent);mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent)\" role=\"separator\"></li><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Pages</span></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1310,20 +1310,20 @@ func PluginSettingsContent(v PluginSettingsView) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "<p class=\"text-sm opacity-70\">Start a task to build and publish a page in the selected project.</p><form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "<p class=\"text-sm opacity-70\">Start a task to build and publish a page in the selected project.</p><form hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var62 string
-			templ_7745c5c3_Var62, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID)).ResolveURL(ctx)
+			templ_7745c5c3_Var62, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 310, Col: 92}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 310, Col: 79}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "\" class=\"space-y-4\" onsubmit=\"this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "\" hx-target=\"#main-content\" hx-swap=\"innerHTML\" hx-disabled-elt=\"find button[type=submit]\" class=\"space-y-4\" hx-on:htmx:config-request=\"event.detail.parameters.prompt='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

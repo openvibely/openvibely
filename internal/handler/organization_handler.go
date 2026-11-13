@@ -338,6 +338,17 @@ func (h *Handler) OrganizationPage(c echo.Context) error {
 	}
 	return h.renderOrganization(c, data)
 }
+
+// Refresh through a new request so role/removal changes re-check authorization.
+// A raw 303 on an HTMX request is not followed by the Linux native transport.
+func redirectToOrganization(c echo.Context) error {
+	if isHTMX(c) {
+		c.Response().Header().Set("HX-Location", `{"path":"/organization","target":"#main-content","swap":"innerHTML"}`)
+		return c.NoContent(http.StatusOK)
+	}
+	return c.Redirect(http.StatusSeeOther, "/organization")
+}
+
 func (h *Handler) RenameOrganization(c echo.Context) error {
 	p, err := h.requireOrgAdmin(c)
 	if err != nil {
@@ -350,7 +361,7 @@ func (h *Handler) RenameOrganization(c echo.Context) error {
 	if err := h.organizationSvc.Store.RenameOrganization(c.Request().Context(), p.UserID, name); err != nil {
 		return orgActionError(err)
 	}
-	return c.Redirect(http.StatusSeeOther, "/organization")
+	return redirectToOrganization(c)
 }
 func (h *Handler) CreateOrgInvitation(c echo.Context) error {
 	p, err := h.requireOrgAdmin(c)
@@ -383,7 +394,7 @@ func (h *Handler) RevokeOrgInvitation(c echo.Context) error {
 	if err := h.organizationSvc.Store.RevokeInvitation(c.Request().Context(), p.UserID, c.Param("id")); err != nil {
 		return orgActionError(err)
 	}
-	return c.Redirect(http.StatusSeeOther, "/organization")
+	return redirectToOrganization(c)
 }
 func (h *Handler) ChangeOrgMember(c echo.Context) error {
 	p, err := h.requireOrgAdmin(c)
@@ -398,7 +409,7 @@ func (h *Handler) ChangeOrgMember(c echo.Context) error {
 		return orgActionError(err)
 	}
 	h.organizationSvc.NotifyUser(c.Param("id"))
-	return c.Redirect(http.StatusSeeOther, "/organization")
+	return redirectToOrganization(c)
 }
 func (h *Handler) OrgInvitePage(c echo.Context) error {
 	if h.organizationSvc == nil || h.authMode != auth.AuthModeLocal {

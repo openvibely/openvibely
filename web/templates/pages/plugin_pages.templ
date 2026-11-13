@@ -105,7 +105,7 @@ func pluginNavScope(e PluginNavEntry, allProjects bool) string {
 
 templ PluginNav(entries []PluginNavEntry, showProject bool) {
 	if len(entries) > 0 {
-		<li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.2;margin:8px 4px" role="separator"></li>
+		<li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.1;margin:6px 4px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent);mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent)" role="separator"></li>
 		<li class="menu-title sidebar-hide-collapsed"><span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Pages</span></li>
 	}
 	for _, e := range entries {
@@ -307,7 +307,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 
 		@pluginSettingsDialog("plugin-describe-modal", "Describe a page") {
 			<p class="text-sm opacity-70">Start a task to build and publish a page in the selected project.</p>
-			<form method="post" action={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } class="space-y-4" onsubmit="this.elements.prompt.value='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
+			<form hx-post={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } hx-target="#main-content" hx-swap="innerHTML" hx-disabled-elt="find button[type=submit]" class="space-y-4" hx-on:htmx:config-request="event.detail.parameters.prompt='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
 				@pluginDestination(v)
 <input type="hidden" name="category" value="active"/>
 				<input type="hidden" name="priority" value="2"/>

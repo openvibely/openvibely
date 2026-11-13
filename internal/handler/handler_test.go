@@ -1333,8 +1333,17 @@ func TestHandler_NewTaskWorkspace(t *testing.T) {
 			status = http.StatusOK
 		}
 		assertCode(t, rec, status)
-		require.Contains(t, rec.Header().Get(header), "?project_id="+project.ID)
-		require.True(t, strings.HasPrefix(rec.Header().Get(header), "/tasks/"))
+		destination := rec.Header().Get(header)
+		if htmx {
+			var location map[string]string
+			require.NoError(t, json.Unmarshal([]byte(destination), &location))
+			require.Equal(t, "#main-content", location["target"])
+			require.Equal(t, "innerHTML", location["swap"])
+			destination = location["path"]
+			require.NotEmpty(t, rec.Header().Get("X-Created-Task-ID"))
+		}
+		require.Contains(t, destination, "?project_id="+project.ID)
+		require.True(t, strings.HasPrefix(destination, "/tasks/"))
 	}
 	tasks, err = h.taskRepo.ListByProject(context.Background(), project.ID, "")
 	require.NoError(t, err)

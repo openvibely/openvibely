@@ -22,6 +22,7 @@ env:
     libxtst-dev
     libx11-dev
     xvfb
+    dbus-daemon
     openbox
     xcompmgr
 
@@ -288,6 +289,21 @@ jobs:
         if: runner.os == 'Linux'
         run: openbox >/tmp/openvibely-native-chat-wm.log 2>&1 &
 
+      - name: Test native desktop navigation and authentication on Linux
+        if: runner.os == 'Linux'
+        env:
+          OPENVIBELY_RUN_NATIVE_UI: "1"
+        # Establish the bus address before Wails starts. Otherwise its theme
+        # monitor can discover the bus and call setenv concurrently with GTK
+        # startup. dbus-run-session also stops the bus when the test exits.
+        run: dbus-run-session -- go test ./cmd/desktop -run '^TestNativeDesktopNavigation$' -v -count=1 -timeout 900s
+
+      - name: Test native desktop navigation and authentication on macOS and Windows
+        if: runner.os != 'Linux'
+        env:
+          OPENVIBELY_RUN_NATIVE_UI: "1"
+        run: go test ./cmd/desktop -run '^TestNativeDesktopNavigation$' -v -count=1 -timeout 900s
+
       - name: Test native Wails desktop scrolling and alignment
         env:
           OPENVIBELY_RUN_NATIVE_UI: "1"
@@ -310,6 +326,12 @@ jobs:
         env:
           OPENVIBELY_RUN_NATIVE_UI: "1"
         run: go test -tags=openvibely_native_ui ./web/templates/pages -run '^TestNativeWebKitStorageIsolation$' -count=1 -timeout=120s
+
+      - name: Test native macOS desktop authentication
+        if: runner.os == 'macOS'
+        env:
+          OPENVIBELY_RUN_NATIVE_UI: "1"
+        run: go test -tags=openvibely_native_ui ./cmd/desktop -run '^TestDesktopAuthenticationInNativeWebView$' -count=1 -timeout=120s
 
       - name: Test native Windows storage isolation
         if: runner.os == 'Windows'

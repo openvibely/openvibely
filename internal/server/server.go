@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"io"
@@ -299,7 +300,12 @@ func moveOrCopyPath(from, to string) error {
 }
 
 func isCrossDeviceRename(err error) bool {
-	return strings.Contains(strings.ToLower(err.Error()), "cross-device") || strings.Contains(strings.ToLower(err.Error()), "invalid cross-device link")
+	if err == nil {
+		return false
+	}
+	// os.Rename wraps the OS error in *os.LinkError. Match the code so
+	// Windows' ERROR_NOT_SAME_DEVICE works regardless of the system language.
+	return errors.Is(err, crossDeviceRenameError) || strings.Contains(strings.ToLower(err.Error()), "cross-device")
 }
 
 func copyFile(from, to string, mode os.FileMode) error {

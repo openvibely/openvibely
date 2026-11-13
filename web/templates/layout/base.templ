@@ -1446,6 +1446,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					margin: 0 !important;
 					width: 2.5rem !important;
 				}
+				/* The outer menu adds 2px before the nested page list. Cancel it so
+				   the divider sits equally far from both neighboring hover areas. */
+				body.sidebar-collapsed-pending .sidebar-aside .menu li.plugin-pages-nav-wrap:not(.sidebar-divider),
+				.sidebar-aside.sidebar-collapsed .menu li.plugin-pages-nav-wrap:not(.sidebar-divider) {
+					margin-top: -2px !important;
+				}
 				body.sidebar-collapsed-pending .sidebar-aside .menu :where(li ul),
 					.sidebar-aside.sidebar-collapsed .menu :where(li ul) {
 					padding: 0 !important;
@@ -1639,7 +1645,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background-color: var(--ov-l-surface-hover);
 					}
 					/* Prevent mouse-click focus from looking like a persistent active nav item (web parity with desktop). */
-					.sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible):not([aria-current="page"]),
+					.sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible):not(:hover):not(:active):not([aria-current="page"]),
 					.sidebar-aside .menu:not(.ov-menu) summary:focus:not(:focus-visible) {
 						background-color: transparent !important;
 						outline: none !important;
@@ -3268,7 +3274,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     pointer-events: none;
                 }
 				html[data-shell-frame] .sidebar-aside .menu a svg { width: 1.125rem; height: 1.125rem; }
-				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background: color-mix(in srgb, oklch(var(--bc)) 10%, transparent); }
+				/* Match task rows and override menu/theme press and focus backgrounds.
+				   Pointer focus alone must not leave an old destination highlighted. */
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]) { background-color: transparent !important; }
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]):is(:hover, :active, :focus-visible) { opacity: 1; color: oklch(var(--bc)); background-color: oklch(var(--bc) / .06) !important; }
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path])[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background-color: var(--shell-row-selected) !important; }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] svg { color: inherit; }
 				html[data-shell-frame] .sidebar-aside .sidebar-footer { justify-content: center; padding: 6px 0 10px; min-height: 0; border: 0; }
 				/* Keep the lowered Settings hit area inset from the viewport edge. */

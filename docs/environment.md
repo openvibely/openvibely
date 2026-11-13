@@ -8,6 +8,7 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 
 | Variable | Purpose | Allowed values | Default behavior (from code) | Examples (local / VPS-public) |
 |---|---|---|---|---|
+| `OPENVIBELY_NO_BROWSER` | Disable automatic browser opening by the server executable | `true`, `false` (Go boolean forms also accepted) | Unset/false opens the local `/chat` page after readiness, including via `start.sh`. Both Docker images set `true`; update relaunches force `true`. Desktop startup is unaffected. | `false` \| `true` |
 | `PORT` | HTTP listen port | Any valid TCP port string | `3001` (`internal/config/config.go`; Docker image overrides to `3001`; desktop uses `0` for ephemeral) | `3001` \| `8080` |
 | `OPENVIBELY_APP_DATA_DIR` | Overrides the external app-data root shared by the database, managed repos, global agents, skills, and plugin storage | Filesystem path (absolute recommended) | Server: `~/.openvibely`. Desktop: macOS `~/Library/Application Support/OpenVibely`, Windows `%LOCALAPPDATA%\OpenVibely`, Linux `$XDG_DATA_HOME/openvibely`. Docker: `/data`. Desktop storage must remain outside the replaceable application bundle. | `~/.openvibely` \| `/data` |
 | `OPENVIBELY_RUNTIME_DIR` | **Deprecated** `start.sh`-only alias for `OPENVIBELY_APP_DATA_DIR`. If `OPENVIBELY_APP_DATA_DIR` is unset and this is set, `start.sh` copies its value into `OPENVIBELY_APP_DATA_DIR`. Has no effect when the binary is launched directly. | Filesystem path | Unset; prefer `OPENVIBELY_APP_DATA_DIR` in all new configurations | deprecated \| — |
@@ -24,6 +25,8 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 | `OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION` | When set to any non-empty value, skips the startup migration that moves old database and repo paths from source-checkout locations into the app-data directory. Use when you have already migrated or are managing storage manually. Has no effect if `OPENVIBELY_APP_DATA_DIR` is set or if no legacy paths exist. | Any non-empty string (presence is the check) | Unset (migration runs automatically when legacy paths are detected) | unset \| `1` |
 | `OPENVIBELY_CODEX_REASONING_EFFORT` | Fallback reasoning effort for Codex requests when model config does not set one | `none`, `low`, `medium`, `high`, `xhigh`, `max` (model support varies; GPT-6 Astra does not support `none`) | If unset/invalid, uses the selected model's default: `medium` for GPT-6 Astra/Sol/Luna, GPT-5.6, GPT-5.5, GPT-5.4, and GPT-5.4 mini; `high` for most older Codex models | `medium` \| `none` |
 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | Overrides the per-call output token budget for Anthropic API/OAuth calls. When set to a positive integer, the value is applied up to the model's hard upper limit. | Positive integer string | Defaults to `128 000` for Claude Opus 5.5; `64 000` for Claude Opus 5, Sonnet 5, Fable 5/5.1, Mythos 5, and Opus 4.6–4.8; `32 000` for Sonnet 4.6 and most Claude 4/3.7 models; `8 192` for Claude 3.5; and `4 096` for older Claude 3 Opus/Haiku models. Model-specific upper limits still apply. | unset \| `32000` |
+
+For background services and remote/headless servers, set `OPENVIBELY_NO_BROWSER=true` in the service environment. For example, use `Environment=OPENVIBELY_NO_BROWSER=true` in a systemd service. To opt out locally, run `OPENVIBELY_NO_BROWSER=true ./start.sh`. No browser CLI flag is required.
 
 ## Live WebSocket Limits
 
@@ -252,7 +255,7 @@ OAUTH_REDIRECT_MODE=auto
 
 Open **Settings → Organization** to manage the installation's organization, members, roles, and invitation links. Local authentication must be enabled to invite members. Invitations can grant member or admin access, expire after seven days, and can be revoked. Personal interface preferences follow each signed-in user, and conversation messages retain their sender identity.
 
-All members currently share access to all projects and global application operations. Roles restrict organization administration; they do not provide project-level isolation. Hosted SSO currently supports the workspace owner only, not multi-member invitations.
+Joining the organization grants no project access. Project owners and organization admins/owners assign viewer, editor, or maintainer roles in Project Settings → Sharing. Application permissions do not isolate agent processes or the filesystem; private-project creation remains unavailable. Hosted SSO currently supports the workspace owner only, not multi-member invitations.
 
 On upgrade, existing authenticated sessions must sign in again. Local `AUTH_USERNAME` and `AUTH_PASSWORD` initialize the owner account once; changing them later does not change its stored credentials. Password-change/reset UI is not yet available. Authentication cannot be disabled after adding other members.
 

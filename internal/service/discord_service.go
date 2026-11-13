@@ -1376,16 +1376,7 @@ func (s *DiscordService) linkAttachmentsToExecution(ctx context.Context, execID 
 }
 
 func discordSafeFileName(f discordIncomingAttachment) string {
-	name := strings.TrimSpace(f.FileName)
-	name = filepath.Base(name)
-	if name == "." || name == string(filepath.Separator) || name == "" {
-		if strings.TrimSpace(f.ID) != "" {
-			name = "discord-" + strings.TrimSpace(f.ID)
-		} else {
-			name = "discord-attachment"
-		}
-	}
-	return name
+	return channelChatSafeIncomingFileName(f.FileName, f.ID, "discord")
 }
 
 func discordFileDisplayName(f discordIncomingAttachment) string {

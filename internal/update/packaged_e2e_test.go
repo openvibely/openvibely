@@ -162,10 +162,17 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		approval = preparePendingApprovalE2E(t, appData)
 	}
 	stdoutLog, stderrLog, readLogs := openCommandLogs(t, root, "binary-current")
+	helperLogPath := filepath.Join(root, "binary-update-helper.log")
+	readDiagnostics := func() string {
+		helperLog, err := os.ReadFile(helperLogPath)
+		return fmt.Sprintf("\nhelper state:\n%s\n%s\nhelper log (read error: %v):\n%s",
+			describePackagedUpdateHelperState(current), readLogs(), err, helperLog)
+	}
 	cmd := exec.Command(launchPath)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),
 		"PORT="+port,
+		updateIntegrationHelperLogEnv+"="+helperLogPath,
 		"DATABASE_PATH="+filepath.Join(appData, "openvibely.db"),
 		"PROJECT_REPO_ROOT="+filepath.Join(root, "projects"),
 		"OPENVIBELY_APP_DATA_DIR="+appData,
@@ -186,7 +193,9 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
+		killExecutable(t, packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand))
 		killPort(t, port)
+		killExecutable(t, current)
 	})
 
 	baseURL := "http://127.0.0.1:" + port
@@ -204,18 +213,18 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		t.Fatalf("accept update HTTP %d\n%s", resp.StatusCode, readLogs())
 	}
 	if err := waitForCommandExit(cmd, time.Minute); err != nil {
-		t.Fatalf("current app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
+		t.Fatalf("current app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readDiagnostics())
 	}
 	if wantState == StateSucceeded {
 		waitForHealthVersionWithin(t, baseURL, releaseVersion, 120*time.Second, func() string {
-			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
+			return fmt.Sprintf("\nupdate snapshot: %s%s", readUpdateSnapshot(baseURL), readDiagnostics())
 		})
 	} else {
 		waitForHealthVersionWithin(t, baseURL, "0.5.0", 120*time.Second, func() string {
-			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
+			return fmt.Sprintf("\nupdate snapshot: %s%s", readUpdateSnapshot(baseURL), readDiagnostics())
 		})
 	}
-	waitForUpdateState(t, baseURL, wantState)
+	waitForUpdateState(t, baseURL, wantState, readDiagnostics)
 	if approval != nil {
 		approval.answerAfterRestart(t, baseURL, readLogs)
 	}
@@ -1481,7 +1490,7 @@ func waitForHealthVersionWithin(t *testing.T, baseURL, version string, timeout t
 	t.Fatalf("health did not report version %s: last=%s%s", version, last, details.String())
 }
 
-func waitForUpdateState(t *testing.T, baseURL, state string) {
+func waitForUpdateState(t *testing.T, baseURL, state string, diagnostics ...func() string) {
 	t.Helper()
 	deadline := time.Now().Add(45 * time.Second)
 	var last string
@@ -1505,7 +1514,13 @@ func waitForUpdateState(t *testing.T, baseURL, state string) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	t.Fatalf("update state did not become %s: last=%s", state, last)
+	var details strings.Builder
+	for _, diagnostic := range diagnostics {
+		if diagnostic != nil {
+			details.WriteString(diagnostic())
+		}
+	}
+	t.Fatalf("update state did not become %s: last=%s%s", state, last, details.String())
 }
 
 func waitForStagedUpdate(t *testing.T, baseURL string) {
@@ -1673,6 +1688,16 @@ func killPort(t *testing.T, port string) {
 func killExecutable(t *testing.T, executable string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
+		// A restarting process may hold the database before opening its port.
+		// Match the full test-owned path so cleanup also finds those processes.
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+			`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:OPENVIBELY_E2E_CLEANUP_EXECUTABLE } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; Wait-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }`)
+		cmd.Env = append(os.Environ(), "OPENVIBELY_E2E_CLEANUP_EXECUTABLE="+executable)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Logf("cleanup executable %s: %v\n%s", executable, err, output)
+		}
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
