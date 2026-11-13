@@ -1355,6 +1355,29 @@ func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOut
 	})
 }
 
+// InvalidateDiffOutput discards the single saved copy after a confirmed empty
+// final diff. The marker prevents in-flight snapshots from reviving that copy.
+// A later execution may save new changes normally.
+func (r *ExecutionRepo) InvalidateDiffOutput(ctx context.Context, id string) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		result, err := tx.ExecContext(ctx, `UPDATE executions SET diff_output_invalidated = 1
+			WHERE id = ? AND NOT EXISTS (
+				SELECT 1 FROM executions newer WHERE newer.task_id = executions.task_id
+				AND (newer.started_at, newer.rowid) > (executions.started_at, executions.rowid)
+			)`, id)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed == 0 {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE executions SET diff_output = ''
+			WHERE task_id = (SELECT task_id FROM executions WHERE id = ?)`, id)
+		return err
+	})
+}
+
 // The caller holds an immediate transaction so accepting a snapshot and clearing
 // older snapshots are atomic. Ordering matches GetLatestNonEmptyDiffOutput,
 // including executions that start in the same timestamp tick.
@@ -1363,9 +1386,9 @@ func saveLatestDiffOutput(ctx context.Context, tx sqlExecutor, id, diffOutput st
 		return nil
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE executions SET diff_output = ?
-		WHERE id = ? AND NOT EXISTS (
+		WHERE id = ? AND diff_output_invalidated = 0 AND NOT EXISTS (
 			SELECT 1 FROM executions newer
-			WHERE newer.task_id = executions.task_id AND newer.diff_output != ''
+			WHERE newer.task_id = executions.task_id AND (newer.diff_output != '' OR newer.diff_output_invalidated = 1)
 			AND (newer.started_at, newer.rowid) > (executions.started_at, executions.rowid)
 		)`, diffOutput, id)
 	if err != nil {

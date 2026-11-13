@@ -1385,8 +1385,11 @@ func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.T
 	if !ok {
 		// Only use saved file indexes when the entire live diff is empty;
 		// an out-of-range index in a nonempty live diff must remain missing.
-		if isActive && strings.TrimSpace(service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)) == "" {
-			return preservedMeta()
+		if isActive {
+			empty, err := service.WorktreeDiffIsEmpty(ctx, project.RepoPath, targetBranch, task.WorktreePath)
+			if err == nil && empty {
+				return preservedMeta()
+			}
 		}
 		if !isActive && (h.reconcileAlreadyMergedBranch(ctx, task) || service.IsBranchMergedContext(ctx, project.RepoPath, task.WorktreeBranch, targetBranch)) {
 			return preservedMeta()

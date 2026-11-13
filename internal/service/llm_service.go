@@ -2248,6 +2248,11 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, result.WorktreeBranch, result.CommitError)
 	}
 	if result.DiffOutput == "" {
+		if result.Finalized && result.CommitError == nil {
+			if err := InvalidateEmptyTaskDiff(ctx, s.execRepo, task, exec.ID, repoDir); err != nil {
+				applog.Infof("[agent-svc] could not verify empty task diff task=%s: %v", task.ID, err)
+			}
+		}
 		return result
 	}
 	if diffErr := s.execRepo.UpdateDiffOutput(ctx, exec.ID, result.DiffOutput); diffErr != nil {

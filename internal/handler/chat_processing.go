@@ -2474,6 +2474,17 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		applog.Infof("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
 		return outcome, nil
 	}
+	// Only invalidate after terminal admission succeeds: pending steering may
+	// continue this same execution and produce a new diff.
+	if task != nil && workDir != "" {
+		project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+		repoDir, _, _, managed := resolveTaskChangesWorktreeRefs(task, project, workDir)
+		if managed {
+			if err := service.InvalidateEmptyTaskDiff(ctx, h.execRepo, task, execID, repoDir); err != nil {
+				applog.Infof("[handler] could not verify empty task diff task=%s: %v", task.ID, err)
+			}
+		}
+	}
 	if republishOpenPR {
 		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, taskID, false); err != nil {
 			applog.Infof("[handler] completeWithSuccess task=%s published startup-sync reconciliation but could not clear durable publication requirement: %v", taskID, err)

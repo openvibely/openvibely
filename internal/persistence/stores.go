@@ -360,6 +360,7 @@ type ExecutionStore interface {
 	SuccessCompletionReadiness(ctx context.Context, id string) (CompleteSuccessOutcome, error)
 	TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error)
 	UpdateDiffOutput(ctx context.Context, id string, diffOutput string) error
+	InvalidateDiffOutput(ctx context.Context, id string) error
 	UpsertChatCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error
 	SaveInTurnCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error
 	UpsertChatProviderSessionState(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error

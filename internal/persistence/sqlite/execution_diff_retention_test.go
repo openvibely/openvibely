@@ -121,3 +121,36 @@ func TestSwarmParentDiffRetention(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "output two", latest.Output)
 }
+
+func TestExecutionDiffInvalidation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewExecutionRepo(db)
+	ctx := context.Background()
+	_, err := db.Exec(`INSERT INTO tasks(id,project_id,title) VALUES('t','default','T'),('other','default','Other');
+ INSERT INTO executions(id,task_id,started_at) VALUES ('old','t','2026-01-01'),('final','t','2026-01-02'),('other','other','2026-01-01')`)
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateDiffOutput(ctx, "other", "other diff"))
+	require.NoError(t, repo.UpdateDiffOutput(ctx, "old", "saved"))
+	require.NoError(t, repo.InvalidateDiffOutput(ctx, "final"))
+	// Neither a delayed older run nor an in-flight snapshot from finalization
+	// may revive the invalidated copy.
+	for _, id := range []string{"old", "final"} {
+		require.NoError(t, repo.UpdateDiffOutput(ctx, id, "late"))
+	}
+	got, err := repo.GetLatestNonEmptyDiffOutput(ctx, "t")
+	require.NoError(t, err)
+	require.Empty(t, got)
+	got, err = repo.GetLatestNonEmptyDiffOutput(ctx, "other")
+	require.NoError(t, err)
+	require.Equal(t, "other diff", got)
+	_, err = db.Exec(`INSERT INTO executions(id,task_id,started_at) VALUES('next','t','2026-01-02')`)
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateDiffOutput(ctx, "next", "new changes"))
+	require.NoError(t, repo.InvalidateDiffOutput(ctx, "final"))
+	got, err = repo.GetLatestNonEmptyDiffOutput(ctx, "t")
+	require.NoError(t, err)
+	require.Equal(t, "new changes", got)
+	var n int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM executions WHERE task_id='t' AND diff_output != ''`).Scan(&n))
+	require.Equal(t, 1, n)
+}

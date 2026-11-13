@@ -1469,3 +1469,72 @@ func TestHandler_ActiveEmptyWorktreeKeepsSavedReviewChanges(t *testing.T) {
 		t.Fatal("out-of-range live index must not resolve saved content")
 	}
 }
+
+func TestHandler_FinalDiffValidityAcrossReruns(t *testing.T) {
+	for _, scenario := range []string{"reverted", "noop", "merged"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, _, _, db := setupTestHandlerWithStores(t)
+			defer db.Close()
+			ctx := context.Background()
+			repoDir := createHandlerTestGitRepo(t)
+			target := gitCurrentBranch(t, repoDir)
+			branch := "task/final-validity"
+			worktree := filepath.Join(t.TempDir(), "worktree")
+			runGit(t, repoDir, "worktree", "add", "-b", branch, worktree, target)
+			if err := os.WriteFile(filepath.Join(worktree, "change.txt"), []byte("task change\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, worktree, "add", "change.txt")
+			runGit(t, worktree, "commit", "-m", "task change")
+			project := &models.Project{Name: "Validity", RepoPath: repoDir}
+			if err := h.projectRepo.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Validity", Category: models.CategoryActive, Status: models.StatusRunning, WorktreePath: worktree, WorktreeBranch: branch, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending}
+			if err := h.taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			previous := &models.Execution{TaskID: task.ID, AgentConfigID: firstAgentID(t, h), Status: models.ExecCompleted}
+			if err := h.execRepo.Create(ctx, previous); err != nil {
+				t.Fatal(err)
+			}
+			saved := service.GetWorktreeDiffWithUncommitted(repoDir, branch, target, worktree)
+			if saved == "" {
+				t.Fatal("missing fixture diff")
+			}
+			if err := h.execRepo.UpdateDiffOutput(ctx, previous.ID, saved); err != nil {
+				t.Fatal(err)
+			}
+			current := &models.Execution{TaskID: task.ID, AgentConfigID: firstAgentID(t, h), Status: models.ExecRunning, IsFollowup: true}
+			if err := h.execRepo.Create(ctx, current); err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "reverted":
+				runGit(t, worktree, "revert", "--no-edit", "HEAD")
+			case "merged":
+				runGit(t, repoDir, "merge", "--ff-only", branch)
+			}
+			if _, err := h.completeWithSuccessWithPRReconciliation(ctx, current.ID, task.ID, "done", worktree, 0, 1, false); err != nil {
+				t.Fatal(err)
+			}
+			got, err := h.execRepo.GetLatestNonEmptyDiffOutput(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (got == "") != (scenario == "reverted") {
+				t.Fatalf("saved diff after %s: %q", scenario, got)
+			}
+			// A later empty run must not revive a deliberately removed diff, while
+			// integrated changes and no-op runs remain reviewable.
+			task.Status = models.StatusRunning
+			if err := h.taskRepo.Update(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			got = h.resolveTaskChangesDiffOutput(ctx, task)
+			if (got == "") != (scenario == "reverted") {
+				t.Fatalf("rerun diff after %s: %q", scenario, got)
+			}
+		})
+	}
+}
