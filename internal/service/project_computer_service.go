@@ -90,10 +90,8 @@ func (s *ProjectComputerService) EnsureStarted(ctx context.Context, id string) e
 	root.taskID = ""
 	root.repo = s.projects.Computers()
 	if root.Ready(ctx, id) {
-		switch s.provisioner.(type) {
-		case *LocalComputerProvisioner, *HostedComputerProvisioner:
-			_ = root.reapIdleDesktops(ctx, id)
-		}
+		// Idle maintenance runs independently of tool calls. A ready computer
+		// must not wait for unrelated desktops to shut down.
 		return nil
 	}
 	return root.start(ctx, id, true)

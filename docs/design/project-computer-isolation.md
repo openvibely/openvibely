@@ -93,7 +93,9 @@ Linux bridge unit tests also cover the fail-closed identity/environment paths.
 
 Project settings offer an idle timeout (30 minutes by default; 0 means Never).
 The app checks approximately once per minute while the project computer is
-available, and before computer-tool use to free eligible slots at capacity.
+available. Computer-tool calls do not wait for this maintenance sweep. At
+capacity, callers retry after maintenance frees an eligible slot; active desktops
+are never evicted.
 This is shutdown, not a memory snapshot: saved files and browser profiles remain,
 but applications close and unsaved edits are lost. Opening the task Computer tab
 or using a computer tool starts a stopped desktop from its existing data.
