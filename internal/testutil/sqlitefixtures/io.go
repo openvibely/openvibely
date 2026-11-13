@@ -45,7 +45,7 @@ func (c *ioCounter) Reset()                  { c.counter.Reset() }
 func (c *ioCounter) SetEnabled(enabled bool) { c.counter.SetEnabled(enabled) }
 func (c *ioCounter) Snapshot() storefixture.IOStats {
 	statements := c.counter.Statements()
-	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
+	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes(), ReturnedRows: c.counter.ReturnedRows()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
 		if strings.Contains(q, "from agent_configs as configs where 1=1 order by name collate nocase asc, name asc, id asc") {
