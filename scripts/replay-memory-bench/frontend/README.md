@@ -98,3 +98,39 @@ and transcript bytes, retained JS heap after GC, DOM count, and one sampled Chro
 process-tree RSS total. RSS is absolute (not baseline-adjusted), can double-count
 shared memory, and is not a peak. These are local-fixture measurements, not real
 network latency. Timing/RSS values are reported rather than used as CI thresholds.
+
+### Mixed-output application loading
+
+```sh
+python3 scripts/replay-memory-bench/frontend/mixed_loading.py \
+  --baseline main --candidate HEAD --runs 3 \
+  --output /tmp/ov-mixed-loading
+```
+
+This separate harness opens the actual task page and uses its HTTP history and
+WebSocket endpoints. It compares pinned Git revisions, with prose, lists, fenced
+code, thinking, small/large tool results, and an earlier unresolved tool. Sizes
+are approximately 1, 10, and 50 MiB (`--sizes 1` for a smoke test). Both modes run.
+Use `--huge` to append an additional unfinished result of approximately the chosen
+size; that fixture's total source is consequently about twice the selected size.
+Use `--mode compact` or `--mode full` to split long batches. `--resume` reuses saved
+samples and archives after verifying the revisions and fixture have not changed;
+failed samples remain recorded rather than being silently retried.
+
+Results include navigation-to-renderer-idle latency (not first paint), uncompressed
+initial HTML and source bytes, retained JS heap after GC, DOM count, and a single
+absolute process-tree RSS sample. `updateMS` includes the append HTTP request,
+stream delivery, waiting for renderers to become idle, and a 30 ms polling interval;
+it is **not** comparable to renderer-only update timings. A renderer timeout also
+ends that wait: idle does not prove a successful visual update. In `--huge` cases,
+the update closes the large unfinished result before delivering the late result.
+RSS is not a peak, is not baseline-adjusted, and can count shared memory twice.
+There are no previews. Paging/concurrent updates are checked when a revision
+supports running windows. Reopening and completion are checked on both revisions.
+Failed or timed-out cases remain in the results and are excluded from medians.
+The runner saves isolated revision archives and logs outside the repository.
+
+The `fallback` field records whether initial display used the renderer's plain-text
+fallback. A run can pass transport/paging checks yet fall back instead of displaying
+normal tool cards; report that separately, rather than describing it as successful
+normal rendering. Large-item cases explicitly exercise this limitation.
