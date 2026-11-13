@@ -857,7 +857,11 @@ func TestSyncWorktreeFromMainAtStart_CleanWorktreeAutoMergeSuccess(t *testing.T)
 	taskRepo := storeEnv.Stores.Tasks
 	projectRepo := storeEnv.Stores.Projects
 	settingsRepo := storeEnv.Stores.Settings
-	ctx := gitidentity.WithResolver(t.Context(), func(context.Context) (gitidentity.Identity, error) { return gitidentity.Identity{}, nil })
+	rt, runtimeErr := gitidentity.Prepare(t.TempDir())
+	if runtimeErr != nil {
+		t.Fatal(runtimeErr)
+	}
+	ctx := gitidentity.WithResolver(gitidentity.WithRuntime(t.Context(), rt), func(context.Context) (gitidentity.Identity, error) { return gitidentity.Identity{}, nil })
 
 	repoDir := createTestGitRepo(t)
 	defaultBranch := GetCurrentBranch(repoDir)
@@ -6463,7 +6467,11 @@ func TestCommitWorktreeChangesPersonalIdentityUsesLegacyBotFallback(t *testing.T
 	if err := os.WriteFile(filepath.Join(dir, "file"), []byte("test"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctx := gitidentity.WithResolver(t.Context(), func(context.Context) (gitidentity.Identity, error) { return gitidentity.Identity{}, nil })
+	rt, runtimeErr := gitidentity.Prepare(t.TempDir())
+	if runtimeErr != nil {
+		t.Fatal(runtimeErr)
+	}
+	ctx := gitidentity.WithResolver(gitidentity.WithRuntime(t.Context(), rt), func(context.Context) (gitidentity.Identity, error) { return gitidentity.Identity{}, nil })
 	if err := CommitWorktreeChangesContext(ctx, dir, "fallback"); err != nil {
 		t.Fatal(err)
 	}

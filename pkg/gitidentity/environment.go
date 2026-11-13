@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -65,7 +66,7 @@ func CommandEnvironment(ctx context.Context, base []string, args []string) ([]st
 	out := make([]string, 0, len(base)+24)
 	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")
-		if (strings.HasPrefix(key, "OV_GIT_AUTH_") || strings.HasPrefix(key, "OV_GIT_IDENTITY_")) || strings.HasPrefix(key, "GIT_TRACE") || key == "GIT_CURL_VERBOSE" || key == "GIT_SSL_NO_VERIFY" || strings.HasPrefix(key, "GIT_CONFIG_") || key == "GH_TOKEN" || key == "GITHUB_TOKEN" || key == "GH_ENTERPRISE_TOKEN" || key == "GITHUB_ENTERPRISE_TOKEN" || key == "GIT_ASKPASS" || key == "SSH_ASKPASS" || key == "GIT_SSH" || key == "GIT_SSH_COMMAND" || key == "GIT_TERMINAL_PROMPT" || key == "GH_CONFIG_DIR" || key == "GH_HOST" {
+		if key == "OV_GIT_REAL_EXECUTABLE" || (strings.HasPrefix(key, "OV_GIT_AUTH_") || strings.HasPrefix(key, "OV_GIT_IDENTITY_")) || strings.HasPrefix(key, "GIT_TRACE") || key == "GIT_CURL_VERBOSE" || key == "GIT_SSL_NO_VERIFY" || strings.HasPrefix(key, "GIT_CONFIG_") || key == "GH_TOKEN" || key == "GITHUB_TOKEN" || key == "GH_ENTERPRISE_TOKEN" || key == "GITHUB_ENTERPRISE_TOKEN" || key == "GIT_ASKPASS" || key == "SSH_ASKPASS" || key == "GIT_SSH" || key == "GIT_SSH_COMMAND" || key == "GIT_TERMINAL_PROMPT" || key == "GH_CONFIG_DIR" || key == "GH_HOST" {
 			continue
 		}
 		if key == "PATH" {
@@ -74,6 +75,15 @@ func CommandEnvironment(ctx context.Context, base []string, args []string) ([]st
 		}
 		out = append(out, entry)
 	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		return nil, err
+	}
+	realGit, err = filepath.Abs(realGit)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, "OV_GIT_REAL_EXECUTABLE="+realGit)
 	out = append(out, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=true", "SSH_ASKPASS=true", "GIT_SSH_COMMAND=false", "GH_CONFIG_DIR="+os.DevNull)
 	// The wrapper reads only identity from the original config, in the command's
 	// working directory, before isolating HOME and all network credentials.

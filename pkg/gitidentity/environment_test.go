@@ -10,7 +10,7 @@ import (
 )
 
 func identityContext(name string) context.Context {
-	return WithResolver(context.Background(), func(context.Context) (Identity, error) {
+	return testResolver(context.Background(), func(context.Context) (Identity, error) {
 		return Identity{Name: name, Email: strings.ToLower(name) + "@example.com", Token: name + "-token", Host: "github.com"}, nil
 	})
 }

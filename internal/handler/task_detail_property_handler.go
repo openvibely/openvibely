@@ -60,9 +60,11 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Priority must be between 1 and 4")
 		}
 	case "tag":
-		if value != "" && value != "bug" && value != "feature" {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid tag")
+		tag, tagErr := models.NormalizeTaskTag(c.FormValue("value"))
+		if tagErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, tagErr.Error())
 		}
+		value = string(tag)
 	case "prompt":
 		if value == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "Prompt is required")

@@ -46,8 +46,11 @@ func (s *personalConnectionTestStore) SaveOwn(ctx context.Context, c models.GitH
 func (s *personalConnectionTestStore) DeleteOwn(ctx context.Context, revision int64) (bool, error) {
 	return s.SaveOwn(ctx, models.GitHubConnection{}, revision)
 }
-func personalServiceForTest() *GitHubService {
+func personalServiceForTest(t *testing.T) *GitHubService {
 	s := NewGitHubService(nil, "", "", "", "")
+	rt, err := gitidentity.Prepare(t.TempDir())
+	require.NoError(t, err)
+	s.SetGitRuntime(rt)
 	s.SetPersonalConnections(&personalConnectionTestStore{rows: map[string]models.GitHubConnection{
 		"alice":                {PAT: "alice-token", AuthorName: "Alice", AuthorEmail: "alice@example.com", Revision: 1},
 		"bob":                  {PAT: "bob-token", AuthorName: "Bob", AuthorEmail: "bob@example.com", Revision: 1},
@@ -56,7 +59,7 @@ func personalServiceForTest() *GitHubService {
 	return s
 }
 func TestPersonalGitHubCredentialsUseActingUserWithoutFallback(t *testing.T) {
-	s := personalServiceForTest()
+	s := personalServiceForTest(t)
 	for _, user := range []string{"alice", "bob"} {
 		t.Run(user, func(t *testing.T) {
 			t.Parallel()
@@ -78,7 +81,7 @@ func TestPersonalGitHubCredentialsUseActingUserWithoutFallback(t *testing.T) {
 	require.ErrorContains(t, err, "not configured")
 }
 func TestPersonalGitHubAuthOffAndDisconnect(t *testing.T) {
-	s := personalServiceForTest()
+	s := personalServiceForTest(t)
 	s.credentialAuthOff = true
 	token, err := s.createOperationAccessToken(t.Context(), "https://api.github.com")
 	require.NoError(t, err)
@@ -94,7 +97,7 @@ func TestPersonalGitHubAuthOffAndDisconnect(t *testing.T) {
 func TestPersonalGitHubLookupEmailAndMissingEmailPermission(t *testing.T) {
 	for _, emailAllowed := range []bool{true, false} {
 		t.Run(map[bool]string{true: "email", false: "manual"}[emailAllowed], func(t *testing.T) {
-			s := personalServiceForTest()
+			s := personalServiceForTest(t)
 			s.httpClient = &http.Client{Transport: githubRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				require.Equal(t, "Bearer entered-token", r.Header.Get("Authorization"))
 				body := `{"login":"alice-gh","name":"Alice GitHub"}`
@@ -135,7 +138,7 @@ func (s gitIdentityRunStore) ExecutionUser(context.Context, string) (string, boo
 	return s.executionUser, s.executionFound, nil
 }
 func TestPersonalGitHubRestoresExecutionIdentityBeforeTaskIdentity(t *testing.T) {
-	s := personalServiceForTest()
+	s := personalServiceForTest(t)
 	s.SetGitRunIdentities(gitIdentityRunStore{executionUser: "alice", executionFound: true})
 	ctx, err := s.TaskGitContext(t.Context(), "task", "execution")
 	require.NoError(t, err)
@@ -153,7 +156,7 @@ func TestPersonalGitHubRestoresExecutionIdentityBeforeTaskIdentity(t *testing.T)
 }
 
 func TestPersonalGitHubMissingIdentityAllowsGitFallback(t *testing.T) {
-	s := personalServiceForTest()
+	s := personalServiceForTest(t)
 	s.personalConnections = &personalConnectionTestStore{rows: map[string]models.GitHubConnection{}}
 	s.credentialAuthOff = true
 	identity, err := gitidentity.Resolve(s.GitContext(t.Context()))
@@ -168,16 +171,32 @@ func TestPersonalGitHubMissingIdentityAllowsGitFallback(t *testing.T) {
 
 func TestPersonalGitHubAllowsOptionalCommitIdentity(t *testing.T) {
 	for _, fields := range []struct{ name, email string }{{"", ""}, {"Alice", ""}, {"", "alice@example.com"}} {
-		s := personalServiceForTest()
+		s := personalServiceForTest(t)
 		ctx := models.WithPrincipal(t.Context(), models.Principal{UserID: "alice"})
 		saved, err := s.SavePersonalConnection(ctx, models.GitHubConnection{PAT: "alice-token", AuthorName: fields.name, AuthorEmail: fields.email}, 1)
 		require.NoError(t, err)
 		require.True(t, saved)
 	}
-	s := personalServiceForTest()
+	s := personalServiceForTest(t)
 	ctx := models.WithPrincipal(t.Context(), models.Principal{UserID: "alice"})
 	for _, fields := range []struct{ name, email string }{{"bad\nname", ""}, {"", "invalid"}} {
 		_, err := s.SavePersonalConnection(ctx, models.GitHubConnection{PAT: "alice-token", AuthorName: fields.name, AuthorEmail: fields.email}, 1)
 		require.Error(t, err)
 	}
+}
+
+func TestPersonalGitContextUsesPreparedRuntime(t *testing.T) {
+	svc := personalServiceForTest(t)
+	root := t.TempDir()
+	rt, err := gitidentity.Prepare(root)
+	require.NoError(t, err)
+	svc.SetGitRuntime(rt)
+	ctx := svc.GitContext(models.WithPrincipal(t.Context(), models.Principal{UserID: "alice"}))
+	path, err := gitidentity.Executable(ctx)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(path, root))
+	cmd := gitidentity.Command(ctx, "--version")
+	cmd.Dir = t.TempDir()
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
 }

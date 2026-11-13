@@ -12,7 +12,12 @@ func detailPointerValue(value *string) string { if value == nil { return "" }; r
 
 templ TaskPropertyRow(label, field, value, text string) {
  <button type="button" class="task-property-row inspector-property-row" data-detail-property={ field } data-value={ value } aria-haspopup="dialog">
+  if field == "tag" && value != "" {
+  <span class="opacity-60">{ label + ":" }</span>
+  <span data-property-label class={ "badge badge-sm", components.TagBadgeClass(models.TaskTag(value)) }>{ text }</span><span aria-hidden="true">›</span>
+ } else {
   @components.InspectorPropertyContent(label, text)
+ }
  </button>
 }
 
@@ -73,6 +78,10 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     }
    </div>
    <div data-options="tag">
+    <label class="label" for="detail-custom-tag">Custom tag</label>
+    <input id="detail-custom-tag" type="text" aria-label="Custom tag" class="input input-bordered w-full" placeholder="None"/>
+    <p class="text-xs opacity-60">Up to 64 characters. Trimmed and lowercased.</p>
+    <button type="button" data-custom-tag class="btn btn-sm w-full">Save tag</button>
     for _, option := range []struct{ Value, Label string }{{"", "None"}, {"feature", "Feature"}, {"bug", "Bug"}} {
      <button type="button" data-value={ option.Value } class="ov-menu-option w-full">{ option.Label }</button>
     }
@@ -146,7 +155,9 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    if (row) {
     current = row; field = row.dataset.detailProperty;
     picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });
-    pickerUI.open(row); return;
+    if (field === 'tag') picker.querySelector('#detail-custom-tag').value = row.dataset.value || '';
+    picker.querySelector('.ov-menu-search').hidden = field === 'tag';
+    pickerUI.open(row); if (field === 'tag' && pickerOpen()) picker.querySelector('#detail-custom-tag').focus(); return;
    }
    var editor = event.target.closest('[data-detail-editor]');
    if (!editor) return;
@@ -161,9 +172,11 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    dialog.querySelector('[data-editor-error]').textContent = '';
    dialog.showModal(); dialog.querySelector('textarea').focus();
   });
+  picker.querySelectorAll('#detail-custom-tag, [data-custom-tag]').forEach(function(control) { control.addEventListener('keydown', function(event) { if (event.isComposing || event.keyCode === 229) return; if (event.key === 'Enter') { event.preventDefault(); picker.querySelector('[data-custom-tag]').click(); } if (event.key === 'ArrowUp' || event.key === 'ArrowDown') event.stopPropagation(); }); });
   picker.addEventListener('click', async function(event) {
-   var option = event.target.closest('button[data-value]'); if (!option || busy) return;
-   var name = field, value = option.dataset.value, label = option.textContent;
+   var option = event.target.closest('button[data-value], button[data-custom-tag]'); if (!option || busy) return;
+   var name = field, value = option.hasAttribute('data-custom-tag') ? picker.querySelector('#detail-custom-tag').value : option.dataset.value;
+   var label = option.hasAttribute('data-custom-tag') ? value.trim() || 'None' : option.textContent;
    busy = true; picker.querySelectorAll('button').forEach(function(button) { button.disabled = true; });
    try {
     if (taskID) await save(name, value);
