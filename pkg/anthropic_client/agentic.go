@@ -11,7 +11,6 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -207,11 +206,18 @@ type agenticBlock struct {
 	IsError   bool            `json:"is_error,omitempty"`    // tool_result
 }
 
-// MarshalJSON ensures tool-use blocks always include an object-valued input.
+// MarshalJSON preserves required text fields, including empty strings, and
+// ensures tool-use blocks always include an object-valued input.
 // Anthropic rejects echoed assistant tool_use content when the input field is
 // omitted, even for empty-input tools.
 func (b agenticBlock) MarshalJSON() ([]byte, error) {
 	type Alias agenticBlock
+	if b.Type == "text" {
+		return json.Marshal(struct {
+			Alias
+			Text string `json:"text"`
+		}{Alias: Alias(b), Text: b.Text})
+	}
 	if b.Type == "tool_use" || b.Type == "server_tool_use" {
 		b.Input = normalizeAnthropicToolInput(b.Input)
 	}
@@ -1745,15 +1751,6 @@ func (c *Client) parseAgenticStreamCapturing(
 	onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool),
 	capture *streamdecode.Text, compactionCallbacks ...func(llmcontracts.CompactionProgress),
 ) (*turnResult, error) {
-	originalOnText := onText
-	if capture != nil {
-		onText = func(text string) {
-			capture.Append(text)
-			if originalOnText != nil {
-				originalOnText(text)
-			}
-		}
-	}
 	var reportCompaction func(llmcontracts.CompactionProgress)
 	if len(compactionCallbacks) > 0 {
 		reportCompaction = compactionCallbacks[0]
@@ -1775,19 +1772,17 @@ func (c *Client) parseAgenticStreamCapturing(
 
 	// Track content blocks being built
 	type blockState struct {
-		typ           string
-		text          strings.Builder // for text blocks
-		thinking      strings.Builder // for thinking blocks
-		signature     string          // for thinking blocks (required to echo back)
-		id            string          // for tool_use
-		name          string          // for tool_use
-		inputJSON     strings.Builder // for tool_use (accumulated partial JSON)
-		startInput    json.RawMessage // for tool_use input present in content_block_start
-		content       strings.Builder // for provider tool result blocks
-		inToolCallTag bool            // true when inside <tool_call>...</tool_call> in text
-		tagBuf        strings.Builder // buffer for detecting partial <tool_call> tags
-		compaction    strings.Builder // for compaction blocks
-		encrypted     *string         // opaque compaction state to round-trip
+		typ        string
+		text       strings.Builder // for text blocks
+		thinking   strings.Builder // for thinking blocks
+		signature  string          // for thinking blocks (required to echo back)
+		id         string          // for tool_use
+		name       string          // for tool_use
+		inputJSON  strings.Builder // for tool_use (accumulated partial JSON)
+		startInput json.RawMessage // for tool_use input present in content_block_start
+		content    strings.Builder // for provider tool result blocks
+		compaction strings.Builder // for compaction blocks
+		encrypted  *string         // opaque compaction state to round-trip
 	}
 	blocks := make(map[int]*blockState)
 	seenMeaningfulEvent := false
@@ -1954,53 +1949,11 @@ func (c *Client) parseAgenticStreamCapturing(
 			case "text_delta":
 				textStart := bs.text.Len()
 				bs.text.WriteString(delta.Text)
-				if !bs.inToolCallTag && bs.tagBuf.Len() == 0 && !strings.Contains(delta.Text, "<tool_") {
-					view := bs.text.String()[textStart:]
-					if capture != nil {
-						capture.View(bs, bs.text.String(), textStart)
-					}
-					if originalOnText != nil {
-						originalOnText(view)
-					}
-					continue
-				}
 				if capture != nil {
-					capture.Boundary()
+					capture.View(bs, bs.text.String(), textStart)
 				}
 				if onText != nil {
-					// Filter <tool_call>...</tool_call> from streaming output.
-					// Buffer text to detect tag boundaries across deltas.
-					bs.tagBuf.WriteString(delta.Text)
-					buf := bs.tagBuf.String()
-
-					if bs.inToolCallTag {
-						// Inside a tool_call tag — check if closing tag arrived
-						if idx := strings.Index(buf, "</tool_call>"); idx != -1 {
-							bs.inToolCallTag = false
-							// Emit text after the closing tag
-							after := buf[idx+len("</tool_call>"):]
-							bs.tagBuf.Reset()
-							if trimmed := strings.TrimSpace(after); trimmed != "" {
-								bs.tagBuf.WriteString(after)
-							}
-						}
-						// Don't emit anything while inside tag
-					} else if idx := strings.Index(buf, "<tool_call>"); idx != -1 {
-						// Opening tag found — emit text before it, suppress the rest
-						before := buf[:idx]
-						if before != "" {
-							onText(before)
-						}
-						bs.inToolCallTag = true
-						bs.tagBuf.Reset()
-						bs.tagBuf.WriteString(buf[idx:])
-					} else if strings.Contains(buf, "<tool_") {
-						// Might be a partial opening tag — hold the buffer
-					} else {
-						// No tag activity — emit buffered text
-						onText(buf)
-						bs.tagBuf.Reset()
-					}
+					onText(bs.text.String()[textStart:])
 				}
 			case "input_json_delta":
 				bs.inputJSON.WriteString(delta.PartialJSON)
@@ -2035,16 +1988,9 @@ func (c *Client) parseAgenticStreamCapturing(
 					})
 				}
 			case "text":
-				// Flush any remaining buffered text that wasn't inside a tag
-				if onText != nil && bs.tagBuf.Len() > 0 && !bs.inToolCallTag {
-					onText(bs.tagBuf.String())
-					bs.tagBuf.Reset()
-				}
-				// Strip <tool_call> tags from the final text block content
-				cleanedText := stripToolCallTags(bs.text.String())
 				result.contentBlocks = append(result.contentBlocks, agenticBlock{
 					Type: "text",
-					Text: cleanedText,
+					Text: bs.text.String(),
 				})
 			case "tool_use":
 				inputRaw := completedAnthropicToolInput(bs.inputJSON.String(), bs.startInput)
@@ -2197,18 +2143,6 @@ func completedAnthropicToolInput(inputDeltas string, startInput json.RawMessage)
 		return normalizeAnthropicToolInput(json.RawMessage(inputDeltas))
 	}
 	return normalizeAnthropicToolInput(startInput)
-}
-
-// reToolCallBlock matches <tool_call>...</tool_call> XML blocks that some models
-// emit in text output alongside proper API tool use.
-var reToolCallBlock = regexp.MustCompile(`(?s)<tool_call>.*?</tool_call>\s*`)
-
-// stripToolCallTags removes <tool_call>...</tool_call> XML blocks from text.
-func stripToolCallTags(s string) string {
-	if !strings.Contains(s, "<tool_call>") {
-		return strings.TrimSpace(s)
-	}
-	return strings.TrimSpace(reToolCallBlock.ReplaceAllString(s, ""))
 }
 
 func anthropicProviderResultContentRaw(textValue, rawValue string) json.RawMessage {

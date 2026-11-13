@@ -29,7 +29,7 @@ func TestRecoveryTextMatchesDeliveredText(t *testing.T) {
 				require.Error(t, err)
 			}
 			require.Equal(t, delivered.String(), capture.String())
-			require.NotContains(t, capture.String(), "hidden")
+			require.Equal(t, strings.Join(parts, ""), capture.String())
 		}
 	}
 }
