@@ -27,15 +27,17 @@ func TestBrowserFunctional_ModalPreservesShellWidth(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "modal-gutters", func(b *composerFocusCDP) {
-		b.waitFor("sidebar rendered", `String(!!document.getElementById('sidebar'))`, "true")
-		b.evaluate(`window.shellBounds=()=>JSON.stringify(['body','#sidebar','.drawer-content'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.width]}));window.beforeModal=shellBounds();const d=document.createElement('dialog');d.id='gutter-test';d.className='modal';d.innerHTML='<div class="modal-box">Test</div>';document.body.appendChild(d);'ok'`)
+		b.waitFor("shell loaded", `String(document.readyState === 'complete' && !!document.getElementById('sidebar'))`, "true")
+		// Finish startup font/layout work before attributing bounds changes to a modal.
+		b.evaluateAwait(`(async()=>{await document.fonts.ready;await Promise.all(document.getAnimations().filter(a=>a.effect.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})));await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return 'ready'})()`)
+		b.evaluate(`window.shellBounds=()=>JSON.stringify(['body','#sidebar','.drawer-content'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.width]}));const d=document.createElement('dialog');d.id='gutter-test';d.className='modal';d.innerHTML='<div class="modal-box">Test</div>';document.body.appendChild(d);'ok'`)
 		b.waitFor("closed modal excluded from layout", `getComputedStyle(document.getElementById('gutter-test')).display`, "none")
 		b.waitFor("shell clips without scrolling", `getComputedStyle(document.querySelector('.drawer-content')).overflow`, "clip")
-		b.evaluate(`document.getElementById('gutter-test').showModal();'ok'`)
+		b.evaluate(`window.beforeModal=shellBounds();document.getElementById('gutter-test').showModal();'ok'`)
 		b.waitFor("modal does not reserve root gutters", `getComputedStyle(document.documentElement).scrollbarGutter`, "auto")
-		b.waitFor("opening modal preserves shell bounds", `String(shellBounds()===beforeModal)`, "true")
+		b.waitFor("opening modal preserves shell bounds", `shellBounds()===beforeModal ? "true" : JSON.stringify({before:JSON.parse(beforeModal),after:JSON.parse(shellBounds())})`, "true")
 		b.evaluate(`document.getElementById('gutter-test').close();'ok'`)
 		b.waitFor("closed modal releases layout", `String(document.getElementById('gutter-test').getClientRects().length===0)`, "true")
-		b.waitFor("closing modal preserves shell bounds", `String(shellBounds()===beforeModal)`, "true")
+		b.waitFor("closing modal preserves shell bounds", `shellBounds()===beforeModal ? "true" : JSON.stringify({before:JSON.parse(beforeModal),after:JSON.parse(shellBounds())})`, "true")
 	})
 }
