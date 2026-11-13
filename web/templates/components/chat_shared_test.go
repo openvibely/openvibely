@@ -743,9 +743,7 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 		!strings.Contains(content, "var streamRenderInterval = 50") {
 		t.Error("Missing throttling for streaming responses")
 	}
-	if strings.Contains(content, "container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer)") {
-		t.Error("Streaming onmessage must not normalize and copy the entire accumulated response before the scheduled render")
-	}
+
 	if strings.Count(content, "flushBufferedOutput();") != 1 {
 		t.Error("the fresh-stream terminal error path must flush and cancel pending delayed output")
 	}
@@ -832,7 +830,6 @@ class FakeEventSource {
 global.EventSource = FakeEventSource;
 global.window = {
   openVibelyLive: {execution: function() { return new FakeEventSource(); }},
-  normalizeTranscriptMarkers: text => text.replace(/alias/g, 'normalized-alias'),
   renderStreamingContent(container, text) { renders++; container.rendered = text; },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
   registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {},
@@ -967,7 +964,6 @@ class FakeEventSource {
 global.EventSource = FakeEventSource;
 global.window = {
   openVibelyLive: {execution: function() { return new FakeEventSource(); }},
-  normalizeTranscriptMarkers() { throw new Error('normalizer must not run in fallback'); },
   renderStreamingContent() { renders++; return Promise.reject(new Error('renderer failed')); },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
   registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {},
@@ -2926,34 +2922,6 @@ func TestCleanDisplayContent_ToolMarkers(t *testing.T) {
 	}
 }
 
-func TestCleanDisplayContent_PreservesCodedAliasesAndCleansRealAliases(t *testing.T) {
-	codedTool := `[Using tool: bash"> <parameter name="command">echo coded</parameter> </invoke>`
-	multilineThinking := "`<thinking>multiline\nthought</thinking>`"
-	multilineTool := "``[Using tool: bash\">\n<parameter name=\"command\">echo multiline</parameter>\n</invoke>``"
-	input := "Inline `<thinking>coded</thinking>` and `" + codedTool + "`.\n" + multilineThinking + "\n" + multilineTool + "\n" +
-		"```text\n<thinking>fenced</thinking>\n" + codedTool + "\n```\n" +
-		"~~~text\n<thinking>tilde</thinking>\n" + codedTool + "\n~~~\n" +
-		"<thinking>real internal</thinking>\nVisible answer.\n" +
-		`[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
-
-	got := CleanDisplayContent(input)
-	for _, literal := range []string{
-		"`<thinking>coded</thinking>`",
-		"`" + codedTool + "`",
-		multilineThinking,
-		multilineTool,
-		"```text\n<thinking>fenced</thinking>\n" + codedTool + "\n```",
-		"~~~text\n<thinking>tilde</thinking>\n" + codedTool + "\n~~~",
-	} {
-		if !strings.Contains(got, literal) {
-			t.Fatalf("server display changed coded alias %q:\n%q", literal, got)
-		}
-	}
-	if strings.Contains(got, "real internal") || strings.Contains(got, "echo real") || !strings.Contains(got, "Visible answer.") {
-		t.Fatalf("server display did not clean real aliases normally:\n%q", got)
-	}
-}
-
 func TestCleanDisplayContent_BareCRControlsAndSummaries(t *testing.T) {
 	coded := "~~~~~text\r[Thinking]coded[/Thinking]\r[Using tool: bash]\r[Tool bash done]\rcoded output\r[/Tool]\r[TASK_ID:coded/create]\r[TASK_EDITED:coded/edit]\r~~~\r~~~~~~\t "
 	input := coded + "\r[Thinking]\rreal thought\r[/Thinking]\r[Using tool: bash]\r[Tool bash done]\rreal output\r[/Tool]\rVisible answer.\r[STATUS: SUCCESS]"
@@ -2971,10 +2939,10 @@ func TestCleanDisplayContent_BareCRControlsAndSummaries(t *testing.T) {
 
 func TestCleanDisplayContent_EscapedBackticksDoNotProtectRealControls(t *testing.T) {
 	validCoded := "``[Thinking]coded[/Thinking]\n[Using tool: bash]``"
-	input := `Escaped \` + "`" + `<thinking>real alias</thinking> escaped \` + "`" + "\n" +
+	input := `Escaped \` + "`" + `[Thinking]real thought[/Thinking] escaped \` + "`" + "\n" +
 		validCoded + "\n[Using tool: bash]\nVisible answer.\n[STATUS: SUCCESS]"
 	got := CleanDisplayContent(input)
-	if !strings.Contains(got, validCoded) || strings.Contains(got, "real alias") || strings.Count(got, "[Using tool: bash]") != 1 || strings.Contains(got, "[STATUS: SUCCESS]") || !strings.Contains(got, "Visible answer.") {
+	if !strings.Contains(got, validCoded) || strings.Contains(got, "real thought") || strings.Count(got, "[Using tool: bash]") != 1 || strings.Contains(got, "[STATUS: SUCCESS]") || !strings.Contains(got, "Visible answer.") {
 		t.Fatalf("server display did not honor escaped delimiter parity:\n%q", got)
 	}
 }
@@ -3230,13 +3198,13 @@ func TestSharedTaskResultLinkConversionAvailableOnDirectTaskThreadLoad(t *testin
 	createDefinition := strings.Index(content, "window.convertTaskLinksInMessage = function(messageElement)")
 	editDefinition := strings.Index(content, "window.convertTaskEditLinksInMessage = function(messageElement)")
 	codeDefinition := strings.Index(content, "window.codeRanges = function(text, transcript)")
-	normalizeDefinition := strings.Index(content, "window.normalizeTranscriptMarkers = function(text, ranges, edits)")
+
 	hydration := strings.Index(content, "// Apply cleaning and scroll on load")
-	if normalizeToolTextDefinition == -1 || createDefinition == -1 || editDefinition == -1 || codeDefinition == -1 || normalizeDefinition == -1 {
-		t.Fatal("direct task-thread output must define task-result converters plus Markdown-aware transcript normalization without requiring a prior /chat load")
+	if normalizeToolTextDefinition == -1 || createDefinition == -1 || editDefinition == -1 || codeDefinition == -1 {
+		t.Fatal("direct task-thread output must define task-result converters plus Markdown code helpers without requiring a prior /chat load")
 	}
-	if hydration == -1 || normalizeToolTextDefinition > hydration || createDefinition > hydration || editDefinition > hydration || codeDefinition > hydration || normalizeDefinition > hydration {
-		t.Fatal("task-result converters and Markdown-aware transcript normalization must be defined before hard-refresh task-thread hydration")
+	if hydration == -1 || normalizeToolTextDefinition > hydration || createDefinition > hydration || editDefinition > hydration || codeDefinition > hydration {
+		t.Fatal("task-result converters and Markdown code helpers must be defined before hard-refresh task-thread hydration")
 	}
 	for _, marker := range []string{"[TASK_ID:task/id?unsafe]", "[TASK_EDITED:edited/id]", "[TASK_ID:coded/create]", "[TASK_EDITED:coded/edit]", "[TASK_ID:later/create]", "[TASK_EDITED:later/edit]", "[TASK_ID:escaped/create]", "[TASK_EDITED:escaped/edit]", "[TASK_ID:unicode/create]", "[TASK_EDITED:unicode/edit]", "[TASK_ID:bare-cr/create]", "[TASK_EDITED:bare-cr/edit]", "`[Tool grep_search done]coded[/Tool]`", "[Tool grep_search done]actual[/Tool]"} {
 		if !strings.Contains(content, marker) {
@@ -3645,10 +3613,10 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 	}
 
 	content := buf.String()
-	start := strings.Index(content, "window.replaceOutsideCode = function")
+	start := strings.Index(content, "window.stripOutsideCode = function")
 	end := strings.Index(content, "// Apply transcript control-artifact cleaning")
 	if start == -1 || end == -1 || end <= start {
-		t.Fatal("rendered script must define transcript normalization and cleaning helpers")
+		t.Fatal("rendered script must define transcript cleaning helpers")
 	}
 	codeHelpers := renderedBaseMarkdownCodeHelpers(t)
 	if strings.Count(content, "window.codeRanges(textBuffer, true)") != 2 {
@@ -3670,31 +3638,15 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 	}
 	input := "Actual [STATUS: SUCCESS]; examples: `[STATUS: FAILED | reason]`, `[Thinking]inline thought[/Thinking]`, `[Thinking]unclosed inline`, `[Using tool: bash]`, `[Tool bash done: output]`, and `[Tool bash error: failed]`; fenced:\n```text\n[Thinking]\nfenced thought\n[/Thinking]\n[Using tool: read_file]\n[Tool read_file done: contents]\n[Tool bash error]\nfailed\n[/Tool]\n```\ntilde fenced:\n~~~log\n[Thinking]\ntilde thought\n[/Thinking]\n[Using tool: grep_search]\n[Tool grep_search done: match]\n~~~\n[Thinking]\nreal internal text\n[/Thinking]\nactual [Using tool: bash] and [Tool bash done: actual output].\n[STATUS: FAILED | actual failure]"
 	want := "Actual [STATUS: SUCCESS]; examples: `[STATUS: FAILED | reason]`, `[Thinking]inline thought[/Thinking]`, `[Thinking]unclosed inline`, `[Using tool: bash]`, `[Tool bash done: output]`, and `[Tool bash error: failed]`; fenced:\n```text\n[Thinking]\nfenced thought\n[/Thinking]\n[Using tool: read_file]\n[Tool read_file done: contents]\n[Tool bash error]\nfailed\n[/Tool]\n```\ntilde fenced:\n~~~log\n[Thinking]\ntilde thought\n[/Thinking]\n[Using tool: grep_search]\n[Tool grep_search done: match]\n~~~\nactual  and ."
-	codedAlias := `[Using tool: bash"> <parameter name="command">echo coded</parameter> </invoke>`
-	aliasInput := "Inline `\u003cthinking\u003ecoded\u003c/thinking\u003e` and `" + codedAlias + "`.\n" +
-		"```text\n\u003cthinking\u003efenced\u003c/thinking\u003e\n" + codedAlias + "\n```\n" +
-		"~~~text\n\u003cthinking\u003etilde\u003c/thinking\u003e\n" + codedAlias + "\n~~~\n" +
-		"\u003cthinking\u003ereal internal\u003c/thinking\u003e\nVisible answer.\n" +
-		`[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
-	overlapProtectedAlias := "`[Using tool: bash\"> <parameter name=\"command\">coded`"
-	overlapAliasInput := "Literal " + overlapProtectedAlias + " before real alias.\n" +
-		`[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
-	multilineAlias := "`<thinking>coded\nthought</thinking>`"
-	multilineToolAlias := "``[Using tool: bash\">\n<parameter name=\"command\">echo coded</parameter>\n</invoke>``"
 	multilineControls := "`[Thinking]coded\n[/Thinking]\n[Using tool: bash]\n[Tool bash done: output]\n[TASK_ID:coded/create]\n[TASK_EDITED:coded/edit]`"
 	multilineCleanedWant := multilineControls + "\n\n[TASK_ID:real/create]\n[TASK_EDITED:real/edit]\nVisible answer."
-	multilineOverlapAlias := "`[Using tool: bash\">\n<parameter name=\"command\">partial`"
-	multilineOverlapInput := multilineOverlapAlias + "\n" + `[Using tool: bash">` + "\n" + `<parameter name="command">echo real overlap</parameter>` + "\n" + `</invoke>`
 	multilineCreatedSummary := "Intro.\n\n---\nCreated 1 task(s):\n- \"Old\" (backlog)\n\nExample `literal\n---\nCreated 1 task(s):\n- \"Coded\" (backlog) [TASK_ID:coded]\nend`\n\n---\nCreated 1 task(s):\n- \"Real\" (backlog) [TASK_ID:real]"
 	multilineCreatedWant := "Intro.\n\nExample `literal\n---\nCreated 1 task(s):\n- \"Coded\" (backlog) [TASK_ID:coded]\nend`\n\n---\nCreated 1 task(s):\n- \"Real\" (backlog) [TASK_ID:real]"
 	multilineEditedSummary := "Intro.\n\n---\nEdited 1 task(s):\n- \"Old\" (updated: title)\n\nExample ``literal\n---\nEdited 1 task(s):\n- \"Coded\" (updated: title) [TASK_EDITED:coded]\nend``\n\n---\nEdited 1 task(s):\n- \"Real\" (updated: title) [TASK_EDITED:real]"
 	multilineEditedWant := "Intro.\n\nExample ``literal\n---\nEdited 1 task(s):\n- \"Coded\" (updated: title) [TASK_EDITED:coded]\nend``\n\n---\nEdited 1 task(s):\n- \"Real\" (updated: title) [TASK_EDITED:real]"
 	unmatchedCodedControls := "Unmatched `` prefix; `<thinking>coded\nthought</thinking>\n[Thinking]coded[/Thinking]\n[Using tool: bash]\n[Tool bash done: coded]\n[STATUS: FAILED | coded]\n[TASK_ID:coded/create]\n[TASK_EDITED:coded/edit]`"
-	unmatchedAliasInput := unmatchedCodedControls + "\n<thinking>real</thinking>"
 	unmatchedSummary := "Intro.\n\n---\nCreated 1 task(s):\n- \"Old\" (backlog)\n\nUnmatched `` prefix; `Example\n---\nCreated 1 task(s):\n- \"Coded\" (backlog) [TASK_ID:coded]`\n\n---\nCreated 1 task(s):\n- \"Real\" (backlog) [TASK_ID:real]"
 	unmatchedSummaryWant := "Intro.\n\nUnmatched `` prefix; `Example\n---\nCreated 1 task(s):\n- \"Coded\" (backlog) [TASK_ID:coded]`\n\n---\nCreated 1 task(s):\n- \"Real\" (backlog) [TASK_ID:real]"
-	escapedAliasInput := `Escaped \` + "`" + `<thinking>escaped real</thinking> escaped \` + "`" + "\n" +
-		"``<thinking>coded</thinking>``\n<thinking>later real</thinking>"
 	escapedControls := `Escaped \` + "`" + `[Thinking]escaped real[/Thinking] escaped \` + "`" + "\n" +
 		"``[Thinking]coded[/Thinking]\n[Using tool: bash]\n[TASK_ID:coded]``\n[Using tool: bash]\nVisible answer.\n[STATUS: SUCCESS]"
 	escapedSummary := `Example \` + "`" + "\n---\nCreated 1 task(s):\n- \"Old\" (backlog) [TASK_ID:old]\n" + `\` + "`" +
@@ -3776,29 +3728,6 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"const duplicateSummaryNode = textNode(duplicateSummary, false);\n" +
 		"window.cleanBubbleContent({ querySelectorAll: function() { return [{ nodes: [codedSummaryNode, duplicateSummaryNode] }]; } });\n" +
 		"if (codedSummaryNode.textContent.indexOf('Coded') === -1 || duplicateSummaryNode.textContent !== dedupedSummary) process.exit(14);\n" +
-		"const aliasInput = " + strconv.Quote(aliasInput) + ";\n" +
-		"const normalizedAliases = window.normalizeTranscriptMarkers(aliasInput);\n" +
-		"if (normalizedAliases.indexOf('`\u003cthinking\u003ecoded\u003c/thinking\u003e`') === -1 || normalizedAliases.indexOf(" + strconv.Quote("`"+codedAlias+"`") + ") === -1 || normalizedAliases.indexOf('[Thinking]\\nreal internal\\n[/Thinking]') === -1 || normalizedAliases.indexOf('[Using tool: bash | echo real]') === -1) { console.error(JSON.stringify(normalizedAliases)); process.exit(15); }\n" +
-		"const cleanedAliases = window.cleanTranscriptControls(aliasInput, true);\n" +
-		"if (cleanedAliases.indexOf('`\u003cthinking\u003ecoded\u003c/thinking\u003e`') === -1 || cleanedAliases.indexOf(" + strconv.Quote("```text\n\u003cthinking\u003efenced\u003c/thinking\u003e\n"+codedAlias+"\n```") + ") === -1 || cleanedAliases.indexOf('real internal') !== -1 || cleanedAliases.indexOf('echo real') !== -1 || cleanedAliases.indexOf('Visible answer.') === -1) { console.error(JSON.stringify(cleanedAliases)); process.exit(16); }\n" +
-		"const aliasStream = element('div'); aliasStream.id = 'streaming-coded-alias';\n" +
-		"const fencedAlias = " + strconv.Quote("```text\n\u003cthinking\u003efenced\u003c/thinking\u003e\n"+codedAlias+"\n```") + ";\n" +
-		"window.renderStreamingContent(aliasStream, fencedAlias);\n" +
-		"if (aliasStream.children.length !== 1 || aliasStream.children[0].className.indexOf('chat-markdown') === -1 || aliasStream.children[0].textContent !== fencedAlias) process.exit(17);\n" +
-		"const realAliasStream = element('div'); realAliasStream.id = 'streaming-real-alias';\n" +
-		"window.renderStreamingContent(realAliasStream, '\u003cthinking\u003ereal internal\u003c/thinking\u003e\\nVisible answer.');\n" +
-		"if (realAliasStream.children.length !== 2 || realAliasStream.children[0].className.indexOf('stream-thinking') === -1) process.exit(18);\n" +
-		"const realToolAliasStream = element('div'); realToolAliasStream.id = 'streaming-real-tool-alias';\n" +
-		"window.renderStreamingContent(realToolAliasStream, " + strconv.Quote(`[Using tool: bash">`+"\n"+`<parameter name="command">echo real</parameter>`+"\n"+`</invoke>`) + ");\n" +
-		"if (realToolAliasStream.children.length !== 1 || realToolAliasStream.children[0].className.indexOf('stream-tool') === -1) process.exit(19);\n" +
-		"const codedAliasNode = textNode('\u003cthinking\u003ecoded\u003c/thinking\u003e\\n' + " + strconv.Quote(codedAlias) + ", true);\n" +
-		"const realAliasNode = textNode('\u003cthinking\u003ereal\u003c/thinking\u003e\\nVisible DOM answer.', false);\n" +
-		"window.cleanBubbleContent({ querySelectorAll: function() { return [{ nodes: [codedAliasNode, realAliasNode] }]; } });\n" +
-		"if (codedAliasNode.textContent !== '\u003cthinking\u003ecoded\u003c/thinking\u003e\\n' + " + strconv.Quote(codedAlias) + " || realAliasNode.textContent !== '\\n\\nVisible DOM answer.') { console.error(JSON.stringify({ coded: codedAliasNode.textContent, real: realAliasNode.textContent })); process.exit(20); }\n" +
-		"const overlapAliases = window.normalizeTranscriptMarkers(" + strconv.Quote(overlapAliasInput) + ");\n" +
-		"if (overlapAliases.indexOf(" + strconv.Quote(overlapProtectedAlias) + ") === -1 || overlapAliases.indexOf('[Using tool: bash | echo real]') === -1) { console.error(JSON.stringify(overlapAliases)); process.exit(21); }\n" +
-		"const multilineAliases = window.normalizeTranscriptMarkers(" + strconv.Quote(multilineAlias+"\n"+multilineToolAlias+"\n<thinking>real</thinking>") + ");\n" +
-		"if (multilineAliases.indexOf(" + strconv.Quote(multilineAlias) + ") === -1 || multilineAliases.indexOf(" + strconv.Quote(multilineToolAlias) + ") === -1 || multilineAliases.indexOf('[Thinking]\\nreal\\n[/Thinking]') === -1) { console.error(JSON.stringify(multilineAliases)); process.exit(22); }\n" +
 		"const multilineCleaned = window.cleanTranscriptControls(" + strconv.Quote(multilineControls+"\n[Thinking]real[/Thinking]\n[Using tool: bash]\n[Tool bash done: actual]\n[TASK_ID:real/create]\n[TASK_EDITED:real/edit]\nVisible answer.\n[STATUS: SUCCESS]") + ", true);\n" +
 		"if (multilineCleaned !== " + strconv.Quote(multilineCleanedWant) + ") { console.error(JSON.stringify(multilineCleaned)); process.exit(23); }\n" +
 		"const multilineStream = element('div'); multilineStream.id = 'streaming-multiline-inline';\n" +
@@ -3806,21 +3735,15 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"if (multilineStream.children.length !== 1 || multilineStream.children[0].className.indexOf('chat-markdown') === -1 || multilineStream.children[0].textContent !== " + strconv.Quote(multilineControls) + ") process.exit(24);\n" +
 		"if (window.cleanTranscriptControls(" + strconv.Quote(multilineCreatedSummary) + ", false) !== " + strconv.Quote(multilineCreatedWant) + ") process.exit(25);\n" +
 		"if (window.cleanTranscriptControls(" + strconv.Quote(multilineEditedSummary) + ", false) !== " + strconv.Quote(multilineEditedWant) + ") process.exit(26);\n" +
-		"const multilineOverlap = window.normalizeTranscriptMarkers(" + strconv.Quote(multilineOverlapInput) + ");\n" +
-		"if (multilineOverlap.indexOf(" + strconv.Quote(multilineOverlapAlias) + ") === -1 || multilineOverlap.indexOf('[Using tool: bash | echo real overlap]') === -1) { console.error(JSON.stringify(multilineOverlap)); process.exit(27); }\n" +
 		"const multilineCodeNode = textNode('[Thinking]coded\\n[/Thinking]\\n[TASK_ID:coded]', true);\n" +
 		"const realMultilineNode = textNode('[Thinking]real[/Thinking]\\nVisible DOM answer.', false);\n" +
 		"window.cleanBubbleContent({ querySelectorAll: function() { return [{ nodes: [multilineCodeNode, realMultilineNode] }]; } });\n" +
 		"if (multilineCodeNode.textContent !== '[Thinking]coded\\n[/Thinking]\\n[TASK_ID:coded]' || realMultilineNode.textContent.indexOf('real') !== -1 || realMultilineNode.textContent.indexOf('Visible DOM answer.') === -1) process.exit(28);\n" +
-		"const unmatchedNormalized = window.normalizeTranscriptMarkers(" + strconv.Quote(unmatchedAliasInput) + ");\n" +
-		"if (unmatchedNormalized.indexOf(" + strconv.Quote(unmatchedCodedControls) + ") === -1 || unmatchedNormalized.indexOf('[Thinking]\\nreal\\n[/Thinking]') === -1) { console.error(JSON.stringify(unmatchedNormalized)); process.exit(29); }\n" +
 		"const unmatchedCleaned = window.cleanTranscriptControls(" + strconv.Quote(unmatchedCodedControls+"\n[Thinking]real[/Thinking]\n[Using tool: bash]\n[Tool bash done: actual]\nVisible answer.\n[STATUS: SUCCESS]") + ", true);\n" +
 		"if (unmatchedCleaned !== " + strconv.Quote(unmatchedCodedControls+"\n\nVisible answer.") + ") { console.error(JSON.stringify(unmatchedCleaned)); process.exit(30); }\n" + "const unmatchedStream = element('div'); unmatchedStream.id = 'streaming-unmatched-prefix';\n" +
 		"window.renderStreamingContent(unmatchedStream, " + strconv.Quote(unmatchedCodedControls) + ");\n" +
 		"if (unmatchedStream.children.length !== 1 || unmatchedStream.children[0].className.indexOf('chat-markdown') === -1 || unmatchedStream.children[0].textContent !== " + strconv.Quote(unmatchedCodedControls) + ") process.exit(31);\n" +
 		"if (window.cleanTranscriptControls(" + strconv.Quote(unmatchedSummary) + ", false) !== " + strconv.Quote(unmatchedSummaryWant) + ") process.exit(32);\n" +
-		"const escapedAliases = window.normalizeTranscriptMarkers(" + strconv.Quote(escapedAliasInput) + ");\n" +
-		"if (escapedAliases.indexOf('<thinking>escaped real</thinking>') !== -1 || escapedAliases.indexOf('[Thinking]\\nescaped real\\n[/Thinking]') === -1 || escapedAliases.indexOf('[Thinking]\\nlater real\\n[/Thinking]') === -1 || escapedAliases.indexOf('``<thinking>coded</thinking>``') === -1) { console.error(JSON.stringify(escapedAliases)); process.exit(33); }\n" +
 		"const escapedCleaned = window.cleanTranscriptControls(" + strconv.Quote(escapedControls) + ", true);\n" +
 		"if (escapedCleaned.indexOf('escaped real') !== -1 || escapedCleaned.indexOf('``[Thinking]coded[/Thinking]\\n[Using tool: bash]\\n[TASK_ID:coded]``') === -1 || escapedCleaned.indexOf('[STATUS: SUCCESS]') !== -1 || escapedCleaned.indexOf('Visible answer.') === -1) { console.error(JSON.stringify(escapedCleaned)); process.exit(34); }\n" +
 		"const escapedStream = element('div'); escapedStream.id = 'streaming-escaped-prefix';\n" +
@@ -3831,8 +3754,6 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"if (escapedDOMNode.textContent !== " + strconv.Quote(escapedDOMWant) + ") { console.error(JSON.stringify(escapedDOMNode.textContent)); process.exit(36); }\n" +
 		"const escapedDedup = window.cleanTranscriptControls(" + strconv.Quote(escapedSummary) + ", false);\n" +
 		"if (escapedDedup.indexOf('\\\"Old\\\"') !== -1 || escapedDedup.indexOf('\\\"Real\\\"') === -1 || (escapedDedup.match(/Created 1 task\\(s\\):/g) || []).length !== 1) { console.error(JSON.stringify(escapedDedup)); process.exit(37); }\n" +
-		"const unicodeFenceNormalized = window.normalizeTranscriptMarkers(" + strconv.Quote(unicodeFenceControls) + ");\n" +
-		"if (unicodeFenceNormalized !== " + strconv.Quote(unicodeFenceControls) + ") { console.error(JSON.stringify(unicodeFenceNormalized)); process.exit(38); }\n" +
 		"const unicodeFenceCleaned = window.cleanTranscriptControls(" + strconv.Quote(unicodeFenceControls+"\n[Thinking]real[/Thinking]\n[Using tool: bash]\n[Tool bash done: actual]\n[TASK_ID:real/create]\n[TASK_EDITED:real/edit]\nVisible answer.\n[STATUS: SUCCESS]") + ", true);\n" +
 		"if (unicodeFenceCleaned !== " + strconv.Quote(unicodeFenceCleanWant) + ") { console.error(JSON.stringify(unicodeFenceCleaned)); process.exit(39); }\n" +
 		"const unicodeFenceStream = element('div'); unicodeFenceStream.id = 'streaming-unicode-fence';\n" +
@@ -3845,8 +3766,6 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"const unicodeFenceRealNode = textNode('[Thinking]real[/Thinking]\\nVisible DOM answer.', false);\n" +
 		"window.cleanBubbleContent({ querySelectorAll: function() { return [{ nodes: [unicodeFenceCodeNode, unicodeFenceRealNode] }]; } });\n" +
 		"if (unicodeFenceCodeNode.textContent.indexOf('[TASK_ID:unicode/create]') === -1 || unicodeFenceRealNode.textContent.indexOf('[Thinking]') !== -1 || unicodeFenceRealNode.textContent.indexOf('Visible DOM answer.') === -1) process.exit(43);\n" +
-		"const bareCRNormalized = window.normalizeTranscriptMarkers(" + strconv.Quote(bareCRFenceControls+"\r<thinking>real alias</thinking>") + ");\n" +
-		"if (bareCRNormalized.indexOf(" + strconv.Quote(bareCRFenceControls) + ") === -1 || bareCRNormalized.indexOf('[Thinking]\\nreal alias\\n[/Thinking]') === -1) { console.error(JSON.stringify(bareCRNormalized)); process.exit(44); }\n" +
 		"const bareCRCleaned = window.cleanTranscriptControls(" + strconv.Quote(bareCRFenceControls+"\r[Thinking]real[/Thinking]\r[Using tool: bash]\r[Tool bash done]\ractual\r[/Tool]\r[TASK_ID:real/create]\r[TASK_EDITED:real/edit]\rVisible answer.\r[STATUS: SUCCESS]") + ", true);\n" +
 		"if (bareCRCleaned.indexOf(" + strconv.Quote(bareCRFenceControls) + ") === -1 || bareCRCleaned.indexOf('actual') !== -1 || bareCRCleaned.indexOf('[TASK_ID:real/create]') === -1 || bareCRCleaned.indexOf('[TASK_EDITED:real/edit]') === -1 || bareCRCleaned.indexOf('[STATUS: SUCCESS]') !== -1 || bareCRCleaned.indexOf('Visible answer.') === -1) { console.error(JSON.stringify(bareCRCleaned)); process.exit(45); }\n" +
 		"const bareCRStream = element('div'); bareCRStream.id = 'streaming-bare-cr-fence';\n" +
@@ -3949,7 +3868,7 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 		"window.isInsideCode = function(text, start, end)",
 		"window.isInsideCodeRanges = function(ranges, start, end)",
 		"window.stripOutsideCode = function(text, pattern, ranges)",
-		"window.replaceOutsideCode = function(text, pattern, replacement, ranges)",
+		"window.stripOutsideCode = function(text, pattern, ranges)",
 		"window.dedupTaskSummaries = function(text)",
 		"var lines = window.markdownLineRanges(text)",
 		"window.isInsideCodeRanges(protectedRanges, delimiter.start, delimiter.end)",
@@ -3976,9 +3895,7 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("generated streaming renderer must protect thinking, tool-use, and both tool-result controls inside Markdown code")
 	}
-	if !strings.Contains(content, "function(raw, tool, command, closing, index)") || strings.Count(content, "return window.replaceOutsideCode(text,") != 1 {
-		t.Fatal("generated transcript normalization must process tool and thinking aliases in one protected pass")
-	}
+
 }
 
 func TestStatusCleaning_ScopesStreamingAndDOMToFinalCanonicalControl(t *testing.T) {
@@ -3988,7 +3905,7 @@ func TestStatusCleaning_ScopesStreamingAndDOMToFinalCanonicalControl(t *testing.
 	}
 
 	content := buf.String()
-	start := strings.Index(content, "window.replaceOutsideCode = function")
+	start := strings.Index(content, "window.stripOutsideCode = function")
 	end := strings.Index(content, "// Apply transcript control-artifact cleaning")
 	if start == -1 || end == -1 || end <= start {
 		t.Fatal("rendered script must define status and transcript-cleaning helpers")

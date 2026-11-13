@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"context"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
-	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
+
 	"github.com/openvibely/openvibely/internal/models"
 	templateui "github.com/openvibely/openvibely/web/templates"
 	"net/url"
@@ -240,7 +240,7 @@ templ chatBubble(role, content string, author []string, tail []*models.DisplayTa
 			if role == "User" {
 				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
 			} else {
-				<div class="chat-stream-content" data-output-window={ displayTailCursor(tail) } data-raw-revision={ chatContentRevision(content) } data-raw-content={ NormalizeDisplayMarkers(content) }></div>
+				<div class="chat-stream-content" data-output-window={ displayTailCursor(tail) } data-raw-revision={ chatContentRevision(content) } data-raw-content={ content }></div>
 			}
 		</div>
 	</div>
@@ -261,7 +261,7 @@ templ ChatBubbleError(role, errorMsg, output string, tail ...*models.DisplayTail
 		</div>
 		<div class="chat-bubble-inner">
 			if output != "" {
-				<div class="chat-stream-content" data-output-window={ displayTailCursor(tail) } data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
+				<div class="chat-stream-content" data-output-window={ displayTailCursor(tail) } data-raw-revision={ chatContentRevision(output) } data-raw-content={ output }></div>
 			}
 			@ChatTerminalError(errorMsg)
 		</div>
@@ -501,7 +501,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							function renderBufferedOutput(force, yieldLarge) {
 							if (!window.renderStreamingContent) {
 							container.classList.remove('text-error/80', 'font-medium');
-								container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
+								container.textContent = textBuffer;
 								return;
 							}
 							if (!force && renderScheduled) return;
@@ -827,7 +827,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 				</div>
 			}
 			<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-			<div id={ "streaming-message-" + execID } class={ "chat-stream-content leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-output-window={ displayTailCursor(tails) } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", displayResumeOffset(partialContent, tails)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+			<div id={ "streaming-message-" + execID } class={ "chat-stream-content leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-output-window={ displayTailCursor(tails) } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", displayResumeOffset(partialContent, tails)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ partialContent } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -1007,7 +1007,7 @@ templ ChatStreamingResumeInitScript() {
 					function renderCumulativeContent(force, yieldLarge) {
 					if (!window.renderStreamingContent) {
 					container.classList.remove('text-error/80', 'font-medium');
-						container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
+						container.textContent = cumulativeContent;
 						return;
 					}
 					if (!force && renderScheduled) return;
@@ -5261,8 +5261,6 @@ templ ChatAutoScrollScript() {
 			// the boundary remains provisional (including open fences and tool calls).
 			window.chatStreamStableBoundary = function(text, preparedRanges) {
 				if (text.length < 8192) return 0;
-				// Legacy XML controls can span Markdown blocks; reconcile them as one tail.
-				if (/<\s*\/?\s*thinking\s*>|<parameter\s/i.test(text)) return 0;
 				var ranges = preparedRanges || (window.codeRanges ? window.codeRanges(text, true) : []);
 				var controls = /^[\t ]*\[(Thinking|\/Thinking|Using tool:[^\]\r\n]+|Tool [^\]\r\n]+|\/Tool|Compaction [^\]\r\n]+)\][\t ]*(?=\r?$)/gm;
 				var thinking = false, tool = false, pending = 0, compaction = false;
@@ -5481,7 +5479,7 @@ templ ChatAutoScrollScript() {
                 var checkpoint = incrementalProjection && container._chatParseCheckpoint;
                 if (checkpoint && !sourceText.startsWith(checkpoint.raw)) { checkpoint = null; delete container._chatParseCheckpoint; }
                 if (checkpoint) textBuffer = sourceText.slice(checkpoint.raw.length);
-                var parseSource = textBuffer, normalizationEdits = [], nextCheckpoint = null, newSegments = null, committedSegments = null;
+                var parseSource = textBuffer, nextCheckpoint = null, newSegments = null, committedSegments = null;
                 // Committed tool mutations can outlive an interrupted preparation phase.
                 // Retain their versions until a successful row installation owns them.
                 var dirtyTools = incrementalProjection ? (container._chatDirtyTools ||= new Map()) : null;
@@ -5541,8 +5539,7 @@ templ ChatAutoScrollScript() {
 					}
 					function protectInitialToolBlocks() {
 						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer, rawCodeRanges));
-						// Command previews are opaque to alias normalization as well as Markdown.
-						// Leave malformed legacy invocations available to the normalizer.
+						// Command previews are opaque to status stripping and Markdown.
 						var headers = /^[\t ]*\[Using tool:\s*[A-Za-z0-9_.:-]+(?: \| [^\]\r\n]*)?\][\t ]*(?=\r?$)/gm;
 						var header;
 						while ((header = headers.exec(textBuffer)) !== null) {
@@ -5559,10 +5556,6 @@ templ ChatAutoScrollScript() {
 							previous.end = Math.max(previous.end, range.end);
 						});
 						rawCodeRanges = mergedRanges;
-						return true;
-					}
-					function normalizePreparedText() {
-						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer, rawCodeRanges, normalizationEdits);
 						return true;
 					}
 					function stripPreparedStatus() {
@@ -5781,15 +5774,6 @@ templ ChatAutoScrollScript() {
                             if ((seg.type === 'tool_result' && /\[\/Tool\][\t ]*(?:\r\n|\r|\n)$/.test(raw)) ||
                                 (seg.type === 'thinking' && /\[\/Thinking\][\t ]*(?:\r\n|\r|\n)$/.test(raw))) cut = end;
                         });
-                        // Translate the normalized checkpoint back to provider source offsets.
-                        // Legacy XML aliases change lengths; never use normalized offsets on raw input.
-                        var rawCut = cut, shift = 0;
-                        normalizationEdits.forEach(function(edit) {
-                            var normalizedStart = edit.start + shift;
-                            if (normalizedStart < cut && normalizedStart + edit.length > cut) rawCut = 0;
-                            else if (normalizedStart + edit.length <= cut) rawCut += edit.end - edit.start - edit.length;
-                            shift += edit.length - (edit.end - edit.start);
-                        });
                         var last = segments[segments.length - 1];
                         if (last?.type === 'tool_result' && (extendOpenResult || !/\[\/Tool\][\t ]*(?:\r\n|\r|\n)?$/.test(textBuffer.slice(last.index))) &&
                             textBuffer === parseSource && !cut && (extendOpenResult || /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r?\n|\r(?=[^\n]))/.test(textBuffer.slice(last.index))) && segments.every(function(seg) { return seg === last || (seg.type === 'text' && !seg.content.trim()); })) {
@@ -5804,9 +5788,9 @@ templ ChatAutoScrollScript() {
                         var committed = segments.filter(function(seg) { return seg.index + (seg.length || seg.content?.length || 0) <= cut; });
                         segments.forEach(function(seg) { seg.index += base; });
                         var prior = checkpoint ? checkpoint.segments : [];
-                        if (rawCut > 0 && rawCut <= parseSource.length) {
+                        if (cut > 0 && cut <= parseSource.length) {
                             nextCheckpoint = {
-                                raw: (checkpoint ? checkpoint.raw : '') + parseSource.slice(0, rawCut),
+                                raw: (checkpoint ? checkpoint.raw : '') + parseSource.slice(0, cut),
                                 normalized: (checkpoint ? checkpoint.normalized : '') + textBuffer.slice(0, cut),
                                 segments: prior.concat(committed)
                             };
@@ -5820,7 +5804,7 @@ templ ChatAutoScrollScript() {
 					var markdownPreparationIndex = 0;
 					function cleanPreparedText(text) {
 						if (!text) return text;
-						// Tool/thinking/status controls were already normalized, scoped, and
+						// Tool/thinking/status controls were already scoped and
 						// extracted above. Do not run the general cleaner's code-range scans
 						// again for every visible Markdown segment.
 						text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
@@ -5925,7 +5909,6 @@ templ ChatAutoScrollScript() {
 						prepareInitialCodeRanges,
 						protectInitialToolBlocks,
 						stripPreparedStatus,
-						normalizePreparedText,
 						prepareToolBlockRanges,
 						prepareCodeRanges,
 					collectThinkingMatches,
@@ -6944,27 +6927,6 @@ templ ChatAutoScrollScript() {
 						// before Chat/task-thread content renders. All transcript transforms and
 						// Markdown rendering share those helpers.
 
-						window.replaceOutsideCode = function(text, pattern, replacement, ranges) {
-							var result = '';
-							var previous = 0;
-							var match;
-							var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
-							pattern.lastIndex = 0;
-							while ((match = pattern.exec(text)) !== null) {
-								if (window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, match.index, match.index + match[0].length)) {
-								// A protected partial alias can make one regex span a later real
-								// alias. Resume just after its start so the real alias is found.
-								pattern.lastIndex = match.index + 1;
-								continue;
-							}
-							result += text.substring(previous, match.index);
-							result += typeof replacement === 'function' ? replacement.apply(null, Array.from(match).concat(match.index)) : replacement;
-							previous = match.index + match[0].length;
-							if (match[0].length === 0) pattern.lastIndex++;
-						}
-						return result + text.substring(previous);
-					};
-
 						window.stripOutsideCode = function(text, pattern, ranges) {
 							var result = '';
 							var previous = 0;
@@ -7051,19 +7013,8 @@ templ ChatAutoScrollScript() {
 				};
 
 				// Clean transcript control artifacts from chat message content.
-					window.normalizeTranscriptMarkers = function(text, ranges, edits) {
-						if (!text) return text;
-						var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
-						return window.replaceOutsideCode(text, /\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*|<\s*(\/?)\s*thinking\s*>/gi, function(raw, tool, command, closing, index) {
-                            function replacement(value) { if (edits) edits.push({start:index, end:index + raw.length, length:value.length}); return value; }
-							if (!tool) return replacement(closing ? '\n[/Thinking]\n' : '\n[Thinking]\n');
-							command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
-							return replacement('\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n');
-						}, protectedRanges);
-				};
 			window.cleanTranscriptControls = function(text, noTrim, statusAlreadyScoped) {
 				if (!text) return text;
-				text = window.normalizeTranscriptMarkers(text);
 				if (!statusAlreadyScoped) text = window.stripFinalStatusControl(text);
 				text = window.stripOutsideCode(text, /^[\t ]*\[Compaction (?:started|done|failed)(?: \| \d+)?\][\t ]*$/gm);
 				text = window.stripOutsideCode(text, /\[Using tool:\s*[^\]]+\]/g);
@@ -7331,17 +7282,11 @@ var (
 	reExcessLines  = regexp.MustCompile(`\n{3,}`)
 )
 
-// NormalizeDisplayMarkers canonicalizes legacy/provider marker variants for UI rendering.
-func NormalizeDisplayMarkers(text string) string {
-	return llmtranscript.NormalizeMarkers(text)
-}
-
 // CleanDisplayContent strips transcript control artifacts from chat content for display.
 func CleanDisplayContent(text string) string {
 	if text == "" {
 		return text
 	}
-	text = NormalizeDisplayMarkers(text)
 	text = llmoutput.StripFinalStatusControl(text)
 	text = llmoutput.ReplaceOutsideMarkdownCode(text, reCompaction, "")
 	text = llmoutput.ReplaceOutsideMarkdownCode(text, reUsingTool, "")

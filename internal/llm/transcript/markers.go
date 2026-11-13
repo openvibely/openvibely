@@ -1,78 +1,6 @@
 package transcript
 
-import (
-	"fmt"
-	"regexp"
-	"strings"
-)
-
-var (
-	reLegacyThinkingOpenTag  = regexp.MustCompile(`(?i)<\s*thinking\s*>`)
-	reLegacyThinkingCloseTag = regexp.MustCompile(`(?i)</\s*thinking\s*>`)
-	reMalformedToolInvoke    = regexp.MustCompile(`(?s)\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">(.*?)</parameter>\s*</invoke>\s*`)
-)
-
-// NormalizeMarkers canonicalizes provider/client marker variants before
-// persistence or rendering. Historical rows may contain XML-ish thinking/tool tags
-// produced by older stream parsers; converting them here keeps thinking and normal
-// assistant content in separate renderable sections without changing the message text.
-func NormalizeMarkers(text string) string {
-	if text == "" {
-		return text
-	}
-	text = replaceOutsideMarkdownCode(text, reMalformedToolInvoke, func(match string) string {
-		parts := reMalformedToolInvoke.FindStringSubmatch(match)
-		if len(parts) != 3 {
-			return match
-		}
-		tool := sanitizeMarkerPart(parts[1])
-		cmd := sanitizeMarkerPart(parts[2])
-		if tool == "" {
-			return ""
-		}
-		if cmd == "" {
-			return fmt.Sprintf("\n[Using tool: %s]\n", tool)
-		}
-		return fmt.Sprintf("\n[Using tool: %s | %s]\n", tool, cmd)
-	})
-	text = replaceOutsideMarkdownCode(text, reLegacyThinkingOpenTag, func(string) string { return "\n[Thinking]\n" })
-	text = replaceOutsideMarkdownCode(text, reLegacyThinkingCloseTag, func(string) string { return "\n[/Thinking]\n" })
-	return text
-}
-
-func replaceOutsideMarkdownCode(text string, re *regexp.Regexp, replace func(string) string) string {
-	// Most responses have no legacy markers. Do not parse Markdown or copy
-	// the entire response when there is nothing to normalize.
-	if !re.MatchString(text) {
-		return text
-	}
-	ranges := MarkdownCodeRanges(text)
-	var result strings.Builder
-	previous := 0
-	searchAt := 0
-	for searchAt <= len(text) {
-		match := re.FindStringIndex(text[searchAt:])
-		if match == nil {
-			break
-		}
-		start, end := searchAt+match[0], searchAt+match[1]
-		if PositionInMarkdownCode(ranges, start) {
-			// A protected incomplete alias can make one regex match span a later real
-			// alias. Resume just after the protected start so the later alias is found.
-			searchAt = start + 1
-			continue
-		}
-		result.WriteString(text[previous:start])
-		result.WriteString(replace(text[start:end]))
-		previous = end
-		searchAt = end
-		if end == start {
-			searchAt++
-		}
-	}
-	result.WriteString(text[previous:])
-	return result.String()
-}
+import "strings"
 
 // MarkdownLineRange is a source-preserving half-open line range. End excludes
 // the line ending and Next points after an LF, CRLF, or bare CR ending.
@@ -299,14 +227,4 @@ func PositionInMarkdownCode(ranges []MarkdownCodeRange, position int) bool {
 		}
 	}
 	return false
-}
-
-func sanitizeMarkerPart(value string) string {
-	if value == "" {
-		return ""
-	}
-	value = strings.ReplaceAll(value, "]", ")")
-	value = strings.ReplaceAll(value, "\r", " ")
-	value = strings.ReplaceAll(value, "\n", " ")
-	return strings.TrimSpace(value)
 }

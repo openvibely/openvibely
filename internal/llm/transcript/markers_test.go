@@ -5,163 +5,6 @@ import (
 	"testing"
 )
 
-func TestNormalizeMarkers_CanonicalizesLegacyThinkingAndMalformedToolInvoke(t *testing.T) {
-	for _, opener := range []string{`[Using tool: bash"]`, `[Using tool: bash">`} {
-		input := "[Thinking]\nreviewing\n</thinking>Normal text\n" + opener + "\n<parameter name=\"command\">echo one\n echo two</parameter>\n</invoke>done"
-		got := NormalizeMarkers(input)
-
-		if strings.Contains(got, "</thinking>") || strings.Contains(got, "<parameter") || strings.Contains(got, "</invoke>") || strings.Contains(got, `bash\"]`) || strings.Contains(got, `bash\">`) {
-			t.Fatalf("expected legacy markers removed, got: %q", got)
-		}
-		if !strings.Contains(got, "[Thinking]\nreviewing\n\n[/Thinking]\nNormal text") {
-			t.Fatalf("expected thinking close tag canonicalized before normal text, got: %q", got)
-		}
-		if !strings.Contains(got, "[Using tool: bash | echo one  echo two]") {
-			t.Fatalf("expected malformed tool invocation canonicalized, got: %q", got)
-		}
-	}
-}
-
-func TestNormalizeMarkers_PreservesMarkdownCodeAliasesAndNormalizesRealAliases(t *testing.T) {
-	codedTool := `[Using tool: bash"> <parameter name="command">echo coded</parameter> </invoke>`
-	realTool := `[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
-	input := "Inline `\u003cthinking\u003ecoded\u003c/thinking\u003e` and `" + codedTool + "`.\n" +
-		"```text\n\u003cthinking\u003efenced\u003c/thinking\u003e\n" + codedTool + "\n```\n" +
-		"~~~text\n\u003cthinking\u003etilde\u003c/thinking\u003e\n" + codedTool + "\n~~~\n" +
-		"\u003cthinking\u003ereal thinking\u003c/thinking\u003e\n" + realTool
-
-	got := NormalizeMarkers(input)
-
-	for _, literal := range []string{
-		"`\u003cthinking\u003ecoded\u003c/thinking\u003e`",
-		"`" + codedTool + "`",
-		"```text\n\u003cthinking\u003efenced\u003c/thinking\u003e\n" + codedTool + "\n```",
-		"~~~text\n\u003cthinking\u003etilde\u003c/thinking\u003e\n" + codedTool + "\n~~~",
-	} {
-		if !strings.Contains(got, literal) {
-			t.Fatalf("expected coded alias preserved byte-for-byte %q in:\n%q", literal, got)
-		}
-	}
-	if !strings.Contains(got, "[Thinking]\nreal thinking\n[/Thinking]") {
-		t.Fatalf("expected real thinking alias canonicalized, got: %q", got)
-	}
-	if !strings.Contains(got, "[Using tool: bash | echo real]") {
-		t.Fatalf("expected real tool alias canonicalized, got: %q", got)
-	}
-}
-
-func TestNormalizeMarkers_UsesMatchingFenceCharacterAndLength(t *testing.T) {
-	input := "`````text\n\u003cthinking\u003elong fence\u003c/thinking\u003e\n```\n" +
-		"~~~\n\u003cthinking\u003estill long fence\u003c/thinking\u003e\n`````\n" +
-		"\u003cthinking\u003ereal\u003c/thinking\u003e"
-
-	got := NormalizeMarkers(input)
-
-	for _, literal := range []string{
-		"\u003cthinking\u003elong fence\u003c/thinking\u003e",
-		"\u003cthinking\u003estill long fence\u003c/thinking\u003e",
-	} {
-		if !strings.Contains(got, literal) {
-			t.Fatalf("mismatched or short fence exposed coded alias %q in: %q", literal, got)
-		}
-	}
-	if !strings.Contains(got, "[Thinking]\nreal\n[/Thinking]") {
-		t.Fatalf("real alias after matching closer was not normalized: %q", got)
-	}
-}
-
-func TestNormalizeMarkers_RecognizesAllCommonMarkFenceLineEndings(t *testing.T) {
-	tests := []struct {
-		name  string
-		coded string
-	}{
-		{
-			name:  "bare CR backtick fence",
-			coded: "```text\r<thinking>coded backtick</thinking>\r```",
-		},
-		{
-			name:  "bare CR tilde fence",
-			coded: "~~~text\r<thinking>coded tilde</thinking>\r~~~~\t ",
-		},
-		{
-			name:  "bare CR long fence ignores short closer",
-			coded: "`````text\r<thinking>coded long</thinking>\r```\r``````   ",
-		},
-		{
-			name:  "CRLF fence",
-			coded: "```text\r\n<thinking>coded CRLF</thinking>\r\n```",
-		},
-		{
-			name:  "LF fence",
-			coded: "```text\n<thinking>coded LF</thinking>\n```",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			input := tt.coded + "\r<thinking>real</thinking>"
-			got := NormalizeMarkers(input)
-			if !strings.Contains(got, tt.coded) {
-				t.Fatalf("coded alias changed across line-ending-aware fence:\n%q", got)
-			}
-			if !strings.Contains(got, "[Thinking]\nreal\n[/Thinking]") {
-				t.Fatalf("real alias after valid closer was not normalized:\n%q", got)
-			}
-		})
-	}
-}
-
-func TestNormalizeMarkers_FenceCloserAllowsOnlyASCIISpaceAndTab(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		coded string
-	}{
-		{
-			name:  "backtick NBSP is not trailing fence whitespace",
-			input: "```text\n<thinking>first</thinking>\n```\u00a0\n<thinking>coded</thinking>\n```\n<thinking>real</thinking>",
-			coded: "<thinking>coded</thinking>",
-		},
-		{
-			name:  "tilde em space is not trailing fence whitespace",
-			input: "~~~text\n<thinking>first</thinking>\n~~~\u2003\n<thinking>coded</thinking>\n~~~~\t \n<thinking>real</thinking>",
-			coded: "<thinking>coded</thinking>",
-		},
-		{
-			name:  "long fence narrow NBSP is not trailing fence whitespace",
-			input: "`````text\n<thinking>first</thinking>\n`````\u202f\n<thinking>coded</thinking>\n``````   \n<thinking>real</thinking>",
-			coded: "<thinking>coded</thinking>",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := NormalizeMarkers(tt.input)
-			if !strings.Contains(got, tt.coded) {
-				t.Fatalf("Unicode-whitespace pseudo-closer exposed coded alias: %q", got)
-			}
-			if !strings.Contains(got, "[Thinking]\nreal\n[/Thinking]") {
-				t.Fatalf("valid ASCII space/tab closer did not expose later real alias: %q", got)
-			}
-		})
-	}
-}
-
-func TestNormalizeMarkers_ProtectedPartialToolAliasCannotMaskLaterRealAlias(t *testing.T) {
-	protected := "`[Using tool: bash\"> <parameter name=\"command\">coded`"
-	input := "Literal " + protected + " before real alias.\n" +
-		`[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
-
-	got := NormalizeMarkers(input)
-
-	if !strings.Contains(got, protected) {
-		t.Fatalf("expected protected partial alias preserved, got: %q", got)
-	}
-	if !strings.Contains(got, "[Using tool: bash | echo real]") {
-		t.Fatalf("expected later real alias canonicalized, got: %q", got)
-	}
-}
-
 func TestMarkdownCodeRanges_ProtectsMultilineInlineSpansWithMatchingDelimiterRuns(t *testing.T) {
 	input := "Before `single\nline [Thinking]coded[/Thinking]` after.\n" +
 		"Double ``multi\nline [TASK_ID:coded]`` done.\n" +
@@ -182,25 +25,6 @@ func TestMarkdownCodeRanges_ProtectsMultilineInlineSpansWithMatchingDelimiterRun
 	}
 	if real := strings.LastIndex(input, "[Using tool: bash]"); real == -1 || PositionInMarkdownCode(ranges, real) {
 		t.Fatalf("real control after matching multiline closer was incorrectly protected: %#v", ranges)
-	}
-}
-
-func TestNormalizeMarkers_PreservesMultilineInlineCodeAliasesAndNormalizesLaterRealAliases(t *testing.T) {
-	codedThinking := "`<thinking>coded\nthought</thinking>`"
-	codedTool := "``[Using tool: bash\">\n<parameter name=\"command\">echo coded</parameter>\n</invoke>``"
-	partialTool := "`[Using tool: bash\">\n<parameter name=\"command\">partial`"
-	realTool := `[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
-	input := codedThinking + "\n" + codedTool + "\n" + partialTool + "\n" +
-		"<thinking>real thinking</thinking>\n" + realTool
-
-	got := NormalizeMarkers(input)
-	for _, literal := range []string{codedThinking, codedTool, partialTool} {
-		if !strings.Contains(got, literal) {
-			t.Fatalf("expected multiline coded alias preserved byte-for-byte %q in:\n%q", literal, got)
-		}
-	}
-	if !strings.Contains(got, "[Thinking]\nreal thinking\n[/Thinking]") || !strings.Contains(got, "[Using tool: bash | echo real]") {
-		t.Fatalf("expected real aliases after multiline spans canonicalized: %q", got)
 	}
 }
 
@@ -237,19 +61,6 @@ func TestMarkdownCodeRanges_ReconsidersRunsAfterUnmatchedDelimiter(t *testing.T)
 				t.Fatalf("real control after later valid span was incorrectly protected: %#v", ranges)
 			}
 		})
-	}
-}
-
-func TestNormalizeMarkers_ReconsidersLaterSpanAfterUnmatchedDelimiter(t *testing.T) {
-	coded := "`<thinking>coded\nthought</thinking>`"
-	input := "Unmatched `` prefix; " + coded + " then <thinking>real</thinking>."
-
-	got := NormalizeMarkers(input)
-	if !strings.Contains(got, "Unmatched `` prefix; "+coded) {
-		t.Fatalf("later coded alias changed after unmatched delimiter: %q", got)
-	}
-	if !strings.Contains(got, "[Thinking]\nreal\n[/Thinking]") {
-		t.Fatalf("real alias after coded span was not normalized: %q", got)
 	}
 }
 
@@ -332,31 +143,6 @@ func TestMarkdownCodeRanges_RespectsBackslashEscapedDelimiterRuns(t *testing.T) 
 	}
 }
 
-func TestNormalizeMarkers_DoesNotProtectAliasesBehindEscapedDelimiters(t *testing.T) {
-	coded := "``<thinking>coded</thinking>``"
-	input := `Escaped \` + "`" + `<thinking>first real</thinking> escaped \` + "`" + `. ` + coded +
-		` then <thinking>third real</thinking>.`
-
-	got := NormalizeMarkers(input)
-	if !strings.Contains(got, coded) {
-		t.Fatalf("valid coded alias after escaped candidates changed: %q", got)
-	}
-	for _, real := range []string{"first real", "third real"} {
-		if !strings.Contains(got, "[Thinking]\n"+real+"\n[/Thinking]") {
-			t.Fatalf("real alias %q was falsely protected: %q", real, got)
-		}
-	}
-}
-
-func TestNormalizeMarkers_LeavesIncompleteMalformedToolInvokeForNextDelta(t *testing.T) {
-	input := "before\n[Using tool: bash\">\n<parameter name=\"command\">go test ./internal/..."
-	got := NormalizeMarkers(input)
-
-	if got != input {
-		t.Fatalf("expected incomplete malformed tool invocation left intact for future stream deltas, got: %q", got)
-	}
-}
-
 func TestUnclosedMarkdownFence(t *testing.T) {
 	for _, tc := range []struct{ text, want string }{
 		{"```go\npartial", "```"},
@@ -369,6 +155,31 @@ func TestUnclosedMarkdownFence(t *testing.T) {
 	} {
 		if got := UnclosedMarkdownFence(tc.text); got != tc.want {
 			t.Fatalf("%q: got %q, want %q", tc.text, got, tc.want)
+		}
+	}
+}
+
+// These fence checks used to be exercised through XML marker conversion.
+// Keep the Markdown coverage independent of any transcript transformation.
+func TestMarkdownCodeRanges_FenceBoundaries(t *testing.T) {
+	for _, ending := range []string{"\n", "\r\n", "\r"} {
+		for _, test := range []struct{ name, opener, misleading, closer string }{
+			{"short backticks", "`````text", "```", "`````"},
+			{"wrong character", "```text", "~~~", "```"},
+			{"short tildes", "~~~~~text", "~~~", "~~~~~~"},
+			{"unicode suffix", "```text", "```\u00a0", "```\t "},
+			{"non whitespace suffix", "~~~text", "~~~ suffix", "~~~ "},
+		} {
+			t.Run(test.name+"/"+strings.ReplaceAll(strings.ReplaceAll(ending, "\r", "CR"), "\n", "LF"), func(t *testing.T) {
+				input := strings.Join([]string{test.opener, test.misleading, "[Thinking]coded[/Thinking]", test.closer, "[Thinking]real[/Thinking]"}, ending)
+				ranges := MarkdownCodeRanges(input)
+				if !PositionInMarkdownCode(ranges, strings.Index(input, "[Thinking]coded")) {
+					t.Fatal("invalid closer ended the code fence")
+				}
+				if PositionInMarkdownCode(ranges, strings.Index(input, "[Thinking]real")) {
+					t.Fatal("matching closer did not end the code fence")
+				}
+			})
 		}
 	}
 }

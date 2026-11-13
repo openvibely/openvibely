@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
-	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 )
@@ -604,7 +603,6 @@ func uniqueExecutionIDArgs(ids []string) ([]string, []interface{}) {
 }
 
 func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.ExecutionStatus, output, errMsg string, tokensUsed int, durationMs int64) error {
-	output = llmtranscript.NormalizeMarkers(output)
 	// An empty result preserves the already-persisted structured display items.
 	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		if _, err := tx.ExecContext(ctx,
@@ -755,7 +753,6 @@ func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id strin
 }
 
 func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, id, output string, tokensUsed int, durationMs int64, finalizeTask func(sqlExecutor) error) (persistence.CompleteSuccessOutcome, error) {
-	output = llmtranscript.NormalizeMarkers(output)
 	// Preserve streamed items when no complete provider output was supplied.
 	var changed int64
 	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {

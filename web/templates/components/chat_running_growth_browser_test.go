@@ -13,26 +13,26 @@ func TestBrowserFunctional_RunningGrowthMeasurements(t *testing.T) {
 			report := runIncrementalChatBrowser(t, fmt.Sprintf(`
  document.documentElement.setAttribute('data-output-detail',%q);
  const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
- const normalizer=window.normalizeTranscriptMarkers, linker=window.linkStreamingToolResults;
- let normalized=0, linked=0;
- window.normalizeTranscriptMarkers=function(text,...rest){normalized+=text.length;return normalizer(text,...rest)};
+ const parser=window.stripFinalStatusControl, linker=window.linkStreamingToolResults;
+ let processedSource=0, linked=0;
+ window.stripFinalStatusControl=function(text,...rest){processedSource+=text.length;return parser(text,...rest)};
  window.linkStreamingToolResults=function(segments,...rest){linked+=segments.length;return linker(segments,...rest)};
  const reports=[];
- for(const scenario of ['tools','unmatched','thinking','legacy','unfinished']) {
+ for(const scenario of ['tools','unmatched','thinking','unfinished']) {
   let node=document.createElement('div');stream.replaceChildren(node);
   let text=scenario==='unmatched'?'[Using tool: read_file | pending]\n':'';
-  const call=i=>scenario==='thinking'?'[Thinking]\nReason '+i+'\n[/Thinking]\n':scenario==='legacy'?'<thinking>Reason '+i+'</thinking>\n':'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+  const call=i=>scenario==='thinking'?'[Thinking]\nReason '+i+'\n[/Thinking]\n':'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
   let count=0;
   for(const size of [200,1000,5000]) {
    while(count<size)text+=call(count++);
    if(scenario==='unfinished')text+='[Using tool: shell | long]\n[Tool shell done]\n'+('output\n').repeat(10000);
    let start=performance.now();await renderLiveChatContent(node,text,false);const initialMS=performance.now()-start;
    if(scenario==='unfinished'){text+='warm output\n';await renderLiveChatContent(node,text,false);}
-   normalized=0;linked=0;start=performance.now();
+   processedSource=0;linked=0;start=performance.now();
    text+=scenario==='unfinished'?'more output\n':call(count++);
    await renderLiveChatContent(node,text,false);
-   reports.push({scenario,size,initialMS,updateMS:performance.now()-start,normalized,linked,dom:node.querySelectorAll('*').length,tools:node.querySelectorAll('.stream-tool').length});
-   assert(normalized<256,'completed history was normalized again: '+scenario+' '+normalized);
+   reports.push({scenario,size,initialMS,updateMS:performance.now()-start,processedSource,linked,dom:node.querySelectorAll('*').length,tools:node.querySelectorAll('.stream-tool').length});
+   assert(processedSource<256,'completed history was processed again: '+scenario+' '+processedSource);
    assert(linked<12,'completed history was relinked: '+scenario+' '+linked);
    assert(node.querySelectorAll('.stream-tool').length<20,'unbounded mounted tools');
    if(scenario==='unfinished')text+='[/Tool]\n';
@@ -56,7 +56,7 @@ func TestBrowserFunctional_RunningCheckpointEquivalence(t *testing.T) {
  const reference=document.createElement('div');referencePair.appendChild(reference);
  const canonical=node=>node._chatVirtualData.sourceModels.map(row=>({kind:row.kind,segments:row.segments.map(seg=>Object.fromEntries(Object.entries(seg).filter(([key])=>key!=='_version').sort(([a],[b])=>a.localeCompare(b))))}));
  let text='';
- const chunks=['Intro **Markdown**.\n\n','[Using tool: Read | pending]\n','[Using tool: shell | next]\n','[Tool shell done]\nopaque '+fence+' [Thinking]\n','[/To','ol]\n','[Thinking]\nReason\n[/Thinking]\n','[Thinking]\nMore\n[/Thinking]\n','<thinking>Legacy</thinking>\n','[Using tool: shell"> <parameter name="command">echo test</parameter></invoke>\n','[Tool shell done: okay]\n','[Tool read_file done]\nlate result\n[/Tool]\n','[Compaction started]\n','[Using tool: shell | during compaction]\n','[Compaction done | 1000]\n','Final [reference][id].\n\n[id]: https://example.com\n',fence+'text\n[Using tool: shell | literal]\n',fence+'\n'];
+ const chunks=['Intro **Markdown**.\n\n','[Using tool: Read | pending]\n','[Using tool: shell | next]\n','[Tool shell done]\nopaque '+fence+' [Thinking]\n','[/To','ol]\n','[Thinking]\nReason\n[/Thinking]\n','[Thinking]\nMore\n[/Thinking]\n','[Using tool: shell | echo test]\n','[Tool shell done: okay]\n','[Tool read_file done]\nlate result\n[/Tool]\n','[Compaction started]\n','[Using tool: shell | during compaction]\n','[Compaction done | 1000]\n','Final [reference][id].\n\n[id]: https://example.com\n',fence+'text\n[Using tool: shell | literal]\n',fence+'\n'];
  for(const chunk of chunks) {
   text+=chunk;
   await renderLiveChatContent(stream,text,false);
@@ -132,9 +132,9 @@ func TestBrowserFunctional_RunningPartialControls(t *testing.T) {
  const reference=document.createElement('div');pair.appendChild(reference);
  const shape=node=>JSON.stringify(node._chatVirtualData.sourceModels.map(row=>({kind:row.kind,segments:row.segments.map(seg=>Object.fromEntries(Object.entries(seg).filter(([key])=>key!=='_version').sort(([a],[b])=>a.localeCompare(b))))})));
  const source='Before.\n\n'+fence+'text\n[Using tool: shell | literal]\n'+fence+'\n'+
- '<thinking>Legacy thought</thinking>\n[Thinking]\nAnother thought\n[/Thinking]\n'+
+ '[Thinking]\nAnother thought\n[/Thinking]\n'+
  '[Using tool: shell | first]\n[Using tool: Shell | second]\n[Tool shell done]\nfirst result\n[/Tool]\n[Tool Shell error: second result]\n'+
- '[Using tool: shell"> <parameter name="command">echo test</parameter></invoke>\n[Tool shell done]\n'+('opaque output\n').repeat(100)+'[/Tool]\nFinal paragraph.';
+ '[Using tool: shell | echo test]\n[Tool shell done]\n'+('opaque output\n').repeat(100)+'[/Tool]\nFinal paragraph.';
  for(const step of [1,7,31]) {
   const node=document.createElement('div');stream.replaceChildren(node);
   for(let end=step;end<source.length+step;end+=step) {
