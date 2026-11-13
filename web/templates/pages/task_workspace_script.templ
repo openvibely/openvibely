@@ -232,10 +232,9 @@ templ TaskWorkspaceScript() {
 				button.setAttribute('aria-keyshortcuts', apple ? 'Meta+Shift+D' : 'Control+Shift+D');
 			});
 			if (!summary) return;
-			// Counts cover the whole task. An active refresh with zero files must
-			// not hide an existing review control, or reveal one for an empty task.
-			var active = summary.status === 'running' || summary.status === 'queued';
-			bar.hidden = summary.files === 0 && (!active || bar.hidden);
+			// The server includes saved reviewable changes during active reruns,
+			// so visibility does not depend on whether this page was open earlier.
+			bar.hidden = summary.files === 0;
 			root.dataset.hasChanges = String(summary.files > 0);
 			bar.querySelector('[data-change-files]').textContent = summary.files.toLocaleString() + (summary.files === 1 ? ' file' : ' files');
 			bar.querySelector('[data-change-additions]').textContent = '+' + summary.insertions.toLocaleString();

@@ -1406,3 +1406,66 @@ func TestHandler_GetTaskWorktreeInfoDoesNotInferMerge(t *testing.T) {
 		})
 	}
 }
+
+func TestHandler_ActiveEmptyWorktreeKeepsSavedReviewChanges(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithStores(t)
+	defer db.Close()
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	target := gitCurrentBranch(t, repoDir)
+	branch := "task/saved-review"
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	runGit(t, repoDir, "worktree", "add", "-b", branch, worktree, target)
+	project := &models.Project{Name: "Saved review", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Saved review", Category: models.CategoryActive, Status: models.StatusRunning, WorktreePath: worktree, WorktreeBranch: branch, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.resolveTaskChangesDiffOutput(ctx, task); got != "" {
+		t.Fatalf("new task should be empty: %s", got)
+	}
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: firstAgentID(t, h), Status: models.ExecCompleted, PromptSent: "earlier run"}
+	if err := h.execRepo.Create(ctx, execution); err != nil {
+		t.Fatal(err)
+	}
+	saved := "diff --git a/saved.txt b/saved.txt\nnew file mode 100644\n--- /dev/null\n+++ b/saved.txt\n@@ -0,0 +1 @@\n+saved task output\n"
+	saved += "diff --git a/second.txt b/second.txt\nnew file mode 100644\n--- /dev/null\n+++ b/second.txt\n@@ -0,0 +1 @@\n+second saved file\n"
+	if err := h.execRepo.UpdateDiffOutput(ctx, execution.ID, saved); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []models.TaskStatus{models.StatusQueued, models.StatusRunning} {
+		task.Status = status
+		if err := h.taskRepo.Update(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/summary?project_id="+project.ID, nil), rec)
+		c.SetParamNames("taskId")
+		c.SetParamValues(task.ID)
+		if err := h.GetTaskChangesSummary(c); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(rec.Body.String(), `"files":2`) {
+			t.Fatalf("%s summary lost saved changes: %s", status, rec.Body.String())
+		}
+		if got := h.resolveTaskChangesDiffOutput(ctx, task); got != saved {
+			t.Fatalf("%s diff lost saved changes: %s", status, got)
+		}
+		if meta, ok := h.resolveTaskChangesFileMeta(ctx, task, 0); !ok || meta.File.Path != "saved.txt" {
+			t.Fatalf("%s file lost saved changes: %+v, %v", status, meta, ok)
+		}
+	}
+	// A nonempty live diff supersedes saved changes and retains its own indexes.
+	if err := os.WriteFile(filepath.Join(worktree, "live.txt"), []byte("live edit\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.resolveTaskChangesDiffOutput(ctx, task); !strings.Contains(got, "live.txt") || strings.Contains(got, "saved.txt") {
+		t.Fatalf("live diff did not take precedence: %s", got)
+	}
+	if _, ok := h.resolveTaskChangesFileMeta(ctx, task, 1); ok {
+		t.Fatal("out-of-range live index must not resolve saved content")
+	}
+}

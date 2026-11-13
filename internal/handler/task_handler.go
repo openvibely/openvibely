@@ -1304,7 +1304,10 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 				state.FileStats = nil
 				return state
 			}
-			if strings.TrimSpace(state.DiffOutput) == "" && !isActive && (state.BranchAlreadyMerged || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
+			// During a rerun, keep earlier reviewable changes available even when
+			// the live worktree is temporarily empty. All Changes surfaces use
+			// this fallback, so summary counts and the opened diff stay consistent.
+			if strings.TrimSpace(state.DiffOutput) == "" && (isActive || state.BranchAlreadyMerged || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
 				if diff := preservedDiff(); diff != "" {
 					state.DiffOutput = diff
 					state.FileStats = nil
@@ -1380,6 +1383,11 @@ func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.T
 		return preservedMeta()
 	}
 	if !ok {
+		// Only use saved file indexes when the entire live diff is empty;
+		// an out-of-range index in a nonempty live diff must remain missing.
+		if isActive && strings.TrimSpace(service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)) == "" {
+			return preservedMeta()
+		}
 		if !isActive && (h.reconcileAlreadyMergedBranch(ctx, task) || service.IsBranchMergedContext(ctx, project.RepoPath, task.WorktreeBranch, targetBranch)) {
 			return preservedMeta()
 		}

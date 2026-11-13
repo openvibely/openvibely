@@ -557,10 +557,10 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 			visible bool
 		}{
 			{"completed", 3, true}, // Earlier runs have changes available to review.
-			{"queued", 0, true},
-			{"running", 0, true},   // A temporary empty summary must not remove navigation.
+			{"queued", 3, true},
+			{"running", 3, true},   // The server includes saved changes during a rerun.
 			{"completed", 3, true}, // Task-wide changes remain after a no-op rerun.
-			{"running", 0, true},
+			{"running", 3, true},
 			{"completed", 0, false}, // Hide only once the task-wide summary is empty at rest.
 			{"queued", 0, false},    // A later empty run must not resurrect the control.
 			{"completed", 0, false},
@@ -697,6 +697,19 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 	if diffRequests.Load() == 0 {
 		t.Fatal("full diff never loaded")
 	}
+	summaryStatus.Store("running")
+	files.Store(3)
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks/workspace-task?tab=chat", "task-workspace-rerun-reload", func(b *composerFocusCDP) {
+		visible := `String(!!document.getElementById('task-change-activity') && document.getElementById('task-change-activity').checkVisibility())`
+		b.waitFor("saved changes visible on direct running-task visit", visible, "true")
+		b.evaluate(`window.beforeDiffReload = true; 'ready'`)
+		b.call("Page.reload", map[string]any{}, nil)
+		b.waitFor("new document loaded", `String(!window.beforeDiffReload && !!document.getElementById('task-message-input'))`, "true")
+		b.waitFor("saved changes visible after reload", visible, "true")
+		b.click("[data-review-changes]")
+		b.waitFor("saved changes open after reload", `String(!!document.getElementById('diff-viewer'))`, "true")
+	})
+	summaryStatus.Store("completed")
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/workspace-task?tab=changes", "task-workspace-deep-links", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 600, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("direct diff lazy load", `String(document.getElementById('diff-viewer')&&document.getElementById('diff-viewer').textContent)`, "Authoritative full diff")
