@@ -1,0 +1,80 @@
+# Frontend renderer benchmarks
+
+Manual Chrome benchmarks for a single growing running execution, in Compact and Full modes. These use the production renderer and bundled assets from each selected Git revision, with synthetic local data. No provider, database, or external service is needed.
+
+These measure renderer updates, **not end-to-end page loading or scrolling**. Normal virtualization stays enabled. There is no fully materialized preview stress case in this harness.
+
+## Run
+
+Requirements: Python 3.9+, Go matching the repository, Git, tar, macOS or Linux `ps`, and Google Chrome/Chromium. On macOS the harness uses the standard Google Chrome application; otherwise it searches PATH for google-chrome, chromium, or chromium-browser. The Go module cache must be populated or module downloads must be available during builds.
+
+From any directory:
+
+```sh
+python3 scripts/replay-memory-bench/frontend/run.py \
+  --baseline main --candidate HEAD --suite all --runs 5 \
+  --output /tmp/openvibely-frontend-comparison
+```
+
+The output directory must not exist and must be outside this worktree. Both refs are resolved to immutable commits before running. **Uncommitted renderer changes are not included**. The harness itself comes from the directory containing this runner, so the same fixtures are injected into both revisions. Revisions need the existing component browser-test helpers and renderer APIs; incompatible older revisions fail compilation rather than silently skipping coverage.
+
+For a quick verification:
+
+```sh
+python3 scripts/replay-memory-bench/frontend/run.py \
+  --baseline main --candidate HEAD --suite timing --mode compact --runs 1 \
+  --output /tmp/openvibely-frontend-smoke
+```
+
+Options:
+
+- `--suite timing`: ordinary output without previews; tools, earlier unmatched tool, repeated thinking, unfinished result.
+- `--suite memory`: ordinary output without previews; heap, DOM counts, Chrome process RSS, transcript reopen cycles, and page reload cycles.
+- `--suite preview`: one real HTML preview near the live tail, inline and expanded; streaming time, heap, process RSS, removal and reload.
+- `--suite all`: all three, reported separately.
+- `--mode compact|full|both` (default both).
+- `--runs N` (default five). Use five for comparisons; one only verifies the runner.
+
+All suites use 200, 1,000 and 5,000 calls. The full five-run comparison takes many minutes. Builds finish before browser measurements. Browser runs are sequential, with baseline/candidate order alternating between repetitions. Each leaf case starts a fresh Chrome process/profile. Temporary source archives and binaries are deleted on exit; original worktrees remain untouched. Missing Chrome, skipped cases, failed assertions, and missing results fail the run. On failure, completed samples and logs remain in the output directory; rerun with a new output directory.
+
+The `.go.txt` files are manual fixtures, injected as `_test.go` files only into temporary archives. They do not add slow performance benchmarks to ordinary CI. Existing committed browser regressions provide deterministic correctness coverage.
+
+## What is measured
+
+### Ordinary output: timing
+
+Each fixture grows through all three sizes and times an awaited `renderLiveChatContent` update. It records initial render time, update time, repeated source processed, segments linked, DOM elements, and mounted tools. An unfinished result contains 10,000 repetitions of `output\n` (about 70 KB) per size, is warmed once, then receives `more output\n`. Other scenarios append one completed call or thinking section. Timing uses the existing production browser test helper, with no memory polling or forced GC. The renderer promise is not an end-to-end paint measurement.
+
+### Ordinary output: memory
+
+Each size receives a fresh transcript. The unfinished-result fixture uses 100,000 repetitions of `output\n` (about 700 KB), deliberately larger than the timing fixture. After loading and one update, it measures three remove/reopen cycles at 5,000 calls and two full page reload/reopen cycles. These are fixture reloads, not the complete application navigation lifecycle.
+
+### With one preview
+
+The production preview loader and viewer use a local HTML fixture. Only visible tool cards are mounted (asserted below 30). Three calls arrive while the preview is inline, then one arrives while expanded. Identity, entered text, iframe load count, and scroll state are checked. Closing restores the inline frame; removal and reload must leave zero iframes.
+
+Opening the viewer can itself reset scroll on either revision. The fixture records `scrollBeforeReset`, then sets and verifies scroll immediately before streaming. It tests **streaming preservation**, not a guarantee that viewer opening preserves scroll. Inline timings summarize the three updates per sample first, then take the median across repetitions.
+
+### Memory interpretation
+
+Heap is Chrome's `performance.memory.usedJSHeapSize`, with precise-memory-info enabled. Retained snapshots call exposed GC twice; `beforeGC` is recorded separately. Heap peaks are sampled every 25 ms and process RSS every 250 ms, so neither is an exact maximum. RSS sums the Chrome process tree from `ps`, can double-count shared pages, and is not exact physical RAM usage. RSS may remain high after objects/iframes are removed because Chrome retains allocated pages.
+
+The summary subtracts each browser's empty-page heap/RSS from corresponding snapshots and expresses memory in MiB. Peak counters span the process lifetime for RSS; heap peak counters reset on page reload, so inspect phases rather than interpreting the last heap sample as the whole-run maximum. Process peak deltas subtract baseline RSS, not baseline peak. Memory polling and forced GC perturb timing; compare `timing` suite values separately from memory/preview runs.
+
+Short reopen cycles can reveal retained growth but do not establish leak freedom. Process memory is noisy: keep the machine idle and compare medians and ranges, not isolated samples.
+
+## Outputs
+
+- `manifest.json`: pinned commits, arguments, platform, Go/Chrome versions, harness hashes.
+- `*-build.log`, per-case `*.log`: compilation and full browser-test output.
+- `samples.json`: all raw reports, saved after every completed case (bytes for memory, milliseconds for time).
+- `summary.json`, `summary.md`: per-revision, per-case, per-size medians, ranges and sample counts. Preview/no-preview and measured phases stay distinct.
+
+Keep results, profiles, and dumps outside the repository. Do not turn noisy timing or RSS thresholds into CI assertions.
+
+Check the summary calculations without launching Chrome:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+  -s scripts/replay-memory-bench/frontend -p 'test_*.py'
+```

@@ -1,0 +1,43 @@
+package components
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestFrontendBenchmarkPreview(t *testing.T) {
+	for _, mode := range []string{"compact", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			script := `
+ document.documentElement.setAttribute('data-output-detail',MODE);
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
+ const reports=JSON.parse(sessionStorage.getItem('previewReports')||'[]');let peakHeap=0;
+ const timer=setInterval(()=>{peakHeap=Math.max(peakHeap,performance.memory.usedJSHeapSize)},25);
+ const snap=async(label,size,updates=[])=>{await paint();await pause(100);const beforeGC=performance.memory.usedJSHeapSize;peakHeap=Math.max(peakHeap,beforeGC);gc();await pause(30);gc();await pause(30);reports.push({label,size,updates,heap:performance.memory.usedJSHeapSize,beforeGC,peakHeap,dom:document.querySelectorAll('*').length,tools:document.querySelectorAll('.stream-tool').length,iframes:document.querySelectorAll('iframe').length,loads:Number(await fetch('/preview-loads').then(r=>r.text())),...await fetch('/memory').then(r=>r.json())});};
+ if(sessionStorage.getItem('previewDone')){await snap('navigation-empty',0);clearInterval(timer);assert(!document.querySelector('iframe'),'iframe remained after navigation');return reports;}
+ await snap('empty',0);
+ const call=i=>'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ const bottom=async()=>{for(let i=0;i<3;i++){messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);await paint();}};
+ const waitFor=async(fn,label)=>{for(let i=0;i<100;i++){if(fn())return;await pause(30);}throw Error(label);};
+ const probe=async(frame,action)=>new Promise((resolve,reject)=>{const id=Math.random().toString();const stop=setTimeout(()=>{removeEventListener('message',listener);reject(Error('preview did not answer '+action))},3000);const listener=event=>{if(event.source===frame.contentWindow&&event.data?.probe===id){clearTimeout(stop);removeEventListener('message',listener);resolve(event.data);}};addEventListener('message',listener);frame.contentWindow.postMessage({action,probe:id},'*');});
+ for(const size of [200,1000,5000]){
+  let node=document.createElement('div');stream.replaceChildren(node);let text='';for(let i=0;i<size;i++)text+=call(i);text+='\n[Preview](/files/abcdef)\n';
+  await renderLiveChatContent(node,text,false);await bottom();
+  await waitFor(()=>node.querySelector('iframe'),'visible tail preview did not load');let frame=node.querySelector('iframe');await pause(150);await probe(frame,'set');
+  const loads=Number(await fetch('/preview-loads').then(r=>r.text()));const check=async(preserveScroll=true)=>{assert(node.querySelector('iframe')===frame||document.getElementById('image-gallery').querySelector('iframe')===frame,'iframe identity lost');const state=await probe(frame,'read');assert(state.value==='retained text'&&(!preserveScroll||state.scrollY===180),'preview state lost '+JSON.stringify(state));assert(Number(await fetch('/preview-loads').then(r=>r.text()))===loads,'preview reloaded');};
+  await snap('inline',size);const updates=[];
+  for(let j=0;j<3;j++){text+=call(size+j);const t=performance.now();await renderLiveChatContent(node,text,false);updates.push(performance.now()-t);await bottom();await check();}
+  await snap('updated',size,updates);
+  assert(node.querySelectorAll('.stream-tool').length<30,'all history rendered instead of virtualization');
+  const gallery=document.getElementById('image-gallery');node.querySelector('.file-html-canvas button').click();await waitFor(()=>gallery.open&&gallery.querySelector('iframe')===frame,'preview did not expand with existing iframe');await check(false);const expansionState=await probe(frame,'read');await probe(frame,'set');await snap('expanded',size);reports[reports.length-1].scrollBeforeReset=expansionState.scrollY;
+  await probe(frame,'set');await check();text+=call(size+3);const t=performance.now();await renderLiveChatContent(node,text,false);const expandedUpdate=performance.now()-t;await paint();await check();await snap('expanded-update',size,[expandedUpdate]);
+  gallery.querySelector('[data-gallery-close]').click();await waitFor(()=>!gallery.open&&node.querySelector('iframe')===frame,'closing viewer did not restore preview');await check();await snap('closed-viewer',size);
+  stream.replaceChildren();frame=null;node=null;text='';await snap('removed',size);assert(!document.querySelector('iframe'),'preview remained after transcript removal');
+ }
+ clearInterval(timer);sessionStorage.setItem('previewReports',JSON.stringify(reports));sessionStorage.setItem('previewDone','1');location.reload();await new Promise(()=>{});
+`
+			script = strings.ReplaceAll(script, "MODE", `"`+mode+`"`)
+			t.Log("FRONTEND_RESULT", string(runFrontendMemoryBrowser(t, script)))
+		})
+	}
+}

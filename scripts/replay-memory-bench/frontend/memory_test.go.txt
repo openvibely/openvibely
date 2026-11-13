@@ -1,0 +1,51 @@
+package components
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestFrontendBenchmarkMemory(t *testing.T) {
+	for _, mode := range []string{"compact", "full"} {
+		for _, scenario := range []string{"tools", "unmatched", "thinking", "unfinished"} {
+			t.Run(mode+"/"+scenario, func(t *testing.T) {
+				script := `
+ document.documentElement.setAttribute('data-output-detail',MODE);
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
+ const scenario=SCENARIO, reports=JSON.parse(sessionStorage.getItem('memoryReports')||'[]');
+ let peakHeap=0;const timer=setInterval(()=>{peakHeap=Math.max(peakHeap,performance.memory.usedJSHeapSize)},25);
+ const snap=async(label,size,updateMS=null)=>{
+  await paint();await pause(100);const beforeGC=performance.memory.usedJSHeapSize;peakHeap=Math.max(peakHeap,beforeGC);
+  gc();await pause(30);gc();await pause(30);
+  const heap=performance.memory.usedJSHeapSize, process=await fetch('/memory').then(r=>r.json());
+  reports.push({label,size,updateMS,heap,beforeGC,peakHeap,dom:document.querySelectorAll('*').length,tools:document.querySelectorAll('.stream-tool').length,iframes:document.querySelectorAll('iframe').length,...process});
+ };
+ let node=null,text='',count=0;
+ const call=i=>scenario==='thinking'?'[Thinking]\nReason '+i+'\n[/Thinking]\n':'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ const makeText=size=>{let t=scenario==='unmatched'?'[Using tool: read_file | pending]\n':'';for(let i=0;i<size;i++)t+=call(i);if(scenario==='unfinished')t+='[Using tool: shell | long]\n[Tool shell done]\n'+('output\n').repeat(100000);return t;};
+ const reload=Number(sessionStorage.getItem('reload')||0);
+ await snap(reload?'navigation-empty':'empty',0);
+ if(!reload){
+  for(const size of [200,1000,5000]){
+   text=makeText(size);node=document.createElement('div');stream.replaceChildren(node);
+   let t=performance.now();await renderLiveChatContent(node,text,false);await snap('loaded',size,performance.now()-t);
+   t=performance.now();text+=scenario==='unfinished'?'more output\n':call(size);await renderLiveChatContent(node,text,false);await snap('updated',size,performance.now()-t);
+  }
+  for(let cycle=1;cycle<=3;cycle++){
+   stream.replaceChildren();node=null;text='';await snap('unmounted-'+cycle,0);
+   node=document.createElement('div');stream.append(node);text=makeText(5000);await renderLiveChatContent(node,text,false);await snap('reopened-'+cycle,5000);
+  }
+ }else{
+  node=document.createElement('div');stream.append(node);text=makeText(5000);await renderLiveChatContent(node,text,false);await snap('navigation-reopened-'+reload,5000);
+ }
+ clearInterval(timer);
+ if(reload<2){sessionStorage.setItem('memoryReports',JSON.stringify(reports));sessionStorage.setItem('reload',String(reload+1));location.reload();await new Promise(()=>{});}
+ return reports;
+`
+				script = strings.ReplaceAll(script, "MODE", `"`+mode+`"`)
+				script = strings.ReplaceAll(script, "SCENARIO", `"`+scenario+`"`)
+				t.Log("FRONTEND_RESULT", string(runFrontendMemoryBrowser(t, script)))
+			})
+		}
+	}
+}

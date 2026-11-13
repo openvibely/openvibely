@@ -1,0 +1,286 @@
+package components
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+// Use real wall time: virtual-time Chrome does not measure delta-to-paint latency.
+func runFrontendMemoryBrowser(t *testing.T, script string) json.RawMessage {
+	t.Helper()
+	chrome := testChromePath(t)
+	var base, shared bytes.Buffer
+	if err := layout.Base("Incremental stream", nil, "").Render(context.Background(), &base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ChatAutoScrollScript().Render(context.Background(), &shared); err != nil {
+		t.Fatal(err)
+	}
+	source := base.String()
+	start := strings.Index(source, "window.configureChatMarked = function()")
+	end := strings.Index(source, "// Listen for system theme changes")
+	if start < 0 || end < start {
+		t.Fatal("missing production markdown helpers")
+	}
+	// Extract the production SSE coalescer, rather than duplicating its scheduling.
+	var bubble bytes.Buffer
+	if err := ChatBubbleStreaming("Assistant", "fixture", "messages", "", false).Render(context.Background(), &bubble); err != nil {
+		t.Fatal(err)
+	}
+	bubbleJS := bubble.String()
+	coalescerStart := strings.Index(bubbleJS, "function renderBufferedOutput(force, yieldLarge)")
+	coalescerEnd := strings.Index(bubbleJS, "function flushBufferedOutput()")
+	if coalescerStart < 0 || coalescerEnd <= coalescerStart {
+		t.Fatal("missing production stream coalescer")
+	}
+	coalescer := `window.makeMeasuredStream = function(container, interval) {
+	 var textBuffer = '', renderScheduled = false, renderDelayTimer = null;
+	 var lastRenderFinishedAt = 0, lastRenderedSourceLength = 0;
+	 var largeStreamRenderThreshold = 100 * 1024, streamRenderInterval = interval;
+	 var messagesId = 'messages', trackerKey = '_measurementTracker', tracker = {shouldAutoScroll:()=>false};
+	 ` + bubbleJS[coalescerStart:coalescerEnd] + `
+	 return {append: function(delta) {textBuffer += delta; renderBufferedOutput(false);},
+	 state: function() {return {scheduled:renderScheduled, timer:renderDelayTimer !== null, rendered:lastRenderedSourceLength, received:textBuffer.length};},
+ idle: function() {return !renderScheduled && lastRenderedSourceLength === textBuffer.length;},
+	 finish: function() {return renderBufferedOutput(true, true);}};
+	};`
+	// Test-only probes sum elapsed time inside synchronous render phases and worker
+	// handlers, including batches resumed after yielding. Explicit async waits are
+	// excluded, but OS scheduling and GC still affect these wall-clock measurements;
+	// they are diagnostics, not CPU-time measurements.
+	probe := `window.streamRenderMS = 0; window.streamTimingDepth = 0; window.streamWorkerReplies = 0;
+	window.measureStreamTime = function(fn) {return function() {
+	 const outer = window.streamTimingDepth++ === 0, start = performance.now();
+	 try {return fn.apply(this, arguments);} finally {window.streamTimingDepth--; if (outer) window.streamRenderMS += performance.now()-start;}
+	};};
+	window.streamWorkerProbe = ';const originalHandler=self.onmessage, originalPost=self.postMessage; self.onmessage=function(event){const started=performance.now();self.postMessage=function(value){value.streamRenderMS=performance.now()-started;return originalPost.call(self,value);};return originalHandler.call(self,event);};';
+	const OriginalStreamWorker = window.Worker;
+	window.Worker = class extends OriginalStreamWorker { constructor(...args) {super(...args); this.addEventListener('message', event=>{window.streamWorkerReplies++; window.streamRenderMS += event.data.streamRenderMS || 0;});} };
+	`
+	baseJS := strings.ReplaceAll(source[start:end], "new Blob([workerSource]", "new Blob([workerSource + window.streamWorkerProbe]")
+	sharedJS := shared.String()
+	sharedJS = strings.Replace(sharedJS, "function renderPreparedSegments() {", "preparationPhases = preparationPhases.map(window.measureStreamTime);\nfunction renderPreparedSegments() {", 1)
+	sharedJS = strings.Replace(sharedJS, "function fillLargeToolOutputChunks(done, fail) {", "renderSegment = window.measureStreamTime(renderSegment); finishRender = window.measureStreamTime(finishRender);\nfunction fillLargeToolOutputChunks(done, fail) {", 1)
+	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(source, -1), "")
+	// Match the page's parser scripts: large Markdown workers import the math
+	// parser through its data attribute, even when the response contains no math.
+	diagnostics := `<script>
+ window.streamPhase = 'loading scripts';
+ window.streamDiagnostic = () => ({phase:window.streamPhase, ready:document.readyState, visibility:document.visibilityState});
+ window.reportStreamError = error => fetch('/report', {method:'POST', body:JSON.stringify({error:String(error && (error.stack || error))})});
+ window.streamResizeWarnings = 0;
+ window.addEventListener('error', event => {
+  // ResizeObserver defers notifications that would recurse within a frame.
+  // Keep these diagnostics, but let the scenario's layout/anchor assertions
+  // decide correctness rather than treating a deferred delivery as an exception.
+  if (!event.error && (event.message === 'ResizeObserver loop completed with undelivered notifications.' || event.message === 'ResizeObserver loop limit exceeded')) {
+   window.streamResizeWarnings++;
+   return;
+  }
+  window.reportStreamError(event.error || event.message || ('asset load failed: '+(event.target.src || event.target.href)));
+ }, true);
+ window.addEventListener('unhandledrejection', event => window.reportStreamError(event.reason));
+ setInterval(() => fetch('/progress', {method:'POST',body:JSON.stringify({...window.streamDiagnostic(), resizeWarnings:window.streamResizeWarnings})}).catch(()=>{}), 1000);
+ </script>`
+	var viewer bytes.Buffer
+	if err := layout.ImageGallery().Render(context.Background(), &viewer); err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.FileViewer().Render(context.Background(), &viewer); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<!doctype html><html><head>` + diagnostics + `<script src="` + static.URL("chat-virtual-list.js") + `"></script>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>` + viewer.String() + `
+ <div id="messages" style="height:300px;overflow:auto"><div id="pair" data-execution-pair="true" data-exec-id="fixture" data-exec-status="running"><div id="stream" class="chat-bubble-assistant-msg"></div></div></div>
+ <script>` + probe + baseJS + `</script>` + sharedJS + `<script>
+ ` + coalescer + `
+ const assert = (ok, message) => { if (!ok) throw Error(message); };
+ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+ const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+ const fence = String.fromCharCode(96).repeat(3);
+ const stream = document.getElementById('stream');
+ const nativeFetch=window.fetch; window.fetch=async(...args)=>{const response=await nativeFetch(...args);if(args[0]==='/memory'){const value=await response.clone().json();if(value.error || !value.processes)throw Error('process memory sampling failed');}return response;};
+ if(typeof gc!=='function'||!performance.memory)throw Error('Chrome heap probes unavailable');
+ async function run() {window.streamPhase = 'running scenario';` + script + `}
+ run().then(report => fetch('/report', {method:'POST',body:JSON.stringify({report})})).catch(error => fetch('/report', {method:'POST',body:JSON.stringify({error:String(error.stack || error)})}));
+ </script></body></html>`
+	type result struct {
+		Report json.RawMessage `json:"report"`
+		Error  string          `json:"error"`
+	}
+	var previewLoads atomic.Int64
+	reports := make(chan result, 1)
+	var memMu sync.Mutex
+	memPID, memPeak := 0, int64(0)
+	sampleMemory := func() map[string]int64 {
+		memMu.Lock()
+		defer memMu.Unlock()
+		data, err := exec.Command("ps", "-axo", "pid=,ppid=,rss=").Output()
+		if err != nil {
+			return map[string]int64{"error": 1}
+		}
+		type proc struct {
+			pid, ppid int
+			rss       int64
+		}
+		procs := []proc{}
+		for _, line := range strings.Split(string(data), "\n") {
+			f := strings.Fields(line)
+			if len(f) != 3 {
+				continue
+			}
+			pid, _ := strconv.Atoi(f[0])
+			ppid, _ := strconv.Atoi(f[1])
+			rss, _ := strconv.ParseInt(f[2], 10, 64)
+			procs = append(procs, proc{pid, ppid, rss * 1024})
+		}
+		ids := map[int]bool{memPID: true}
+		for again := true; again; {
+			again = false
+			for _, v := range procs {
+				if ids[v.ppid] && !ids[v.pid] {
+					ids[v.pid] = true
+					again = true
+				}
+			}
+		}
+		var sum, n int64
+		for _, v := range procs {
+			if ids[v.pid] {
+				sum += v.rss
+				n++
+			}
+		}
+		if sum > memPeak {
+			memPeak = sum
+		}
+		return map[string]int64{"rss": sum, "peakRSS": memPeak, "processes": n}
+	}
+
+	var progressMu sync.Mutex
+	progress := "no browser heartbeat received"
+	progressAt := time.Now()
+	diagnosticsText := func() string {
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		return fmt.Sprintf("last heartbeat %s ago: %s", time.Since(progressAt).Round(time.Millisecond), progress)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/preview-loads" {
+			fmt.Fprint(w, previewLoads.Load())
+			return
+		}
+		if r.URL.Path == "/files/abcdef" {
+			if r.URL.Query().Has("metadata") {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"file_name":"mockup.html","media_type":"text/html"}`)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html")
+			if r.URL.Query().Has("view") {
+				fmt.Fprint(w, `<section data-file-viewer="html"><iframe sandbox="allow-scripts" src="/files/abcdef?raw=1"></iframe></section>`)
+				return
+			}
+			previewLoads.Add(1)
+			fmt.Fprint(w, `<!doctype html><html><body><input id="value" value="initial"><div style="height:2000px">Interactive preview</div><script>window.addEventListener('message',event=>{if(event.source!==parent)return;if(event.data.action==='set'){document.querySelector('input').value='retained text';window.scrollTo(0,180)}if(event.data.probe)parent.postMessage({probe:event.data.probe,value:document.querySelector('input').value,scrollY:window.scrollY},'*')});</script></body></html>`)
+			return
+		}
+		if r.URL.Path == "/memory" {
+			json.NewEncoder(w).Encode(sampleMemory())
+			return
+		}
+		if r.URL.Path == "/progress" {
+			data, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+			if err == nil {
+				progressMu.Lock()
+				progress, progressAt = string(data), time.Now()
+				progressMu.Unlock()
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/report" {
+			var report result
+			if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+				report.Error = err.Error()
+			}
+			select {
+			case reports <- report:
+			default:
+			}
+			return
+		}
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(fixture))
+	}))
+	defer server.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--user-data-dir="+t.TempDir(), "--disable-background-networking", "--disable-component-update", "--disable-default-apps", "--disable-extensions", "--no-default-browser-check", "--enable-precise-memory-info", "--js-flags=--expose-gc", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--no-first-run", server.URL)
+	outputPath := filepath.Join(t.TempDir(), "chrome.log")
+	output, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Close()
+	cmd.Stdout, cmd.Stderr = output, output
+	configureTestBrowserProcess(cmd)
+	if err := startTestBrowserProcess(t, cmd); err != nil {
+		t.Fatal(err)
+	}
+	defer stopTestBrowserProcess(cmd)
+	memMu.Lock()
+	memPID = cmd.Process.Pid
+	memMu.Unlock()
+	memStop := make(chan struct{})
+	defer close(memStop)
+	go func() {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-memStop:
+				return
+			case <-ticker.C:
+				sampleMemory()
+			}
+		}
+	}()
+
+	// Leave time for diagnostics and browser cleanup before Go kills the package.
+	timeout := 150 * time.Second
+	if deadline, ok := t.Deadline(); ok {
+		timeout = min(timeout, time.Until(deadline)-10*time.Second)
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case result := <-reports:
+		if result.Error != "" {
+			t.Fatalf("%s; %s", result.Error, diagnosticsText())
+		}
+		return result.Report
+	case <-timer.C:
+		browserOutput, _ := os.ReadFile(outputPath)
+		t.Fatalf("incremental browser fixture timed out; %s\nChrome output:\n%s", diagnosticsText(), browserOutput)
+	}
+	return nil
+}
