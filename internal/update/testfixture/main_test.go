@@ -24,7 +24,7 @@ const (
 func TestFixtureHelperBranchesApplyValidTimeout(t *testing.T) {
 	for _, command := range []string{update.ExecutableUpdateHelperCommand, update.AppBundleUpdateHelperCommand} {
 		t.Run(command, func(t *testing.T) {
-			output, err := runFixtureHelperProcess(t, command, "", "1", true)
+			output, err := runFixtureHelperProcess(t, command, "", "1", true, "")
 			if err == nil {
 				t.Fatal("fixture helper unexpectedly exited successfully")
 			}
@@ -52,7 +52,7 @@ func TestFixtureHelperBranchesFatalBeforeRunOnInvalidTimeout(t *testing.T) {
 	for _, test := range tests {
 		for _, command := range []string{update.ExecutableUpdateHelperCommand, update.AppBundleUpdateHelperCommand} {
 			t.Run(test.name+"/"+command, func(t *testing.T) {
-				output, err := runFixtureHelperProcess(t, command, test.envName, test.value, false)
+				output, err := runFixtureHelperProcess(t, command, test.envName, test.value, false, "")
 				if err == nil {
 					t.Fatal("fixture helper unexpectedly exited successfully")
 				}
@@ -90,7 +90,7 @@ func TestFixtureParentProcess(t *testing.T) {
 	select {}
 }
 
-func runFixtureHelperProcess(t *testing.T, command, invalidEnvName, timeoutValue string, expectHelperRun bool) ([]byte, error) {
+func runFixtureHelperProcess(t *testing.T, command, invalidEnvName, timeoutValue string, expectHelperRun bool, inputFailure string) ([]byte, error) {
 	t.Helper()
 	root := t.TempDir()
 	current := filepath.Join(root, "current")
@@ -110,6 +110,9 @@ func runFixtureHelperProcess(t *testing.T, command, invalidEnvName, timeoutValue
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if inputFailure == "metadata" {
+		metadata = []byte(`{}`)
 	}
 	metadataPath := filepath.Join(root, "relaunch.json")
 	if err := os.WriteFile(metadataPath, metadata, 0o644); err != nil {
@@ -156,6 +159,9 @@ func runFixtureHelperProcess(t *testing.T, command, invalidEnvName, timeoutValue
 		if err := os.WriteFile(current+".openvibely-recovery-claim.json", claim, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if inputFailure == "arguments" {
+		args = append(args, "--invalid")
 	}
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
@@ -207,4 +213,33 @@ func fixtureTestEnvFrom(base []string, values ...string) []string {
 		env = append(filtered, value)
 	}
 	return env
+}
+
+func TestFixtureHelperInvalidInputsFatal(t *testing.T) {
+	for _, command := range []string{update.ExecutableUpdateHelperCommand, update.AppBundleUpdateHelperCommand} {
+		for _, failure := range []string{"arguments", "metadata"} {
+			t.Run(command+"/"+failure, func(t *testing.T) {
+				output, err := runFixtureHelperProcess(t, command, "", "1", false, failure)
+				want := "arguments"
+				if failure == "metadata" {
+					want = "relaunch metadata"
+				}
+				if err == nil || !strings.Contains(string(output), want) {
+					t.Fatalf("fatal error = %v, output = %q, want %q", err, output, want)
+				}
+				if strings.Contains(string(output), "[update-helper] started") {
+					t.Fatalf("invalid input reached helper: %s", output)
+				}
+			})
+		}
+	}
+}
+
+func TestFixtureUnknownCommandUsesOrdinaryStartup(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=TestFixtureHelperProcess")
+	cmd.Env = fixtureTestEnv(fixtureHelperProcessEnv+"=1", fixtureHelperArgsEnv+`=["unknown"]`)
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "serve --listen host:port") {
+		t.Fatalf("normal fixture usage: error=%v output=%q", err, output)
+	}
 }

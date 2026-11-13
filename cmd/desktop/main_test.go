@@ -15,7 +15,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
@@ -118,42 +117,6 @@ func TestDesktopCommandRoutesPackagedUpdateHelpers(t *testing.T) {
 				t.Fatalf("normal desktop command returned error: %v", err)
 			}
 		})
-	}
-}
-
-func TestDesktopPackagedUpdateHelperIntegrationTimeouts(t *testing.T) {
-	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "2500")
-	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "7500")
-	var executableCfg update.ExecutableUpdateHelperConfig
-	if err := applyUpdateIntegrationTimeouts(&executableCfg); err != nil {
-		t.Fatal(err)
-	}
-	if executableCfg.WaitTimeout != 2500*time.Millisecond {
-		t.Fatalf("executable wait timeout = %s", executableCfg.WaitTimeout)
-	}
-	if executableCfg.ValidationTimeout != 7500*time.Millisecond {
-		t.Fatalf("executable validation timeout = %s", executableCfg.ValidationTimeout)
-	}
-	var appBundleCfg update.AppBundleUpdateHelperConfig
-	if err := applyAppBundleUpdateIntegrationTimeouts(&appBundleCfg); err != nil {
-		t.Fatal(err)
-	}
-	if appBundleCfg.WaitTimeout != 2500*time.Millisecond {
-		t.Fatalf("app-bundle wait timeout = %s", appBundleCfg.WaitTimeout)
-	}
-	if appBundleCfg.ValidationTimeout != 7500*time.Millisecond {
-		t.Fatalf("app-bundle validation timeout = %s", appBundleCfg.ValidationTimeout)
-	}
-}
-
-func TestDesktopPackagedUpdateHelperIntegrationTimeoutsNilConfig(t *testing.T) {
-	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "not-a-duration")
-	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "not-a-duration")
-	if err := applyUpdateIntegrationTimeouts(nil); err != nil {
-		t.Fatalf("executable nil config error = %v", err)
-	}
-	if err := applyAppBundleUpdateIntegrationTimeouts(nil); err != nil {
-		t.Fatalf("app-bundle nil config error = %v", err)
 	}
 }
 
@@ -565,5 +528,24 @@ func TestDesktopProxyMarksNativeWindowRequests(t *testing.T) {
 	backend.Config.Handler.ServeHTTP(rec, req)
 	if rec.Body.String() != "" {
 		t.Fatal("direct browser request must not have native marker")
+	}
+}
+
+func TestDesktopPackagedHelperInvalidMetadataReturns(t *testing.T) {
+	for _, command := range []string{update.ExecutableUpdateHelperCommand, update.AppBundleUpdateHelperCommand} {
+		t.Run(command, func(t *testing.T) {
+			current := filepath.Join(t.TempDir(), "current")
+			args := []string{"desktop", command, "--parent-pid", "99999999", "--current", current,
+				"--staged", current + ".openvibely-new", "--backup", current + ".openvibely-backup",
+				"--previous-version", "0.5.0", "--expected-version", "0.6.0", "--outcome-id", "invalid-metadata"}
+			handled, err := runPackagedUpdateHelperCommand(context.Background(), args, strings.NewReader(`{}`))
+			if !handled || err == nil || !strings.Contains(err.Error(), "relaunch metadata") {
+				t.Fatalf("handled=%t err=%v", handled, err)
+			}
+		})
+	}
+	handled, err := runPackagedUpdateHelperCommand(context.Background(), []string{"desktop"}, nil)
+	if handled || err != nil {
+		t.Fatalf("normal startup: handled=%t err=%v", handled, err)
 	}
 }

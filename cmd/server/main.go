@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -46,19 +47,7 @@ import (
 // @tag.description Worker capacity and utilization API endpoints
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == update.ExecutableUpdateHelperCommand {
-		cfg, err := update.ParseExecutableUpdateHelperArgs(os.Args[2:])
-		if err == nil {
-			if cfg.RelaunchMetadataPath != "" {
-				err = update.LoadExecutableUpdateHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
-			} else {
-				err = update.LoadExecutableUpdateHelperRelaunch(os.Stdin, &cfg)
-			}
-		}
-		applyUpdateIntegrationTimeouts(&cfg)
-		if err == nil {
-			err = update.RunExecutableUpdateHelper(context.Background(), cfg)
-		}
+	if handled, err := runPackagedUpdateHelperCommand(context.Background(), os.Args, os.Stdin); handled {
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -100,13 +89,11 @@ func main() {
 	inst.Shutdown()
 }
 
-func applyUpdateIntegrationTimeouts(cfg *update.ExecutableUpdateHelperConfig) {
-	if cfg == nil {
-		return
+func runPackagedUpdateHelperCommand(ctx context.Context, args []string, stdin io.Reader) (bool, error) {
+	if len(args) < 2 {
+		return false, nil
 	}
-	if err := update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout); err != nil {
-		log.Fatal(err)
-	}
+	return update.RunPackagedUpdateHelperCommand(ctx, args[1], args[2:], stdin, update.PackagedUpdateHelperOptions{})
 }
 
 func waitForShutdown(signals <-chan os.Signal, requested <-chan struct{}) {
