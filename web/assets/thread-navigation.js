@@ -174,6 +174,11 @@
             node.setAttribute('data-raw-content', seed.text);
             node.setAttribute('data-raw-revision', seed.revision);
             node.dataset.outputWindow = seed.cursor;
+            // The retained seed predates any live bytes received since opening.
+            // Restore its matching absolute cursor, not the current view's cursor.
+            if (Number.isSafeInteger(seed.byteLength) && seed.byteLength >= 0) {
+                node.setAttribute('data-initial-byte-length', String(seed.byteLength));
+            }
         });
         // A cached composer is a new DOM instance and needs its own focus attempt.
         clone.querySelectorAll('[data-composer-focus-initialized]').forEach(input => {
@@ -235,7 +240,14 @@
                 sources.push({kind, liveKey,
                     get text() { return caughtUp() ? live.output : seed; },
                     get byteLength() { return caughtUp() ? live.offset : seedOffset; }});
-            } else sources.push({kind, text: kind === 'output' ? node.getAttribute('data-raw-content') : node.textContent});
+            } else {
+                const source = {kind, text: kind === 'output' ? node.getAttribute('data-raw-content') : node.textContent};
+                if (kind === 'output' && node.hasAttribute('data-initial-byte-length')) {
+                    const offset = Number(node.getAttribute('data-initial-byte-length'));
+                    if (Number.isSafeInteger(offset) && offset >= 0) source.byteLength = offset;
+                }
+                sources.push(source);
+            }
             node.replaceChildren();
             node.removeAttribute('data-raw-content');
             node.removeAttribute('data-rendered-revision');

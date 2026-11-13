@@ -17,7 +17,8 @@
             node._outputWindowSeed = {
                 text: node.getAttribute('data-raw-content') || '',
                 cursor: node.dataset.outputWindow,
-                revision: node.getAttribute('data-raw-revision') || ''
+                revision: node.getAttribute('data-raw-revision') || '',
+                byteLength: node.hasAttribute('data-initial-byte-length') ? Number(node.getAttribute('data-initial-byte-length')) : undefined
             };
         });
         for (const [node, controller] of pending) {
