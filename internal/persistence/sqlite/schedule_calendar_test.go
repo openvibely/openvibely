@@ -419,3 +419,64 @@ func TestScheduleCalendarAllProjectsUndoOmitsUnchangedProjects(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, state.Paused)
 }
+
+func TestScheduleCalendarMixedProjectPausesAndRestore(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewScheduleRepo(db)
+	tasks := NewTaskRepo(db, nil)
+	ctx := t.Context()
+	_, err := db.ExecContext(ctx, `INSERT INTO projects(id,name) VALUES ('second','Second')`)
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Second)
+	var ids []string
+	for _, project := range []string{"default", "second"} {
+		task := &models.Task{ProjectID: project, Title: project, Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, tasks.Create(ctx, task))
+		schedule := &models.Schedule{TaskID: task.ID, RunAt: now.Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+		require.NoError(t, repo.Create(ctx, schedule))
+		ids = append(ids, schedule.ID)
+	}
+	_, err = repo.ApplyCalendarAction(ctx, "default", models.ScheduleCalendarAction{Action: "pause_all"}, now)
+	require.NoError(t, err)
+	state, err := repo.CalendarState(ctx, models.AllProjectsID)
+	require.NoError(t, err)
+	require.False(t, state.Paused)
+	require.Equal(t, map[string]int64{ids[0]: now.Unix()}, state.ProjectPauses)
+	require.Empty(t, state.Skips)
+	run := models.ScheduleSkip{ScheduleID: ids[0], StartAt: now.Add(time.Hour).Unix(), EndAt: now.Add(time.Hour).Unix() + 1}
+	for _, project := range []string{"default", models.AllProjectsID} {
+		_, err = repo.ApplyCalendarAction(ctx, project, models.ScheduleCalendarAction{Action: "restore", Skips: []models.ScheduleSkip{run}}, now)
+		require.ErrorIs(t, err, persistence.ErrScheduleCalendarSelection)
+	}
+	run.ScheduleID = ids[1]
+	_, err = repo.ApplyCalendarAction(ctx, models.AllProjectsID, models.ScheduleCalendarAction{Action: "skip", Skips: []models.ScheduleSkip{run}}, now)
+	require.NoError(t, err)
+	state, err = repo.CalendarState(ctx, models.AllProjectsID)
+	require.NoError(t, err)
+	require.Equal(t, []models.ScheduleSkip{run}, state.Skips)
+	// Restoring a date can change just one project without failing on the other.
+	run.ScheduleID = ""
+	inverse, err := repo.ApplyCalendarAction(ctx, models.AllProjectsID, models.ScheduleCalendarAction{Action: "restore", Skips: []models.ScheduleSkip{run}}, now)
+	require.NoError(t, err)
+	require.Len(t, inverse.ProjectActions, 1)
+	require.Contains(t, inverse.ProjectActions, "second")
+	state, err = repo.CalendarState(ctx, models.AllProjectsID)
+	require.NoError(t, err)
+	require.Empty(t, state.Skips)
+	require.Len(t, state.ProjectPauses, 1)
+	suppressed, _, err := repo.SuppressedOccurrence(ctx, ids[1], now.Add(time.Hour))
+	require.NoError(t, err)
+	require.False(t, suppressed)
+	for _, action := range []string{"pause_all", "resume_all"} {
+		_, err = repo.ApplyCalendarAction(ctx, models.AllProjectsID, models.ScheduleCalendarAction{Action: action}, now)
+		require.NoError(t, err)
+		state, err = repo.CalendarState(ctx, models.AllProjectsID)
+		require.NoError(t, err)
+		require.Equal(t, action == "pause_all", state.Paused)
+		if state.Paused {
+			require.Len(t, state.ProjectPauses, 2)
+		} else {
+			require.Empty(t, state.ProjectPauses)
+		}
+	}
+}

@@ -17,26 +17,37 @@ import (
 )
 
 func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
-	testScheduleCalendarHeader(t, false, false)
+	testScheduleCalendarHeader(t, false, false, false)
 }
 
 func TestBrowserFunctional_ScheduleCalendarPausedHeader(t *testing.T) {
-	testScheduleCalendarHeader(t, true, false)
+	testScheduleCalendarHeader(t, true, false, false)
 }
 
 func TestBrowserFunctional_ScheduleCalendarMobileSelectionPanel(t *testing.T) {
-	testScheduleCalendarHeader(t, false, true)
+	testScheduleCalendarHeader(t, false, true, false)
 }
 
-func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
+func TestBrowserFunctional_ScheduleCalendarAllProjectsPaused(t *testing.T) {
+	testScheduleCalendarHeader(t, true, false, true)
+}
+
+func TestBrowserFunctional_ScheduleCalendarMixedProjectPauses(t *testing.T) {
+	testScheduleCalendarHeader(t, false, false, true)
+}
+
+func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
 	t.Helper()
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "calendar-selection", Name: "Calendar"}
+	if mixed {
+		project.ID = models.AllProjectsID
+	}
 	day := getStartOfWeek(0).AddDate(0, 0, 1)
 	var tasks []persistence.TaskWithSchedule
 	for i := 0; i < 2; i++ {
 		at := day.Add(8 * time.Hour)
-		tasks = append(tasks, persistence.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: i == 0}})
+		tasks = append(tasks, persistence.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: i == 0 || mixed}})
 	}
 	for i := 2; i < 5; i++ {
 		at := day.Add(12 * time.Hour)
@@ -122,6 +133,33 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    report('pass','');return;
    }
    check(root.querySelector('[data-calendar-action="resume_all"]').hidden,'active project offers pause only');
+   if (JSON.parse(root.querySelector('#schedule-calendar-controls').dataset.state).project_pauses) {
+    var pausedCard=root.querySelector('[data-schedule-id="s1"]');
+    check(pausedCard.lastElementChild.textContent==='Paused' && pausedCard.dataset.skipStatus==='none','project pause is distinct from skip');
+    selectScheduleContextCard(pausedCard);
+    ['skip','restore','pause','resume'].forEach(action=>check(toolbar.querySelector('[data-calendar-action="'+action+'"]').hidden,'project-paused card hides '+action));
+    toolbar.querySelector('[data-calendar-action="restore"]').click();await tick();
+    check(requests.length===0 && !window._scheduleCalendarUndo,'paused-only card sends no restore or success');
+    clearScheduleSelection();
+    var dayHeader=root.querySelectorAll('[data-calendar-day]')[2];
+    check(root.querySelector('.drop-zone[data-date="'+dayHeader.dataset.calendarDay+'"] [data-schedule-id="s1"]'),'date contains project-paused run');
+    down(dayHeader);up();
+    check(toolbar.querySelector('[data-calendar-action="restore"]').hidden,'date without real skips has no Unskip');
+    toolbar.querySelector('[data-calendar-action="clear"]').click();
+    var skipped=root.querySelector('[data-schedule-id="s0"]');
+    check(skipped.lastElementChild.textContent==='Skipped','active project real skip label');
+    selectScheduleContextCard(skipped);
+    check(!toolbar.querySelector('[data-calendar-action="restore"]').hidden,'real skip offers Unskip');
+    toolbar.querySelector('[data-calendar-action="restore"]').click();await tick();
+    check(requests.length===1 && requests[0].skips[0].schedule_id==='s0','restore targets active project skip');
+    check(window._scheduleCalendarUndo.message==='1 run(s) unskipped.','real restore feedback');
+    window._scheduleCalendarUndo=null;
+    window.fetch=async()=>new Response(JSON.stringify({undo:{action:'undo_projects',project_actions:{}}}),{status:200,headers:{'Content-Type':'application/json'}});
+    toolbar.querySelector('[data-calendar-action="restore"]').click();await tick();
+    check(!window._scheduleCalendarUndo,'empty inverse cannot record successful unskip');
+    check(root.querySelector('[data-calendar-message]').textContent==='No skipped runs to restore.','no-op restore feedback');
+    report('pass','');return;
+   }
    var days=Array.from(root.querySelectorAll('[data-calendar-day]'));
    function down(el,options){ el.dispatchEvent(new PointerEvent('pointerdown',Object.assign({bubbles:true,cancelable:true,pointerType:'mouse',button:0,pointerId:8},options||{}))); }
    function up(){window.dispatchEvent(new PointerEvent('pointerup',{pointerId:8}));}
@@ -381,6 +419,9 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 			{ScheduleID: "s4", StartAt: day.Add(12 * time.Hour).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix()},
 			{ScheduleID: "s4", StartAt: day.Add(12*time.Hour + 30*time.Minute).Unix(), EndAt: day.Add(13 * time.Hour).Unix()},
 		}}
+		if mixed {
+			state.ProjectPauses = map[string]int64{"s1": day.AddDate(0, 0, -1).Unix()}
+		}
 		component := Schedule([]models.Project{project}, &project, tasks, 0, nil, nil, state)
 		if r.Header.Get("HX-Request") == "true" {
 			component = ScheduleContent(&project, tasks, 0, nil, nil, state)

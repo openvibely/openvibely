@@ -15,8 +15,11 @@ type ScheduleSkipChange struct {
 }
 
 type ScheduleCalendarState struct {
-	Paused bool           `json:"paused"`
-	Skips  []ScheduleSkip `json:"skips"`
+	// ProjectPauses maps schedule IDs to the owning project pause start (Unix seconds).
+	// It is populated for aggregate calendars; Paused remains the all-project flag.
+	ProjectPauses map[string]int64 `json:"project_pauses,omitempty"`
+	Paused        bool             `json:"paused"`
+	Skips         []ScheduleSkip   `json:"skips"`
 }
 
 type ScheduleCalendarAction struct {

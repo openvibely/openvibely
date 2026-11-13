@@ -142,9 +142,13 @@ templ ScheduleCalendarScript() {
    }
    return excluded === 0 ? 'none' : excluded === total ? 'full' : 'partial';
   }
+  function projectPaused(card) {
+   var started = (state.project_pauses || {})[card.dataset.scheduleId];
+   return state.paused || (started !== undefined && Number(card.dataset.occurrenceEnd) > started);
+  }
   var selectionModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'Command' : 'Ctrl';
   cards().forEach(function(card) {
-   var paused = state.paused || card.dataset.scheduleEnabled === 'false';
+   var paused = projectPaused(card) || card.dataset.scheduleEnabled === 'false';
    var status = skipStatus(card);
    var excluded = status === 'full';
    card.dataset.calendarMuted = String(paused || excluded);
@@ -184,6 +188,7 @@ templ ScheduleCalendarScript() {
   window.clearScheduleDates = function() { dates.clear(); hours.clear(); paintDates(); };
   function eligibleCards(action) {
    return selectedCards().filter(function(card) {
+    if (projectPaused(card)) return false;
     var paused = card.dataset.scheduleEnabled === 'false';
     if (action === 'pause') return !state.paused && !paused;
     if (action === 'resume') return !state.paused && paused;
@@ -258,6 +263,7 @@ templ ScheduleCalendarScript() {
     var result = await response.json();
     var inverse = result.undo;
     if (!inverse || !inverse.action || (inverse.action === 'undo_projects' && !Object.keys(inverse.project_actions || {}).length) || (inverse.action === 'undo_skips' && !(inverse.changes || []).length) || (['skip','restore'].includes(inverse.action) && !(inverse.skips || []).length) || (['pause','resume'].includes(inverse.action) && !(inverse.schedule_ids || []).length)) inverse = null;
+    if (request.action === 'restore' && !inverse) throw new Error('No skipped runs to restore.');
     var size = (request.schedule_ids || request.skips || []).length;
     var noun = request.schedule_ids ? 'schedule(s)' : request.skips && request.skips.every(function(skip) { return !skip.schedule_id; }) ? (hours.size ? 'time window(s)' : 'day(s)') : 'run(s)';
     var verbs = {skip:'skipped',restore:'unskipped',pause:'paused',resume:'resumed'};
