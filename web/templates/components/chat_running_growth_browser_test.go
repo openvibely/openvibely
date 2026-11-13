@@ -173,15 +173,15 @@ func TestBrowserFunctional_RunningCheckpointUnclosedCodeSpan(t *testing.T) {
   const node=document.createElement('div');stream.replaceChildren(node);
   const prefix='[Using tool: shell | earlier]\n[Tool shell done]\nearlier output\n[/Tool]\n';
   await renderLiveChatContent(node,prefix,false);
-  const checkpoint=node._chatParseCheckpoint.raw;
+  const checkpoint=node._chatParseCheckpoint.offset;
   let text=prefix+delimiter+'example\n[Using tool: shell | fake]\n';
   await renderLiveChatContent(node,text,false);
-  assert(node._chatParseCheckpoint.raw===checkpoint,'unfinished code span advanced checkpoint');
+  assert(node._chatParseCheckpoint.offset===checkpoint,'unfinished code span advanced checkpoint');
   text+=delimiter+'\n[Using tool: shell | real]\n[Tool shell done]\nreal output\n[/Tool]\n';
   await renderLiveChatContent(node,text,false);await renderStreamingContent(reference,text,false);
   assert(JSON.stringify(tools(node))===JSON.stringify(tools(reference)),'result attached to code example: '+JSON.stringify(tools(node)));
   assert(tools(node).length===2 && tools(node)[1].output==='real output\n','real tool lost its result');
-  assert(node._chatParseCheckpoint.raw.length>checkpoint.length,'closed code span prevented checkpoint progress');
+  assert(node._chatParseCheckpoint.offset>checkpoint,'closed code span prevented checkpoint progress');
  }
  // Backticks in tool data, complete code spans, and escaped literals must not
  // keep ordinary completed history in the provisional suffix.
@@ -189,7 +189,7 @@ func TestBrowserFunctional_RunningCheckpointUnclosedCodeSpan(t *testing.T) {
   const node=document.createElement('div');stream.replaceChildren(node);
   const text=prose+'[Using tool: shell | echo '+tick+']\n[Tool shell done]\nopaque '+tick+'\n[/Tool]\n';
   await renderLiveChatContent(node,text,false);
-  assert(node._chatParseCheckpoint?.raw===text,'safe Markdown or opaque tool data blocked checkpoint');
+  assert(node._chatParseCheckpoint?.offset===text.length,'safe Markdown or opaque tool data blocked checkpoint');
  }
  return {};
  `, mode))
@@ -337,6 +337,34 @@ func TestBrowserFunctional_RunningInterruptedLateResult(t *testing.T) {
  await renderLiveChatContent(stream,update+'\nFollowing prose. More.',false);
  assert(stream._chatVirtualRows[0].node.querySelector('.stream-tool')===current,'settled tool row rebuilt on unrelated append');
  assert(stream._chatDirtyTools.size===0,'unrelated update created dirty tools');
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_RunningCheckpointSourceStorage(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');
+ for(const mode of ['compact','full']){
+  document.documentElement.setAttribute('data-output-detail',mode);
+  const node=document.createElement('div');stream.replaceChildren(node);
+  const prefix='[Using tool: shell | echo first]\n[Tool shell done]\nfirst\n[/Tool]\n';
+  let text=prefix+'[Using tool: read_file | pending]\n[Tool read_file done]\n'+('large output\n').repeat(10000);
+  await renderLiveChatContent(node,text,false);
+  text+='more output\n';await renderLiveChatContent(node,text,false);
+  const checkpoint=node._chatParseCheckpoint;
+  assert(checkpoint.offset<text.length/10,'unfinished result was committed');
+  assert(checkpoint.normalizedPrefix===null,'unchanged prefix retained a source substring');
+  assert(!('raw' in checkpoint)&&!('normalized' in checkpoint),'checkpoint retained source buffers');
+  assert(node._chatVirtualData.normalized===text,'unchanged source content differs');
+  text+='[/Tool]\n[STATUS: SUCCESS]';await renderLiveChatContent(node,text,false);
+  assert(!node._chatVirtualData.normalized.endsWith('[STATUS: SUCCESS]'),'terminal status was not stripped');
+  text+='\nFollowing prose.';await renderLiveChatContent(node,text,false);
+  assert(node._chatVirtualData.normalized===text,'provisional status removal corrupted later text');
+  const replacement='[Using tool: shell | replacement]\n[Tool shell done]\nreplaced\n[/Tool]\n';
+  await renderLiveChatContent(node,replacement,false);
+  const calls=node._chatVirtualData.sourceModels.flatMap(row=>row.segments).filter(seg=>seg.type==='using');
+  assert(calls.length===1&&calls[0].secondary==='replacement'&&calls[0].resultOutput.trim()==='replaced','source replacement retained old checkpoint state');
+ }
  return {};
  `)
 }

@@ -5477,16 +5477,18 @@ templ ChatAutoScrollScript() {
                 if (!incrementalProjection || (container._chatParseSource && !sourceText.startsWith(container._chatParseSource))) { delete container._chatParseCheckpoint; delete container._chatOpenResult; delete container._chatDirtyTools; }
                 container._chatParseSource = incrementalProjection ? sourceText : null;
                 var checkpoint = incrementalProjection && container._chatParseCheckpoint;
-                if (checkpoint && !sourceText.startsWith(checkpoint.raw)) { checkpoint = null; delete container._chatParseCheckpoint; }
-                if (checkpoint) textBuffer = sourceText.slice(checkpoint.raw.length);
+                // The cumulative-source check above validates the committed prefix too.
+                // Store its position, not a substring that can pin an old large result.
+                if (checkpoint && checkpoint.offset > sourceText.length) { checkpoint = null; delete container._chatParseCheckpoint; }
+                if (checkpoint) textBuffer = sourceText.slice(checkpoint.offset);
                 var parseSource = textBuffer, nextCheckpoint = null, newSegments = null, committedSegments = null;
                 // Committed tool mutations can outlive an interrupted preparation phase.
                 // Retain their versions until a successful row installation owns them.
                 var dirtyTools = incrementalProjection ? (container._chatDirtyTools ||= new Map()) : null;
-                var previousProjection = container._chatVirtualData, changedTools = new Set(), rowDelta = null;
-                var provisionalTools = new Map();
+                var previousProjection = container._chatVirtualData, changedTools = options?.virtualRow ? null : new Set(), rowDelta = null;
+                var provisionalTools = options?.virtualRow ? null : new Map();
                 var openResult = incrementalProjection && container._chatOpenResult;
-                if (openResult && (!sourceText.startsWith(openResult.source) || !checkpoint || checkpoint.raw.length !== openResult.offset)) openResult = null;
+                if (openResult && (!sourceText.startsWith(openResult.source) || !checkpoint || checkpoint.offset !== openResult.offset)) openResult = null;
                 var extendOpenResult = openResult && !/\[\/Tool\][\t ]*(?=\r?$)/m.test(sourceText.slice(openResult.scanFrom));
                 delete container._chatOpenResult;
 				var shouldYieldPreparation = !options?.thinkingShell && yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024 || (options?.preparedSegments?.reduce(function(size, seg) { return size + (seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length; }, 0) || 0) >= 64 * 1024);
@@ -5777,28 +5779,34 @@ templ ChatAutoScrollScript() {
                         var last = segments[segments.length - 1];
                         if (last?.type === 'tool_result' && (extendOpenResult || !/\[\/Tool\][\t ]*(?:\r\n|\r|\n)?$/.test(textBuffer.slice(last.index))) &&
                             textBuffer === parseSource && !cut && (extendOpenResult || /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r?\n|\r(?=[^\n]))/.test(textBuffer.slice(last.index))) && segments.every(function(seg) { return seg === last || (seg.type === 'text' && !seg.content.trim()); })) {
-                            var scanBase = extendOpenResult ? openResult.scanFrom : (checkpoint?.raw.length || 0) + last.index;
+                            var scanBase = extendOpenResult ? openResult.scanFrom : (checkpoint?.offset || 0) + last.index;
                             var scanTail = sourceText.slice(scanBase), bracket = scanTail.lastIndexOf('[');
                             var scanFrom = bracket >= 0 && '[/Tool]'.startsWith(scanTail.slice(bracket)) ? scanBase + bracket : sourceText.length;
-                            container._chatOpenResult = {source:sourceText, offset:checkpoint?.raw.length || 0,
+                            container._chatOpenResult = {source:sourceText, offset:checkpoint?.offset || 0,
                                 scanFrom:scanFrom,
                                 segments:segments.map(function(seg) { return Object.assign({}, seg); })};
                         }
-                        var base = checkpoint ? checkpoint.normalized.length : 0;
+                        var base = checkpoint ? checkpoint.normalizedLength : 0;
+                        var unchangedPrefix = !checkpoint || checkpoint.normalizedPrefix === null;
+                        var prefix = function() {
+                            return checkpoint ? (unchangedPrefix ? sourceText.slice(0, checkpoint.offset) : checkpoint.normalizedPrefix) : '';
+                        };
                         var committed = segments.filter(function(seg) { return seg.index + (seg.length || seg.content?.length || 0) <= cut; });
                         segments.forEach(function(seg) { seg.index += base; });
                         var prior = checkpoint ? checkpoint.segments : [];
                         if (cut > 0 && cut <= parseSource.length) {
                             nextCheckpoint = {
-                                raw: (checkpoint ? checkpoint.raw : '') + parseSource.slice(0, cut),
-                                normalized: (checkpoint ? checkpoint.normalized : '') + textBuffer.slice(0, cut),
+                                offset: (checkpoint ? checkpoint.offset : 0) + cut,
+                                normalizedLength: base + cut,
+                                normalizedPrefix: unchangedPrefix && textBuffer.slice(0, cut) === parseSource.slice(0, cut) ? null : prefix() + textBuffer.slice(0, cut),
                                 segments: prior.concat(committed)
                             };
                         }
                         newSegments = segments;
                         committedSegments = committed;
                         segments = prior.concat(segments);
-                        textBuffer = (checkpoint ? checkpoint.normalized : '') + textBuffer;
+                        // Reuse the caller's string when no control cleanup changed its text.
+                        textBuffer = unchangedPrefix && textBuffer === parseSource ? sourceText : prefix() + textBuffer;
                         return true;
                     }
 					var markdownPreparationIndex = 0;
@@ -6176,9 +6184,9 @@ templ ChatAutoScrollScript() {
 			var pendingThinkingRenderedContent = null;
             var pendingThinkingID = 0;
             var retainedThinking = [];
-            var previousThinking = new Map(Array.from(container.querySelectorAll('details.stream-thinking'), function(details) {
+            var previousThinking = container.querySelector('details.stream-thinking') ? new Map(Array.from(container.querySelectorAll('details.stream-thinking'), function(details) {
                 return [details.getAttribute('data-activity-id'), details];
-            }));
+            })) : null;
 			var pendingLargeToolOutputs = [];
 			function flushThinking() {
 				if (pendingThinking.length === 0) return;
@@ -6186,7 +6194,7 @@ templ ChatAutoScrollScript() {
 				var merged = pendingThinking.join('\n\n');
 				pendingThinking = [];
                 var thinkingID = 'thinking-' + pendingThinkingID;
-                var previous = previousThinking.get(thinkingID);
+                var previous = previousThinking?.get(thinkingID);
                 var details = previous || document.createElement('details');
                 var body = previous?.querySelector('.stream-thinking-body');
                 if (!previous) {
