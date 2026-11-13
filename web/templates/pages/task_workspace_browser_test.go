@@ -478,6 +478,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		return out.String()
 	}
 	var summaryRequests, diffRequests, threadRequests atomic.Int32
+	var summaryRequestsBeforeBurst int32
 	var files atomic.Int32
 	var summaryStatus atomic.Value
 	summaryStatus.Store("completed")
@@ -522,7 +523,10 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		case "/tasks/workspace-task/changes/summary":
 			summaryRequests.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"files":%d,"insertions":51,"deletions":12,"status":%q,"duration":"12m 41s","review_comments":0}`, files.Load(), summaryStatus.Load())
+			status := summaryStatus.Load().(string)
+			// A distinct rendered value proves that this status's summary was applied.
+			comments := map[string]int{"queued": 1, "running": 2, "completed": 0}[status]
+			fmt.Fprintf(w, `{"files":%d,"insertions":51,"deletions":12,"status":%q,"duration":"12m 41s","review_comments":%d}`, files.Load(), status, comments)
 		case "/tasks/workspace-task/changes":
 			if r.URL.Query().Get("composer_action") == "1" {
 				fmt.Fprint(w, render(ComposerChangesAction(task, nil, true, false)))
@@ -543,6 +547,8 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		for _, status := range []string{"queued", "running", "completed"} {
 			summaryStatus.Store(status)
 			fileEvents <- `{"type":"file_modified","task_id":"workspace-task","project_id":"workspace-project"}`
+			comments := map[string]string{"queued": "1 comment", "running": "2 comments", "completed": ""}[status]
+			b.waitFor(status+" summary applied", `document.querySelector('[data-change-comments]').textContent`, comments)
 			b.waitFor("empty diff control visibility while "+status, `String(document.getElementById('task-change-activity').checkVisibility())`, fmt.Sprint(status != "completed"))
 		}
 		b.waitFor("panel closed", `String(document.getElementById('task-details-panel').hidden)`, "true")
@@ -602,6 +608,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("shortcut returns to thread", `String(document.getElementById('tab-changes').classList.contains('hidden') && document.activeElement===document.getElementById('task-message-input') && document.getElementById('task-message-input').value==='Keep this draft')`, "true")
 		b.wheel("#task-thread-messages", -650)
 		b.evaluate(`window.savedThread=document.getElementById('task-thread-view');window.savedComposer=document.getElementById('task-message-input');window.savedScroll=document.getElementById('task-thread-messages').scrollTop;window.savedSources=window._threadEventSources; 'saved'`)
+		summaryRequestsBeforeBurst = summaryRequests.Load()
 		files.Store(3)
 		for i := 0; i < 20; i++ {
 			fileEvents <- `{"type":"file_modified","task_id":"workspace-task","project_id":"workspace-project"}`
@@ -661,8 +668,10 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 	if threadRequests.Load() != 1 {
 		t.Errorf("thread was replaced: %d requests", threadRequests.Load())
 	}
-	if summaryRequests.Load() > 4 {
-		t.Errorf("file invalidations not debounced: %d", summaryRequests.Load())
+	// The burst may cause one refresh plus one coalesced follow-up if events
+	// arrive during the request. Earlier status transitions are independent.
+	if requests := summaryRequests.Load() - summaryRequestsBeforeBurst; requests > 2 {
+		t.Errorf("file invalidations not debounced: %d", requests)
 	}
 	if diffRequests.Load() == 0 {
 		t.Fatal("full diff never loaded")
