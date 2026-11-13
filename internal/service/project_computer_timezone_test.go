@@ -19,12 +19,13 @@ func TestComputerTimeZoneReachesDockerAndReplacesChangedContainer(t *testing.T) 
 	db := teststores.New(t)
 	project := &models.Project{Name: "Desktop zone"}
 	require.NoError(t, db.Projects.Create(t.Context(), project))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"isolation":1}`)) }))
 	defer server.Close()
 	port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
 	t.Setenv("OPENVIBELY_COMPUTER_IMAGE", "timezone-fixture")
 	exists := false
 	zone := ""
+	isolation := "1"
 	runs, removes := 0, 0
 	var mount string
 	p := &LocalComputerProvisioner{run: func(ctx context.Context, in io.Reader, args ...string) ([]byte, error) {
@@ -33,9 +34,10 @@ func TestComputerTimeZoneReachesDockerAndReplacesChangedContainer(t *testing.T) 
 			if !exists {
 				return nil, errors.New("not found")
 			}
-			return json.Marshal([]any{map[string]any{"Config": map[string]any{"Labels": map[string]string{"openvibely.project": project.ID}, "Image": "timezone-fixture", "Env": []string{"TZ=" + zone, "OPENVIBELY_COMPUTER_TOKEN=fixture"}}, "State": map[string]bool{"Running": true}, "NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}}}})
+			return json.Marshal([]any{map[string]any{"Config": map[string]any{"Labels": map[string]string{"openvibely.project": project.ID, "openvibely.computer-isolation": isolation}, "Image": "timezone-fixture", "Env": []string{"TZ=" + zone, "OPENVIBELY_COMPUTER_TOKEN=fixture"}}, "State": map[string]bool{"Running": true}, "NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}}}})
 		case "run":
 			runs++
+			isolation = "1"
 			exists = true
 			for i, arg := range args {
 				if arg == "--env" && strings.HasPrefix(args[i+1], "TZ=") {
@@ -68,6 +70,10 @@ func TestComputerTimeZoneReachesDockerAndReplacesChangedContainer(t *testing.T) 
 	require.Equal(t, "Asia/Kathmandu", zone)
 	require.Equal(t, 2, runs)
 	require.Equal(t, 1, removes)
+	isolation = "" // Older containers must be replaced even with the same image tag.
+	require.NoError(t, svc.Start(t.Context(), project.ID))
+	require.Equal(t, 3, runs)
+	require.Equal(t, 2, removes)
 	for _, bad := range []string{"", "Local", "Not/AZone"} {
 		require.Error(t, svc.SetTimeZone(t.Context(), project.ID, bad))
 	}

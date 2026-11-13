@@ -20,7 +20,8 @@ func TestProjectComputerLocalDockerLifecycle(t *testing.T) {
 		t.Skip("set OPENVIBELY_TEST_COMPUTER_IMAGE for isolated Docker integration")
 	}
 	t.Setenv("OPENVIBELY_COMPUTER_IMAGE", image)
-	repo := teststores.New(t).Projects
+	db := teststores.New(t)
+	repo := db.Projects
 	project := &models.Project{Name: "Disposable computer integration"}
 	if err := repo.Create(t.Context(), project); err != nil {
 		t.Fatal(err)
@@ -38,7 +39,11 @@ func TestProjectComputerLocalDockerLifecycle(t *testing.T) {
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
 	}
-	tools := svc.runtimeTools(t.Context(), project.ID, "test-turn")
+	task := &models.Task{ProjectID: project.ID, Title: "Lifecycle", Category: models.CategoryActive, Status: models.StatusPending, Priority: 1}
+	if err := db.Tasks.Create(t.Context(), task); err != nil {
+		t.Fatal(err)
+	}
+	tools := svc.RuntimeTools(t.Context(), project.ID, task.ID)
 	call := func(name, body string) string {
 		t.Helper()
 		out, handled, bad, err := tools.Executor(t.Context(), name, json.RawMessage(body))
@@ -113,7 +118,7 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 	}
 	for i := range ids {
 		call(i, "computer_files", fmt.Sprintf(`{"operation":"write_file","input":{"file_path":"same.txt","content":"task-%d"}}`, i))
-		call(i, "project_browser", `{"action":"navigate","url":"http://127.0.0.1:8090/health"}`)
+		call(i, "project_browser", `{"action":"navigate","url":"http://127.0.0.1:10001/json/version"}`)
 	}
 	for i := range ids {
 		if got := call(i, "computer_files", `{"operation":"read_file","input":{"file_path":"same.txt"}}`); got != fmt.Sprintf("task-%d", i) {
@@ -137,7 +142,7 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 	if !strings.Contains(jobRead, job.ID) {
 		t.Fatal("job disappeared", jobRead)
 	}
-	call(0, "request_browser_login", `{"url":"http://127.0.0.1:9222/json/version","expected_text":"Protocol-Version"}`)
+	call(0, "request_browser_login", `{"url":"http://127.0.0.1:10001/json/version","expected_text":"Protocol-Version"}`)
 	if _, _, _, err := first.Executor(t.Context(), "project_browser", json.RawMessage(`{"action":"read"}`)); err == nil {
 		t.Fatal("login not private")
 	}

@@ -17,11 +17,12 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -29,7 +30,7 @@ var inputMu sync.Mutex
 var keyPattern = regexp.MustCompile(`^[a-zA-Z0-9_+]{1,100}$`)
 
 func command(ctx context.Context, name string, args ...string) ([]byte, error) {
-	b, e := exec.CommandContext(ctx, name, args...).Output()
+	b, e := desktopCommand(ctx, name, args...).Output()
 	if e != nil {
 		return nil, fmt.Errorf("%s failed: %w", name, e)
 	}
@@ -186,7 +187,7 @@ func action(ctx context.Context, name string, v map[string]any) (any, error) {
 		if text == "" || len(text) > 10000 {
 			return nil, fmt.Errorf("enter up to 10000 characters")
 		}
-		c := exec.CommandContext(ctx, "xdotool", "type", "--clearmodifiers", "--file", "-")
+		c := desktopCommand(ctx, "xdotool", "type", "--clearmodifiers", "--file", "-")
 		c.Stdin = strings.NewReader(text)
 		if e := c.Run(); e != nil {
 			return nil, fmt.Errorf("typing failed: %w", e)
@@ -245,13 +246,11 @@ func computerPort(offset int) string {
 	}
 	return strconv.Itoa(base + offset)
 }
-func server() http.Handler {
+func desktopServer() http.Handler {
 	mux := http.NewServeMux()
 	workspaceRoutes(mux)
 	browserRoutes(mux)
-	if os.Getenv("OPENVIBELY_DESKTOP_PORT") == "" {
-		desktopRoutes(mux)
-	}
+
 	publicBrowserProxy(mux)
 	for route, port := range map[string]string{"/vnc/": computerPort(4), "/rfb-view": computerPort(4), "/rfb-control": computerPort(5)} {
 		target, _ := url.Parse("http://127.0.0.1:" + port)
@@ -288,7 +287,7 @@ func server() http.Handler {
 			}
 			conn.Close()
 		}
-		io.WriteString(w, `{"ready":true,"version":6,"features":["desktop","shell","files"]}`)
+		io.WriteString(w, `{"ready":true,"version":7,"isolation":1,"features":["desktop","shell","files"]}`)
 	})
 	mux.HandleFunc("GET /screen", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -349,17 +348,21 @@ func server() http.Handler {
 			proxy.ServeHTTP(w, r)
 		}
 	})
+	return mux
+}
+
+// Only the supervisor accepts TCP. It never exposes shell, files, or CDP in its
+// own namespace. Per-task bridges are reached through root-only Unix sockets.
+func server() http.Handler {
+	mux := http.NewServeMux()
+	desktopRoutes(mux)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"ready":true,"version":7,"isolation":1}`)
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		host := r.Host
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		}
 		token := os.Getenv("OPENVIBELY_COMPUTER_TOKEN")
-		local, _, _ := net.SplitHostPort(r.RemoteAddr)
-		internal := net.ParseIP(local) != nil && net.ParseIP(local).IsLoopback()
-		authorized := token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) == 1
-		if r.Header.Get("Origin") != "" || (!authorized && !(internal && (host == "127.0.0.1" || host == "localhost" || host == "::1"))) {
+		if r.Header.Get("Origin") != "" || token == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
 			http.Error(w, "Use the application to access this computer", 403)
 			return
 		}
@@ -367,8 +370,43 @@ func server() http.Handler {
 	})
 }
 func main() {
-	s := &http.Server{Addr: ":" + computerPort(0), Handler: server(), ReadHeaderTimeout: 5 * time.Second}
-	log.Fatal(s.ListenAndServe())
+	if os.Getenv("OPENVIBELY_ISOLATED") == "1" {
+		name := os.Getenv("OPENVIBELY_DESKTOP_ID")
+		if !desktopName.MatchString(name) || os.Geteuid() != 0 {
+			log.Fatal("invalid isolated desktop")
+		}
+		listener, err := net.Listen("unix", desktopSocket(name))
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err = os.Chmod(desktopSocket(name), 0600); err != nil {
+			log.Fatal(err)
+		}
+		log.Fatal((&http.Server{Handler: desktopServer(), ReadHeaderTimeout: 5 * time.Second}).Serve(listener))
+	}
+	if os.Geteuid() != 0 {
+		log.Fatal("computer supervisor must run as root")
+	}
+	if err := validateIsolationHost(); err != nil {
+		log.Fatal(err)
+	}
+	s := &http.Server{Addr: ":8090", Handler: server(), ReadHeaderTimeout: 5 * time.Second}
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-shutdown
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, "POST", "http://127.0.0.1:8090/desktop-shutdown", nil)
+		req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENVIBELY_COMPUTER_TOKEN"))
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			res.Body.Close()
+		}
+		s.Shutdown(ctx)
+	}()
+	if err := s.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }
 
 // Scroll amounts are wheel steps, not pixels. Keep each gesture bounded.
@@ -409,8 +447,8 @@ func publicBrowserProxy(mux *http.ServeMux) {
 				if err != nil {
 					return err
 				}
-				b = bytes.ReplaceAll(b, []byte("ws://127.0.0.1:9223/"), []byte("ws://"+externalHost+"/public-cdp/"))
-				b = bytes.ReplaceAll(b, []byte("ws://localhost:9223/"), []byte("ws://"+externalHost+"/public-cdp/"))
+				b = bytes.ReplaceAll(b, []byte("ws://"+target.Host+"/"), []byte("ws://"+externalHost+"/public-cdp/"))
+				b = bytes.ReplaceAll(b, []byte("ws://localhost:"+computerPort(6)+"/"), []byte("ws://"+externalHost+"/public-cdp/"))
 				res.Body = io.NopCloser(bytes.NewReader(b))
 				res.ContentLength = int64(len(b))
 				res.Header.Set("Content-Length", strconv.Itoa(len(b)))

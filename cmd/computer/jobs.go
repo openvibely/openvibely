@@ -71,7 +71,11 @@ func (m *computerJobs) start(parent context.Context, command, directory string, 
 	}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(timeout)*time.Second)
 	j := &computerJob{id: hex.EncodeToString(token[:]), created: time.Now(), done: make(chan struct{}), cancel: cancel}
-	cmd := exec.CommandContext(ctx, "/bin/bash", "-lc", command)
+	cmd, err := shellCommand(ctx, command, directory)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	cmd.Dir = directory
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
@@ -141,6 +145,12 @@ func shellRoutes(mux *http.ServeMux) {
 			case <-j.done:
 			case <-r.Context().Done():
 				http.Error(w, "Cancellation interrupted", 503)
+				return
+			}
+		}
+		if args.ID == "" {
+			if err := stopShellProcesses(r.Context()); err != nil {
+				http.Error(w, "Shell cleanup incomplete", 503)
 				return
 			}
 		}

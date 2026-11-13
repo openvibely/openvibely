@@ -153,8 +153,10 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 	ready, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	for {
-		if _, err = s.request(ready, conn, "GET", "/health", nil); err == nil {
-			return nil
+		data, healthErr := s.request(ready, conn, "GET", "/health", nil)
+		err = healthErr
+		if err == nil {
+			return s.requireIsolation(data)
 		}
 		select {
 		case <-ready.Done():
@@ -270,8 +272,8 @@ func (s *ProjectComputerService) Ready(ctx context.Context, id string) bool {
 	}
 	check, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, err = s.request(check, conn, "GET", "/health", nil)
-	return err == nil
+	data, err := s.request(check, conn, "GET", "/health", nil)
+	return err == nil && s.requireIsolation(data) == nil
 }
 
 func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, owner string) *llmcontracts.RuntimeTools {
@@ -720,4 +722,19 @@ func (s *ProjectComputerService) SetTimeZone(ctx context.Context, id, zone strin
 		return err
 	}
 	return s.repo.SetTimeZone(ctx, id, zone)
+}
+
+// A custom/hosted legacy image must not silently restore the old shared-user
+// boundary. Test provisioners are deliberately independent of the wire version.
+func (s *ProjectComputerService) requireIsolation(data []byte) error {
+	switch s.provisioner.(type) {
+	case *LocalComputerProvisioner, *HostedComputerProvisioner:
+		var health struct {
+			Isolation int `json:"isolation"`
+		}
+		if json.Unmarshal(data, &health) != nil || health.Isolation != 1 {
+			return errors.New("update the project computer image: isolated task desktops are required")
+		}
+	}
+	return nil
 }

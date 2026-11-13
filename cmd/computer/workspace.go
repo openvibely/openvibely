@@ -137,7 +137,7 @@ func workspaceRoutes(mux *http.ServeMux) {
 			return
 		}
 		defer root.Close()
-		if err = root.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		if err = taskMkdirAll(root, filepath.Dir(path)); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
@@ -148,6 +148,11 @@ func workspaceRoutes(mux *http.ServeMux) {
 			return
 		}
 		defer f.Close()
+		if err = taskOwnFile(f); err != nil {
+			root.Remove(path)
+			http.Error(w, "File ownership failed", 500)
+			return
+		}
 		if _, err = f.Write(data); err != nil {
 			root.Remove(path)
 			http.Error(w, err.Error(), 500)
@@ -217,10 +222,10 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 	}
 	switch p.Operation {
 	case "write_file":
-		if err = root.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		if err = taskMkdirAll(root, filepath.Dir(path)); err != nil {
 			return "", err
 		}
-		err = root.WriteFile(path, []byte(p.Input.Content), 0600)
+		err = taskWriteFile(root, path, []byte(p.Input.Content))
 		return "Saved " + raw, err
 	case "read_file", "edit_file":
 		f, err := root.Open(path)
@@ -246,7 +251,7 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 			if p.Input.All {
 				n = -1
 			}
-			err = root.WriteFile(path, []byte(strings.Replace(text, p.Input.Old, p.Input.New, n)), 0600)
+			err = taskWriteFile(root, path, []byte(strings.Replace(text, p.Input.Old, p.Input.New, n)))
 			return "Updated " + raw, err
 		}
 		lines := strings.Split(text, "\n")

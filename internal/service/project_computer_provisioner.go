@@ -142,7 +142,7 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 				existingZone = strings.TrimPrefix(value, "TZ=")
 			}
 		}
-		if rows[0].Config.Image == image && existingZone == zone {
+		if rows[0].Config.Image == image && existingZone == zone && rows[0].Config.Labels["openvibely.computer-isolation"] == "1" {
 			if _, err = p.docker(ctx, nil, "start", name); err != nil {
 				return ComputerConnection{}, err
 			}
@@ -195,7 +195,7 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 	if _, err := rand.Read(secret); err != nil {
 		return ComputerConnection{}, err
 	}
-	_, err := p.docker(ctx, nil, "run", "-d", "--name", name, "--label", "openvibely.project="+id, "--publish", "127.0.0.1::8090", "--mount", "type=volume,src="+name+"-home,dst=/home/ubuntu", "--shm-size", "1g", "--memory", "4g", "--cpus", "2", "--pids-limit", "1024", "--security-opt", "no-new-privileges:true", "--restart", "unless-stopped", "--env", "OPENVIBELY_COMPUTER_TOKEN="+hex.EncodeToString(secret), "--env", "TZ="+zone, image)
+	_, err := p.docker(ctx, nil, "run", "-d", "--name", name, "--label", "openvibely.project="+id, "--label", "openvibely.computer-isolation=1", "--publish", "127.0.0.1::8090", "--mount", "type=volume,src="+name+"-home,dst=/home/ubuntu", "--shm-size", "1g", "--memory", "4g", "--cpus", "2", "--pids-limit", "1024", "--cap-add", "SYS_ADMIN", "--cap-add", "NET_ADMIN", "--device", "/dev/net/tun", "--security-opt", "apparmor=unconfined", "--security-opt", "no-new-privileges:true", "--restart", "unless-stopped", "--env", "OPENVIBELY_COMPUTER_TOKEN="+hex.EncodeToString(secret), "--env", "TZ="+zone, image)
 	if err != nil {
 		return ComputerConnection{}, err
 	}

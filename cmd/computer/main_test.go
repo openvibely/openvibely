@@ -38,7 +38,7 @@ func TestBridgeRejectsBrowserOriginsAndInvalidActions(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:1234"
 	res = httptest.NewRecorder()
 	server().ServeHTTP(res, req)
-	if res.Code != 400 {
+	if res.Code != 403 {
 		t.Fatal(res.Code)
 	}
 	if _, err := action(context.Background(), "click", map[string]any{"x": float64(-1), "y": float64(20)}); err == nil {
@@ -68,7 +68,7 @@ func TestBridgeAuthenticatesPrivateNetworkRequests(t *testing.T) {
 	for _, tc := range []struct {
 		token, origin string
 		want          int
-	}{{"", "", 403}, {"Bearer wrong", "", 403}, {"Bearer test-token", "https://evil.example", 403}, {"Bearer test-token", "", 400}} {
+	}{{"", "", 403}, {"Bearer wrong", "", 403}, {"Bearer test-token", "https://evil.example", 403}, {"Bearer test-token", "", 404}} {
 		req := httptest.NewRequest("POST", "http://computer:8090/action", strings.NewReader(`{"action":"invalid"}`))
 		req.RemoteAddr = "172.20.0.4:30000"
 		req.Header.Set("Authorization", tc.token)
