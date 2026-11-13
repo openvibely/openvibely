@@ -12,7 +12,8 @@ const (
 	CategoryCompleted TaskCategory = "completed"
 	CategoryBacklog   TaskCategory = "backlog"
 	CategoryScheduled TaskCategory = "scheduled"
-	CategoryChat      TaskCategory = "chat" // Internal category for chat messages (not displayed in UI)
+	CategoryChat      TaskCategory = "chat"      // Internal category for chat messages (not displayed in UI)
+	CategoryPageChat  TaskCategory = "page_chat" // Internal category for page side-chat history
 )
 
 var AllCategories = []TaskCategory{
@@ -219,16 +220,17 @@ type Task struct {
 	AutoMergeOnGoalAchieved  bool         `json:"auto_merge_on_goal_achieved"`
 	MergeTargetBranch        string       `json:"merge_target_branch"`
 	MergeStatus              MergeStatus  `json:"merge_status"`
-	BaseBranch               string       `json:"base_branch"`        // Git branch this task should base its worktree on (from parent lineage)
-	BaseCommitSHA            string       `json:"base_commit_sha"`    // Git commit SHA to base worktree on (from parent lineage)
-	LineageDepth             int          `json:"lineage_depth"`      // Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.
-	CreatedVia               string       `json:"created_via"`        // Origin: "web", "telegram", etc.
-	TelegramChatID           int64        `json:"telegram_chat_id"`   // Telegram chat ID for sending completion notifications
-	HasGoal                  bool         `json:"has_goal,omitempty"` // Derived: task has a non-cleared persisted goal
-	GoalMet                  bool         `json:"goal_met,omitempty"` // Derived: task's persisted goal is achieved
-	WorkerCapacityQueued     bool         `json:"-"`                  // Board projection: reserved execution waiting for worker admission.
-	AutomationCapacityQueued bool         `json:"-"`                  // Runtime-only board projection: an unfinished Automation dispatch is waiting for worker admission
-	StartsNewContext         bool         `json:"-"`                  // Runtime-only: this dispatch starts a new model replay context
+	BaseBranch               string       `json:"base_branch"`                     // Git branch this task should base its worktree on (from parent lineage)
+	BaseCommitSHA            string       `json:"base_commit_sha"`                 // Git commit SHA to base worktree on (from parent lineage)
+	LineageDepth             int          `json:"lineage_depth"`                   // Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.
+	CreatedVia               string       `json:"created_via"`                     // Origin: "web", "telegram", etc.
+	TelegramChatID           int64        `json:"telegram_chat_id"`                // Telegram chat ID for sending completion notifications
+	HasGoal                  bool         `json:"has_goal,omitempty"`              // Derived: task has a non-cleared persisted goal
+	HasOpenPullRequest       bool         `json:"has_open_pull_request,omitempty"` // Derived from the linked PR record
+	GoalMet                  bool         `json:"goal_met,omitempty"`              // Derived: task's persisted goal is achieved
+	WorkerCapacityQueued     bool         `json:"-"`                               // Board projection: reserved execution waiting for worker admission.
+	AutomationCapacityQueued bool         `json:"-"`                               // Runtime-only board projection: an unfinished Automation dispatch is waiting for worker admission
+	StartsNewContext         bool         `json:"-"`                               // Runtime-only: this dispatch starts a new model replay context
 	CreatedAt                time.Time    `json:"created_at"`
 	UpdatedAt                time.Time    `json:"updated_at"`
 	CompletedAt              *time.Time   `json:"completed_at,omitempty"`

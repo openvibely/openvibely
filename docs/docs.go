@@ -1203,6 +1203,411 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/plugin-pages/{instanceId}/bridge": {
+            "post": {
+                "description": "Executes one validated v1 bridge message relayed by the host page. Body is the bridge envelope including the page-load handle.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Run a plugin page bridge call",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.pluginBridgeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.pluginBridgeResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handler.pluginBridgeResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat": {
+            "post": {
+                "consumes": [
+                    "application/x-www-form-urlencoded"
+                ],
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Send a page side-chat message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Message (max 8000 characters)",
+                        "name": "message",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Rendered chat turn",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat/stop": {
+            "post": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Stop the page side-chat turn",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat/thread": {
+            "get": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "PluginChatThread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chat response",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat/thread/composer-action": {
+            "get": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Page side-chat composer action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML fragment",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat/thread/executions/{execId}/fragment": {
+            "get": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "PluginChatThreadFragment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID",
+                        "name": "execId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chat response",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat/thread/pending-inputs": {
+            "get": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "PluginChatThreadPending",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chat response",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat/thread/queued/{inputId}/steer": {
+            "post": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "PluginChatQueuedSteer",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID",
+                        "name": "inputId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chat response",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/chat/thread/steer": {
+            "post": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "PluginChatSteer",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Chat response",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/events": {
+            "get": {
+                "description": "Server-sent events for page refreshes.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Stream plugin page events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page-load handle",
+                        "name": "handle",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "event stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugin-pages/{instanceId}/handle/retire": {
+            "post": {
+                "tags": [
+                    "plugin-pages"
+                ],
+                "summary": "Retire a page-load handle",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin page instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page-load handle",
+                        "name": "handle",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
         "/api/projects": {
             "get": {
                 "description": "Get a list of all available projects with their IDs, names, paths, and creation timestamps",
@@ -2092,6 +2497,20 @@ const docTemplate = `{
                 },
                 "queued_tasks": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.pluginBridgeResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "result": {
+                    "type": "object"
                 }
             }
         },
@@ -3629,6 +4048,10 @@ const docTemplate = `{
                     "description": "Derived: task has a non-cleared persisted goal",
                     "type": "boolean"
                 },
+                "has_open_pull_request": {
+                    "description": "Derived from the linked PR record",
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -3704,24 +4127,28 @@ const docTemplate = `{
                 "completed",
                 "backlog",
                 "scheduled",
-                "chat"
+                "chat",
+                "page_chat"
             ],
             "x-enum-comments": {
-                "CategoryChat": "Internal category for chat messages (not displayed in UI)"
+                "CategoryChat": "Internal category for chat messages (not displayed in UI)",
+                "CategoryPageChat": "Internal category for page side-chat history"
             },
             "x-enum-descriptions": [
                 "",
                 "",
                 "",
                 "",
-                "Internal category for chat messages (not displayed in UI)"
+                "Internal category for chat messages (not displayed in UI)",
+                "Internal category for page side-chat history"
             ],
             "x-enum-varnames": [
                 "CategoryActive",
                 "CategoryCompleted",
                 "CategoryBacklog",
                 "CategoryScheduled",
-                "CategoryChat"
+                "CategoryChat",
+                "CategoryPageChat"
             ]
         },
         "models.TaskStatus": {

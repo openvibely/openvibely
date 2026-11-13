@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"github.com/openvibely/openvibely/internal/events"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -100,5 +102,58 @@ func TestTaskPullRequestRepoSetNeedsRepublish(t *testing.T) {
 	}
 	if got == nil || got.NeedsRepublish {
 		t.Fatalf("expected explicit publication clear, got %#v", got)
+	}
+}
+
+func TestTaskPullRequestStateProjectionAndRefresh(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	broadcaster := events.NewBroadcaster()
+	tasks := NewTaskRepo(db, nil)
+	prs := NewTaskPullRequestRepo(db)
+	prs.SetBroadcaster(broadcaster)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Review this task", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	if err := tasks.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := broadcaster.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broadcaster.Unsubscribe(sub)
+	check := func(want bool) {
+		t.Helper()
+		board, err := tasks.ListBoardByProjectWithCategorySorts(ctx, "default", "completed", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(board) != 1 || board[0].HasOpenPullRequest != want {
+			t.Fatalf("board projection = %+v, want open %t", board, want)
+		}
+		for _, search := range []string{"", "Review"} {
+			items, err := tasks.ListBreadcrumbSelector(ctx, "default", search, task.ID, false, 20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 || items[0].HasOpenPullRequest != want {
+				t.Fatalf("breadcrumb projection = %+v, want open %t", items, want)
+			}
+		}
+	}
+	check(false)
+	for _, state := range []string{"open", "closed", "OPEN", "merged"} {
+		pr := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 1, PRURL: "https://github.com/example/repo/pull/1", PRState: state}
+		if err := prs.Upsert(ctx, pr); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case event := <-sub:
+			if event.Type != events.TaskBoardUpdated || event.TaskID != task.ID || event.ProjectID != task.ProjectID {
+				t.Fatalf("unexpected refresh: %+v", event)
+			}
+		default:
+			t.Fatal("missing refresh event")
+		}
+		check(strings.EqualFold(state, "open"))
 	}
 }

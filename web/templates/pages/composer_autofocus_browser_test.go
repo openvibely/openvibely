@@ -506,6 +506,10 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		browser.waitFor("Task Detail HTMX settle", `(function(){var el=document.getElementById('main-content');return el.classList.contains('htmx-swapping')+':'+el.classList.contains('htmx-settling')})()`, "false:false")
 		// The permanent thread loads without a page-tab click.
 		browser.waitFor("lazy Thread focus", `document.activeElement&&document.activeElement.id`, "task-message-input")
+		// A composer-control response can settle between the two deferred focus
+		// callbacks. It must not cancel focus for the unchanged textarea.
+		browser.evaluate(`(function(){var input=document.getElementById('task-message-input'),form=input.form,target=document.getElementById('task-thread-form-primary-action');input.blur();delete input.dataset.composerFocusInitialized;window.openVibelyRequestComposerFocus({root:form});htmx.trigger(target,'htmx:beforeSwap',{target:target,shouldSwap:true});htmx.trigger(target,'htmx:afterSettle',{target:target});return 'scheduled';})()`)
+		browser.waitFor("composer control refresh preserves pending focus", `document.activeElement&&document.activeElement.id`, "task-message-input")
 		browser.typeText("lazy thread")
 		browser.waitFor("native Thread typing", `document.getElementById('task-message-input').value`, "lazy thread")
 

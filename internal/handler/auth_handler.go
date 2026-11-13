@@ -141,6 +141,12 @@ func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 			if err := h.consumeNativeLiveTicket(c); err != nil {
 				return err
 			}
+			// Opaque-origin plugin frames cannot send session cookies for assets.
+			// Only this registered GET route uses its per-load capability instead;
+			// PluginAsset validates the handle, owner, and enabled instance.
+			if c.Request().Method == http.MethodGet && c.Path() == "/plugin-assets/:handle/*" {
+				return next(c)
+			}
 			if h.organizationSvc != nil {
 				return h.organizationAuth(c, next)
 			}

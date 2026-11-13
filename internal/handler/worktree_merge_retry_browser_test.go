@@ -164,7 +164,7 @@ func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
 	    (async function() {
 	      await waitFor(function() { return !!mergeButton(); }, 'initial merge action');
 	      var first = mergeButtonFor('merge') || mergeButton();
-	      if (first.getAttribute('hx-disabled-elt') !== '#changes-actions-dropdown button') throw new Error('merge action lacks menu-wide duplicate-submit guard');
+	      if (first.getAttribute('hx-disabled-elt') !== '[data-changes-split] button') throw new Error('merge action lacks menu-wide duplicate-submit guard');
 	      var alternate = mergeButtonFor('squash');
 	      first.click();
 	      await waitFor(function() { return first.disabled && alternate && alternate.disabled; }, 'all merge options disabled');

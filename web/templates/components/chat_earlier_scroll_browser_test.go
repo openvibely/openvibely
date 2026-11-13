@@ -14,7 +14,7 @@ import (
 
 func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
 	chrome := testChromePath(t)
-	for _, id := range []string{"chat-messages", "task-thread-messages"} {
+	for _, id := range []string{"chat-messages", "task-thread-messages", "page-chat-messages", "custom-conversation"} {
 		for _, anchoring := range []string{"auto", "none"} {
 			t.Run(id+"/"+anchoring, func(t *testing.T) {
 				var script, loader bytes.Buffer
@@ -112,7 +112,7 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
 
 func TestBrowserFunctional_EarlierLoaderContinuousUpwardInput(t *testing.T) {
 	chrome := testChromePath(t)
-	for _, id := range []string{"chat-messages", "task-thread-messages"} {
+	for _, id := range []string{"chat-messages", "task-thread-messages", "page-chat-messages", "custom-conversation"} {
 		for _, input := range []string{"wheel", "touch"} {
 			t.Run(id+"/"+input, func(t *testing.T) {
 				var script, loader bytes.Buffer

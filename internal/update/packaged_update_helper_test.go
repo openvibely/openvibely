@@ -4,12 +4,66 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestExpectedHealthRecoversFromStartupConnectionRefusals(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ready":true,"version":"0.6.0"}`))
+	}))
+	defer server.Close()
+
+	// Inject refused connections before allowing a real HTTP exchange. This
+	// models startup without racing to close and rebind a reserved TCP port.
+	var attempts atomic.Int32
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if attempts.Add(1) <= 4 {
+				return nil, &net.OpError{Op: "dial", Net: network, Err: syscall.ECONNREFUSED}
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		},
+	}
+	defer transport.CloseIdleConnections()
+	// Four 250 ms polling intervals fit comfortably; the general exponential
+	// retry policy cannot reach the healthy fifth attempt within this budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := waitForExpectedHealth(ctx, server.URL, "0.6.0", &http.Client{Transport: transport}); err != nil {
+		t.Fatalf("replacement failed validation after startup connection refusals: %v (dial attempts: %d)", err, attempts.Load())
+	}
+	if got := attempts.Load(); got != 5 {
+		t.Fatalf("dial attempts = %d, want 4 refused connections followed by success", got)
+	}
+}
+
+func TestExpectedHealthPollsThroughStartupWithoutHTTPBackoff(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ready":true,"version":"0.6.0"}`))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := waitForExpectedHealth(ctx, server.URL, "0.6.0", server.Client()); err != nil {
+		t.Fatalf("healthy replacement missed validation deadline: %v", err)
+	}
+}
 
 func TestReadPackagedUpdateHelperStateFileRetriesTransientErrors(t *testing.T) {
 	attempts := 0
@@ -184,7 +238,7 @@ func TestExecutableUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T)
 func TestPackagedRestartCommandPreservesHealthPortForRelaunch(t *testing.T) {
 	if _, ok := os.LookupEnv("OPENVIBELY_TEST_HELPER_PRINT_PORT"); ok {
 		if len(os.Args) > 3 {
-			_ = os.WriteFile(os.Args[3], []byte(os.Getenv("PORT")), 0o600)
+			_ = os.WriteFile(os.Args[3], []byte(os.Getenv("PORT")+"|"+os.Getenv("OPENVIBELY_NO_BROWSER")), 0o600)
 		}
 		time.Sleep(30 * time.Second)
 		return
@@ -193,6 +247,7 @@ func TestPackagedRestartCommandPreservesHealthPortForRelaunch(t *testing.T) {
 	root := t.TempDir()
 	portFile := filepath.Join(root, "port.txt")
 	t.Setenv("OPENVIBELY_TEST_HELPER_PRINT_PORT", "1")
+	t.Setenv("OPENVIBELY_NO_BROWSER", "false")
 	cfg := ExecutableUpdateHelperConfig{
 		Current:          os.Args[0],
 		HealthURL:        "http://127.0.0.1:45678/api/system/health",
@@ -218,14 +273,14 @@ func TestPackagedRestartCommandPreservesHealthPortForRelaunch(t *testing.T) {
 		data, err := os.ReadFile(portFile)
 		lastData = data
 		lastErr = err
-		if err == nil && string(data) == "45678" {
+		if err == nil && string(data) == "45678|true" {
 			return
 		}
 		if time.Now().After(deadline) {
 			if lastErr != nil {
 				t.Fatalf("child did not write port file: %v", lastErr)
 			}
-			t.Fatalf("PORT = %q, want 45678", lastData)
+			t.Fatalf("PORT|OPENVIBELY_NO_BROWSER = %q, want 45678|true", lastData)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

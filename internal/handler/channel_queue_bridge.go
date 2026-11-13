@@ -49,19 +49,8 @@ func (h *Handler) PromoteQueuedTaskThreadInput(taskID string) {
 		return
 	}
 	defer h.trackQueuedPromotion(streamingResponseParams{TaskID: taskID, IsTaskFollowup: true})()
-	task, err := h.taskRepo.GetByID(context.Background(), taskID)
-	if err != nil {
-		applog.Infof("[handler] PromoteQueuedTaskThreadInput task=%s load error: %v", taskID, err)
-		return
-	}
-	if task == nil {
-		applog.Infof("[handler] PromoteQueuedTaskThreadInput task=%s not found", taskID)
-		return
-	}
-	applog.Debugf("[handler] PromoteQueuedTaskThreadInput task=%s checking queue", taskID)
 	h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{
-		ProjectID:      task.ProjectID,
-		TaskID:         task.ID,
+		TaskID:         taskID,
 		IsTaskFollowup: true,
 	}, "")
 }

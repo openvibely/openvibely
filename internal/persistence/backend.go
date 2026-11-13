@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageintegration"
 )
 
 // Backend is an opened persistence implementation. Each backend owns its
@@ -21,8 +22,14 @@ type AgentMutationStore interface {
 }
 
 // Stores is the full set of stores a backend provides to the application.
+type PageConversationStore interface {
+	ForPage(pageintegration.PageRef) pageintegration.ConversationStore
+}
+
 type Stores struct {
+	PageConversations    PageConversationStore
 	Organizations        OrganizationStore
+	GitHubConnections    GitHubConnectionStore
 	ProjectAccess        ProjectAccessStore
 	RunIdentities        RunIdentityStore
 	Agents               AgentStore
@@ -72,4 +79,5 @@ type Stores struct {
 	XInboundReceipts     XInboundReceiptStore
 	XTaskContexts        XTaskContextStore
 	XUserProjects        XUserProjectStore
+	PagePlugins          PagePluginStore
 }

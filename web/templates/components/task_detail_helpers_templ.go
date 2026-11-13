@@ -480,7 +480,7 @@ func TaskThreadEarlierMessages(task *models.Task, executions []models.Execution,
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if hasEarlier && len(executions) > 0 {
-			templ_7745c5c3_Err = ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ChatEarlierMessagesLoader("task-thread-messages", threadEndpoint(ctx, task, "", fmt.Sprintf("before=%s&limit=%d", executions[0].ID, windowLimit)), windowLimit).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -575,9 +575,9 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var16 string
-			templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/thread?poll=1&limit=%d", task.ID, windowLimit)).Resolve(ctx)
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(threadEndpoint(ctx, task, "", fmt.Sprintf("poll=1&limit=%d", windowLimit))).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 328, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 328, Col: 86}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
@@ -601,121 +601,160 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" data-task-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" data-project-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression(task.ID).Resolve(ctx)
+		templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression(task.ProjectID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 335, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 335, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" data-task-status=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" data-thread-api-base=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(task.Status)).Resolve(ctx)
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.NewAttributeExpression(threadAPIBase(ctx, task)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 336, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 336, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" data-task-category=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" data-thread-project-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(task.Category)).Resolve(ctx)
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(threadProjectID(ctx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 337, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 337, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" data-task-agent=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" data-task-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(derefString(task.AgentID)).Resolve(ctx)
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(task.ID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 338, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 338, Col: 24}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" data-thread-revision=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" data-task-status=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ChatTranscriptRevision(executions, nil, fmt.Sprintf("%s|%s|%s", task.Status, task.Category, derefString(task.AgentID)))).Resolve(ctx)
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(task.Status)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 339, Col: 144}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 339, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\"><!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) --><div class=\"relative flex-1 min-h-0 min-w-0\"><div id=\"task-thread-messages\" class=\"h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if preservedExecIDs == nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " data-transcript-hydrating=\"true\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, " data-window-limit=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" data-task-category=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 string
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", windowLimit)).Resolve(ctx)
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(task.Category)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 349, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 340, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" data-earlier-url-base=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\" data-task-agent=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit)).ResolveURL(ctx)
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(derefString(task.AgentID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 350, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 341, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" data-scroll-intent-scope=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" data-thread-revision=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var25 string
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(task.ID).Resolve(ctx)
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ChatTranscriptRevision(executions, nil, fmt.Sprintf("%s|%s|%s", task.Status, task.Category, derefString(task.AgentID)))).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 351, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 342, Col: 144}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\"><!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) --><div class=\"relative flex-1 min-h-0 min-w-0\"><div id=\"task-thread-messages\" data-chat-transcript class=\"h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if preservedExecIDs == nil {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " data-transcript-hydrating=\"true\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, " data-window-limit=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var26 string
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", windowLimit)).Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 352, Col: 54}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\" data-earlier-url-base=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var27 string
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression(threadEndpoint(ctx, task, "", fmt.Sprintf("limit=%d", windowLimit))).ResolveURL(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 353, Col: 95}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" data-scroll-intent-scope=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var28 string
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templruntime.NewAttributeExpression(task.ID).Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 354, Col: 38}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -724,13 +763,13 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 			return templ_7745c5c3_Err
 		}
 		if hasEarlier && len(executions) > 0 {
-			templ_7745c5c3_Err = ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ChatEarlierMessagesLoader("task-thread-messages", threadEndpoint(ctx, task, "", fmt.Sprintf("before=%s&limit=%d", executions[0].ID, windowLimit)), windowLimit).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if len(executions) == 0 && len(pendingInputs) == 0 {
-			templ_7745c5c3_Err = ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ChatEmptyState(threadEmptyMessage(ctx)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -746,11 +785,11 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, " ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = PendingThreadInputRows(pendingInputs, threadQueuedSteerEndpoint(ctx, task)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -759,7 +798,7 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -767,65 +806,65 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</div><!-- Message Input Form (shared component with model selector) -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</div><!-- Message Input Form (shared component with model selector) -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = ChatInputForm(ChatInputFormConfig{
 			FormID:                 "task-thread-form",
 			InputID:                "task-message-input",
-			PostEndpoint:           fmt.Sprintf("/tasks/%s/thread?project_id=%s", task.ID, url.QueryEscape(task.ProjectID)),
+			PostEndpoint:           threadSendEndpoint(ctx, task),
 			TargetID:               "task-thread-messages",
 			Agents:                 agents,
 			ShowModelSelector:      true,
-			ShowChangesSummary:     true,
+			ShowChangesSummary:     threadProjectID(ctx) == "",
 			TaskID:                 task.ID,
 			ProjectID:              task.ProjectID,
 			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
 			ActiveTurnID:           taskThreadActiveTurnID(executions),
-			StopEndpoint:           SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID)),
-			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer?project_id=%s", task.ID, url.QueryEscape(task.ProjectID)),
+			StopEndpoint:           threadStopEndpoint(ctx, task),
+			SteerEndpoint:          threadEndpoint(ctx, task, "/steer", "project_id="+url.QueryEscape(task.ProjectID)),
 			SelectedAgentID:        derefString(task.AgentID),
 			DefaultAgentID:         defaultAgentID,
 			PendingInputs:          pendingInputs,
-			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
+			QueuedSteerEndpointFor: threadQueuedSteerEndpoint(ctx, task),
 		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if preservedExecIDs != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<div id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<div id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var26 string
-			templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression("task-thread-runtime-" + task.ID).Resolve(ctx)
+			var templ_7745c5c3_Var29 string
+			templ_7745c5c3_Var29, templ_7745c5c3_Err = templruntime.NewAttributeExpression("task-thread-runtime-" + task.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 392, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 395, Col: 45}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" class=\"contents\" hx-preserve=\"true\"></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\" class=\"contents\" hx-preserve=\"true\"></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<div id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<div id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var27 string
-			templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression("task-thread-runtime-" + task.ID).Resolve(ctx)
+			var templ_7745c5c3_Var30 string
+			templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression("task-thread-runtime-" + task.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 394, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 397, Col: 45}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\" class=\"contents\"><!-- Shared auto-scroll and transcript rendering/cleaning utilities -->")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" class=\"contents\"><!-- Shared auto-scroll and transcript rendering/cleaning utilities -->")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -841,12 +880,12 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<script>\n\t\t\tfunction _taskThreadTaskId() {\n\t\t\t\t// Resolve identity from the mounted thread, never the URL: /tasks/new\n\t\t\t\t// shares the composer IDs but must not participate in saved-task drafts.\n\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\treturn view ? (view.getAttribute('data-task-id') || '') : '';\n\t\t\t}\n\n\t\t\tfunction _taskThreadDraftStorageKey() {\n\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\treturn taskId ? 'task-thread-draft-' + taskId : '';\n\t\t\t}\n\n\t\t\tfunction _taskThreadScrollStateKey(taskId) {\n\t\t\t\treturn taskId ? 'task-thread-scroll-' + taskId : '';\n\t\t\t}\n\n\t\t\tfunction _getTaskThreadScrollState(taskId) {\n\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\tvar key = _taskThreadScrollStateKey(taskId || _taskThreadTaskId());\n\t\t\t\treturn key ? window._taskThreadScrollStates[key] : null;\n\t\t\t}\n\n\t\t\tfunction _saveTaskThreadScrollState() {\n\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\tvar key = _taskThreadScrollStateKey(taskId);\n\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\tif (!key || !messages || !window.chatAutoScroll) return;\n\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\tvar userScrolledUp = tracker\n\t\t\t\t\t? !!tracker.userScrolledUp\n\t\t\t\t\t: !!window._taskThreadUserScrolledUp;\n\t\t\t\tvar snapshot = tracker && typeof tracker.snapshot === 'function'\n\t\t\t\t\t? tracker.snapshot()\n\t\t\t\t\t: { scrollTop: messages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };\n\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\twindow._taskThreadScrollStates[key] = snapshot;\n\t\t\t\twindow._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;\n\t\t\t}\n\n\t\t\tfunction _restoreTaskThreadScrollState(messages, state) {\n\t\t\t\tif (!messages || !state) return false;\n\t\t\t\tmessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : messages.scrollHeight;\n\t\t\t\treturn true;\n\t\t\t}\n\n\t\t\tfunction _consumeTaskThreadSendScrollIntent() {\n\t\t\t\tvar sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages', _taskThreadTaskId()) : false;\n\t\t\t\tif (!sentByUser) return false;\n\t\t\t\tif (window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {\n\t\t\t\t\twindow._taskThreadPageTracker.resetOnUserSend();\n\t\t\t\t}\n\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\tvar key = _taskThreadScrollStateKey(_taskThreadTaskId());\n\t\t\t\tif (key) delete window._taskThreadScrollStates[key];\n\t\t\t\treturn true;\n\t\t\t}\n\n\t\t\t\tfunction _finishTaskThreadRenderScroll(messages, renderPromise) {\n\t\t\t\t\tif (!messages) return Promise.resolve(false);\n\t\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\t\tvar stateKey = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\tvar state = _getTaskThreadScrollState(taskId);\n\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\tvar userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;\n\t\t\t\t\tif (!window.openVibelyThreadController) return Promise.resolve(renderPromise);\n\t\t\t\t\treturn window.openVibelyThreadController.restore({\n\t\t\t\t\t\tmessages: messages,\n\t\t\t\t\t\ttracker: tracker,\n\t\t\t\t\t\tgetTracker: function() { return window._taskThreadPageTracker; },\n\t\t\t\t\t\tstateKey: stateKey,\n\t\t\t\t\t\tstate: state,\n\t\t\t\t\t\tdefaultPinned: !userScrolledUp,\n\t\t\t\t\t\twaitForImages: true,\n\t\t\t\t\t\trenderPromise: renderPromise\n\t\t\t\t\t}).then(function(restored) {\n\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t\treturn restored;\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\tfunction _syncTaskThreadDraftFromTextarea(event) {\n\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\t// A send can finish after navigation. Its detached textarea still owns\n\t\t\t\t// the draft; only reconcile a replacement composer for the same task.\n\t\t\t\tvar textarea = event ? event.target : document.getElementById('task-message-input');\n\t\t\t\tvar view = textarea && textarea.closest('#task-thread-view');\n\t\t\t\tvar taskId = view && view.getAttribute('data-task-id');\n\t\t\t\tif (!taskId) return;\n\t\t\t\t// Retain an empty value so a cached history snapshot cannot revive a sent draft.\n\t\t\t\tvar key = 'task-thread-draft-' + taskId;\n\t\t\t\tif (!textarea.isConnected && window._taskThreadDrafts[key] !== textarea._taskDraftValue) return;\n\t\t\t\tvar previousValue = textarea._taskDraftValue;\n\t\t\t\twindow._taskThreadDrafts[key] = textarea.value;\n\t\t\t\ttextarea._taskDraftValue = textarea.value;\n\t\t\t\tif (!textarea.isConnected) {\n\t\t\t\t\tvar current = document.getElementById('task-message-input');\n\t\t\t\t\tvar currentView = current && current.closest('#task-thread-view');\n\t\t\t\t\t// Returning before acceptance can mount a copy of the submitted draft.\n\t\t\t\t\t// Reconcile that copy without overwriting text edited since the return.\n\t\t\t\t\tif (currentView && currentView.getAttribute('data-task-id') === taskId && current.value === previousValue) {\n\t\t\t\t\t\tcurrent.value = textarea.value;\n\t\t\t\t\t\tcurrent.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction _restoreTaskThreadDraftToTextarea() {\n\t\t\t\tvar key = _taskThreadDraftStorageKey();\n\t\t\t\tif (!key) return;\n\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\tif (!textarea) return;\n\n\t\t\t\tif (Object.prototype.hasOwnProperty.call(window._taskThreadDrafts, key)) {\n\t\t\t\t\tvar restoreValue = window._taskThreadDrafts[key];\n\t\t\t\t\tif (textarea.value !== restoreValue) textarea.value = restoreValue;\n\t\t\t\t}\n\t\t\t\t// DOM properties are not copied into HTMX's history cache, unlike data attributes.\n\t\t\t\ttextarea._taskDraftValue = textarea.value;\n\t\t\t\tif (!textarea._taskDraftSyncBound) {\n\t\t\t\t\ttextarea._taskDraftSyncBound = true;\n\t\t\t\t\ttextarea.addEventListener('input', _syncTaskThreadDraftFromTextarea);\n\t\t\t\t\ttextarea.addEventListener('change', _syncTaskThreadDraftFromTextarea);\n\t\t\t\t}\n\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t}\n\n\t\t\t\twindow.taskThreadPreservedExecutionIDs = function() {\n\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\tif (!view) return '';\n\t\t\t\t\treturn Array.prototype.map.call(\n\t\t\t\t\t\tview.querySelectorAll('#task-thread-messages > [data-execution-pair=\"true\"][hx-preserve]'),\n\t\t\t\t\t\tfunction(pair) { return pair.getAttribute('data-exec-id') || ''; }\n\t\t\t\t\t).filter(function(id) { return id !== ''; }).join(',');\n\t\t\t\t};\n\n\t\t\t\twindow.syncTaskThreadTranscriptRevision = function(expectedExecID) {\n\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\tvar taskID = view ? (view.getAttribute('data-task-id') || '') : '';\n\t\t\t\t\tif (!view || !taskID || typeof fetch === 'undefined') return Promise.resolve(false);\n\t\t\t\t\twindow._taskThreadRevisionSyncGeneration = (window._taskThreadRevisionSyncGeneration || 0) + 1;\n\t\t\t\t\tvar generation = window._taskThreadRevisionSyncGeneration;\n\t\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\t\tvar limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';\n\t\t\t\t\tvar url = '/tasks/' + encodeURIComponent(taskID) + '/thread?poll=1&limit=' + encodeURIComponent(limit);\n\t\t\t\t\tvar detail = document.getElementById('task-detail-content');\n\t\t\t\t\tvar projectID = (detail && detail.dataset.projectId) || '';\n\t\t\t\t\tif (projectID) url += '&project_id=' + encodeURIComponent(projectID);\n\t\t\t\t\tview.dataset.revisionSyncPending = 'true';\n\t\t\t\t\treturn fetch(url, {headers: {'HX-Request': 'true'}}).then(function(response) {\n\t\t\t\t\t\tif (!response.ok) throw new Error('HTTP ' + response.status);\n\t\t\t\t\t\treturn response.text();\n\t\t\t\t\t}).then(function(html) {\n\t\t\t\t\t\tif (generation !== window._taskThreadRevisionSyncGeneration) return false;\n\t\t\t\t\t\tvar currentView = document.getElementById('task-thread-view');\n\t\t\t\t\t\tif (!currentView || currentView.getAttribute('data-task-id') !== taskID) return false;\n\t\t\t\t\t\tvar detached = document.createElement('template');\n\t\t\t\t\t\tdetached.innerHTML = html;\n\t\t\t\t\t\tvar nextView = detached.content.querySelector('#task-thread-view');\n\t\t\t\t\t\tif (!nextView || currentView.getAttribute('data-task-agent') !== nextView.getAttribute('data-task-agent')) return false;\n\t\t\t\t\t\tif (!window.chatTranscriptSnapshotMatches || !window.chatTranscriptSnapshotMatches(currentView, nextView, 'task-thread-messages', expectedExecID || '')) return false;\n\t\t\t\t\t\twindow.applyChatTranscriptSnapshotRevision(currentView, nextView, 'task-thread-messages', 'data-thread-revision');\n\t\t\t\t\t\t['data-task-active', 'data-task-status', 'data-task-category'].forEach(function(attribute) {\n\t\t\t\t\t\t\tcurrentView.setAttribute(attribute, nextView.getAttribute(attribute) || '');\n\t\t\t\t\t\t});\n\t\t\t\t\t\tvar catchupTimers = window._taskThreadReconnectCatchupTimers || {};\n\t\t\t\t\t\tif (catchupTimers[taskID]) {\n\t\t\t\t\t\t\tclearTimeout(catchupTimers[taskID]);\n\t\t\t\t\t\t\tdelete catchupTimers[taskID];\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\tconsole.error('[task-thread] transcript revision sync failed:', err);\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}).finally(function() {\n\t\t\t\t\t\tif (generation !== window._taskThreadRevisionSyncGeneration) return;\n\t\t\t\t\t\tvar currentView = document.getElementById('task-thread-view');\n\t\t\t\t\t\tif (currentView && currentView.getAttribute('data-task-id') === taskID) delete currentView.dataset.revisionSyncPending;\n\t\t\t\t\t});\n\t\t\t\t};\n\n\t\t\t\twindow.reconcileTaskThreadState = function(reconnectTaskId) {\n\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\tif (!view || !reconnectTaskId || view.getAttribute('data-task-id') !== reconnectTaskId) return Promise.resolve(false);\n\t\t\t\t\tvar attachmentSession = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\tif (attachmentSession && attachmentSession.value) return Promise.resolve(true);\n\t\t\t\t\t// A tracked per-execution stream owns durable offset catch-up. Do not\n\t\t\t\t\t// replace its active bubble merely because the shared live SSE reconnected.\n\t\t\t\t\tif (window._taskThreadStreamingActive) {\n\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\twindow._taskThreadReconnectCatchupTimers = window._taskThreadReconnectCatchupTimers || {};\n\t\t\t\t\t\tif (!window._taskThreadReconnectCatchupTimers[reconnectTaskId]) {\n\t\t\t\t\t\t\twindow._taskThreadReconnectCatchupTimers[reconnectTaskId] = setTimeout(function waitForActiveCatchup() {\n\t\t\t\t\t\t\t\tvar currentView = document.getElementById('task-thread-view');\n\t\t\t\t\t\t\t\tif (!currentView || currentView.getAttribute('data-task-id') !== reconnectTaskId) {\n\t\t\t\t\t\t\t\t\tdelete window._taskThreadReconnectCatchupTimers[reconnectTaskId];\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (window._taskThreadStreamingActive) {\n\t\t\t\t\t\t\t\t\twindow._taskThreadReconnectCatchupTimers[reconnectTaskId] = setTimeout(waitForActiveCatchup, 500);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tdelete window._taskThreadReconnectCatchupTimers[reconnectTaskId];\n\t\t\t\t\t\t\t\twindow.reconcileTaskThreadState(reconnectTaskId);\n\t\t\t\t\t\t\t}, 500);\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn Promise.resolve(true);\n\t\t\t\t\t}\n\t\t\t\t\tif (view.dataset.reconcilePending === 'true' || typeof htmx === 'undefined') return Promise.resolve(false);\n\t\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\t\tvar limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';\n\t\t\t\t\tvar url = view.getAttribute('hx-get') || ('/tasks/' + encodeURIComponent(reconnectTaskId) + '/thread?poll=1&limit=' + encodeURIComponent(limit));\n\t\t\t\t\tvar preserved = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : '';\n\t\t\t\t\turl += (url.indexOf('?') === -1 ? '?' : '&') + 'preserved_exec_ids=' + encodeURIComponent(preserved);\n\t\t\t\t\tview.dataset.reconcilePending = 'true';\n\t\t\t\t\treturn htmx.ajax('GET', url, {target: '#task-thread-view', swap: 'morph:outerHTML'}).finally(function() {\n\t\t\t\t\t\tvar current = document.getElementById('task-thread-view');\n\t\t\t\t\t\tif (current && current.getAttribute('data-task-id') === reconnectTaskId) delete current.dataset.reconcilePending;\n\t\t\t\t\t});\n\t\t\t\t};\n\n\t\t\t\t// Apply cleaning and scroll on load\n\t\t\t\t(function() {\n\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\tvar cleanPromise = null;\n\t\t\t\t\tvar resumeRenderPromises = [];\n\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\tcleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;\n\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);\n\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);\n\t\t\t\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\t\t\t\twindow._taskThreadFreshOpenTasks = window._taskThreadFreshOpenTasks || {};\n\t\t\t\t\t\t\tvar freshOpen = !!window._taskThreadFreshOpenTasks[taskId];\n\t\t\t\t\t\t\tif (freshOpen) {\n\t\t\t\t\t\t\t\tdelete window._taskThreadFreshOpenTasks[taskId];\n\t\t\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\t\t\tvar freshStateKey = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\t\t\t\tif (freshStateKey) {\n\t\t\t\t\t\t\t\t\tdelete window._taskThreadScrollStates[freshStateKey];\n\t\t\t\t\t\t\t\t\tif (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[freshStateKey];\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar preservedScrollState = freshOpen ? null : _getTaskThreadScrollState(taskId);\n\n\t\t\t\t\t\t\t// Set up the page tracker before applying initial state so a scoped\n\t\t\t\t\t\t\t// successful send can supersede a stale navigation snapshot.\n\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);\n\t\t\t\t\t\t\t\tif (freshOpen && window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {\n\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.resetOnUserSend();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\tvar initialScrollState = window.initializeChatTranscriptScrollState\n\t\t\t\t\t\t\t? window.initializeChatTranscriptScrollState({\n\t\t\t\t\t\t\t\tmessages: chatMessages,\n\t\t\t\t\t\t\t\ttracker: window._taskThreadPageTracker,\n\t\t\t\t\t\t\t\tstate: preservedScrollState,\n\t\t\t\t\t\t\t\tscope: taskId\n\t\t\t\t\t\t\t})\n\t\t\t\t\t\t\t: { sentByUser: false, restoredScrollState: _restoreTaskThreadScrollState(chatMessages, preservedScrollState), userScrolledUp: !!(preservedScrollState && preservedScrollState.userScrolledUp) };\n\t\t\t\t\t\tif (!initialScrollState.restoredScrollState && !initialScrollState.sentByUser && window.chatAutoScroll) {\n\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, false);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar preservedUserScrolledUp = !!initialScrollState.userScrolledUp;\n\t\t\t\t\t\tif (initialScrollState.sentByUser) {\n\t\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\t\tvar sentStateKey = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\t\t\tif (sentStateKey) delete window._taskThreadScrollStates[sentStateKey];\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = preservedUserScrolledUp;\n\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\n\t\t\t\t\t\t// Keep global flag as fallback source of truth across partial re-inits.\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = preservedUserScrolledUp;\n\t\t\t\t\t}\n\t\t\t\t\t// Render tool/thinking transcript controls and initialize SSE for any running executions.\n\t\t\t\t\t// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.\n\t\t\t\t\tvar resumeContainers = document.querySelectorAll('[data-streaming-resume=\"true\"]');\n\t\t\t\t\t\tresumeContainers.forEach(function(c) {\n\t\t\t\t\t\t\tvar raw = c.getAttribute('data-raw-content') || '';\n\t\t\t\t\t\t\tvar revision = c.getAttribute('data-raw-revision') || raw;\n\t\t\t\t\t\t\tvar hasRenderedContent = !!(c.textContent && c.textContent.trim()) || !!c.querySelector('*');\n\t\t\t\t\t\t\tvar hasCurrentRenderedContent = hasRenderedContent && c._renderedRevision === revision;\n\t\t\t\t\t\t\tvar renderPromise = c._activeLiveChatRender && c._activeLiveChatRender.promise;\n\t\t\t\t\t\t\tif (raw.trim() && !hasCurrentRenderedContent && !c._activeLiveChatRender && window.renderStreamingContent) {\n\t\t\t\t\t\t\t\tvar liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;\n\t\t\t\t\t\t\t\tvar renderPromise = liveRenderer(c, raw);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (renderPromise && typeof renderPromise.then === 'function') {\n\t\t\t\t\t\t\t\tresumeRenderPromises.push(Promise.resolve(renderPromise).catch(function() {\n\t\t\t\t\t\t\t\t\tc.textContent = raw;\n\t\t\t\t\t\t\t\t\treturn false;\n\t\t\t\t\t\t\t\t}));\n\t\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar initialRenderPromises = [];\n\t\t\t\t\tif (cleanPromise && typeof cleanPromise.then === 'function') initialRenderPromises.push(cleanPromise);\n\t\t\t\t\tinitialRenderPromises = initialRenderPromises.concat(resumeRenderPromises);\n\t\t\t\t\tif (chatMessages) _finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));\n\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t\t})();\n\t\t\t\t\tfunction _initializeFreshTaskThreadOpen() {\n\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\tif (!chatMessages) return;\n\t\t\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\tvar stateKey = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\tif (stateKey) {\n\t\t\t\t\t\tdelete window._taskThreadScrollStates[stateKey];\n\t\t\t\t\t\tif (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[stateKey];\n\t\t\t\t\t}\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);\n\t\t\t\t\t\t\tif (window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {\n\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.resetOnUserSend();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);\n\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);\n\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);\n\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\t\t\t\t\t\t_finishTaskThreadRenderScroll(chatMessages, renderPromise);\n\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t}\n\n\t\t\t\t\t// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up\n\t\t\tif (!window._taskThreadScrollHandlerAttached) {\n\t\t\t\twindow._taskThreadScrollHandlerAttached = true;\n\n\t\t\t\t// Preserve scroll intent while requests are pending. The shared composer\n\t\t\t\t// commits deliberate-send pinning only after an accepted response.\n\t\t\t\t// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource\n\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\t\tvar threadView = document.getElementById('task-thread-view');\n\t\t\t\t\tvar isTaskActive = !!(threadView && threadView.getAttribute('data-task-active') === 'true');\n\t\t\t\t\tvar triggerEl = event.detail && event.detail.elt;\n\t\t\t\t\t// Block stale polls when task is no longer active\n\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-view' && !isTaskActive) {\n\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\t// Block polling requests to task-thread-view while SSE streaming\n\t\t\t\t\t// is active or sidebar navigation is in progress\n\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-view') {\n\t\t\t\t\t\tvar attachmentSession = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\t\tif ((attachmentSession && attachmentSession.value) || triggerEl.dataset.revisionSyncPending === 'true' || window._taskThreadStreamingActive || window._sidebarNavigating) {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\t\tfunction _closeTaskThreadEventSources() {\n\t\t\t\t\t\tif (!window._threadEventSources) return;\n\t\t\t\t\t\twindow._threadEventSources.slice().forEach(function(es) {\n\t\t\t\t\t\t\ttry { es.close(); } catch(e) {}\n\t\t\t\t\t\t});\n\t\t\t\t\t\twindow._threadEventSources = [];\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _taskThreadResponseRevision(html) {\n\t\t\t\t\t\tif (!html) return '';\n\t\t\t\t\t\tvar detached = document.createElement('template');\n\t\t\t\t\t\tdetached.innerHTML = html;\n\t\t\t\t\t\tvar nextView = detached.content.querySelector('#task-thread-view');\n\t\t\t\t\t\treturn nextView ? (nextView.getAttribute('data-thread-revision') || '') : '';\n\t\t\t\t\t}\n\n\t\t\t\t\t// Before swaps, reject unchanged authoritative snapshots before capturing\n\t\t\t\t\t// state or closing streams, then preserve state for a real replacement.\n\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\tif (target && target.id === 'task-thread-view') {\n\t\t\t\t\t\tvar attachmentSession = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\t\tif (attachmentSession && attachmentSession.value) {\n\t\t\t\t\t\t\tevent.detail.shouldSwap = false;\n\t\t\t\t\t\t\tdelete target.dataset.reconcilePending;\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar currentRevision = target.getAttribute('data-thread-revision') || '';\n\t\t\t\t\t\t\tvar revisionXHR = event.detail.xhr;\n\t\t\t\t\t\t\tvar nextRevision = _taskThreadResponseRevision(revisionXHR ? (revisionXHR.responseText || '') : '');\n\t\t\t\t\t\t\tif (currentRevision && nextRevision && currentRevision === nextRevision) {\n\t\t\t\t\t\t\t\tevent.detail.shouldSwap = false;\n\t\t\t\t\t\t\t\tdelete target.dataset.reconcilePending;\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content')) {\n\t\t\t\t\t\t// Capture the current draft before replacement. The shared composer clears\n\t\t\t\t\t\t// only the accepted message, through its scoped input listener.\n\t\t\t\t\t\t_syncTaskThreadDraftFromTextarea();\n\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t}\n\t\t\t\t\t\t// Clean up thread EventSource connections before replacing active thread DOM.\n\t\t\t\t\t\tif (target && (target.id === 'thread-content' || target.id === 'task-thread-view' || target.id === 'task-detail-content' || target.id === 'main-content')) {\n\t\t\t\t\t\t\t_closeTaskThreadEventSources();\n\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t// Release detached task-thread runtime owners when navigating away.\n\t\t\t\t\t\t\t// A later open is a fresh reading session and must settle at the true\n\t\t\t\t\t\t\t// bottom instead of restoring an old upward position from this task.\n\t\t\t\t\t\t\tif (target && target.id === 'main-content' && !event.detail._ovThreadRefresh) {\n\t\t\t\t\t\t\t\tvar outgoingTaskId = _taskThreadTaskId();\n\t\t\t\t\t\t\t\twindow._taskThreadFreshOpenTasks = window._taskThreadFreshOpenTasks || {};\n\t\t\t\t\t\t\t\tif (outgoingTaskId) window._taskThreadFreshOpenTasks[outgoingTaskId] = true;\n\t\t\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\t\t\tvar outgoingStateKey = _taskThreadScrollStateKey(outgoingTaskId);\n\t\t\t\t\t\t\t\tif (outgoingStateKey) {\n\t\t\t\t\t\t\t\t\tdelete window._taskThreadScrollStates[outgoingStateKey];\n\t\t\t\t\t\t\t\t\tif (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[outgoingStateKey];\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) {\n\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = null;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tdelete window['scrollTracker_task-thread-messages'];\n\t\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\t\t\tif (target && target.id === 'task-thread-messages') {\n\t\t\t\t\t\t\t\t// Skip expensive DOM work if navigating away via sidebar\n\t\t\t\t\t\t\t\tif (window._sidebarNavigating) return;\n\t\t\t\t\t\t\t\t// Re-attach tracker if the DOM element changed before binding image load handlers.\n\t\t\t\t\t\t\t\tif (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', target);\n\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tvar renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(target) : Promise.resolve([]);\n\t\t\t\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(target);\n\t\t\t\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(target);\n\t\t\t\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\t\t\t\t\t\t\t\t// A deliberate send resets both the live tracker and stale saved reading state.\n\t\t\t\t\t\t\t\t_consumeTaskThreadSendScrollIntent();\n\t\t\t\t\t\t\t\t_finishTaskThreadRenderScroll(target, renderPromise);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Handle polling updates to task-thread-view (e.g., task completion status)\n\t\t\t\t\t\t\telse if (target && target.id === 'task-thread-view') {\n\t\t\t\t\t\t\t\t// Skip expensive DOM work if navigating away via sidebar\n\t\t\t\t\t\t\t\tif (window._sidebarNavigating) return;\n\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\t// Re-attach tracker if the DOM element changed before binding image load handlers.\n\t\t\t\t\t\t\t\t\tif (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);\n\t\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tvar renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);\n\t\t\t\t\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);\n\t\t\t\t\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);\n\t\t\t\t\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\t\t\t\t\t\t\t\t\t\t_consumeTaskThreadSendScrollIntent();\n\t\t\t\t\t\t\t\t\t\t_finishTaskThreadRenderScroll(chatMessages, renderPromise);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t// Also handle full page refreshes on task-detail-content\n\t\t\t\t\t\telse if (target && target.id === 'task-detail-content') {\n\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t// Re-attach tracker if the DOM element changed before binding image load handlers.\n\t\t\t\t\t\t\t\tif (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);\n\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tvar renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);\n\t\t\t\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);\n\t\t\t\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);\n\t\t\t\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\t\t\t\t\t\t\t\t\t_consumeTaskThreadSendScrollIntent();\n\t\t\t\t\t\t\t\t\t_finishTaskThreadRenderScroll(chatMessages, renderPromise);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\telse if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh) {\n\t\t\t\t\t\t\t\t_initializeFreshTaskThreadOpen();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Restore textarea value after morph polling or full page refresh\n\t\t\t\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t\t\t\t});\n\n\t\t\t\t\t\tdocument.body.addEventListener('htmx:historyRestore', function() {\n\t\t\t\t\t\t\t_initializeFreshTaskThreadOpen();\n\t\t\t\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t\t\t\t});\n\t\t\t}\n\t\t\t</script></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<script>\n\t\t\tfunction _taskThreadTaskId() {\n\t\t\t\t// Resolve identity from the mounted thread, never the URL: /tasks/new\n\t\t\t\t// shares the composer IDs but must not participate in saved-task drafts.\n\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\treturn view ? (view.getAttribute('data-task-id') || '') : '';\n\t\t\t}\n\n\t\t\tfunction _taskThreadDraftStorageKey() {\n\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\treturn taskId ? 'task-thread-draft-' + taskId : '';\n\t\t\t}\n\n\t\t\tfunction _taskThreadScrollStateKey(taskId) {\n\t\t\t\treturn taskId ? 'task-thread-scroll-' + taskId : '';\n\t\t\t}\n\n\t\t\tfunction _getTaskThreadScrollState(taskId) {\n\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\tvar key = _taskThreadScrollStateKey(taskId || _taskThreadTaskId());\n\t\t\t\treturn key ? window._taskThreadScrollStates[key] : null;\n\t\t\t}\n\n\t\t\tfunction _saveTaskThreadScrollState() {\n\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\tvar key = _taskThreadScrollStateKey(taskId);\n\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\tif (!key || !messages || !window.chatAutoScroll) return;\n\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\tvar userScrolledUp = tracker\n\t\t\t\t\t? !!tracker.userScrolledUp\n\t\t\t\t\t: !!window._taskThreadUserScrolledUp;\n\t\t\t\tvar snapshot = tracker && typeof tracker.snapshot === 'function'\n\t\t\t\t\t? tracker.snapshot()\n\t\t\t\t\t: { scrollTop: messages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };\n\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\twindow._taskThreadScrollStates[key] = snapshot;\n\t\t\t\twindow._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;\n\t\t\t}\n\n\t\t\tfunction _restoreTaskThreadScrollState(messages, state) {\n\t\t\t\tif (!messages || !state) return false;\n\t\t\t\tmessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : messages.scrollHeight;\n\t\t\t\treturn true;\n\t\t\t}\n\n\t\t\tfunction _consumeTaskThreadSendScrollIntent() {\n\t\t\t\tvar sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages', _taskThreadTaskId()) : false;\n\t\t\t\tif (!sentByUser) return false;\n\t\t\t\tif (window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {\n\t\t\t\t\twindow._taskThreadPageTracker.resetOnUserSend();\n\t\t\t\t}\n\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\tvar key = _taskThreadScrollStateKey(_taskThreadTaskId());\n\t\t\t\tif (key) delete window._taskThreadScrollStates[key];\n\t\t\t\treturn true;\n\t\t\t}\n\n\t\t\t\tfunction _finishTaskThreadRenderScroll(messages, renderPromise) {\n\t\t\t\t\tif (!messages) return Promise.resolve(false);\n\t\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\t\tvar stateKey = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\tvar state = _getTaskThreadScrollState(taskId);\n\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\tvar userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;\n\t\t\t\t\tif (!window.openVibelyThreadController) return Promise.resolve(renderPromise);\n\t\t\t\t\treturn window.openVibelyThreadController.hydrate({\n\t\t\t\t\t\tmessages: messages,\n\t\t\t\t\t\ttracker: tracker,\n\t\t\t\t\t\tgetTracker: function() { return window._taskThreadPageTracker; },\n\t\t\t\t\t\tstateKey: stateKey,\n\t\t\t\t\t\tstate: state,\n\t\t\t\t\t\tdefaultPinned: !userScrolledUp,\n\t\t\t\t\t\twaitForImages: true,\n\t\t\t\t\t\trenderPromise: renderPromise\n\t\t\t\t\t}).then(function(restored) {\n\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t\treturn restored;\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\tfunction _syncTaskThreadDraftFromTextarea(event) {\n\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\t// A send can finish after navigation. Its detached textarea still owns\n\t\t\t\t// the draft; only reconcile a replacement composer for the same task.\n\t\t\t\tvar textarea = event ? event.target : document.getElementById('task-message-input');\n\t\t\t\tvar view = textarea && textarea.closest('#task-thread-view');\n\t\t\t\tvar taskId = view && view.getAttribute('data-task-id');\n\t\t\t\tif (!taskId) return;\n\t\t\t\t// Retain an empty value so a cached history snapshot cannot revive a sent draft.\n\t\t\t\tvar key = 'task-thread-draft-' + taskId;\n\t\t\t\tif (!textarea.isConnected && window._taskThreadDrafts[key] !== textarea._taskDraftValue) return;\n\t\t\t\tvar previousValue = textarea._taskDraftValue;\n\t\t\t\twindow._taskThreadDrafts[key] = textarea.value;\n\t\t\t\ttextarea._taskDraftValue = textarea.value;\n\t\t\t\tif (!textarea.isConnected) {\n\t\t\t\t\tvar current = document.getElementById('task-message-input');\n\t\t\t\t\tvar currentView = current && current.closest('#task-thread-view');\n\t\t\t\t\t// Returning before acceptance can mount a copy of the submitted draft.\n\t\t\t\t\t// Reconcile that copy without overwriting text edited since the return.\n\t\t\t\t\tif (currentView && currentView.getAttribute('data-task-id') === taskId && current.value === previousValue) {\n\t\t\t\t\t\tcurrent.value = textarea.value;\n\t\t\t\t\t\tcurrent.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction _restoreTaskThreadDraftToTextarea() {\n\t\t\t\tvar key = _taskThreadDraftStorageKey();\n\t\t\t\tif (!key) return;\n\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\tif (!textarea) return;\n\n\t\t\t\tif (Object.prototype.hasOwnProperty.call(window._taskThreadDrafts, key)) {\n\t\t\t\t\tvar restoreValue = window._taskThreadDrafts[key];\n\t\t\t\t\tif (textarea.value !== restoreValue) textarea.value = restoreValue;\n\t\t\t\t}\n\t\t\t\t// DOM properties are not copied into HTMX's history cache, unlike data attributes.\n\t\t\t\ttextarea._taskDraftValue = textarea.value;\n\t\t\t\tif (!textarea._taskDraftSyncBound) {\n\t\t\t\t\ttextarea._taskDraftSyncBound = true;\n\t\t\t\t\ttextarea.addEventListener('input', _syncTaskThreadDraftFromTextarea);\n\t\t\t\t\ttextarea.addEventListener('change', _syncTaskThreadDraftFromTextarea);\n\t\t\t\t}\n\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t}\n\n\t\t\t\twindow.taskThreadPreservedExecutionIDs = function() {\n\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\tif (!view) return '';\n\t\t\t\t\treturn Array.prototype.map.call(\n\t\t\t\t\t\tview.querySelectorAll('#task-thread-messages > [data-execution-pair=\"true\"][hx-preserve]'),\n\t\t\t\t\t\tfunction(pair) { return pair.getAttribute('data-exec-id') || ''; }\n\t\t\t\t\t).filter(function(id) { return id !== ''; }).join(',');\n\t\t\t\t};\n\n\t\t\t\twindow.syncTaskThreadTranscriptRevision = function(expectedExecID) {\n\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\tvar taskID = view ? (view.getAttribute('data-task-id') || '') : '';\n\t\t\t\t\tif (!view || !taskID || typeof fetch === 'undefined') return Promise.resolve(false);\n\t\t\t\t\twindow._taskThreadRevisionSyncGeneration = (window._taskThreadRevisionSyncGeneration || 0) + 1;\n\t\t\t\t\tvar generation = window._taskThreadRevisionSyncGeneration;\n\t\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\t\tvar limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';\n\t\t\t\t\tvar url = window.taskThreadURL(taskID, '', 'poll=1&limit=' + encodeURIComponent(limit));\n\t\t\t\t\tvar detail = document.getElementById('task-detail-content');\n\t\t\t\t\tvar projectID = (detail && detail.dataset.projectId) || '';\n\t\t\t\t\tif (projectID) url += '&project_id=' + encodeURIComponent(projectID);\n\t\t\t\t\tview.dataset.revisionSyncPending = 'true';\n\t\t\t\t\treturn fetch(url, {headers: {'HX-Request': 'true'}}).then(function(response) {\n\t\t\t\t\t\tif (!response.ok) throw new Error('HTTP ' + response.status);\n\t\t\t\t\t\treturn response.text();\n\t\t\t\t\t}).then(function(html) {\n\t\t\t\t\t\tif (generation !== window._taskThreadRevisionSyncGeneration) return false;\n\t\t\t\t\t\tvar currentView = document.getElementById('task-thread-view');\n\t\t\t\t\t\tif (!currentView || currentView.getAttribute('data-task-id') !== taskID) return false;\n\t\t\t\t\t\tvar detached = document.createElement('template');\n\t\t\t\t\t\tdetached.innerHTML = html;\n\t\t\t\t\t\tvar nextView = detached.content.querySelector('#task-thread-view');\n\t\t\t\t\t\tif (!nextView || currentView.getAttribute('data-task-agent') !== nextView.getAttribute('data-task-agent')) return false;\n\t\t\t\t\t\tif (!window.chatTranscriptSnapshotMatches || !window.chatTranscriptSnapshotMatches(currentView, nextView, 'task-thread-messages', expectedExecID || '')) return false;\n\t\t\t\t\t\twindow.applyChatTranscriptSnapshotRevision(currentView, nextView, 'task-thread-messages', 'data-thread-revision');\n\t\t\t\t\t\t['data-task-active', 'data-task-status', 'data-task-category'].forEach(function(attribute) {\n\t\t\t\t\t\t\tcurrentView.setAttribute(attribute, nextView.getAttribute(attribute) || '');\n\t\t\t\t\t\t});\n\t\t\t\t\t\tvar catchupTimers = window._taskThreadReconnectCatchupTimers || {};\n\t\t\t\t\t\tif (catchupTimers[taskID]) {\n\t\t\t\t\t\t\tclearTimeout(catchupTimers[taskID]);\n\t\t\t\t\t\t\tdelete catchupTimers[taskID];\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\tconsole.error('[task-thread] transcript revision sync failed:', err);\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}).finally(function() {\n\t\t\t\t\t\tif (generation !== window._taskThreadRevisionSyncGeneration) return;\n\t\t\t\t\t\tvar currentView = document.getElementById('task-thread-view');\n\t\t\t\t\t\tif (currentView && currentView.getAttribute('data-task-id') === taskID) delete currentView.dataset.revisionSyncPending;\n\t\t\t\t\t});\n\t\t\t\t};\n\n\t\t\t\twindow.reconcileTaskThreadState = function(reconnectTaskId) {\n\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\tif (!view || !reconnectTaskId || view.getAttribute('data-task-id') !== reconnectTaskId) return Promise.resolve(false);\n\t\t\t\t\tvar attachmentSession = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\tif (attachmentSession && attachmentSession.value) return Promise.resolve(true);\n\t\t\t\t\t// A tracked per-execution stream owns durable offset catch-up. Do not\n\t\t\t\t\t// replace its active bubble merely because the shared live SSE reconnected.\n\t\t\t\t\tif (window._taskThreadStreamingActive) {\n\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\twindow._taskThreadReconnectCatchupTimers = window._taskThreadReconnectCatchupTimers || {};\n\t\t\t\t\t\tif (!window._taskThreadReconnectCatchupTimers[reconnectTaskId]) {\n\t\t\t\t\t\t\twindow._taskThreadReconnectCatchupTimers[reconnectTaskId] = setTimeout(function waitForActiveCatchup() {\n\t\t\t\t\t\t\t\tvar currentView = document.getElementById('task-thread-view');\n\t\t\t\t\t\t\t\tif (!currentView || currentView.getAttribute('data-task-id') !== reconnectTaskId) {\n\t\t\t\t\t\t\t\t\tdelete window._taskThreadReconnectCatchupTimers[reconnectTaskId];\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (window._taskThreadStreamingActive) {\n\t\t\t\t\t\t\t\t\twindow._taskThreadReconnectCatchupTimers[reconnectTaskId] = setTimeout(waitForActiveCatchup, 500);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tdelete window._taskThreadReconnectCatchupTimers[reconnectTaskId];\n\t\t\t\t\t\t\t\twindow.reconcileTaskThreadState(reconnectTaskId);\n\t\t\t\t\t\t\t}, 500);\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn Promise.resolve(true);\n\t\t\t\t\t}\n\t\t\t\t\tif (view.dataset.reconcilePending === 'true' || typeof htmx === 'undefined') return Promise.resolve(false);\n\t\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\t\tvar limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';\n\t\t\t\t\tvar url = view.getAttribute('hx-get') || window.taskThreadURL(reconnectTaskId, '', 'poll=1&limit=' + encodeURIComponent(limit));\n\t\t\t\t\tvar preserved = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : '';\n\t\t\t\t\turl += (url.indexOf('?') === -1 ? '?' : '&') + 'preserved_exec_ids=' + encodeURIComponent(preserved);\n\t\t\t\t\tview.dataset.reconcilePending = 'true';\n\t\t\t\t\treturn htmx.ajax('GET', url, {target: '#task-thread-view', swap: 'morph:outerHTML'}).finally(function() {\n\t\t\t\t\t\tvar current = document.getElementById('task-thread-view');\n\t\t\t\t\t\tif (current && current.getAttribute('data-task-id') === reconnectTaskId) delete current.dataset.reconcilePending;\n\t\t\t\t\t});\n\t\t\t\t};\n\n\t\t\t\t// Apply cleaning and scroll on load\n\t\t\t\t(function() {\n\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\tvar cleanPromise = null;\n\t\t\t\t\tvar resumeRenderPromises = [];\n\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\tcleanPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);\n\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);\n\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);\n\t\t\t\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\t\t\t\twindow._taskThreadFreshOpenTasks = window._taskThreadFreshOpenTasks || {};\n\t\t\t\t\t\t\tvar freshOpen = !!window._taskThreadFreshOpenTasks[taskId];\n\t\t\t\t\t\t\tif (freshOpen) {\n\t\t\t\t\t\t\t\tdelete window._taskThreadFreshOpenTasks[taskId];\n\t\t\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\t\t\tvar freshStateKey = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\t\t\t\tif (freshStateKey) {\n\t\t\t\t\t\t\t\t\tdelete window._taskThreadScrollStates[freshStateKey];\n\t\t\t\t\t\t\t\t\tif (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[freshStateKey];\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar preservedScrollState = freshOpen ? null : _getTaskThreadScrollState(taskId);\n\n\t\t\t\t\t\t\t// Set up the page tracker before applying initial state so a scoped\n\t\t\t\t\t\t\t// successful send can supersede a stale navigation snapshot.\n\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);\n\t\t\t\t\t\t\t\tif (freshOpen && window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {\n\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.resetOnUserSend();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\tvar initialScrollState = window.initializeChatTranscriptScrollState\n\t\t\t\t\t\t\t? window.initializeChatTranscriptScrollState({\n\t\t\t\t\t\t\t\tmessages: chatMessages,\n\t\t\t\t\t\t\t\ttracker: window._taskThreadPageTracker,\n\t\t\t\t\t\t\t\tstate: preservedScrollState,\n\t\t\t\t\t\t\t\tscope: taskId\n\t\t\t\t\t\t\t})\n\t\t\t\t\t\t\t: { sentByUser: false, restoredScrollState: _restoreTaskThreadScrollState(chatMessages, preservedScrollState), userScrolledUp: !!(preservedScrollState && preservedScrollState.userScrolledUp) };\n\t\t\t\t\t\tif (!initialScrollState.restoredScrollState && !initialScrollState.sentByUser && window.chatAutoScroll) {\n\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, false);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar preservedUserScrolledUp = !!initialScrollState.userScrolledUp;\n\t\t\t\t\t\tif (initialScrollState.sentByUser) {\n\t\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\t\tvar sentStateKey = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\t\t\tif (sentStateKey) delete window._taskThreadScrollStates[sentStateKey];\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = preservedUserScrolledUp;\n\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\n\t\t\t\t\t\t// Keep global flag as fallback source of truth across partial re-inits.\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = preservedUserScrolledUp;\n\t\t\t\t\t}\n\t\t\t\t\t// Render tool/thinking transcript controls and initialize SSE for any running executions.\n\t\t\t\t\t// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.\n\t\t\t\t\tvar resumeContainers = document.querySelectorAll('[data-streaming-resume=\"true\"]');\n\t\t\t\t\t\tresumeContainers.forEach(function(c) {\n\t\t\t\t\t\t\tvar raw = c.getAttribute('data-raw-content') || '';\n\t\t\t\t\t\t\tvar revision = c.getAttribute('data-raw-revision') || raw;\n\t\t\t\t\t\t\tvar hasRenderedContent = !!(c.textContent && c.textContent.trim()) || !!c.querySelector('*');\n\t\t\t\t\t\t\tvar hasCurrentRenderedContent = hasRenderedContent && c._renderedRevision === revision;\n\t\t\t\t\t\t\tvar renderPromise = c._activeLiveChatRender && c._activeLiveChatRender.promise;\n\t\t\t\t\t\t\tif (raw.trim() && !hasCurrentRenderedContent && !c._activeLiveChatRender && window.renderStreamingContent) {\n\t\t\t\t\t\t\t\tvar liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;\n\t\t\t\t\t\t\t\tvar renderPromise = liveRenderer(c, raw);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (renderPromise && typeof renderPromise.then === 'function') {\n\t\t\t\t\t\t\t\tresumeRenderPromises.push(Promise.resolve(renderPromise).catch(function() {\n\t\t\t\t\t\t\t\t\tc.textContent = raw;\n\t\t\t\t\t\t\t\t\treturn false;\n\t\t\t\t\t\t\t\t}));\n\t\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar initialRenderPromises = [];\n\t\t\t\t\tif (cleanPromise && typeof cleanPromise.then === 'function') initialRenderPromises.push(cleanPromise);\n\t\t\t\t\tinitialRenderPromises = initialRenderPromises.concat(resumeRenderPromises);\n\t\t\t\t\tif (chatMessages) _finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));\n\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t\t})();\n\t\t\t\t\tfunction _initializeFreshTaskThreadOpen() {\n\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\tif (!chatMessages) return;\n\t\t\t\t\t\tvar taskId = _taskThreadTaskId();\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\tvar stateKey = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\tif (stateKey) {\n\t\t\t\t\t\tdelete window._taskThreadScrollStates[stateKey];\n\t\t\t\t\t\tif (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[stateKey];\n\t\t\t\t\t}\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);\n\t\t\t\t\t\t\tif (window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {\n\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.resetOnUserSend();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar renderPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);\n\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);\n\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);\n\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\t\t\t\t\t\t_finishTaskThreadRenderScroll(chatMessages, renderPromise);\n\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t}\n\n\t\t\t\t\t// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up\n\t\t\tif (!window._taskThreadScrollHandlerAttached) {\n\t\t\t\twindow._taskThreadScrollHandlerAttached = true;\n\n\t\t\t\t// Preserve scroll intent while requests are pending. The shared composer\n\t\t\t\t// commits deliberate-send pinning only after an accepted response.\n\t\t\t\t// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource\n\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\t\tvar threadView = document.getElementById('task-thread-view');\n\t\t\t\t\tvar isTaskActive = !!(threadView && threadView.getAttribute('data-task-active') === 'true');\n\t\t\t\t\tvar triggerEl = event.detail && event.detail.elt;\n\t\t\t\t\t// Block stale polls when task is no longer active\n\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-view' && !isTaskActive) {\n\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\t// Block polling requests to task-thread-view while SSE streaming\n\t\t\t\t\t// is active or sidebar navigation is in progress\n\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-view') {\n\t\t\t\t\t\tvar attachmentSession = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\t\tif ((attachmentSession && attachmentSession.value) || triggerEl.dataset.revisionSyncPending === 'true' || window._taskThreadStreamingActive || window._sidebarNavigating) {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\t\tfunction _closeTaskThreadEventSources() {\n\t\t\t\t\t\tif (!window._threadEventSources) return;\n\t\t\t\t\t\twindow._threadEventSources.slice().forEach(function(es) {\n\t\t\t\t\t\t\ttry { es.close(); } catch(e) {}\n\t\t\t\t\t\t});\n\t\t\t\t\t\twindow._threadEventSources = [];\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _taskThreadResponseRevision(html) {\n\t\t\t\t\t\tif (!html) return '';\n\t\t\t\t\t\tvar detached = document.createElement('template');\n\t\t\t\t\t\tdetached.innerHTML = html;\n\t\t\t\t\t\tvar nextView = detached.content.querySelector('#task-thread-view');\n\t\t\t\t\t\treturn nextView ? (nextView.getAttribute('data-thread-revision') || '') : '';\n\t\t\t\t\t}\n\n\t\t\t\t\t// Before swaps, reject unchanged authoritative snapshots before capturing\n\t\t\t\t\t// state or closing streams, then preserve state for a real replacement.\n\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n                    if (event.detail.shouldSwap === false) return;\n\t\t\t\t\tvar target = event.detail.target;\n                    // A live-start fragment and the send response can arrive in either order.\n                    // Keep one execution row without suppressing composer OOB updates.\n                    var source = event.detail.requestConfig && event.detail.requestConfig.elt;\n                    var swapOwner = source && source.closest('[hx-swap]');\n                    var swap = event.detail.swapOverride || (swapOwner && swapOwner.getAttribute('hx-swap')) || '';\n                    if (target && target.id === 'task-thread-messages' && swap.split(' ')[0] === 'beforeend') {\n                        var incoming = document.createElement('template');\n                        incoming.innerHTML = event.detail.serverResponse || '';\n                        var pairs = Array.from(incoming.content.children).filter(function(el) { return el.matches('[data-execution-pair]'); });\n                        if (pairs.length) {\n                            target.querySelectorAll('[data-chat-empty-state]').forEach(function(el) { el.remove(); });\n                            pairs.forEach(function(pair) {\n                                if (Array.from(target.querySelectorAll('[data-execution-pair]')).some(function(existing) { return existing.dataset.execId === pair.dataset.execId; })) pair.remove();\n                            });\n                            event.detail.serverResponse = incoming.innerHTML;\n                        }\n                    }\n\t\t\t\t\tif (target && target.id === 'task-thread-view') {\n\t\t\t\t\t\tvar attachmentSession = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\t\tif (attachmentSession && attachmentSession.value) {\n\t\t\t\t\t\t\tevent.detail.shouldSwap = false;\n\t\t\t\t\t\t\tdelete target.dataset.reconcilePending;\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar currentRevision = target.getAttribute('data-thread-revision') || '';\n\t\t\t\t\t\t\tvar revisionXHR = event.detail.xhr;\n\t\t\t\t\t\t\tvar nextRevision = _taskThreadResponseRevision(revisionXHR ? (revisionXHR.responseText || '') : '');\n\t\t\t\t\t\t\tif (currentRevision && nextRevision && currentRevision === nextRevision) {\n\t\t\t\t\t\t\t\tevent.detail.shouldSwap = false;\n\t\t\t\t\t\t\t\tdelete target.dataset.reconcilePending;\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content')) {\n\t\t\t\t\t\t// Capture the current draft before replacement. The shared composer clears\n\t\t\t\t\t\t// only the accepted message, through its scoped input listener.\n\t\t\t\t\t\t_syncTaskThreadDraftFromTextarea();\n\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t}\n\t\t\t\t\t\t// Clean up thread EventSource connections before replacing active thread DOM.\n\t\t\t\t\t\tif (target && (target.id === 'thread-content' || target.id === 'task-thread-view' || target.id === 'task-detail-content' || target.id === 'main-content')) {\n\t\t\t\t\t\t\t_closeTaskThreadEventSources();\n\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t// Release detached task-thread runtime owners when navigating away.\n\t\t\t\t\t\t\t// A later open is a fresh reading session and must settle at the true\n\t\t\t\t\t\t\t// bottom instead of restoring an old upward position from this task.\n\t\t\t\t\t\t\tif (target && target.id === 'main-content' && !event.detail._ovThreadRefresh) {\n\t\t\t\t\t\t\t\tvar outgoingTaskId = _taskThreadTaskId();\n\t\t\t\t\t\t\t\twindow._taskThreadFreshOpenTasks = window._taskThreadFreshOpenTasks || {};\n\t\t\t\t\t\t\t\tif (outgoingTaskId) window._taskThreadFreshOpenTasks[outgoingTaskId] = true;\n\t\t\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\t\t\tvar outgoingStateKey = _taskThreadScrollStateKey(outgoingTaskId);\n\t\t\t\t\t\t\t\tif (outgoingStateKey) {\n\t\t\t\t\t\t\t\t\tdelete window._taskThreadScrollStates[outgoingStateKey];\n\t\t\t\t\t\t\t\t\tif (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[outgoingStateKey];\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) {\n\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = null;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tdelete window['scrollTracker_task-thread-messages'];\n\t\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\t\t\tif (target && target.id === 'task-thread-messages') {\n\t\t\t\t\t\t\t\t// Skip expensive DOM work if navigating away via sidebar\n\t\t\t\t\t\t\t\tif (window._sidebarNavigating) return;\n\t\t\t\t\t\t\t\t// Re-attach tracker if the DOM element changed before binding image load handlers.\n\t\t\t\t\t\t\t\tif (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', target);\n\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tvar renderPromise = window.openVibelyThreadController.prepareTranscript(target);\n\t\t\t\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(target);\n\t\t\t\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(target);\n\t\t\t\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\t\t\t\t\t\t\t\t// A deliberate send resets both the live tracker and stale saved reading state.\n\t\t\t\t\t\t\t\t_consumeTaskThreadSendScrollIntent();\n\t\t\t\t\t\t\t\t_finishTaskThreadRenderScroll(target, renderPromise);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Handle polling updates to task-thread-view (e.g., task completion status)\n\t\t\t\t\t\t\telse if (target && target.id === 'task-thread-view') {\n\t\t\t\t\t\t\t\t// Skip expensive DOM work if navigating away via sidebar\n\t\t\t\t\t\t\t\tif (window._sidebarNavigating) return;\n\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\t// Re-attach tracker if the DOM element changed before binding image load handlers.\n\t\t\t\t\t\t\t\t\tif (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);\n\t\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tvar renderPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);\n\t\t\t\t\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);\n\t\t\t\t\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);\n\t\t\t\t\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\t\t\t\t\t\t\t\t\t\t_consumeTaskThreadSendScrollIntent();\n\t\t\t\t\t\t\t\t\t\t_finishTaskThreadRenderScroll(chatMessages, renderPromise);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t// Also handle full page refreshes on task-detail-content\n\t\t\t\t\t\telse if (target && target.id === 'task-detail-content') {\n\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t// Re-attach tracker if the DOM element changed before binding image load handlers.\n\t\t\t\t\t\t\t\tif (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);\n\t\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tvar renderPromise = window.openVibelyThreadController.prepareTranscript(chatMessages);\n\t\t\t\t\t\t\t\t\tif (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);\n\t\t\t\t\t\t\t\t\tif (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);\n\t\t\t\t\t\t\t\t\tif (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);\n\t\t\t\t\t\t\t\t\t_consumeTaskThreadSendScrollIntent();\n\t\t\t\t\t\t\t\t\t_finishTaskThreadRenderScroll(chatMessages, renderPromise);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\telse if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh) {\n\t\t\t\t\t\t\t\t_initializeFreshTaskThreadOpen();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Restore textarea value after morph polling or full page refresh\n\t\t\t\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t\t\t\t});\n\n\t\t\t\t\t\tdocument.body.addEventListener('htmx:historyRestore', function() {\n\t\t\t\t\t\t\t_initializeFreshTaskThreadOpen();\n\t\t\t\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t\t\t\t});\n\t\t\t}\n\t\t\t</script></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -871,7 +910,7 @@ func TaskThreadLiveEventsScript(taskID string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<script type=\"text/javascript\">\n\t\t\t(function() {\n\t\t\t\t\tvar threadView = document.getElementById('task-thread-view');\n\t\t\t\t\tvar taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';\n\t\t\t\t\tif (!taskId) return;\n\t\t\t\t\tvar disposed = false;\n\t\t\t\t\t\tvar queuedSteerInFlight = {};\n\t\t\t\t\t\tvar queuedSteerClearTimers = {};\n\t\t\t\t\t\tvar directSteerInFlight = false;\n\t\t\t\t\t\tvar directSteerClearTimer = null;\t\t\t\t\tfunction taskQueuedSteerInputID(triggerEl) {\n\t\t\t\t\t\tif (!triggerEl || !triggerEl.getAttribute) return '';\n\t\t\t\t\t\tvar hxPost = triggerEl.getAttribute('hx-post') || '';\n\t\t\t\t\t\tvar match = hxPost.match(/^\\/tasks\\/[^\\/]+\\/thread\\/queued\\/([^\\/]+)\\/steer(?:\\?.*)?$/);\n\t\t\t\t\t\treturn match ? match[1] : '';\n\t\t\t\t\t}\n\t\t\t\t\t\tvar queuedSteerBeforeRequestHandler = function(event) {\n\t\t\t\t\t\t\tif (!currentTaskThreadView()) return;\n\t\t\t\t\t\t\tvar triggerEl = event.detail && event.detail.elt;\n\t\t\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-form' && triggerEl.getAttribute('data-submit-intent') === 'steer') {\n\t\t\t\t\t\t\t\tdirectSteerInFlight = true;\n\t\t\t\t\t\t\t\tif (directSteerClearTimer) clearTimeout(directSteerClearTimer);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar inputID = taskQueuedSteerInputID(triggerEl);\n\t\t\t\t\t\t\tif (!inputID) return;\n\t\t\t\t\t\t\tqueuedSteerInFlight[inputID] = true;\n\t\t\t\t\t\t\tif (queuedSteerClearTimers[inputID]) clearTimeout(queuedSteerClearTimers[inputID]);\n\t\t\t\t\t\t};\n\t\t\t\t\t\tvar queuedSteerAfterRequestHandler = function(event) {\n\t\t\t\t\t\t\tvar triggerEl = event.detail && event.detail.elt;\n\t\t\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-form' && directSteerInFlight) {\n\t\t\t\t\t\t\t\tdirectSteerClearTimer = setTimeout(function() {\n\t\t\t\t\t\t\t\t\tdirectSteerInFlight = false;\n\t\t\t\t\t\t\t\t\tdirectSteerClearTimer = null;\n\t\t\t\t\t\t\t\t}, 1000);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar inputID = taskQueuedSteerInputID(triggerEl);\n\t\t\t\t\t\t\tif (!inputID) return;\n\t\t\t\t\t\t\tqueuedSteerClearTimers[inputID] = setTimeout(function() {\n\t\t\t\t\t\t\t\tdelete queuedSteerInFlight[inputID];\n\t\t\t\t\t\t\t\tdelete queuedSteerClearTimers[inputID];\n\t\t\t\t\t\t\t}, 1000);\n\t\t\t\t\t\t};\n\t\t\t\t\t\tfunction clearQueuedSteerRequestGuards() {\n\t\t\t\t\t\t\tObject.keys(queuedSteerClearTimers).forEach(function(inputID) {\n\t\t\t\t\t\t\t\tclearTimeout(queuedSteerClearTimers[inputID]);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tif (directSteerClearTimer) clearTimeout(directSteerClearTimer);\n\t\t\t\t\t\t\tqueuedSteerInFlight = {};\n\t\t\t\t\t\t\tqueuedSteerClearTimers = {};\n\t\t\t\t\t\t\tdirectSteerInFlight = false;\n\t\t\t\t\t\t\tdirectSteerClearTimer = null;\n\t\t\t\t\t\t}\t\t\t\t\twindow._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};\n\t\t\t\t\twindow._taskThreadQueuedSteerRequestHandlers = window._taskThreadQueuedSteerRequestHandlers || {};\n\t\t\t\t\tif (window._taskThreadLiveHandlers[taskId]) {\n\t\t\t\t\t\twindow.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskThreadQueuedSteerRequestHandlers[taskId]) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeRequest', window._taskThreadQueuedSteerRequestHandlers[taskId].beforeRequest);\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:afterRequest', window._taskThreadQueuedSteerRequestHandlers[taskId].afterRequest);\n\t\t\t\t\t\tdelete window._taskThreadQueuedSteerRequestHandlers[taskId];\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction currentTaskThreadView() {\n\t\t\t\t\t\t\tif (disposed) return null;\n\t\t\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\t\t\treturn view && view.getAttribute('data-task-id') === taskId ? view : null;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction scopedPendingContainerSelector() {\n\t\t\t\t\t\t\treturn '#pending-thread-inputs[data-task-id=\"' + taskId.replace(/\"/g, '\\\\\"') + '\"]';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction currentPendingContainer() {\n\t\t\t\t\t\t\treturn currentTaskThreadView() ? document.querySelector(scopedPendingContainerSelector()) : null;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction removePendingRow(inputId) {\n\t\t\t\t\t\t\tif (!inputId || !currentTaskThreadView()) return;\n\t\t\t\t\t\t\tvar row = document.querySelector('[data-thread-input-id=\"' + inputId.replace(/\"/g, '\\\\\"') + '\"][data-task-id=\"' + taskId.replace(/\"/g, '\\\\\"') + '\"]');\n\t\t\t\t\t\t\tif (row) row.remove();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction ensureComposerPendingContainer() {\n\t\t\t\t\t\t\tif (!currentTaskThreadView()) return null;\n\t\t\t\t\t\t\tvar pendingContainer = currentPendingContainer();\n\t\t\t\t\t\t\tif (pendingContainer) return pendingContainer;\n\t\t\t\t\t\t\tvar form = document.getElementById('task-thread-form');\n\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\tif (!form || !textarea) return null;\n\t\t\t\t\t\t\tpendingContainer = document.createElement('div');\n\t\t\t\t\t\t\tpendingContainer.id = 'pending-thread-inputs';\n\t\t\t\t\t\t\tpendingContainer.className = 'space-y-1.5';\n\t\t\t\t\t\t\tpendingContainer.setAttribute('data-task-id', taskId);\n\t\t\t\t\t\t\t\tvar textareaWrap = textarea.parentElement;\n\t\t\t\t\t\t\t\tform.insertBefore(pendingContainer, textareaWrap || textarea);\n\t\t\t\t\t\t\t\treturn pendingContainer;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction createPendingAttachmentBadge(label, title) {\n\t\t\t\t\t\t\t\tvar badge = document.createElement('div');\n\t\t\t\t\t\t\t\tbadge.className = 'badge badge-ghost badge-sm shrink-0 gap-1 text-xs';\n\t\t\t\t\t\t\t\tbadge.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\t\t\tbadge.setAttribute('aria-label', title);\n\t\t\t\t\t\t\t\tbadge.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-3 w-3\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486\"></path></svg><span>' + label + '</span>';\n\t\t\t\t\t\t\t\treturn badge;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction refreshPendingInputsIfVisible() {\t\t\t\t\t\t\tvar pendingContainer = currentPendingContainer();\n\t\t\t\t\t\t\tif (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction refreshThreadComposerAction() {\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction stopThreadPollingAfterCompletion() {\n\t\t\t\t\t\t\tvar view = currentTaskThreadView();\n\t\t\t\t\t\t\tif (!view) return;\n\t\t\t\t\t\t\tview.setAttribute('data-task-active', 'false');\n\t\t\t\t\t\t\tview.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\tview.removeAttribute('hx-get');\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(view);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction showCompletedThreadTerminalStatus(status) {\n\t\t\t\t\t\t\tstopThreadPollingAfterCompletion();\n\t\t\t\t\t\t\tvar form = document.getElementById('task-thread-form');\n\t\t\t\t\t\t\tif (form) {\n\t\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\t\tif (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (status !== 'failed' && status !== 'cancelled') return;\n\t\t\t\t\t\t\tif (!messages || document.getElementById('task-thread-terminal-status')) return;\n\t\t\t\t\t\t\tvar wrap = document.createElement('div');\n\t\t\t\t\t\t\twrap.id = 'task-thread-terminal-status';\n\t\t\t\t\t\t\twrap.className = 'flex items-center justify-center gap-2 py-2';\n\t\t\t\t\t\t\tvar inner = document.createElement('div');\n\t\t\t\t\t\t\tvar statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');\n\t\t\t\t\t\t\tinner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;\n\t\t\t\t\t\t\tvar icon = document.createElement('span');\n\t\t\t\t\t\t\ticon.setAttribute('aria-hidden', 'true');\n\t\t\t\t\t\t\ticon.textContent = status === 'failed' ? '✕' : (status === 'cancelled' ? '■' : '✓');\n\t\t\t\t\t\t\tvar text = document.createElement('span');\n\t\t\t\t\t\t\ttext.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));\n\t\t\t\t\t\t\tinner.appendChild(icon);\n\t\t\t\t\t\t\tinner.appendChild(text);\n\t\t\t\t\t\t\twrap.appendChild(inner);\n\t\t\t\t\t\t\tmessages.appendChild(wrap);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction syncCompletedThreadOutput(execId, completedOutput, status) {\n\t\t\t\t\t\t\t\tif (!currentTaskThreadView() || !execId) return;\n\t\t\t\t\t\t\t\tvar terminalStatus = status === 'failed' || status === 'cancelled' || status === 'completed' ? status : '';\n\t\t\t\t\t\t\t\tvar completedPair = document.getElementById('chat-execution-' + execId);\n\t\t\t\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) terminalStatus = window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);\n\t\t\t\t\t\t\t\telse if (completedPair) {\n\t\t\t\t\t\t\t\t\tvar currentStatus = completedPair.getAttribute('data-exec-status') || '';\n\t\t\t\t\t\t\t\t\tif (!terminalStatus) terminalStatus = currentStatus === 'failed' || currentStatus === 'cancelled' || currentStatus === 'completed' ? currentStatus : 'completed';\n\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('data-exec-status', terminalStatus);\n\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (!terminalStatus) terminalStatus = 'completed';\n\t\t\t\t\t\t\t\tvar streamContainer = document.getElementById('streaming-message-' + execId);\n\t\t\t\t\t\t\t\tif (streamContainer && typeof completedOutput === 'string') {\n\t\t\t\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);\n\t\t\t\t\t\t\t\t\telse streamContainer.setAttribute('data-raw-content', completedOutput);\n\t\t\t\t\t\t\t\t\tstreamContainer._authoritativeTerminalContent = completedOutput;\n\t\t\t\t\t\t\t\t\tstreamContainer.setAttribute('data-authoritative-terminal-content', 'true');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (streamContainer && typeof completedOutput === 'string' && completedOutput !== '') {\n\t\t\t\t\t\t\t\t\tif (window.renderStreamingContent) {\n\t\t\t\t\t\t\t\t\t\tvar liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;\n\t\t\t\t\t\t\t\t\t\tvar renderPromise = liveRenderer(streamContainer, completedOutput);\n\t\t\t\t\t\t\t\t\t\tif (renderPromise && typeof renderPromise.catch === 'function') {\n\t\t\t\t\t\t\t\t\t\t\trenderPromise.catch(function() { streamContainer.textContent = completedOutput; });\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tstreamContainer.textContent = completedOutput;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (streamContainer) {\n\t\t\t\t\t\t\t\t\tstreamContainer.classList.remove('hidden');\n\t\t\t\t\t\t\t\t\tvar bubble = streamContainer.closest('.chat-bubble-assistant-msg');\n\t\t\t\t\t\t\t\t\tif (bubble) {\n\t\t\t\t\t\t\t\t\t\tvar thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);\n\t\t\t\t\t\t\t\t\t\tif (thinkingWrap) {\n\t\t\t\t\t\t\t\t\t\t\tthinkingWrap.classList.add('hidden');\n\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\tvar thinking = bubble.querySelector('.ov-loading-dots');\n\t\t\t\t\t\t\t\t\t\t\tif (thinking) thinking.classList.add('hidden');\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tvar loading = bubble.querySelector('.loading-dots, [id^=\"streaming-dots-\"]');\n\t\t\t\t\t\t\t\t\t\tif (loading) loading.classList.add('hidden');\n\t\t\t\t\t\t\t\t\t\tif (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t\t\tif (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t\t\tif (window.cleanBubbleContent) window.cleanBubbleContent(bubble);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\t\tshowCompletedThreadTerminalStatus(terminalStatus);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction renderQueuedRow(data) {\n\t\t\t\t\t\t\tif (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;\n\t\t\t\t\t\t\tif (document.querySelector('[data-thread-input-id=\"' + data.pending_input_id + '\"][data-task-id=\"' + taskId + '\"]')) return;\n\t\t\t\t\t\t\tvar pendingContainer = ensureComposerPendingContainer();\t\t\t\t\t\tif (!pendingContainer) return;\n\t\t\t\t\t\t\tvar queuedRow = document.createElement('div');\n\t\t\t\t\t\t\tqueuedRow.id = 'thread-input-' + data.pending_input_id;\n\t\t\t\t\t\t\tqueuedRow.className = 'queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';\n\t\t\t\t\t\t\tqueuedRow.setAttribute('data-thread-input-id', data.pending_input_id);\n\t\t\t\t\t\t\tqueuedRow.setAttribute('data-task-id', taskId);\n\t\t\t\t\t\t\tqueuedRow.setAttribute('data-input-mode', 'queued');\t\t\t\t\t\tqueuedRow.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\tvar preview = document.createElement('div');\n\t\t\t\t\t\tpreview.className = 'min-w-0 flex-1 truncate';\n\t\t\t\t\t\tpreview.textContent = data.message || '';\n\t\t\t\t\t\tpreview.setAttribute('data-pending-input-content', '');\n\t\t\t\t\t\tvar actionWrap = document.createElement('div');\n\t\t\t\t\t\tactionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';\n\t\t\t\t\t\tvar steerBtn = document.createElement('button');\n\t\t\t\t\t\tsteerBtn.type = 'button';\n\t\t\t\t\t\tsteerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';\n\t\t\t\t\t\tsteerBtn.setAttribute('hx-post', '/tasks/' + encodeURIComponent(taskId) + '/thread/queued/' + encodeURIComponent(data.pending_input_id) + '/steer?expected_turn_id=' + encodeURIComponent(data.exec_id || ''));\n\t\t\t\t\t\tsteerBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);\n\t\t\t\t\t\tsteerBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\t\tsteerBtn.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\tsteerBtn.setAttribute('aria-label', 'Convert queued follow-up to steering');\n\t\t\t\t\t\tsteerBtn.textContent = 'Steer';\n\t\t\t\t\t\tvar cancelBtn = document.createElement('button');\n\t\t\t\t\t\tcancelBtn.type = 'button';\n\t\t\t\t\t\tcancelBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';\n\t\t\t\t\t\tcancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.pending_input_id + '/cancel');\n\t\t\t\t\t\tcancelBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);\n\t\t\t\t\t\tcancelBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\t\tcancelBtn.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\tcancelBtn.setAttribute('aria-label', 'Cancel pending steering');\n\t\t\t\t\t\tcancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');\n\t\t\t\t\t\tcancelBtn.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg>';\n\t\t\t\t\t\tactionWrap.appendChild(steerBtn);\n\t\t\t\t\t\twindow.appendPendingThreadInputEditButton(actionWrap);\n\t\t\t\t\t\tactionWrap.appendChild(cancelBtn);\n\t\t\t\t\t\t\tqueuedRow.appendChild(preview);\n\t\t\t\t\t\t\tif (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued', 'Attachments queued with this follow-up'));\n\t\t\t\t\t\t\tqueuedRow.appendChild(actionWrap);\t\t\t\t\t\tpendingContainer.appendChild(queuedRow);\n\t\t\t\t\t\tif (window.htmx) htmx.process(queuedRow);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction renderSteeringRow(data) {\n\t\t\t\t\t\t\tif (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;\n\t\t\t\t\t\t\tvar selector = '[data-thread-input-id=\"' + data.pending_input_id + '\"][data-task-id=\"' + taskId + '\"]';\n\t\t\t\t\t\t\t\tvar existing = document.querySelector(selector);\n\t\t\t\t\t\t\t\t\tif (existing && existing.getAttribute('data-input-mode') === 'steering') return;\n\t\t\t\t\t\t\t\t\tif (directSteerInFlight && !existing) return;\n\t\t\t\t\t\t\t\t\tif (queuedSteerInFlight[data.pending_input_id]) return;\t\t\t\t\t\t\t\tvar pendingContainer = ensureComposerPendingContainer();\t\t\t\t\t\t\tif (!pendingContainer) return;\n\t\t\t\t\t\t\tif (existing) existing.remove();\n\t\t\t\t\t\t\tvar steeringRow = document.createElement('div');\n\t\t\t\t\t\t\tsteeringRow.id = 'thread-input-' + data.pending_input_id;\n\t\t\t\t\t\t\tsteeringRow.className = 'steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';\n\t\t\t\t\t\t\tsteeringRow.setAttribute('data-thread-input-id', data.pending_input_id);\n\t\t\t\t\t\t\tsteeringRow.setAttribute('data-task-id', taskId);\n\t\t\t\t\t\t\tsteeringRow.setAttribute('data-input-mode', 'steering');\n\t\t\t\t\t\t\tsteeringRow.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\t\tvar content = document.createElement('div');\n\t\t\t\t\t\t\tcontent.className = 'min-w-0 flex-1';\n\t\t\t\t\t\t\tcontent.innerHTML = '<div class=\"text-xs font-semibold opacity-70\">Steering pending</div>';\n\t\t\t\t\t\t\tvar preview = document.createElement('div');\n\t\t\t\t\t\t\tpreview.className = 'truncate';\n\t\t\t\t\t\t\tpreview.textContent = data.message || '';\n\t\t\t\t\t\tpreview.setAttribute('data-pending-input-content', '');\n\t\t\t\t\t\t\tcontent.appendChild(preview);\n\t\t\t\t\t\t\tvar hint = document.createElement('div');\n\t\t\t\t\t\t\thint.className = 'text-xs opacity-60';\n\t\t\t\t\t\t\thint.textContent = 'Will be applied before the active run\\'s next model step.';\n\t\t\t\t\t\t\tcontent.appendChild(hint);\n\t\t\t\t\t\t\tvar actionWrap = document.createElement('div');\n\t\t\t\t\t\t\tactionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';\n\t\t\t\t\t\t\tvar cancelBtn = document.createElement('button');\n\t\t\t\t\t\t\tcancelBtn.type = 'button';\n\t\t\t\t\t\t\tcancelBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';\n\t\t\t\t\t\t\tcancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.pending_input_id + '/cancel');\n\t\t\t\t\t\t\tcancelBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);\n\t\t\t\t\t\t\tcancelBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\t\t\tcancelBtn.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\t\tcancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');\n\t\t\t\t\t\t\tcancelBtn.setAttribute('aria-label', 'Cancel pending steering');\n\t\t\t\t\t\t\tcancelBtn.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg>';\n\t\t\t\t\t\t\twindow.appendPendingThreadInputEditButton(actionWrap);\n\t\t\t\t\t\tactionWrap.appendChild(cancelBtn);\n\t\t\t\t\t\t\tsteeringRow.appendChild(content);\n\t\t\t\t\t\t\tif (data.has_attachments) steeringRow.appendChild(createPendingAttachmentBadge('Attachments included', 'Attachments included with this steering instruction'));\n\t\t\t\t\t\t\tsteeringRow.appendChild(actionWrap);\n\t\t\t\t\t\t\tpendingContainer.appendChild(steeringRow);\n\t\t\t\t\t\t\tif (window.htmx) htmx.process(steeringRow);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar pendingFragmentExecs = {};\t\t\t\t\t\twindow._pendingTaskThreadLiveEvents = window._pendingTaskThreadLiveEvents || {};\n\t\t\t\t\t\tfunction rememberPendingExecutionEvent(data) {\n\t\t\t\t\t\t\tif (!data || data.task_id !== taskId || !data.exec_id) return;\n\t\t\t\t\t\t\twindow._pendingTaskThreadLiveEvents[taskId] = data;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction consumePendingExecutionEvent() {\n\t\t\t\t\t\t\tvar data = window._pendingTaskThreadLiveEvents && window._pendingTaskThreadLiveEvents[taskId];\n\t\t\t\t\t\t\tif (!data) return;\n\t\t\t\t\t\t\tdelete window._pendingTaskThreadLiveEvents[taskId];\n\t\t\t\t\t\t\tensureStreamingFragment(data);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction ensureStreamingFragment(data, attempt) {\n\t\t\t\t\t\t\tattempt = attempt || 0;\n\t\t\t\t\t\t\tif (!currentTaskThreadView()) return;\n\t\t\t\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (!data || data.task_id !== taskId || !data.exec_id) return;\n\t\t\t\t\t\t\tif (!messages) {\n\t\t\t\t\t\t\t\trememberPendingExecutionEvent(data);\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (document.querySelector('[data-exec-id=\"' + data.exec_id + '\"]')) {\n\t\t\t\t\t\t\t\tdelete pendingFragmentExecs[data.exec_id];\n\t\t\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tremovePendingRow(data.pending_input_id);\n\t\t\t\t\t\t\tvar terminal = document.getElementById('task-thread-terminal-status');\n\t\t\t\t\t\t\tif (terminal) terminal.remove();\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined') return;\n\t\t\t\t\t\t\tif (pendingFragmentExecs[data.exec_id] && attempt === 0) return;\n\t\t\t\t\t\t\tpendingFragmentExecs[data.exec_id] = true;\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {\n\t\t\t\t\t\t\t\ttarget: '#task-thread-messages',\n\t\t\t\t\t\t\t\tswap: 'beforeend'\n\t\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\t\tdelete pendingFragmentExecs[data.exec_id];\n\t\t\t\t\t\t\t\tif (!currentTaskThreadView() || !messages.isConnected) return;\n\t\t\t\t\t\t\t\tvar view = currentTaskThreadView();\n\t\t\t\t\t\t\t\tif (view) view.setAttribute('data-task-active', 'true');\n\t\t\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);\n\t\t\t\t\t\t\t\tif (window.htmx) htmx.process(messages);\n\t\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\t\tif (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {\n\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(messages, true);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}).catch(function() {\n\t\t\t\t\t\t\t\tdelete pendingFragmentExecs[data.exec_id];\n\t\t\t\t\t\t\t\tif (attempt < 5) {\n\t\t\t\t\t\t\t\t\tsetTimeout(function() { ensureStreamingFragment(data, attempt + 1); }, 150 * (attempt + 1));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar chatHandler = function(event) {\n\t\t\t\t\t\t\tvar data = event.detail || {};\n\t\t\t\t\t\t\tif (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tsyncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || '');\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\t\tconsole.error('[task-thread] completed-output reconciliation failed:', err);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);\n\t\t\t\t\t\t};\n\t\t\t\t\t\tvar handler = function(event) {\n\t\t\t\t\t\tvar data = event.detail || {};\n\t\t\t\t\t\tif (data.type !== 'mixture_progress' && data.task_id !== taskId) return;\n\t\t\t\t\t\tif (data.type === 'mixture_progress') {\n\t\t\t\t\t\t\tif (window.applyMixtureProgress) window.applyMixtureProgress(data);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (data.type === 'task_status_changed' || data.type === 'task_category_changed') {\n\t\t\t\t\t\trefreshPendingInputsIfVisible();\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (data.type === 'task_thread_execution_started') {\n\t\t\t\t\t\trefreshPendingInputsIfVisible();\n\t\t\t\t\t\tensureStreamingFragment(data);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\t\t\tif (data.type === 'task_thread_input_applied') {\n\t\t\t\t\t\t\t\tremovePendingRow(data.pending_input_id);\n\t\t\t\t\t\t\t\trefreshPendingInputsIfVisible();\n\t\t\t\t\t\t\t\tensureStreamingFragment(data);\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (data.type === 'task_thread_input_cancelled') {\n\t\t\t\t\t\t\t\t\tremovePendingRow(data.pending_input_id);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (data.type === 'task_thread_input_steered') {\n\t\t\t\t\t\t\t\t\trenderSteeringRow(data);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (data.type === 'task_thread_input_queued') {\n\t\t\t\t\t\t\t\t\trenderQueuedRow(data);\n\t\t\t\t\t\t\t\t}\t\t\t\t};\n\t\t\t\t\t\twindow._taskThreadLiveHandlers[taskId] = handler;\n\t\t\t\t\t\twindow.addEventListener('sse-task-event', handler);\n\t\t\t\t\t\twindow.addEventListener('sse-chat-live-event', chatHandler);\n\t\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler);\n\t\t\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler);\n\t\t\t\t\t\twindow._taskThreadQueuedSteerRequestHandlers[taskId] = {\n\t\t\t\t\t\t\tbeforeRequest: queuedSteerBeforeRequestHandler,\n\t\t\t\t\t\t\tafterRequest: queuedSteerAfterRequestHandler,\n\t\t\t\t\t\t};\n\t\t\t\t\t\tconsumePendingExecutionEvent();\n\t\t\t\t\t// On SSE reconnect (e.g. after tab blur/refocus), refresh the pending-inputs\n\t\t\t\t// container so any steering rows missed while the tab was hidden are reconciled.\n\t\t\t\t// The server query excludes prepared/in-flight steering (expected_turn_id=NULL),\n\t\t\t\t// so stale \"Steering pending\" rows are cleanly replaced with current state.\n\t\t\t\t\tvar reconnectHandler = function(event) {\n\t\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\t\tif (!detail.reconnected || !currentTaskThreadView()) return;\n\t\t\t\t\t\tvar pendingContainer = currentPendingContainer();\n\t\t\t\t\t\tif (pendingContainer && typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (window.reconcileTaskThreadState) window.reconcileTaskThreadState(taskId);\n\t\t\t\t\t};\t\t\t\twindow._taskThreadReconnectHandlers = window._taskThreadReconnectHandlers || {};\n\t\t\t\tif (window._taskThreadReconnectHandlers[taskId]) {\n\t\t\t\t\twindow.removeEventListener('sse-live-connected', window._taskThreadReconnectHandlers[taskId]);\n\t\t\t\t}\n\t\t\t\twindow._taskThreadReconnectHandlers[taskId] = reconnectHandler;\n\t\t\t\twindow.addEventListener('sse-live-connected', reconnectHandler);\n\n\t\t\t\t\tvar cleanupTaskThreadLiveHandlers = function(event) {\n\t\t\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\t\t\tif (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content')) {\n\t\t\t\t\t\t\tdisposed = true;\n\t\t\t\t\t\t\twindow.removeEventListener('sse-task-event', handler);\n\t\t\t\t\t\t\twindow.removeEventListener('sse-chat-live-event', chatHandler);\n\t\t\t\t\t\t\tdelete window._taskThreadLiveHandlers[taskId];\n\t\t\t\t\t\t\t\twindow.removeEventListener('sse-live-connected', reconnectHandler);\n\t\t\t\t\t\t\t\tdelete window._taskThreadReconnectHandlers[taskId];\n\t\t\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler);\n\t\t\t\t\t\t\t\tdocument.body.removeEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler);\n\t\t\t\t\t\t\t\tdelete window._taskThreadQueuedSteerRequestHandlers[taskId];\n\t\t\t\t\t\t\t\tclearQueuedSteerRequestGuards();\n\t\t\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);\n\t\t\t})();\n\t\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<script type=\"text/javascript\">\n window.taskThreadURL = function(taskID, suffix, query) {\n  var view = document.getElementById('task-thread-view');\n  var base = view && view.getAttribute('data-task-id') === taskID ? view.getAttribute('data-thread-api-base') : '';\n  var project = view && view.getAttribute('data-task-id') === taskID ? view.getAttribute('data-thread-project-id') : '';\n  var params = query || '';\n  if (project && !new URLSearchParams(params).has('project_id')) params += (params ? '&' : '') + 'project_id=' + encodeURIComponent(project);\n  return (base || '/tasks/' + encodeURIComponent(taskID) + '/thread') + (suffix || '') + (params ? '?' + params : '');\n };\n\t\t\t(function() {\n\t\t\t\t\tvar threadView = document.getElementById('task-thread-view');\n\t\t\t\t\tvar taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';\n\t\t\t\t\tif (!taskId) return;\n\t\t\t\t\tvar disposed = false;\n\t\t\t\t\t\tvar queuedSteerInFlight = {};\n\t\t\t\t\t\tvar queuedSteerClearTimers = {};\n\t\t\t\t\t\tvar directSteerInFlight = false;\n\t\t\t\t\t\tvar directSteerClearTimer = null;\t\t\t\t\tfunction taskQueuedSteerInputID(triggerEl) {\n\t\t\t\t\t\tif (!triggerEl || !triggerEl.getAttribute) return '';\n\t\t\t\t\t\tvar hxPost = triggerEl.getAttribute('hx-post') || '';\n\t\t\t\t\t\tvar match = hxPost.match(/\\/thread\\/queued\\/([^\\/]+)\\/steer(?:\\?.*)?$/);\n\t\t\t\t\t\treturn match ? match[1] : '';\n\t\t\t\t\t}\n\t\t\t\t\t\tvar queuedSteerBeforeRequestHandler = function(event) {\n\t\t\t\t\t\t\tif (!currentTaskThreadView()) return;\n\t\t\t\t\t\t\tvar triggerEl = event.detail && event.detail.elt;\n\t\t\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-form' && triggerEl.getAttribute('data-submit-intent') === 'steer') {\n\t\t\t\t\t\t\t\tdirectSteerInFlight = true;\n\t\t\t\t\t\t\t\tif (directSteerClearTimer) clearTimeout(directSteerClearTimer);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar inputID = taskQueuedSteerInputID(triggerEl);\n\t\t\t\t\t\t\tif (!inputID) return;\n\t\t\t\t\t\t\tqueuedSteerInFlight[inputID] = true;\n\t\t\t\t\t\t\tif (queuedSteerClearTimers[inputID]) clearTimeout(queuedSteerClearTimers[inputID]);\n\t\t\t\t\t\t};\n\t\t\t\t\t\tvar queuedSteerAfterRequestHandler = function(event) {\n\t\t\t\t\t\t\tvar triggerEl = event.detail && event.detail.elt;\n\t\t\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-form' && directSteerInFlight) {\n\t\t\t\t\t\t\t\tdirectSteerClearTimer = setTimeout(function() {\n\t\t\t\t\t\t\t\t\tdirectSteerInFlight = false;\n\t\t\t\t\t\t\t\t\tdirectSteerClearTimer = null;\n\t\t\t\t\t\t\t\t}, 1000);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar inputID = taskQueuedSteerInputID(triggerEl);\n\t\t\t\t\t\t\tif (!inputID) return;\n\t\t\t\t\t\t\tqueuedSteerClearTimers[inputID] = setTimeout(function() {\n\t\t\t\t\t\t\t\tdelete queuedSteerInFlight[inputID];\n\t\t\t\t\t\t\t\tdelete queuedSteerClearTimers[inputID];\n\t\t\t\t\t\t\t}, 1000);\n\t\t\t\t\t\t};\n\t\t\t\t\t\tfunction clearQueuedSteerRequestGuards() {\n\t\t\t\t\t\t\tObject.keys(queuedSteerClearTimers).forEach(function(inputID) {\n\t\t\t\t\t\t\t\tclearTimeout(queuedSteerClearTimers[inputID]);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tif (directSteerClearTimer) clearTimeout(directSteerClearTimer);\n\t\t\t\t\t\t\tqueuedSteerInFlight = {};\n\t\t\t\t\t\t\tqueuedSteerClearTimers = {};\n\t\t\t\t\t\t\tdirectSteerInFlight = false;\n\t\t\t\t\t\t\tdirectSteerClearTimer = null;\n\t\t\t\t\t\t}\t\t\t\t\twindow._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};\n\t\t\t\t\twindow._taskThreadQueuedSteerRequestHandlers = window._taskThreadQueuedSteerRequestHandlers || {};\n\t\t\t\t\tif (window._taskThreadLiveHandlers[taskId]) {\n\t\t\t\t\t\twindow.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskThreadQueuedSteerRequestHandlers[taskId]) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeRequest', window._taskThreadQueuedSteerRequestHandlers[taskId].beforeRequest);\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:afterRequest', window._taskThreadQueuedSteerRequestHandlers[taskId].afterRequest);\n\t\t\t\t\t\tdelete window._taskThreadQueuedSteerRequestHandlers[taskId];\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction currentTaskThreadView() {\n\t\t\t\t\t\t\tif (disposed) return null;\n\t\t\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\t\t\treturn view && view.getAttribute('data-task-id') === taskId ? view : null;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction scopedPendingContainerSelector() {\n\t\t\t\t\t\t\treturn '#pending-thread-inputs[data-task-id=\"' + taskId.replace(/\"/g, '\\\\\"') + '\"]';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction currentPendingContainer() {\n\t\t\t\t\t\t\treturn currentTaskThreadView() ? document.querySelector(scopedPendingContainerSelector()) : null;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction removePendingRow(inputId) {\n\t\t\t\t\t\t\tif (!inputId || !currentTaskThreadView()) return;\n\t\t\t\t\t\t\tvar row = document.querySelector('[data-thread-input-id=\"' + inputId.replace(/\"/g, '\\\\\"') + '\"][data-task-id=\"' + taskId.replace(/\"/g, '\\\\\"') + '\"]');\n\t\t\t\t\t\t\tif (row) row.remove();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction ensureComposerPendingContainer() {\n\t\t\t\t\t\t\tif (!currentTaskThreadView()) return null;\n\t\t\t\t\t\t\tvar pendingContainer = currentPendingContainer();\n\t\t\t\t\t\t\tif (pendingContainer) return pendingContainer;\n\t\t\t\t\t\t\tvar form = document.getElementById('task-thread-form');\n\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\tif (!form || !textarea) return null;\n\t\t\t\t\t\t\tpendingContainer = document.createElement('div');\n\t\t\t\t\t\t\tpendingContainer.id = 'pending-thread-inputs';\n\t\t\t\t\t\t\tpendingContainer.className = 'space-y-1.5';\n\t\t\t\t\t\t\tpendingContainer.setAttribute('data-task-id', taskId);\n\t\t\t\t\t\t\t\tvar textareaWrap = textarea.parentElement;\n\t\t\t\t\t\t\t\tform.insertBefore(pendingContainer, textareaWrap || textarea);\n\t\t\t\t\t\t\t\treturn pendingContainer;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction createPendingAttachmentBadge(label, title) {\n\t\t\t\t\t\t\t\tvar badge = document.createElement('div');\n\t\t\t\t\t\t\t\tbadge.className = 'badge badge-ghost badge-sm shrink-0 gap-1 text-xs';\n\t\t\t\t\t\t\t\tbadge.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\t\t\tbadge.setAttribute('aria-label', title);\n\t\t\t\t\t\t\t\tbadge.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-3 w-3\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486\"></path></svg><span>' + label + '</span>';\n\t\t\t\t\t\t\t\treturn badge;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction refreshPendingInputsIfVisible() {\t\t\t\t\t\t\tvar pendingContainer = currentPendingContainer();\n\t\t\t\t\t\t\tif (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;\n\t\t\t\t\t\t\thtmx.ajax('GET', window.taskThreadURL(taskId, '/pending-inputs'), {target: scopedPendingContainerSelector(), swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction refreshThreadComposerAction() {\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;\n\t\t\t\t\t\t\thtmx.ajax('GET', window.taskThreadURL(taskId, '/composer-action'), {target: '#task-thread-form-primary-action', swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction stopThreadPollingAfterCompletion() {\n\t\t\t\t\t\t\tvar view = currentTaskThreadView();\n\t\t\t\t\t\t\tif (!view) return;\n\t\t\t\t\t\t\tview.setAttribute('data-task-active', 'false');\n\t\t\t\t\t\t\tview.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\tview.removeAttribute('hx-get');\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(view);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction showCompletedThreadTerminalStatus(status) {\n\t\t\t\t\t\t\tstopThreadPollingAfterCompletion();\n\t\t\t\t\t\t\tvar form = document.getElementById('task-thread-form');\n\t\t\t\t\t\t\tif (form) {\n\t\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\t\tif (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (status !== 'failed' && status !== 'cancelled') return;\n\t\t\t\t\t\t\tif (!messages || document.getElementById('task-thread-terminal-status')) return;\n\t\t\t\t\t\t\tvar wrap = document.createElement('div');\n\t\t\t\t\t\t\twrap.id = 'task-thread-terminal-status';\n\t\t\t\t\t\t\twrap.className = 'flex items-center justify-center gap-2 py-2';\n\t\t\t\t\t\t\tvar inner = document.createElement('div');\n\t\t\t\t\t\t\tvar statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');\n\t\t\t\t\t\t\tinner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;\n\t\t\t\t\t\t\tvar icon = document.createElement('span');\n\t\t\t\t\t\t\ticon.setAttribute('aria-hidden', 'true');\n\t\t\t\t\t\t\ticon.textContent = status === 'failed' ? '✕' : (status === 'cancelled' ? '■' : '✓');\n\t\t\t\t\t\t\tvar text = document.createElement('span');\n\t\t\t\t\t\t\ttext.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));\n\t\t\t\t\t\t\tinner.appendChild(icon);\n\t\t\t\t\t\t\tinner.appendChild(text);\n\t\t\t\t\t\t\twrap.appendChild(inner);\n\t\t\t\t\t\t\tmessages.appendChild(wrap);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction syncCompletedThreadOutput(execId, completedOutput, status) {\n\t\t\t\t\t\t\t\tif (!currentTaskThreadView() || !execId) return;\n\t\t\t\t\t\t\t\tvar terminalStatus = status === 'failed' || status === 'cancelled' || status === 'completed' ? status : '';\n\t\t\t\t\t\t\t\tvar completedPair = document.getElementById('chat-execution-' + execId);\n\t\t\t\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) terminalStatus = window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);\n\t\t\t\t\t\t\t\telse if (completedPair) {\n\t\t\t\t\t\t\t\t\tvar currentStatus = completedPair.getAttribute('data-exec-status') || '';\n\t\t\t\t\t\t\t\t\tif (!terminalStatus) terminalStatus = currentStatus === 'failed' || currentStatus === 'cancelled' || currentStatus === 'completed' ? currentStatus : 'completed';\n\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('data-exec-status', terminalStatus);\n\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (!terminalStatus) terminalStatus = 'completed';\n\t\t\t\t\t\t\t\tvar streamContainer = document.getElementById('streaming-message-' + execId);\n\t\t\t\t\t\t\t\tif (streamContainer && typeof completedOutput === 'string') {\n\t\t\t\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);\n\t\t\t\t\t\t\t\t\telse streamContainer.setAttribute('data-raw-content', completedOutput);\n\t\t\t\t\t\t\t\t\tstreamContainer._authoritativeTerminalContent = completedOutput;\n\t\t\t\t\t\t\t\t\tstreamContainer.setAttribute('data-authoritative-terminal-content', 'true');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (streamContainer && typeof completedOutput === 'string' && completedOutput !== '') {\n\t\t\t\t\t\t\t\t\tif (window.renderStreamingContent) {\n\t\t\t\t\t\t\t\t\t\tvar liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;\n\t\t\t\t\t\t\t\t\t\tvar renderPromise = liveRenderer(streamContainer, completedOutput);\n\t\t\t\t\t\t\t\t\t\tif (renderPromise && typeof renderPromise.catch === 'function') {\n\t\t\t\t\t\t\t\t\t\t\trenderPromise.catch(function() { streamContainer.textContent = completedOutput; });\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tstreamContainer.textContent = completedOutput;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (streamContainer) {\n\t\t\t\t\t\t\t\t\tstreamContainer.classList.remove('hidden');\n\t\t\t\t\t\t\t\t\tvar bubble = streamContainer.closest('.chat-bubble-assistant-msg');\n\t\t\t\t\t\t\t\t\tif (bubble) {\n\t\t\t\t\t\t\t\t\t\tvar thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);\n\t\t\t\t\t\t\t\t\t\tif (thinkingWrap) {\n\t\t\t\t\t\t\t\t\t\t\tthinkingWrap.classList.add('hidden');\n\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\tvar thinking = bubble.querySelector('.ov-loading-dots');\n\t\t\t\t\t\t\t\t\t\t\tif (thinking) thinking.classList.add('hidden');\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tvar loading = bubble.querySelector('.loading-dots, [id^=\"streaming-dots-\"]');\n\t\t\t\t\t\t\t\t\t\tif (loading) loading.classList.add('hidden');\n\t\t\t\t\t\t\t\t\t\tif (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t\t\tif (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t\t\tif (window.cleanBubbleContent) window.cleanBubbleContent(bubble);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\t\tshowCompletedThreadTerminalStatus(terminalStatus);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction renderQueuedRow(data) {\n\t\t\t\t\t\t\tif (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;\n\t\t\t\t\t\t\tif (document.querySelector('[data-thread-input-id=\"' + data.pending_input_id + '\"][data-task-id=\"' + taskId + '\"]')) return;\n\t\t\t\t\t\t\tvar pendingContainer = ensureComposerPendingContainer();\t\t\t\t\t\tif (!pendingContainer) return;\n\t\t\t\t\t\t\tvar queuedRow = document.createElement('div');\n\t\t\t\t\t\t\tqueuedRow.id = 'thread-input-' + data.pending_input_id;\n\t\t\t\t\t\t\tqueuedRow.className = 'queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';\n\t\t\t\t\t\t\tqueuedRow.setAttribute('data-thread-input-id', data.pending_input_id);\n\t\t\t\t\t\t\tqueuedRow.setAttribute('data-task-id', taskId);\n\t\t\t\t\t\t\tqueuedRow.setAttribute('data-input-mode', 'queued');\t\t\t\t\t\tqueuedRow.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\tvar preview = document.createElement('div');\n\t\t\t\t\t\tpreview.className = 'min-w-0 flex-1 truncate';\n\t\t\t\t\t\tpreview.textContent = data.message || '';\n\t\t\t\t\t\tpreview.setAttribute('data-pending-input-content', '');\n\t\t\t\t\t\tvar actionWrap = document.createElement('div');\n\t\t\t\t\t\tactionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';\n\t\t\t\t\t\tvar steerBtn = document.createElement('button');\n\t\t\t\t\t\tsteerBtn.type = 'button';\n\t\t\t\t\t\tsteerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';\n\t\t\t\t\t\tsteerBtn.setAttribute('hx-post', window.taskThreadURL(taskId, '/queued/' + encodeURIComponent(data.pending_input_id) + '/steer', 'expected_turn_id=' + encodeURIComponent(data.exec_id || '')));\n\t\t\t\t\t\tsteerBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);\n\t\t\t\t\t\tsteerBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\t\tsteerBtn.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\tsteerBtn.setAttribute('aria-label', 'Convert queued follow-up to steering');\n\t\t\t\t\t\tsteerBtn.textContent = 'Steer';\n\t\t\t\t\t\tvar cancelBtn = document.createElement('button');\n\t\t\t\t\t\tcancelBtn.type = 'button';\n\t\t\t\t\t\tcancelBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';\n\t\t\t\t\t\tcancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.pending_input_id + '/cancel');\n\t\t\t\t\t\tcancelBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);\n\t\t\t\t\t\tcancelBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\t\tcancelBtn.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\tcancelBtn.setAttribute('aria-label', 'Cancel pending steering');\n\t\t\t\t\t\tcancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');\n\t\t\t\t\t\tcancelBtn.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg>';\n\t\t\t\t\t\tactionWrap.appendChild(steerBtn);\n\t\t\t\t\t\twindow.appendPendingThreadInputEditButton(actionWrap);\n\t\t\t\t\t\tactionWrap.appendChild(cancelBtn);\n\t\t\t\t\t\t\tqueuedRow.appendChild(preview);\n\t\t\t\t\t\t\tif (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued', 'Attachments queued with this follow-up'));\n\t\t\t\t\t\t\tqueuedRow.appendChild(actionWrap);\t\t\t\t\t\tpendingContainer.appendChild(queuedRow);\n\t\t\t\t\t\tif (window.htmx) htmx.process(queuedRow);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction renderSteeringRow(data) {\n\t\t\t\t\t\t\tif (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;\n\t\t\t\t\t\t\tvar selector = '[data-thread-input-id=\"' + data.pending_input_id + '\"][data-task-id=\"' + taskId + '\"]';\n\t\t\t\t\t\t\t\tvar existing = document.querySelector(selector);\n\t\t\t\t\t\t\t\t\tif (existing && existing.getAttribute('data-input-mode') === 'steering') return;\n\t\t\t\t\t\t\t\t\tif (directSteerInFlight && !existing) return;\n\t\t\t\t\t\t\t\t\tif (queuedSteerInFlight[data.pending_input_id]) return;\t\t\t\t\t\t\t\tvar pendingContainer = ensureComposerPendingContainer();\t\t\t\t\t\t\tif (!pendingContainer) return;\n\t\t\t\t\t\t\tif (existing) existing.remove();\n\t\t\t\t\t\t\tvar steeringRow = document.createElement('div');\n\t\t\t\t\t\t\tsteeringRow.id = 'thread-input-' + data.pending_input_id;\n\t\t\t\t\t\t\tsteeringRow.className = 'steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';\n\t\t\t\t\t\t\tsteeringRow.setAttribute('data-thread-input-id', data.pending_input_id);\n\t\t\t\t\t\t\tsteeringRow.setAttribute('data-task-id', taskId);\n\t\t\t\t\t\t\tsteeringRow.setAttribute('data-input-mode', 'steering');\n\t\t\t\t\t\t\tsteeringRow.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\t\tvar content = document.createElement('div');\n\t\t\t\t\t\t\tcontent.className = 'min-w-0 flex-1';\n\t\t\t\t\t\t\tcontent.innerHTML = '<div class=\"text-xs font-semibold opacity-70\">Steering pending</div>';\n\t\t\t\t\t\t\tvar preview = document.createElement('div');\n\t\t\t\t\t\t\tpreview.className = 'truncate';\n\t\t\t\t\t\t\tpreview.textContent = data.message || '';\n\t\t\t\t\t\tpreview.setAttribute('data-pending-input-content', '');\n\t\t\t\t\t\t\tcontent.appendChild(preview);\n\t\t\t\t\t\t\tvar hint = document.createElement('div');\n\t\t\t\t\t\t\thint.className = 'text-xs opacity-60';\n\t\t\t\t\t\t\thint.textContent = 'Will be applied before the active run\\'s next model step.';\n\t\t\t\t\t\t\tcontent.appendChild(hint);\n\t\t\t\t\t\t\tvar actionWrap = document.createElement('div');\n\t\t\t\t\t\t\tactionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';\n\t\t\t\t\t\t\tvar cancelBtn = document.createElement('button');\n\t\t\t\t\t\t\tcancelBtn.type = 'button';\n\t\t\t\t\t\t\tcancelBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';\n\t\t\t\t\t\t\tcancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.pending_input_id + '/cancel');\n\t\t\t\t\t\t\tcancelBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);\n\t\t\t\t\t\t\tcancelBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\t\t\tcancelBtn.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\t\t\tcancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');\n\t\t\t\t\t\t\tcancelBtn.setAttribute('aria-label', 'Cancel pending steering');\n\t\t\t\t\t\t\tcancelBtn.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg>';\n\t\t\t\t\t\t\twindow.appendPendingThreadInputEditButton(actionWrap);\n\t\t\t\t\t\tactionWrap.appendChild(cancelBtn);\n\t\t\t\t\t\t\tsteeringRow.appendChild(content);\n\t\t\t\t\t\t\tif (data.has_attachments) steeringRow.appendChild(createPendingAttachmentBadge('Attachments included', 'Attachments included with this steering instruction'));\n\t\t\t\t\t\t\tsteeringRow.appendChild(actionWrap);\n\t\t\t\t\t\t\tpendingContainer.appendChild(steeringRow);\n\t\t\t\t\t\t\tif (window.htmx) htmx.process(steeringRow);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar pendingFragmentExecs = {};\t\t\t\t\t\twindow._pendingTaskThreadLiveEvents = window._pendingTaskThreadLiveEvents || {};\n\t\t\t\t\t\tfunction rememberPendingExecutionEvent(data) {\n\t\t\t\t\t\t\tif (!data || data.task_id !== taskId || !data.exec_id) return;\n\t\t\t\t\t\t\twindow._pendingTaskThreadLiveEvents[taskId] = data;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction consumePendingExecutionEvent() {\n\t\t\t\t\t\t\tvar data = window._pendingTaskThreadLiveEvents && window._pendingTaskThreadLiveEvents[taskId];\n\t\t\t\t\t\t\tif (!data) return;\n\t\t\t\t\t\t\tdelete window._pendingTaskThreadLiveEvents[taskId];\n\t\t\t\t\t\t\tensureStreamingFragment(data);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction ensureStreamingFragment(data, attempt) {\n\t\t\t\t\t\t\tattempt = attempt || 0;\n\t\t\t\t\t\t\tif (!currentTaskThreadView()) return;\n\t\t\t\t\t\t\tvar messages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (!data || data.task_id !== taskId || !data.exec_id) return;\n\t\t\t\t\t\t\tif (!messages) {\n\t\t\t\t\t\t\t\trememberPendingExecutionEvent(data);\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (document.querySelector('[data-exec-id=\"' + data.exec_id + '\"]')) {\n\t\t\t\t\t\t\t\tdelete pendingFragmentExecs[data.exec_id];\n\t\t\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tremovePendingRow(data.pending_input_id);\n\t\t\t\t\t\t\tvar terminal = document.getElementById('task-thread-terminal-status');\n\t\t\t\t\t\t\tif (terminal) terminal.remove();\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined') return;\n\t\t\t\t\t\t\tif (pendingFragmentExecs[data.exec_id] && attempt === 0) return;\n\t\t\t\t\t\t\tpendingFragmentExecs[data.exec_id] = true;\n\t\t\t\t\t\t\thtmx.ajax('GET', window.taskThreadURL(taskId, '/executions/' + encodeURIComponent(data.exec_id) + '/fragment'), {\n\t\t\t\t\t\t\t\ttarget: '#task-thread-messages',\n\t\t\t\t\t\t\t\tswap: 'beforeend'\n\t\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\t\tdelete pendingFragmentExecs[data.exec_id];\n\t\t\t\t\t\t\t\tif (!currentTaskThreadView() || !messages.isConnected) return;\n\t\t\t\t\t\t\t\tvar view = currentTaskThreadView();\n\t\t\t\t\t\t\t\tif (view) view.setAttribute('data-task-active', 'true');\n\t\t\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);\n\t\t\t\t\t\t\t\tif (window.htmx) htmx.process(messages);\n\t\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\t\tif (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {\n\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(messages, true);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}).catch(function() {\n\t\t\t\t\t\t\t\tdelete pendingFragmentExecs[data.exec_id];\n\t\t\t\t\t\t\t\tif (attempt < 5) {\n\t\t\t\t\t\t\t\t\tsetTimeout(function() { ensureStreamingFragment(data, attempt + 1); }, 150 * (attempt + 1));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar chatHandler = function(event) {\n                            var data = event.detail || {};\n\n\t\t\t\t\t\t\tif (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tsyncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || '');\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\t\tconsole.error('[task-thread] completed-output reconciliation failed:', err);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);\n\t\t\t\t\t\t};\n\t\t\t\t\t\tvar handler = function(event) {\n\t\t\t\t\t\tvar data = event.detail || {};\n\t\t\t\t\t\tif (data.type !== 'mixture_progress' && data.task_id !== taskId) return;\n\t\t\t\t\t\tif (data.type === 'mixture_progress') {\n\t\t\t\t\t\t\tif (window.applyMixtureProgress) window.applyMixtureProgress(data);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (data.type === 'task_status_changed' || data.type === 'task_category_changed') {\n\t\t\t\t\t\trefreshPendingInputsIfVisible();\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (data.type === 'task_thread_execution_started') {\n\t\t\t\t\t\trefreshPendingInputsIfVisible();\n\t\t\t\t\t\tensureStreamingFragment(data);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\t\t\tif (data.type === 'task_thread_input_applied') {\n\t\t\t\t\t\t\t\tremovePendingRow(data.pending_input_id);\n\t\t\t\t\t\t\t\trefreshPendingInputsIfVisible();\n\t\t\t\t\t\t\t\tensureStreamingFragment(data);\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (data.type === 'task_thread_input_cancelled') {\n\t\t\t\t\t\t\t\t\tremovePendingRow(data.pending_input_id);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (data.type === 'task_thread_input_steered') {\n\t\t\t\t\t\t\t\t\trenderSteeringRow(data);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (data.type === 'task_thread_input_queued') {\n\t\t\t\t\t\t\t\t\trenderQueuedRow(data);\n\t\t\t\t\t\t\t\t}\t\t\t\t};\n\t\t\t\t\t\twindow._taskThreadLiveHandlers[taskId] = handler;\n\t\t\t\t\t\twindow.addEventListener('sse-task-event', handler);\n\t\t\t\t\t\twindow.addEventListener('sse-chat-live-event', chatHandler);\n\t\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler);\n\t\t\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler);\n\t\t\t\t\t\twindow._taskThreadQueuedSteerRequestHandlers[taskId] = {\n\t\t\t\t\t\t\tbeforeRequest: queuedSteerBeforeRequestHandler,\n\t\t\t\t\t\t\tafterRequest: queuedSteerAfterRequestHandler,\n\t\t\t\t\t\t};\n\t\t\t\t\t\tconsumePendingExecutionEvent();\n\t\t\t\t\t// On SSE reconnect (e.g. after tab blur/refocus), refresh the pending-inputs\n\t\t\t\t// container so any steering rows missed while the tab was hidden are reconciled.\n\t\t\t\t// The server query excludes prepared/in-flight steering (expected_turn_id=NULL),\n\t\t\t\t// so stale \"Steering pending\" rows are cleanly replaced with current state.\n\t\t\t\t\tvar reconnectHandler = function(event) {\n\t\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\t\tif (!detail.reconnected || !currentTaskThreadView()) return;\n\t\t\t\t\t\tvar pendingContainer = currentPendingContainer();\n\t\t\t\t\t\tif (pendingContainer && typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\thtmx.ajax('GET', window.taskThreadURL(taskId, '/pending-inputs'), {target: scopedPendingContainerSelector(), swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (window.reconcileTaskThreadState) window.reconcileTaskThreadState(taskId);\n\t\t\t\t\t};\t\t\t\twindow._taskThreadReconnectHandlers = window._taskThreadReconnectHandlers || {};\n\t\t\t\tif (window._taskThreadReconnectHandlers[taskId]) {\n\t\t\t\t\twindow.removeEventListener('sse-live-connected', window._taskThreadReconnectHandlers[taskId]);\n\t\t\t\t}\n\t\t\t\twindow._taskThreadReconnectHandlers[taskId] = reconnectHandler;\n\t\t\t\twindow.addEventListener('sse-live-connected', reconnectHandler);\n\n\t\t\t\t\tvar cleanupTaskThreadLiveHandlers = function(event) {\n                        if (event.detail && event.detail.shouldSwap === false) return;\n\t\t\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\t\t\tif (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content')) {\n\t\t\t\t\t\t\tdisposed = true;\n\t\t\t\t\t\t\twindow.removeEventListener('sse-task-event', handler);\n\t\t\t\t\t\t\twindow.removeEventListener('sse-chat-live-event', chatHandler);\n\t\t\t\t\t\t\tdelete window._taskThreadLiveHandlers[taskId];\n\t\t\t\t\t\t\t\twindow.removeEventListener('sse-live-connected', reconnectHandler);\n\t\t\t\t\t\t\t\tdelete window._taskThreadReconnectHandlers[taskId];\n\t\t\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler);\n\t\t\t\t\t\t\t\tdocument.body.removeEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler);\n\t\t\t\t\t\t\t\tdelete window._taskThreadQueuedSteerRequestHandlers[taskId];\n\t\t\t\t\t\t\t\tclearQueuedSteerRequestGuards();\n\t\t\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);\n\t\t\t})();\n\t\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -964,64 +1003,64 @@ func RunningTaskCancelButton(taskID string, label string, target string, swap st
 			templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 			templ_7745c5c3_Buffer := templ.GetBuffer()
 			var templ_7745c5c3_ElementScripts []templ.ComponentScript
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<button class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<button class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var32 = []any{class}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var32...)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var33 string
-			templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var32).String()).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1, Col: 0}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "\" hx-post=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var34 string
-			templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/cancel", taskID)).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1362, Col: 51}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "\" hx-target=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var35 string
-			templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(target).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1363, Col: 20}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "\" hx-swap=\"")
+			var templ_7745c5c3_Var35 = []any{class}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var35...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var36 string
-			templ_7745c5c3_Var36, templ_7745c5c3_Err = templruntime.NewAttributeExpression(swap).Resolve(ctx)
+			templ_7745c5c3_Var36, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var35).String()).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1364, Col: 16}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1, Col: 0}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\" hx-confirm=\"Cancel this running task?\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\" hx-post=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var37 string
+			templ_7745c5c3_Var37, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/cancel", taskID)).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1393, Col: 51}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "\" hx-target=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var38 string
+			templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(target).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1394, Col: 20}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "\" hx-swap=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var39 string
+			templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(swap).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1395, Col: 16}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "\" hx-confirm=\"Cancel this running task?\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1035,20 +1074,20 @@ func RunningTaskCancelButton(taskID string, label string, target string, swap st
 			}
 			templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, ">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, ">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var37 string
-		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(label)
+		var templ_7745c5c3_Var40 string
+		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1366, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1397, Col: 9}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "</button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</button>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1074,30 +1113,30 @@ func TaskExecutionHistory(task *models.Task, executions []models.Execution, hasO
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<div id=\"task-execution-history\" class=\"mt-6\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "<div id=\"task-execution-history\" class=\"mt-6\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if task.Status == models.StatusRunning || task.Status == models.StatusPending {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, " hx-get=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, " hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var39 string
-			templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/executions?limit=%d", task.ID, windowLimit)).Resolve(ctx)
+			var templ_7745c5c3_Var42 string
+			templ_7745c5c3_Var42, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/executions?limit=%d", task.ID, windowLimit)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1375, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1406, Col: 78}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\" hx-trigger=\"every 3s\" hx-target=\"#task-execution-history\" hx-swap=\"morph:outerHTML\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\" hx-trigger=\"every 3s\" hx-target=\"#task-execution-history\" hx-swap=\"morph:outerHTML\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "><div class=\"flex items-center justify-between mb-3\"><h4 class=\"text-lg font-bold\">Execution History</h4><div class=\"flex items-center gap-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "><div class=\"flex items-center justify-between mb-3\"><h4 class=\"text-lg font-bold\">Execution History</h4><div class=\"flex items-center gap-2\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1106,17 +1145,17 @@ func TaskExecutionHistory(task *models.Task, executions []models.Execution, hasO
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "<span class=\"loading loading-spinner loading-sm\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "<span class=\"loading loading-spinner loading-sm\"></span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "</div></div><div id=\"task-execution-history-latest\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</div></div><div id=\"task-execution-history-latest\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(executions) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<p class=\"opacity-50\">No executions yet</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<p class=\"opacity-50\">No executions yet</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1126,7 +1165,7 @@ func TaskExecutionHistory(task *models.Task, executions []models.Execution, hasO
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "</div><div id=\"task-execution-history-loaded-older\" hx-preserve></div><div id=\"task-execution-history-older-loader\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "</div><div id=\"task-execution-history-loaded-older\" hx-preserve></div><div id=\"task-execution-history-older-loader\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1136,7 +1175,7 @@ func TaskExecutionHistory(task *models.Task, executions []models.Execution, hasO
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1161,7 +1200,7 @@ func TaskExecutionHistoryOlderPage(task *models.Task, executions []models.Execut
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<div id=\"task-execution-history-loaded-older\" hx-swap-oob=\"beforeend\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "<div id=\"task-execution-history-loaded-older\" hx-swap-oob=\"beforeend\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1169,7 +1208,7 @@ func TaskExecutionHistoryOlderPage(task *models.Task, executions []models.Execut
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "</div><div id=\"task-execution-history-older-loader\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "</div><div id=\"task-execution-history-older-loader\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1179,7 +1218,7 @@ func TaskExecutionHistoryOlderPage(task *models.Task, executions []models.Execut
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1204,20 +1243,20 @@ func taskExecutionHistoryOlderLoader(task *models.Task, beforeExecID string, win
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "<div class=\"mt-3 flex justify-center\" data-execution-history-older-loader><button class=\"btn btn-sm btn-ghost\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "<div class=\"mt-3 flex justify-center\" data-execution-history-older-loader><button class=\"btn btn-sm btn-ghost\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var42 string
-		templ_7745c5c3_Var42, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/executions?before=%s&limit=%d", task.ID, beforeExecID, windowLimit)).Resolve(ctx)
+		var templ_7745c5c3_Var45 string
+		templ_7745c5c3_Var45, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/executions?before=%s&limit=%d", task.ID, beforeExecID, windowLimit)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1421, Col: 102}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1452, Col: 102}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "\" hx-target=\"#task-execution-history-older-loader\" hx-swap=\"outerHTML\">Load older executions</button></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "\" hx-target=\"#task-execution-history-older-loader\" hx-swap=\"outerHTML\">Load older executions</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1269,172 +1308,108 @@ func taskExecutionHistoryCard(task *models.Task, exec models.Execution, index in
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "<div class=\"card bg-base-100 shadow-sm border border-base-300 mb-2\" data-execution-history-card=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "<div class=\"card bg-base-100 shadow-sm border border-base-300 mb-2\" data-execution-history-card=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var45 string
-		templ_7745c5c3_Var45, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.ID).Resolve(ctx)
+		var templ_7745c5c3_Var48 string
+		templ_7745c5c3_Var48, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.ID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1437, Col: 106}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1468, Col: 106}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "\"><div class=\"card-body p-4\"><div class=\"flex items-center justify-between mb-2\"><div class=\"flex flex-col text-sm opacity-60\"><span>Started: ")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var46 string
-		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(exec.StartedAt.Local().Format("2006-01-02 3:04:05 PM"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1441, Col: 76}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "\"><div class=\"card-body p-4\"><div class=\"flex items-center justify-between mb-2\"><div class=\"flex flex-col text-sm opacity-60\"><span>Started: ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "</span> ")
+		var templ_7745c5c3_Var49 string
+		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(exec.StartedAt.Local().Format("2006-01-02 3:04:05 PM"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1472, Col: 76}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if exec.CompletedAt != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "<span>Finished: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "<span>Finished: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var47 string
-			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(exec.CompletedAt.Local().Format("2006-01-02 3:04:05 PM"))
+			var templ_7745c5c3_Var50 string
+			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(exec.CompletedAt.Local().Format("2006-01-02 3:04:05 PM"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1443, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1474, Col: 80}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if exec.Status == models.ExecRunning && index == 0 && task.Status == models.StatusRunning {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "<div class=\"text-sm opacity-60\"><span class=\"badge badge-warning\">Elapsed: ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var48 string
-			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(FormatElapsedTime(exec.StartedAt))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1448, Col: 84}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "</span></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else if exec.DurationMs > 0 || exec.TokensUsed > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "<div class=\"text-sm opacity-60\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var49 string
-			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d tokens, %s", exec.TokensUsed, formatDuration(exec.DurationMs)))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1452, Col: 86}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "</div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if exec.Status == models.ExecRunning && exec.Output == "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "<div class=\"flex items-center gap-2 p-3 bg-base-200 rounded-lg\"><span class=\"loading loading-spinner loading-sm\"></span> <span class=\"text-sm opacity-60\">Model is working on this task...</span></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		if exec.Output != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "<div class=\"mb-2\"><div class=\"flex items-center justify-between mb-1\"><span class=\"text-xs opacity-60\">Model Output:</span> ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			{
-				templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
-				templ_7745c5c3_Buffer := templ.GetBuffer()
-				var templ_7745c5c3_ElementScripts []templ.ComponentScript
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "<button class=\"btn btn-xs btn-ghost\" onclick=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var50 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-output-%s', this)", exec.ID)}
-				templ_7745c5c3_ElementScripts = append(templ_7745c5c3_ElementScripts, templ_7745c5c3_Var50)
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50.Call)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "\" data-tooltip-disabled aria-label=\"Copy to clipboard\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_ElementScripts...)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_ElementWriter)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ.ReleaseBuffer(templ_7745c5c3_Buffer)
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg></button></div><pre id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "<div class=\"text-sm opacity-60\"><span class=\"badge badge-warning\">Elapsed: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var51 string
-			templ_7745c5c3_Var51, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("exec-output-%s", exec.ID)).Resolve(ctx)
+			templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(FormatElapsedTime(exec.StartedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1476, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1479, Col: 84}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "\" class=\"p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap max-h-96 overflow-y-auto mt-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "</span></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else if exec.DurationMs > 0 || exec.TokensUsed > 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "<div class=\"text-sm opacity-60\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var52 string
-			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(exec.Output)
+			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d tokens, %s", exec.TokensUsed, formatDuration(exec.DurationMs)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1476, Col: 162}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1483, Col: 86}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "</pre></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		if exec.ErrorMessage != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "<div class=\"mb-2\"><div class=\"flex items-center justify-between mb-1\"><span class=\"text-xs opacity-60 text-error\">Error:</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "</div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if exec.Status == models.ExecRunning && exec.Output == "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "<div class=\"flex items-center gap-2 p-3 bg-base-200 rounded-lg\"><span class=\"loading loading-spinner loading-sm\"></span> <span class=\"text-sm opacity-60\">Model is working on this task...</span></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		if exec.Output != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "<div class=\"mb-2\"><div class=\"flex items-center justify-between mb-1\"><span class=\"text-xs opacity-60\">Model Output:</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1442,17 +1417,17 @@ func taskExecutionHistoryCard(task *models.Task, exec models.Execution, index in
 				templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 				templ_7745c5c3_Buffer := templ.GetBuffer()
 				var templ_7745c5c3_ElementScripts []templ.ComponentScript
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "<button class=\"btn btn-xs btn-ghost text-error\" onclick=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "<button class=\"btn btn-xs btn-ghost\" onclick=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var53 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-error-%s', this)", exec.ID)}
+				var templ_7745c5c3_Var53 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-output-%s', this)", exec.ID)}
 				templ_7745c5c3_ElementScripts = append(templ_7745c5c3_ElementScripts, templ_7745c5c3_Var53)
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53.Call)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "\" data-tooltip-disabled aria-label=\"Copy to clipboard\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "\" data-tooltip-disabled aria-label=\"Copy to clipboard\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1466,38 +1441,102 @@ func taskExecutionHistoryCard(task *models.Task, exec models.Execution, index in
 				}
 				templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg></button></div><pre id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg></button></div><pre id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var54 string
-			templ_7745c5c3_Var54, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("exec-error-%s", exec.ID)).Resolve(ctx)
+			templ_7745c5c3_Var54, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("exec-output-%s", exec.ID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1493, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1507, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, "\" class=\"p-3 bg-error/10 rounded-lg text-sm text-error whitespace-pre-wrap mt-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "\" class=\"p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap max-h-96 overflow-y-auto mt-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var55 string
-			templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(exec.ErrorMessage)
+			templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(exec.Output)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1493, Col: 153}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1507, Col: 162}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "</pre></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "</pre></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "</div></div>")
+		if exec.ErrorMessage != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "<div class=\"mb-2\"><div class=\"flex items-center justify-between mb-1\"><span class=\"text-xs opacity-60 text-error\">Error:</span> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			{
+				templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
+				templ_7745c5c3_Buffer := templ.GetBuffer()
+				var templ_7745c5c3_ElementScripts []templ.ComponentScript
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, "<button class=\"btn btn-xs btn-ghost text-error\" onclick=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var56 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-error-%s', this)", exec.ID)}
+				templ_7745c5c3_ElementScripts = append(templ_7745c5c3_ElementScripts, templ_7745c5c3_Var56)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56.Call)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "\" data-tooltip-disabled aria-label=\"Copy to clipboard\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_ElementScripts...)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_ElementWriter)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg></button></div><pre id=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var57 string
+			templ_7745c5c3_Var57, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("exec-error-%s", exec.ID)).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1524, Col: 52}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "\" class=\"p-3 bg-error/10 rounded-lg text-sm text-error whitespace-pre-wrap mt-1\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var58 string
+			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(exec.ErrorMessage)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 1524, Col: 153}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, "</pre></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

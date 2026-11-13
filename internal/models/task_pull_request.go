@@ -3,6 +3,8 @@ package models
 import "time"
 
 type TaskPullRequest struct {
+	HeadRepoURL      string    `json:"head_repo_url"`
+	BaseBranch       string    `json:"base_branch"`
 	ID               string    `json:"id"`
 	TaskID           string    `json:"task_id"`
 	PRNumber         int       `json:"pr_number"`

@@ -1,7 +1,7 @@
 # =============================================================================
 # Stage 1: Builder — compile Go binary with all generated assets
 # =============================================================================
-FROM golang:1.27.3-alpine AS builder
+FROM golang:1.27.4-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
@@ -71,7 +71,6 @@ RUN dnf -y upgrade --refresh --setopt=install_weak_deps=False \
       gcc \
       gcc-c++ \
       git \
-      golang \
       grep \
       gzip \
       java-25-openjdk-devel \
@@ -102,6 +101,17 @@ RUN dnf -y upgrade --refresh --setopt=install_weak_deps=False \
       zip \
  && dnf clean all \
  && rm -rf /var/cache/dnf
+
+ARG GO_VERSION=1.27.4
+ARG TARGETARCH
+RUN case "${TARGETARCH:-amd64}" in \
+      amd64) go_arch=amd64 ;; \
+      arm64) go_arch=arm64 ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o /tmp/go.tgz \
+ && tar -C /usr/local -xzf /tmp/go.tgz \
+ && rm /tmp/go.tgz
 
 ARG COREPACK_VERSION=0.34.0
 ARG TYPESCRIPT_VERSION=5.9.3
@@ -146,6 +156,7 @@ RUN printf '%s\n' \
 COPY --from=builder /out/openvibely /openvibely
 
 ENV PORT=3001 \
+    OPENVIBELY_NO_BROWSER=true \
     OPENVIBELY_APP_DATA_DIR=/data \
     DATABASE_PATH=/data/openvibely.db \
     PROJECT_REPO_ROOT=/data/repos \
@@ -155,7 +166,7 @@ ENV PORT=3001 \
     HOME=/home/openvibely \
     GOPATH=/home/openvibely/go \
     XDG_RUNTIME_DIR=/tmp/openvibely-runtime \
-    PATH=/home/openvibely/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=/usr/local/go/bin:/home/openvibely/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 EXPOSE 3001
 

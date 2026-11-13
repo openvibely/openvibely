@@ -35,6 +35,12 @@ func TestBrowserFunctional_KanbanSelectedCardsUseThemeTextBorder(t *testing.T) {
 		if static.ServeAsset(w, r) {
 			return
 		}
+		// The layout's hx-trigger="load" fragments would otherwise swap this whole
+		// page into themselves recursively and stall the renderer.
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(page))
 	}))

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -12,6 +13,24 @@ import (
 // A project maintainer grant must not authorize changing shared executable code.
 func (h *Handler) authorizeSharedDefinitionResource(c echo.Context) error {
 	path := c.Path()
+	if h.personalGitHub != nil {
+		switch path {
+		case "/channels/github/identity":
+			return nil
+		case "/channels/github/configure":
+			if c.FormValue("github_auth_mode") != "app" {
+				return nil
+			}
+		case "/channels/github/remove", "/channels/github/disconnect":
+			personal, err := h.personalGitHub.UsesPersonalPAT(c.Request().Context())
+			if err != nil {
+				return err
+			}
+			if personal {
+				return nil
+			}
+		}
+	}
 	// OAuth callbacks authenticate using their single-use state, not a browser
 	// session. Callback run-as checks belong in flow completion.
 	if path == "/models/oauth/callback" {
@@ -52,9 +71,37 @@ func (h *Handler) requireCurrentOrgAdmin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if user == nil || user.Disabled || !user.IsOrgAdmin() {
+	if user == nil || user.Disabled || user.Role == "" {
 		return authz.ErrDenied
+	}
+	if !user.IsOrgAdmin() {
+		return organizationSettingsAccessResponse(c)
 	}
 	c.SetRequest(c.Request().WithContext(models.WithPrincipal(ctx, user.Principal)))
 	return nil
+}
+
+// Only the known settings navigation pages disclose their admin requirement.
+// Other resource denials retain their existing response and hiding behavior.
+func organizationSettingsAccessResponse(c echo.Context) error {
+	if c.Request().Method != http.MethodGet {
+		return authz.ErrDenied
+	}
+	section := map[string]string{
+		"/models":                "Models",
+		"/agents":                "Agents",
+		"/skills":                "Skills",
+		"/personality":           "Personalities",
+		"/workers":               "Workers",
+		"/settings/workers":      "Workers",
+		"/settings/plugin-pages": "Custom Pages",
+	}[c.Path()]
+	if section == "" {
+		return authz.ErrDenied
+	}
+	message := "Organization admin access is required to open " + section + " settings."
+	c.Response().Header().Set("X-OpenVibely-Permission-Denied", "true")
+	c.Response().Header().Set("HX-Reswap", "none")
+	setHTMXToast(c, message, "failed")
+	return echo.NewHTTPError(http.StatusForbidden, message)
 }

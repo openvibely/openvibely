@@ -106,7 +106,7 @@ func analyticsTaskDimensionClause(alias string, filter persistence.AnalyticsDash
 	clause := ""
 	args := []any{}
 	if filter.View == "agents" {
-		clause += " AND COALESCE(" + alias + ".category,'')<>'chat'"
+		clause += " AND COALESCE(" + alias + ".category,'') NOT IN ('chat','page_chat')"
 		filter.WorkType = ""
 	}
 	if filter.AgentID == "__unassigned__" {
@@ -737,7 +737,7 @@ func (r *ExecutionRepo) queryAnalyticsTaskSummary(ctx context.Context, filter pe
 	) SELECT COUNT(*),COALESCE(SUM(g.status='achieved'),0),COALESCE(SUM(g.status IN ('achieved','failed','active','paused','blocked')),0),
 	COALESCE(SUM(t.merge_status='merged'),0),COALESCE(SUM(t.worktree_path<>'' OR t.merge_status<>''),0)
 	FROM active_tasks a JOIN tasks t ON t.id=a.task_id LEFT JOIN task_goals g ON g.task_id=t.id
-	WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", filter.ProjectID) + ` AND COALESCE(t.category,'')<>'chat'` + dimension
+	WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", filter.ProjectID) + ` AND COALESCE(t.category,'') NOT IN ('chat','page_chat')` + dimension
 	params := append([]any{filter.ProjectID}, args...)
 	params = append(params, filter.ProjectID)
 	params = append(params, usageArgs...)
@@ -759,7 +759,7 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter persis
 	comparisonFilter.AgentID = ""
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", comparisonFilter)
 	query := `WITH scoped_tasks AS (
-			SELECT t.id,t.agent_definition_id,t.merge_status,t.worktree_path FROM tasks t WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", filter.ProjectID) + ` AND COALESCE(t.category,'')<>'chat'` + dimension + `
+			SELECT t.id,t.agent_definition_id,t.merge_status,t.worktree_path FROM tasks t WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", filter.ProjectID) + ` AND COALESCE(t.category,'') NOT IN ('chat','page_chat')` + dimension + `
 	), period_exec AS (
 			SELECT t.id task_id,e.agent_config_id,e.status,e.started_at,e.completed_at,e.is_followup,t.agent_definition_id
 			FROM scoped_tasks t CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=t.id WHERE 1=1` + window + `
@@ -1261,7 +1261,7 @@ func (r *ExecutionRepo) queryModelMetrics(ctx context.Context, filter persistenc
 	// Like the other tabs, count activity in the selected period, not lifetime
 	// effort for a cohort of tasks finishing in that period.
 	query := `WITH scoped_tasks AS (
-		SELECT t.id,t.status,t.category,t.worktree_path,t.merge_status FROM tasks t WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", filter.ProjectID) + ` AND COALESCE(t.category,'')<>'chat'` + dimension + `
+		SELECT t.id,t.status,t.category,t.worktree_path,t.merge_status FROM tasks t WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", filter.ProjectID) + ` AND COALESCE(t.category,'') NOT IN ('chat','page_chat')` + dimension + `
 	), period_runs AS MATERIALIZED (
 		SELECT e.task_id,e.agent_config_id,e.status,e.started_at,e.completed_at,e.is_followup
 		FROM scoped_tasks t JOIN executions e ON e.task_id=t.id WHERE 1=1` + window + `
@@ -1422,7 +1422,7 @@ func (r *ExecutionRepo) queryAgentAnalyticsDetail(ctx context.Context, filter pe
 	detail := &models.AgentAnalyticsDetail{AgentID: filter.AgentID, OutcomeTrend: []models.AnalyticsTrendPoint{}, Categories: []models.AnalyticsCategoryPerformance{}, ModelMix: []models.AnalyticsModelMix{}, Failures: []models.AnalyticsFailurePattern{}, Skills: skills, RecentTasks: recent}
 	window, windowArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
-	dimension += " AND COALESCE(t.category,'')<>'chat'"
+	dimension += " AND COALESCE(t.category,'') NOT IN ('chat','page_chat')"
 	periodExpr := analyticsPeriodExpression(filter.GroupBy, "e.started_at")
 	query := `SELECT ` + periodExpr + `,SUM(CASE WHEN e.status='completed' THEN 1 ELSE 0 END),SUM(CASE WHEN e.status='failed' THEN 1 ELSE 0 END),SUM(CASE WHEN e.status='cancelled' THEN 1 ELSE 0 END),COUNT(*)
 		FROM executions e JOIN tasks t ON t.id=e.task_id WHERE ` + analyticsProjectPredicate(ctx, "t.project_id", filter.ProjectID) + `` + dimension + window + ` GROUP BY 1 ORDER BY 1`

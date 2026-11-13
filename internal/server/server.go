@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"io"
@@ -32,6 +33,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
@@ -298,7 +300,12 @@ func moveOrCopyPath(from, to string) error {
 }
 
 func isCrossDeviceRename(err error) bool {
-	return strings.Contains(strings.ToLower(err.Error()), "cross-device") || strings.Contains(strings.ToLower(err.Error()), "invalid cross-device link")
+	if err == nil {
+		return false
+	}
+	// os.Rename wraps the OS error in *os.LinkError. Match the code so
+	// Windows' ERROR_NOT_SAME_DEVICE works regardless of the system language.
+	return errors.Is(err, crossDeviceRenameError) || strings.Contains(strings.ToLower(err.Error()), "cross-device")
 }
 
 func copyFile(from, to string, mode os.FileMode) error {
@@ -798,6 +805,10 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		cfg.ProjectRepoRoot,
 	)
 	githubSvc.SetCredentialAuthorization(stores.Organizations, cfg.AuthMode == auth.AuthModeDisabled)
+	githubSvc.SetPersonalConnections(stores.GitHubConnections)
+	agentplugins.SetGitContextResolver(githubSvc.GitContext)
+	githubSvc.SetGitRunIdentities(stores.RunIdentities)
+	llmSvc.SetGitCredentials(githubSvc)
 	projectSvc.SetManagedProjectRepoResolver(githubSvc)
 	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
 	automationLiveViewTracker := service.NewAutomationLiveViewTracker()
@@ -1162,6 +1173,12 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 			ChatInputRequests: stores.ChatInputRequests,
 		},
 	)
+	pagePluginRoot := os.Getenv("OPENVIBELY_PAGE_PLUGIN_ROOT")
+	if pagePluginRoot == "" {
+		pagePluginRoot = filepath.Join(cfg.AppDataDir, "page-plugins")
+	}
+	pagePluginMgr := pageplugins.NewManager(stores.PagePlugins, pagePluginRoot)
+	h.SetPagePlugins(pagePluginMgr)
 	for _, option := range options {
 		h.SetDesktopFileSaver(option.DesktopFileSaver)
 		if option.ProjectFolderPicker != nil {
@@ -1201,6 +1218,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	h.SetGitHubPRFeedbackRepo(githubPRFeedbackRepo)
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetGitHubService(githubSvc)
+	h.SetPersonalGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
 	h.SetDiscordService(discordSvc)
 	h.SetChannelMessageRouter(channelMessageRouter)
@@ -1355,6 +1373,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		automationDispatcher.Stop()
 		automationReconciler.Stop()
 		workerSvc.Stop()
+		pagePluginMgr.StopAll()
 		if telegramSvc != nil {
 			telegramSvc.Stop()
 		}

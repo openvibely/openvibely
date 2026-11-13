@@ -743,7 +743,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if c.QueryParam("from") == "new" {
 		destination := "/tasks/" + t.ID + "?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), projectID))
 		if isHTMX(c) {
-			c.Response().Header().Set("HX-Location", destination)
+			// Keep navigation inside the app shell. A bare HX-Location defaults
+			// to replacing body, including the native desktop controls.
+			location, _ := json.Marshal(map[string]string{
+				"path": destination, "target": "#main-content", "swap": "innerHTML",
+			})
+			c.Response().Header().Set("X-Created-Task-ID", t.ID)
+			c.Response().Header().Set("HX-Location", string(location))
 			return c.NoContent(http.StatusOK)
 		}
 		return c.Redirect(http.StatusSeeOther, destination)
@@ -1158,6 +1164,7 @@ type taskChangesWorktreeState struct {
 }
 
 type taskMergeEligibility struct {
+	TargetMissing    bool
 	MergeAvailable   bool
 	ConflictRecovery bool
 	Reason           string
@@ -1222,6 +1229,7 @@ func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.
 		return result
 	}
 	if targetBranch == "" || !gitRefExists(ctx, project.RepoPath, targetBranch) {
+		result.TargetMissing = true
 		result.Reason = "target branch does not exist"
 		return result
 	}
@@ -1262,7 +1270,8 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 	state.UseWorktreeContent = true
 	state.BranchAlreadyMerged = mergeState.BranchAlreadyMerged
 	mergeEligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
-	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery
+	// A missing old target must not prevent choosing a valid replacement.
+	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery && !mergeEligibility.TargetMissing
 	state.ConflictRecovery = mergeEligibility.ConflictRecovery
 	state.RebaseAvailable = mergeEligibility.MergeAvailable && mergeState.RebaseAvailable
 	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
@@ -1416,6 +1425,7 @@ func (h *Handler) GetTaskChangesSummary(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"title": task.Title, "files": len(files), "insertions": insertions, "deletions": deletions,
 		"review_comments": len(h.loadTaskReviewComments(ctx, task.ID)),
+		"action_revision": fmt.Sprintf("%s:%s:%s:%s", task.Status, task.MergeStatus, task.WorktreeBranch, task.WorktreePath),
 		"status":          task.Status, "duration": components.FormatDuration(metrics.LatestDurationMs),
 	})
 }
@@ -1435,6 +1445,14 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 
 	ctx := c.Request().Context()
 	state := h.resolveTaskChangesWorktreeState(ctx, task)
+
+	if c.QueryParam("composer_action") == "1" {
+		var taskPR *models.TaskPullRequest
+		if h.taskPullRequestRepo != nil {
+			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
+		}
+		return render(c, http.StatusOK, pages.ComposerChangesAction(task, taskPR, state.LocalMergeUnavailable, state.ConflictRecovery))
+	}
 
 	reviewComments := h.loadTaskReviewComments(ctx, taskID)
 
@@ -2928,6 +2946,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	message := strings.TrimSpace(c.FormValue("message"))
 	agentID := c.FormValue("agent_id")
 	sessionID := c.FormValue("attachment_session_id")
+	if sessionID != "" && !isValidPendingAttachmentSessionID(sessionID) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
+	}
 	// The picker persists the current task selection separately. A delayed send
 	// can carry an older model for this message without changing that selection.
 	managedModelSelection := c.FormValue("model_selection_managed") == "1"
@@ -2942,7 +2963,13 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if task == nil {
+	// Page turns require their owning surface's authorization and context.
+	// Never admit them through the ordinary coding-task follow-up path.
+	pageOwned, err := h.taskRepo.IsPageConversation(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil || pageOwned {
 		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
 			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s for missing task: %v", sessionID, cleanupErr)
 		}
@@ -3150,7 +3177,7 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 	if task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	active, err := h.execRepo.FindActiveTaskThreadExecution(c.Request().Context(), taskID, "")
+	active, err := h.activeConversationTaskExecution(c.Request().Context(), taskID)
 	if err != nil {
 		applog.Infof("[handler] TaskThreadSteer active execution check failed task=%s: %v", taskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
@@ -3177,8 +3204,12 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 		Content:             message,
 		AttachmentSessionID: c.FormValue("attachment_session_id"),
 	}
-	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
+	if err := h.saveConversationSteering(c, input, active); err != nil {
 		applog.Infof("[handler] TaskThreadSteer error creating steering input: %v", err)
+		var httpErr *echo.HTTPError
+		if errors.As(err, &httpErr) {
+			return httpErr
+		}
 		if errors.Is(err, persistence.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}

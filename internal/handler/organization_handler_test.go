@@ -572,3 +572,58 @@ func TestOrganizationInvitationStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestOrganizationHTMXMutationsNavigateWithoutHTTPRedirect(t *testing.T) {
+	_, e := organizationTestApp(t, true)
+	login := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}}, nil)
+	owner := orgCookie(t, login)
+	invite := orgRequest(e, http.MethodPost, "/organization/invitations", url.Values{"role": {"member"}}, owner)
+	token := regexp.MustCompile(`/invite\?token=([A-Za-z0-9_-]+)`).FindStringSubmatch(invite.Body.String())
+	require.Len(t, token, 2)
+	joined := orgRequest(e, http.MethodPost, "/invite", url.Values{"token": {token[1]}, "username": {"bob"}, "password": {"bob-password-long"}}, nil)
+	require.Equal(t, http.StatusSeeOther, joined.Code)
+	bob := orgCookie(t, joined)
+	me := orgRequest(e, http.MethodGet, "/auth/me", nil, bob)
+	var identity struct {
+		UserID string `json:"user_id"`
+	}
+	require.NoError(t, json.Unmarshal(me.Body.Bytes(), &identity))
+	require.NotEmpty(t, identity.UserID)
+	unused := orgRequest(e, http.MethodPost, "/organization/invitations", url.Values{"role": {"member"}}, owner)
+	revoke := regexp.MustCompile(`action="(/organization/invitations/[^"/]+/revoke)"`).FindStringSubmatch(unused.Body.String())
+	require.Len(t, revoke, 2)
+	for _, test := range []struct {
+		name, path string
+		form       url.Values
+	}{
+		{"rename", "/organization", url.Values{"name": {"Renamed organization"}}},
+		{"change role", "/organization/members/" + identity.UserID, url.Values{"action": {"role"}, "role": {"admin"}}},
+		{"remove member", "/organization/members/" + identity.UserID, url.Values{"action": {"remove"}}},
+		{"revoke invitation", revoke[1], nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://example.com"+test.path, strings.NewReader(test.form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Origin", "http://example.com")
+			req.Header.Set("HX-Request", "true")
+			req.AddCookie(owner)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Empty(t, rec.Header().Get("Location"))
+			var location map[string]string
+			require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &location))
+			require.Equal(t, map[string]string{"path": "/organization", "target": "#main-content", "swap": "innerHTML"}, location)
+			req = httptest.NewRequest(http.MethodGet, "http://example.com"+location["path"], nil)
+			req.Header.Set("HX-Request", "true")
+			req.AddCookie(owner)
+			rec = httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), `id="organization-container"`)
+			require.Contains(t, rec.Body.String(), "Renamed organization")
+			require.NotContains(t, rec.Body.String(), "<!DOCTYPE")
+		})
+	}
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, bob).Code)
+}

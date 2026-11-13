@@ -1323,7 +1323,18 @@ func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeO
 	if err != nil || len(automationContext.Bindings) == 0 {
 		return err
 	}
-	prResourceID := githubPullRequestResourceID(repo, result.PullRequest.Number)
+	// A reused PR can belong to upstream even though the project and source
+	// issue belong to the fork. Match status reconciliation's repository identity
+	// without changing the source issue's repository below.
+	prURL := result.PullRequest.URL
+	if strings.TrimSpace(prURL) == "" && result.Record != nil {
+		prURL = result.Record.PRURL
+	}
+	prRepo, err := TaskPullRequestTarget(prURL, result.PullRequest.Number, repo)
+	if err != nil {
+		return fmt.Errorf("resolving automation pull request repository: %w", err)
+	}
+	prResourceID := githubPullRequestResourceID(prRepo, result.PullRequest.Number)
 	for _, sourceBinding := range automationContext.Bindings {
 		openPRNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, sourceBinding.NodeID, "open_pull_request", true)
 		if err != nil {

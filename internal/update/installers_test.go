@@ -520,7 +520,13 @@ func TestWailsInstallUnitRejectsEveryUpdaterOwnedDeletionBoundary(t *testing.T) 
 }
 
 func TestDesktopRollbackRejectsInterruptedBackupAndPreservesHealthyBundle(t *testing.T) {
-	root := t.TempDir()
+	// t.TempDir includes the long test name, exceeding macOS's Unix socket
+	// path limit once the app bundle path is appended.
+	root, err := os.MkdirTemp("", "ov-rb-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	installed := filepath.Join(root, "OpenVibely.app")
 	backup := installed + ".openvibely-backup"
 	contents := filepath.Join(installed, "Contents")

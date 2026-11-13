@@ -46,7 +46,8 @@ func TestHandlerGetTaskDetailActionsUsesCompactTaskMetadata(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		counter.SetEnabled(false)
 		stats := counter.Snapshot()
-		require.Equal(t, 1, stats.TaskReads)
+		// One compact ownership read authorizes the request; one loads the actions.
+		require.Equal(t, 2, stats.TaskReads)
 		require.Equal(t, 1, stats.TaskActionReads)
 		require.Less(t, stats.ReadTextBytes, 1024)
 		return rec

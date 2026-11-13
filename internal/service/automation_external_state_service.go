@@ -75,8 +75,13 @@ func (s *AutomationExternalStateService) refreshAfterValidation(ctx context.Cont
 	cacheCutoff := now.UTC().Add(-automationExternalRefreshCache)
 	for i := range pulls {
 		pull := &pulls[i]
+		targetRepo, targetErr := TaskPullRequestTarget(pull.PRURL, pull.PRNumber, repoRef)
+		if targetErr != nil {
+			return models.AutomationExternalState{}, targetErr
+		}
+		fullName = targetRepo.FullName
 		if pull.UpdatedAt.UTC().Before(cacheCutoff) {
-			live, getErr := s.github.GetPullRequest(ctx, repoRef, pull.PRNumber)
+			live, getErr := s.github.GetPullRequest(ctx, targetRepo, pull.PRNumber)
 			if getErr != nil {
 				return models.AutomationExternalState{}, getErr
 			}

@@ -40,10 +40,13 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 	executions.SetAutomationRepo(automations)
 	tasks := NewTaskRepo(db, broadcaster)
 	tasks.SetExecutionRepo(executions)
+	pullRequests := NewTaskPullRequestRepo(db)
+	pullRequests.SetBroadcaster(broadcaster)
 	alerts := NewAlertRepo(db)
 	alerts.SetAutomationRepo(automations)
 	return persistence.Stores{
 		Organizations:        NewOrganizationRepo(db),
+		GitHubConnections:    NewGitHubConnectionRepo(db),
 		ProjectAccess:        NewProjectAccessRepo(db),
 		RunIdentities:        NewRunIdentityRepo(db),
 		Agents:               NewAgentRepo(db),
@@ -80,7 +83,7 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 		SlackUserProjects:    NewSlackUserProjectRepo(db),
 		TaskCommitStats:      NewTaskCommitStatRepo(db),
 		TaskGoals:            NewTaskGoalRepo(db),
-		TaskPullRequests:     NewTaskPullRequestRepo(db),
+		TaskPullRequests:     pullRequests,
 		Tasks:                tasks,
 		TelegramAuth:         NewTelegramAuthRepo(db),
 		TelegramUserProjects: NewTelegramUserProjectRepo(db),
@@ -93,6 +96,8 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 		XInboundReceipts:     NewXInboundReceiptRepo(db),
 		XTaskContexts:        NewXTaskContextRepo(db),
 		XUserProjects:        NewXUserProjectRepo(db),
+		PagePlugins:          NewPagePluginRepo(db),
+		PageConversations:    NewPageConversationRepo(db),
 	}
 }
 

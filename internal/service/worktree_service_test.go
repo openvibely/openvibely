@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 )
 
 func TestWorktreeServiceRepositoryMutationSerializesCanonicalAliasesAcrossInstances(t *testing.T) {
@@ -856,7 +857,7 @@ func TestSyncWorktreeFromMainAtStart_CleanWorktreeAutoMergeSuccess(t *testing.T)
 	taskRepo := storeEnv.Stores.Tasks
 	projectRepo := storeEnv.Stores.Projects
 	settingsRepo := storeEnv.Stores.Settings
-	ctx := context.Background()
+	ctx := gitidentity.WithResolver(t.Context(), func(context.Context) (gitidentity.Identity, error) { return gitidentity.Identity{}, nil })
 
 	repoDir := createTestGitRepo(t)
 	defaultBranch := GetCurrentBranch(repoDir)
@@ -2013,6 +2014,16 @@ func TestCommitWorktreeChanges(t *testing.T) {
 }
 
 func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
+	// Isolate the fallback from the developer or runner's Git identity.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// Create repo WITHOUT git config (simulating VPS scenario)
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init")
@@ -2034,12 +2045,6 @@ func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
 		t.Fatalf("initial commit failed: %v\n%s", err, out)
 	}
 
-	// Verify no local user.email is configured in repo
-	cmd = exec.Command("git", "config", "--local", "user.email")
-	cmd.Dir = dir
-	out, _ := cmd.Output()
-	hasLocalConfig := len(strings.TrimSpace(string(out))) > 0
-
 	// Make a change and commit - should succeed even without local config
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("content"), 0644); err != nil {
 		t.Fatal(err)
@@ -2048,35 +2053,25 @@ func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
 		t.Fatalf("CommitWorktreeChanges failed (should auto-set config if needed): %v", err)
 	}
 
-	// If there was no local config before, verify bot config was auto-set
-	if !hasLocalConfig {
-		cmd = exec.Command("git", "config", "--local", "user.email")
+	// Defaults belong to the commit process, never shared repository config.
+	for _, key := range []string{"user.name", "user.email"} {
+		cmd = exec.Command("git", "config", "--local", "--get", key)
 		cmd.Dir = dir
-		out, _ := cmd.Output()
-		email := strings.TrimSpace(string(out))
-		// If local config was set, it should be the bot email
-		// If it's empty, that's ok too (means global config was used)
-		if email != "" && email != "bot@openvibely.ai" {
-			t.Errorf("expected bot@openvibely.ai or empty (using global) in local config, got: %s", email)
+		if out, err := cmd.Output(); err == nil || len(out) != 0 {
+			t.Fatalf("commit must not write %s to repository config: %s", key, out)
 		}
-
-		// Verify the effective config (local or global) allowed the commit
-		cmd = exec.Command("git", "config", "user.email")
-		cmd.Dir = dir
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		effectiveEmail := strings.TrimSpace(string(out))
-		if effectiveEmail == "" {
-			t.Error("expected some user.email configured (local or global)")
-		}
+	}
+	cmd = exec.Command("git", "log", "-1", "--format=%an <%ae>|%cn <%ce>")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) != "OpenVibely Bot <bot@openvibely.ai>|OpenVibely Bot <bot@openvibely.ai>" {
+		t.Fatalf("wrong process identity: %s: %v", out, err)
 	}
 
 	// Verify commit was made
 	cmd = exec.Command("git", "log", "--oneline", "-1")
 	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err = cmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2129,13 +2124,16 @@ func TestCommitWorktreeChanges_AutoConfigSetupMissingName(t *testing.T) {
 
 	cmd = exec.Command("git", "config", "--local", "user.name")
 	cmd.Dir = dir
+	if out, err := cmd.Output(); err == nil || len(out) != 0 {
+		t.Fatal("commit must not write repository identity")
+	}
+	cmd = exec.Command("git", "log", "-1", "--format=%an <%ae>")
+	cmd.Dir = dir
 	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || strings.TrimSpace(string(out)) != "OpenVibely Bot <partial@example.com>" {
+		t.Fatalf("wrong process identity: %s: %v", out, err)
 	}
-	if name := strings.TrimSpace(string(out)); name != "OpenVibely Bot" {
-		t.Fatalf("expected missing user.name to be filled, got %q", name)
-	}
+
 }
 
 func TestWorktreeDiff(t *testing.T) {
@@ -2437,27 +2435,42 @@ func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	started := filepath.Join(t.TempDir(), "pre-commit-started")
-	hook := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
-	hookBody := fmt.Sprintf("#!/bin/sh\ntouch %q\nsleep 2\n", started)
-	if err := os.WriteFile(hook, []byte(hookBody), 0755); err != nil {
-		t.Fatal(err)
+	// The validator runs while MergeBranchValidated holds the repository lease.
+	// Hold that lease explicitly instead of racing Git startup and a sleeping hook.
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	unblock := func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
 	}
-
+	t.Cleanup(func() {
+		unblock()
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Error("first merge did not finish after releasing the repository lease barrier")
+		}
+	})
 	firstDone := make(chan error, 1)
 	go func() {
-		_, mergeErr := ws.MergeBranch(ctx, task, repoDir, "merge")
+		defer close(finished)
+		_, mergeErr := ws.MergeBranchValidated(ctx, task, repoDir, "merge", func() error {
+			close(started)
+			<-release
+			return nil
+		})
 		firstDone <- mergeErr
 	}()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, statErr := os.Stat(started); statErr == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("first merge did not reach pre-commit hook")
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-started:
+	case firstErr := <-firstDone:
+		t.Fatalf("first merge exited before reaching the repository lease barrier: %v", firstErr)
+	case <-time.After(10 * time.Second):
+		t.Fatal("first merge did not reach the repository lease barrier")
 	}
 
 	secondDone := make(chan error, 1)
@@ -2487,8 +2500,14 @@ func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("concurrent rebase was not rejected promptly")
 	}
-	if firstErr := <-firstDone; firstErr != nil {
-		t.Fatalf("first merge failed: %v", firstErr)
+	unblock()
+	select {
+	case firstErr := <-firstDone:
+		if firstErr != nil {
+			t.Fatalf("first merge failed: %v", firstErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first merge did not finish after releasing the repository lease barrier")
 	}
 }
 
@@ -6424,5 +6443,40 @@ func TestCleanupMergedWorktreesDoesNotInventMerge(t *testing.T) {
 				t.Fatal("unverified or unmerged worktree was removed")
 			}
 		})
+	}
+}
+
+func TestCommitWorktreeChangesPersonalIdentityUsesLegacyBotFallback(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file"), []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := gitidentity.WithResolver(t.Context(), func(context.Context) (gitidentity.Identity, error) { return gitidentity.Identity{}, nil })
+	if err := CommitWorktreeChangesContext(ctx, dir, "fallback"); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "-C", dir, "log", "-1", "--format=%an <%ae>")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(out)) != "OpenVibely Bot <bot@openvibely.ai>" {
+		t.Fatalf("unexpected fallback: %s", out)
+	}
+	cmd = exec.Command("git", "-C", dir, "config", "--local", "--get", "user.name")
+	if out, _ := cmd.Output(); len(out) != 0 {
+		t.Fatal("fallback modified repository config")
 	}
 }

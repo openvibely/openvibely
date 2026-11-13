@@ -213,3 +213,47 @@ func TestSessionSettingsUpdatePreservesPortableCheckpoint(t *testing.T) {
 		}
 	}
 }
+
+// Page chat uses orchestration prompts (Followup=false), but its persisted
+// conversation task must own session state and summaries, even after restart.
+func TestPageConversationCheckpointIsolation(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	agent := models.LLMConfig{ID: "page-model", Provider: models.ProviderOpenAI, Model: "test"}
+	pageA := &models.Task{ProjectID: "default", Title: "Page A conversation", Category: models.CategoryPageChat, Status: models.StatusCompleted}
+	pageB := &models.Task{ProjectID: "default", Title: "Page B conversation", Category: models.CategoryPageChat, Status: models.StatusCompleted}
+	require.NoError(t, stores.Tasks.Create(ctx, pageA))
+	require.NoError(t, stores.Tasks.Create(ctx, pageB))
+	svc := &LLMService{execRepo: stores.Executions}
+	requests := []llmcontracts.AgentRequest{
+		{Ctx: ctx, ProjectID: "default", TransportScope: "task:" + pageA.ID, Agent: agent, Operation: llmcontracts.OperationStreaming},
+		{Ctx: ctx, ProjectID: "default", TransportScope: "task:" + pageB.ID, Agent: agent, Operation: llmcontracts.OperationStreaming},
+		{Ctx: ctx, ProjectID: "default", TransportScope: "chat:project:default", Agent: agent, Operation: llmcontracts.OperationStreaming},
+	}
+	for _, req := range requests {
+		summary := "summary for " + req.TransportScope
+		compacted := req
+		compacted.ChatHistory = buildCompactedReplacementHistory(nil, summary)
+		require.NoError(t, svc.persistCompactionCheckpoint(req, compacted, summary, "local_summary"))
+		svc.persistProviderSessionState(req, `{"session":"`+req.TransportScope+`"}`)
+	}
+	// A new service instance restores exclusively from persisted checkpoint rows.
+	restarted := &LLMService{execRepo: stores.Executions}
+	for _, req := range requests {
+		restored := restarted.restoreCompactionCheckpoint(req)
+		require.Equal(t, `{"session":"`+req.TransportScope+`"}`, restored.ProviderSessionStateJSON)
+		var summaries []string
+		for _, row := range restored.ChatHistory {
+			if row.ContextKind == "summary" {
+				summaries = append(summaries, row.PromptSent)
+			}
+		}
+		require.Len(t, summaries, 1)
+		require.Contains(t, summaries[0], "summary for "+req.TransportScope)
+	}
+	fresh := requests[0]
+	fresh.TransportScope = "task:new-page"
+	restored := restarted.restoreCompactionCheckpoint(fresh)
+	require.Empty(t, restored.ProviderSessionStateJSON)
+	require.Empty(t, restored.ChatHistory)
+}

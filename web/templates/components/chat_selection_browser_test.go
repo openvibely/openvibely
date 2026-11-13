@@ -8,6 +8,8 @@ func TestBrowserFunctional_SelectAllResumesVirtualization(t *testing.T) {
 			t.Run(id+"/"+modifier, func(t *testing.T) {
 				runIncrementalChatBrowser(t, `
  const messages=document.getElementById('messages');messages.id='`+id+`';
+ // Production transcripts opt into virtualization through this marker.
+ messages.setAttribute('data-chat-transcript','');
  document.getElementById('pair').dataset.execStatus='completed';
  let source='';for(let i=0;i<80;i++)source+='Message '+i+'\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
  await renderStreamingContent(stream,source,false);await paint();

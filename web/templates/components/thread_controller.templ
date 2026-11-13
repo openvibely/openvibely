@@ -9,6 +9,33 @@ templ ThreadControllerScript() {
         if (window.openVibelyThreadController) return;
         var controller = {};
         var views = new Map();
+        // Every conversation supplies its container, scope and optional scroll policy.
+        controller.prepareTranscript = function(messages) {
+            if (!messages) return Promise.resolve(false);
+            messages.setAttribute('data-chat-transcript', '');
+            var rendered = window.cleanAssistantMessages ? window.cleanAssistantMessages(messages) : Promise.resolve([]);
+            if (window.initChatEarlierLoader) window.initChatEarlierLoader(messages);
+            if (window.initChatOutputWindows) window.initChatOutputWindows(messages.parentElement || messages);
+            if (window.initChatInputRequestCards) window.initChatInputRequestCards(messages);
+            return Promise.resolve(rendered).then(function() {
+                messages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
+                    if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+                    if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+                    if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+                });
+                return true;
+            });
+        };
+        controller.hydrate = function(options) {
+            var messages = options.messages;
+            if (!messages) return Promise.resolve(false);
+            var tracker = options.getTracker ? options.getTracker() : options.tracker;
+            if (!tracker && window.resolveScrollTracker) tracker = window.resolveScrollTracker('scrollTracker_' + messages.id, messages);
+            var rendered = options.renderPromise || controller.prepareTranscript(messages);
+            if (window._initThreadStreaming) window._initThreadStreaming();
+            if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(messages, 'scrollTracker_' + messages.id, tracker);
+            return controller.restore(Object.assign({}, options, {tracker:tracker, renderPromise:rendered}));
+        };
         controller.attach = function(id, project, seed, container, offset) {
             controller.detach(container);
             var source = window.openVibelyThreadCache
@@ -178,7 +205,7 @@ templ ThreadControllerScript() {
 			};
 			controller.schedule = window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches) {
 				if (!container) return Promise.resolve(false);
-				var initialMessages = container.closest && container.closest('#chat-messages, #task-thread-messages');
+				var initialMessages = container.closest && container.closest('[data-chat-transcript]');
 				var initialRender = window.initialTranscriptRender(initialMessages);
 				if (initialRender && initialRender.initial.has(container)) return initialRender.initial.get(container);
 				var activeRequest = window._activeChatContentRender;
@@ -358,7 +385,7 @@ templ ThreadControllerScript() {
 				restore.initial.clear();
 			};
 			controller.render = window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches, final) {
-				var initialMessages = container.closest && container.closest('#chat-messages, #task-thread-messages');
+				var initialMessages = container.closest && container.closest('[data-chat-transcript]');
 				var initialRender = window.initialTranscriptRender(initialMessages);
 				if (initialRender) {
 					initialRender.pending.set(container, {text:textBuffer || '', yield:yieldBetweenBatches, final:final});

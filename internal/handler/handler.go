@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"github.com/openvibely/openvibely/internal/pageplugins"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 )
 
 type Handler struct {
+	pagePlugins                *pageplugins.Manager
 	diffChunks                 diffChunkCache
 	channelOAuthMu             sync.Mutex
 	channelOAuthFlows          map[string]channelOAuthFlow
@@ -107,6 +109,7 @@ type Handler struct {
 	githubPRFeedbackRepo       persistence.GitHubPRFeedbackStore
 	githubAuthRepo             persistence.GitHubAuthStore
 	githubSvc                  GitHubServiceProvider
+	personalGitHub             *service.GitHubService
 	slackSvc                   SlackServiceProvider
 	discordSvc                 DiscordServiceProvider
 	channelMessageRouter       *service.ChannelMessageRouter
@@ -988,6 +991,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Worker settings
 	e.GET("/workers", h.WorkerSettings)
 	e.GET("/settings/workers", h.WorkerSettings)
+	h.registerPluginPageRoutes(e)
 	e.POST("/workers", h.UpdateWorkerSettings)
 	e.POST("/workers/projects/:projectId/limit", h.UpdateProjectWorkerLimit)
 	// Worker stats polling endpoints
@@ -1013,6 +1017,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/telegram/remove", h.handleTelegramRemove)
 	e.POST("/channels/telegram/send-responses", h.handleTelegramSendResponses)
 	e.POST("/channels/github/configure", h.handleGitHubConfigure)
+	e.POST("/channels/github/identity", h.lookupPersonalGitHub)
 	e.GET("/channels/github/connect", h.handleGitHubConnect)
 	e.GET("/channels/github/callback", h.handleGitHubCallback)
 	e.POST("/channels/github/disconnect", h.handleGitHubDisconnect)
@@ -1103,6 +1108,10 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/:taskId/worktree/merge", h.MergeTaskBranch)
 	e.POST("/tasks/:taskId/worktree/rebase", h.RebaseTaskBranch)
 	e.POST("/tasks/:taskId/worktree/pull-request", h.CreateTaskPullRequest)
+	e.GET("/tasks/:taskId/worktree/action-settings", h.GetChangesActionSettings)
+	e.POST("/tasks/:taskId/worktree/action-settings", h.SaveChangesActionSettings)
+	e.GET("/tasks/:taskId/worktree/action-branches", h.GetChangesActionBranches)
+	e.GET("/tasks/:taskId/worktree/action-local", h.GetChangesLocalEligibility)
 	e.POST("/tasks/:taskId/worktree/resolve", h.ResolveTaskConflicts)
 	e.POST("/tasks/:taskId/worktree/abort", h.AbortTaskMerge)
 	e.POST("/tasks/:taskId/worktree/cleanup", h.CleanupTaskWorktree)

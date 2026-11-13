@@ -22,7 +22,10 @@ func ConfigureNativeBrowserStorage(t testing.TB, cmd *exec.Cmd) {
 	configureNativeBrowserStorage(t, cmd, runtime.GOOS)
 }
 
-func configureNativeBrowserStorage(t testing.TB, cmd *exec.Cmd, platform string) {
+// NativeBrowserTempDir creates disposable browser storage with bounded cleanup
+// retries for browser services that release files after the host exits.
+// The caller must stop and wait for the host before test cleanup runs.
+func NativeBrowserTempDir(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	// WebKit/WebView2 use out-of-process services which can finish writing after
@@ -42,6 +45,12 @@ func configureNativeBrowserStorage(t testing.TB, cmd *exec.Cmd, platform string)
 			time.Sleep(50 * time.Millisecond)
 		}
 	})
+	return root
+}
+
+func configureNativeBrowserStorage(t testing.TB, cmd *exec.Cmd, platform string) {
+	t.Helper()
+	root := NativeBrowserTempDir(t)
 	var dirs map[string]string
 	switch platform {
 	case "darwin":

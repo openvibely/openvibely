@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
 )
@@ -280,6 +281,15 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 	})
 	goalHandlers := h.taskGoalActionHandlers(params)
 	handlers := map[string]chatcontrol.RuntimeActionHandler{
+		"get_custom_page_status": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.customPageStatusTool(ctx, params, input)
+		},
+		"get_custom_page_guide": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return pageplugins.AuthoringGuide, nil
+		},
+		"publish_custom_page": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.publishCustomPageTool(ctx, params, input)
+		},
 		"request_user_input": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeRequestUserInputTool(ctx, params, input)
 		},

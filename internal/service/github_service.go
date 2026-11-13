@@ -27,6 +27,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -77,6 +78,7 @@ type GitHubRepoRef struct {
 }
 
 type GitHubPullRequest struct {
+	BaseRef          string
 	Number           int
 	URL              string
 	Body             string `json:"-"`
@@ -160,21 +162,24 @@ var DefaultGitHubSDLCLabels = []string{
 }
 
 type GitHubCreatePullRequestRequest struct {
-	Title string
-	Body  string
-	Head  string
-	Base  string
-	Draft bool
+	HeadRepo string
+	Title    string
+	Body     string
+	Head     string
+	Base     string
+	Draft    bool
 }
 
 type GitHubPublishBranchRequest struct {
-	RepoPath       string
-	WorktreePath   string
-	Branch         string
-	BaseBranch     string
-	CommitMessage  string
-	CommitterName  string
-	CommitterEmail string
+	PreserveLocalHistory bool   // Publish the actual task commits rather than rebuilding a remote tree.
+	LocalBaseBranch      string // Local diff baseline, independent of the remote PR target.
+	RepoPath             string
+	WorktreePath         string
+	Branch               string
+	BaseBranch           string
+	CommitMessage        string
+	CommitterName        string
+	CommitterEmail       string
 }
 
 type GitHubPublishedCommitStats struct {
@@ -221,6 +226,8 @@ type githubAppConfig struct {
 }
 
 type GitHubService struct {
+	gitRunIdentities        persistence.RunIdentityStore
+	personalConnections     persistence.GitHubConnectionStore
 	credentialOrganizations persistence.OrganizationStore
 	credentialAuthOff       bool
 	projectCloneLocks       sync.Map // project ID -> *semaphore.Weighted
@@ -262,13 +269,20 @@ func NewGitHubService(settingsRepo persistence.SettingsStore, appID, appSlug, ap
 }
 
 func defaultRunGit(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := gitidentity.Command(ctx, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, extraEnv...)
-	cmd.Env = ensureGitSSLConfig(cmd.Env)
+	var envErr error
+	cmd.Env, envErr = gitidentity.CommandEnvironment(ctx, cmd.Env, args)
+	if envErr != nil {
+		return nil, envErr
+	}
+	if !gitidentity.Configured(ctx) {
+		cmd.Env = ensureGitSSLConfig(cmd.Env)
+	}
 	if len(args) > 0 && args[0] == "status" {
 		cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=0")
 	}
@@ -340,9 +354,12 @@ func (s *GitHubService) GetConnectionStatus(ctx context.Context) (GitHubConnecti
 	if err != nil {
 		return GitHubConnectionStatus{}, err
 	}
-	pat, err := s.getPAT(ctx)
-	if err != nil {
-		return GitHubConnectionStatus{}, err
+	var pat string
+	if mode == GitHubAuthModePAT {
+		pat, err = s.getPAT(ctx)
+		if err != nil {
+			return GitHubConnectionStatus{}, err
+		}
 	}
 
 	status := GitHubConnectionStatus{
@@ -353,7 +370,14 @@ func (s *GitHubService) GetConnectionStatus(ctx context.Context) (GitHubConnecti
 	if mode == GitHubAuthModePAT {
 		status.Configured = status.HasPAT
 		status.Connected = status.HasPAT
-		if s.settingsRepo != nil {
+		if s.personalConnections != nil {
+			c, err := s.PersonalConnection(ctx)
+			if err != nil {
+				return status, err
+			}
+			status.AccountLogin = c.Login
+			status.AccountType = "User"
+		} else if s.settingsRepo != nil {
 			patLogin, _ := s.settingsRepo.Get(ctx, GitHubSettingPATUserLogin)
 			status.AccountLogin = strings.TrimSpace(patLogin)
 			if status.AccountLogin != "" {
@@ -443,6 +467,31 @@ func (s *GitHubService) HandleInstallCallback(ctx context.Context, installationI
 }
 
 func (s *GitHubService) Disconnect(ctx context.Context) error {
+	if s.personalConnections != nil {
+		appCfg, err := s.getAppConfig(ctx)
+		if err != nil {
+			return err
+		}
+		mode, err := s.resolveAuthMode(ctx, appCfg)
+		if err != nil {
+			return err
+		}
+		if mode == GitHubAuthModePAT {
+			c, err := s.PersonalConnection(ctx)
+			if err != nil {
+				return err
+			}
+			ok, err := s.DeletePersonalConnection(ctx, c.Revision)
+			if err != nil {
+				return err
+			}
+			if !ok && c.Revision != 0 {
+				return fmt.Errorf("GitHub settings changed; refresh before disconnecting")
+			}
+			return nil
+		}
+	}
+
 	ctx, accessErr := credentialPrincipalContext(ctx, s.credentialOrganizations, s.credentialAuthOff)
 	if accessErr != nil {
 		return accessErr
@@ -802,6 +851,9 @@ func isGitHubCommitSHA(value string) bool {
 }
 
 func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+	if publishReq.PreserveLocalHistory {
+		return s.publishTaskHistory(ctx, repo, publishReq)
+	}
 	if repo == nil {
 		return nil, fmt.Errorf("repository reference is required")
 	}
@@ -830,7 +882,11 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		return nil, fmt.Errorf("repository path is required")
 	}
 
-	changes, err := s.collectGitHubBranchChanges(ctx, dir, baseBranch)
+	localBase := strings.TrimSpace(publishReq.LocalBaseBranch)
+	if localBase == "" {
+		localBase = baseBranch
+	}
+	changes, err := s.collectGitHubBranchChanges(ctx, dir, localBase)
 	if err != nil {
 		return nil, err
 	}
@@ -1376,7 +1432,26 @@ func githubPublishCommitParents(primaryParentSHA, baseSHA, comparisonStatus stri
 }
 
 func (s *GitHubService) createGitHubCommit(ctx context.Context, token string, repo *GitHubRepoRef, message, treeSHA string, parentSHAs []string, committerName, committerEmail string) (string, error) {
+	gitCtx := s.GitContext(ctx)
+	if gitidentity.Configured(gitCtx) {
+		if err := gitidentity.RequireCommit(gitCtx); err != nil {
+			return "", err
+		}
+		identity, err := gitidentity.Resolve(gitCtx)
+		if err != nil {
+			return "", err
+		}
+		if identity.Name != "" {
+			committerName = identity.Name
+		}
+		if identity.Email != "" {
+			committerEmail = identity.Email
+		}
+	}
 	payload := map[string]any{"message": message, "tree": treeSHA, "parents": parentSHAs}
+	if gitidentity.Configured(gitCtx) && strings.TrimSpace(committerName) != "" && strings.TrimSpace(committerEmail) != "" {
+		payload["author"] = map[string]string{"name": committerName, "email": committerEmail}
+	}
 	if strings.TrimSpace(committerName) != "" && strings.TrimSpace(committerEmail) != "" {
 		payload["committer"] = map[string]string{"name": strings.TrimSpace(committerName), "email": strings.TrimSpace(committerEmail)}
 	}
@@ -1775,7 +1850,10 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 		Body   string `json:"body"`
 		State  string `json:"state"`
 		Merged bool   `json:"merged"`
-		Head   struct {
+		Base   struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		Head struct {
 			Ref  string `json:"ref"`
 			SHA  string `json:"sha"`
 			Repo struct {
@@ -1786,7 +1864,7 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 	if err := s.doGitHubJSON(req, &pr); err != nil {
 		return nil, err
 	}
-	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, Body: pr.Body, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA}, nil
+	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, Body: pr.Body, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA, BaseRef: pr.Base.Ref}, nil
 }
 
 func (s *GitHubService) UpdatePullRequestBody(ctx context.Context, repo *GitHubRepoRef, number int, body string) error {
@@ -1814,6 +1892,13 @@ func (s *GitHubService) UpdatePullRequestBody(ctx context.Context, repo *GitHubR
 }
 
 func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
+	return s.findPullRequest(ctx, repo, branch, "", "")
+}
+
+func (s *GitHubService) FindPullRequestForTarget(ctx context.Context, repo *GitHubRepoRef, head, headRepo, base string) (*GitHubPullRequest, error) {
+	return s.findPullRequest(ctx, repo, head, headRepo, base)
+}
+func (s *GitHubService) findPullRequest(ctx context.Context, repo *GitHubRepoRef, branch, headRepo, base string) (*GitHubPullRequest, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository reference is required")
 	}
@@ -1827,8 +1912,15 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 		return nil, err
 	}
 
-	head := url.QueryEscape(fmt.Sprintf("%s:%s", repo.Owner, branch))
+	headName := branch
+	if !strings.Contains(headName, ":") {
+		headName = repo.Owner + ":" + headName
+	}
+	head := url.QueryEscape(headName)
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls?state=all&head=%s", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), head)
+	if base != "" {
+		endpoint += "&base=" + url.QueryEscape(base) + "&per_page=100"
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -1840,7 +1932,10 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 		URL    string `json:"html_url"`
 		Body   string `json:"body"`
 		State  string `json:"state"`
-		Head   struct {
+		Base   struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		Head struct {
 			Ref  string `json:"ref"`
 			SHA  string `json:"sha"`
 			Repo struct {
@@ -1854,6 +1949,14 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 	if len(prs) == 0 {
 		return nil, nil
 	}
+	if headRepo != "" {
+		for _, pr := range prs {
+			if IsOpenPullRequestState(pr.State) && strings.EqualFold(pr.Head.Repo.FullName, headRepo) && pr.Base.Ref == base {
+				return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, Body: pr.Body, State: pr.State, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA, BaseRef: pr.Base.Ref}, nil
+			}
+		}
+		return nil, nil
+	}
 	selected := prs[0]
 	for _, pr := range prs {
 		if IsOpenPullRequestState(pr.State) {
@@ -1861,7 +1964,7 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 			break
 		}
 	}
-	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, Body: selected.Body, State: selected.State, HeadRef: selected.Head.Ref, HeadRepoFullName: selected.Head.Repo.FullName, HeadSHA: selected.Head.SHA}, nil
+	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, Body: selected.Body, State: selected.State, HeadRef: selected.Head.Ref, HeadRepoFullName: selected.Head.Repo.FullName, HeadSHA: selected.Head.SHA, BaseRef: selected.Base.Ref}, nil
 }
 
 func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
@@ -1884,6 +1987,9 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 		"body":  createReq.Body,
 		"draft": createReq.Draft,
 	}
+	if createReq.HeadRepo != "" {
+		payload["head_repo"] = createReq.HeadRepo
+	}
 	body, _ := json.Marshal(payload)
 
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
@@ -1899,7 +2005,10 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 		URL    string `json:"html_url"`
 		Body   string `json:"body"`
 		State  string `json:"state"`
-		Head   struct {
+		Base   struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		Head struct {
 			Ref  string `json:"ref"`
 			SHA  string `json:"sha"`
 			Repo struct {
@@ -1911,7 +2020,7 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 		return nil, err
 	}
 
-	return &GitHubPullRequest{Number: created.Number, URL: created.URL, Body: created.Body, State: created.State, HeadRef: created.Head.Ref, HeadRepoFullName: created.Head.Repo.FullName, HeadSHA: created.Head.SHA}, nil
+	return &GitHubPullRequest{Number: created.Number, URL: created.URL, Body: created.Body, State: created.State, HeadRef: created.Head.Ref, HeadRepoFullName: created.Head.Repo.FullName, HeadSHA: created.Head.SHA, BaseRef: created.Base.Ref}, nil
 }
 
 func (s *GitHubService) EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, requested []string) error {
@@ -2260,7 +2369,17 @@ func (s *GitHubService) getAuthenticatedUser(ctx context.Context, repo *GitHubRe
 		return &GitHubAuthenticatedUser{Login: login, Source: GitHubAuthModeApp}, nil
 	}
 
-	useGlobalPATLoginCache := repo == nil || strings.TrimSpace(repo.APIBaseURL) == ""
+	if s.personalConnections != nil && (repo == nil || strings.TrimSpace(repo.APIBaseURL) == "") {
+		c, err := s.PersonalConnection(ctx)
+		if err != nil {
+			return nil, err
+		}
+		apiBaseURL, err = personalGitHubAPIEndpoint(c.APIEndpoint)
+		if err != nil {
+			return nil, err
+		}
+	}
+	useGlobalPATLoginCache := s.personalConnections == nil && (repo == nil || strings.TrimSpace(repo.APIBaseURL) == "")
 	if useGlobalPATLoginCache && s.settingsRepo != nil {
 		stored, err := s.settingsRepo.Get(ctx, GitHubSettingPATUserLogin)
 		if err != nil {
@@ -2915,6 +3034,19 @@ func (s *GitHubService) createOperationAccessToken(ctx context.Context, apiBaseU
 		return "", err
 	}
 	if mode == GitHubAuthModePAT {
+		if s.personalConnections != nil {
+			c, err := s.PersonalConnection(ctx)
+			if err != nil {
+				return "", err
+			}
+			expected, err := personalGitHubAPIEndpoint(c.APIEndpoint)
+			if err != nil {
+				return "", err
+			}
+			if strings.TrimRight(apiBaseURL, "/") != expected {
+				return "", fmt.Errorf("your GitHub connection is configured for a different server")
+			}
+		}
 		pat, err := s.getPAT(ctx)
 		if err != nil {
 			return "", err
@@ -2971,6 +3103,9 @@ func (s *GitHubService) cloneProjectRepo(ctx context.Context, tokenCloneURL, loc
 		return s.cloneWithToken(ctx, tokenCloneURL, destPath, token)
 	}
 
+	if gitidentity.Configured(s.GitContext(ctx)) {
+		return fmt.Errorf("configure your GitHub connection before cloning: %w", tokenErr)
+	}
 	if err := s.cloneWithLocalGit(ctx, localCloneURL, destPath); err != nil {
 		if shouldIncludeGitHubAuthUnavailableContext(err) {
 			return fmt.Errorf("cloning repository with local git CLI fallback after GitHub auth was unavailable (%v): %w", tokenErr, err)
@@ -3488,6 +3623,18 @@ func NormalizeGitHubAuthMode(raw string) string {
 }
 
 func (s *GitHubService) resolveAuthMode(ctx context.Context, appCfg githubAppConfig) (string, error) {
+	if s.personalConnections != nil {
+		if s.settingsRepo != nil {
+			mode, err := s.settingsRepo.Get(ctx, GitHubSettingAuthMode)
+			if err != nil {
+				return "", err
+			}
+			if mode == GitHubAuthModeApp || (strings.TrimSpace(mode) == "" && appCfg.isConfigured()) {
+				return GitHubAuthModeApp, nil
+			}
+		}
+		return GitHubAuthModePAT, nil
+	}
 	mode := ""
 	if s.settingsRepo != nil {
 		storedMode, err := s.settingsRepo.Get(ctx, GitHubSettingAuthMode)
@@ -3514,6 +3661,13 @@ func (s *GitHubService) resolveAuthMode(ctx context.Context, appCfg githubAppCon
 }
 
 func (s *GitHubService) getPAT(ctx context.Context) (string, error) {
+	if s.personalConnections != nil {
+		c, err := s.PersonalConnection(ctx)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(c.PAT), nil
+	}
 	if s.settingsRepo == nil {
 		return "", nil
 	}
@@ -3527,6 +3681,20 @@ func (s *GitHubService) getPAT(ctx context.Context) (string, error) {
 // GlobalAPIEndpoint returns the GitHub API endpoint saved in the global settings.
 // An empty string means public GitHub (https://api.github.com is the implicit default).
 func (s *GitHubService) GlobalAPIEndpoint(ctx context.Context) string {
+	if s.personalConnections != nil {
+		appCfg, configErr := s.getAppConfig(ctx)
+		mode, modeErr := s.resolveAuthMode(ctx, appCfg)
+		if configErr != nil || modeErr != nil {
+			return ""
+		}
+		if mode != GitHubAuthModeApp {
+			c, err := s.PersonalConnection(ctx)
+			if err != nil {
+				return ""
+			}
+			return c.APIEndpoint
+		}
+	}
 	if s.settingsRepo == nil {
 		return ""
 	}

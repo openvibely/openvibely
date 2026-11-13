@@ -209,6 +209,7 @@ type taskBranchMutationPreflight struct {
 }
 
 type taskBranchMutationOptions struct {
+	selectedTarget string // Immutable destination supplied by this action request.
 	taskID         string
 	projectID      string
 	fromTaskCard   bool
@@ -303,6 +304,9 @@ func (h *Handler) revalidateTaskBranchMutation(ctx context.Context, preflight *t
 		return fmt.Errorf("%w: project repository context changed", service.ErrMergeEligibilityChanged)
 	}
 
+	if err := h.selectChangesLocalTarget(ctx, freshTask, freshProject, options.selectedTarget); err != nil {
+		return fmt.Errorf("%w: %v", service.ErrMergeEligibilityChanged, err)
+	}
 	preflight.task = freshTask
 	preflight.project = freshProject
 	h.refreshTaskBranchMutation(ctx, preflight, options)
@@ -318,6 +322,11 @@ func (h *Handler) revalidateTaskBranchMutation(ctx context.Context, preflight *t
 			reason = "task branch is no longer eligible for this operation"
 		}
 		return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
+	}
+	if options.selectedTarget != "" {
+		if err := h.taskRepo.UpdateMergeTargetBranch(ctx, freshTask.ID, options.selectedTarget); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -413,6 +422,10 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	}
 
 	options := h.mergeTaskBranchOptions(taskID, projectID, fromTaskCard, mergeType)
+	options.selectedTarget, err = h.prepareChangesLocalTarget(c, preflight)
+	if err != nil {
+		return err
+	}
 	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
 	if fromTaskCard {
 		if preflight.cardReason != "" {
@@ -542,6 +555,10 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	}
 	task := preflight.task
 	project := preflight.project
+	options.selectedTarget, err = h.prepareChangesLocalTarget(c, preflight)
+	if err != nil {
+		return err
+	}
 	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
 	if fromTaskCard {
 		if preflight.cardReason != "" {
@@ -739,6 +756,8 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	var eligibilityReason string
 	result, mutationErr := h.newTaskPullRequestService().OpenForTaskValidated(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
+		TargetRepoURL: strings.TrimSpace(c.FormValue("target_repo")),
+		Base:          strings.TrimSpace(c.FormValue("base")),
 	}, func() (*models.Project, *models.Task, error) {
 		currentTask, loadErr := h.taskSvc.GetByID(c.Request().Context(), taskID)
 		if loadErr != nil || currentTask == nil {
@@ -756,6 +775,10 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		}
 		if !service.SameRepositoryMutationScope(project.RepoPath, currentProject.RepoPath) {
 			eligibilityReason = "Task project repository eligibility changed."
+			return nil, nil, errTaskMutationEligibilityChanged
+		}
+		if currentTask.Status == models.StatusRunning {
+			eligibilityReason = "Wait for the task to finish before creating a PR."
 			return nil, nil, errTaskMutationEligibilityChanged
 		}
 		h.recoverTaskWorktreeState(c.Request().Context(), currentTask, currentProject)

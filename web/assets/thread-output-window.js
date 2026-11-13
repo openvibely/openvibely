@@ -6,7 +6,7 @@
     const positions = new WeakMap();
     const selector = '.chat-stream-content[data-output-window]';
     function initialize(root) {
-        root.querySelectorAll?.('#chat-messages, #task-thread-messages').forEach(messages => {
+        root.querySelectorAll?.('[data-chat-transcript]').forEach(messages => {
             if (!positions.has(messages)) {
                 positions.set(messages, messages.scrollTop);
                 messages.dataset.outputCacheFirst = messages.querySelector(':scope > [data-execution-pair]')?.dataset.execId || '';
@@ -93,7 +93,7 @@
     }
     document.addEventListener('scroll', event => {
         const messages = event.target;
-        if (!messages.matches?.('#chat-messages, #task-thread-messages')) return;
+        if (!messages.matches?.('[data-chat-transcript]')) return;
         const previous = positions.get(messages);
         positions.set(messages, messages.scrollTop);
         if (previous !== undefined && messages.scrollTop < previous) loadNearViewport(messages);
@@ -102,16 +102,16 @@
     // Still honor the reader's wheel/key request without adding paging controls.
     document.addEventListener('wheel', event => {
         if (event.deltaY >= 0) return;
-        const messages = event.target.closest?.('#chat-messages, #task-thread-messages');
+        const messages = event.target.closest?.('[data-chat-transcript]');
         if (messages && messages.scrollTop <= 0) loadNearViewport(messages);
     }, {passive: true});
     const touchStarts = new WeakMap();
     document.addEventListener('touchstart', event => {
-        const messages = event.target.closest?.('#chat-messages, #task-thread-messages');
+        const messages = event.target.closest?.('[data-chat-transcript]');
         if (messages && event.touches.length === 1) touchStarts.set(messages, event.touches[0].clientY);
     }, {passive: true});
     document.addEventListener('touchmove', event => {
-        const messages = event.target.closest?.('#chat-messages, #task-thread-messages');
+        const messages = event.target.closest?.('[data-chat-transcript]');
         if (!messages || event.touches.length !== 1) return;
         const start = touchStarts.get(messages);
         // A downward finger movement asks to see earlier content. Do not
@@ -123,7 +123,7 @@
     }, {passive: true});
     document.addEventListener('keydown', event => {
         if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key) || event.target.closest?.('input, textarea, [contenteditable="true"]')) return;
-        const messages = event.target.closest?.('#chat-messages, #task-thread-messages');
+        const messages = event.target.closest?.('[data-chat-transcript]');
         if (messages && messages.scrollTop <= 0) loadNearViewport(messages);
     });
     document.addEventListener('htmx:beforeCleanupElement', event => {

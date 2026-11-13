@@ -52,7 +52,10 @@ func TestBrowserFunctional_TaskDiffControlSurvivesNavigation(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		task := &models.Task{ID: id, ProjectID: project.ID, Title: id, Status: models.StatusCompleted, Category: models.CategoryCompleted}
+		task := &models.Task{ID: id, ProjectID: project.ID, Title: id, Status: models.StatusCompleted, Category: models.CategoryCompleted, WorktreeBranch: "task/" + id}
+		if id == "diff-nav-b" {
+			task.MergeStatus = models.MergeStatusMerged
+		}
 		if path == id {
 			revision.Add(1)
 		}
@@ -64,6 +67,8 @@ func TestBrowserFunctional_TaskDiffControlSurvivesNavigation(t *testing.T) {
 			return components.TaskThreadView(task, nil, nil, nil, nil, inputs, false, 30)
 		}
 		switch {
+		case strings.HasSuffix(path, "/changes") && r.URL.Query().Get("composer_action") == "1":
+			fmt.Fprint(w, render(ComposerChangesAction(task, nil, true, false)))
 		case strings.HasSuffix(path, "/changes/summary"):
 			time.Sleep(time.Duration(summaryDelay.Load()) * time.Millisecond)
 			w.Header().Set("Content-Type", "application/json")
@@ -117,8 +122,13 @@ func TestBrowserFunctional_TaskDiffControlSurvivesNavigation(t *testing.T) {
 					continue
 				}
 				b.waitForTimeout(timing.name+" "+dest, visible, "true", 3*time.Second)
-				b.waitFor("one diff control inside composer", `String(document.querySelectorAll('#task-change-activity').length === 1 && !!document.querySelector('#task-thread-form > #task-change-activity'))`, "true")
+				b.waitFor("one diff control inside composer", `String(document.querySelectorAll('#task-change-activity').length === 1 && !!document.querySelector('#task-thread-form > .contents > #task-change-activity'))`, "true")
 				b.waitFor("fresh queued and steered rows", fmt.Sprintf(`String(document.querySelector('#pending-thread-inputs [data-thread-input-id="queued-' + document.getElementById('task-detail-content').dataset.taskId + '"]').textContent.includes('Queued revision %d') && document.querySelector('#pending-thread-inputs [data-thread-input-id="steered-' + document.getElementById('task-detail-content').dataset.taskId + '"]').textContent.includes('Steered revision %d'))`, revision.Load(), revision.Load()), "true")
+				if strings.Contains(dest, "diff-nav-b") {
+					b.waitFor("merged task has no composer action", `String(document.getElementById('composer-changes-action')?.textContent.trim()==='')`, "true")
+				} else {
+					b.waitFor("ready task owns composer action", `String(document.querySelector('#composer-changes-action [data-changes-split]')?.dataset.taskId==='diff-nav-a')`, "true")
+				}
 				if strings.Contains(dest, "diff-nav-a") {
 					b.waitFor("draft retained", `document.getElementById('task-message-input').value`, "Keep my unsent draft")
 					b.waitFor("cached composer and diff control retained together", `String(!!window.cachedComposer && window.cachedComposer === document.getElementById('task-thread-form') && window.cachedDiffControl === document.getElementById('task-change-activity'))`, "true")

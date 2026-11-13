@@ -69,7 +69,11 @@ func TestSharedDefinitionHTTPRequiresCurrentOrgAdmin(t *testing.T) {
 	principal := user.Principal
 	principal.Role = "owner"
 	for _, route := range routes {
-		require.Equal(t, 404, request(route.method, route.path, principal))
+		want := 404
+		if route.method == "GET" && (route.path == "/models" || route.path == "/agents" || route.path == "/skills" || route.path == "/personality") {
+			want = 403
+		}
+		require.Equal(t, want, request(route.method, route.path, principal), route.path)
 	}
 	require.Zero(t, calls, "project maintainer cannot read or change shared definitions")
 	require.NoError(t, tc.stores.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "admin", false))
@@ -79,7 +83,11 @@ func TestSharedDefinitionHTTPRequiresCurrentOrgAdmin(t *testing.T) {
 	require.Equal(t, len(routes), calls)
 	require.NoError(t, tc.stores.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "member", false))
 	for _, route := range routes {
-		require.Equal(t, 404, request(route.method, route.path, principal))
+		want := 404
+		if route.method == "GET" && (route.path == "/models" || route.path == "/agents" || route.path == "/skills" || route.path == "/personality") {
+			want = 403
+		}
+		require.Equal(t, want, request(route.method, route.path, principal), route.path)
 	}
 	require.Equal(t, len(routes), calls)
 	require.NoError(t, tc.stores.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "admin", true))

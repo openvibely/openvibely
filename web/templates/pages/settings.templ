@@ -1,9 +1,9 @@
 package pages
 
 import (
- templateui "github.com/openvibely/openvibely/web/templates"
 	"encoding/json"
 	"fmt"
+	templateui "github.com/openvibely/openvibely/web/templates"
 	"sort"
 	"strings"
 
@@ -107,12 +107,12 @@ func channelSettingsCards(view ChannelsSettingsView) []channelSettingsCard {
 func channelCardListState(view ChannelsSettingsView) CardListState {
 	return CardListState{
 		ProjectID: view.CurrentProjectID,
-		Search: view.WebhooksSearch,
-		Sort:   view.Sort,
+		Search:    view.WebhooksSearch,
+		Sort:      view.Sort,
 		Filters: map[string]string{
-			"type": view.ChannelTypeFilter,
+			"type":             view.ChannelTypeFilter,
 			"connection_state": view.ConnectionStateFilter,
-			"webhook_enabled": view.WebhookEnabledFilter,
+			"webhook_enabled":  view.WebhookEnabledFilter,
 		},
 	}
 }
@@ -206,8 +206,8 @@ func selectedWebhookAgentIDs(webhooks []models.WebhookEndpoint, webhookAgents ma
 
 func agentsJSON(agents []persistence.AgentPickerOption) string {
 	type agentData struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID        string `json:"id"`
+		Name      string `json:"name"`
 		ProjectID string `json:"project_id"`
 	}
 	data := make([]agentData, len(agents))
@@ -293,7 +293,9 @@ templ settingsContent(view ChannelsSettingsView) {
 			data-card-pagination-key="data-webhook-id"
 			data-card-loaded-name-sort
 				data-card-pagination-page-size="20"
-				data-card-pagination-has-more={ cardPaginationHasMoreAttribute(view.WebhooksHasMore) }			hx-get={ CardListURL("channels", channelCardListState(view)) }		hx-trigger="channels-refresh from:body"
+		data-card-pagination-has-more={ cardPaginationHasMoreAttribute(view.WebhooksHasMore) }
+		hx-get={ CardListURL("channels", channelCardListState(view)) }
+		hx-trigger="channels-refresh from:body"
 		hx-target="this"
 		hx-swap="outerHTML"
 	>
@@ -354,9 +356,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				</ul>
 			</div>
 		</div>
-
 		@CardListToolbar(collectionToolbarConfigWithState("channels", channelCardListState(view)))
-
 			<!-- Active Channels -->
 			<div id="channel-card-list" data-card-pagination-list>
 				<div class="grid gap-4">
@@ -370,7 +370,8 @@ templ settingsContent(view ChannelsSettingsView) {
 							<div class="flex items-start justify-between gap-3">
 								<div><h3 class="card-title">X (formerly Twitter)</h3><p class="text-sm opacity-60">Receive authorized mentions and post replies using X API v2.</p></div>
 								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for X (formerly Twitter)", WrapperClass: "dropdown dropdown-end", MenuClass: "z-10 w-32", StopPropagation: true}) {
-										<li><button type="button" onclick="openXConfigModal()">Edit</button></li><li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('X (formerly Twitter)', '/channels/x/remove', 'POST')">Delete</button></li>
+										<li><button type="button" onclick="openXConfigModal()">Edit</button></li>
+										<li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('X (formerly Twitter)', '/channels/x/remove', 'POST')">Delete</button></li>
 									}
 							</div>
 							<div class="mt-3 flex gap-2">
@@ -392,7 +393,6 @@ templ settingsContent(view ChannelsSettingsView) {
 						</div>
 					</div>
 				}
-
 						if card.Kind == "github" {
 				<!-- GitHub Card -->
 				<div
@@ -417,14 +417,14 @@ templ settingsContent(view ChannelsSettingsView) {
 												onclick="openDeleteChannelConfirm('GitHub', '/channels/github/remove', 'POST')"
 											>
 												Delete
-											</button>									</li>
-
+											</button>
+										</li>
 								}
 						</div>
 						<div class="pr-12">
 							<h3 class="font-bold flex items-center gap-2">
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-									<path d="M12 .5a12 12 0 00-3.792 23.39c.6.112.82-.258.82-.576 0-.285-.011-1.04-.017-2.04-3.338.726-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.746.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.419-1.305.762-1.605-2.665-.304-5.467-1.334-5.467-5.932 0-1.31.468-2.381 1.235-3.22-.124-.303-.535-1.527.117-3.181 0 0 1.007-.322 3.3 1.23A11.52 11.52 0 0112 6.317c1.02.005 2.047.138 3.007.404 2.291-1.553 3.297-1.23 3.297-1.23.653 1.655.242 2.879.12 3.181.77.839 1.233 1.91 1.233 3.22 0 4.61-2.807 5.625-5.48 5.922.43.37.814 1.102.814 2.222 0 1.604-.014 2.896-.014 3.29 0 .32.216.694.825.576A12 12 0 0012 .5z"/>
+											<path d="M12 .5a12 12 0 00-3.792 23.39c.6.112.82-.258.82-.576 0-.285-.011-1.04-.017-2.04-3.338.726-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.746.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.419-1.305.762-1.605-2.665-.304-5.467-1.334-5.467-5.932 0-1.31.468-2.381 1.235-3.22-.124-.303-.535-1.527.117-3.181 0 0 1.007-.322 3.3 1.23A11.52 11.52 0 0112 6.317c1.02.005 2.047.138 3.007.404 2.291-1.553 3.297-1.23 3.297-1.23.653 1.655.242 2.879.12 3.181.77.839 1.233 1.91 1.233 3.22 0 4.61-2.807 5.625-5.48 5.922.43.37.814 1.102.814 2.222 0 1.604-.014 2.896-.014 3.29 0 .32.216.694.825.576A12 12 0 0012 .5z"></path>
 								</svg>
 								GitHub
 							</h3>
@@ -465,7 +465,6 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 				</div>
 			}
-
 						if card.Kind == "slack" {
 				<!-- Slack Card -->
 				<div
@@ -500,14 +499,14 @@ templ settingsContent(view ChannelsSettingsView) {
 												onclick="openDeleteChannelConfirm('Slack', '/channels/slack/remove', 'POST')"
 											>
 												Delete
-											</button>									</li>
-
+											</button>
+										</li>
 								}
 						</div>
 						<div class="pr-12">
 							<h3 class="font-bold flex items-center gap-2">
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-									<path d="M6.6 15.6c0 1.32-1.08 2.4-2.4 2.4S1.8 16.92 1.8 15.6s1.08-2.4 2.4-2.4h2.4v2.4zM7.8 15.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6zM10.2 6c-1.32 0-2.4-1.08-2.4-2.4S8.88 1.2 10.2 1.2s2.4 1.08 2.4 2.4V6h-2.4zM10.2 7.2c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4H4.2c-1.32 0-2.4-1.08-2.4-2.4S2.88 7.2 4.2 7.2h6zM19.8 9.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4-1.08 2.4-2.4 2.4h-2.4V9.6zM18.6 9.6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6zM16.2 19.2c1.32 0 2.4 1.08 2.4 2.4S17.52 24 16.2 24s-2.4-1.08-2.4-2.4v-2.4h2.4zM16.2 18c-1.32 0-2.4-1.08-2.4-2.4s1.08-2.4 2.4-2.4h6c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4h-6z"/>
+											<path d="M6.6 15.6c0 1.32-1.08 2.4-2.4 2.4S1.8 16.92 1.8 15.6s1.08-2.4 2.4-2.4h2.4v2.4zM7.8 15.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6zM10.2 6c-1.32 0-2.4-1.08-2.4-2.4S8.88 1.2 10.2 1.2s2.4 1.08 2.4 2.4V6h-2.4zM10.2 7.2c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4H4.2c-1.32 0-2.4-1.08-2.4-2.4S2.88 7.2 4.2 7.2h6zM19.8 9.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4-1.08 2.4-2.4 2.4h-2.4V9.6zM18.6 9.6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6zM16.2 19.2c1.32 0 2.4 1.08 2.4 2.4S17.52 24 16.2 24s-2.4-1.08-2.4-2.4v-2.4h2.4zM16.2 18c-1.32 0-2.4-1.08-2.4-2.4s1.08-2.4 2.4-2.4h6c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4h-6z"></path>
 								</svg>
 								Slack
 							</h3>
@@ -541,7 +540,6 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 				</div>
 			}
-
 						if card.Kind == "telegram" {
 							<!-- Telegram Bot Card -->
 				<div
@@ -582,15 +580,15 @@ templ settingsContent(view ChannelsSettingsView) {
 												onclick="openDeleteChannelConfirm('Telegram Bot', '/channels/telegram/remove', 'POST')"
 											>
 												Delete
-											</button>									</li>
-
+											</button>
+										</li>
 								}
 						</div>
 						<!-- Channel content with padding for kebab menu -->
 						<div class="pr-12">
 							<h3 class="font-bold flex items-center gap-2">
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-icon="telegram-brand">
-									<path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+											<path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"></path>
 								</svg>
 								Telegram Bot
 							</h3>
@@ -614,7 +612,6 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 				</div>
 				}
-
 						if card.Kind == "discord" {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -644,13 +641,12 @@ templ settingsContent(view ChannelsSettingsView) {
 												Delete
 											</button>
 										</li>
-
 								}
 							</div>
 							<div class="pr-12">
 								<h3 class="font-bold flex items-center gap-2">
 									<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-icon="discord-brand">
-										<path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.516 13.78 13.78 0 0 0-.624 1.275 18.27 18.27 0 0 0-5.616 0 12.64 12.64 0 0 0-.632-1.275A19.74 19.74 0 0 0 3.677 4.37C.589 8.966-.247 13.45.171 17.87a19.9 19.9 0 0 0 5.993 3.03 14.24 14.24 0 0 0 1.28-2.083 12.78 12.78 0 0 1-2.017-.962c.169-.124.334-.252.493-.385a14.05 14.05 0 0 0 12.594 0c.161.133.326.261.493.385a12.78 12.78 0 0 1-2.017.962 14.2 14.2 0 0 0 1.28 2.083 19.9 19.9 0 0 0 5.993-3.03c.483-5.188-.826-9.681-3.18-13.688l-.77.188ZM8.02 15.331c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.955 2.419-2.157 2.419Zm7.975 0c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.946 2.419-2.157 2.419Z"/>
+											<path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.516 13.78 13.78 0 0 0-.624 1.275 18.27 18.27 0 0 0-5.616 0 12.64 12.64 0 0 0-.632-1.275A19.74 19.74 0 0 0 3.677 4.37C.589 8.966-.247 13.45.171 17.87a19.9 19.9 0 0 0 5.993 3.03 14.24 14.24 0 0 0 1.28-2.083 12.78 12.78 0 0 1-2.017-.962c.169-.124.334-.252.493-.385a14.05 14.05 0 0 0 12.594 0c.161.133.326.261.493.385a12.78 12.78 0 0 1-2.017.962 14.2 14.2 0 0 0 1.28 2.083 19.9 19.9 0 0 0 5.993-3.03c.483-5.188-.826-9.681-3.18-13.688l-.77.188ZM8.02 15.331c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.955 2.419-2.157 2.419Zm7.975 0c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.946 2.419-2.157 2.419Z"></path>
 									</svg>
 									Discord
 								</h3>
@@ -678,7 +674,6 @@ templ settingsContent(view ChannelsSettingsView) {
 						</div>
 					</div>
 				}
-
 						if card.Kind == "email" {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -697,7 +692,6 @@ templ settingsContent(view ChannelsSettingsView) {
 										<li><button type="button" onclick="openEmailConfigModal()">Edit</button></li>
 										<li><button type="button" hx-post="/channels/email/test" hx-target="#test-result-email" hx-swap="innerHTML">Test Connection</button></li>
 										<li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('Email', '/channels/email/remove', 'POST')">Delete</button></li>
-
 								}
 							</div>
 							<div class="pr-12">
@@ -744,7 +738,8 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div class="card-body relative">
 					<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
 						@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Webhook"}) {
-								<li><button type="button" onclick={ templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)} }>Edit</button></li>									<li>
+										<li><button type="button" onclick={ templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)} }>Edit</button></li>
+										<li>
 										<button
 											type="button"
 											hx-post={ "/channels/webhooks/" + wh.ID + "/rotate-secret?project_id=" + wh.ProjectID }
@@ -769,12 +764,13 @@ templ settingsContent(view ChannelsSettingsView) {
 												type="button"
 												class="text-error"
 												data-channel-delete-name={ wh.Name }
-													data-channel-delete-url={ "/channels/webhooks/" + wh.ID + "?project_id=" + wh.ProjectID }												data-channel-delete-method="DELETE"
+												data-channel-delete-url={ "/channels/webhooks/" + wh.ID + "?project_id=" + wh.ProjectID }
+												data-channel-delete-method="DELETE"
 												onclick="openDeleteChannelConfirmFromButton(this)"
 											>
 												Delete
-											</button>									</li>
-
+											</button>
+										</li>
 								}
 						</div>
 						<div class="pr-12">
@@ -831,7 +827,6 @@ templ settingsContent(view ChannelsSettingsView) {
 					<button>close</button>
 				</form>
 			</dialog>
-
 			<dialog id="x_config_modal" class="modal">
 				<div class="modal-box max-w-2xl">
 					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
@@ -846,7 +841,15 @@ templ settingsContent(view ChannelsSettingsView) {
 							<label class="form-control"><span class="label-text">Access token secret</span><input class="input input-bordered" type="password" name="x_access_token_secret" autocomplete="off" placeholder="Leave blank to preserve existing"/></label>
 						</div>
 						<label class="form-control"><span class="label-text">Poll interval (seconds)</span><input class="input input-bordered" type="number" min="15" max="300" name="x_poll_interval_seconds" value={ view.XPollIntervalSeconds } required/></label>
-						<label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox checkbox-primary" name="x_send_responses" value="true" if view.XSendResponses { checked }/><span>Post assistant responses as replies</span></label>
+					<label class="label cursor-pointer justify-start gap-3"><input
+	type="checkbox"
+	class="checkbox checkbox-primary"
+	name="x_send_responses"
+	value="true"
+	if view.XSendResponses {
+		checked
+	}
+/><span>Post assistant responses as replies</span></label>
 						<div class="flex items-center justify-between"><div><button type="button" class="btn btn-outline btn-sm" hx-post="/channels/x/test" hx-target="#x-test-feedback" hx-swap="innerHTML">Test connection</button><span id="x-test-feedback" class="ml-2"></span></div><div class="flex gap-2"><button type="button" class="btn btn-ghost" onclick="closeXConfigModal()">Cancel</button><button type="submit" class="btn btn-primary">Save X</button></div></div>
 					</form>
 					<div class="divider">Authorized mention authors for this project</div>
@@ -884,13 +887,14 @@ templ settingsContent(view ChannelsSettingsView) {
 					}
 						if len(view.XAuthorizedUsers) == 0 {
 							<p class="text-sm opacity-60">No users authorized. Inbound mentions are denied until a user is added.</p>
-						}					</div>
+					}
+				</div>
 				</div>
 				<form method="dialog" class="modal-backdrop"><button onclick="closeXConfigModal()">close</button></form>
 			</dialog>
-
 			<!-- Channel Configuration Modal -->
-			<dialog id="channel_modal" class="modal">			<div class="modal-box max-w-2xl">
+		<dialog id="channel_modal" class="modal">
+			<div class="modal-box max-w-2xl">
 				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('channel_modal')" aria-label="Close channel configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
@@ -915,7 +919,6 @@ templ settingsContent(view ChannelsSettingsView) {
 							</span>
 						</label>
 					</div>
-
 					<!-- Help Section -->
 					<div class="alert alert-info mb-4">
 						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
@@ -936,7 +939,6 @@ templ settingsContent(view ChannelsSettingsView) {
 							</details>
 						</div>
 					</div>
-
 					<!-- Authorized Users Section -->
 					if view.CurrentProjectID != "" {
 						<div class="divider"></div>
@@ -951,7 +953,6 @@ templ settingsContent(view ChannelsSettingsView) {
 						</p>
 						@components.TelegramAuthorizedUsersList(view.AuthorizedUsers, view.CurrentProjectID)
 					}
-
 					<!-- Notification Settings -->
 					<div class="divider"></div>
 					<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
@@ -1003,7 +1004,6 @@ templ settingsContent(view ChannelsSettingsView) {
 							</div>
 						</label>
 					</div>
-
 					<div class="modal-action">
 						<button type="button" class="btn" onclick="closeChannelConfigModal('channel_modal')">Cancel</button>
 						<button type="submit" id="channel_submit_btn" class="btn btn-primary">Save & Start Bot</button>
@@ -1014,7 +1014,6 @@ templ settingsContent(view ChannelsSettingsView) {
 				<button>close</button>
 			</form>
 		</dialog>
-
 		<dialog id="github_config_modal" class="modal">
 			<div class="modal-box max-w-2xl">
 				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('github_config_modal')" aria-label="Close GitHub configuration">
@@ -1025,14 +1024,23 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text">Authentication</span></label>
 						<select id="github_auth_mode" name="github_auth_mode" class="select select-bordered w-full" onchange="toggleGitHubAuthMode(this.value)">
-							<option value={ service.GitHubAuthModePAT } if view.GitHubAuthMode == service.GitHubAuthModePAT { selected }>Personal Access Token (Recommended)</option>
-							<option value={ service.GitHubAuthModeApp } if view.GitHubAuthMode == service.GitHubAuthModeApp { selected }>GitHub App (Advanced)</option>
+							<option
+								value={ service.GitHubAuthModePAT }
+								if view.GitHubAuthMode == service.GitHubAuthModePAT {
+									selected
+								}
+							>Personal Access Token (Recommended)</option>
+							<option
+								value={ service.GitHubAuthModeApp }
+								if view.GitHubAuthMode == service.GitHubAuthModeApp {
+									selected
+								}
+							>GitHub App (Advanced)</option>
 						</select>
 						<label class="label">
 							<span class="label-text-alt opacity-70">Use PAT for local/self-hosted installs. Use GitHub App for centralized cloud deployments.</span>
 						</label>
 					</div>
-
 					<div id="github_pat_section">
 						<div class="alert alert-info mb-3 text-sm">
 							PAT mode is the fastest setup for local open-source usage. Create a token with repository read/write and pull request permissions.
@@ -1050,7 +1058,20 @@ templ settingsContent(view ChannelsSettingsView) {
 							})
 						</div>
 					</div>
-
+					if view.GitHubPersonal {
+						<input type="hidden" name="github_revision" value={ view.GitHubRevision }/>
+						<div id="github_commit_identity" class="mb-4">
+							<div class="form-control mb-3">
+								<label class="label" for="github_author_name"><span class="label-text">Commit author</span></label>
+								<input id="github_author_name" name="github_author_name" class="input input-bordered" value={ view.GitHubAuthorName }/>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label" for="github_author_email"><span class="label-text">Commit email</span></label>
+								<input id="github_author_email" name="github_author_email" type="email" class="input input-bordered" value={ view.GitHubAuthorEmail }/>
+							</div>
+							<button type="button" class="btn btn-sm" onclick="lookupGitHubCommitIdentity()">Look up GitHub identity</button>
+						</div>
+					}
 					<div id="github_app_section">
 						<div class="alert mb-3 text-sm">
 							GitHub App mode is for advanced/cloud deployments where one app installation is shared by your deployment.
@@ -1080,11 +1101,11 @@ templ settingsContent(view ChannelsSettingsView) {
 									aria-pressed="false"
 								>
 									<svg class="eye-open h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
 									</svg>
 									<svg class="eye-closed h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>
 									</svg>
 								</button>
 							</div>
@@ -1126,7 +1147,6 @@ templ settingsContent(view ChannelsSettingsView) {
 				<button>close</button>
 			</form>
 		</dialog>
-
 		<dialog id="slack_config_modal" class="modal">
 			<div class="modal-box max-w-2xl">
 				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('slack_config_modal')" aria-label="Close Slack configuration">
@@ -1177,10 +1197,20 @@ templ settingsContent(view ChannelsSettingsView) {
 							class="select select-bordered w-full"
 							onchange="toggleSlackBotTokenMode(this.value)"
 						>
-							<option value={ service.SlackBotTokenSourceOAuth } if view.SlackBotTokenMode == service.SlackBotTokenSourceOAuth { selected }>
+							<option
+								value={ service.SlackBotTokenSourceOAuth }
+								if view.SlackBotTokenMode == service.SlackBotTokenSourceOAuth {
+									selected
+								}
+							>
 								OAuth Callback Token (Recommended)
 							</option>
-							<option value={ service.SlackBotTokenSourceManual } if view.SlackBotTokenMode == service.SlackBotTokenSourceManual { selected }>
+							<option
+								value={ service.SlackBotTokenSourceManual }
+								if view.SlackBotTokenMode == service.SlackBotTokenSourceManual {
+									selected
+								}
+							>
 								Manual Override Token
 							</option>
 						</select>
@@ -1224,7 +1254,15 @@ templ settingsContent(view ChannelsSettingsView) {
 					</h4>
 					<div class="form-control mb-4">
 						<label class="label cursor-pointer justify-start gap-3">
-							<input type="checkbox" class="checkbox checkbox-primary" name="slack_send_responses" value="true" if view.SlackSendResponses { checked }/>
+							<input
+								type="checkbox"
+								class="checkbox checkbox-primary"
+								name="slack_send_responses"
+								value="true"
+								if view.SlackSendResponses {
+									checked
+								}
+							/>
 							<span class="label-text">Send task completion/failure notifications for Slack-created tasks</span>
 						</label>
 					</div>
@@ -1238,7 +1276,6 @@ templ settingsContent(view ChannelsSettingsView) {
 				<button>close</button>
 			</form>
 			</dialog>
-
 		<dialog id="discord_config_modal" class="modal" onclose="resetDiscordConfigForm()">
 			<div class="modal-box max-w-2xl">
 				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('discord_config_modal')" aria-label="Close Discord configuration"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
@@ -1254,13 +1291,13 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Bot Token</span></label>
 						@components.SecretInput(components.SecretInputConfig{
-							ID: "discord_bot_token",
-							Name: "discord_bot_token",
-							Value: view.DiscordBotToken,
-							Class: "input input-bordered w-full pr-10 font-mono text-xs",
-							Placeholder: "Leave blank to keep existing token, or paste a new token to rotate.",
+							ID:           "discord_bot_token",
+							Name:         "discord_bot_token",
+							Value:        view.DiscordBotToken,
+							Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+							Placeholder:  "Leave blank to keep existing token, or paste a new token to rotate.",
 							AutoComplete: "off",
-							AriaLabel: "Toggle bot token visibility",
+							AriaLabel:    "Toggle bot token visibility",
 						})
 					</div>
 					if view.CurrentProjectID != "" {
@@ -1271,7 +1308,15 @@ templ settingsContent(view ChannelsSettingsView) {
 					}
 					<div class="divider"></div>
 					<label class="label cursor-pointer justify-start gap-3">
-						<input type="checkbox" class="checkbox checkbox-primary" name="discord_send_responses" value="true" if view.DiscordSendResponses { checked }/>
+						<input
+							type="checkbox"
+							class="checkbox checkbox-primary"
+							name="discord_send_responses"
+							value="true"
+							if view.DiscordSendResponses {
+								checked
+							}
+						/>
 						<span class="label-text">Send task completion/failure notifications for Discord-created tasks</span>
 					</label>
 					<div class="modal-action">
@@ -1282,7 +1327,6 @@ templ settingsContent(view ChannelsSettingsView) {
 			</div>
 			<form method="dialog" class="modal-backdrop"><button onclick="closeChannelConfigModal('discord_config_modal')">close</button></form>
 		</dialog>
-
 			<dialog id="email_config_modal" class="modal">
 				<div class="modal-box max-w-2xl">
 					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('email_config_modal')" aria-label="Close Email configuration">
@@ -1300,7 +1344,17 @@ templ settingsContent(view ChannelsSettingsView) {
 							<label class="label"><span class="label-text">Provider</span></label>
 							<select id="email_provider" name="email_provider" class="select select-bordered w-full" onchange="setEmailProviderPreset(this.value, false)">
 								for _, preset := range service.EmailProviderPresets() {
-									<option value={ preset.Key } data-imap-host={ preset.IMAPHost } data-imap-port={ fmt.Sprintf("%d", preset.IMAPPort) } data-smtp-host={ preset.SMTPHost } data-smtp-port={ fmt.Sprintf("%d", preset.SMTPPort) } data-help={ preset.HelpText } if view.EmailStatus.Provider == preset.Key { selected }>{ preset.Label }</option>
+								<option
+									value={ preset.Key }
+									data-imap-host={ preset.IMAPHost }
+									data-imap-port={ fmt.Sprintf("%d", preset.IMAPPort) }
+									data-smtp-host={ preset.SMTPHost }
+									data-smtp-port={ fmt.Sprintf("%d", preset.SMTPPort) }
+									data-help={ preset.HelpText }
+									if view.EmailStatus.Provider == preset.Key {
+										selected
+									}
+								>{ preset.Label }</option>
 								}
 							</select>
 						</div>
@@ -1312,7 +1366,13 @@ templ settingsContent(view ChannelsSettingsView) {
 							<label class="label"><span class="label-text">App Password</span></label>
 							@components.SecretInput(components.SecretInputConfig{ID: "email_password", Name: "email_password", Value: view.EmailPasswordValue, Class: "input input-bordered w-full pr-10 font-mono text-xs", Placeholder: slackSecretPlaceholder(view.EmailPasswordValue != "", "App password"), AutoComplete: "off", AriaLabel: "Toggle email password visibility"})
 						</div>
-						<details id="email_advanced_details" class="collapse collapse-arrow bg-base-200 mb-3" if view.EmailStatus.Provider == service.EmailProviderCustom { open }>
+					<details
+						id="email_advanced_details"
+						class="collapse collapse-arrow bg-base-200 mb-3"
+						if view.EmailStatus.Provider == service.EmailProviderCustom {
+							open
+						}
+					>
 							<summary class="collapse-title text-sm font-medium">Advanced IMAP/SMTP settings</summary>
 							<div class="collapse-content grid grid-cols-1 md:grid-cols-2 gap-3">
 								<div class="form-control">
@@ -1346,15 +1406,39 @@ templ settingsContent(view ChannelsSettingsView) {
 						<div class="divider"></div>
 						<div class="space-y-2 mb-4">
 							<label class="label cursor-pointer justify-start gap-3">
-								<input type="checkbox" class="toggle toggle-primary" name="email_send_responses" value="true" if view.EmailSendResponses { checked }/>
+							<input
+								type="checkbox"
+								class="toggle toggle-primary"
+								name="email_send_responses"
+								value="true"
+								if view.EmailSendResponses {
+									checked
+								}
+							/>
 								<span class="label-text">Send task completion/failure replies by email</span>
 							</label>
 							<label class="label cursor-pointer justify-start gap-3">
-								<input type="checkbox" class="toggle toggle-primary" name="email_skip_attachments" value="true" if view.EmailSkipAttachments { checked }/>
+							<input
+								type="checkbox"
+								class="toggle toggle-primary"
+								name="email_skip_attachments"
+								value="true"
+								if view.EmailSkipAttachments {
+									checked
+								}
+							/>
 								<span class="label-text">Skip incoming attachments</span>
 							</label>
 							<label class="label cursor-pointer justify-start gap-3">
-								<input type="checkbox" class="toggle toggle-primary" name="email_mark_existing_seen_on_start" value="true" if view.EmailMarkExistingSeenOnStart { checked }/>
+							<input
+								type="checkbox"
+								class="toggle toggle-primary"
+								name="email_mark_existing_seen_on_start"
+								value="true"
+								if view.EmailMarkExistingSeenOnStart {
+									checked
+								}
+							/>
 								<span class="label-text">Mark existing unread messages seen on start</span>
 							</label>
 						</div>
@@ -1366,8 +1450,8 @@ templ settingsContent(view ChannelsSettingsView) {
 				</div>
 				<form method="dialog" class="modal-backdrop"><button>close</button></form>
 			</dialog>
-
-			<!-- Webhook Configuration Modal -->		<dialog id="webhook_modal" class="modal">
+		<!-- Webhook Configuration Modal -->
+		<dialog id="webhook_modal" class="modal">
 			<div class="modal-box max-w-4xl p-0 overflow-hidden">
 				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeWebhookModal()" aria-label="Close webhook configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -1383,19 +1467,19 @@ templ settingsContent(view ChannelsSettingsView) {
 							<button type="button" role="tab" class="tab" data-webhook-section-tab="agents" aria-selected="false" onclick="setWebhookSection('agents')">Agents</button>
 						</div>
 					</div>
-
 					<div class="flex-1 min-h-0 px-6 py-3">
 						<div data-webhook-section-panel="config" class="h-full overflow-y-auto pr-4">
  if view.CurrentProjectID == models.AllProjectsID {
- <label class="form-control mb-3"><span class="label-text">Project</span>
+								<label class="form-control mb-3">
+									<span class="label-text">Project</span>
  <select id="webhook_project_owner" class="select select-bordered" required onchange="var f=this.form;f.querySelector('[name=project_id]').value=this.value;if(f.dataset.webhookMode==='create'){f.setAttribute('hx-post','/channels/webhooks?project_id='+encodeURIComponent(this.value));htmx.process(f);}syncWebhookProjectAgents()">
  <option value="">Choose project</option>
  for _, project := range templateui.ProjectOptions(ctx) {
  <option value={ project.ID }>{ project.Name }</option>
  }
- </select></label>
+									</select>
+								</label>
  }
-
 							<div class="form-control mb-3">
 								<label class="label"><span class="label-text">Name</span></label>
 								<input type="text" id="webhook_name" name="name" class="input input-bordered w-full" placeholder="e.g. PagerDuty Alerts" required/>
@@ -1427,7 +1511,7 @@ templ settingsContent(view ChannelsSettingsView) {
 									})
 									</div>
 									<div class="form-control mb-3">
-										<label class="label"><span class="label-text">System Instructions</span></label>								<textarea id="webhook_system_instructions" name="system_instructions" class="textarea textarea-bordered w-full h-20" placeholder="Optional system context for the agent..."></textarea>
+								<label class="label"><span class="label-text">System Instructions</span></label> <textarea id="webhook_system_instructions" name="system_instructions" class="textarea textarea-bordered w-full h-20" placeholder="Optional system context for the agent..."></textarea>
 							</div>
 							<div class="form-control mb-3">
 								<label class="label"><span class="label-text">Default Priority</span></label>
@@ -1447,7 +1531,6 @@ templ settingsContent(view ChannelsSettingsView) {
 								<textarea id="webhook_prompt_template" name="prompt_template" class="textarea textarea-bordered w-full h-24" placeholder="Optional task prompt template"></textarea>
 							</div>
 						</div>
-
 						<div data-webhook-section-panel="agents" class="h-full overflow-y-auto pr-4 hidden">
 							<div class="space-y-3">
 								<div class="border border-base-300 rounded-lg p-3">
@@ -1470,7 +1553,6 @@ templ settingsContent(view ChannelsSettingsView) {
 						</div>
 					</div>
 					<input type="hidden" id="webhook_agent_ids_hidden" name="agent_ids"/>
-
 					<div class="modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3">
 						<form method="dialog" class="inline">
 							<button type="button" class="btn" onclick="closeWebhookModal()">Cancel</button>
@@ -1483,10 +1565,8 @@ templ settingsContent(view ChannelsSettingsView) {
 			<button>close</button>
 		</form>
 	</dialog>
-
 	<!-- Webhook available agents data for JavaScript -->
 	<div id="webhook_agents_data" data-agents={ agentsJSON(view.AgentPickerOptions) } style="display:none"></div>
-
 	<style>
 		/* Keep password toggle button fixed inside input across press/focus states */
 		.password-toggle-btn:active,
@@ -1503,9 +1583,7 @@ templ settingsContent(view ChannelsSettingsView) {
 			-webkit-text-security: disc;
 		}
 	</style>
-
 	@components.SecretInputVisibilityScript()
-
 	<script>
 		var pendingDeleteChannelURL = '';
 				var pendingDeleteChannelMethod = 'POST';
@@ -2333,7 +2411,30 @@ templ settingsContent(view ChannelsSettingsView) {
 				section.style.display = normalized === 'manual' ? '' : 'none';
 			}
 
+			async function lookupGitHubCommitIdentity() {
+                const form = document.getElementById('github_config_form');
+                if (!form || !form.querySelector('[name="github_revision"]')) return;
+                try {
+                    const response = await fetch('/channels/github/identity', {method: 'POST', body: new FormData(form)});
+                    if (!response.ok) throw new Error('Identity lookup failed');
+                    const identity = await response.json();
+                    for (const [field, value] of [['github_author_name', identity.author_name], ['github_author_email', identity.author_email]]) {
+                        const input = form.elements[field];
+                        if (input && !input.value.trim()) input.value = value || '';
+                    }
+                } catch (_) {
+                    window.showToast?.('Could not fetch GitHub identity. Enter your commit author and email manually.', 'failed');
+                }
+            }
+            document.getElementById('github_pat')?.addEventListener('change', lookupGitHubCommitIdentity);
+
 			function toggleGitHubAuthMode(mode) {
+                const identity = document.getElementById('github_commit_identity');
+                if (identity) {
+                    identity.classList.toggle('hidden', mode === 'app');
+                    identity.querySelectorAll('input,button').forEach(el => { el.disabled = mode === 'app'; });
+                }
+
 				const normalized = (mode || '').toLowerCase();
 				const patSection = document.getElementById('github_pat_section');
 				const appSection = document.getElementById('github_app_section');
@@ -2427,7 +2528,6 @@ templ OutboundTargetsCard(currentProjectID string, summary persistence.ChannelTa
 			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
 				@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Outbound Message Targets"}) {
 						<li><button type="button" onclick="openOutboundTargetsModal()">Edit</button></li>
-
 								}
 			</div>
 			<div class="pr-12">
@@ -2495,7 +2595,8 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 				}
                 if currentProjectID == models.AllProjectsID {
  <div class="mt-4 space-y-2">
-  <label class="form-control"><span class="label-text">Project for new targets or policy settings</span>
+					<label class="form-control">
+						<span class="label-text">Project for new targets or policy settings</span>
    <select class="select select-bordered select-sm" onchange="if(this.value)htmx.ajax('GET','/channels/outbound-targets?project_id='+encodeURIComponent(this.value),{target:'#outbound-targets-section',swap:'outerHTML'})">
     <option value="">Choose project</option>
     for _, project := range templateui.ProjectOptions(ctx) {
@@ -2505,7 +2606,8 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
   </label>
  </div>
  } else {
-				<form id="outbound-target-add-form" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()" onsubmit="return addOutboundTargetDraft(event)">				<select name="platform" id="outbound-target-platform-select" class="select select-bordered select-sm" required onchange="outboundTargetKindOnPlatformChange(this)">
+				<form id="outbound-target-add-form" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()" onsubmit="return addOutboundTargetDraft(event)">
+					<select name="platform" id="outbound-target-platform-select" class="select select-bordered select-sm" required onchange="outboundTargetKindOnPlatformChange(this)">
 					<option value="slack">Slack</option>
 					<option value="telegram">Telegram</option>
 					<option value="email">Email</option>
@@ -2530,7 +2632,6 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<button type="submit" class="btn btn-primary btn-sm">Add Target</button>
 			</form>
  }
-
 				<div class="overflow-x-auto mt-4">
 					<table class="table table-sm">
 						<thead>
@@ -2607,7 +2708,15 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 							</div>
 							<div class="form-control">
 								<label class="label cursor-pointer gap-3 justify-start px-0">
-									<input type="checkbox" name="enabled" value="true" class="toggle toggle-primary toggle-sm" if explicitAllowed { checked }/>
+							<input
+								type="checkbox"
+								name="enabled"
+								value="true"
+								class="toggle toggle-primary toggle-sm"
+								if explicitAllowed {
+									checked
+								}
+							/>
 									<div>
 										<span class="label-text text-sm font-semibold">Allow explicit unsaved targets</span>
 										<p class="text-xs opacity-50 mt-1">Permit send_message to use direct destinations that are not saved here.</p>
@@ -2620,5 +2729,6 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 							</div>
 						</form>
  }
- </div>	</div>
+		</div>
+	</div>
 }

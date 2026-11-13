@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -36,13 +39,16 @@ type TaskPullRequestService struct {
 }
 
 type OpenTaskPullRequestOptions struct {
-	Title         string
-	Body          string
-	Base          string
-	Draft         bool
-	CommitMessage string
-	IssueNumber   *int
-	IssueURL      string
+	closingIssueRef         string
+	previousClosingIssueRef string
+	TargetRepoURL           string
+	Title                   string
+	Body                    string
+	Base                    string
+	Draft                   bool
+	CommitMessage           string
+	IssueNumber             *int
+	IssueURL                string
 	// PreserveNeedsRepublish keeps a durable startup-sync publication marker
 	// until the caller has atomically completed the execution.
 	PreserveNeedsRepublish bool
@@ -201,7 +207,23 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 	if err := ConfigureGitHubRepoEndpoint(repoRef, s.github.GlobalAPIEndpoint(ctx)); err != nil {
 		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
 	}
-	linkedPR, err := replacer.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
+	targetRepo, err := TaskPullRequestTarget(existingPR.PRURL, existingPR.PRNumber, repoRef)
+	if err != nil {
+		return nil, err
+	}
+	if existingPR.HeadRepoURL != "" {
+		head, err := SameHostGitHubRepo(existingPR.HeadRepoURL, repoRef)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.EqualFold(head.FullName, repoRef.FullName) {
+			if err := s.validatePublicationRepository(ctx, repoRef, head); err != nil {
+				return nil, err
+			}
+		}
+		repoRef = head
+	}
+	linkedPR, err := replacer.GetPullRequest(ctx, targetRepo, existingPR.PRNumber)
 	if err != nil {
 		return nil, fmt.Errorf("fetching linked pull request: %w", err)
 	}
@@ -277,6 +299,9 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if project == nil {
 		return nil, fmt.Errorf("project is required")
 	}
+	if task.ProjectID != "" && project.ID != "" && task.ProjectID != project.ID {
+		return nil, fmt.Errorf("task does not belong to project")
+	}
 	if strings.TrimSpace(task.WorktreeBranch) == "" {
 		return nil, fmt.Errorf("task has no worktree branch")
 	}
@@ -306,6 +331,53 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if err := ConfigureGitHubRepoEndpoint(repoRef, s.github.GlobalAPIEndpoint(ctx)); err != nil {
 		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
 	}
+	// Keep the project as the issue source even when publication uses a personal fork.
+	projectSource := repoRef
+	headRepo := repoRef
+	if existingPR != nil && existingPR.HeadRepoURL != "" {
+		headRepo, err = SameHostGitHubRepo(existingPR.HeadRepoURL, repoRef)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.EqualFold(headRepo.FullName, repoRef.FullName) {
+			if err := s.validatePublicationRepository(ctx, repoRef, headRepo); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if existingPR != nil {
+		repoRef, err = TaskPullRequestTarget(existingPR.PRURL, existingPR.PRNumber, headRepo)
+		if err != nil {
+			return nil, err
+		}
+		if existingPR.BaseBranch != "" {
+			opts.Base = existingPR.BaseBranch
+		}
+	} else if strings.TrimSpace(opts.TargetRepoURL) != "" {
+		repoRef, err = SameHostGitHubRepo(opts.TargetRepoURL, headRepo)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.EqualFold(repoRef.FullName, headRepo.FullName) {
+			provider, ok := s.github.(GitHubRepositoryOptionsProvider)
+			if !ok {
+				return nil, fmt.Errorf("GitHub integration cannot verify the upstream repository")
+			}
+			metadata, err := provider.RepositoryOptions(ctx, headRepo)
+			if err != nil {
+				return nil, err
+			}
+			if metadata.Parent == nil || !strings.EqualFold(metadata.Parent.FullName, repoRef.FullName) {
+				return nil, fmt.Errorf("PR target must be the project repository or its upstream parent")
+			}
+		}
+	}
+	if opts.Base == "" && !strings.EqualFold(repoRef.FullName, headRepo.FullName) {
+		opts.Base, err = s.github.DefaultBranch(ctx, repoRef)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var validatedExistingPR *GitHubPullRequest
 	if opts.RequireExistingOpenPR > 0 {
 		if existingPR == nil || existingPR.PRNumber != opts.RequireExistingOpenPR || !IsOpenPullRequestState(existingPR.PRState) {
@@ -315,13 +387,44 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		if err != nil {
 			return nil, fmt.Errorf("checking startup reconciliation pull request #%d: %w", opts.RequireExistingOpenPR, err)
 		}
-		if err := ValidateTaskPullRequestLiveState(project, task, repoRef, livePR); err != nil {
+		if err := ValidateTaskPullRequestLiveState(project, task, headRepo, livePR); err != nil {
 			return nil, fmt.Errorf("startup reconciliation pull request #%d is unavailable: %w", opts.RequireExistingOpenPR, err)
 		}
 		validatedExistingPR = livePR
 	}
 
+	issueRepo := projectSource
+	if existingPR == nil {
+		if provider, ok := s.github.(taskPublicationRepositoryProvider); ok {
+			headRepo, err = provider.PreparePublicationRepository(ctx, headRepo)
+			if err != nil {
+				return nil, fmt.Errorf("preparing publication repository: %w", err)
+			}
+		}
+	}
+
+	issueOpts := opts
+	if existingPR != nil {
+		if opts.IssueNumber != nil && existingPR.IssueNumber != nil && *opts.IssueNumber == *existingPR.IssueNumber && strings.TrimSpace(issueOpts.IssueURL) == "" {
+			issueOpts.IssueURL = existingPR.IssueURL
+		}
+		opts.previousClosingIssueRef = taskIssueClosingRef(OpenTaskPullRequestOptions{IssueNumber: existingPR.IssueNumber, IssueURL: existingPR.IssueURL}, issueRepo.HTMLURL)
+	}
+	opts.closingIssueRef = taskIssueClosingRef(issueOpts, issueRepo.HTMLURL)
 	createReq := s.buildCreatePullRequestRequest(ctx, project, task, opts, repoRef)
+	if existingPR == nil && opts.TargetRepoURL != "" {
+		if validator, ok := s.github.(interface {
+			ValidatePullRequestBase(context.Context, *GitHubRepoRef, string) error
+		}); ok {
+			if err := validator.ValidatePullRequestBase(ctx, repoRef, createReq.Base); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if !strings.EqualFold(repoRef.FullName, headRepo.FullName) {
+		createReq.Head = headRepo.Owner + ":" + task.WorktreeBranch
+		createReq.HeadRepo = headRepo.Name
+	}
 	commitMessage := strings.TrimSpace(opts.CommitMessage)
 	if commitMessage == "" && strings.TrimSpace(task.WorktreePath) != "" {
 		commitMessage = BuildWorktreeCommitMessage(task.WorktreePath, WorktreeCommitMessageContext{Phase: WorktreeCommitPhaseMerge, TaskTitle: task.Title})
@@ -329,14 +432,16 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if commitMessage == "" {
 		commitMessage = fmt.Sprintf("Prepare task %s", task.ID)
 	}
-	publishResult, err := s.github.PublishBranch(ctx, repoRef, GitHubPublishBranchRequest{
-		RepoPath:       project.RepoPath,
-		WorktreePath:   task.WorktreePath,
-		Branch:         task.WorktreeBranch,
-		BaseBranch:     createReq.Base,
-		CommitMessage:  commitMessage,
-		CommitterName:  "OpenVibely Bot",
-		CommitterEmail: "bot@openvibely.ai",
+	publishResult, err := s.github.PublishBranch(ctx, headRepo, GitHubPublishBranchRequest{
+		RepoPath:             project.RepoPath,
+		WorktreePath:         task.WorktreePath,
+		Branch:               task.WorktreeBranch,
+		BaseBranch:           createReq.Base,
+		PreserveLocalHistory: !strings.EqualFold(repoRef.FullName, headRepo.FullName),
+		LocalBaseBranch:      task.MergeTargetBranch,
+		CommitMessage:        commitMessage,
+		CommitterName:        "OpenVibely Bot",
+		CommitterEmail:       "bot@openvibely.ai",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("publishing branch: %w", err)
@@ -366,7 +471,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 				return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
 			}
 		}
-		if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, publishedHeadSHA); err == nil {
+		if err := ValidateTaskPullRequestCurrentPublication(project, task, headRepo, livePR, publishedHeadSHA); err == nil {
 			if body, update := reusedPullRequestBody(livePR.Body, createReq.Body, existingPR.IssueNumber, opts); update {
 				if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
 					if err := updater.UpdatePullRequestBody(ctx, repoRef, existingPR.PRNumber, body); err != nil {
@@ -377,7 +482,13 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 			}
 			liveURL := strings.TrimSpace(livePR.URL)
 			liveState := strings.TrimSpace(livePR.State)
-			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA
+			changed := existingPR.HeadRepoURL != headRepo.HTMLURL
+			existingPR.HeadRepoURL = headRepo.HTMLURL
+			if livePR.BaseRef != "" && existingPR.BaseBranch != livePR.BaseRef {
+				existingPR.BaseBranch = livePR.BaseRef
+				changed = true
+			}
+			changed = changed || existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA
 			existingPR.PRURL = liveURL
 			existingPR.PRState = liveState
 			existingPR.PublishedHeadSHA = publishedHeadSHA
@@ -404,7 +515,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		return nil, fmt.Errorf("startup reconciliation pull request #%d is no longer open or current; refusing to create a replacement", opts.RequireExistingOpenPR)
 	}
 
-	foundPR, err := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)
+	foundPR, err := s.findPullRequestForTarget(ctx, repoRef, headRepo, createReq)
 	if err != nil {
 		return nil, fmt.Errorf("finding pull request: %w", err)
 	}
@@ -418,7 +529,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		pr, err = s.github.CreatePullRequest(ctx, repoRef, createReq)
 		if err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "pull request already exists") {
-				retryPR, findErr := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)
+				retryPR, findErr := s.findPullRequestForTarget(ctx, repoRef, headRepo, createReq)
 				if findErr == nil && retryPR != nil {
 					pr = retryPR
 				} else {
@@ -442,7 +553,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		}
 		pr = livePR
 	}
-	if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, pr, publishedHeadSHA); err != nil {
+	if err := ValidateTaskPullRequestCurrentPublication(project, task, headRepo, pr, publishedHeadSHA); err != nil {
 		return nil, fmt.Errorf("pull request #%d is not current: %w", prNumber, err)
 	}
 	if !created {
@@ -458,6 +569,8 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 
 	record := &models.TaskPullRequest{
 		TaskID:           task.ID,
+		HeadRepoURL:      headRepo.HTMLURL,
+		BaseBranch:       createReq.Base,
 		PRNumber:         pr.Number,
 		PRURL:            pr.URL,
 		PRState:          pr.State,
@@ -483,38 +596,112 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	}, nil
 }
 
+// Resolve the issue against its source, never the PR destination.
+func taskIssueClosingRef(opts OpenTaskPullRequestOptions, sourceRepoURL string) string {
+	if raw := strings.TrimSpace(opts.IssueURL); raw != "" {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return ""
+		}
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) != 4 || parts[2] != "issues" {
+			return ""
+		}
+		n, err := strconv.Atoi(parts[3])
+		if err != nil || n <= 0 || (opts.IssueNumber != nil && *opts.IssueNumber != n) {
+			return ""
+		}
+		u.RawQuery, u.Fragment = "", ""
+		return strings.TrimRight(u.String(), "/")
+	}
+	if opts.IssueNumber == nil || *opts.IssueNumber <= 0 {
+		return ""
+	}
+	repo, err := ParseGitHubRepoURL(sourceRepoURL)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s/issues/%d", strings.TrimRight(repo.HTMLURL, "/"), *opts.IssueNumber)
+}
+
+// closingIssueNumber reads the number from an already validated issue URL.
+func closingIssueNumber(ref string) int {
+	n, err := strconv.Atoi(ref[strings.LastIndex(ref, "/")+1:])
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// Qualify only closing references for the linked issue; leave other prose intact.
+func qualifyIssueClosingReferences(body string, opts OpenTaskPullRequestOptions) string {
+	if opts.closingIssueRef == "" {
+		return body
+	}
+	var issueNumber int
+	if opts.IssueNumber != nil {
+		issueNumber = *opts.IssueNumber
+	} else {
+		// closingIssueRef is the validated, canonical issue URL. URL-only
+		// callers still identify the issue whose shorthand needs qualifying.
+		issueNumber = closingIssueNumber(opts.closingIssueRef)
+		if issueNumber == 0 {
+			return body
+		}
+	}
+	pattern := regexp.MustCompile(fmt.Sprintf(`(?i)(\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\s+)#%d(\b)`, issueNumber))
+	return pattern.ReplaceAllStringFunc(body, func(match string) string {
+		i := strings.LastIndex(match, "#")
+		return match[:i] + opts.closingIssueRef
+	})
+}
+
 func reusedPullRequestBody(existingBody, defaultBody string, previousIssueNumber *int, opts OpenTaskPullRequestOptions) (string, bool) {
 	if body := strings.TrimSpace(opts.Body); body != "" {
-		return body, true
+		return qualifyIssueClosingReferences(body, opts), true
 	}
-	if opts.IssueNumber == nil {
+	if opts.closingIssueRef == "" {
 		return "", false
 	}
 
-	closingLine := fmt.Sprintf("Closes #%d", *opts.IssueNumber)
+	closingLine := "Closes " + opts.closingIssueRef
 	originalBody := strings.TrimSpace(existingBody)
 	body := originalBody
-	if previousIssueNumber != nil && *previousIssueNumber != *opts.IssueNumber {
-		body = removePullRequestIssueClosingLine(body, *previousIssueNumber)
+	previousNumber := closingIssueNumber(opts.previousClosingIssueRef)
+	if previousNumber == 0 && previousIssueNumber != nil {
+		previousNumber = *previousIssueNumber
 	}
-	if pullRequestBodyClosesIssue(body, *opts.IssueNumber) {
+	issueChanged := opts.previousClosingIssueRef != "" && !strings.EqualFold(opts.previousClosingIssueRef, opts.closingIssueRef)
+	if opts.previousClosingIssueRef == "" && previousNumber > 0 {
+		issueChanged = previousNumber != closingIssueNumber(opts.closingIssueRef)
+	}
+	if issueChanged {
+		if previousNumber > 0 {
+			body = removePullRequestIssueClosingLine(body, fmt.Sprintf("#%d", previousNumber))
+		}
+		if opts.previousClosingIssueRef != "" {
+			body = removePullRequestIssueClosingLine(body, opts.previousClosingIssueRef)
+		}
+	}
+	body = qualifyIssueClosingReferences(body, opts)
+	if pullRequestBodyClosesIssue(body, opts.closingIssueRef) {
 		if body != originalBody {
 			return body, true
 		}
 		return "", false
 	}
 	if body == "" {
-		return strings.TrimSpace(defaultBody), true
+		return qualifyIssueClosingReferences(strings.TrimSpace(defaultBody), opts), true
 	}
 	return body + "\n\n" + closingLine, true
 }
 
-func removePullRequestIssueClosingLine(body string, issueNumber int) string {
+func removePullRequestIssueClosingLine(body string, issueRef string) string {
 	lines := strings.Split(body, "\n")
 	kept := lines[:0]
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
-		if pullRequestClosingLineMatchesIssue(line, issueNumber) {
+		if pullRequestClosingLineMatchesIssue(line, issueRef) {
 			if i+1 < len(lines) && len(kept) > 0 && strings.TrimSpace(lines[i+1]) == "" && strings.TrimSpace(kept[len(kept)-1]) == "" {
 				i++
 			}
@@ -525,7 +712,7 @@ func removePullRequestIssueClosingLine(body string, issueNumber int) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
-func pullRequestClosingLineMatchesIssue(line string, issueNumber int) bool {
+func pullRequestClosingLineMatchesIssue(line string, issueRef string) bool {
 	fields := strings.Fields(strings.TrimSpace(line))
 	if len(fields) == 3 && (fields[0] == "-" || fields[0] == "*" || fields[0] == "+") {
 		fields = fields[1:]
@@ -537,14 +724,13 @@ func pullRequestClosingLineMatchesIssue(line string, issueNumber int) bool {
 	switch keyword {
 	case "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved":
 		ref := strings.Trim(fields[1], "*_`.,;:[]()")
-		return strings.EqualFold(ref, fmt.Sprintf("#%d", issueNumber))
+		return strings.EqualFold(ref, issueRef)
 	default:
 		return false
 	}
 }
 
-func pullRequestBodyClosesIssue(body string, issueNumber int) bool {
-	issueRef := fmt.Sprintf("#%d", issueNumber)
+func pullRequestBodyClosesIssue(body string, issueRef string) bool {
 	for _, line := range strings.Split(body, "\n") {
 		fields := strings.Fields(line)
 		for i := 0; i+1 < len(fields); i++ {
@@ -586,15 +772,18 @@ func (s *TaskPullRequestService) buildCreatePullRequestRequest(ctx context.Conte
 	if title == "" {
 		title = task.Title
 	}
-	body := strings.TrimSpace(opts.Body)
+	if opts.closingIssueRef == "" {
+		opts.closingIssueRef = taskIssueClosingRef(opts, project.RepoURL)
+	}
+	body := qualifyIssueClosingReferences(strings.TrimSpace(opts.Body), opts)
 	if body == "" {
 		summary := strings.TrimSpace(task.Title)
 		if opts.IssueNumber != nil {
 			summary = strings.TrimSpace(strings.TrimSuffix(summary, fmt.Sprintf("(#%d)", *opts.IssueNumber)))
 		}
 		body = "## Summary\n- " + summary
-		if opts.IssueNumber != nil {
-			body += fmt.Sprintf("\n\nCloses #%d", *opts.IssueNumber)
+		if opts.closingIssueRef != "" {
+			body += "\n\nCloses " + opts.closingIssueRef
 		}
 	}
 	base := strings.TrimSpace(opts.Base)
@@ -643,4 +832,23 @@ func mergeTaskPullRequestIssueMetadata(record *models.TaskPullRequest, opts Open
 		changed = true
 	}
 	return changed
+}
+
+// Target-aware lookup avoids adopting another PR from a similarly named fork
+// branch or a PR against a different base branch.
+func (s *TaskPullRequestService) findPullRequestForTarget(ctx context.Context, target, head *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+	if provider, ok := s.github.(interface {
+		FindPullRequestForTarget(context.Context, *GitHubRepoRef, string, string, string) (*GitHubPullRequest, error)
+	}); ok {
+		return provider.FindPullRequestForTarget(ctx, target, req.Head, head.FullName, req.Base)
+	}
+	return s.github.FindPullRequestByBranch(ctx, target, req.Head)
+}
+
+func (s *TaskPullRequestService) validatePublicationRepository(ctx context.Context, project, head *GitHubRepoRef) error {
+	provider, ok := s.github.(taskPublicationRepositoryProvider)
+	if !ok {
+		return fmt.Errorf("project repository differs from the linked pull request source")
+	}
+	return provider.ValidatePublicationRepository(ctx, project, head)
 }

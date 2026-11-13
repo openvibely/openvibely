@@ -659,6 +659,8 @@ type TaskPullRequestStore interface {
 
 // TaskStore persists tasks and their lifecycle state.
 type TaskStore interface {
+	// IsPageConversation checks durable ownership, even if category was changed.
+	IsPageConversation(context.Context, string) (bool, error)
 	UpdatePreservingTitle(ctx context.Context, task *models.Task) error
 	UpdateGeneratedTitle(ctx context.Context, id, expectedTitle, expectedPrompt, title string) (bool, error)
 	TaskModelSettings(ctx context.Context, taskID, selectedID string) (*models.TaskModelSettings, error)
@@ -743,6 +745,7 @@ type TaskStore interface {
 	Update(ctx context.Context, t *models.Task) error
 	UpdateAgentDefinition(ctx context.Context, taskID string, agentDefinitionID *string) error
 	UpdateAgentID(ctx context.Context, id string, agentID string) error
+	UpdateMergeTargetBranch(ctx context.Context, id, targetBranch string) error
 	UpdateAutoMerge(ctx context.Context, id string, autoMerge bool, targetBranch string) error
 	UpdateAutoMergeSettings(ctx context.Context, id string, autoMerge bool, autoMergeOnGoalAchieved *bool, targetBranch string) error
 	UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error
@@ -791,6 +794,7 @@ type ThreadInputStore interface {
 	CancelPendingForTask(ctx context.Context, taskID string) error
 	ClaimQueuedForChatExecution(ctx context.Context, inputID string, task *models.Task, exec *models.Execution, slackContext *models.SlackTaskContext, emailContext *models.EmailTaskContext, discordContext *models.DiscordTaskContext) error
 	ClaimQueuedForTaskExecutionWithModel(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string, agent *models.LLMConfig) error
+	ClaimQueuedForPageExecution(context.Context, string, *models.Execution) error
 	ClearProviderSteering(ctx context.Context, steeringIDs []string) error
 	CommitLocalSteering(ctx context.Context, commit LocalSteeringCommit) error
 	ConvertQueuedToSteering(ctx context.Context, id string, runExecutionID string, expectedTurnID string) (*models.ThreadInput, error)

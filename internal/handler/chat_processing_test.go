@@ -151,6 +151,8 @@ func TestStreamingTransportScope(t *testing.T) {
 	}{
 		{name: "project chat", params: streamingResponseParams{ProjectID: "project-1", TaskID: "hidden-chat-task"}, want: "chat:project:project-1"},
 		{name: "task followup", params: streamingResponseParams{ProjectID: "project-1", TaskID: "task-1", IsTaskFollowup: true}, want: "task:task-1"},
+		{name: "page conversation", params: streamingResponseParams{ProjectID: "project-1", TaskID: "page-chat-1", TaskScopedChat: true}, want: "task:page-chat-1"},
+		{name: "page conversation missing task", params: streamingResponseParams{ProjectID: "project-1", TaskScopedChat: true}, want: ""},
 		{name: "task followup missing task", params: streamingResponseParams{ProjectID: "project-1", IsTaskFollowup: true}, want: ""},
 		{name: "missing identity", params: streamingResponseParams{}, want: ""},
 	} {

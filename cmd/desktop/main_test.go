@@ -295,7 +295,11 @@ func TestDesktopWindowProxiesEphemeralBackendWithPersistentStorage(t *testing.T)
 	if err != nil {
 		t.Fatalf("read desktop main.go: %v", err)
 	}
-	source := string(content)
+	proxyContent, err := os.ReadFile("desktop_proxy.go")
+	if err != nil {
+		t.Fatalf("read desktop proxy: %v", err)
+	}
+	source := string(content) + "\n" + string(proxyContent)
 	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       "/chat",`) || !strings.Contains(source, `httputil.NewSingleHostReverseProxy(backendURL)`) || !strings.Contains(source, `proxy.FlushInterval = -1`) {
 		t.Fatal("desktop launcher must keep loading the server UI through a Wails WebView window")
 	}

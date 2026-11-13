@@ -1,0 +1,552 @@
+package pages
+
+import (
+	"net/url"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+// PluginPageView is everything the host shell needs to render one plugin page instance.
+type PluginPageView struct {
+	InstanceID      string
+	Title           string
+	OwningProjectID string
+	Handle          string
+	AssetURL        string
+	ChatHasEarlier  bool
+	ChatExecutions  []models.Execution
+	ChatTask        *models.Task
+	ChatAgents      []models.LLMConfig
+	ChatAttachments map[string][]models.ChatAttachment
+	ChatPending     []models.ThreadInput
+}
+
+func pluginAPI(v PluginPageView, suffix string) string {
+	return "/api/plugin-pages/" + url.PathEscape(v.InstanceID) + suffix + "?project_id=" + url.QueryEscape(v.OwningProjectID)
+}
+
+templ PluginPage(projects []models.Project, currentProjectID string, v PluginPageView) {
+	@layout.Base(v.Title, projects, currentProjectID) {
+		@PluginPageContent(v)
+	}
+}
+
+templ PluginPageContent(v PluginPageView) {
+	@layout.PageTitle(v.Title)
+	<div
+		id="plugin-page-root"
+		hx-history="false"
+		class="flex flex-col h-full min-h-0"
+		data-page-chat-root
+		data-plugin-handle={ v.Handle }
+		data-project-id={ v.OwningProjectID }
+		data-bridge-url={ pluginAPI(v, "/bridge") }
+		data-events-url={ pluginAPI(v, "/events") }
+		data-retire-url={ pluginAPI(v, "/handle/retire") }
+	>
+		<div data-page-header class="flex items-center gap-2 flex-shrink-0 min-w-0">
+			<nav class="flex min-w-0 flex-1 items-center gap-2" aria-label="Breadcrumb" data-page-header>
+                <a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL("/settings/plugin-pages?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, v.OwningProjectID))) } onclick="event.preventDefault(); window.openVibelyNavigate(this.getAttribute('href'));">Custom Pages</a>
+                <span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
+                <div class="min-w-0 flex-1 flex items-center gap-1">
+                    <span data-breadcrumb-title class="min-w-0 truncate">{ v.Title }</span>
+                    @components.BreadcrumbSelector(models.BreadcrumbSelector{
+                        ID: "custom-page-resource-selector", Kind: "Custom page", CurrentID: v.InstanceID, CurrentName: v.Title,
+                        SearchURL: "/breadcrumb-selectors/custom-pages?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, v.OwningProjectID)) + "&current_id=" + url.QueryEscape(v.InstanceID),
+                        CaretOnly: true,
+                    })
+                </div>
+            </nav>
+			@components.SidePanelToggle("page-chat-toggle", "page-side-chat", templ.Attributes{"data-page-chat-toggle": ""})
+		</div>
+		<div id="plugin-startup" class="text-xs mb-2" role="status" hidden data-state="loading"></div>
+		<div id="plugin-notice" class="text-xs mb-2" aria-live="polite"></div>
+		<div class="flex flex-1 min-h-0 gap-3">
+			<iframe
+				id="plugin-frame"
+				data-tooltip-disabled
+				title={ v.Title }
+				class="flex-1 min-w-0 w-full h-full border border-base-300 bg-base-100"
+				sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+				referrerpolicy="no-referrer"
+				src={ v.AssetURL }
+			></iframe>
+			@components.PageSideChat(components.PageChatView{
+				HasEarlier:     v.ChatHasEarlier,
+				ChatExecutions: v.ChatExecutions, ChatTask: v.ChatTask, PendingInputs: v.ChatPending, Attachments: v.ChatAttachments, Agents: v.ChatAgents,
+			})
+		</div>
+		@pluginHostBridgeScript()
+	</div>
+}
+
+// PluginNavEntry is one enabled page instance in the left rail.
+type PluginNavEntry struct {
+	Icon         string
+	InstanceID   string
+	Title        string
+	ProjectID    string
+	ProjectLabel string
+}
+
+func pluginNavProjectSuffix(e PluginNavEntry, showProject bool) string {
+	if showProject {
+		return " · " + e.ProjectLabel
+	}
+	return ""
+}
+
+func pluginNavScope(e PluginNavEntry, allProjects bool) string {
+    if allProjects { return models.AllProjectsID }
+    return e.ProjectID
+}
+
+templ PluginNav(entries []PluginNavEntry, showProject bool) {
+	if len(entries) > 0 {
+		<li class="sidebar-divider" style="display:block!important;border-top:1px solid currentColor;opacity:.1;margin:6px 4px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent);mask-image:linear-gradient(90deg,transparent,#000 25%,#000 75%,transparent)" role="separator"></li>
+		<li class="menu-title sidebar-hide-collapsed"><span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Pages</span></li>
+	}
+	for _, e := range entries {
+		<li data-plugin-nav-entry={ e.InstanceID }>
+			<a
+				data-sidebar-path={ "/p/" + url.PathEscape(e.InstanceID) }
+				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject))) }
+				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject)) }
+				aria-label={ e.Title + pluginNavProjectSuffix(e, showProject) }
+				data-tip={ e.Title + pluginNavProjectSuffix(e, showProject) }
+				data-tip-side="right"
+				hx-target="#main-content"
+				hx-push-url="true"
+			>
+				if e.Icon != "" {
+					<span class="h-4 w-4 shrink-0 inline-flex items-center justify-center" aria-hidden="true">{ e.Icon }</span>
+				} else {
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16M4 12h16M4 19h10"></path></svg>
+				}
+				<span class="sidebar-text">
+					{ e.Title }
+					if showProject {
+						<span class="text-xs opacity-60">· { e.ProjectLabel }</span>
+					}
+				</span>
+			</a>
+		</li>
+	}
+	if len(entries) > 0 {
+		<li data-plugin-nav-overflow hidden>
+			<button type="button" aria-label="More pages" aria-haspopup="menu" aria-expanded="false" aria-controls="plugin-pages-overflow-menu">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
+				<span class="sidebar-text">More pages</span>
+			</button>
+		</li>
+	}
+}
+
+// PluginSettingsRow is one project instance shown in settings.
+type PluginSettingsRow struct {
+	Instance      models.PagePluginInstance
+ Description string
+}
+
+type PluginSettingsPackage struct {
+	Package models.PagePluginPackage
+ Description string
+	Pages   []string
+	InUse   int
+}
+
+type PluginSettingsView struct {
+ Projects []models.Project
+	Search       string
+	Sort         string
+	OpenInstall  bool
+	InstallPath  string
+	NativePicker bool
+	Enabled      string
+	ProjectID    string
+	Packages     []PluginSettingsPackage
+	Instances    []PluginSettingsRow
+	Error        string
+}
+
+templ PluginSettings(projects []models.Project, currentProjectID string, v PluginSettingsView) {
+	@layout.Base("Custom pages", projects, currentProjectID) {
+		@PluginSettingsContent(v)
+	}
+}
+
+func (v PluginSettingsView) URL(suffix string) string {
+	values := url.Values{"project_id": {v.ProjectID}}
+	if v.Search != "" {
+		values.Set("search", v.Search)
+	}
+	if v.Sort != "" {
+		values.Set("sort", v.Sort)
+	}
+	if v.Enabled != "" {
+		values.Set("enabled", v.Enabled)
+	}
+	return "/settings/plugin-pages" + suffix + "?" + values.Encode()
+}
+
+templ PluginSettingsContent(v PluginSettingsView) {
+	@layout.PageTitle("Custom pages")
+	<div id="plugin-settings" data-search-container data-card-loaded-name-sort data-card-pagination-root data-card-pagination-list="#plugin-page-cards" data-card-pagination-card-selector="[data-plugin-card-id]" data-card-pagination-key="data-plugin-card-id" data-card-pagination-has-more="false" data-card-pagination-url={ v.URL("") }>
+		<div data-page-header class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">Custom pages</h2>
+			<div class="dropdown dropdown-end">
+				<button type="button" tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Add page" data-tooltip-disabled onclick="handleDropdownToggle(event)">@pageCreateIcon()</button>
+				<ul tabindex="0" class="ov-menu ov-menu-actions dropdown-content z-[100] menu w-48">
+					<li><button onclick="document.activeElement.blur();document.getElementById('plugin-describe-modal').showModal()">Describe</button></li>
+					<li><button onclick="document.activeElement.blur();document.getElementById('plugin-install-modal').showModal()">Install package</button></li>
+				</ul>
+			</div>
+		</div>
+		if v.Error != "" && !v.OpenInstall {
+			<div class="alert alert-error text-sm mb-4" role="alert">{ v.Error }</div>
+		}
+		@CardListToolbar(CardListToolbarConfig{PageKey: "plugin-pages", Placeholder: "Search pages...", Action: "/settings/plugin-pages", ProjectID: v.ProjectID, Search: v.Search, Sort: v.Sort, Filters: []CardListFilter{{Key: "enabled", Label: "Status", Value: v.Enabled, Options: cardListOptions("true", "Enabled", "false", "Disabled")}}, SortOptions: cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A")})
+		<div id="plugin-page-cards" class="grid grid-cols-1 gap-4 min-w-0">
+			if len(v.Instances) == 0 && len(v.Packages) == 0 {
+				<p class="text-sm opacity-60 py-8 text-center">No pages found. Use + to add a page.</p>
+			}
+			for _, r := range v.Instances {
+				<div class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 transition-all min-w-0" data-plugin-instance-row={ r.Instance.ID } data-plugin-card-id={ r.Instance.ID } data-card-sort-name={ r.Instance.Title } data-search-card data-search-text={ r.Instance.Title + " " + r.Instance.PluginID }>
+					<div class="card-body relative">
+						<div class="absolute top-4 right-4">
+							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + r.Instance.Title}) {
+								if r.Instance.Enabled {
+									<li><a href={ templ.SafeURL("/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(r.Instance.ProjectID)) }>Open</a></li>
+								}
+								if r.Instance.Enabled {
+									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button></li>
+								} else {
+									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button></li>
+								}
+                                if v.ProjectID == models.AllProjectsID {
+                                    <li><button onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-add-project-" + r.Instance.ID + "').showModal()"} }>Add to another project</button></li>
+                                }
+								<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-delete-" + r.Instance.ID + "').showModal()"} }>Delete</button></li>
+							}
+						</div>
+						<h3 class="card-title pr-12">{ r.Instance.Title }</h3>
+ if v.ProjectID == models.AllProjectsID {
+ <p class="text-sm opacity-60">{ r.Instance.ProjectName }</p>
+ }
+						if r.Description != "" {
+ <p class="text-sm opacity-60">{ r.Description }</p>
+ }
+						<div class="flex gap-2">
+							if r.Instance.Enabled {
+								<span class="badge badge-success badge-sm">Enabled</span>
+							} else {
+								<span class="badge badge-ghost badge-sm">Disabled</span>
+							}
+						</div>
+					</div>
+				</div>
+                if v.ProjectID == models.AllProjectsID {
+                    @pluginSettingsDialog("plugin-add-project-"+r.Instance.ID, "Add "+r.Instance.Title+" to another project") {
+                        <p class="text-sm opacity-70">Create a separate page with its own data and conversation.</p>
+                        <form hx-post={ v.URL("/instances") } hx-target="#plugin-settings" hx-swap="outerHTML" class="space-y-4">
+                            <input type="hidden" name="package_id" value={ r.Instance.PackageID }/>
+                            <input type="hidden" name="page_id" value={ r.Instance.PageID }/>
+                            <label class="form-control">
+                                <span class="label-text">Project</span>
+                                <select name="destination_project" class="select select-bordered w-full" required aria-label="Project">
+                                    <option value="">Choose a project</option>
+                                    for _, project := range v.Projects {
+                                        if project.ID != r.Instance.ProjectID {
+                                            <option value={ project.ID }>{ project.Name }</option>
+                                        }
+                                    }
+                                </select>
+                            </label>
+                            <div class="modal-action">
+                                <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+                                <button type="submit" class="btn btn-primary">Add page</button>
+                            </div>
+                        </form>
+                    }
+                }
+                @pluginRemovalDialog("plugin-delete-"+r.Instance.ID, "Delete page", r.Instance.Title, "Delete page", v.URL("/instances/"+r.Instance.ID+"/remove")) {
+                    <p>This deletes this project's page, saved data, and conversation. Other projects are kept.</p>
+                }
+			}
+			for _, p := range v.Packages {
+				<div class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 transition-all min-w-0" data-plugin-package={ p.Package.PluginID } data-plugin-card-id={ p.Package.ID } data-card-sort-name={ p.Package.Name } data-search-card data-search-text={ p.Package.Name + " " + p.Package.PluginID }>
+					<div class="card-body relative">
+						<div class="absolute top-4 right-4">
+							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + p.Package.Name}) {
+								for _, page := range p.Pages {
+									<li><form hx-post={ v.URL("/instances") } hx-target="#plugin-settings" hx-swap="outerHTML"><input type="hidden" name="package_id" value={ p.Package.ID }/><input type="hidden" name="page_id" value={ page }/>
+@pluginDestination(v)
+<button type="submit">Add { page } to project</button></form></li>
+								}
+								if p.InUse == 0 {
+									<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-uninstall-"+p.Package.ID+"').showModal()"} }>Uninstall package</button></li>
+								}
+							}
+						</div>
+						<h3 class="card-title pr-12">{ p.Package.Name }</h3>
+						if p.Description != "" {
+ <p class="text-sm opacity-60">{ p.Description }</p>
+ }
+						<span class="badge badge-ghost badge-sm">Available to add</span>
+					</div>
+				</div>
+                if p.InUse == 0 {
+                    @pluginRemovalDialog("plugin-uninstall-"+p.Package.ID, "Uninstall package", p.Package.Name, "Uninstall package", v.URL("/packages/"+url.PathEscape(p.Package.ID)+"/remove")) {
+                        <p>This removes the unused package and its files.</p>
+                    }
+                }
+			}
+		</div>
+
+		@pluginSettingsDialog("plugin-describe-modal", "Describe a page") {
+			<p class="text-sm opacity-70">Start a task to build and publish a page in the selected project.</p>
+			<form hx-post={ "/tasks?from=new&project_id=" + url.QueryEscape(v.ProjectID) } hx-target="#main-content" hx-swap="innerHTML" hx-disabled-elt="find button[type=submit]" class="space-y-4" hx-on:htmx:config-request="event.detail.parameters.prompt='Build and publish a custom page for this project. Read the custom-page authoring guide and use publish_custom_page. Requirements: '+this.elements.description.value">
+				@pluginDestination(v)
+<input type="hidden" name="category" value="active"/>
+				<input type="hidden" name="priority" value="2"/>
+				<input type="hidden" name="prompt"/>
+				<label class="form-control"><span class="label-text">Name</span><input name="title" class="input input-bordered" required maxlength="200"/></label>
+				<label class="form-control"><span class="label-text">What should this page do?</span><textarea name="description" class="textarea textarea-bordered" rows="5" required></textarea></label>
+				<div class="modal-action">
+                    <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create and start</button>
+                </div>
+			</form>
+		}
+		@pluginSettingsDialog("plugin-install-modal", "Install package") {
+			<form id="plugin-upload-form" class="space-y-3" hx-post={ v.URL("/upload") } hx-encoding="multipart/form-data" hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML" hx-on:htmx:config-request="if(this.elements.destination_project){event.detail.path += '&destination_project='+encodeURIComponent(this.elements.destination_project.value);}event.detail.parameters.paths = Array.from(this.querySelector('input[type=file]').files).map(function(f){return f.webkitRelativePath || f.name;});">
+				@pluginDestination(v)
+<label class="form-control"><span class="label-text">Upload folder</span><input type="file" name="files" class="file-input file-input-bordered w-full" multiple webkitdirectory required/></label>
+				<p class="text-sm opacity-70">Choose a folder on your computer containing plugin.json. Up to 64 MiB.</p>
+			</form>
+			if v.OpenInstall && v.Error != "" {
+				<p id="plugin-install-error" class="text-sm text-error" role="alert">{ v.Error }</p>
+			}
+			<details open?={ v.InstallPath != "" } ontoggle="var button=document.getElementById('plugin-install-submit');button.setAttribute('form',this.open?'plugin-path-form':'plugin-upload-form');button.textContent=this.open?'Install':'Upload and install';">
+				<summary class="cursor-pointer">Advanced: server folder path</summary>
+				<form id="plugin-path-form" class="space-y-3" hx-post={ v.URL("/install") } hx-vals='{"open_install":"true"}' hx-target="#plugin-settings" hx-swap="outerHTML">
+					@pluginDestination(v)
+<label class="form-control"><span class="label-text">Folder on the OpenVibely server</span><input name="path" class="input input-bordered w-full" placeholder="/path/to/package" value={ v.InstallPath } aria-describedby="plugin-install-error" aria-invalid={ v.OpenInstall && v.Error != "" } required/></label>
+					if v.NativePicker {
+						<button type="button" class="btn btn-ghost" onclick="var form=this.form; var button=this; button.disabled=true; fetch('/projects/pick-folder',{method:'POST',headers:{'HX-Request':'true'}}).then(async function(r){var p=await r.json(); if(!r.ok) throw new Error(p.message||p.error||'Folder picker unavailable. Enter the server path manually.'); if(p.selected) form.elements.path.value=p.path;}).catch(function(e){form.querySelector('[data-picker-error]').textContent=e.message;}).finally(function(){button.disabled=false;});">Browse on server</button>
+					}
+					<p class="text-sm opacity-70">Browse opens on the server machine and may be unavailable in hosted environments.</p>
+					<p data-picker-error class="text-sm text-error" role="alert"></p>
+				</form>
+            </details>
+            <div class="modal-action">
+                <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+                <button id="plugin-install-submit" type="submit" class="btn btn-primary" form={ func() string { if v.InstallPath != "" { return "plugin-path-form" }; return "plugin-upload-form" }() }>
+                    if v.InstallPath != "" {
+                        Install
+                    } else {
+                        Upload and install
+                    }
+                </button>
+            </div>
+        }
+		if v.OpenInstall {
+			<script>document.getElementById('plugin-install-modal').showModal();</script>
+		}
+	</div>
+}
+
+templ pluginRemovalDialog(id, title, name, action, endpoint string) {
+    @layout.ConfirmationFrame(id, "Close confirmation", title, "Are you sure you want to remove ", "", name, "? This action cannot be undone.", action, true,
+        templ.ComponentScript{Call: "document.getElementById('"+id+"').close()"},
+        templ.ComponentScript{Call: "document.getElementById('"+id+"-form').requestSubmit()"}) {
+        { children... }
+        <form id={ id+"-form" } hx-post={ endpoint } hx-target="#plugin-settings" hx-swap="outerHTML"></form>
+    }
+}
+
+templ pluginSettingsDialog(id, title string) {
+	<dialog id={ id } class="modal">
+		<div class="modal-box space-y-4">
+			@ModalCloseButton("document.getElementById('"+id+"')", "Close dialog")
+			<h3 class="pr-10 text-lg font-bold">{ title }</h3>
+			{ children... }
+		</div>
+		<form method="dialog" class="modal-backdrop"><button>Close</button></form>
+	</dialog>
+}
+
+// pluginHostBridgeScript is the host side of bridge v1. It accepts messages
+// only from this page's iframe window, validates the envelope, and relays them
+// to the server, which re-validates and authorizes everything.
+templ pluginHostBridgeScript() {
+	<script>
+	(function () {
+		var root = document.currentScript.closest('#plugin-page-root');
+		if (!root) return;
+		var frame = root.querySelector('#plugin-frame');
+		var handle = root.getAttribute('data-plugin-handle');
+		var bridgeURL = root.getAttribute('data-bridge-url');
+		var eventsURL = root.getAttribute('data-events-url');
+		var retireURL = root.getAttribute('data-retire-url');
+		var projectID = root.getAttribute('data-project-id');
+		var MAX = 65536;
+		var ALLOWED = ['ready', 'op.invoke', 'context.set', 'analyze.request', 'events.subscribe', 'page.loaded', 'page.failed'];
+		var dead = false, loads = 0, events = null, subscribed = false, streams = [];
+		var requests = new AbortController();
+		var startupTimer = setTimeout(function () {
+			onMessage({source: frame.contentWindow, data: {v: 1, handle: handle, id: 'startup-timeout', type: 'page.failed', payload: {error: 'Page did not confirm startup within 30 seconds.'}}});
+		}, 30000);
+
+		function post(type, replyTo, payload) {
+			if (dead || !frame.contentWindow) return;
+			// Sandboxed frames have an opaque origin, so "*" is required; the
+			// recipient is pinned to this iframe's window object.
+			frame.contentWindow.postMessage({v: 1, type: type, replyTo: replyTo, handle: handle, payload: payload || {}}, '*');
+		}
+		function startEvents() {
+			if (events || dead) return;
+			events = new EventSource(eventsURL + '&handle=' + encodeURIComponent(handle));
+			events.onopen = function () { if (subscribed) post('event', null, {type: 'page.refresh'}); };
+			events.onmessage = function (e) {
+				if (dead) return;
+				var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+				if (subscribed) post('event', null, ev);
+			};
+			events.addEventListener('closed', function () { events.close(); events = null; });
+		}
+		function streamAnalysis(execID) {
+            if (window.openVibelyPageChat) window.openVibelyPageChat.refresh();
+			if (dead) return;
+			if (!window.openVibelyLive) { post('analysis.done', null, {exec_id: execID, error: 'live transport unavailable'}); return; }
+			var s = window.openVibelyLive.execution(execID, 0, projectID);
+			streams.push(s);
+			s.addEventListener('message', function (e) { post('analysis.delta', null, {exec_id: execID, text: e.data}); });
+			s.addEventListener('done', function () { post('analysis.done', null, {exec_id: execID}); });
+			s.addEventListener('error', function (e) { post('analysis.done', null, {exec_id: execID, error: e.data || 'analysis failed'}); });
+		}
+		function cleanup() {
+			if (dead) return;
+			dead = true;
+			clearTimeout(startupTimer);
+			requests.abort();
+			if (events) { events.close(); events = null; }
+			streams.forEach(function (s) { try { s.close(); } catch (_) {} });
+			try { fetch(retireURL + '&handle=' + encodeURIComponent(handle), {method: 'POST', keepalive: true, credentials: 'same-origin', headers: {'X-OpenVibely-Plugin-Bridge': '1'}}).catch(function () {}); } catch (_) {}
+			window.removeEventListener('message', onMessage);
+			document.removeEventListener('htmx:beforeSwap', onSwap);
+ window.removeEventListener('plugin-page-updated', onPageUpdated);
+			window.removeEventListener('pagehide', onPageHide);
+		}
+        var refreshGeneration = 0;
+        async function onPageUpdated(e) {
+            if (!e.detail || !e.detail.task_id || window.location.pathname !== '/p/' + e.detail.task_id || dead) return;
+            var generation = ++refreshGeneration;
+            try {
+                var response = await fetch(window.location.href, {credentials: 'same-origin', signal: requests.signal});
+                if (!response.ok) throw new Error('Could not refresh updated page');
+                var html = await response.text();
+                if (dead || generation !== refreshGeneration) return;
+                var updated = new DOMParser().parseFromString(html, 'text/html').querySelector('#plugin-page-root');
+                var nextFrame = updated && updated.querySelector('#plugin-frame');
+                if (!nextFrame) throw new Error('Updated page is unavailable');
+                clearTimeout(startupTimer);
+                if (events) { events.close(); events = null; }
+                handle = updated.getAttribute('data-plugin-handle');
+                root.setAttribute('data-plugin-handle', handle);
+                bridgeURL = updated.getAttribute('data-bridge-url');
+                eventsURL = updated.getAttribute('data-events-url');
+                retireURL = updated.getAttribute('data-retire-url');
+                loads = 0;
+                subscribed = false;
+                frame.src = nextFrame.getAttribute('src');
+                var header = root.querySelector('[data-breadcrumb-title]');
+                var nextHeader = updated.querySelector('[data-breadcrumb-title]');
+                if (header && nextHeader) header.replaceChildren.apply(header, Array.from(nextHeader.childNodes));
+                startupTimer = setTimeout(function () {
+                    onMessage({source: frame.contentWindow, data: {v: 1, handle: handle, id: 'startup-timeout', type: 'page.failed', payload: {error: 'Page did not confirm startup within 30 seconds.'}}});
+                }, 30000);
+            } catch (error) {
+                if (!dead && generation === refreshGeneration) {
+                    var notice = root.querySelector('#plugin-notice');
+                    if (notice) notice.textContent = 'Page saved, but refresh failed. Reload to retry.';
+                }
+            }
+        }
+ window.addEventListener('plugin-page-updated', onPageUpdated);
+		function onPageHide(e) {
+			cleanup();
+			// A bfcache document contains a retired capability. Obtain a new page load
+			// rather than reviving old subscriptions or replaying unfinished requests.
+			if (e && e.persisted) window.addEventListener('pageshow', function (event) {
+				if (event.persisted) window.location.reload();
+			}, {once: true});
+		}
+		function onSwap(e) {
+			var t = e.detail && e.detail.target;
+			if (e.detail.shouldSwap !== false && t && (t.id === 'main-content' || t.contains(root))) cleanup();
+		}
+		function onMessage(ev) {
+			if (dead || ev.source !== frame.contentWindow) return;
+			var msg = ev.data;
+			if (!msg || typeof msg !== 'object' || msg.v !== 1 || msg.handle !== handle || typeof msg.id !== 'string' || ALLOWED.indexOf(msg.type) < 0) return;
+			var body;
+			try { body = JSON.stringify({v: 1, type: msg.type, id: msg.id, handle: msg.handle, payload: msg.payload || {}}); } catch (_) { return; }
+			if (body.length > MAX) { post('error', msg.id, {message: 'bridge message too large'}); return; }
+			var requestURL = new URL(bridgeURL, window.location.href);
+			if (msg.type === 'analyze.request') {
+				var composer = root.querySelector('#task-thread-form');
+				['agent_id', 'reasoning_effort', 'service_tier'].forEach(function (name) {
+					var input = composer && composer.querySelector('[name="' + name + '"]');
+					if (input) requestURL.searchParams.set(name, input.value);
+				});
+			}
+			fetch(requestURL.href, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-OpenVibely-Plugin-Bridge': '1'}, body: body, signal: requests.signal})
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+				if (dead) return;
+					if (!res || !res.ok) { post('error', msg.id, {message: (res && res.error) || 'request failed'}); return; }
+					if (msg.type === 'page.loaded' || msg.type === 'page.failed') {
+                        clearTimeout(startupTimer);
+                        var status = root.querySelector('#plugin-startup');
+                        if (status && res.result) {
+                            status.setAttribute('data-state', res.result.state);
+                            status.hidden = res.result.state !== 'failed';
+                            status.textContent = status.hidden ? '' : 'Page failed: ' + (res.result.error || 'Reload to retry.');
+                        }
+                    }
+					if (msg.type === 'events.subscribe') { subscribed = true; startEvents(); post('event', null, {type: 'page.refresh'}); }
+					if (msg.type === 'analyze.request' && res.result && res.result.exec_id) streamAnalysis(res.result.exec_id);
+					post('result', msg.id, res.result);
+				})
+				.catch(function () { post('error', msg.id, {message: 'network error'}); });
+		}
+		frame.addEventListener('load', function () {
+			loads++;
+			// The bridge is bound to the entry document; a navigated frame loses it.
+			if (loads > 1) { cleanup(); root.querySelector('#plugin-notice').textContent = 'The plugin page navigated away; reload to reconnect.'; }
+		});
+		window.addEventListener('message', onMessage);
+		document.addEventListener('htmx:beforeSwap', onSwap);
+		window.addEventListener('pagehide', onPageHide, {once: true});
+		startEvents();
+
+	})();
+	</script>
+}
+
+templ pluginDestination(v PluginSettingsView) {
+ if v.ProjectID == models.AllProjectsID {
+ <label class="form-control">
+ <span class="label-text">Project</span>
+ <select name="destination_project" class="select select-bordered w-full" required aria-label="Project">
+ <option value="">Choose a project</option>
+ for _, project := range v.Projects {
+ <option value={ project.ID }>{ project.Name }</option>
+ }
+ </select>
+ </label>
+ }
+}

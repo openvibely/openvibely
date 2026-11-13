@@ -22,6 +22,12 @@
         clearRefreshPreview?.();
         if (!messages?.checkVisibility?.({visibilityProperty: true}) || !messages.clientHeight) return;
         const bounds = messages.getBoundingClientRect();
+        const style = getComputedStyle(messages);
+        // A sanitized clone can have different overflow from the virtualized
+        // live transcript. Reserve its actual scrollbar space so classic
+        // scrollbars cannot change the width of the frozen conversation.
+        const scrollbar = messages.offsetWidth - messages.clientWidth -
+            parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth);
         const preview = messages.cloneNode(true);
         preview.removeAttribute('id');
         preview.removeAttribute('data-transcript-hydrating');
@@ -37,7 +43,9 @@
         });
         Object.assign(preview.style, {position: 'fixed', top: bounds.top + 'px', left: bounds.left + 'px',
             width: bounds.width + 'px', height: bounds.height + 'px', boxSizing: 'border-box',
-            margin: '0', zIndex: '10', pointerEvents: 'none', visibility: 'visible'});
+            margin: '0', zIndex: '10', pointerEvents: 'none', visibility: 'visible',
+            overflowY: 'hidden', scrollbarGutter: 'auto', paddingLeft: style.paddingLeft,
+            paddingRight: (parseFloat(style.paddingRight) + scrollbar) + 'px'});
         document.body.appendChild(preview);
         preview.scrollTop = messages.scrollTop;
         let observer = null, timer = null;
@@ -50,7 +58,7 @@
         };
         const swapped = event => {
             if (event.detail.xhr !== xhr || event.detail.target?.id !== 'main-content') return;
-            const next = event.detail.target.querySelector('#task-thread-messages, #chat-messages');
+            const next = event.detail.target.querySelector('[data-chat-transcript]');
             const ready = () => {
                 if (!next?.isConnected || !next.hasAttribute('data-transcript-hydrating')) cleanup();
             };
@@ -171,7 +179,7 @@
         clone.querySelectorAll('[data-composer-focus-initialized]').forEach(input => {
             input.removeAttribute('data-composer-focus-initialized');
         });
-        clone.querySelectorAll('#chat-messages, #task-thread-messages').forEach(messages => {
+        clone.querySelectorAll('[data-chat-transcript]').forEach(messages => {
             // Older pages belong to the current reading session, not the shared
             // navigation cache. Rebuild the paging cursor for the retained window.
             const pairs = Array.from(messages.querySelectorAll(':scope > [data-execution-pair]'));
@@ -238,7 +246,7 @@
             // This shell no longer contains rendered messages. Reveal it only
             // after the visible rows and scroll position are ready, just like a
             // cold transcript; otherwise readers see its height grow in stages.
-            clone.querySelectorAll('#chat-messages, #task-thread-messages').forEach(messages => {
+            clone.querySelectorAll('[data-chat-transcript]').forEach(messages => {
                 messages.setAttribute('data-transcript-hydrating', 'true');
             });
             const bootstrap = document.createElement('script');
@@ -376,7 +384,7 @@
     }, true);
     document.addEventListener('htmx:beforeSwap', function (event) {
         const detail = event.detail;
-        if (detail.target?.matches?.('#main-content, #thread-content, #task-thread-view, #chat-page-root, #task-thread-messages, #chat-messages')) clearRefreshPreview?.();
+        if (detail.target?.matches?.('#main-content, #thread-content, #task-thread-view, #chat-page-root, [data-chat-transcript]')) clearRefreshPreview?.();
         if (detail._ovCachedPreview || detail.target?.id !== 'main-content') return;
         if (!pending || pending.xhr !== detail.xhr) return;
         if (!pending.cached) return;

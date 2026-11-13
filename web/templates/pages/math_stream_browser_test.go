@@ -42,7 +42,7 @@ func runStreamingMathBrowser(t *testing.T, run func(*composerFocusCDP)) {
 	chrome := chatNavigationChromePath(t)
 	base := renderTerminalBrowserComponent(t, layout.Base("Math", nil, ""))
 	shared := renderTerminalBrowserComponent(t, components.ChatAutoScrollScript())
-	fixture := strings.Replace(base, "</body>", shared+`<div id="chat-messages"><div id="math-stream"></div></div></body>`, 1)
+	fixture := strings.Replace(base, "</body>", shared+`<div data-chat-transcript id="chat-messages"><div id="math-stream"></div></div></body>`, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return

@@ -819,8 +819,27 @@ func TestHandler_ChangesMergeEligibilityBlocksUnsafeAndMissingStates(t *testing.
 			if getRec.Code != http.StatusOK {
 				t.Fatalf("GET Changes returned %d: %s", getRec.Code, getRec.Body.String())
 			}
-			if strings.Contains(getRec.Body.String(), "/tasks/"+task.ID+"/worktree/merge") {
-				t.Fatalf("ineligible state exposed merge action: %s", getRec.Body.String())
+			// The split action loads target-specific eligibility separately, so the
+			// hidden transport may exist while the visible button stays disabled.
+			eligibilityReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/worktree/action-local?target="+url.QueryEscape(mergeTarget), nil)
+			eligibilityRec := worktreeExecute(e, eligibilityReq)
+			var eligibility struct {
+				MergeAvailable bool `json:"merge_available"`
+			}
+			if tt.target == "missing-target" {
+				if eligibilityRec.Code != http.StatusBadRequest || !strings.Contains(eligibilityRec.Body.String(), "local target branch no longer exists") {
+					t.Fatalf("missing target eligibility: %d %s", eligibilityRec.Code, eligibilityRec.Body.String())
+				}
+			} else {
+				if eligibilityRec.Code != http.StatusOK {
+					t.Fatalf("GET eligibility returned %d: %s", eligibilityRec.Code, eligibilityRec.Body.String())
+				}
+				if err := json.Unmarshal(eligibilityRec.Body.Bytes(), &eligibility); err != nil {
+					t.Fatal(err)
+				}
+				if eligibility.MergeAvailable {
+					t.Fatal("ineligible state allowed merge action")
+				}
 			}
 
 			form := url.Values{"merge_type": {"merge"}, "merge_source": {"changes_tab"}}
@@ -1375,7 +1394,7 @@ func TestHandler_StaleTerminalConflictRecoversChangesAndRecoveryPosts(t *testing
 
 	getReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
 	getRec := worktreeExecute(e, getReq)
-	if getRec.Code != http.StatusOK || !strings.Contains(getRec.Body.String(), "/tasks/"+task.ID+"/worktree/merge") {
+	if getRec.Code != http.StatusOK || !strings.Contains(getRec.Body.String(), `hx-post="/tasks/`+task.ID+`/worktree/merge"`) {
 		t.Fatalf("stale conflict did not recover merge actions: %d %s", getRec.Code, getRec.Body.String())
 	}
 	updated, err := h.taskRepo.GetByID(ctx, task.ID)
@@ -1531,7 +1550,7 @@ func TestHandler_MergeTaskBranch_ChangesTabRecoverableFailureRendersRetryAndSucc
 	if second.Code != http.StatusOK {
 		t.Fatalf("expected retry to succeed, got %d: %s", second.Code, second.Body.String())
 	}
-	if body := second.Body.String(); strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Merge commit") {
+	if body := second.Body.String(); strings.Contains(body, `hx-post="/tasks/`+task.ID+`/worktree/merge"`) {
 		t.Fatalf("expected terminal merged response to hide retry actions, got %s", body)
 	}
 	mergedTask, err := h.taskRepo.GetByID(ctx, task.ID)
@@ -1779,7 +1798,7 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 			t.Fatalf("expected Changes conflict recovery content %q, got %s", want, body)
 		}
 	}
-	if strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Fast-forward only") {
+	if strings.Contains(body, `hx-post="/tasks/`+task.ID+`/worktree/merge"`) {
 		t.Fatalf("conflicted Changes response must hide ordinary merge actions, got %s", body)
 	}
 
@@ -2160,7 +2179,7 @@ func TestHandler_MergeTaskBranch_RefreshesOwningSurfaceOnce(t *testing.T) {
 				if source == "changes_tab" && !strings.Contains(body, "Worktree changes") {
 					t.Fatalf("expected changes-tab partial response, got %s", body)
 				}
-				if mergeType == "ff" && source == "changes_tab" && (strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Fast-forward only")) {
+				if mergeType == "ff" && source == "changes_tab" && strings.Contains(body, `hx-post="/tasks/`+task.ID+`/worktree/merge"`) {
 					t.Fatalf("expected local merge actions hidden after successful ff merge, got %s", body)
 				}
 

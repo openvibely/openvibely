@@ -19,8 +19,10 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
@@ -57,19 +59,27 @@ var (
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
-	ExecID                      string
-	RetrySourceExecutionID      string
-	TaskID                      string
-	Message                     string
-	Agent                       models.LLMConfig
-	AgentDefinition             *models.Agent
-	ChatHistory                 []models.Execution
-	ProjectID                   string
-	PrincipalID                 string
-	SystemContext               string
-	WorkDir                     string
-	ImageAttachments            []models.Attachment
-	IsTaskFollowup              bool // true = coding agent prompt; false = orchestration prompt
+	// CancellationContext binds work to the owning surface lifetime.
+	CancellationContext    context.Context
+	ExecID                 string
+	RetrySourceExecutionID string
+	TaskID                 string
+	Message                string
+	Agent                  models.LLMConfig
+	AgentDefinition        *models.Agent
+	ChatHistory            []models.Execution
+	ProjectID              string
+	GoalID                 string
+	PrincipalID            string
+	SystemContext          string
+	WorkDir                string
+	ImageAttachments       []models.Attachment
+	IsTaskFollowup         bool // true = coding agent prompt; false = orchestration prompt
+	// TaskScopedChat isolates an orchestration conversation's transport, provider
+	// state, and compaction checkpoints using its persisted conversation task.
+	// It does not select the coding-agent prompt used by task follow-ups.
+	TaskScopedChat              bool
+	PageConversation            *pageintegration.Conversation
 	ChatMode                    models.ChatMode
 	Surface                     chatcontrol.Surface // chat entry point (web/api/telegram/slack)
 	TelegramInitialAckMessageID int
@@ -118,7 +128,7 @@ type streamingResponseParams struct {
 }
 
 func streamingTransportScope(params streamingResponseParams) string {
-	if params.IsTaskFollowup {
+	if params.IsTaskFollowup || params.TaskScopedChat {
 		if strings.TrimSpace(params.TaskID) != "" {
 			return "task:" + strings.TrimSpace(params.TaskID)
 		}
@@ -128,6 +138,13 @@ func streamingTransportScope(params streamingResponseParams) string {
 		return "chat:project:" + strings.TrimSpace(params.ProjectID)
 	}
 	return ""
+}
+
+func streamingTransportScopeForUser(ctx context.Context, params streamingResponseParams) string {
+	if !params.IsTaskFollowup {
+		params.ProjectID = models.WorkspaceChatScope(ctx, params.ProjectID)
+	}
+	return streamingTransportScope(params)
 }
 
 // processStreamingResponse is the shared goroutine that handles LLM streaming for
@@ -311,6 +328,10 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		defer params.updateWorkDone()
 	}
 	baseCtx := context.Background()
+	if params.CancellationContext != nil {
+		baseCtx = params.CancellationContext
+	}
+	baseCtx = h.followupAuthorizationContext(baseCtx)
 	if h.organizationSvc != nil && strings.HasPrefix(params.PrincipalID, "user:") {
 		user, err := h.organizationSvc.Store.UserByID(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))
 		if err != nil || user == nil || user.Disabled || user.Role == "" {
@@ -319,6 +340,36 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		baseCtx = models.WithPrincipal(baseCtx, user.Principal)
 	}
+	if h.projectAccessSvc != nil && isGoalContinuation(params.InputOrigin, params.InputOriginAgent) {
+		authorizedCtx, err := h.queuedGoalContinuationContext(baseCtx, models.ThreadInput{GoalID: params.GoalID, TaskID: params.TaskID, Source: models.TaskOriginSystemAgent, OriginAgent: models.AgentSystemKindGoal, AuthorUserID: strings.TrimPrefix(params.PrincipalID, "user:")})
+		if err != nil {
+			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "goal continuation authorization failed", 0, params.ChannelReply)
+			return
+		}
+		baseCtx = authorizedCtx
+	}
+
+	if (params.IsTaskFollowup || isVerifiedChannelRun(params)) && h.projectAccessSvc != nil {
+		authorizedCtx, err := h.followupUserContext(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))
+		if err == nil {
+			err = h.requireFollowupAccess(authorizedCtx, params)
+		}
+		if err != nil {
+			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "follow-up authorization failed", 0, params.ChannelReply)
+			return
+		}
+		baseCtx = authorizedCtx
+	}
+
+	if params.PageConversation != nil {
+		authorizedCtx, err := h.pagePrincipalContext(baseCtx, params.PrincipalID, params.ProjectID, authz.Edit)
+		if err != nil {
+			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "page conversation authorization failed", 0, params.ChannelReply)
+			return
+		}
+		baseCtx = authorizedCtx
+	}
+
 	// Memory recall is injected for task-thread followups through the full task
 	// lifecycle path below. Interactive chat uses a recall-only lifecycle path so
 	// relevant project memory reaches Chat without triggering after_complete memory
@@ -758,7 +809,12 @@ modelLoop:
 				break modelLoop
 			}
 		}
-		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScopeForUser(ctx, params))
+		if h.threadInputRepo != nil && params.ExecID != "" {
+			requestCtx = llmcontracts.WithBeforeModelSend(requestCtx, func(sendCtx context.Context) error {
+				return h.threadInputRepo.CheckSteeringDelivery(sendCtx, params.ExecID, preparedSteeringInputIDs(pendingSteering))
+			})
+		}
 		requestCtx = params.withAttachmentContext(requestCtx)
 		requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, nil)
 		if params.Agent.Provider == models.ProviderOpenAI && pendingSteering.count() > 0 {
@@ -1312,7 +1368,7 @@ func (h *Handler) publishThreadInputAppliedEvents(params streamingResponseParams
 			})
 		}
 		if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
-			h.chatBroadcaster.Publish(events.ChatEvent{
+			h.publishChatEvent(events.ChatEvent{
 				Type:           events.ChatThreadInputApplied,
 				ProjectID:      input.ProjectID,
 				ExecID:         params.ExecID,
@@ -1376,7 +1432,7 @@ func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
 			})
 		}
 		if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
-			h.chatBroadcaster.Publish(events.ChatEvent{
+			h.publishChatEvent(events.ChatEvent{
 				Type:           events.ChatNewMessage,
 				ProjectID:      input.ProjectID,
 				ExecID:         input.ID,
@@ -1494,7 +1550,7 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 		}
 	}
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:            events.ChatResponseDone,
 			ProjectID:       params.ProjectID,
 			ExecID:          params.ExecID,
@@ -1554,9 +1610,52 @@ func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID 
 	return ad
 }
 
-// registerTaskCancellation registers a cancel function for a task with the worker service.
-// No-op if worker service is unavailable.
+// startNextQueuedTurnAfter is the shared queue dispatcher for completion, edit
+// release, expired editors, and restart recovery. Recover page identity here so
+// callers with only a persisted task ID cannot accidentally use the coding runner.
 func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed streamingResponseParams, excludeExecID string) {
+	if completed.ProjectID == models.AllProjectsID && !completed.IsTaskFollowup && h.projectAccessSvc != nil {
+		if _, identified := models.PrincipalFromContext(ctx); !identified {
+			if !strings.HasPrefix(completed.PrincipalID, "user:") {
+				// Recovery enumerates each saved sender rather than sharing an active turn.
+				h.PromoteQueuedChatInput(completed.ProjectID)
+				return
+			}
+			restored, err := h.followupUserContext(ctx, strings.TrimPrefix(completed.PrincipalID, "user:"))
+			if err != nil {
+				return
+			}
+			ctx = restored
+		}
+	}
+	if completed.PageConversation == nil && completed.TaskID != "" && (completed.IsTaskFollowup || completed.TaskScopedChat) {
+		if h.taskRepo == nil {
+			return
+		}
+		task, err := h.taskRepo.GetByID(ctx, completed.TaskID)
+		if err != nil || task == nil {
+			applog.Infof("[handler] queue routing task=%s: unavailable (%v)", completed.TaskID, err)
+			return
+		}
+		completed.ProjectID = task.ProjectID
+		if task.Category == models.CategoryPageChat {
+			binding, err := h.recoverPageConversation(ctx, task)
+			if err != nil {
+				applog.Infof("[page-chat] queue routing task=%s: %v", task.ID, err)
+				return
+			}
+			completed.PageConversation = &binding
+		}
+	}
+	if completed.PageConversation != nil {
+		h.startInstallationContinuations(ctx, completed.ProjectID, completed.TaskID)
+		h.startNextQueuedPageTurn(ctx, *completed.PageConversation)
+		return
+	}
+	if completed.TaskScopedChat {
+		return
+	}
+
 	installationTaskID := completed.TaskID
 	if !completed.IsTaskFollowup {
 		installationTaskID = ""
@@ -1613,6 +1712,19 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 }
 
 func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadInput) {
+	if input.ProjectID == models.AllProjectsID && h.projectAccessSvc != nil {
+		// Restore the queued sender before loading history or any provider context.
+		restored, err := h.followupUserContext(ctx, input.AuthorUserID)
+		if err == nil {
+			err = h.projectAccessSvc.ChatResourceAllowed(restored, "input", input.ID)
+		}
+		if err != nil {
+			h.cancelUnstartableQueuedInput(ctx, input)
+			return
+		}
+		ctx = restored
+	}
+
 	var updateWorkDone func()
 	if h.updateWorkTracker != nil {
 		var err error
@@ -1642,7 +1754,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 	selectedAgentID := agent.ID
 	task := &models.Task{
 		ProjectID: input.ProjectID,
-		Title:     fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), input.Content[:min(50, len(input.Content))]),
+		Title:     fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), chatTitlePreview(input.Content)),
 		Prompt:    input.Content,
 		Status:    models.StatusRunning,
 		Category:  models.CategoryChat,
@@ -1724,7 +1836,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		chatMode = models.ChatModeOrchestrate
 	}
 	if h.chatBroadcaster != nil {
-		h.chatBroadcaster.Publish(events.ChatEvent{
+		h.publishChatEvent(events.ChatEvent{
 			Type:           events.ChatNewMessage,
 			ProjectID:      input.ProjectID,
 			ExecID:         exec.ID,
@@ -1736,8 +1848,13 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		})
 	}
 
+	queuedPrincipalID := ""
+	if input.AuthorUserID != "" {
+		queuedPrincipalID = "user:" + input.AuthorUserID
+	}
 	h.startStreamingResponse(streamingResponseParams{
 		ExecID:      exec.ID,
+		PrincipalID: queuedPrincipalID,
 		TaskID:      task.ID,
 		Message:     input.Content,
 		Agent:       *agent,
@@ -1880,6 +1997,7 @@ func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyC
 	return service.ChannelReplyContext{
 		Source:           input.Source,
 		TelegramChatID:   input.TelegramChatID,
+		TelegramUserID:   input.TelegramUserID,
 		SlackTeamID:      input.SlackTeamID,
 		SlackChannelID:   input.SlackChannelID,
 		SlackThreadTS:    input.SlackThreadTS,
@@ -2087,6 +2205,22 @@ func (h *Handler) applySwarmChildFollowupRetryStart(ctx context.Context, task *m
 }
 
 func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.ThreadInput) error {
+	if h.projectAccessSvc != nil {
+		restored, err := h.followupUserContext(ctx, input.AuthorUserID)
+		if err == nil {
+			err = h.requireFollowupAccess(restored, streamingResponseParams{TaskID: input.TaskID, ProjectID: input.ProjectID})
+		}
+		if err != nil {
+			return h.rejectUnauthorizedQueuedFollowup(ctx, input, err)
+		}
+		ctx = restored
+	}
+	var authorizationErr error
+	ctx, authorizationErr = h.queuedGoalContinuationContext(ctx, input)
+	if authorizationErr != nil {
+		return h.rejectUnauthorizedQueuedFollowup(ctx, input, authorizationErr)
+	}
+
 	var updateWorkDone func()
 	if h.updateWorkTracker != nil {
 		var err error
@@ -2216,7 +2350,14 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			automationContext = &value
 		}
 	}
+	principalID := ""
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		principalID = "user:" + p.UserID
+	}
+
 	h.startStreamingResponse(streamingResponseParams{
+		GoalID:                          input.GoalID,
+		PrincipalID:                     principalID,
 		ExecID:                          exec.ID,
 		RetrySourceExecutionID:          input.RetrySourceExecutionID,
 		TaskID:                          exec.TaskID,
@@ -2257,20 +2398,6 @@ func (h *Handler) deregisterTaskCancellation(taskID string, registrationID uint6
 	if h.workerSvc != nil {
 		h.workerSvc.DeregisterCancelOwned(taskID, registrationID)
 	}
-}
-
-// completeWithSuccess marks an execution and its task as completed.
-// Also moves Active tasks to the Completed category so they appear in the right column.
-// Logs errors but does not fail since this runs in a background goroutine.
-// Captures git diff if workDir is provided.
-func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, completionOptions ...interface{}) persistence.CompleteSuccessOutcome {
-	outcome, err := h.completeWithSuccessWithPRReconciliation(ctx, execID, taskID, output, workDir, tokensUsed, durationMs, false, completionOptions...)
-	if err != nil {
-		applog.Infof("[handler] completeWithSuccess exec=%s completion policy failed: %v", execID, err)
-		h.completeWithFinalizationError(ctx, execID, taskID, err, output, tokensUsed, durationMs, completionOptions...)
-		return persistence.CompleteSuccessAlreadyTerminal
-	}
-	return outcome
 }
 
 // completeWithFinalizationError preserves cancellation ownership when Stop or a
@@ -2414,9 +2541,31 @@ func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, 
 	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(ctx)); err != nil {
 		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
 	}
-	livePR, err := h.githubSvc.GetPullRequest(ctx, repoRef, pullRequest.PRNumber)
+	targetRepo, err := service.TaskPullRequestTarget(pullRequest.PRURL, pullRequest.PRNumber, repoRef)
+	if err != nil {
+		return true, fmt.Sprintf("GitHub PR target could not be verified: %v", err)
+	}
+	livePR, err := h.githubSvc.GetPullRequest(ctx, targetRepo, pullRequest.PRNumber)
 	if err != nil {
 		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
+	}
+	if pullRequest.HeadRepoURL != "" {
+		head, err := service.SameHostGitHubRepo(pullRequest.HeadRepoURL, repoRef)
+		if err != nil {
+			return true, fmt.Sprintf("GitHub PR source could not be verified: %v", err)
+		}
+		if !strings.EqualFold(head.FullName, repoRef.FullName) {
+			validator, ok := h.githubSvc.(interface {
+				ValidatePublicationRepository(context.Context, *service.GitHubRepoRef, *service.GitHubRepoRef) error
+			})
+			if !ok {
+				return true, "GitHub integration cannot verify the publication fork"
+			}
+			if err := validator.ValidatePublicationRepository(ctx, repoRef, head); err != nil {
+				return true, fmt.Sprintf("GitHub PR source could not be verified: %v", err)
+			}
+		}
+		repoRef = head
 	}
 	if err := service.ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, pullRequest.PublishedHeadSHA); err != nil {
 		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is not reviewable with the current published task work: %v; rerun after resolving PR publication", pullRequest.PRNumber, err)
@@ -2453,13 +2602,6 @@ func (h *Handler) recordStreamingUsage(ctx context.Context, params streamingResp
 		LatencyMs:    durationMs,
 		OccurredAt:   time.Now().UTC(),
 	}, params.Agent, result)
-}
-
-func firstInt(values []int) int {
-	if len(values) == 0 {
-		return 0
-	}
-	return values[0]
 }
 
 func parseCompletionOptions(options ...interface{}) (int, service.ChannelReplyContext) {
@@ -2719,7 +2861,7 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 				if h.llmSvc != nil {
 					return h.llmSvc.CommitTaskWorktreeChanges(ctx, task, exec, workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
 				}
-				return service.CommitWorktreeChanges(workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
+				return service.CommitWorktreeChangesContext(ctx, workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
 			})
 			if commitErr != nil {
 				applog.Infof("[handler] error committing task follow-up worktree changes task=%s worktree=%s: %v", task.ID, workDir, commitErr)
@@ -3220,6 +3362,18 @@ func (h *Handler) liveStartupSyncPullRequest(ctx context.Context, task *models.T
 	}
 	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(ctx)); err != nil {
 		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
+	}
+	if h.taskPullRequestRepo != nil {
+		record, loadErr := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if record != nil && record.PRNumber == number {
+			repoRef, err = service.TaskPullRequestTarget(record.PRURL, number, repoRef)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	livePR, err := h.githubSvc.GetPullRequest(ctx, repoRef, number)
 	if err != nil {
@@ -3735,23 +3889,6 @@ const maxThreadTranscriptBytes = 80 * 1024
 // maxPerMessageBytes is a safety limit for a single message within the transcript (50KB).
 const maxPerMessageBytes = 50 * 1024
 
-// formatThreadTranscript formats a task's execution history as a readable thread transcript.
-// offset/limit control pagination: offset is the execution index to start from (0-based),
-// limit is the max number of executions to include (0 = all).
-func (h *Handler) formatThreadTranscript(task *models.Task, executions []models.Execution, offset, limit int) string {
-	total := len(executions)
-	if offset > 0 {
-		if offset >= total {
-			return h.formatThreadTranscriptPage(task, nil, total, offset).transcript
-		}
-		executions = executions[offset:]
-	}
-	if limit > 0 && limit < len(executions) {
-		executions = executions[:limit]
-	}
-	return h.formatThreadTranscriptWithTotal(task, executions, total, offset)
-}
-
 // formatThreadTranscriptWithTotal formats a page that has already been bounded
 // by the repository. total is the full execution count used for pagination
 // metadata and executions starts at offset.
@@ -4066,71 +4203,6 @@ func (h *Handler) executeListProjects(ctx context.Context, projectID string) str
 	}
 
 	return sb.String()
-}
-
-// executeCreateAlertRequests creates alerts from typed runtime-tool requests.
-func (h *Handler) executeCreateAlertRequests(ctx context.Context, projectID string, requests []service.CreateAlertRequest) string {
-	if len(requests) == 0 {
-		return ""
-	}
-	if h.alertSvc == nil {
-		return "Alert Create Results:\n- Alert service not available"
-	}
-
-	var results []string
-	for _, req := range requests {
-		// Default severity to info
-		severity := models.SeverityInfo
-		switch req.Severity {
-		case "warning":
-			severity = models.SeverityWarning
-		case "error":
-			severity = models.SeverityError
-		case "info", "":
-			severity = models.SeverityInfo
-		default:
-			results = append(results, fmt.Sprintf("- Invalid severity %q (use info, warning, or error)", req.Severity))
-			continue
-		}
-
-		// Default type to custom
-		alertType := models.AlertCustom
-		switch req.Type {
-		case "task_failed":
-			alertType = models.AlertTaskFailed
-		case "task_needs_followup":
-			alertType = models.AlertTaskNeedsFollowup
-		case "custom", "":
-			alertType = models.AlertCustom
-		default:
-			results = append(results, fmt.Sprintf("- Invalid alert type %q (use custom, task_failed, or task_needs_followup)", req.Type))
-			continue
-		}
-
-		a := &models.Alert{
-			ProjectID: projectID,
-			Type:      alertType,
-			Severity:  severity,
-			Title:     req.Title,
-			Message:   req.Message,
-		}
-		if req.TaskID != "" {
-			a.TaskID = &req.TaskID
-		}
-
-		if err := h.alertSvc.Create(ctx, a); err != nil {
-			applog.Infof("[handler] executeCreateAlertRequests error: %v", err)
-			results = append(results, fmt.Sprintf("- Error creating alert %q: %v", req.Title, err))
-			continue
-		}
-
-		results = append(results, fmt.Sprintf("- Created alert %q (id: `%s`, severity: %s)", req.Title, a.ID, severity))
-	}
-
-	if len(results) == 0 {
-		return ""
-	}
-	return "Alert Create Results:\n" + strings.Join(results, "\n")
 }
 
 // executeAlertMutationRequests applies one alert mutation to each requested ID and formats the results.
@@ -4530,6 +4602,13 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 	if task == nil {
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
+	if isGoalContinuation(origin, originAgent) {
+		ctx, err = h.resolveGoalContinuation(ctx, taskID, "")
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	agentID := ""
 	if task.AgentID != nil {
 		agentID = *task.AgentID
@@ -4553,6 +4632,7 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 	if err != nil {
 		return nil, err
 	}
+	goalID, _ := ctx.Value(continuationGoalKey{}).(string)
 	reply := firstChannelReply(channelReply)
 	queued := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
@@ -4565,6 +4645,7 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 		Content:        message,
 		Source:         origin,
 		OriginAgent:    originAgent,
+		GoalID:         goalID,
 	}
 	if origin == models.TaskOriginEmail && strings.TrimSpace(reply.EmailFrom) != "" {
 		queued.EmailFrom = reply.EmailFrom

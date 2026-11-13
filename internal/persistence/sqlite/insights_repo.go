@@ -674,7 +674,7 @@ func scanInsights(rows *sql.Rows) ([]models.Insight, error) {
 func insightsTaskPredicate(ctx context.Context, alias, projectID string) string {
 	predicate := analyticsProjectPredicate(ctx, alias+"project_id", projectID)
 	if projectID == models.AllProjectsID {
-		predicate += " AND " + alias + "category != 'chat'"
+		predicate += " AND " + alias + "category NOT IN ('chat','page_chat')"
 	}
 	return predicate
 }

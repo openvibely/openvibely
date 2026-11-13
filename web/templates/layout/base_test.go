@@ -1181,8 +1181,7 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 	// 1,1,0 beats Tailwind CDN's .w-full (0,1,0) which injects after the <style> block:
 	//   - width: calc(100% + 16px)  — only needs to recover the left shift, no extra right
 	for _, expected := range []string{
-		"#chat-messages,",
-		"#task-thread-messages,",
+		"[data-chat-transcript],",
 		"[data-thread-refresh-preview] {",
 		".chat-input-shadow-gutter,",
 		"margin-left: -16px;",
@@ -1637,7 +1636,7 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 		"display: none !important;",
 		".sidebar-aside.sidebar-collapsed [data-tip]:hover::after {",
 		"opacity: 0 !important;",
-		".sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible),",
+		".sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible):not(:hover):not(:active):not([aria-current=\"page\"]),",
 		".sidebar-aside .menu:not(.ov-menu) summary:focus:not(:focus-visible) {",
 		"background-color: transparent !important;",
 	}

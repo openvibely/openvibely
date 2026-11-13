@@ -1,0 +1,42 @@
+package components
+
+import "github.com/openvibely/openvibely/internal/models"
+
+// PageChatView uses server-authorized endpoints and saved conversation records.
+// It has no dependency on a plugin, iframe, or a particular page type.
+// The caller supplies authorized thread endpoints with WithThreadSurface.
+type PageChatView struct {
+ HasEarlier bool
+ Agents []models.LLMConfig
+ ChatExecutions []models.Execution
+ ChatTask *models.Task
+ Attachments map[string][]models.ChatAttachment
+ PendingInputs []models.ThreadInput
+}
+
+const PageChatFormID = "task-thread-form"
+
+
+templ PageSideChat(v PageChatView) {
+ @SidePanel("page-side-chat", "page-chat-divider", "Page chat") {
+  <button type="button" class="btn btn-ghost btn-sm btn-square" data-page-chat-close aria-label="Close page chat" style="position:absolute;right:8px;top:8px;z-index:2">✕</button>
+  @TaskThreadView(v.ChatTask,v.ChatExecutions,v.Agents,nil,v.Attachments,v.PendingInputs,v.HasEarlier,50)
+ }
+ <style>
+  #page-chat-toggle{flex-shrink:0}
+  /* The fixed panel has no main-content gutter: give the transcript the
+     same 16px inset as the composer, including focused-width mode. */
+  #page-side-chat #task-thread-view [data-chat-transcript],
+  #page-side-chat #task-thread-view [data-thread-refresh-preview]{margin-left:0;width:100%;max-width:100%;padding-left:16px;padding-right:16px;box-sizing:border-box}
+  /* Match main-content's 4px bottom inset. The shared composer already
+     supplies its own 14px bottom gutter. */
+  html[data-shell-frame] #page-side-chat{bottom:0;padding-bottom:4px}
+  #page-side-chat #task-thread-view .chat-input-shadow-gutter{width:calc(100% - 32px);max-width:calc(100% - 32px);margin-inline:auto!important;padding-inline:0!important;box-sizing:border-box}
+  html[data-thread-width="focused"] #page-side-chat #task-thread-view .chat-input-shadow-gutter{max-width:min(820px,calc(100% - 32px))}
+  #page-side-chat [data-page-chat-close]{display:none}
+  #page-side-chat[data-overlay="true"] [data-page-chat-close]{display:flex}
+  #page-side-chat[data-overlay="true"] #task-thread-messages{padding-top:48px}
+ </style>
+ @SidePanelScript()
+ <script>if(window.initPageChat) window.initPageChat();</script>
+}

@@ -40,7 +40,7 @@
   return node;
  };
  function projectID(root) {
-  return root?.closest('#chat-page-root, #task-detail-content')?.dataset.projectId || document.getElementById('project-selector')?.value || new URLSearchParams(location.search).get('project_id') || '';
+  return root?.closest('#chat-page-root, #task-detail-content, #task-thread-view')?.dataset.projectId || document.getElementById('project-selector')?.value || new URLSearchParams(location.search).get('project_id') || '';
  }
  async function request(url, body) {
   const response = await fetch(url, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','X-OpenVibely-UI':'chat-input-answer'},body:JSON.stringify(body)});
@@ -126,14 +126,19 @@
   if(!project || !exec || (!force && root.dataset.skillApprovalsLoaded===project))return;
   root.dataset.skillApprovalsLoaded=project;
   const generation=(Number(root.dataset.skillApprovalsGeneration)||0)+1;root.dataset.skillApprovalsGeneration=String(generation);
+  const revision=window._chatInputRevision || 0;
   try {
    const response=await fetch('/chat/input-requests?project_id='+encodeURIComponent(project)+'&execution_id='+encodeURIComponent(exec));
    if(!response.ok)throw new Error('Unable to load questions');
    const html=await response.text();
    if(!root.isConnected || projectID(root)!==project || Number(root.dataset.skillApprovalsGeneration)!==generation)return;
+   if(revision!==(window._chatInputRevision || 0)){load(root,true);return;}
    const fragment=document.createElement('template');fragment.innerHTML=html;
-   root.querySelectorAll('[data-chat-input-request-id]').forEach(card=>card.remove());
-   root.append(fragment.content);initDetails();
+   const incoming=new Set(Array.from(fragment.content.querySelectorAll('[data-chat-input-request-id]'),card=>card.id));
+   root.querySelectorAll('[data-chat-input-request-id]').forEach(card=>{if(!incoming.has(card.id))card.remove();});
+   fragment.content.querySelectorAll('[data-chat-input-request-id]').forEach(card=>{if(!document.getElementById(card.id))root.append(card);});
+   initDetails();
+   window.initChatInputRequestCards?.(root);
    if(location.hash.startsWith('#chat-input-request-'))window.openVibelyScrollIntoPanel(document.getElementById(location.hash.slice(1)), {block:'center'});
   } catch(_){delete root.dataset.skillApprovalsLoaded;}
  }
@@ -145,6 +150,15 @@
  });
  let scheduled=false;
  new MutationObserver(()=>{if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;scan();});}).observe(document.documentElement,{childList:true,subtree:true});
+ // Ordinary agent questions use the same execution-scoped loader as approvals.
+ window.addEventListener('sse-chat-live-event',event=>{
+  const update=event.detail;
+  if(!['chat_user_input_requested','chat_user_input_resolved'].includes(update?.type))return;
+  const exec=update.exec_id || update.input_request?.exec_id;
+  if(!exec)return;
+  const root=document.querySelector('[data-execution-pair][data-exec-id="'+CSS.escape(exec)+'"]');
+  if(root && (!update.project_id || projectID(root)===update.project_id))load(root,true);
+ });
  window.addEventListener('sse-task-event',event=>{
   const update=event.detail;if(update?.type!=='skill_dependency_approval')return;
   const root=document.querySelector('[data-execution-pair][data-exec-id="'+CSS.escape(update.exec_id)+'"]');

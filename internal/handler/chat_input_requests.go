@@ -399,21 +399,22 @@ func (h *Handler) chatInputRequestEvents(ctx context.Context, projectID string) 
 	}
 	items := make([]*events.ChatInputRequestEvent, 0, len(requests))
 	for _, req := range requests {
-		if req.Installation != nil {
-			execution, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), req.ExecID)
-			if err != nil {
+		execution, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), req.ExecID)
+		if err != nil {
+			return nil, err
+		}
+		var task *models.Task
+		if execution != nil {
+			if task, err = h.taskRepo.GetByID(ctx, execution.TaskID); err != nil {
 				return nil, err
 			}
-			if execution == nil {
-				continue
-			}
-			task, err := h.taskRepo.GetByID(ctx, execution.TaskID)
-			if err != nil {
-				return nil, err
-			}
-			if task == nil || task.Category != models.CategoryChat {
-				continue
-			}
+		}
+		// Page side-chat questions belong to their page; installs only run from Chat.
+		if task != nil && task.Category == models.CategoryPageChat {
+			continue
+		}
+		if req.Installation != nil && (task == nil || task.Category != models.CategoryChat) {
+			continue
 		}
 		items = append(items, chatInputRequestForEvent(req))
 	}

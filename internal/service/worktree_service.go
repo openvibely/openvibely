@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/pkg/agenttools"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 )
 
 // ErrMergeInProgress is returned when another repository merge, rebase, or
@@ -571,6 +572,9 @@ func worktreeHeadSHA(ctx context.Context, task *models.Task) (string, error) {
 }
 
 func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Context, task *models.Task, repoDir string) (bool, error) {
+	if ws.llmSvc != nil {
+		ctx = ws.llmSvc.gitContext(ctx)
+	}
 	if task == nil || task.WorktreePath == "" {
 		return false, nil
 	}
@@ -579,9 +583,9 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 		cmdCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
 		for attempt := 0; ; attempt++ {
-			cmd := exec.CommandContext(cmdCtx, "git", args...)
+			cmd := gitidentity.Command(cmdCtx, args...)
 			cmd.Dir = dir
-			cmd.Env = append(os.Environ(),
+			cmd.Env = append(cmd.Env,
 				"GIT_TERMINAL_PROMPT=0",
 				"GIT_ASKPASS=true",
 				"SSH_ASKPASS=true",
@@ -1181,12 +1185,16 @@ func minInt(a, b int) int {
 
 // CommitWorktreeChanges stages and commits all changes in the worktree.
 func CommitWorktreeChanges(worktreePath string, message string) error {
+	return CommitWorktreeChangesContext(context.Background(), worktreePath, message)
+}
+
+func CommitWorktreeChangesContext(ctx context.Context, worktreePath string, message string) error {
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("empty commit message")
 	}
 
 	// Check for changes
-	out, err := GitStatusPorcelain(context.Background(), worktreePath)
+	out, err := GitStatusPorcelain(ctx, worktreePath)
 	if err != nil {
 		return fmt.Errorf("checking git status: %w", err)
 	}
@@ -1194,28 +1202,34 @@ func CommitWorktreeChanges(worktreePath string, message string) error {
 		return nil // no changes
 	}
 
-	// Ensure git identity is set (required for commits). Check email and name
-	// independently because a repo/environment may configure only one of them.
-	checkEmailCmd := exec.Command("git", "config", "user.email")
-	checkEmailCmd.Dir = worktreePath
-	if out, _ := checkEmailCmd.Output(); len(strings.TrimSpace(string(out))) == 0 {
-		exec.Command("git", "-C", worktreePath, "config", "user.email", "bot@openvibely.ai").Run()
+	// Supply identity to this process only; never write shared repository config.
+	if err := gitidentity.RequireCommit(ctx); err != nil {
+		return err
 	}
-	checkNameCmd := exec.Command("git", "config", "user.name")
-	checkNameCmd.Dir = worktreePath
-	if out, _ := checkNameCmd.Output(); len(strings.TrimSpace(string(out))) == 0 {
-		exec.Command("git", "-C", worktreePath, "config", "user.name", "OpenVibely Bot").Run()
-	}
-
 	// Stage all changes
-	addCmd := exec.Command("git", "add", "-A")
+	addCmd := gitidentity.Command(ctx, "add", "-A")
 	addCmd.Dir = worktreePath
 	if out, err := addCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("staging changes: %w: %s", err, string(out))
 	}
 
 	// Commit
-	commitCmd := exec.Command("git", "commit", "-m", message)
+	commitArgs := []string{}
+	// Personal contexts resolve identity and bot defaults in the shared wrapper.
+	if !gitidentity.Configured(ctx) {
+		// Preserve legacy Git identity, with process-local
+		// defaults only for missing fields. Never modify repository config.
+		for _, field := range [][2]string{{"user.name", "OpenVibely Bot"}, {"user.email", "bot@openvibely.ai"}} {
+			query := exec.CommandContext(ctx, "git", "config", "--get", field[0])
+			query.Dir = worktreePath
+			value, _ := query.Output()
+			if strings.TrimSpace(string(value)) == "" {
+				commitArgs = append(commitArgs, "-c", field[0]+"="+field[1])
+			}
+		}
+	}
+	commitArgs = append(commitArgs, "commit", "-m", message)
+	commitCmd := gitidentity.Command(ctx, commitArgs...)
 	commitCmd.Dir = worktreePath
 	if out, err := commitCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("committing changes: %w: %s", err, string(out))
@@ -1325,6 +1339,9 @@ func (ws *WorktreeService) MergeBranchValidated(ctx context.Context, task *model
 }
 
 func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.Task, repoDir string, mergeType string) (*MergeResult, error) {
+	if ws.llmSvc != nil {
+		ctx = ws.llmSvc.gitContext(ctx)
+	}
 	if task.WorktreeBranch == "" {
 		return nil, fmt.Errorf("task has no worktree branch")
 	}
@@ -1351,7 +1368,7 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 		if ws.llmSvc != nil {
 			err = ws.llmSvc.CommitTaskWorktreeChanges(ctx, task, nil, task.WorktreePath, message)
 		} else {
-			err = CommitWorktreeChanges(task.WorktreePath, message)
+			err = CommitWorktreeChangesContext(ctx, task.WorktreePath, message)
 		}
 		if err != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
@@ -1397,7 +1414,7 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 		mergeArgs = []string{"merge", "--no-ff", "-m", fmt.Sprintf("Merge task: %s", task.Title), task.WorktreeBranch}
 	}
 
-	mergeCmd := exec.Command("git", mergeArgs...)
+	mergeCmd := gitidentity.Command(ctx, mergeArgs...)
 	mergeCmd.Dir = repoDir
 	mergeOut, mergeErr := mergeCmd.CombinedOutput()
 
@@ -1446,7 +1463,7 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 			return &MergeResult{ErrorMessage: fmt.Sprintf("checking squash merge paths: %s", pathErr.Error())}, fmt.Errorf("checking squash merge paths: %w", pathErr)
 		}
 		commitArgs := append([]string{"commit", "-m", fmt.Sprintf("Squash merge task: %s", task.Title), "--only", "--"}, squashPaths...)
-		commitCmd := exec.Command("git", commitArgs...)
+		commitCmd := gitidentity.Command(ctx, commitArgs...)
 		commitCmd.Dir = repoDir
 		if out, err := commitCmd.CombinedOutput(); err != nil {
 			commitErrMsg := strings.TrimSpace(string(out))
@@ -1502,6 +1519,9 @@ func (ws *WorktreeService) RebaseBranchValidated(ctx context.Context, task *mode
 }
 
 func (ws *WorktreeService) rebaseBranchLocked(ctx context.Context, task *models.Task, repoDir string) (*RebaseResult, error) {
+	if ws.llmSvc != nil {
+		ctx = ws.llmSvc.gitContext(ctx)
+	}
 	if task == nil || task.WorktreeBranch == "" {
 		return nil, fmt.Errorf("task has no worktree branch")
 	}
@@ -1549,7 +1569,7 @@ func (ws *WorktreeService) rebaseBranchLocked(ctx context.Context, task *models.
 	}
 
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
-	rebaseOut, rebaseErr := gitOutput(task.WorktreePath, "rebase", targetBranch)
+	rebaseOut, rebaseErr := gitOutputContext(ctx, task.WorktreePath, "rebase", targetBranch)
 	if rebaseErr != nil {
 		conflictFiles := detectConflicts(task.WorktreePath)
 		if len(conflictFiles) > 0 {
@@ -1612,7 +1632,7 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
 			applog.Debugf("[worktree] task branch %s is not already fast-forwardable from %s before auto-rebase: %s", task.WorktreeBranch, targetBranch, trimmed)
 		}
-		rebaseOut, rebaseErr := gitOutput(task.WorktreePath, "rebase", targetBranch)
+		rebaseOut, rebaseErr := gitOutputContext(ctx, task.WorktreePath, "rebase", targetBranch)
 		if rebaseErr != nil {
 			conflictFiles := detectConflicts(task.WorktreePath)
 			if len(conflictFiles) > 0 {
@@ -2161,6 +2181,9 @@ func containsGitConflictMarkers(content string) bool {
 }
 
 func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, task *models.Task, repoDir string, validateBeforeCommit func() error) (*MergeResult, error) {
+	if ws.llmSvc != nil {
+		ctx = ws.llmSvc.gitContext(ctx)
+	}
 	if ws.llmSvc == nil {
 		return nil, fmt.Errorf("LLM service not available for conflict resolution")
 	}
@@ -2271,7 +2294,7 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 		}
 	}
 
-	commitCmd := exec.Command("git", "commit", "--no-edit")
+	commitCmd := gitidentity.Command(ctx, "commit", "--no-edit")
 	commitCmd.Dir = repoDir
 	if out, err := commitCmd.CombinedOutput(); err != nil {
 		commitErrMsg := strings.TrimSpace(string(out))
@@ -3057,6 +3080,14 @@ func (ws *WorktreeService) recoverAutomaticMergeConflict(ctx context.Context, ta
 }
 
 func (ws *WorktreeService) autoMergeTask(ctx context.Context, taskID string, trigger automaticMergeTrigger) {
+	if ws.llmSvc != nil && ws.llmSvc.gitCredentials != nil {
+		var err error
+		ctx, err = ws.llmSvc.gitCredentials.TaskGitContext(ctx, taskID, "")
+		if err != nil {
+			applog.Infof("[worktree] auto-merge identity unavailable for task %s", taskID)
+			return
+		}
+	}
 	if ws.taskRepo == nil || ws.projectRepo == nil {
 		return
 	}
@@ -3177,7 +3208,7 @@ func (ws *WorktreeService) finalizeTaskOutputChangesUnlocked(ctx context.Context
 	if llmSvc != nil {
 		result.CommitError = llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, task.WorktreePath, message)
 	} else {
-		result.CommitError = CommitWorktreeChanges(task.WorktreePath, message)
+		result.CommitError = CommitWorktreeChangesContext(ctx, task.WorktreePath, message)
 	}
 
 	// Persist and review the authoritative branch diff when the auto-commit succeeds
@@ -3728,4 +3759,10 @@ func ListGitWorktreesContext(ctx context.Context, repoDir string) ([]WorktreeInf
 	}
 
 	return worktrees, nil
+}
+
+func gitOutputContext(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := gitidentity.Command(ctx, args...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
 }

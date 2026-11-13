@@ -12,6 +12,7 @@ var ErrMaxSubscribers = errors.New("maximum subscriber limit reached")
 type TaskEventType string
 
 const (
+	PluginPagesChanged            TaskEventType = "plugin_pages_changed"
 	SkillDependencyApproval       TaskEventType = "skill_dependency_approval"
 	SkillDependencyProgress       TaskEventType = "skill_dependency_progress"
 	TaskFilesChanged              TaskEventType = "task_files_changed"

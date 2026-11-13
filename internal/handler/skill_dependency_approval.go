@@ -18,7 +18,9 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	contracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/skilldeps"
 	"github.com/openvibely/openvibely/internal/update"
 )
@@ -411,6 +413,44 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 	if task == nil {
 		return errors.New("original task unavailable")
 	}
+	var pageBinding pageintegration.Conversation
+	var pageTurn pageQueuedContext
+	if task.Category == models.CategoryPageChat {
+		pageBinding, err = h.recoverPageConversation(ctx, task)
+		if err != nil {
+			return err
+		}
+		var release func()
+		ctx, release, err = pageBinding.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+		unlock := persistence.LockTaskLifecycle(pageBinding.LockKey())
+		defer unlock()
+		raw, e := pageBinding.Store.Snapshot(ctx, original.ID)
+		if e != nil {
+			return e
+		}
+		var saved pageTurnContext
+		if e = json.Unmarshal([]byte(raw), &saved); e != nil {
+			return e
+		}
+		if saved.Page.Key() != pageBinding.Page.Key() || saved.Page.ProjectID != task.ProjectID {
+			return errors.New("page context binding changed")
+		}
+		if e = h.authorizePageTurn(ctx, saved.Principal, task.ProjectID); e != nil {
+			return e
+		}
+		ctx, err = h.pagePrincipalContext(ctx, saved.Principal, task.ProjectID, authz.Edit)
+		if err != nil {
+			return err
+		}
+		pageTurn.Principal = saved.Principal
+		if saved.HasContext {
+			pageTurn.Snapshot = &saved.Snapshot
+		}
+	}
 	// Native tool results must continue with the original provider/model.
 	agent, err := h.llmConfigRepo.GetByID(ctx, original.AgentConfigID)
 	if err != nil {
@@ -430,7 +470,7 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 	var updateDone func()
 	if h.updateWorkTracker != nil {
 		class := update.WorkChat
-		if task.Category != models.CategoryChat {
+		if task.Category != models.CategoryChat && task.Category != models.CategoryPageChat {
 			class = update.WorkTask
 		}
 		updateDone, err = h.updateWorkTracker.Start(class)
@@ -469,7 +509,12 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 	if p, ok := models.PrincipalFromContext(ctx); ok {
 		params.PrincipalID = "user:" + p.UserID
 	}
-	if params.IsTaskFollowup {
+	if task.Category == models.CategoryPageChat {
+		params, err = h.pageChatParams(ctx, pageBinding, task, exec, agent, original.PromptSent, pageTurn)
+		if err != nil {
+			return fail(err)
+		}
+	} else if params.IsTaskFollowup {
 		// Reuse the direct task runner's context preparation after worker admission.
 		params.DeferHistoryLoad = true
 	} else {

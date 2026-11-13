@@ -39,7 +39,7 @@ RUN dnf install -y \
  && dnf clean all \
  && rm -rf /var/cache/dnf \
  && (chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap /usr/sbin/newuidmap /usr/sbin/newgidmap 2>/dev/null || true)
-ARG GO_VERSION=1.27.3
+ARG GO_VERSION=1.27.4
 ARG TARGETARCH
 RUN case "${TARGETARCH:-amd64}" in \
       amd64) go_arch=amd64 ;; \
@@ -103,6 +103,7 @@ RUN templ generate \
  && go build -o ./tmp/openvibely ./cmd/server
 USER root
 ENV PORT=3001 \
+    OPENVIBELY_NO_BROWSER=true \
     OPENVIBELY_APP_DATA_DIR=/data \
     DATABASE_PATH=/data/openvibely.db \
     PROJECT_REPO_ROOT=/data/repos \

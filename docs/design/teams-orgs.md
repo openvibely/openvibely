@@ -580,6 +580,7 @@ Today: global `worker_settings.max_workers`, `projects.max_workers`, and `agent_
 
 - Add `user_id` and `org_id` to `llm_usage_events` (populated from the execution's initiator), and group by user in `service/usage_analytics_service.go`.
 - Attribute background-run usage to the run-as user and mark `initiator_kind`.
+- Scope provider account limits, reset times, and provider-supported usage-reset actions to connection ownership: users can access only their own personal accounts; shared organization accounts remain admin/owner-only. Apply these checks to both reads and reset requests, including account/credit identifiers. Provider support determines which information and actions are available.
 - Billing (hosted): meter per org via `llm_usage_events` and worker-minutes. Seat count = `org_memberships`. BYO-key orgs pay only seats; managed-key orgs pay usage. Self-hosted: no billing, analytics only.
 - Budgets: `agent_cost_budgets` exists per model config. Add org- and user-level budgets later.
 
@@ -731,10 +732,12 @@ Delivered: explicit project grants and the Sharing tab; personal all-projects ch
 - Milestone: two users in the same conversation see each other's messages live, with attribution. Private conversations are not visible to others.
 
 ### Phase 5: Credentials and channels (3–4 weeks)
+- Implemented early: personal GitHub PATs and editable commit identities in the existing channel modal. Migration 228 assigns the legacy PAT to the bootstrap owner and removes the shared PAT; GitHub App mode and other channels remain shared. Git/API operations select the acting user, queued execution identities are retained, and Git author/committer values are process-local. Auth-off local commits retain the bot default until an identity is configured. Migrated authenticated owners must fill in their commit identity before committing. This does not implement encrypted credential storage or GitHub user OAuth.
 - `agent_configs`/`oauth_connections` gain `owner_kind/owner_id`. Personal vs org models; project model allow-list; follow-up model re-resolution.
 - `integration_credentials` (org scope, with optional project override). Move secrets out of `app_settings`; encrypt at rest.
 - Channel-specific tool restrictions and verified email sender identity. Global sender-to-user mappings already use admin/self assignment in channel settings; no linking-code flow is required.
 - Usage analytics by user. Org and user worker caps. Optional fair-share admission.
+- Personal provider account limits and resets: users can view limits/reset times and use provider-supported usage-reset actions only for their own connections. Shared organization account limits and reset actions remain organization-admin/owner-only. Enforce connection ownership on reads and reset requests; never expose or reset another user's account. Show only information and actions supported by the provider, and test cross-user denial and shared-account permissions.
 - Personal API tokens.
 - Milestone: Bob's personal Claude subscription is never used for Alice's work. A Slack user linked to Bob can only reach Bob's projects.
 

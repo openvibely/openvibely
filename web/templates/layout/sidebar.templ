@@ -295,6 +295,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							}
 
 							// Update all sidebar nav links with new project_id
+							if (typeof window.openVibelyRefreshPluginNav === 'function') window.openVibelyRefreshPluginNav(newProjectId);
 							document.querySelectorAll('[data-nav-base]').forEach(function(link) {							const base = link.getAttribute('data-nav-base');
 							const newUrl = base + '?project_id=' + encodeURIComponent(newProjectId);
 							link.setAttribute('href', newUrl);
@@ -409,6 +410,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						sel.value = projectID;
 						previousProjectID = projectID;
 						syncProjectSelector();
+						if (typeof window.openVibelyRefreshPluginNav === 'function') window.openVibelyRefreshPluginNav(projectID);
 						document.querySelectorAll('[data-nav-base]').forEach(function(link) {
 							var scopedURL = link.getAttribute('data-nav-base') + '?project_id=' + encodeURIComponent(projectID);
 							link.setAttribute('href', scopedURL);
@@ -506,7 +508,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-							if (eventType === 'task_files_changed' || eventType === 'skill_dependency_progress' || eventType === 'skill_dependency_approval' || eventType === 'task_deleted' || eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'task_goal_updated' || eventType === 'task_goal_paused' || eventType === 'task_goal_resumed' || eventType === 'task_goal_cleared' || eventType === 'task_goal_evaluated' || eventType === 'task_goal_followup_queued' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
+							if (eventType === 'plugin_pages_changed') {
+                                    if (window.htmx) htmx.trigger(document.body, 'plugin-nav-refresh');
+ window.dispatchEvent(new CustomEvent('plugin-page-updated', {detail: data}));
+                                    return;
+                                }
+                                if (eventType === 'task_files_changed' || eventType === 'skill_dependency_progress' || eventType === 'skill_dependency_approval' || eventType === 'task_deleted' || eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'task_goal_updated' || eventType === 'task_goal_paused' || eventType === 'task_goal_resumed' || eventType === 'task_goal_cleared' || eventType === 'task_goal_evaluated' || eventType === 'task_goal_followup_queued' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
 								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
 								if (eventType.indexOf('automation_') === 0) {
 									window._tabVisibility.dispatchSSEEvent('sse-automation-event', data);
@@ -530,7 +537,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 										if (data.project_id === currentProjectID || currentProjectID === '__all_projects__') {
 											const terminalStatuses = ['completed', 'failed', 'cancelled'];
 											if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
-												const taskName = data.task_name || 'Task';
+												const rawTaskName = data.task_name || 'Task';
+												const taskName = rawTaskName.startsWith('Page chat: ') ? rawTaskName.replace(/\s+\[plugin:[^\]]+\]$/, '') : rawTaskName;
 												window.showToast(taskName, data.status, data.task_id, {clickURL: '/tasks/' + encodeURIComponent(data.task_id) + '?project_id=' + encodeURIComponent(currentProjectID)});
 											}
 										}
@@ -587,7 +595,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									console.error('[SSE-Live] Connection error:', err);
 								},
 								listeners: {
-									'task_deleted': handleLiveEvent,
+									'plugin_pages_changed': handleLiveEvent,
+                                'task_deleted': handleLiveEvent,
                                     'task_board_updated': handleLiveEvent,
                                     'task_files_changed': handleLiveEvent,
                                     'skill_dependency_progress': handleLiveEvent,
@@ -661,17 +670,24 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// flash as selected during HTMX navigation.
 					(function() {
 						function syncSidebarActiveNavigation() {
-							var currentPath = window.location.pathname;
-							document.querySelectorAll('[data-nav-base]').forEach(function(link) {
-								var base = link.getAttribute('data-nav-base');
-                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(currentPath));
+							var currentPath = new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href).pathname;
+							document.querySelectorAll('[data-nav-base], [data-sidebar-path]').forEach(function(link) {
+								var base = link.getAttribute('data-nav-base') || link.getAttribute('data-sidebar-path');
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/plugin-pages)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
+							if (window.syncPluginNavOverflowSelection) window.syncPluginNavOverflowSelection();
 						}
 						window.syncSidebarActiveNavigation = syncSidebarActiveNavigation;
 						syncSidebarActiveNavigation();
-						document.body.addEventListener('htmx:afterSettle', syncSidebarActiveNavigation);
+						document.addEventListener('DOMContentLoaded', syncSidebarActiveNavigation, {once: true});
+
+						// Update before the next paint, including cached views and history navigation.
+						// Waiting for afterSettle leaves the previous icon selected on the new page.
+						['htmx:afterSwap', 'htmx:pushedIntoHistory', 'htmx:replacedInHistory', 'htmx:historyRestore'].forEach(function(eventName) {
+							document.body.addEventListener(eventName, syncSidebarActiveNavigation);
+						});
 						window.addEventListener('popstate', syncSidebarActiveNavigation);
 					})();
 
@@ -728,15 +744,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									htmx.process(el);
 								});
 							}
-							// Clean up thread streaming state
-							window._taskThreadStreamingActive = false;
-							// Close thread EventSource connections
-							if (window._threadEventSources) {
-								window._threadEventSources.slice().forEach(function(es) {
-									try { es.close(); } catch(e) {}
-								});
-								window._threadEventSources = [];
-							}
+
 						}
 					});
 
@@ -932,6 +940,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					</a>
 				</li>
 
+
 				<!-- Divider -->
 				<li class="my-1 sidebar-divider"><hr class="border-base-300 opacity-30"/></li>
 
@@ -981,8 +990,46 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						<span class="sidebar-text">Reflection</span>
 					</a>
 				</li>
+				<li class="plugin-pages-nav-wrap" style="padding:0;margin:0">
+					<ul
+						id="plugin-pages-nav"
+						class="plugin-pages-nav"
+						style="margin:0;padding:0"
+						data-nav-src="/plugin-pages/nav"
+						hx-get={ fmt.Sprintf("/plugin-pages/nav?project_id=%s", currentProjectID) }
+						hx-trigger="load, plugin-nav-refresh from:body"
+						hx-swap="innerHTML settle:0"
+						data-plugin-project={ currentProjectID }
+					></ul>
+				</li>
 			</ul>
 		</div>
+
+		<style>#sidebar #plugin-pages-nav [hidden]{display:none!important}.plugin-pages-nav::before{display:none!important}.plugin-pages-nav-wrap:has(> ul:empty){display:none}</style>
+		<script>
+            (function() {
+                var nav = document.getElementById('plugin-pages-nav');
+                if (!nav) return;
+                // Resolve scope at request time; reprocessing hx-get also fires
+                // its load trigger and used to request the same rail twice.
+                nav.addEventListener('htmx:configRequest', function(event) {
+                    if (event.detail.elt !== nav) return;
+                    event.detail.path = nav.dataset.navSrc + '?project_id=' + encodeURIComponent(nav.dataset.pluginProject);
+                });
+                nav.addEventListener('htmx:beforeSwap', function(event) {
+                    if (event.detail.target !== nav) return;
+                    var path = event.detail.xhr && event.detail.xhr.responseURL;
+                    if (path && new URL(path, location.href).searchParams.get('project_id') !== nav.dataset.pluginProject) event.detail.shouldSwap = false;
+                });
+                window.openVibelyRefreshPluginNav = function(projectID) {
+                    if (!window.htmx || nav.dataset.pluginProject === projectID) return;
+                    htmx.trigger(nav, 'htmx:abort');
+                    nav.dataset.pluginProject = projectID;
+                    nav.replaceChildren();
+                    htmx.trigger(document.body, 'plugin-nav-refresh');
+                };
+            })();
+		</script>
 
 			<!-- Footer: user info + settings pinned to bottom of sidebar -->
 		<div class="sidebar-footer border-t border-base-300 p-3 flex items-center justify-between gap-2">

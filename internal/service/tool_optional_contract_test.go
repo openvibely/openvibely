@@ -44,6 +44,7 @@ func TestEveryToolOptionalArgumentContract(t *testing.T) {
 		"memory_view": "handle", "list_automations": "", "get_automation": "automation_id", "preview_automation_description": "description",
 		"save_automation": "source", "update_automation_template": "", "run_automation_now": "", "pause_automation": "", "resume_automation": "", "delete_automation": "",
 		"get_chat_mode": "", "set_chat_mode": "mode", "list_capabilities": "",
+		"get_custom_page_guide": "", "get_custom_page_status": "instance_id", "publish_custom_page": "package_path",
 		"read_file": "file_path", "write_file": "file_path content", "edit_file": "file_path old_string new_string", "shell": "command", "process": "session_id", "list_files": "", "grep_search": "pattern", "delete_file": "file_path",
 		"skill_view": "handle", "skills_list": "", "agent_list": "", "agent_view": "key", "skill_manage": "action", "skill_import": "", "agent_skill_manage": "action",
 		"register_automation_resources": "adapter_key stable_key resources", oversizedInputReaderTool: "offset limit",

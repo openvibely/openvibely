@@ -27,7 +27,7 @@ func ResolveTaskReference(ctx context.Context, taskRepo persistence.TaskStore, p
 		if err != nil {
 			return nil, fmt.Errorf("error looking up task %s: %w", taskID, err)
 		}
-		if task == nil {
+		if task == nil || task.Category == models.CategoryPageChat {
 			return nil, fmt.Errorf("task %s not found", taskID)
 		}
 		if (projectID != "" || !opts.AllowUnscopedProject) && task.ProjectID != projectID {

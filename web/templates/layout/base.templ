@@ -263,6 +263,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
             <script src={ static.URL("permission-errors.js") }></script>
 			<script src={ static.URL("live-transport.js") }></script>
 			<script src={ static.URL("thread-snapshots.js") }></script>
+			<script src={ static.URL("chat-input-requests.js") }></script>
+            <script src={ static.URL("plugin-nav-overflow.js") }></script>
+ <script src={ static.URL("page-chat.js") }></script>
 			<script defer src={ static.URL("kanban.js") }></script>
 			<script defer src={ static.URL("thread-output-window.js") }></script>
 			<script defer src={ static.URL("thread-navigation.js") }></script>
@@ -409,7 +412,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				dialog.id = 'pending-input-editor';
 				dialog.className = 'modal';
 				dialog.setAttribute('aria-labelledby', 'pending-input-editor-title');
-				dialog.innerHTML = '<form class="modal-box"><button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" data-tooltip-disabled data-pending-editor-close aria-label="Close pending message editor"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button><h3 id="pending-input-editor-title" class="font-bold text-lg pr-10">Edit pending message</h3><textarea class="textarea textarea-bordered w-full" rows="6" aria-label="Message" required></textarea><p role="alert" class="text-error"></p><div class="modal-action"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div></form>';
+				dialog.innerHTML = '<form class="modal-box"><button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" data-tooltip-disabled data-pending-editor-close aria-label="Close pending message editor"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button><h3 id="pending-input-editor-title" class="font-semibold text-lg mb-4 pr-10">Edit pending message</h3><textarea class="textarea textarea-bordered w-full h-48" aria-label="Message" required></textarea><p role="alert" class="text-error text-sm"></p><div class="modal-action"><button type="button" class="btn btn-ghost" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div></form>';
 				var textarea = dialog.querySelector('textarea');
 				textarea.value = held.content;
 				var saving = false;
@@ -1196,8 +1199,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				     Selector uses parent ID prefix (#chat-page-root / #task-thread-view)
 				     for specificity 1,1,0 — beats Tailwind CDN's .w-full (0,1,0) which
 				     injects after our <style> block and would otherwise override width. */
-				#chat-messages,
-				#task-thread-messages,
+				[data-chat-transcript],
 				[data-thread-refresh-preview] {
 					/* WKWebView rubber-banding moves beyond the transcript's bounds,
 					   conflicting with virtual row measurement and bottom restoration.
@@ -1337,8 +1339,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					padding-bottom: 1rem;
 				}
 				/* Chat message scrollports: scrollbar appearance only (geometry handled above). */
-				#chat-messages,
-				#task-thread-messages,
+				[data-chat-transcript],
 				[data-thread-refresh-preview] {
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.2) transparent;
@@ -1444,6 +1445,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					padding: 0 !important;
 					margin: 0 !important;
 					width: 2.5rem !important;
+				}
+				/* The outer menu adds 2px before the nested page list. Cancel it so
+				   the divider sits equally far from both neighboring hover areas. */
+				body.sidebar-collapsed-pending .sidebar-aside .menu li.plugin-pages-nav-wrap:not(.sidebar-divider),
+				.sidebar-aside.sidebar-collapsed .menu li.plugin-pages-nav-wrap:not(.sidebar-divider) {
+					margin-top: -2px !important;
 				}
 				body.sidebar-collapsed-pending .sidebar-aside .menu :where(li ul),
 					.sidebar-aside.sidebar-collapsed .menu :where(li ul) {
@@ -1638,7 +1645,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background-color: var(--ov-l-surface-hover);
 					}
 					/* Prevent mouse-click focus from looking like a persistent active nav item (web parity with desktop). */
-					.sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible),
+					.sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible):not(:hover):not(:active):not([aria-current="page"]),
 					.sidebar-aside .menu:not(.ov-menu) summary:focus:not(:focus-visible) {
 						background-color: transparent !important;
 						outline: none !important;
@@ -1730,6 +1737,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					color: var(--ov-l-accent);
 					border-color: var(--ov-l-accent-soft);
 				}
+
+					/* Selected Changes controls must not depend on daisyUI's color-mix()
+					   active fill, which older desktop WebKit cannot render. IDs keep
+					   this state above generic theme and hover button overrides. */
+					#diff-btn-inline.btn-active,
+					#diff-btn-split.btn-active,
+					#changes-split-settings [data-changes-mode].btn-active {
+						background: var(--ov-button-bg, #7480ff) !important;
+						border-color: var(--ov-button-bg, #7480ff) !important;
+						color: var(--ov-button-fg, #050617) !important;
+					}
 
 					/* --- Buttons --- */
 					/* Dark-mode hover parity across web and desktop (deterministic, engine-agnostic). */
@@ -3239,6 +3257,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside .sidebar-inner::-webkit-scrollbar { display: none; }
 				html[data-shell-frame] .sidebar-aside .menu a { position: relative; opacity: .75; }
 				html[data-shell-frame] .sidebar-aside .menu a:hover { opacity: 1; }
+				/* Navigation highlights must not fade through the previously hovered/selected icon. */
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]) { transition: none; }
                 html[data-shell-frame] #alerts-nav-link[data-system-update-available="true"] { opacity: 1; }
                 .sidebar-update-dot { display: none; }
                 html[data-shell-frame] #alerts-nav-link[data-system-update-available="true"] .sidebar-update-dot {
@@ -3254,7 +3274,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     pointer-events: none;
                 }
 				html[data-shell-frame] .sidebar-aside .menu a svg { width: 1.125rem; height: 1.125rem; }
-				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background: color-mix(in srgb, oklch(var(--bc)) 10%, transparent); }
+				/* Match task rows and override menu/theme press and focus backgrounds.
+				   Pointer focus alone must not leave an old destination highlighted. */
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]) { background-color: transparent !important; }
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path]):is(:hover, :active, :focus-visible) { opacity: 1; color: oklch(var(--bc)); background-color: oklch(var(--bc) / .06) !important; }
+				html[data-shell-frame] .sidebar-aside .menu a:is([data-nav-base], [data-sidebar-path])[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background-color: var(--shell-row-selected) !important; }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] svg { color: inherit; }
 				html[data-shell-frame] .sidebar-aside .sidebar-footer { justify-content: center; padding: 6px 0 10px; min-height: 0; border: 0; }
 				/* Keep the lowered Settings hit area inset from the viewport edge. */
@@ -3306,6 +3330,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"])::after { top: calc(50% - 5px); }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-5px); }
 
+				#plugin-frame { border-radius: 28px 28px 0 0; }
+				#plugin-frame[style*="--superellipse-clip"] { border-radius: 0; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
 				html[data-shell-frame] #task-list-panel[style*="--superellipse-clip"],
 				html[data-shell-frame]:not([data-tab-style="attached"]) #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
@@ -3339,8 +3365,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-theme="light"] .stream-tool-body-content { border-top: 0 !important; }
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg::before,
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg::after { display: none !important; }
-				html[data-thread-width="focused"] :is(#task-thread-messages, #chat-messages, [data-thread-refresh-preview]) > *, html[data-thread-width="focused"] #main-content .chat-input-shadow-gutter { max-width: 820px; margin-left: auto !important; margin-right: auto !important; }
-				html[data-thread-width="focused"] :is(#task-thread-messages, #chat-messages, [data-thread-refresh-preview]) { padding-left: 28px; padding-right: 24px; }
+				html[data-thread-width="focused"] :is([data-chat-transcript], [data-thread-refresh-preview]) > *, html[data-thread-width="focused"] #main-content .chat-input-shadow-gutter { max-width: 820px; margin-left: auto !important; margin-right: auto !important; }
+				html[data-thread-width="focused"] :is([data-chat-transcript], [data-thread-refresh-preview]) { padding-left: 28px; padding-right: 24px; }
 				html[data-thread-width="focused"] #main-content :is(#chat-page-root, #task-thread-view) .chat-input-shadow-gutter { padding-left: 0; padding-right: 0; }
 				html[data-thread-width="focused"] .chat-execution-pair { display: flex; flex-direction: column; }
 				html[data-thread-width="focused"] .chat-bubble-user-msg { align-self: flex-end; max-width: 75%; width: fit-content; padding: 10px 16px !important; border-radius: 18px !important; border: 0 !important; }
@@ -5631,12 +5657,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									// Attached hover surfaces are inset 2px per side and match detached tabs at 35px tall.
 									if (attachedHover) { w -= 4; h = 35; }
 									var inspector = el.hasAttribute('data-side-panel');
+									var pluginFrame = el.id === 'plugin-frame';
 									var layout = document.documentElement.getAttribute('data-layout');
 									var unified = layout === 'unified';
 									var list = el.id === 'task-list-panel';
 									var joined = unified && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
-									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : 17);
-									var radii = joined ? [0, 0, 0, 0] : list ? (unified ? [0, 0, 0, r] : [r, 0, 0, r]) : el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
+									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list || pluginFrame ? 28 : 17);
+									var radii = pluginFrame ? [r, 0, 0, r] : joined ? [0, 0, 0, 0] : list ? (unified ? [0, 0, 0, r] : [r, 0, 0, r]) : el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
 									corners.forEach(function(c, index) {
@@ -5660,7 +5687,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 										observer.unobserve(el);
 										seen.delete(el);
 									});
-									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, [data-side-panel]').forEach(function(el) {
+									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, [data-side-panel], #plugin-frame').forEach(function(el) {
 										if (seen.has(el)) return;
 										seen.add(el);
 										shape(el);

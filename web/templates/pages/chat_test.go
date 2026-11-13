@@ -58,7 +58,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		t.Fatalf("global Chat transcript and composer must share project-scoped send intent, got %d markers", count)
 	}
 
-	if !strings.Contains(content, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="chat-messages" data-chat-transcript class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4" data-transcript-hydrating="true"`) {
 		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
 	}
 	if !strings.Contains(content, `data-messages-id="chat-messages"`) || !strings.Contains(content, `data-tracker-key="scrollTracker_chat-messages"`) || !strings.Contains(content, `aria-label="Scroll to latest message"`) {
@@ -68,7 +68,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		"var chatScrollStateKey = 'chat-scroll-' + projectId;",
 		"window._chatPageTracker = window.resolveScrollTracker('scrollTracker_chat-messages', chatMessages);",
 		"window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);",
-		"window.openVibelyThreadController.restore({",
+		"window.openVibelyThreadController.hydrate({",
 		"stateKey: chatScrollStateKey",
 		"renderPromise: renderPromise",
 		"document.body.addEventListener('htmx:historyRestore'",
@@ -88,7 +88,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 	if strings.Contains(content, "// Scroll to bottom on page load to show latest messages") {
 		t.Fatal("global Chat must not unconditionally jump before transcript hydration finishes")
 	}
-	chatRestoreStart := strings.Index(content, "return window.openVibelyThreadController.restore({")
+	chatRestoreStart := strings.Index(content, "return window.openVibelyThreadController.hydrate({")
 	if chatRestoreStart < 0 {
 		t.Fatal("could not isolate global Chat transcript restore options")
 	}
@@ -114,7 +114,7 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	required := []string{
 		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full"`,
 		`class="relative flex-1 min-h-0 min-w-0"`,
-		`id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4"`,
+		`id="chat-messages" data-chat-transcript class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4"`,
 		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2"`,
 		`class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`,
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
@@ -717,7 +717,7 @@ func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testin
 	if !strings.Contains(content, "var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;") {
 		t.Fatal("chat page should consume submit scroll intent through the shared initialization path")
 	}
-	if !strings.Contains(content, "return window.openVibelyThreadController.restore({") {
+	if !strings.Contains(content, "return window.openVibelyThreadController.hydrate({") {
 		t.Fatal("chat page should reconcile variable-sized attachments and later layout through the shared scroll coordinator")
 	}
 	if !strings.Contains(content, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {") {

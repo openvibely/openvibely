@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/httpclient"
-	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 type ExecutableUpdateHelperConfig struct {
@@ -994,8 +993,17 @@ func packagedRestartCommand(cfg ExecutableUpdateHelperConfig) func(string, strin
 		cmd := exec.Command(cfg.Current, arguments[1:]...)
 		cmd.Args[0] = arguments[0]
 		cmd.Dir = cfg.WorkingDirectory
+		// Updates and rollback recovery must not open another browser tab.
+		cmd.Env = append(os.Environ(), "OPENVIBELY_NO_BROWSER=true")
 		if health, err := url.Parse(cfg.HealthURL); err == nil && health.Port() != "" {
-			cmd.Env = append(os.Environ(), "PORT="+health.Port())
+			cmd.Env = append(cmd.Env, "PORT="+health.Port())
+		}
+		logFile, err := attachDetachedHelperIntegrationLog(cmd)
+		if err != nil {
+			return nil, err
+		}
+		if logFile != nil {
+			defer logFile.Close()
 		}
 		if err := cmd.Start(); err != nil {
 			return nil, err
@@ -1053,7 +1061,9 @@ func waitForExpectedHealth(ctx context.Context, endpoint, expected string, clien
 		if err != nil {
 			return err
 		}
-		resp, err := httpretry.DoRequest(client, req)
+		// This loop owns the retry cadence. General HTTP backoff can consume
+		// the validation deadline while a replacement is still starting.
+		resp, err := client.Do(req)
 		if err == nil {
 			var body struct {
 				Ready   bool   `json:"ready"`

@@ -268,3 +268,48 @@ func TestBreadcrumbSelectorItemURLPreservesOnlySupportedContext(t *testing.T) {
 	require.Equal(t, "/automations/automation/builder?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", "edit", "", "", ""))
 	require.Equal(t, "/automations/automation?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", strings.Repeat("x", 20), "", "", ""))
 }
+
+func TestCustomPageBreadcrumbSelector(t *testing.T) {
+	env := setupPluginPages(t)
+	for _, scope := range []string{env.projA.ID, models.AllProjectsID} {
+		rec := env.do(t, http.MethodGet, "/breadcrumb-selectors/custom-pages?project_id="+scope+"&current_id="+env.inA.ID, "", nil)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), "/p/"+env.inA.ID+"?project_id="+scope)
+		require.Contains(t, rec.Body.String(), `aria-selected="true"`)
+		if scope == models.AllProjectsID {
+			require.Contains(t, rec.Body.String(), "/p/"+env.inB.ID)
+		} else {
+			require.NotContains(t, rec.Body.String(), env.inB.ID)
+		}
+	}
+	rec := env.do(t, http.MethodGet, "/breadcrumb-selectors/custom-pages?project_id="+env.projA.ID+"&search=missing-title", "", nil)
+	require.Contains(t, rec.Body.String(), "No Custom pages found")
+	require.NoError(t, env.mgr.Disable(t.Context(), env.inB.ID))
+	rec = env.do(t, http.MethodGet, "/breadcrumb-selectors/custom-pages?project_id="+models.AllProjectsID, "", nil)
+	require.NotContains(t, rec.Body.String(), env.inB.ID)
+	rec = env.do(t, http.MethodGet, "/p/"+env.inA.ID+"?project_id="+env.projA.ID, "", map[string]string{"HX-Request": "true"})
+	require.Contains(t, rec.Body.String(), `aria-label="Breadcrumb"`)
+	require.Contains(t, rec.Body.String(), `/breadcrumb-selectors/custom-pages?project_id=`+env.projA.ID)
+	require.Contains(t, rec.Body.String(), `data-breadcrumb-title`)
+}
+
+func TestCustomPageAllProjectsNavigationKeepsScope(t *testing.T) {
+	env := setupPluginPages(t)
+	scope := models.AllProjectsID
+	nav := env.do(t, http.MethodGet, "/plugin-pages/nav?project_id="+scope, "", nil)
+	require.Contains(t, nav.Body.String(), `/p/`+env.inA.ID+`?project_id=`+scope)
+	for _, instance := range []*models.PagePluginInstance{env.inA, env.inB} {
+		for _, headers := range []map[string]string{nil, {"HX-Request": "true"}} {
+			page := env.do(t, http.MethodGet, "/p/"+instance.ID+"?project_id="+scope, "", headers)
+			require.Equal(t, http.StatusOK, page.Code)
+			require.Empty(t, page.Header().Get("HX-Redirect"))
+			require.Contains(t, page.Body.String(), `/settings/plugin-pages?project_id=`+scope)
+			require.Contains(t, page.Body.String(), `/breadcrumb-selectors/custom-pages?project_id=`+scope)
+			require.Contains(t, page.Body.String(), `/api/plugin-pages/`+instance.ID+`/bridge?project_id=`+instance.ProjectID)
+		}
+	}
+	selector := env.do(t, http.MethodGet, "/breadcrumb-selectors/custom-pages?project_id="+scope, "", nil)
+	require.Contains(t, selector.Body.String(), `/p/`+env.inB.ID+`?project_id=`+scope)
+	settings := env.do(t, http.MethodGet, "/settings/plugin-pages?project_id="+scope, "", nil)
+	require.Equal(t, http.StatusOK, settings.Code)
+}

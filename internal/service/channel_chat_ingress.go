@@ -1398,6 +1398,18 @@ func cleanupChannelChatAttachmentDirs(dirs map[string]struct{}) {
 	}
 }
 
+// channelChatSafeIncomingFileName normalizes provider filenames before download.
+func channelChatSafeIncomingFileName(name, id, platform string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	if name == "." || name == string(filepath.Separator) || name == "" {
+		if id = strings.TrimSpace(id); id != "" {
+			return platform + "-" + id
+		}
+		return platform + "-attachment"
+	}
+	return name
+}
+
 func safeChannelChatAttachmentFileName(name, fallbackName string) string {
 	fileName := filepath.Base(name)
 	if fileName == "." || fileName == string(filepath.Separator) || fileName == "" {

@@ -89,7 +89,7 @@ func ConfirmationFrame(dialogID string, closeLabel string, title string, promptP
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var5 templ.ComponentScript = templ.ComponentScript{Call: dialogID + ".close()"}
+			var templ_7745c5c3_Var5 templ.ComponentScript = templ.ComponentScript{Call: "document.getElementById('" + dialogID + "').close()"}
 			templ_7745c5c3_ElementScripts = append(templ_7745c5c3_ElementScripts, templ_7745c5c3_Var5)
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5.Call)
 			if templ_7745c5c3_Err != nil {

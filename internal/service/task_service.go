@@ -99,8 +99,7 @@ func (s *TaskService) submitActivatedTask(ctx context.Context, task models.Task,
 	if s.workerSvc == nil {
 		return errors.New("worker service unavailable")
 	}
-	s.workerSvc.Submit(task)
-	return nil
+	return s.workerSvc.SubmitAs(ctx, task)
 }
 
 func (s *TaskService) SetQueuedTaskThreadFollowupHook(hook func(context.Context, string) (bool, error)) {
@@ -277,7 +276,11 @@ func (s *TaskService) ValidateTaskIDsForProject(ctx context.Context, projectID s
 		if err != nil {
 			return fmt.Errorf("validating task %s for project %s: %w", id, projectID, err)
 		}
-		if task == nil || task.Category == models.CategoryChat {
+		pageOwned, err := s.repo.IsPageConversation(ctx, id)
+		if err != nil {
+			return err
+		}
+		if task == nil || task.Category == models.CategoryChat || pageOwned {
 			return fmt.Errorf("%w: %s", ErrTaskNotFoundInProject, id)
 		}
 	}
@@ -381,13 +384,15 @@ func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.T
 	}
 	applog.Infof("[task-svc] Create success id=%s", t.ID)
 	if goal != nil && s.goalSvc != nil {
-		s.goalSvc.publishGoalEvent(events.TaskGoalUpdated, goal)
+		s.goalSvc.publishGoalEvent(ctx, events.TaskGoalUpdated, goal)
 	}
 
 	// Auto-submit if created in Active category (blocked tasks wait for parent to activate them)
 	if t.Category == models.CategoryActive && t.Status != models.StatusBlocked && s.workerSvc != nil {
 		applog.Infof("[task-svc] Create auto-submitting active task id=%s to worker pool", t.ID)
-		s.workerSvc.Submit(*t)
+		if err := s.workerSvc.SubmitAs(ctx, *t); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -401,6 +406,9 @@ func (s *TaskService) UpdatePreservingTitle(ctx context.Context, t *models.Task)
 }
 
 func (s *TaskService) updateTask(ctx context.Context, t *models.Task, preserveTitle bool) error {
+	if err := s.requireBoardTask(ctx, t.ID); err != nil {
+		return err
+	}
 	if err := normalizeTaskTitleAndPrompt(t); err != nil {
 		return err
 	}
@@ -512,13 +520,18 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 		if status == models.StatusRunning {
 			s.workerSvc.SubmitReserved(task, admission.ExecutionID)
 		} else {
-			s.workerSvc.Submit(task)
+			if err := s.workerSvc.SubmitAs(ctx, task); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
+	if err := s.requireBoardTask(ctx, id); err != nil {
+		return err
+	}
 	if category != models.CategoryActive {
 		// A demotion may cancel the observed run after its board update. Keep
 		// direct follow-ups and manual worker submissions out until that older
@@ -859,6 +872,9 @@ func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, cate
 }
 
 func (s *TaskService) RunTask(ctx context.Context, id string) error {
+	if err := s.requireBoardTask(ctx, id); err != nil {
+		return err
+	}
 	applog.Infof("[task-svc] RunTask id=%s", id)
 	task, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -1336,4 +1352,16 @@ func (s *TaskService) ExecuteTasksByTags(ctx context.Context, tags []models.Task
 
 	applog.Infof("[task-svc] ExecuteTasksByTags submitted %d tasks for execution", submitted)
 	return allTasks, submitted, nil
+}
+
+// Page conversation lifecycle belongs to its surface, not task-board actions.
+func (s *TaskService) requireBoardTask(ctx context.Context, id string) error {
+	owned, err := s.repo.IsPageConversation(ctx, id)
+	if err != nil {
+		return err
+	}
+	if owned {
+		return fmt.Errorf("%w: %s", ErrTaskNotFoundInProject, id)
+	}
+	return nil
 }

@@ -1,8 +1,12 @@
 package components
 
-// This node is preserved during thread morphs; the workspace controller owns its compact JSON projection.
+import "fmt"
+
+// Preserve only within the same task; a shared preserve ID would carry another
+// task's action URL and button state across navigation.
 templ TaskChangeActivity(taskID string) {
-	<div id="task-change-activity" data-task-id={ taskID } hx-preserve="true" class="flex min-h-8 items-center gap-3 rounded-lg px-3 py-1.5 text-sm text-base-content/80" hidden>
+	<div id={ "task-change-activity-" + taskID } hx-preserve="true" class="contents">
+	<div id="task-change-activity" data-task-id={ taskID } class="flex min-h-8 items-center gap-3 rounded-lg px-3 py-1.5 text-sm text-base-content/80" hidden>
 		<button type="button" class="task-change-summary" data-review-changes onclick="window.taskWorkspace.openChanges()">
 			<svg class="task-change-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2h12l4 4v16H4z"/><path d="M8 10h8M12 6v8M8 17h8"/></svg>
 			<span class="task-change-summary-text" data-change-summary aria-live="polite">
@@ -11,7 +15,10 @@ templ TaskChangeActivity(taskID string) {
 				<span data-change-comments hidden></span>
 			</span>
 		</button>
-		<button type="button" class="task-change-review btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" data-review-changes onclick="window.taskWorkspace.openChanges()"><span data-change-action>Review changes</span></button>
+		<div id="composer-changes-action" class="flex-shrink-0" hx-get={ fmt.Sprintf("/tasks/%s/changes?composer_action=1", taskID) } hx-trigger="load, composer-actions-refresh" hx-target="this" hx-sync="this:queue last" hx-swap="innerHTML">
+   <button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 text-xs font-normal opacity-50" disabled>Loading…</button>
+  </div>
+	</div>
 	</div>
 	<style>
 		#task-change-activity { min-width:0; max-width:100%; margin-bottom:14px; }
@@ -21,7 +28,7 @@ templ TaskChangeActivity(taskID string) {
 		.task-change-summary { display:flex; align-items:center; flex:1; gap:10px; min-width:0; padding:0; text-align:left; }
 		.task-change-icon { flex-shrink:0; }
 		.task-change-icon { color:oklch(var(--bc) / .6); }
-		#task-change-activity:not([hidden]) ~ [id$="-attachments-preview"] { margin-top:0; }
+		[id^="task-change-activity-"]:has(> #task-change-activity:not([hidden])) ~ [id$="-attachments-preview"] { margin-top:0; }
 		.task-change-summary-text { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
 		[data-change-files] { white-space:nowrap; font-weight:400; }
 		.task-change-stats { display:inline-flex; flex-wrap:wrap; gap:6px; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums; }

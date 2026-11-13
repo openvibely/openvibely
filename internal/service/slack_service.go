@@ -1529,6 +1529,7 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		},
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		GitHubConnection:   s.githubProjectSvc,
 		ProjectID:          projectID,
 		CallerTaskID:       callerTaskID,
 		TaskRepo:           s.taskRepo,
@@ -2303,19 +2304,11 @@ func cleanupSlackAttachmentSourceDirs(attachments []models.ChatAttachment) {
 }
 
 func slackSafeFileName(f slackIncomingFile) string {
-	name := strings.TrimSpace(f.Name)
-	if name == "" {
-		name = strings.TrimSpace(f.Title)
+	name := f.Name
+	if strings.TrimSpace(name) == "" {
+		name = f.Title
 	}
-	name = filepath.Base(name)
-	if name == "." || name == string(filepath.Separator) || name == "" {
-		if strings.TrimSpace(f.ID) != "" {
-			name = "slack-" + strings.TrimSpace(f.ID)
-		} else {
-			name = "slack-attachment"
-		}
-	}
-	return name
+	return channelChatSafeIncomingFileName(name, f.ID, "slack")
 }
 
 func slackFileDisplayName(f slackIncomingFile) string {

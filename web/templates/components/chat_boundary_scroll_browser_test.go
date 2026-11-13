@@ -6,7 +6,7 @@ func TestBrowserFunctional_UpwardScrollIntoLargePreviousBubble(t *testing.T) {
 	for _, mode := range []string{"loaded", "paged", "shrinking", "reverse", "top"} {
 		t.Run(mode, func(t *testing.T) {
 			runIncrementalChatBrowser(t, `const mode="`+mode+`", paging=mode==='paged';
- const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
  messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
  const newer=document.createElement('div');newer.dataset.executionPair='true';newer.dataset.execStatus='completed';
  const owner=document.createElement('div');owner.className='chat-bubble-assistant-msg';newer.append(owner);messages.append(newer);

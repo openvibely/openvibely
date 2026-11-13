@@ -165,3 +165,10 @@ Important:
 Select **All projects** to work across projects from one workspace. Tasks, automations, Analytics, and Insights combine project records and show their ownership. Filter to a project when you need a narrower view. The All projects tab can be reordered or closed like other project tabs.
 
 All projects has its own saved Chat conversation. Select a destination project when creating project-owned work; tasks and automations keep their own project context. A conversation opened within a specific project stays scoped to that project.
+
+## Share a project
+
+Open Project Settings → Sharing to grant organization members viewer, editor, or maintainer access. Joining the organization does not grant project access. Project owners and organization admins/owners manage grants and ownership; maintainers manage project work but cannot change sharing. Save applies the staged sharing changes together.
+
+Project lists and live updates show only projects the user can access. Revoking access blocks new work and subscriptions, but does not automatically cancel work already running. These are application permissions, not process or filesystem isolation; private-project creation remains unavailable.
+

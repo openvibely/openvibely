@@ -129,6 +129,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    var path = name === 'goal' ? '/goal' + (action ? '/' + action : '') : '/details/property';
    var body = new URLSearchParams(name === 'goal' ? {goal:value} : {field:name,value:value});
    var response = await fetch('/tasks/' + encodeURIComponent(taskID) + path + '?project_id=' + encodeURIComponent(projectID), {method:name === 'goal' ? 'POST' : 'PATCH',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
+   if (await window.openVibelyPermissionErrors?.fetch(response)) { var denied = new Error('Permission denied'); denied.toastOnly = true; throw denied; }
    if (!response.ok) { var error = await response.text(); try { error = JSON.parse(error).message || error; } catch (_) {} throw new Error(error); }
    var html = await response.text();
    var editInput = root.querySelector('#task-detail-edit [name="' + name + '"]');
@@ -145,7 +146,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    panel.querySelector('[data-auto-merge-error]').textContent = '';
    panel.querySelectorAll('input').forEach(function(control) { control.disabled = true; });
    try { await save(input.name, String(input.checked)); }
-   catch (error) { input.checked = !input.checked; panel.querySelector('[data-auto-merge-error]').textContent = error.message; }
+   catch (error) { input.checked = !input.checked; if (!error.toastOnly) panel.querySelector('[data-auto-merge-error]').textContent = error.message; }
    finally { busy = false; panel.querySelectorAll('input').forEach(function(control) { control.disabled = false; }); }
   });
   root.addEventListener('click', function(event) {
@@ -185,7 +186,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     }
     if (name === 'agent_id') composerModel(value, label);
     hidePicker(); var row = root.querySelector('[data-detail-property="' + name + '"]'); returnToRow(row);
-   } catch (error) { picker.querySelector('[data-property-error]').textContent = error.message; }
+   } catch (error) { if (!error.toastOnly) picker.querySelector('[data-property-error]').textContent = error.message; }
    finally { busy = false; picker.querySelectorAll('button').forEach(function(button) { button.disabled = false; }); }
   });
   dialog.querySelectorAll('[data-goal-action]').forEach(function(button) {
@@ -194,7 +195,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     busy = true;
     dialog.querySelectorAll('button').forEach(function(control) { control.disabled = true; });
     try { await save('goal', '', button.dataset.goalAction); dialog.close(); }
-    catch (error) { dialog.querySelector('[data-editor-error]').textContent = error.message; }
+    catch (error) { if (!error.toastOnly) dialog.querySelector('[data-editor-error]').textContent = error.message; }
     finally { busy = false; dialog.querySelectorAll('button').forEach(function(control) { control.disabled = false; }); }
    };
   });
@@ -208,7 +209,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     else { root.querySelector('[data-draft-property="goal"]').value = value; current.dataset.value = value; current.textContent = value ? 'Edit' : '+'; }
     dialog.close();
     var trigger = root.querySelector('[data-detail-editor="' + field + '"]'); if (trigger) trigger.focus({preventScroll:true});
-   } catch (error) { dialog.querySelector('[data-editor-error]').textContent = error.message; }
+   } catch (error) { if (!error.toastOnly) dialog.querySelector('[data-editor-error]').textContent = error.message; }
    finally { busy = false; button.disabled = false; }
   });
   // Do not replace rows underneath an open picker; the following poll reconciles them.

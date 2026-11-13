@@ -1317,7 +1317,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                                     try {
                                         while (root && root.isConnected) {
                                             var message = Array.from(root.querySelectorAll('[data-exec-id]')).find(function(el) { return el.dataset.execId === id; });
-                                            if (message) { message.scrollIntoView({block:'center'}); return; }
+                                            if (message) { window.openVibelyScrollIntoPanel(message, {container: message.closest('#task-thread-messages'), block:'center'}); return; }
                                             var loader = root.querySelector('[data-earlier-loader]');
                                             if (!loader || !window.htmx) break;
                                             await htmx.ajax('GET', loader.getAttribute('hx-get'), {target:loader, swap:loader.getAttribute('hx-swap') || 'outerHTML'});
@@ -1884,6 +1884,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							if (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {
 								htmx.process(changesContent);
 							}
+
+                            // Direct DOM replacement does not run the split-action script
+                            // or emit the afterSwap event that initializes new controls.
+                            if (window.ovChangesSplit) window.ovChangesSplit.init();
 
 							// Direct refreshes do not emit HTMX afterSettle. Update the
 							// explorer before restoring the selected file's scroll anchor.

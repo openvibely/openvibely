@@ -183,6 +183,19 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("saved details after reload", `String(!window.beforeGutterReload && Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
 		assertTabGutters()
 		assertFooter()
+		result := b.evaluateAwait(`(async()=>{
+ const originalFetch=window.fetch,originalToast=window.showToast;const toasts=[];
+ window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});window.showToast=m=>toasts.push(m);
+ const toggle=document.querySelector('#task-auto-merge-panel input[name="auto_merge"]'),checked=toggle.checked;toggle.click();
+ for(let i=0;i<100&&toggle.disabled;i++)await new Promise(r=>setTimeout(r,10));
+ if(toggle.checked!==checked||document.querySelector('[data-auto-merge-error]').textContent)return 'toggle changed';
+ document.querySelector('[data-detail-editor="prompt"]').click();const dialog=document.getElementById('task-detail-text-editor');dialog.querySelector('textarea').value='Keep draft';dialog.querySelector('[type="submit"]').click();
+ for(let i=0;i<100&&dialog.querySelector('[type="submit"]').disabled;i++)await new Promise(r=>setTimeout(r,10));
+ const ok=toasts.length===2&&toasts.every(m=>m==='Editor access required')&&dialog.open&&dialog.querySelector('textarea').value==='Keep draft'&&!dialog.querySelector('[data-editor-error]').textContent;
+ dialog.close();window.fetch=originalFetch;window.showToast=originalToast;return ok?'ok':'editor changed';})()`)
+		if result != "ok" {
+			t.Fatal(result)
+		}
 		b.click(`#task-auto-merge-panel input[name="auto_merge"]`)
 		b.waitFor("auto merge saved and directly visible", `String(document.querySelector('#task-auto-merge-panel').tagName === 'SECTION' && document.querySelector('#task-auto-merge-panel input[name="auto_merge"]').hasAttribute("checked") && !document.querySelector('#task-auto-merge-panel input').disabled)`, "true")
 		if !autoMerge.Load() {
@@ -361,8 +374,17 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 				view = NewTask([]models.Project{project}, &project, nil, nil)
 			}
 		default:
+			// Saved tasks load their composer actions. Only IDs actually created
+			// by this fixture may make these requests; drafts must still fail.
+			for id := int32(1); id <= sends.Load(); id++ {
+				if r.Method == http.MethodGet && r.URL.Path == fmt.Sprintf("/tasks/created-%d/changes", id) && r.URL.Query().Get("composer_action") == "1" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+			}
 			if strings.HasPrefix(r.URL.Path, "/tasks/") {
 				unexpected.Add(1)
+				t.Logf("unexpected task request: %s %s", r.Method, r.URL.RequestURI())
 			}
 			http.NotFound(w, r)
 			return
@@ -373,7 +395,8 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id="+project.ID, "new-task-workspace", func(b *composerFocusCDP) {
-		b.waitFor("board ready", `String(Boolean(document.querySelector('a[hx-get^="/tasks/new"]')))`, "true")
+		// The new-task link is parsed before the sidebar and before htmx initializes.
+		b.waitFor("board ready", `String(document.readyState==='complete' && Boolean(document.querySelector('a[hx-get^="/tasks/new"]')))`, "true")
 		b.evaluate(`window.originalSidebar=document.getElementById('sidebar'); 'saved'`)
 		b.click(`a[hx-get^="/tasks/new"]`)
 		b.waitFor("new workspace navigation", `location.pathname+':'+String(Boolean(document.querySelector('#task-detail-content textarea[name="message"]')))`, "/tasks/new:true")
@@ -499,6 +522,10 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"files":%d,"insertions":51,"deletions":12,"status":"completed","duration":"12m 41s","review_comments":0}`, files.Load())
 		case "/tasks/workspace-task/changes":
+			if r.URL.Query().Get("composer_action") == "1" {
+				fmt.Fprint(w, render(ComposerChangesAction(task, nil, true, false)))
+				return
+			}
 			diffRequests.Add(1)
 			fmt.Fprint(w, `<div id="diff-viewer">Authoritative full diff</div>`)
 		case "/auth/me":
@@ -574,7 +601,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		}
 		b.waitFor("live summary", `document.getElementById('task-change-activity').hidden+':'+document.querySelector('[data-change-summary]').textContent.includes('3 files')`, "false:true")
 		b.waitFor("no completed status label", `String(document.querySelector('[data-task-terminal-status]')===null)`, "true")
-		b.waitFor("summary first inside composer", `String(document.querySelector('#task-thread-form > #task-change-activity') !== null && document.getElementById('task-change-activity').getBoundingClientRect().bottom <= document.getElementById('pending-thread-inputs').getBoundingClientRect().top)`, "true")
+		b.waitFor("summary first inside composer", `String(document.querySelector('#task-thread-form > .contents > #task-change-activity') !== null && document.getElementById('task-change-activity').getBoundingClientRect().bottom <= document.getElementById('pending-thread-inputs').getBoundingClientRect().top)`, "true")
 		b.evaluate(`htmx.ajax('GET', '/test/pending-inputs', {target:'#pending-thread-inputs',swap:'outerHTML'}); 'loading'`)
 		b.waitFor("changes stay above queued and steered rows after live replacement", `(function(){var bar=document.getElementById('task-change-activity'),rows=document.querySelectorAll('#pending-thread-inputs [data-thread-input-id]');return String(rows.length===2 && Array.from(rows).every(function(row){return bar.getBoundingClientRect().bottom<=row.getBoundingClientRect().top}) && document.querySelectorAll('#task-change-activity').length===1)})()`, "true")
 		b.evaluate(`window.savedScroll=document.getElementById('task-thread-messages').scrollTop; 'saved'`)
@@ -598,14 +625,14 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("Back restores diff in place", `document.getElementById('tab-changes').classList.contains('hidden')+':'+(window.savedThread===document.getElementById('task-thread-view'))`, "false:true")
 		b.navigateHistory(1)
 		b.waitFor("Forward restores thread in place", `document.getElementById('tab-chat').classList.contains('hidden')+':'+(window.savedThread===document.getElementById('task-thread-view'))`, "false:true")
-		b.click(".task-change-review")
+		b.click(".task-change-summary")
 		b.waitFor("toolbar review opens changes", `String(!document.getElementById('tab-changes').classList.contains('hidden'))`, "true")
 		b.click("#task-breadcrumb-title")
 		b.waitFor("breadcrumb returns to thread without opening menu", `String(document.getElementById('task-breadcrumb-changes').hidden && document.getElementById('task-breadcrumb-title').disabled && !document.querySelector('#task-resource-selector-dialog').open && !document.getElementById('tab-chat').classList.contains('hidden'))`, "true")
 		// A pinned thread must follow content received while Changes was visible.
 		for _, returnControl := range []string{"#task-workspace-back", "#task-breadcrumb-title", "history"} {
 			b.evaluate(`window._taskThreadPageTracker.returnToLatest(false); 'pinned'`)
-			b.click(".task-change-review")
+			b.click(".task-change-summary")
 			b.evaluate(`var added=document.createElement('div');added.style.height='400px';added.textContent='Incoming message';document.getElementById('task-thread-messages').appendChild(added); 'appended'`)
 			if returnControl == "history" {
 				b.navigateHistory(-1)
@@ -897,7 +924,8 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerDistinguishesSelection(t *
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/hover-task", "breadcrumb-pointer", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
-		b.waitFor("breadcrumb", `String(!!document.querySelector('[data-breadcrumb-selector-button]'))`, "true")
+		// Stylesheets and the sidebar move the breadcrumb until the page finishes loading.
+		b.waitFor("breadcrumb", `String(document.readyState==='complete' && !!document.querySelector('[data-breadcrumb-selector-button]'))`, "true")
 		b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus(); 'focused'`)
 		b.waitFor("breadcrumb trigger has no primary focus ring", `getComputedStyle(document.querySelector('[data-breadcrumb-selector-button]')).outlineStyle`, "none")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
@@ -977,5 +1005,78 @@ func TestBrowserFunctional_BreadcrumbOpensBeforeHTMXInitialization(t *testing.T)
 	runComposerFocusCDP(t, chrome, server.URL, "breadcrumb-startup", func(b *composerFocusCDP) {
 		b.waitFor("opened before DOMContentLoaded", `String(window.selectorOpenState)`, "interactive")
 		b.waitFor("initial search results", `String(document.querySelectorAll('[data-breadcrumb-selector-option]').length)`, "1")
+	})
+}
+
+func TestBrowserFunctional_ComposerActionTaskNavigation(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	project := models.Project{ID: "action-project", Name: "Actions"}
+	var merged atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 2 || parts[0] != "tasks" || (parts[1] != "ready" && parts[1] != "merged") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		task := &models.Task{ID: parts[1], ProjectID: project.ID, Title: parts[1], Status: models.StatusCompleted, Category: models.CategoryCompleted, WorktreeBranch: "task/" + parts[1]}
+		if task.ID == "merged" || merged.Load() {
+			task.MergeStatus = models.MergeStatusMerged
+		}
+		var component templ.Component
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/activity"):
+			component = components.TaskChangeActivity(task.ID)
+		case strings.HasSuffix(r.URL.Path, "/workspace-controller"):
+			component = TaskWorkspaceScript()
+		case strings.HasSuffix(r.URL.Path, "/changes/summary"):
+			fmt.Fprint(w, `{"files":1,"insertions":1,"deletions":0,"status":"completed"}`)
+			return
+		case strings.HasSuffix(r.URL.Path, "/changes"):
+			component = ComposerChangesAction(task, nil, true, false)
+		case strings.HasSuffix(r.URL.Path, "/thread"):
+			component = components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
+		case len(parts) == 2:
+			if r.Header.Get("HX-Request") == "true" {
+				component = TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil)
+			} else {
+				component = TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "chat", nil)
+			}
+		default:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := component.Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks/merged", "composer-action-navigation", func(b *composerFocusCDP) {
+		b.waitFor("merged composer loaded", `String(!!document.getElementById('composer-changes-action') && document.getElementById('composer-changes-action')?.textContent.trim()==='')`, "true")
+		// Fragment swaps must not preserve the previous task's activity just
+		// because the inner control IDs match.
+		b.evaluate(`htmx.ajax('GET','/tasks/ready/activity',{target:'#thread-content',swap:'innerHTML'}); 'swapped'`)
+		b.waitFor("fragment uses new task action URL", `String(document.querySelector('#composer-changes-action [data-changes-split]')?.dataset.taskId==='ready')`, "true")
+		b.evaluate(`htmx.ajax('GET','/tasks/merged/activity',{target:'#thread-content',swap:'innerHTML'}); 'swapped'`)
+		b.waitFor("merged fragment cannot retain ready action", `String(document.querySelector('#task-change-activity')?.dataset.taskId==='merged' && document.getElementById('composer-changes-action')?.textContent.trim()==='')`, "true")
+		// Await each navigation: a cached preview satisfies the waits before the
+		// authoritative response replaces #main-content and any injected fixture.
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/ready').then(() => 'navigated')`)
+		b.waitFor("unmerged action belongs to destination", `String(document.querySelector('#composer-changes-action [data-changes-split]')?.dataset.taskId==='ready')`, "true")
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/merged').then(() => 'navigated')`)
+		b.waitFor("merged action stays absent on navigation", `String(document.querySelector('#task-change-activity')?.dataset.taskId==='merged' && document.getElementById('composer-changes-action')?.textContent.trim()==='')`, "true")
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/ready').then(() => 'navigated')`)
+		b.waitFor("ready again", `String(document.querySelector('#composer-changes-action [data-changes-split]')?.dataset.taskId==='ready')`, "true")
+		merged.Store(true)
+		// Restart the workspace controller around a retained composer, as on a
+		// cached view visit. No HTMX load event is fired for the retained host.
+		b.evaluate(`var holder=document.createElement('div');holder.id='controller-fixture';document.getElementById('task-detail-content').appendChild(holder);htmx.ajax('GET','/tasks/ready/workspace-controller',{target:holder,swap:'innerHTML'}); 'revisited'`)
+		b.waitFor("preserved action revalidated on first summary", `String(document.getElementById('composer-changes-action')?.textContent.trim()==='')`, "true")
+		merged.Store(false)
+		b.evaluate(`htmx.ajax('GET','/tasks/ready/workspace-controller',{target:'#controller-fixture',swap:'innerHTML'}); 'revisited'`)
+		b.waitFor("retained empty action appears when task is ready", `String(document.querySelector('#composer-changes-action [data-changes-split]')?.dataset.taskId==='ready')`, "true")
 	})
 }

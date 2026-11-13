@@ -345,7 +345,7 @@ func runHeadlessChromeCDPFixture(t *testing.T, chrome, targetURL, name string, w
 	defer conn.CloseNow()
 
 	nextID := 0
-	call := func(method string, params any, result any) {
+	call := func(method string, params any, result any) bool {
 		t.Helper()
 		nextID++
 		request, marshalErr := json.Marshal(map[string]any{"id": nextID, "method": method, "params": params})
@@ -369,6 +369,18 @@ func runHeadlessChromeCDPFixture(t *testing.T, chrome, targetURL, name string, w
 				continue
 			}
 			if len(response.Error) > 0 {
+				// Reloading fixtures can invalidate the execution context between
+				// polling requests. Let the next poll inspect the new document.
+				var protocolError struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				}
+				if method == "Runtime.evaluate" && json.Unmarshal(response.Error, &protocolError) == nil && protocolError.Code == -32000 {
+					switch protocolError.Message {
+					case "Inspected target navigated or closed", "Execution context was destroyed.", "Cannot find context with specified id":
+						return false
+					}
+				}
 				t.Fatalf("CDP %s error: %s", method, response.Error)
 			}
 			if result != nil && len(response.Result) > 0 {
@@ -376,7 +388,7 @@ func runHeadlessChromeCDPFixture(t *testing.T, chrome, targetURL, name string, w
 					t.Fatalf("decode CDP %s result: %v", method, err)
 				}
 			}
-			return
+			return true
 		}
 	}
 
@@ -392,10 +404,13 @@ func runHeadlessChromeCDPFixture(t *testing.T, chrome, targetURL, name string, w
 				Value string `json:"value"`
 			} `json:"result"`
 		}
-		call("Runtime.evaluate", map[string]any{
+		if !call("Runtime.evaluate", map[string]any{
 			"expression":    `document.body ? (document.body.getAttribute('data-test-result') || 'pending') + ':' + (document.body.getAttribute('data-test-error') || '') + ' | url=' + location.href + ' ready=' + document.readyState + ' width=' + innerWidth + ' tail=' + document.body.innerText.slice(-500) : 'pending: | url=' + location.href + ' ready=' + document.readyState`,
 			"returnByValue": true,
-		}, &response)
+		}, &response) {
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
 		result = response.Result.Value
 		if strings.HasPrefix(result, "pass:") {
 			return
@@ -419,13 +434,14 @@ func TestBreadcrumbSelectorResultsMarksCurrentAndUsesAuthoritativeURLs(t *testin
 		{ID: "task-2", Name: "Other", URL: "/tasks/task-2?project_id=project-1&tab=changes", Status: models.StatusRunning, Category: models.CategoryActive},
 		{ID: "task-3", Name: "Merged", URL: "/tasks/task-3?project_id=project-1&tab=changes", Status: models.StatusCompleted, Category: models.CategoryCompleted, MergeStatus: models.MergeStatusMerged},
 		{ID: "task-4", Name: "Merge Failed", URL: "/tasks/task-4?project_id=project-1&tab=changes", Status: models.StatusCompleted, Category: models.CategoryCompleted, MergeStatus: models.MergeStatusFailed},
+		{ID: "task-pr", Name: "Review", URL: "/tasks/task-pr", Status: models.StatusCompleted, HasOpenPullRequest: true},
 		{ID: "task-5", Name: "Merge Conflict", URL: "/tasks/task-5?project_id=project-1&tab=changes", Status: models.StatusCompleted, Category: models.CategoryCompleted, MergeStatus: models.MergeStatusConflict},
 	}, false, false).Render(context.Background(), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-task-state-icon`, `data-task-state="queued"`, `data-task-state="running"`, `data-task-state="merged"`, `data-task-state="merge-failed"`, `data-task-state="merge-conflict"`, `Task state: In Progress`, `Task state: Merged`, `Task state: Merge failed`, `Task state: Merge conflict`, `ov-menu-option`, `w-full max-w-full`, `overflow-hidden`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
+	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-task-state-icon`, `data-task-state="pr-open"`, `Task state: Pull request open`, `data-task-state="queued"`, `data-task-state="running"`, `data-task-state="merged"`, `data-task-state="merge-failed"`, `data-task-state="merge-conflict"`, `Task state: In Progress`, `Task state: Merged`, `Task state: Merge failed`, `Task state: Merge conflict`, `ov-menu-option`, `w-full max-w-full`, `overflow-hidden`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in results markup", want)
 		}

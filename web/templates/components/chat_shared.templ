@@ -103,6 +103,7 @@ func jsStringLength(s string) int {
 // ChatInputFormConfig holds configuration for the shared chat input form.
 type ChatInputFormConfig struct {
 	FormID                 string
+ DraftScope string // optional page identity for isolated drafts and message history
 	InputID                string
 	PostEndpoint           string
 	TargetID               string
@@ -131,12 +132,14 @@ func chatSessionInputID(formID string) string      { return formID + "-session-i
 func chatFileInputID(formID string) string         { return formID + "-file-input" }
 func chatDropOverlayID(formID string) string       { return formID + "-drop-overlay" }
 func chatMessageHistoryStorageKey(config ChatInputFormConfig) string {
+ if config.DraftScope != "" { return "openvibely-page-message-history-" + config.DraftScope }
 	if config.TaskID != "" {
 		return "openvibely-task-thread-message-history-" + config.TaskID
 	}
 	return "openvibely-chat-message-history"
 }
 func chatAttachmentStateKey(config ChatInputFormConfig) string {
+ if config.DraftScope != "" { return "openvibely-page-attachments-" + config.DraftScope }
 	if config.DiscardDraftOnLeave {
 		return ""
 	}
@@ -430,7 +433,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var view = document.getElementById('task-thread-view');
 							var taskId = view ? (view.getAttribute('data-task-id') || '') : '';
 							if (!taskId) return;
-							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
+							htmx.ajax('GET', (window.taskThreadURL ? window.taskThreadURL(taskId, '/composer-action') : '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action'), {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
 						}
 
 						function showThreadTerminalStatus(status) {
@@ -934,7 +937,7 @@ templ ChatStreamingResumeInitScript() {
 							var view = document.getElementById('task-thread-view');
 							var taskId = view ? (view.getAttribute('data-task-id') || '') : '';
 							if (!taskId) return;
-							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
+							htmx.ajax('GET', (window.taskThreadURL ? window.taskThreadURL(taskId, '/composer-action') : '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action'), {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
 						}
 
 						function showThreadTerminalStatus(status) {
@@ -1292,8 +1295,8 @@ templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttac
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			if steerEndpoint != "" {
 				<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" hx-post={ steerEndpoint } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" data-tooltip-disabled aria-label="Convert queued follow-up to steering">Steer</button>
-				<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" onclick="window.editPendingThreadInput(this)" data-tooltip-disabled aria-label="Edit message"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 3.487a2.1 2.1 0 012.97 2.97L7.5 18.789 3 20l1.211-4.5L16.862 3.487zM15 5l3 3"></path></svg></button>
 			}
+				<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" onclick="window.editPendingThreadInput(this)" data-tooltip-disabled aria-label="Edit message"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 3.487a2.1 2.1 0 012.97 2.97L7.5 18.789 3 20l1.211-4.5L16.862 3.487zM15 5l3 3"></path></svg></button>
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" data-tooltip-disabled aria-label="Cancel queued follow-up">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -1471,7 +1474,7 @@ templ ChatMessagesPoll(executions []models.Execution, task *models.Task, attachm
 
 // ChatEmptyState renders the empty chat placeholder.
 templ ChatEmptyState(message string) {
-	<div class="flex flex-col items-center justify-center h-full text-center">
+	<div data-chat-empty-state class="flex flex-col items-center justify-center h-full text-center">
 		<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
 		</svg>
@@ -1554,6 +1557,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 	@templateui.MenuStyles()
 	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
 	<style>
+        /* Match the composer split action's label gap and chevron right inset. */
+        .chat-input-container :is(.chat-model-select, .chat-mode-select) { column-gap:10px; padding-right:4px; }
+
 		.ov-paste-card { position:relative; display:flex; align-items:center; gap:10px; padding:8px 32px 8px 8px; width:260px; cursor:pointer; max-width:100%; border:1px solid oklch(var(--bc)/.14); border-radius:10px; }
 		.ov-paste-icon { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:36px; height:40px; border-radius:8px; background:oklch(var(--bc)/.04); color:oklch(var(--bc)/.55); }
 		.ov-paste-copy { min-width:0; flex:1; }
@@ -1770,9 +1776,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 				function _cancelComposerFocusForSwap(event) {
 					var target = event.detail && (event.detail.target || event.detail.elt);
-					var withinComposerSurface = target && target.closest && target.closest('form[data-composer-auto-focus="true"]');
+					var composer = target && target.closest && target.closest('form[data-composer-auto-focus="true"]');
+					var textarea = composer && composer.querySelector('textarea[name="message"]');
+					var replacesTextarea = textarea && target.contains(textarea);
 					var containsComposer = target && target.querySelector && target.querySelector('form[data-composer-auto-focus="true"]');
-					if (!target || target.id === 'main-content' || withinComposerSurface || containsComposer) {
+					// Control-only refreshes leave the pending textarea intact, and
+					// their settle target cannot restart the form's focus request.
+					if (!target || target.id === 'main-content' || replacesTextarea || containsComposer) {
 						_cancelComposerFocus();
 					}
 				}
@@ -3053,8 +3063,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						window.saveChatPendingAttachmentState(form);
 						// Auto-scroll to show the attachment preview after upload
 						requestAnimationFrame(function() {
-							// Find the chat messages container (works for both /chat and task thread)
-							var chatMessages = document.getElementById('chat-messages') || document.getElementById('task-thread-messages');
+							// Use this composer's transcript, including embedded conversations.
+							var chatMessages = document.querySelector(form.getAttribute('hx-target'));
 							if (chatMessages && window.chatAutoScroll) {
 								window.chatAutoScroll.scrollToBottom(chatMessages, true);
 							}
@@ -4334,7 +4344,7 @@ templ ChatAutoScrollScript() {
 				document.addEventListener('keydown', function(event) {
 					if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key)) return;
 					if (event.repeat) return;
-					document.querySelectorAll('#chat-messages, #task-thread-messages').forEach(function(container) {
+					document.querySelectorAll('[data-earlier-loader-bound="true"]').forEach(function(container) {
 						if (container.dataset.earlierLoaderBound !== 'true' || container.scrollTop > 12 || container.dataset.earlierAnchorRestoring === 'true') return;
 						if (container.dataset.earlierRequestLoading === 'true' && container.querySelector('[data-earlier-loader="true"][data-loading="true"]')) return;
 						container.dataset.earlierRequestLoading = 'false';
@@ -4358,7 +4368,7 @@ templ ChatAutoScrollScript() {
 				if (!element || !element.getAttribute) return null;
 				var containerID = element.getAttribute('data-container-id') || '';
 				var container = containerID ? document.getElementById(containerID) : null;
-				if (!container && element.closest) container = element.closest('#chat-messages, #task-thread-messages');
+				if (!container && element.closest) container = element.closest('[data-earlier-loader-bound="true"]');
 				return container;
 			}
 
@@ -5402,7 +5412,7 @@ templ ChatAutoScrollScript() {
 				var sourceText = textBuffer;
 				// Promoting an enhanced SVG to lazy rows discards its live figure and
 				// revokes the gallery's blob URL. Keep this segment on the DOM-preserving path.
-				var virtualOwner = !options?.virtualRow && container.closest('#chat-messages, #task-thread-messages') &&
+				var virtualOwner = !options?.virtualRow && container.closest('[data-chat-transcript]') &&
 					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable || document.documentElement.getAttribute('data-output-detail') === 'compact') &&
 					!container.querySelector('.chat-svg-preview');
 				var projectionKey = _thinkingStateKey(container);

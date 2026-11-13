@@ -406,7 +406,7 @@ func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = components.DiffViewer(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery, rebaseAvailable)).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.DiffViewer(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery)).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -424,10 +424,10 @@ func changesMetadataKey(task *models.Task, pr *models.TaskPullRequest, unavailab
 	if pr != nil {
 		prKey = fmt.Sprintf("%d:%s", pr.PRNumber, pr.PRURL)
 	}
-	return fmt.Sprintf("%q:%q:%q:%t:%t:%t:%q", task.WorktreeBranch, components.TaskWorktreeMergeTarget(task), task.MergeStatus, unavailable, conflict, rebase, prKey)
+	return fmt.Sprintf("%q:%q:%q:%t:%t:%t:%q:%t", task.WorktreeBranch, components.TaskWorktreeMergeTarget(task), task.MergeStatus, unavailable, conflict, rebase, prKey, task.Status == models.StatusRunning)
 }
 
-func changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool) templ.Component {
+func changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -445,120 +445,104 @@ func changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, lo
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if task.WorktreeBranch != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, " <div class=\"dropdown dropdown-end relative z-[60] flex-shrink-0\" id=\"changes-actions-dropdown\"><button type=\"button\" role=\"button\" popovertarget=\"changes-actions-menu\" class=\"btn btn-primary btn-sm whitespace-nowrap\">Actions <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg></button><ul id=\"changes-actions-menu\" popover=\"manual\" class=\"ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]\" style=\"position:fixed;inset:auto;margin:0;\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if conflictRecovery {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<li class=\"menu-title\"><span>Conflict recovery</span></li><li><button type=\"button\" hx-post=\"")
+			if !conflictRecovery {
+				templ_7745c5c3_Err = changesSplitAction(task, taskPR, localMergeUnavailable).Render(ctx, templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, " <div class=\"dropdown dropdown-end relative z-[60] flex-shrink-0\" id=\"changes-actions-dropdown\"><button type=\"button\" role=\"button\" popovertarget=\"changes-actions-menu\" class=\"btn btn-primary btn-sm whitespace-nowrap\">Actions <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg></button><ul id=\"changes-actions-menu\" popover=\"manual\" class=\"ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]\" style=\"position:fixed;inset:auto;margin:0;\"><li class=\"menu-title\"><span>Conflict recovery</span></li><li><button type=\"button\" hx-post=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/worktree/resolve", task.ID)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 181, Col: 71}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 183, Col: 71}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" hx-target=\"#changes-content\" hx-swap=\"innerHTML\" hx-disabled-elt=\"#changes-actions-dropdown button\" hx-vals='{\"merge_source\": \"changes_tab\"}'>AI Resolve Conflicts</button></li><li><button type=\"button\" hx-post=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" hx-target=\"#changes-content\" hx-swap=\"innerHTML\" hx-disabled-elt=\"#changes-actions-dropdown button\" hx-vals='{\"merge_source\": \"changes_tab\"}'>AI Resolve Conflicts</button></li><li><button type=\"button\" hx-post=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/worktree/abort", task.ID)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 193, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 195, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" hx-target=\"#changes-content\" hx-swap=\"innerHTML\" hx-disabled-elt=\"#changes-actions-dropdown button\" hx-vals='{\"merge_source\": \"changes_tab\"}'>Abort Merge</button></li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" hx-target=\"#changes-content\" hx-swap=\"innerHTML\" hx-disabled-elt=\"#changes-actions-dropdown button\" hx-vals='{\"merge_source\": \"changes_tab\"}'>Abort Merge</button></li><li class=\"menu-title\"><span>GitHub</span></li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-			} else if !localMergeUnavailable && task.MergeStatus != models.MergeStatusMerged {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<li class=\"menu-title\"><span>Local</span></li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				for _, action := range components.TaskWorktreeMergeActions() {
-					if !action.RequiresRebaseEligibility || rebaseAvailable {
-						templ_7745c5c3_Err = components.TaskWorktreeMergeActionItem(task, action, "changes", "#changes-content", "innerHTML", "#changes-actions-dropdown button", "changes_tab").Render(ctx, templ_7745c5c3_Buffer)
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
+				if taskPR != nil {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<li><a href=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var22 string
+					templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(taskPR.PRURL)).ResolveURL(ctx)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 207, Col: 46}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" target=\"_blank\" rel=\"noopener noreferrer\"><span class=\"htmx-indicator\"><span class=\"loading loading-spinner loading-xs\"></span></span> View PR #")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var23 string
+					templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", taskPR.PRNumber))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 209, Col: 55}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</a></li>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				} else {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<li><button type=\"button\" hx-post=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var24 string
+					templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID)).Resolve(ctx)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 216, Col: 75}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" hx-target=\"#changes-content\" hx-swap=\"innerHTML\" hx-indicator=\"#create-pr-indicator\"><span class=\"htmx-indicator\" id=\"create-pr-indicator\"><span class=\"loading loading-spinner loading-xs\"></span></span> Create PR</button></li>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
 					}
 				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<li class=\"menu-title\"><span>GitHub</span></li>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if taskPR != nil {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<li><a href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</ul>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var22 string
-				templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(taskPR.PRURL)).ResolveURL(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 213, Col: 46}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
+				templ_7745c5c3_Err = changesActionsPopoverScript().Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" target=\"_blank\" rel=\"noopener noreferrer\"><span class=\"htmx-indicator\"><span class=\"loading loading-spinner loading-xs\"></span></span> View PR #")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var23 string
-				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", taskPR.PRNumber))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 215, Col: 55}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</a></li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<li><button type=\"button\" hx-post=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var24 string
-				templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID)).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 222, Col: 75}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\" hx-target=\"#changes-content\" hx-swap=\"innerHTML\" hx-indicator=\"#create-pr-indicator\"><span class=\"htmx-indicator\" id=\"create-pr-indicator\"><span class=\"loading loading-spinner loading-xs\"></span></span> Create PR</button></li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</ul>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = changesActionsPopoverScript().Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
 			}
 		}
 		return nil
@@ -654,7 +638,7 @@ func changesActionsPopoverScript() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<script>\n (() => {\n  if (window._changesActionsPopoverInstalled) return;\n  window._changesActionsPopoverInstalled = true;\n  const current = () => document.getElementById('changes-actions-menu');\n  const menus=new WeakMap();\n  function controller(menu){let handle=menus.get(menu);if(!handle){handle=window.ovMenuController.create({trigger:()=>document.querySelector('[popovertarget=\"changes-actions-menu\"]'),panels:[menu],isOpen:()=>menu.matches(':popover-open'),open:()=>{menu.showPopover();position(menu);},close:()=>menu.hidePopover()});menus.set(menu,handle);}return handle;}\n  const close=()=>{const menu=current();if(menu)controller(menu).close(false);};\n  document.addEventListener('click',event=>{if(!event.target.closest('[popovertarget=\"changes-actions-menu\"]'))return;event.preventDefault();controller(current()).toggle(event);});\n  function position(menu) {\n   if(!menu || !menu.isConnected || !menu.matches(':popover-open')) return;\n   const trigger=document.querySelector('[popovertarget=\"changes-actions-menu\"]');\n   if(!trigger) { menu.hidePopover(); return; }\n   const rect=trigger.getBoundingClientRect();\n   if(rect.bottom<=0 || rect.top>=innerHeight) { menu.hidePopover(); return; }\n   menu.style.maxHeight=Math.max(0,innerHeight-16)+'px';\n   menu.style.left=Math.max(8,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-8))+'px';\n   menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';\n  }\n  document.addEventListener('beforetoggle', event => {\n   // Native input can flush microtasks before the popover has entered the top\n   // layer. Measure on the next frame, after opening and before it is painted.\n   if(event.target.id==='changes-actions-menu' && event.newState==='open') requestAnimationFrame(()=>position(event.target));\n  }, true);\n  window.addEventListener('resize',()=>position(current()));\n  document.addEventListener('scroll',event=>{const menu=current();if(menu && !menu.contains(event.target))position(menu);},true);\n  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail && event.detail.target;const menu=current();if(target && menu && target.contains(menu))close();},true);\n })();\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<script>\n (() => {\n  if (window._changesActionsPopoverInstalled) return;\n  window._changesActionsPopoverInstalled = true;\n  const current = () => document.getElementById('changes-actions-menu');\n  const menus=new WeakMap();\n  function controller(menu){let handle=menus.get(menu);if(!handle){handle=window.ovMenuController.create({trigger:()=>document.querySelector('[popovertarget=\"changes-actions-menu\"]'),panels:[menu],isOpen:()=>menu.matches(':popover-open'),open:()=>{menu.showPopover();position(menu);},close:()=>menu.hidePopover()});menus.set(menu,handle);}return handle;}\n  const close=()=>{const menu=current();if(menu)controller(menu).close(false);};\n  document.addEventListener('click',event=>{if(!event.target.closest('[popovertarget=\"changes-actions-menu\"]'))return;event.preventDefault();controller(current()).toggle(event);});\n  function position(menu) {\n   if(!menu || !menu.isConnected || !menu.matches(':popover-open')) return;\n   const trigger=document.querySelector('[popovertarget=\"changes-actions-menu\"]');\n   if(!trigger) { menu.hidePopover(); return; }\n   const rect=trigger.getBoundingClientRect();\n   if(rect.bottom<=0 || rect.top>=innerHeight) { menu.hidePopover(); return; }\n   menu.style.maxHeight=Math.max(0,innerHeight-16)+'px';\n   menu.style.left=Math.max(8,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-8))+'px';\n   menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';\n  }\n  document.addEventListener('beforetoggle', event => {\n   // Native input can flush microtasks before the popover has entered the top\n   // layer. Measure on the next frame, after opening and before it is painted.\n   if(event.target.id==='changes-actions-menu' && event.newState==='open') requestAnimationFrame(()=>position(event.target));\n  }, true);\n  window.addEventListener('resize',()=>position(current()));\n  document.addEventListener('scroll',event=>{const menu=current();if(menu && !menu.contains(event.target))position(menu);},true);\n  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail && event.detail.target;const menu=current();if(target && menu && target.contains(menu))close();},true);\n })();\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -680,7 +664,7 @@ func taskChangesStyles() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<style>\n\t\t\t\t.task-changes-view #diff-viewer > [data-diff-toolbar] {\n\t\t\t\t\tposition: sticky;\n\t\t\t\t\ttop: 0;\n\t\t\t\t\tz-index: 40;\n\t\t\t\t\tpadding: 0.5rem 0 0.75rem;\n\t\t\t\t\tborder-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));\n\t\t\t\t}\n\t\t\t\t.task-changes-view #diff-viewer .diff-file-header {\n\t\t\t\t\ttop: var(--diff-toolbar-height, 0px);\n\t\t\t\t}\n\t\t\t\t.task-changes-view .diff-file-card {\n\t\t\t\t\tscroll-margin-top: calc(var(--diff-toolbar-height, 0px) + 8px);\n\t\t\t\t}\n\t\t\t\t.task-changes-view #diff-viewer > [data-diff-toolbar] > :first-child {\n\t\t\t\t\tflex-wrap: wrap;\n\t\t\t\t}\n\t\t\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<style>\n\t\t\t\t.task-changes-view #diff-viewer > [data-diff-toolbar] {\n\t\t\t\t\tposition: sticky;\n\t\t\t\t\ttop: 0;\n\t\t\t\t\tz-index: 40;\n\t\t\t\t\tpadding: 0.5rem 0 0.75rem;\n\t\t\t\t\tborder-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));\n\t\t\t\t}\n\t\t\t\t.task-changes-view #diff-viewer .diff-file-header {\n\t\t\t\t\ttop: var(--diff-toolbar-height, 0px);\n\t\t\t\t}\n\t\t\t\t.task-changes-view .diff-file-card {\n\t\t\t\t\tscroll-margin-top: calc(var(--diff-toolbar-height, 0px) + 8px);\n\t\t\t\t}\n\t\t\t\t.task-changes-view #diff-viewer > [data-diff-toolbar] > :first-child {\n\t\t\t\t\tflex-wrap: wrap;\n\t\t\t\t}\n\t\t\t</style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

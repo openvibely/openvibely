@@ -112,17 +112,25 @@ window.addEventListener('DOMContentLoaded',function(){
  window.linkStreamingToolResults=function(...args){parsedSources++;return originalLink.apply(this,args)};
  const view=()=>document.getElementById('task-thread-view');
  document.documentElement.setAttribute('data-thread-width','focused');
+ // Exercise classic scrollbar geometry even on hosts with overlay scrollbars.
+ const scrollbarStyle=document.createElement('style');
+ scrollbarStyle.textContent='[data-chat-transcript], [data-thread-refresh-preview] { scrollbar-width: auto; } [data-chat-transcript]::-webkit-scrollbar, [data-thread-refresh-preview]::-webkit-scrollbar { width: 12px; }';
+ document.head.appendChild(scrollbarStyle);
  let refreshPreviewChecks=0, refreshPreviewError='';
- document.addEventListener('htmx:beforeSwap',()=>{
+ // Compare against the original transcript during the page swap. Nested
+ // composer swaps can fire after it has been replaced, while the frozen
+ // preview still covers the new transcript during hydration.
+ document.addEventListener('htmx:beforeSwap',event=>{
+   if(event.detail.target?.id!=='main-content')return;
    const preview=document.querySelector('[data-thread-refresh-preview]');
    if(!preview)return;
    refreshPreviewChecks++;
    const live=document.getElementById('task-thread-messages');
    const a=live.firstElementChild.getBoundingClientRect(), b=preview.firstElementChild.getBoundingClientRect();
-   if(Math.abs(a.left-b.left)>1 || Math.abs(a.width-b.width)>1 || getComputedStyle(live).scrollbarWidth!==getComputedStyle(preview).scrollbarWidth)refreshPreviewError='refresh preview shifted horizontally';
+   if(Math.abs(a.left-b.left)>1 || Math.abs(a.width-b.width)>1 || getComputedStyle(live).scrollbarWidth!==getComputedStyle(preview).scrollbarWidth)refreshPreviewError='refresh preview shifted horizontally: '+JSON.stringify({live:{left:a.left,width:a.width},preview:{left:b.left,width:b.width},liveScroll:live.clientWidth,previewScroll:preview.clientWidth});
    const row=preview.firstElementChild;
    if(document.documentElement.dataset.threadWidth==='focused' && (!row || getComputedStyle(row).maxWidth!=='820px' || getComputedStyle(preview).paddingLeft!=='28px'))refreshPreviewError='refresh preview lost focused conversation width';
- });
+ },true); // Run after preview capture, before bubbling handlers materialize rows.
  let cachedShellError='';
  document.addEventListener('htmx:beforeSwap',event=>{
    if(!event.detail._ovCachedPreview)return;

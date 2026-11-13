@@ -37,7 +37,7 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
 			composer = form.String()
 		}
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<!doctype html><head>%s</head><body data-test-result="pending"><div id="chat-messages"></div>%s<div id="browser-result"></div><script>
+		fmt.Fprintf(w, `<!doctype html><head>%s</head><body data-test-result="pending"><div id="chat-messages" data-chat-transcript></div>%s<div id="browser-result"></div><script>
 (async function() {
  function assert(ok, message) { if (!ok) throw new Error(message); }
  try {

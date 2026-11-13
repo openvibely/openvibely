@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -38,6 +40,31 @@ func (h *Handler) GetBreadcrumbSelectorResults(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "selector unavailable")
 		}
 		items, err = h.taskSvc.ListBreadcrumbSelector(c.Request().Context(), projectID, search, currentID, scheduleOnly, breadcrumbSelectorLimit+1)
+	case "custom-pages":
+		kind = "Custom page"
+		if h.pagePlugins == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "selector unavailable")
+		}
+		instances, listErr := h.pagePlugins.ListEnabled(c.Request().Context(), projectID)
+		if listErr != nil {
+			return listErr
+		}
+		for _, instance := range instances {
+			if accessErr := h.requirePageAccess(c.Request().Context(), instance.ProjectID, authz.View); accessErr != nil {
+				if errors.Is(accessErr, authz.ErrDenied) {
+					continue
+				}
+				return accessErr
+			}
+			if search != "" && !strings.Contains(strings.ToLower(instance.Title), strings.ToLower(search)) {
+				continue
+			}
+			items = append(items, models.BreadcrumbSelectorItem{ID: instance.ID, Name: instance.Title, ProjectID: instance.ProjectID})
+			if len(items) > breadcrumbSelectorLimit {
+				break
+			}
+		}
+
 	case "automations":
 		kind = "Automation"
 		if h.automationGraphSvc == nil {
@@ -89,7 +116,9 @@ func breadcrumbSelectorItemsContainID(items []models.BreadcrumbSelectorItem, id 
 func breadcrumbSelectorItemURL(resource, id, projectID, tab, view, from, automationID, automationName string) string {
 	values := url.Values{"project_id": {projectID}}
 	path := "/automations/" + url.PathEscape(id)
-	if resource == "tasks" {
+	if resource == "custom-pages" {
+		path = "/p/" + url.PathEscape(id)
+	} else if resource == "tasks" {
 		path = "/tasks/" + url.PathEscape(id)
 		switch tab {
 		case "details", "chat", "changes", "schedules", "chaining", "attachments", "lifecycle":

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/gitidentity"
 	"io"
 	"os"
 	"os/exec"
@@ -158,6 +159,11 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 		if !strings.HasPrefix(e, "CLAUDECODE=") {
 			cmd.Env = append(cmd.Env, e)
 		}
+	}
+	cmd.Env, err = gitidentity.Environment(ctx, cmd.Env)
+	if err != nil {
+		cancel()
+		return "", err
 	}
 	afterStart, cleanup, err := configureProcess(cmd)
 	if err != nil {

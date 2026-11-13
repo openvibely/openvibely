@@ -59,7 +59,7 @@ const chatTaskContextQuery = `WITH RECURSIVE
 		SELECT t.id AS task_id, tree.id AS node_id, tree.parent, tree.key, tree.type, tree.value
 		FROM tasks t
 		JOIN json_tree(CASE WHEN json_valid(t.chain_config) THEN t.chain_config ELSE 'null' END) AS tree ON TRUE
-		WHERE t.project_id = ? AND t.category != 'chat'
+		WHERE t.project_id = ? AND t.category != 'chat' AND category != 'page_chat'
 	),
 	chain_nodes(task_id, node_id) AS (
 		SELECT task_id, node_id
@@ -128,7 +128,7 @@ const chatTaskContextQuery = `WITH RECURSIVE
 		COALESCE(chain_projection.chain_config, '{}')
 	FROM tasks t
 	LEFT JOIN chain_projection ON chain_projection.task_id = t.id
-	WHERE t.project_id = ? AND t.category != 'chat'
+	WHERE t.project_id = ? AND t.category != 'chat' AND category != 'page_chat'
 	ORDER BY t.display_order ASC, t.created_at ASC`
 
 const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, auto_merge_on_goal_achieved, merge_target_branch, merge_status`
@@ -152,6 +152,7 @@ const scheduleCalendarQuery = `SELECT ` + scheduleCalendarTaskSelectColumns + `,
 const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.auto_merge_on_goal_achieved, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
+				EXISTS(SELECT 1 FROM task_pull_requests pr WHERE pr.task_id = t.id AND lower(trim(pr.pr_state)) = 'open') AS has_open_pull_request,
 				0 AS automation_capacity_queued,
 				0 AS worker_capacity_queued,
 				t.created_at, t.updated_at, t.completed_at`
@@ -161,6 +162,7 @@ const BoardPromptPreviewCodePoints = 300
 var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.auto_merge_on_goal_achieved, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 					EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 					EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
+				EXISTS(SELECT 1 FROM task_pull_requests pr WHERE pr.task_id = t.id AND lower(trim(pr.pr_state)) = 'open') AS has_open_pull_request,
 					EXISTS(SELECT 1 FROM automation_dispatch_outbox d
 						JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
 					WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued,
@@ -317,18 +319,19 @@ func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search
 }
 
 const breadcrumbSelectorSelectColumns = `id, title, project_id, status, category, merge_status,
-				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = tasks.id AND g.status = 'achieved') AS goal_met`
+				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = tasks.id AND g.status = 'achieved') AS goal_met,
+				EXISTS(SELECT 1 FROM task_pull_requests pr WHERE pr.task_id = tasks.id AND lower(trim(pr.pr_state)) = 'open') AS has_open_pull_request`
 
 const breadcrumbSelectorCurrentQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND id = ? AND category != 'chat'
+				WHERE project_id = ? AND id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))`
 
 const breadcrumbSelectorCurrentSearchQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND id = ? AND category != 'chat'
+				WHERE project_id = ? AND id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -336,7 +339,7 @@ const breadcrumbSelectorCurrentSearchQuery = `SELECT ` + breadcrumbSelectorSelec
 
 const breadcrumbSelectorRunningQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks INDEXED BY idx_tasks_status
-				WHERE project_id = ? AND category != 'chat'
+				WHERE project_id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -347,7 +350,7 @@ const breadcrumbSelectorRunningQuery = `SELECT ` + breadcrumbSelectorSelectColum
 
 const breadcrumbSelectorSearchRunningQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND category != 'chat'
+				WHERE project_id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -360,7 +363,7 @@ const breadcrumbSelectorSearchRunningQuery = `SELECT ` + breadcrumbSelectorSelec
 
 const breadcrumbSelectorSearchOtherQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND category != 'chat'
+				WHERE project_id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -373,7 +376,7 @@ const breadcrumbSelectorSearchOtherQuery = `SELECT ` + breadcrumbSelectorSelectC
 
 const breadcrumbSelectorRecencyQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
 				FROM tasks
-				WHERE project_id = ? AND category != 'chat'
+				WHERE project_id = ? AND category != 'chat' AND category != 'page_chat'
 					AND (? = FALSE OR EXISTS (
 						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 					))
@@ -498,7 +501,7 @@ func (r *TaskRepo) listEmptyBreadcrumbSelector(ctx context.Context, projectID, c
 func (r *TaskRepo) listBreadcrumbSelectorRows(ctx context.Context, query string, capacity int, args ...any) ([]models.BreadcrumbSelectorItem, error) {
 	// The explicit virtual workspace broadens this bounded read only.
 	if len(args) > 0 && args[0] == models.AllProjectsID {
-		query = strings.ReplaceAll(query, "project_id = ?", "? = '__all_projects__'")
+		query = strings.ReplaceAll(query, "project_id = ?", analyticsProjectPredicate(ctx, "project_id", models.AllProjectsID))
 	}
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -509,7 +512,7 @@ func (r *TaskRepo) listBreadcrumbSelectorRows(ctx context.Context, query string,
 	items := make([]models.BreadcrumbSelectorItem, 0, capacity)
 	for rows.Next() {
 		var item models.BreadcrumbSelectorItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.ProjectID, &item.Status, &item.Category, &item.MergeStatus, &item.GoalMet); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.ProjectID, &item.Status, &item.Category, &item.MergeStatus, &item.GoalMet, &item.HasOpenPullRequest); err != nil {
 			return nil, fmt.Errorf("scanning task breadcrumb selector: %w", err)
 		}
 		items = append(items, item)
@@ -579,7 +582,7 @@ func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]
 
 	rows, err := r.db.QueryContext(ctx, `SELECT `+taskReferenceSelectColumns+`
 		FROM tasks t
-		WHERE `+analyticsProjectPredicate("t.project_id", projectID)+` AND t.category != 'chat'
+		WHERE `+analyticsProjectPredicate(ctx, "t.project_id", projectID)+` AND t.category NOT IN ('chat','page_chat')
 		ORDER BY t.display_order ASC, t.created_at ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing task references: %w", err)
@@ -611,7 +614,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 				 FROM tasks t WHERE t.project_id = ?`
 	args := []any{projectID}
 	if projectID == models.AllProjectsID && category != string(models.CategoryChat) {
-		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category != 'chat'`
+		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category NOT IN ('chat','page_chat') AND ` + accessibleProjectPredicate(ctx, "t.project_id", false)
 		args = nil
 	}
 	if category != "" {
@@ -619,6 +622,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 		args = append(args, category)
 	}
 
+	query += " AND " + workspaceChatPredicate(ctx, "t.project_id", "t.chat_owner_user_id")
 	// Fetch in stable default order and apply category-specific sorts in memory.
 	query += ` ORDER BY display_order ASC, created_at ASC`
 
@@ -632,7 +636,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.GoalMet, &t.AutomationCapacityQueued, &t.WorkerCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.GoalMet, &t.HasOpenPullRequest, &t.AutomationCapacityQueued, &t.WorkerCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -774,14 +778,14 @@ func taskDisplayOrderDesc(a models.Task, b models.Task) bool {
 func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {
 	return r.getOne(ctx,
 		`SELECT `+taskSelectColumns+`
-			 FROM tasks WHERE id = ?`, id)
+			 FROM tasks WHERE id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), id)
 }
 
 // GetByIDForProject returns a task only when it belongs to the requested project.
 func (r *TaskRepo) GetByIDForProject(ctx context.Context, projectID, id string) (*models.Task, error) {
 	return r.getOne(ctx,
 		`SELECT `+taskSelectColumns+`
-			 FROM tasks WHERE project_id = ? AND id = ?`, projectID, id)
+			 FROM tasks WHERE project_id = ? AND id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), projectID, id)
 }
 
 // GetThreadRenderMetadata returns the compact task fields needed by recurring
@@ -791,7 +795,7 @@ func (r *TaskRepo) GetThreadRenderMetadata(ctx context.Context, id string) (*mod
 	var t models.Task
 	err := r.db.QueryRowContext(ctx,
 		`SELECT `+taskThreadRenderMetadataColumns+`
-			 FROM tasks WHERE id = ?`, id).
+			 FROM tasks WHERE id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), id).
 		Scan(&t.ID, &t.ProjectID, &t.Category, &t.Status, &t.AgentID, &t.AgentDefinitionID)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -894,9 +898,13 @@ func defaultJSON(raw string) string {
 }
 
 func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
-	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		return r.createWithExecutor(ctx, exec, t)
 	})
+	if err == nil {
+		r.publishFirstPlannerParent(ctx)
+	}
+	return err
 }
 
 // CreateInTx persists a task using the caller's store transaction.
@@ -916,7 +924,12 @@ func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *mod
 // metadata callback in one transaction. The callback runs after the task ID is
 // assigned and before the transaction is committed.
 func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, goal *models.TaskGoal, callback func(persistence.Tx) error) error {
-	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var inheritedErr error
+		ctx, inheritedErr = discordSwarmChildContext(ctx, exec, *t)
+		if inheritedErr != nil {
+			return inheritedErr
+		}
 		if err := r.createWithExecutor(ctx, exec, t); err != nil {
 			return err
 		}
@@ -930,6 +943,10 @@ func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task
 		}
 		return nil
 	})
+	if err == nil {
+		r.publishFirstPlannerParent(ctx)
+	}
+	return err
 }
 
 func createTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID string, goal *models.TaskGoal) error {
@@ -940,15 +957,19 @@ func createTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID st
 	if goal.Status == "" {
 		goal.Status = models.TaskGoalStatusActive
 	}
+	goal.RunAsUserID = ""
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		goal.RunAsUserID = p.UserID
+	}
 	created, err := scanTaskGoal(exec.QueryRowContext(ctx, `
-		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
-		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
-		RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason))
+		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at, run_as_user_id)
+		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL, ?)
+		RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason, goal.RunAsUserID))
 	if err != nil {
 		return fmt.Errorf("creating task goal: %w", err)
 	}
 	*goal = *created
-	return nil
+	return auditTaskGoalIdentity(ctx, exec, goal)
 }
 
 func setTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID, objective, reason string) error {
@@ -965,20 +986,55 @@ func setTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID, obje
 	if err == sql.ErrNoRows {
 		return createTaskGoalWithExecutor(ctx, exec, taskID, goal)
 	}
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		goal.RunAsUserID = p.UserID
+	}
 	updated, err := scanTaskGoal(exec.QueryRowContext(ctx, `
 		UPDATE task_goals
-		SET goal_id = ?, objective = ?, status = 'active', reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '',
+		SET goal_id = ?, objective = ?, status = 'active', reason = ?, run_as_user_id = ?, blocker_key = '', blocker_count = 0, blocker_reason = '',
 			blocker_last_seen_at = NULL, last_checked_at = NULL, achieved_at = NULL, updated_at = datetime('now')
 		WHERE task_id = ?
-		RETURNING `+taskGoalSelectColumns, goal.GoalID, goal.Objective, goal.Reason, taskID))
+		RETURNING `+taskGoalSelectColumns, goal.GoalID, goal.Objective, goal.Reason, goal.RunAsUserID, taskID))
 	if err != nil {
 		return fmt.Errorf("updating task goal: %w", err)
 	}
 	*goal = *updated
-	return nil
+	return auditTaskGoalIdentity(ctx, exec, goal)
 }
 
 func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *models.Task) error {
+	if err := prepareFirstPlannerParent(ctx, exec, *t); err != nil {
+		return err
+	}
+	var inheritedErr error
+	ctx, inheritedErr = discordSwarmChildContext(ctx, exec, *t)
+	if inheritedErr != nil {
+		return inheritedErr
+	}
+	if err := authorizeTelegramTask(ctx, exec, *t); err != nil {
+		return err
+	}
+	if err := authorizeDiscordTask(ctx, exec, *t); err != nil {
+		return err
+	}
+	if identity, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+		if identity.ProjectID != t.ProjectID {
+			return persistence.ErrProjectDenied
+		}
+		if err := authorizeSlackHandoff(ctx, exec, identity.EventKey); err != nil {
+			return err
+		}
+		if t.AutoMerge || t.AutoMergeOnGoalAchieved || t.CreatedVia == models.TaskOriginWebhook || persistence.IsAutomationTaskCreatedVia(t.CreatedVia) {
+			role, err := projectRole(ctx, exec, identity.UserID, t.ProjectID)
+			if err != nil {
+				return err
+			}
+			if role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+	}
+
 	tag, tagErr := models.NormalizeTaskTag(string(t.Tag))
 	if tagErr != nil {
 		return tagErr
@@ -1019,9 +1075,36 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 		return fmt.Errorf("creating task: %w", err)
 	}
 	t.DisplayOrder = displayOrder
+	if err := stampWorkspaceChatOwner(ctx, exec, "tasks", t.ID, t.ProjectID); err != nil {
+		return err
+	}
 	if p, ok := models.PrincipalFromContext(ctx); ok {
 		_, err := exec.ExecContext(ctx, `UPDATE tasks SET author_user_id=?, author_name=? WHERE id=?`, p.UserID, p.Username, t.ID)
-		return err
+		if err != nil {
+			return err
+		}
+		_, err = exec.ExecContext(ctx, `INSERT INTO task_run_identities(task_id,user_id) VALUES(?,?)`, t.ID, p.UserID)
+		if err != nil {
+			return err
+		}
+		if err := saveTelegramTaskProvenance(ctx, exec, t.ID); err != nil {
+			return err
+		}
+		if _, ok := models.DiscordIngressIdentityFromContext(ctx); ok {
+			if err := saveDiscordTaskProvenance(ctx, exec, t.ID); err != nil {
+				return err
+			}
+			if err := projectAudit(ctx, exec, t.ProjectID, p.UserID, "discord.task_created", t.ID, `{}`); err != nil {
+				return err
+			}
+		}
+		if _, ok := models.SlackIngressIdentityFromContext(ctx); ok {
+			if err := saveSlackTaskProvenance(ctx, exec, t.ID); err != nil {
+				return err
+			}
+			return projectAudit(ctx, exec, t.ProjectID, p.UserID, "slack.task_created", t.ID, `{}`)
+		}
+		return nil
 	}
 	return nil
 }
@@ -1062,29 +1145,58 @@ func (r *TaskRepo) UpdatePreservingTitle(ctx context.Context, t *models.Task) er
 }
 
 func (r *TaskRepo) updateTask(ctx context.Context, t *models.Task, updateTitle bool) error {
-	autoMerge := 0
-	if t.AutoMerge {
-		autoMerge = 1
-	}
-	autoMergeOnGoalAchieved := 0
-	if t.AutoMergeOnGoalAchieved {
-		autoMergeOnGoalAchieved = 1
-	}
-	swarmConfig := defaultJSON(t.SwarmConfig)
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET title = CASE WHEN ? THEN ? ELSE title END, title_explicitly_set = CASE WHEN ? THEN 1 ELSE title_explicitly_set END, category = ?, priority = ?, status = ?,
+	apply := func(exec func(context.Context, string, ...interface{}) (sql.Result, error)) error {
+		autoMerge := 0
+		if t.AutoMerge {
+			autoMerge = 1
+		}
+		autoMergeOnGoalAchieved := 0
+		if t.AutoMergeOnGoalAchieved {
+			autoMergeOnGoalAchieved = 1
+		}
+		swarmConfig := defaultJSON(t.SwarmConfig)
+		_, err := exec(ctx,
+			`UPDATE tasks SET title = CASE WHEN ? THEN ? ELSE title END, title_explicitly_set = CASE WHEN ? THEN 1 ELSE title_explicitly_set END, category = ?, priority = ?, status = ?,
 			 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
 			 swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
-		updateTitle, t.Title, updateTitle, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus,
-		t.SwarmRole, swarmConfig, swarmConfig, swarmConfig, t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
-	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
-			return persistence.ErrDuplicateTask
+			updateTitle, t.Title, updateTitle, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus,
+			t.SwarmRole, swarmConfig, swarmConfig, swarmConfig, t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
+		if err != nil {
+			if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
+				return persistence.ErrDuplicateTask
+			}
+			return fmt.Errorf("updating task: %w", err)
 		}
-		return fmt.Errorf("updating task: %w", err)
+		return nil
 	}
-	return nil
+	identity, slack := models.SlackIngressIdentityFromContext(ctx)
+	if !slack {
+		return apply(func(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+			return execBoundSQLite(ctx, r.db, query, args...)
+		})
+	}
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := authorizeSlackTaskMutation(ctx, tx, t.ID); err != nil {
+			return err
+		}
+		if t.ProjectID != identity.ProjectID {
+			return persistence.ErrProjectDenied
+		}
+		if t.AutoMerge || t.AutoMergeOnGoalAchieved {
+			role, err := projectRole(ctx, tx, identity.UserID, identity.ProjectID)
+			if err != nil {
+				return err
+			}
+			if role != "maintainer" && role != "owner" {
+				return persistence.ErrProjectDenied
+			}
+		}
+		if err := apply(tx.ExecContext); err != nil {
+			return err
+		}
+		return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, "slack.task_updated", t.ID, `{}`)
+	})
 }
 
 const activeBoardTailOrderQuery = `SELECT COALESCE(MAX(display_order), -1) + 1
@@ -1109,7 +1221,7 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 				return fmt.Errorf("duplicate task in active lane move: %s", move.ID)
 			}
 			seen[move.ID] = struct{}{}
-			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND `+analyticsProjectPredicate("project_id", projectID), move.ID, projectID)
+			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND `+editableProjectPredicate(ctx, "project_id", projectID), move.ID, projectID)
 			if err != nil {
 				return fmt.Errorf("loading active lane task %s: %w", move.ID, err)
 			}
@@ -1193,6 +1305,9 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
 	var task *models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		if err := authorizeSwarmWrite(ctx, exec, id); err != nil {
+			return err
+		}
 		var err error
 		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
 		if err != nil {
@@ -1226,7 +1341,7 @@ func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category model
 				return fmt.Errorf("cancelling reserved task execution: %w", err)
 			}
 		}
-		return nil
+		return auditSwarmWrite(ctx, exec, id, "swarm.category_updated")
 	})
 	if err != nil {
 		return err
@@ -1318,6 +1433,9 @@ func (r *TaskRepo) RestoreBoardState(ctx context.Context, task models.Task) erro
 func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.TaskStatus) error {
 	var task *models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		if err := authorizeSwarmWrite(ctx, exec, id); err != nil {
+			return err
+		}
 		var err error
 		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
 		if err != nil {
@@ -1348,7 +1466,7 @@ func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.Ta
 				return fmt.Errorf("cancelling reserved task execution: %w", err)
 			}
 		}
-		return nil
+		return auditSwarmWrite(ctx, exec, id, "swarm.status_updated")
 	})
 	if err != nil {
 		return err
@@ -1921,7 +2039,7 @@ func (r *TaskRepo) SearchByTitle(ctx context.Context, projectID string, titleQue
 	queryPattern := escapeSQLLikePatternLiteral(titleQuery)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskSelectColumns+`
-		 FROM tasks WHERE project_id = ? AND category != 'chat' AND title LIKE ? ESCAPE '\'
+		 FROM tasks WHERE project_id = ? AND category != 'chat' AND category != 'page_chat' AND title LIKE ? ESCAPE '\'
 		 ORDER BY
 		   CASE WHEN LOWER(title) = LOWER(?) THEN 0
 		        WHEN LOWER(title) LIKE LOWER(? || '%') ESCAPE '\' THEN 1
@@ -1980,7 +2098,7 @@ func escapeSQLLikePatternLiteral(value string) string {
 // relevance (exact, then prefix, then contains) and then by updated_at DESC with a
 // task id tiebreaker; without a query, results are ordered by updated_at DESC, id ASC.
 func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, filter persistence.TaskDiscoveryFilter) ([]models.Task, int, error) {
-	where := `project_id = ? AND category != 'chat'`
+	where := `project_id = ? AND category != 'chat' AND category != 'page_chat'`
 	args := []any{projectID}
 
 	query := strings.TrimSpace(filter.Query)
@@ -2079,7 +2197,7 @@ func (r *TaskRepo) GetTaskForSwarmInspection(ctx context.Context, projectID, tas
 	if projectID == "" {
 		return nil, fmt.Errorf("getting swarm inspection task: project id is required")
 	}
-	where := `project_id = ? AND category != 'chat'`
+	where := `project_id = ? AND category != 'chat' AND category != 'page_chat'`
 	args := []any{projectID}
 	if taskID != "" {
 		where += ` AND id = ?`
@@ -2099,7 +2217,7 @@ func (r *TaskRepo) ListSwarmChildrenForInspection(ctx context.Context, projectID
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+swarmInspectionSelectColumns+`
 		 FROM tasks
-		 WHERE project_id = ? AND parent_task_id = ? AND category != 'chat'
+		 WHERE project_id = ? AND parent_task_id = ? AND category != 'chat' AND category != 'page_chat'
 		   AND swarm_role IN ('planner','worker','reviewer','merger','integrator')
 		 ORDER BY swarm_sequence ASC,
 		 CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'merger' THEN 3 WHEN 'integrator' THEN 3 ELSE 9 END,
@@ -2182,6 +2300,10 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 			return manifest, false, fmt.Errorf("committing empty task deletion: %w", err)
 		}
 		return manifest, false, nil
+	}
+
+	if err = authorizeSlackTaskMutation(ctx, tx, id); err != nil {
+		return manifest, false, err
 	}
 
 	var deletedProjectID, deletedTitle string
@@ -2287,6 +2409,16 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 		}
 	}
 
+	if _, slack := models.SlackIngressIdentityFromContext(ctx); slack {
+		for _, childID := range manifest.SwarmChildTaskIDs {
+			if err = authorizeSlackTaskMutation(ctx, tx, childID); err != nil {
+				return manifest, false, err
+			}
+		}
+		if err = auditSlackTaskDeletion(ctx, tx, id); err != nil {
+			return manifest, false, err
+		}
+	}
 	if beforeDelete != nil {
 		if err = beforeDelete(manifest); err != nil {
 			return manifest, false, err
@@ -2343,6 +2475,22 @@ func isTaskDeletionUploadSessionID(sessionID string) bool {
 }
 
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
+	if _, slack := models.SlackIngressIdentityFromContext(ctx); slack {
+		err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+			if err := authorizeSlackTaskMutation(ctx, tx, id); err != nil {
+				return err
+			}
+			if err := auditSlackTaskDeletion(ctx, tx, id); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id=?`, id)
+			return err
+		})
+		if err == nil {
+			requestDeletionCleanup(r.db)
+		}
+		return err
+	}
 	_, err := execTaskDeletion(ctx, r.db, `DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting task: %w", err)
@@ -2464,9 +2612,18 @@ func scanSwarmChildTask(scan func(dest ...any) error) (models.Task, error) {
 
 func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status, config string, sequence int) error {
 	swarmConfig := defaultJSON(config)
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
-		role, status, role, swarmConfig, swarmConfig, swarmConfig, sequence, id)
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := authorizeSwarmWrite(ctx, tx, id); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
+			role, status, role, swarmConfig, swarmConfig, swarmConfig, sequence, id)
+		if err != nil {
+			return err
+		}
+		return auditSwarmWrite(ctx, tx, id, "swarm.fields_updated")
+	})
 	if err != nil {
 		return fmt.Errorf("updating swarm fields: %w", err)
 	}
@@ -2559,7 +2716,7 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 
 func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, projectID string) ([]persistence.TaskWithSchedule, error) {
 	if projectID == models.AllProjectsID {
-		query = strings.ReplaceAll(query, "t.project_id = ?", "? = '__all_projects__'")
+		query = strings.ReplaceAll(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID))
 	}
 	rows, err := r.db.QueryContext(ctx, query, projectID)
 	if err != nil {
@@ -2710,7 +2867,7 @@ func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 		                    WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
 		       THEN 'failed' ELSE 'pending' END,
 		     category = CASE
-		       WHEN category != 'chat' AND EXISTS (SELECT 1 FROM thread_inputs i
+		       WHEN category != 'chat' AND category != 'page_chat' AND EXISTS (SELECT 1 FROM thread_inputs i
 		                    WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
 		       THEN 'backlog' ELSE category END,
 		     updated_at = datetime('now')
@@ -2744,7 +2901,7 @@ func (r *TaskRepo) MoveCompletedActiveToCompleted(ctx context.Context, projectID
 	}
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = 'completed', updated_at = datetime('now'), completed_at = datetime('now')
-		 WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND category = 'active' AND status = 'completed'`, projectID)
+		 WHERE `+editableProjectPredicate(ctx, "project_id", projectID)+` AND category = 'active' AND status = 'completed'`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("moving completed active tasks to completed: %w", err)
 	}
@@ -2814,7 +2971,7 @@ func (r *TaskRepo) DeleteAllBacklog(ctx context.Context, projectID string) (int,
 // Returns the number of tasks deleted.
 func (r *TaskRepo) DeleteAllChat(ctx context.Context, projectID string) (int, error) {
 	result, err := execTaskDeletion(ctx, r.db,
-		`DELETE FROM tasks WHERE category = 'chat' AND project_id = ?`, projectID)
+		`DELETE FROM tasks WHERE category = 'chat' AND project_id = ? AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), projectID)
 	if err != nil {
 		return 0, fmt.Errorf("deleting chat tasks: %w", err)
 	}
@@ -2829,7 +2986,7 @@ func (r *TaskRepo) DeleteAllChat(ctx context.Context, projectID string) (int, er
 // for a project. Used to cancel active goroutines before clearing chat history.
 func (r *TaskRepo) ListRunningChatTaskIDs(ctx context.Context, projectID string) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id FROM tasks WHERE category = 'chat' AND project_id = ? AND status IN ('pending', 'queued', 'running')`, projectID)
+		`SELECT id FROM tasks WHERE category = 'chat' AND project_id = ? AND status IN ('pending', 'queued', 'running') AND `+workspaceChatPredicate(ctx, "project_id", "chat_owner_user_id"), projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing running chat tasks: %w", err)
 	}
@@ -2851,7 +3008,7 @@ func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (in
 	var activated []models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		rows, err := exec.QueryContext(ctx, `SELECT id, project_id, title, status, display_order FROM tasks
-			WHERE category = 'backlog' AND `+analyticsProjectPredicate("project_id", projectID)+`
+			WHERE category = 'backlog' AND `+editableProjectPredicate(ctx, "project_id", projectID)+`
 			  AND (status != 'blocked' OR swarm_role = 'swarm_parent')
 			ORDER BY display_order ASC, created_at ASC, id ASC`, projectID)
 		if err != nil {
@@ -2934,6 +3091,9 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 		if task == nil || task.Category != expected.ExpectedCategory || task.Status != expected.ExpectedStatus || task.SwarmRole != models.SwarmRoleParent {
 			return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 		}
+		if err := authorizeSwarmWrite(ctx, exec, id); err != nil {
+			return err
+		}
 		var displayOrder int
 		if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, task.ProjectID).Scan(&displayOrder); err != nil {
 			return err
@@ -2944,7 +3104,7 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 		task.Category = models.CategoryActive
 		task.Status = models.StatusBlocked
 		task.DisplayOrder = displayOrder
-		return nil
+		return auditSwarmWrite(ctx, exec, id, "swarm.active_lane_prepared")
 	})
 	if err != nil {
 		return err
@@ -2967,7 +3127,7 @@ func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition i
 // Only returns tasks with status pending, failed, or cancelled (eligible for execution).
 func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, priority int) ([]models.Task, error) {
 	query := `SELECT ` + taskSelectColumns + `
-		 FROM tasks WHERE category = 'backlog' AND ` + analyticsProjectPredicate("project_id", projectID) + ` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))`
+		 FROM tasks WHERE category = 'backlog' AND ` + analyticsProjectPredicate(ctx, "project_id", projectID) + ` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))`
 	args := []any{projectID}
 
 	if priority > 0 {
@@ -3000,7 +3160,7 @@ func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, 
 func (r *TaskRepo) CountBacklogByPriority(ctx context.Context, projectID string) (map[int]int, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT priority, COUNT(*) FROM tasks
-		 WHERE category = 'backlog' AND `+analyticsProjectPredicate("project_id", projectID)+` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))
+		 WHERE category = 'backlog' AND `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))
 		 GROUP BY priority ORDER BY priority DESC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("counting backlog tasks by priority: %w", err)
@@ -3039,7 +3199,7 @@ func (r *TaskRepo) ListByTags(ctx context.Context, tags []models.TaskTag, projec
 
 	// Apply optional filters
 	if projectID != "" {
-		query += ` AND ` + analyticsProjectPredicate("project_id", projectID)
+		query += ` AND ` + analyticsProjectPredicate(ctx, "project_id", projectID)
 		args = append(args, projectID)
 	}
 
@@ -3159,6 +3319,13 @@ func (r *TaskRepo) ClearActiveMergeConflictOwner(ctx context.Context, taskID str
 	return nil
 }
 
+// UpdateMergeTargetBranch changes only the manual merge destination. It must
+// preserve independently configured automatic merge flags, including concurrent edits.
+func (r *TaskRepo) UpdateMergeTargetBranch(ctx context.Context, id, targetBranch string) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`, targetBranch, id)
+	return err
+}
+
 // UpdateAutoMerge sets the completion auto-merge flag and merge target branch.
 // Callers that expose both task settings should use UpdateAutoMergeSettings.
 func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge bool, targetBranch string) error {
@@ -3168,30 +3335,54 @@ func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge boo
 // UpdateAutoMergeSettings updates both independent automatic merge settings.
 // A nil goal setting preserves its current value for backward-compatible callers.
 func (r *TaskRepo) UpdateAutoMergeSettings(ctx context.Context, id string, autoMerge bool, autoMergeOnGoalAchieved *bool, targetBranch string) error {
-	am := 0
-	if autoMerge {
-		am = 1
-	}
-	if autoMergeOnGoalAchieved == nil {
-		_, err := execBoundSQLite(ctx, r.db,
-			`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
-			am, targetBranch, id)
+	apply := func(exec func(context.Context, string, ...interface{}) (sql.Result, error)) error {
+		am := 0
+		if autoMerge {
+			am = 1
+		}
+		if autoMergeOnGoalAchieved == nil {
+			_, err := exec(ctx,
+				`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
+				am, targetBranch, id)
+			if err != nil {
+				return fmt.Errorf("updating auto merge: %w", err)
+			}
+			return nil
+		}
+		goalAM := 0
+		if *autoMergeOnGoalAchieved {
+			goalAM = 1
+		}
+		_, err := exec(ctx,
+			`UPDATE tasks SET auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
+			am, goalAM, targetBranch, id)
 		if err != nil {
-			return fmt.Errorf("updating auto merge: %w", err)
+			return fmt.Errorf("updating auto merge settings: %w", err)
 		}
 		return nil
 	}
-	goalAM := 0
-	if *autoMergeOnGoalAchieved {
-		goalAM = 1
+	identity, slack := models.SlackIngressIdentityFromContext(ctx)
+	if !slack {
+		return apply(func(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+			return execBoundSQLite(ctx, r.db, query, args...)
+		})
 	}
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
-		am, goalAM, targetBranch, id)
-	if err != nil {
-		return fmt.Errorf("updating auto merge settings: %w", err)
-	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := authorizeSlackTaskMutation(ctx, tx, id); err != nil {
+			return err
+		}
+		role, err := projectRole(ctx, tx, identity.UserID, identity.ProjectID)
+		if err != nil {
+			return err
+		}
+		if role != "maintainer" && role != "owner" {
+			return persistence.ErrProjectDenied
+		}
+		if err := apply(tx.ExecContext); err != nil {
+			return err
+		}
+		return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, "slack.task_merge_settings_updated", id, `{}`)
+	})
 }
 
 // ClearWorktreeInfo removes worktree path/branch from a task (after cleanup).
@@ -3417,4 +3608,19 @@ func (r *TaskRepo) UpdateGeneratedTitle(ctx context.Context, id, expectedTitle, 
 	}
 	n, err := result.RowsAffected()
 	return n > 0, err
+}
+
+// Save the audit before runtime cleanup, so an audit failure cannot cancel work.
+// The record still commits or rolls back with the subsequent deletion.
+func auditSlackTaskDeletion(ctx context.Context, tx sqlExecutor, id string) error {
+	identity, _ := models.SlackIngressIdentityFromContext(ctx)
+	return projectAudit(ctx, tx, identity.ProjectID, identity.UserID, "slack.task_deleted", id, `{}`)
+}
+
+// IsPageConversation treats the durable binding as authoritative. The category
+// also protects a newly-created conversation before its binding is inserted.
+func (r *TaskRepo) IsPageConversation(ctx context.Context, id string) (bool, error) {
+	var owned bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_conversations WHERE task_id=?) OR EXISTS(SELECT 1 FROM tasks WHERE id=? AND category='page_chat')`, id, id).Scan(&owned)
+	return owned, err
 }

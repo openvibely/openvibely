@@ -103,6 +103,23 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 			c.Request().URL.RawQuery = q.Encode()
 			return next(c)
 		}
+		if strings.HasPrefix(path, "/p/") && c.Param("instanceId") != "" {
+			if h.pagePlugins == nil {
+				return pluginNotFound()
+			}
+			instance, err := h.pagePlugins.Store().GetInstance(c.Request().Context(), c.Param("instanceId"))
+			if err != nil {
+				return err
+			}
+			if instance == nil {
+				return pluginNotFound()
+			}
+			c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
+			q := c.QueryParams()
+			q.Set("project_id", instance.ProjectID)
+			c.Request().URL.RawQuery = q.Encode()
+			return next(c)
+		}
 		// Task routes resolve their real owner while retaining the virtual
 		// workspace for rendering. Never substitute the task's stored ProjectID.
 		if strings.HasPrefix(path, "/tasks/") && c.Param("taskId") != "" {
