@@ -63,6 +63,9 @@ func (s *ProjectComputerService) Connection(ctx context.Context, id string) (Com
 		return ComputerConnection{}, errors.New("computer provider differs from this installation")
 	}
 	conn, err := s.provisioner.Resolve(ctx, id)
+	if err == nil {
+		s.startIdleMonitor(id)
+	}
 	if err == nil && s.taskID != "" {
 		conn.Endpoint += "/desktops/" + ComputerDesktopID(s.taskID)
 		stale, cleanupErr := s.repo.ExpiredChromeInstallations(ctx, id)
@@ -89,6 +92,10 @@ func (s *ProjectComputerService) EnsureStarted(ctx context.Context, id string) e
 	root.taskID = ""
 	root.repo = s.projects.Computers()
 	if root.Ready(ctx, id) {
+		switch s.provisioner.(type) {
+		case *LocalComputerProvisioner, *HostedComputerProvisioner:
+			_ = root.reapIdleDesktops(ctx, id)
+		}
 		return nil
 	}
 	return root.start(ctx, id, true)
@@ -156,7 +163,11 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 		data, healthErr := s.request(ready, conn, "GET", "/health", nil)
 		err = healthErr
 		if err == nil {
-			return s.requireIsolation(data)
+			if err := s.requireIsolation(data); err != nil {
+				return err
+			}
+			s.startIdleMonitor(id)
+			return nil
 		}
 		select {
 		case <-ready.Done():

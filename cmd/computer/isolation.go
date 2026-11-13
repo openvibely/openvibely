@@ -365,3 +365,32 @@ func validateIsolationHost() error {
 	}
 	return nil
 }
+
+// Detached command descendants still occupy a desktop even after their job's
+// original process exits. Inspect the task PID namespace, not other desktops.
+func shellProcessesRunning() bool {
+	if os.Getenv("OPENVIBELY_ISOLATED") != "1" {
+		return false
+	}
+	uid, err := strconv.ParseUint(os.Getenv("OPENVIBELY_SHELL_UID"), 10, 32)
+	if err != nil || uid < 20000 {
+		return true
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return true
+	}
+	for _, entry := range entries {
+		if _, err := strconv.Atoi(entry.Name()); err != nil {
+			continue
+		}
+		info, err := os.Stat("/proc/" + entry.Name())
+		if err != nil {
+			continue
+		}
+		if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Uid == uint32(uid) {
+			return true
+		}
+	}
+	return false
+}

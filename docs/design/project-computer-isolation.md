@@ -88,3 +88,27 @@ authorized screenshots/input/CDP/viewer connections, outbound Internet access,
 separate login cookies, detached-process cleanup,
 legacy file ownership migration, and persistence across task/container restart.
 Linux bridge unit tests also cover the fail-closed identity/environment paths.
+
+## Idle shutdown
+
+Project settings offer an idle timeout (30 minutes by default; 0 means Never).
+The app checks approximately once per minute while the project computer is
+available, and before computer-tool use to free eligible slots at capacity.
+This is shutdown, not a memory snapshot: saved files and browser profiles remain,
+but applications close and unsaved edits are lost. Opening the task Computer tab
+or using a computer tool starts a stopped desktop from its existing data.
+
+The app excludes running/queued tasks, current computer leases, user holds,
+pending takeover, and private handoffs. It uses nonblocking task/control locks,
+so maintenance cannot wait behind an operation and prevent its cancellation.
+Only freshly authorized candidates are sent to the authenticated supervisor;
+there is no cached permission to stop a desktop if the app is unavailable.
+The supervisor serializes reclamation with new connections, tracks active HTTP
+requests and WebSockets, and checks background jobs and detached shell processes
+through the private task socket. Unknown job state prevents shutdown. Job finish
+times start a fresh idle interval. Protected desktops have their activity clock
+refreshed during each maintenance sweep. The oldest eligible desktops stop first;
+no active desktop is evicted to make room at the 32-desktop limit.
+
+The live isolation script also checks idle shutdown and restoration, Never,
+viewer protection, background commands, and saved login/file persistence.

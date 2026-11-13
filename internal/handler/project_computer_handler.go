@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +31,7 @@ func (h *Handler) computerProject(c echo.Context) error {
 		if _, ticket := c.Get(computerTicketContextKey).(computerStreamTicket); !ticket {
 			permission := authz.Edit
 			switch c.Param("action") {
-			case "enable", "disable", "time-zone":
+			case "enable", "disable", "time-zone", "idle-timeout":
 				permission = authz.Manage
 			}
 			if err := h.projectAccessSvc.Require(c.Request().Context(), c.Param("id"), permission); err != nil {
@@ -79,12 +80,12 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	state, err := h.computerService(c).Get(c.Request().Context(), c.Param("id"))
 	if errors.Is(err, sql.ErrNoRows) {
-		return c.JSON(200, map[string]any{"time_zone": "UTC", "configured": false, "ready": false, "enabled": true})
+		return c.JSON(200, map[string]any{"idle_minutes": 30, "time_zone": "UTC", "configured": false, "ready": false, "enabled": true})
 	}
 	if err != nil {
 		return err
 	}
-	status := map[string]any{"time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "ready": h.computerService(c).Ready(c.Request().Context(), c.Param("id")), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": h.computerService(c).ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
+	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "ready": h.computerService(c).Ready(c.Request().Context(), c.Param("id")), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": h.computerService(c).ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
 	if h.desktopMode && h.computerDesktopURL != "" && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1" && status["ready"] == true {
 		mode := "view"
 		if state.Held && !state.TakeoverPending {
@@ -120,6 +121,12 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 	defer cancel()
 	var err error
 	switch c.Param("action") {
+	case "idle-timeout":
+		minutes, parseErr := strconv.Atoi(c.FormValue("idle_minutes"))
+		if parseErr != nil {
+			return echo.NewHTTPError(400, "Choose an idle timeout in minutes")
+		}
+		err = h.computerSvc.SetIdleMinutes(ctx, c.Param("id"), minutes)
 	case "time-zone":
 		err = h.computerSvc.SetTimeZone(ctx, c.Param("id"), c.FormValue("time_zone"))
 	case "enable", "disable":

@@ -23,15 +23,18 @@ import (
 var desktopName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,79}$`)
 
 type desktopProcess struct {
-	initPID int
-	cmd     *exec.Cmd
-	uid     uint32
-	done    chan struct{}
+	initPID      int
+	cmd          *exec.Cmd
+	uid          uint32
+	done         chan struct{}
+	lastActivity time.Time
+	requests     int
 }
 
 func desktopRoutes(mux *http.ServeMux) {
 	var mu sync.Mutex
 	sessions := map[string]*desktopProcess{}
+	registerDesktopReaper(mux, &mu, sessions)
 	mux.HandleFunc("POST /desktop-shutdown", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		all := []*desktopProcess{}
@@ -73,6 +76,8 @@ func desktopRoutes(mux *http.ServeMux) {
 			case <-p.done:
 				delete(sessions, name)
 			default:
+				p.requests++
+				p.lastActivity = time.Now()
 				return p, nil
 			}
 		}
@@ -84,7 +89,7 @@ func desktopRoutes(mux *http.ServeMux) {
 			}
 		}
 		if len(sessions) >= 32 {
-			return nil, fmt.Errorf("Desktop capacity reached (32 active task desktops)")
+			return nil, fmt.Errorf("All 32 desktop slots are occupied. Close unused viewers or wait for the idle timeout; active desktops are kept running.")
 		}
 		uid := desktopUID(name)
 		for key, existing := range sessions {
@@ -97,6 +102,8 @@ func desktopRoutes(mux *http.ServeMux) {
 			return nil, err
 		}
 		p.uid = uid
+		p.requests = 1
+		p.lastActivity = time.Now()
 		sessions[name] = p
 		return p, nil
 	}
@@ -133,6 +140,7 @@ func desktopRoutes(mux *http.ServeMux) {
 			http.Error(w, err.Error(), 503)
 			return
 		}
+		defer func() { mu.Lock(); p.requests--; p.lastActivity = time.Now(); mu.Unlock() }()
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
 		transport := desktopTransport(name)

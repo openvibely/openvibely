@@ -50,6 +50,8 @@ func TestProjectComputerSharingPermissions(t *testing.T) {
 				expected = http.StatusOK
 			}
 			require.Equal(t, expected, save.Code, save.Body.String())
+			idle := orgRequest(e, http.MethodPost, "/projects/"+project.ID+"/computer/idle-timeout", url.Values{"idle_minutes": {"30"}}, cookie)
+			require.Equal(t, expected, idle.Code, idle.Body.String())
 		})
 	}
 }

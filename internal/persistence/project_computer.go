@@ -9,6 +9,8 @@ import (
 var ErrComputerBusy = errors.New("project computer is controlled by a user or another task")
 
 type ProjectComputerStore interface {
+	SetIdleMinutes(context.Context, string, int) error
+	IdleDesktopCandidates(context.Context, string) ([]string, error)
 	SetTakeoverPending(context.Context, string, bool) error
 	SetTimeZone(context.Context, string, string) error
 	ChromeImportProgress(context.Context, string, string) (map[string]int, error)

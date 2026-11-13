@@ -21,7 +21,7 @@ func (r *ProjectComputerRepo) Get(ctx context.Context, id string) (*models.Proje
 		return r.getSession(ctx, id)
 	}
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,held,owner,lease_until,enabled,time_zone,takeover_pending FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.TakeoverPending)
+	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,held,owner,lease_until,enabled,time_zone,takeover_pending,idle_minutes FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.TakeoverPending, &c.IdleMinutes)
 	return c, err
 }
 func (r *ProjectComputerRepo) Configure(ctx context.Context, id, provider string) error {
@@ -155,7 +155,7 @@ func (r *ProjectComputerRepo) ForTask(ctx context.Context, projectID, taskID str
 }
 func (r *ProjectComputerRepo) getSession(ctx context.Context, id string) (*models.ProjectComputer, error) {
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT s.project_id,p.provider,s.held,s.owner,s.lease_until,s.handoff_kind,s.handoff_url,s.handoff_reason,s.handoff_expected_text,s.handoff_alert_id,s.tool_target,p.enabled,p.time_zone,s.takeover_pending FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.HandoffKind, &c.HandoffURL, &c.HandoffReason, &c.HandoffExpectedText, &c.HandoffAlertID, &c.ToolTarget, &c.Enabled, &c.TimeZone, &c.TakeoverPending)
+	err := r.db.QueryRowContext(ctx, `SELECT s.project_id,p.provider,s.held,s.owner,s.lease_until,s.handoff_kind,s.handoff_url,s.handoff_reason,s.handoff_expected_text,s.handoff_alert_id,s.tool_target,p.enabled,p.time_zone,s.takeover_pending,p.idle_minutes FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.HandoffKind, &c.HandoffURL, &c.HandoffReason, &c.HandoffExpectedText, &c.HandoffAlertID, &c.ToolTarget, &c.Enabled, &c.TimeZone, &c.TakeoverPending, &c.IdleMinutes)
 	return c, err
 }
 func (r *ProjectComputerRepo) SessionsBusy(ctx context.Context, id string) (bool, error) {
@@ -207,4 +207,27 @@ func (r *ProjectComputerRepo) SetTakeoverPending(ctx context.Context, id string,
 		}
 		return err
 	})
+}
+
+func (r *ProjectComputerRepo) SetIdleMinutes(ctx context.Context, id string, minutes int) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		_, err := tx.ExecContext(ctx, `UPDATE project_computers SET idle_minutes=? WHERE project_id=?`, minutes, id)
+		return err
+	})
+}
+func (r *ProjectComputerRepo) IdleDesktopCandidates(ctx context.Context, id string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT s.task_id FROM task_computer_sessions s JOIN tasks t ON t.id=s.task_id AND t.project_id=s.project_id WHERE s.project_id=? AND s.held=0 AND s.takeover_pending=0 AND s.handoff_kind='' AND (s.owner='' OR s.lease_until<?) AND t.status NOT IN ('running','queued')`, id, time.Now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

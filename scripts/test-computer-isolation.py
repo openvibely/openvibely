@@ -152,6 +152,8 @@ printf boundary-checks-passed
                 chunk = stream.recv(4096)
                 assert chunk, 'Viewer closed before RFB greeting'
                 received += chunk
+            time.sleep(1.2)
+            assert json.loads(request('/desktop-reap', {'idle_seconds': 1, 'candidates': ['task-b']})) == [], 'Open viewer must prevent idle shutdown'
     print('PASS: authorized screen/input/browser/files and both viewer WebSockets', flush=True)
     # A detached shell must not survive takeover's cancel-all operation.
     shell('task-a', "setsid bash -c 'while :; do echo tick >> escaped.txt; sleep .1; done' >/dev/null 2>&1 & sleep 1")
@@ -174,6 +176,30 @@ printf boundary-checks-passed
     assert request('/desktops/task-a/files?path=Files/result.txt') == b'durable'
     browser_fixture('task-a', 'present')
     print('PASS: task and container restart preserve files and browser logins', flush=True)
+    # A short supervisor timeout exercises the same path as the app's minutes policy.
+    def reap(seconds=1, candidates=None):
+        return json.loads(request('/desktop-reap', {'idle_seconds': seconds, 'candidates': candidates if candidates is not None else ['task-a']}))
+    time.sleep(1.2)
+    assert reap(0) == [], 'Never must preserve desktop'
+    assert reap(candidates=[]) == [], 'Protected task must stay running'
+    assert reap() == [], 'Protection must reset the idle clock'
+    shell('task-a', "setsid sleep 30 >/dev/null 2>&1 & sleep .1")
+    time.sleep(1.2)
+    assert reap() == [], 'Detached command must prevent shutdown'
+    request('/desktops/task-a/jobs/cancel', {})
+    job = shell('task-a', 'sleep 4', background=True)
+    time.sleep(1.2)
+    assert reap() == [], 'Background command must prevent shutdown'
+    time.sleep(3.2)
+    assert reap() == [], 'Newly finished command must receive its full idle interval'
+    time.sleep(1.2)
+    assert reap() == ['task-a'], 'Idle desktop must release its slot'
+    assert 'task-a' not in json.loads(request('/desktop-sessions'))
+    ready('task-a')
+    assert request('/desktops/task-a/files?path=Files/result.txt') == b'durable'
+    browser_fixture('task-a', 'present')
+    print('PASS: idle shutdown, Never, protected work, background jobs and reopen persistence', flush=True)
+
 except Exception:
     subprocess.run(['docker', 'logs', '--tail', '100', name])
     raise

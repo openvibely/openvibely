@@ -21,6 +21,7 @@ import (
 type computerJob struct {
 	id       string
 	created  time.Time
+	finished time.Time
 	out      limitedOutput
 	done     chan struct{}
 	cancel   context.CancelFunc
@@ -34,6 +35,7 @@ func (j *computerJob) snapshot() map[string]any {
 	select {
 	case <-j.done:
 		result["running"] = false
+		result["finished_at"] = j.finished
 		result["exit_code"] = j.code
 		result["timed_out"] = j.timedOut
 	default:
@@ -98,6 +100,7 @@ func (m *computerJobs) start(parent context.Context, command, directory string, 
 				j.code = exit.ExitCode()
 			}
 		}
+		j.finished = time.Now()
 		j.timedOut = ctx.Err() == context.DeadlineExceeded
 		cancel()
 		close(j.done)
@@ -121,7 +124,7 @@ func shellRoutes(mux *http.ServeMux) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"jobs": values})
+		json.NewEncoder(w).Encode(map[string]any{"jobs": values, "shell_processes_running": shellProcessesRunning()})
 	})
 	mux.HandleFunc("POST /jobs/cancel", func(w http.ResponseWriter, r *http.Request) {
 		var args struct {

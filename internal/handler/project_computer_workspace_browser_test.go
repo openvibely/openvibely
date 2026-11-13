@@ -89,6 +89,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'preview first frame');
 
  const visiblePreview=window.fixtureRFB;q('[data-computer-preview]').style.transform='translateY(200vh)';document.dispatchEvent(new Event('computer-tab-change'));await wait(()=>visiblePreview.disconnected,'offscreen pause');q('[data-computer-preview]').style.transform='';document.dispatchEvent(new Event('computer-tab-change'));await wait(()=>window.fixtureRFB!==visiblePreview&&window.fixtureRFB.painted,'onscreen resume');
+ await wait(()=>!q('[data-computer-idle]').disabled);if(q('[data-computer-idle]').value!=='30')throw Error('Wrong default idle timeout');q('[data-computer-idle]').value='0';q('[data-computer-idle]').dispatchEvent(new Event('change'));await wait(()=>q('[data-computer-preference-status]').textContent.includes('Idle timeout saved'));
  await wait(()=>!q('[data-computer-enabled]').disabled);q('[data-computer-enabled]').click();await wait(()=>q('[data-computer-preference-status]').textContent.includes('Saved'));
  q('[data-tab="computer"]').click();await wait(()=>q('[data-computer-status]').textContent.includes('disabled'));
  finish('pass','New task preview, automatic startup, expansion, takeover, release and project toggle');
@@ -98,6 +99,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 	var mu sync.Mutex
 	enabled, ready, held := true, false, false
 	starts := 0
+	idleMinutes := "30"
 	savedWorkflow := false
 	handoff := ""
 	var demonstration struct {
@@ -123,6 +125,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		defer mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/idle-timeout"):
+			idleMinutes = r.FormValue("idle_minutes")
+			fmt.Fprint(w, `{}`)
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			fmt.Fprintf(w, `{"enabled":%t,"ready":%t,"held":%t,"handoff_kind":%q}`, enabled, ready, held, handoff)
 		case r.URL.Path == "/fixture-private":
@@ -185,6 +190,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 	mu.Lock()
 	defer mu.Unlock()
 	require.Equal(t, 1, starts)
+	require.Equal(t, "0", idleMinutes)
 	require.False(t, enabled)
 	require.Equal(t, "Download a report", demonstration.Goal)
 	require.Len(t, demonstration.Images, 3)
