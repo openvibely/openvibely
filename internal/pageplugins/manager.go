@@ -557,12 +557,8 @@ func (m *Manager) IssueHandle(r *Resolved, principalID string) (Handle, error) {
 	}
 	h := Handle{Token: hex.EncodeToString(buf), InstanceID: r.Instance.ID, ProjectID: r.Instance.ProjectID, PrincipalID: principalID, ExpiresAt: m.now().Add(HandleTTL), done: make(chan struct{})}
 	m.mu.Lock()
-	now := m.now()
-	for tok, old := range m.handles {
-		if now.After(old.ExpiresAt) {
-			m.retireHandleLocked(tok)
-		}
-	}
+	// Each timer reclaims its handle even without further page activity. Lookup
+	// also enforces expiry if a timer is delayed; issuance need not scan peers.
 	h.timer = time.AfterFunc(HandleTTL, func() { m.RetireHandle(h.Token) })
 	m.handles[h.Token] = h
 	m.startups[h.InstanceID] = StartupStatus{State: "loading", ContentHash: r.Package.ContentHash, ObservedAt: m.now().UTC(), handle: h.Token}
@@ -575,7 +571,7 @@ func (m *Manager) LookupHandle(token string) (Handle, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	h, ok := m.handles[token]
-	if !ok || m.now().After(h.ExpiresAt) {
+	if !ok || !m.now().Before(h.ExpiresAt) {
 		m.retireHandleLocked(token)
 		return Handle{}, false
 	}
