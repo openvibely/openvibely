@@ -7,14 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"io"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
+	"sort"
 	"strings"
-	"sync"
 	"syscall"
 )
 
@@ -165,31 +165,6 @@ func workspaceRoutes(mux *http.ServeMux) {
 	shellRoutes(mux)
 }
 
-type limitedOutput struct {
-	mu        sync.Mutex
-	text      string
-	truncated bool
-}
-
-func (b *limitedOutput) snapshot() (string, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.text, b.truncated
-}
-
-func (b *limitedOutput) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	n := len(p)
-	space := 65536 - len(b.text)
-	if len(p) > space {
-		b.truncated = true
-		p = p[:space]
-	}
-	b.text += string(p)
-	return n, nil
-}
-
 type nativeFileRequest struct {
 	Operation string `json:"operation"`
 	Input     struct {
@@ -207,178 +182,95 @@ type nativeFileRequest struct {
 	} `json:"input"`
 }
 
+// The tool behavior is shared with local execution; only filesystem access is
+// adapted here. Every discovered path still passes through homePath and os.Root.
 func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest) (string, error) {
-	raw := p.Input.Path
-	if p.Operation == "read_file" || p.Operation == "write_file" || p.Operation == "edit_file" {
-		raw = p.Input.FilePath
-		if raw == "" {
-			return "", fmt.Errorf("provide file_path")
-		}
-	}
-	if !filepath.IsAbs(raw) {
-		raw = filepath.Join(computerHome(), "Files", raw)
-	}
-	path, err := homePath(raw)
+	input, err := json.Marshal(p.Input)
 	if err != nil {
 		return "", err
 	}
-	switch p.Operation {
-	case "write_file":
-		if err = taskMkdirAll(root, filepath.Dir(path)); err != nil {
-			return "", err
-		}
-		err = taskWriteFile(root, path, []byte(p.Input.Content))
-		return "Saved " + raw, err
-	case "read_file", "edit_file":
-		f, err := openWorkspaceFile(root, path, os.O_RDONLY, false)
-		if err != nil {
-			return "", err
-		}
-		defer f.Close()
-		info, err := f.Stat()
-		if err != nil || !info.Mode().IsRegular() || info.Size() > 2<<20 {
-			return "", fmt.Errorf("choose a regular text file up to 2 MB")
-		}
-		data, err := io.ReadAll(io.LimitReader(f, 2<<20))
-		if err != nil {
-			return "", err
-		}
-		text := string(data)
-		if p.Operation == "edit_file" {
-			count := strings.Count(text, p.Input.Old)
-			if p.Input.Old == "" || count == 0 || (!p.Input.All && count != 1) {
-				return "", fmt.Errorf("old_string must match once unless replace_all is true")
-			}
-			n := 1
-			if p.Input.All {
-				n = -1
-			}
-			err = taskWriteFile(root, path, []byte(strings.Replace(text, p.Input.Old, p.Input.New, n)))
-			return "Updated " + raw, err
-		}
-		lines := strings.Split(text, "\n")
-		offset := max(0, p.Input.Offset)
-		if offset >= len(lines) {
-			return "End of file", nil
-		}
-		limit := p.Input.Limit
-		if limit <= 0 || limit > 1000 {
-			limit = 1000
-		}
-		return strings.Join(lines[offset:min(len(lines), offset+limit)], "\n"), nil
-	case "list_files", "grep_search":
-		var pattern *regexp.Regexp
-		if p.Operation == "grep_search" {
-			if p.Input.Pattern == "" {
-				return "", fmt.Errorf("provide pattern")
-			}
-			pattern, err = regexp.Compile(p.Input.Pattern)
-			if err != nil {
-				return "", err
-			}
-		}
-		if p.Operation == "list_files" && p.Input.Pattern != "" {
-			if _, err := filepath.Match(p.Input.Pattern, ""); err != nil {
-				return "", err
-			}
-		}
-		var out strings.Builder
-		count, visited := 0, 0
-		err = fs.WalkDir(root.FS(), filepath.ToSlash(path), func(name string, d fs.DirEntry, walkErr error) error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			visited++
-			if visited > 10000 || count >= 500 || out.Len() > 60000 {
-				return fs.SkipAll
-			}
-			if walkErr != nil {
-				return nil
-			}
-			if d.Type()&os.ModeSymlink != 0 || strings.HasPrefix(d.Name(), ".") {
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if p.Operation == "list_files" && name != path {
-				rel, _ := filepath.Rel(path, name)
-				if strings.Count(rel, string(filepath.Separator)) > 4 {
-					if d.IsDir() {
-						return fs.SkipDir
-					}
-					return nil
-				}
-			}
-			if d.IsDir() {
-				if p.Operation == "list_files" && name != path {
-					fmt.Fprintln(&out, name+"/")
-					count++
-				}
-				if p.Operation == "list_files" && name != path && !p.Input.Recursive {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if !d.Type().IsRegular() {
-				return nil
-			}
-			if p.Input.Include != "" {
-				match, _ := filepath.Match(p.Input.Include, d.Name())
-				if !match {
-					return nil
-				}
-			}
-			if pattern == nil {
-				if p.Input.Pattern != "" {
-					match, _ := filepath.Match(p.Input.Pattern, d.Name())
-					if !match {
-						return nil
-					}
-				}
-				fmt.Fprintln(&out, name)
-				count++
-				return nil
-			}
-			f, err := openWorkspaceFile(root, name, os.O_RDONLY, false)
-			if err != nil {
-				return nil
-			}
-			defer f.Close()
-			info, err := f.Stat()
-			if err != nil || !info.Mode().IsRegular() || info.Size() > 2<<20 {
-				return nil
-			}
-			data, err := io.ReadAll(io.LimitReader(f, 2<<20))
-			if err != nil {
-				return nil
-			}
-			for i, line := range strings.Split(string(data), "\n") {
-				if pattern.MatchString(line) {
-					fmt.Fprintf(&out, "%s:%d:%s\n", name, i+1, line)
-					count++
-				}
-				if count >= 500 || out.Len() > 60000 {
-					break
-				}
-			}
-			return nil
-		})
-		return out.String(), err
-	default:
-		return "", fmt.Errorf("unknown file operation")
-	}
+	return agenttools.ExecuteFiles(ctx, filepath.Join(computerHome(), "Files"), p.Operation, input, workspaceFS{root})
 }
 
-func computerShellTimeout(seconds int, background bool) int {
-	if seconds <= 0 {
-		return 60
+type workspaceFS struct{ root *os.Root }
+
+func (w workspaceFS) Open(path string) (*os.File, error) {
+	p, err := homePath(path)
+	if err != nil {
+		return nil, err
 	}
-	limit := 180
-	if background {
-		limit = 3600
+	return openWorkspaceFile(w.root, p, os.O_RDONLY, false)
+}
+func (w workspaceFS) ReadFile(path string) ([]byte, error) {
+	f, err := w.Open(path)
+	if err != nil {
+		return nil, err
 	}
-	return min(seconds, limit)
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, transferLimit+1))
+	if len(data) > transferLimit {
+		return nil, fmt.Errorf("choose a regular file up to 25 MB")
+	}
+	return data, err
+}
+func (w workspaceFS) MkdirAll(path string, _ fs.FileMode) error {
+	p, err := homePath(path)
+	if err != nil {
+		return err
+	}
+	return taskMkdirAll(w.root, p)
+}
+func (w workspaceFS) WriteFile(path string, data []byte, _ fs.FileMode) error {
+	p, err := homePath(path)
+	if err != nil {
+		return err
+	}
+	return taskWriteFile(w.root, p, data)
+}
+func (w workspaceFS) ReadDir(path string) ([]os.DirEntry, error) {
+	p, err := homePath(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := openWorkspaceFile(w.root, p, os.O_RDONLY, true)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	kept := entries[:0]
+	for _, e := range entries {
+		if _, err := homePath(filepath.Join(p, e.Name())); err == nil && (e.IsDir() || e.Type().IsRegular()) {
+			kept = append(kept, e)
+		}
+	}
+	sort.Slice(kept, func(i, j int) bool { return kept[i].Name() < kept[j].Name() })
+	return kept, nil
+}
+func (w workspaceFS) WalkDir(path string, visit fs.WalkDirFunc) error {
+	p, err := homePath(path)
+	if err != nil {
+		return err
+	}
+	return fs.WalkDir(w.root.FS(), filepath.ToSlash(p), func(name string, d fs.DirEntry, walkErr error) error {
+		full := filepath.Join(computerHome(), name)
+		if walkErr != nil {
+			return visit(full, d, walkErr)
+		}
+		if _, err := homePath(name); err != nil || (!d.IsDir() && !d.Type().IsRegular()) {
+			if name == p {
+				return fmt.Errorf("choose a regular file or directory")
+			}
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		return visit(full, d, nil)
+	})
 }
 
 // Check before opening to avoid touching special files, then check the opened

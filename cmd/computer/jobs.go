@@ -4,124 +4,21 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"net/http"
-	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 )
 
-type computerJob struct {
-	id       string
-	created  time.Time
-	finished time.Time
-	out      limitedOutput
-	done     chan struct{}
-	cancel   context.CancelFunc
-	code     int
-	timedOut bool
-}
-
-func (j *computerJob) snapshot() map[string]any {
-	text, truncated := j.out.snapshot()
-	result := map[string]any{"job_id": j.id, "output": text, "truncated": truncated, "running": true, "created_at": j.created}
-	select {
-	case <-j.done:
-		result["running"] = false
-		result["finished_at"] = j.finished
-		result["exit_code"] = j.code
-		result["timed_out"] = j.timedOut
-	default:
-	}
-	return result
-}
-
-type computerJobs struct {
-	mu   sync.Mutex
-	jobs map[string]*computerJob
-}
-
-func (m *computerJobs) start(parent context.Context, command, directory string, timeout int) (*computerJob, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.jobs) >= 64 {
-		var oldest *computerJob
-		for _, j := range m.jobs {
-			select {
-			case <-j.done:
-				if oldest == nil || j.created.Before(oldest.created) {
-					oldest = j
-				}
-			default:
-			}
-		}
-		if oldest == nil {
-			return nil, errors.New("too many active jobs")
-		}
-		delete(m.jobs, oldest.id)
-	}
-	var token [16]byte
-	if _, err := rand.Read(token[:]); err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(parent, time.Duration(timeout)*time.Second)
-	j := &computerJob{id: hex.EncodeToString(token[:]), created: time.Now(), done: make(chan struct{}), cancel: cancel}
-	cmd, err := shellCommand(ctx, command, directory)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	cmd.Dir = directory
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
-	cmd.Stdout = &j.out
-	cmd.Stderr = &j.out
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return nil, errors.New("could not start command")
-	}
-	m.jobs[j.id] = j
-	go func() {
-		err := cmd.Wait()
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		j.code = 0
-		if err != nil {
-			j.code = -1
-			var exit *exec.ExitError
-			if errors.As(err, &exit) {
-				j.code = exit.ExitCode()
-			}
-		}
-		j.finished = time.Now()
-		j.timedOut = ctx.Err() == context.DeadlineExceeded
-		cancel()
-		close(j.done)
-	}()
-	return j, nil
-}
 func shellRoutes(mux *http.ServeMux) {
-	manager := &computerJobs{jobs: map[string]*computerJob{}}
+	manager := agenttools.NewProcessManager(shellCommand)
+	processRoutes(mux, manager)
 	mux.HandleFunc("GET /jobs", func(w http.ResponseWriter, r *http.Request) {
-		manager.mu.Lock()
-		defer manager.mu.Unlock()
-		jobs := []*computerJob{}
-		for _, j := range manager.jobs {
-			jobs = append(jobs, j)
-		}
-		sort.Slice(jobs, func(a, b int) bool { return jobs[a].created.Before(jobs[b].created) })
 		values := []map[string]any{}
-		for _, j := range jobs {
-			if id := r.URL.Query().Get("job_id"); id == "" || id == j.id {
-				values = append(values, j.snapshot())
-			}
+		for _, j := range manager.Jobs(r.URL.Query().Get("job_id")) {
+			values = append(values, j.Snapshot())
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"jobs": values, "shell_processes_running": shellProcessesRunning()})
@@ -134,18 +31,14 @@ func shellRoutes(mux *http.ServeMux) {
 			http.Error(w, "Invalid job", 400)
 			return
 		}
-		manager.mu.Lock()
-		jobs := []*computerJob{}
-		for _, j := range manager.jobs {
-			if args.ID == "" || j.id == args.ID {
-				j.cancel()
-				jobs = append(jobs, j)
-			}
+		jobs := manager.Jobs(args.ID)
+		for _, j := range jobs {
+			j.Cancel()
 		}
-		manager.mu.Unlock()
+
 		for _, j := range jobs {
 			select {
-			case <-j.done:
+			case <-j.Done():
 			case <-r.Context().Done():
 				http.Error(w, "Cancellation interrupted", 503)
 				return
@@ -166,7 +59,7 @@ func shellRoutes(mux *http.ServeMux) {
 			Timeout    int    `json:"timeout_seconds"`
 			Background bool   `json:"background"`
 		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 100000)).Decode(&args) != nil || strings.TrimSpace(args.Command) == "" {
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&args) != nil || strings.TrimSpace(args.Command) == "" {
 			http.Error(w, "Provide a command", 400)
 			return
 		}
@@ -179,21 +72,21 @@ func shellRoutes(mux *http.ServeMux) {
 		if args.Background {
 			parent = context.Background()
 		}
-		timeout := computerShellTimeout(args.Timeout, args.Background)
-		job, err := manager.start(parent, args.Command, filepath.Join(computerHome(), path), timeout)
+		timeout := agenttools.NormalizeBashTimeout(args.Timeout)
+		job, err := manager.StartJob(agenttools.WithProcessLifetime(parent), filepath.Join(computerHome(), path), args.Command, timeout)
 		if err != nil {
 			http.Error(w, err.Error(), 409)
 			return
 		}
 		if args.Background {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(job.snapshot())
+			json.NewEncoder(w).Encode(job.Snapshot())
 			return
 		}
-		defer job.cancel()
+		defer job.Cancel()
 		if r.Header.Get("Accept") != "application/x-ndjson" {
-			<-job.done
-			json.NewEncoder(w).Encode(job.snapshot())
+			<-job.Done()
+			json.NewEncoder(w).Encode(job.Snapshot())
 			return
 		}
 		w.Header().Set("Content-Type", "application/x-ndjson")
@@ -202,7 +95,7 @@ func shellRoutes(mux *http.ServeMux) {
 		tick := time.NewTicker(200 * time.Millisecond)
 		defer tick.Stop()
 		for {
-			value := job.snapshot()
+			value := job.Snapshot()
 			value["type"] = "output"
 			if value["running"] == false {
 				value["type"] = "result"
@@ -214,11 +107,32 @@ func shellRoutes(mux *http.ServeMux) {
 				return
 			}
 			select {
-			case <-job.done:
+			case <-job.Done():
 			case <-tick.C:
 			case <-r.Context().Done():
 				return
 			}
 		}
+	})
+}
+
+// Standard names and explicit computer tools use the same task-local manager.
+func processRoutes(mux *http.ServeMux, manager *agenttools.ProcessManager) {
+	mux.HandleFunc("POST /process-tools", func(w http.ResponseWriter, r *http.Request) {
+		var p struct {
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&p); err != nil {
+			http.Error(w, "Invalid process call", 400)
+			return
+		}
+		out, err := manager.Execute(r.Context(), filepath.Join(computerHome(), "Files"), p.Name, p.Input)
+		result := map[string]any{"output": out}
+		if err != nil {
+			result["error"] = err.Error()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
 	})
 }

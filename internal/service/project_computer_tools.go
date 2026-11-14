@@ -80,7 +80,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 				AdditionalProperties: toolschema.Pointer(false),
 			}},
 		{Name: "computer_shell",
-			Description: "Execute a Linux command inside the project computer, separate from the coding worktree. Files and browser profiles persist. Output is visible live in the task panel. Set background=true for a job that survives the tool call; read or cancel it with computer_job. Foreground timeout is 180 seconds; background timeout is 3600 seconds.",
+			Description: "Execute a Linux command inside the project computer, separate from the coding worktree. Files and browser profiles persist. Output is visible live in the task panel. Set background=true for a job that survives the tool call; read or cancel it with computer_job. Default timeout is 120 seconds; maximum is 600 seconds, matching shell.",
 			Access:      llmcontracts.RuntimeToolAccessWrite,
 			Schema: &toolschema.Schema{
 				Type: "object",
@@ -96,7 +96,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 					"timeout_seconds": &toolschema.Schema{
 						Type:    "integer",
 						Minimum: toolschema.Number("1"),
-						Maximum: toolschema.Number("3600"),
+						Maximum: toolschema.Number("600"),
 					},
 				},
 				Required:             []string{"command"},

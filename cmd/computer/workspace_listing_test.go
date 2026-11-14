@@ -29,10 +29,10 @@ func TestNativeFileListingDirectoriesAndPatterns(t *testing.T) {
 		recursive  bool
 		want       string
 	}{
-		{"directories", "", false, "Files/nested/\nFiles/top.go\nFiles/top.txt\n"},
-		{"filtered", "*.go", false, "Files/nested/\nFiles/top.go\n"},
-		{"recursive filter", "*.go", true, "Files/nested/\nFiles/nested/child.go\nFiles/top.go\n"},
-		{"no matching files", "*.rs", true, "Files/nested/\n"},
+		{"directories", "", false, "nested/\ntop.go\ntop.txt\n"},
+		{"filtered", "*.go", false, "nested/\ntop.go\n"},
+		{"recursive filter", "*.go", true, "nested/\nnested/child.go\ntop.go\n"},
+		{"no matching files", "*.rs", true, "nested/\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := nativeFileRequest{Operation: "list_files"}
@@ -70,8 +70,8 @@ func TestNativeSearchFindsNestedFilesWithoutRecursiveOption(t *testing.T) {
 	}
 	defer root.Close()
 	for _, tc := range []struct{ include, want string }{
-		{"", "Files/nested/deeper/match.go:2:needle\nFiles/nested/deeper/match.txt:2:needle\n"},
-		{"*.go", "Files/nested/deeper/match.go:2:needle\n"},
+		{"", "nested/deeper/match.go:2: needle\nnested/deeper/match.txt:2: needle\n"},
+		{"*.go", "nested/deeper/match.go:2: needle\n"},
 	} {
 		t.Run(tc.include, func(t *testing.T) {
 			// The advertised grep_search schema has no recursive option.

@@ -6,7 +6,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -20,15 +19,6 @@ func TestHomePathBoundaries(t *testing.T) {
 		t.Fatal(path, err)
 	}
 }
-func TestShellOutputBounded(t *testing.T) {
-	out := &limitedOutput{}
-	out.Write([]byte(strings.Repeat("x", 70000)))
-	out.Write([]byte("tail"))
-	if len(out.text) != 65536 || !out.truncated {
-		t.Fatal("output not capped")
-	}
-}
-
 func TestNativeFilesStayRootedAndEditPrecisely(t *testing.T) {
 	rootPath := t.TempDir()
 	root, err := os.OpenRoot(rootPath)
@@ -55,7 +45,7 @@ func TestNativeFilesStayRootedAndEditPrecisely(t *testing.T) {
 	}
 	p.Operation = "read_file"
 	out, err := nativeFileOperation(ctx, root, p)
-	if err != nil || out != "changed changed" {
+	if err != nil || out != "1\tchanged changed\n" {
 		t.Fatal(out, err)
 	}
 	outside := t.TempDir()
@@ -70,18 +60,6 @@ func TestNativeFilesStayRootedAndEditPrecisely(t *testing.T) {
 	p.Input.FilePath = "/etc/passwd"
 	if _, err = nativeFileOperation(ctx, root, p); err == nil {
 		t.Fatal("absolute host path accepted")
-	}
-}
-
-func TestBackgroundShellTimeoutPolicy(t *testing.T) {
-	if got := computerShellTimeout(600, true); got != 600 {
-		t.Fatal(got)
-	}
-	if got := computerShellTimeout(600, false); got != 180 {
-		t.Fatal(got)
-	}
-	if got := computerShellTimeout(7200, true); got != 3600 {
-		t.Fatal(got)
 	}
 }
 

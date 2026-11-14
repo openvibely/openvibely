@@ -110,10 +110,10 @@ func TestComputerToolRoutingAndAttachments(t *testing.T) {
 			}
 			return
 		}
-		if strings.HasSuffix(r.URL.Path, "/shell") {
+		if strings.HasSuffix(r.URL.Path, "/process-tools") {
 			var args map[string]any
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&args))
-			require.Equal(t, "git status", args["command"])
+			require.Equal(t, "git status", args["input"].(map[string]any)["command"])
 			io.WriteString(w, `{"output":"clean","exit_code":0}`)
 			return
 		}

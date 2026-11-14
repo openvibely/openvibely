@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,6 +16,7 @@ import (
 // SearchOptions preserves each caller's directory policy and output limits.
 // AllowFile is an additional restriction; context authorization always applies.
 type SearchOptions struct {
+	FileSystem       FileSystem
 	Include          string
 	MaxResults       int
 	MaxLineLength    int
@@ -50,6 +50,9 @@ func SearchFiles(ctx context.Context, root, pattern string, opts SearchOptions) 
 	if err != nil {
 		return nil, fmt.Errorf("invalid pattern %q: %w", pattern, err)
 	}
+	if opts.FileSystem == nil {
+		opts.FileSystem = localFileSystem{}
+	}
 	s := fileSearcher{
 		ctx:          ctx,
 		re:           re,
@@ -58,7 +61,7 @@ func SearchFiles(ctx context.Context, root, pattern string, opts SearchOptions) 
 		lineBuffer:   make([]byte, 0, 128),
 		binarySample: make([]byte, binaryTailCheckSize),
 	}
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = opts.FileSystem.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -125,7 +128,7 @@ func (s *fileSearcher) full() bool {
 // the whole file. Read errors are reported for the requested root file and skipped
 // for descendant files.
 func (s *fileSearcher) searchFile(path string, reportErrors bool) error {
-	file, err := os.Open(path)
+	file, err := s.opts.FileSystem.Open(path)
 	if err != nil {
 		if reportErrors {
 			return fmt.Errorf("search path %q: %w", path, err)

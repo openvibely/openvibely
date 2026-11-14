@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -67,6 +67,9 @@ func resolvePath(workDir, filePath string) string {
 }
 
 func execReadFile(workDir string, input json.RawMessage) (string, error) {
+	return readFile(localFileSystem{}, workDir, input)
+}
+func readFile(filesystem FileSystem, workDir string, input json.RawMessage) (string, error) {
 	var params struct {
 		FilePath string `json:"file_path"`
 		Offset   int    `json:"offset"`
@@ -86,7 +89,7 @@ func execReadFile(workDir string, input json.RawMessage) (string, error) {
 	}
 
 	path := resolvePath(workDir, params.FilePath)
-	data, err := os.ReadFile(path)
+	data, err := filesystem.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", params.FilePath, err)
 	}
@@ -137,6 +140,9 @@ func formatNumberedLines(data []byte, offset, limit int) string {
 }
 
 func execWriteFile(workDir string, input json.RawMessage) (string, error) {
+	return writeFile(localFileSystem{}, workDir, input)
+}
+func writeFile(filesystem FileSystem, workDir string, input json.RawMessage) (string, error) {
 	var params struct {
 		FilePath string `json:"file_path"`
 		Content  string `json:"content"`
@@ -151,11 +157,11 @@ func execWriteFile(workDir string, input json.RawMessage) (string, error) {
 	path := resolvePath(workDir, params.FilePath)
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := filesystem.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("create directories: %w", err)
 	}
 
-	if err := os.WriteFile(path, []byte(params.Content), 0644); err != nil {
+	if err := filesystem.WriteFile(path, []byte(params.Content), 0644); err != nil {
 		return "", fmt.Errorf("write %s: %w", params.FilePath, err)
 	}
 
@@ -164,6 +170,9 @@ func execWriteFile(workDir string, input json.RawMessage) (string, error) {
 }
 
 func execEditFile(workDir string, input json.RawMessage) (string, error) {
+	return editFile(localFileSystem{}, workDir, input)
+}
+func editFile(filesystem FileSystem, workDir string, input json.RawMessage) (string, error) {
 	var params struct {
 		FilePath   string `json:"file_path"`
 		OldString  string `json:"old_string"`
@@ -182,7 +191,7 @@ func execEditFile(workDir string, input json.RawMessage) (string, error) {
 
 	path := resolvePath(workDir, params.FilePath)
 
-	data, err := os.ReadFile(path)
+	data, err := filesystem.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", params.FilePath, err)
 	}
@@ -200,7 +209,7 @@ func execEditFile(workDir string, input json.RawMessage) (string, error) {
 		} else {
 			newContent = strings.Replace(content, params.OldString, params.NewString, 1)
 		}
-		if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
+		if err := filesystem.WriteFile(path, []byte(newContent), 0644); err != nil {
 			return "", fmt.Errorf("write %s: %w", params.FilePath, err)
 		}
 		if params.ReplaceAll {
@@ -217,7 +226,7 @@ func execEditFile(workDir string, input json.RawMessage) (string, error) {
 		return "", fmt.Errorf("old_string found %d times in %s — set replace_all=true to replace all, or provide a more specific string", count, params.FilePath)
 	}
 
-	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
+	if err := filesystem.WriteFile(path, []byte(newContent), 0644); err != nil {
 		return "", fmt.Errorf("write %s: %w", params.FilePath, err)
 	}
 
@@ -351,6 +360,9 @@ func normalizeLineForMatch(s string) string {
 }
 
 func execListFiles(workDir string, input json.RawMessage) (string, error) {
+	return listFiles(localFileSystem{}, workDir, input)
+}
+func listFiles(filesystem FileSystem, workDir string, input json.RawMessage) (string, error) {
 	var params struct {
 		Path      string `json:"path"`
 		Recursive bool   `json:"recursive"`
@@ -365,11 +377,14 @@ func execListFiles(workDir string, input json.RawMessage) (string, error) {
 		dir = resolvePath(workDir, params.Path)
 	}
 
+	if _, err := filepath.Match(params.Pattern, ""); err != nil {
+		return "", err
+	}
 	if params.Recursive {
-		return listFilesRecursive(dir, params.Pattern)
+		return listFilesRecursiveFS(filesystem, dir, params.Pattern)
 	}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := filesystem.ReadDir(dir)
 	if err != nil {
 		return "", fmt.Errorf("read directory %s: %w", dir, err)
 	}
@@ -379,7 +394,7 @@ func execListFiles(workDir string, input json.RawMessage) (string, error) {
 		name := entry.Name()
 		if params.Pattern != "" {
 			matched, _ := filepath.Match(params.Pattern, name)
-			if !matched {
+			if !matched && !entry.IsDir() {
 				continue
 			}
 		}
@@ -393,13 +408,13 @@ func execListFiles(workDir string, input json.RawMessage) (string, error) {
 	return sb.String(), nil
 }
 
-func listFilesRecursive(root, pattern string) (string, error) {
+func listFilesRecursiveFS(filesystem FileSystem, root, pattern string) (string, error) {
 	var sb strings.Builder
 	count := 0
 	maxEntries := 500
 	maxDepth := 4
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	err := filesystem.WalkDir(root, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -452,6 +467,9 @@ func listFilesRecursive(root, pattern string) (string, error) {
 }
 
 func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
+	return grepSearch(ctx, localFileSystem{}, workDir, input)
+}
+func grepSearch(ctx context.Context, filesystem FileSystem, workDir string, input json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -474,7 +492,7 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 	}
 
 	matches, err := SearchFiles(ctx, searchDir, params.Pattern, SearchOptions{
-		Include: params.Include, MaxResults: 100, MaxLineLength: 200,
+		FileSystem: filesystem, Include: params.Include, MaxResults: 100, MaxLineLength: 200,
 		SkipDirectory: func(path string) bool {
 			name := filepath.Base(path)
 			return strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor"

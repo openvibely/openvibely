@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,18 +14,19 @@ import (
 )
 
 func TestComputerJobSurvivesRequestAndCancelsProcessGroup(t *testing.T) {
-	manager := &computerJobs{jobs: map[string]*computerJob{}}
-	job, err := manager.start(context.Background(), "printf started; sleep 30", t.TempDir(), 60)
+	manager := agenttools.NewProcessManager(shellCommand)
+	defer manager.Close()
+	job, err := manager.StartJob(context.Background(), t.TempDir(), "printf started; sleep 30", 60)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer job.cancel()
+	defer job.Cancel()
 	deadline := time.NewTimer(3 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		if strings.Contains(job.snapshot()["output"].(string), "started") {
+		if strings.Contains(job.Snapshot()["output"].(string), "started") {
 			break
 		}
 		select {
@@ -33,16 +35,16 @@ func TestComputerJobSurvivesRequestAndCancelsProcessGroup(t *testing.T) {
 		case <-tick.C:
 		}
 	}
-	if job.snapshot()["running"] != true {
+	if job.Snapshot()["running"] != true {
 		t.Fatal("job finished before cancellation")
 	}
-	job.cancel()
+	job.Cancel()
 	select {
-	case <-job.done:
+	case <-job.Done():
 	case <-time.After(3 * time.Second):
 		t.Fatal("job did not cancel")
 	}
-	if job.snapshot()["running"] != false {
+	if job.Snapshot()["running"] != false {
 		t.Fatal("job still running")
 	}
 }

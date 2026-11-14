@@ -1,9 +1,14 @@
 FROM golang:1.27.1 AS builder
 WORKDIR /src
-COPY cmd/computer/ ./
-RUN go mod init openvibely.local/computer && go get github.com/coder/websocket@v1.8.15 && CGO_ENABLED=0 go build -o /computer .
-RUN mkdir -p /licenses/coder-websocket /licenses/go && \
+COPY cmd/computer/ ./cmd/computer/
+COPY pkg/agenttools/ ./pkg/agenttools/
+COPY pkg/executionenv/ ./pkg/executionenv/
+COPY pkg/gitidentity/ ./pkg/gitidentity/
+COPY pkg/toolschema/ ./pkg/toolschema/
+RUN go mod init github.com/openvibely/openvibely && go get github.com/coder/websocket@v1.8.15 github.com/santhosh-tekuri/jsonschema/v5@v5.3.1 && CGO_ENABLED=0 go build -o /computer ./cmd/computer
+RUN mkdir -p /licenses/coder-websocket /licenses/go /licenses/jsonschema && \
     cp /go/pkg/mod/github.com/coder/websocket@v1.8.15/LICENSE.txt /licenses/coder-websocket/ && \
+    cp /go/pkg/mod/github.com/santhosh-tekuri/jsonschema/v5@v5.3.1/LICENSE /licenses/jsonschema/ && \
     cp /usr/local/go/LICENSE /usr/local/go/PATENTS /licenses/go/ && \
     cp go.mod go.sum /licenses/ && go version > /licenses/go/version.txt
 

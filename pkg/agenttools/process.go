@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,12 +47,18 @@ func processLifetime(ctx context.Context) context.Context {
 }
 
 type processManager struct {
+	command func(context.Context, string, string) (*exec.Cmd, error)
+
 	closed   bool
 	mu       sync.Mutex
 	sessions map[string]*processSession
 }
 
 type processSession struct {
+	created, completed time.Time
+	history            []byte
+	historyDropped     bool
+
 	expiry      *time.Timer // guarded by manager.mu
 	id, dir     string
 	cmd         *exec.Cmd
@@ -74,6 +81,19 @@ func (s *processSession) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := len(p)
+	if n > 0 {
+		if n >= processOutputLimit {
+			s.historyDropped = s.historyDropped || len(s.history) > 0 || n > processOutputLimit
+			s.history = append(s.history[:0], p[n-processOutputLimit:]...)
+		} else {
+			if excess := len(s.history) + n - processOutputLimit; excess > 0 {
+				copy(s.history, s.history[excess:])
+				s.history = s.history[:len(s.history)-excess]
+				s.historyDropped = true
+			}
+			s.history = append(s.history, p...)
+		}
+	}
 	if n > 0 {
 		// Allocate once per drain cycle. Writes only copy incoming bytes, even
 		// when the ring is full, and the backing allocation never exceeds the cap.
@@ -139,45 +159,44 @@ func (m *processManager) remove(s *processSession) {
 	}
 }
 
-func (m *processManager) start(ctx context.Context, dir, command string, timeout int, yield time.Duration) (string, error) {
+func (m *processManager) launch(ctx context.Context, dir, command string, timeout int) (*processSession, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return nil, err
 	}
 	dir, err := processWorkDir(dir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	shell, err := executionenv.Resolve()
-	if err != nil {
-		return "", err
-	}
-	// Individual requests bound waits; the owning execution bounds process lifetime.
+	// The backend chooses the executable and environment. Session behavior is shared.
 	life, cancel := context.WithTimeout(processLifetime(ctx), time.Duration(timeout)*time.Second)
-	cmd := exec.CommandContext(life, shell.Path, shell.Args(command)...)
-	cmd.Dir = dir
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
-			cmd.Env = append(cmd.Env, e)
-		}
+	factory := m.command
+	if factory == nil {
+		factory = localShellCommand
 	}
-	cmd.Env, err = gitidentity.Environment(ctx, cmd.Env)
+	cmd, err := factory(life, command, dir)
+	if err == nil && m.command == nil {
+		// Credentials belong to this call, not the longer-lived session context.
+		// Isolated factories supply their own environment and never inherit them.
+		cmd.Env, err = gitidentity.Environment(ctx, cmd.Env)
+	}
 	if err != nil {
 		cancel()
-		return "", err
+		return nil, err
 	}
+	cmd.Dir = dir
 	afterStart, cleanup, err := configureProcess(cmd)
 	if err != nil {
 		cancel()
-		return "", fmt.Errorf("prepare shell process: %w", err)
+		return nil, fmt.Errorf("prepare shell process: %w", err)
 	}
 	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
 		cleanup()
-		return "", err
+		return nil, err
 	}
-	s := &processSession{dir: dir, cmd: cmd, stdin: stdin, cancel: cancel, done: make(chan struct{}), changed: make(chan struct{}, 1), timeout: timeout}
+	s := &processSession{created: time.Now(), dir: dir, cmd: cmd, stdin: stdin, cancel: cancel, done: make(chan struct{}), changed: make(chan struct{}, 1), timeout: timeout}
 	cmd.Stdout, cmd.Stderr = s, s
 	m.mu.Lock()
 	if err := ctx.Err(); err != nil {
@@ -185,21 +204,21 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 		cancel()
 		cleanup()
 		stdin.Close()
-		return "", err
+		return nil, err
 	}
 	if err := life.Err(); err != nil {
 		m.mu.Unlock()
 		cancel()
 		cleanup()
 		stdin.Close()
-		return "", err
+		return nil, err
 	}
 	if m.closed || len(m.sessions) >= processSessionLimit {
 		m.mu.Unlock()
 		cancel()
 		cleanup()
 		stdin.Close()
-		return "", fmt.Errorf("shell session limit reached; finish or stop existing sessions before starting more")
+		return nil, fmt.Errorf("shell session limit reached; finish or stop existing sessions before starting more")
 	}
 	for {
 		var id [16]byte
@@ -208,7 +227,7 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 			cancel()
 			cleanup()
 			stdin.Close()
-			return "", err
+			return nil, err
 		}
 		s.id = "sh_" + hex.EncodeToString(id[:])
 		if m.sessions[s.id] == nil {
@@ -220,7 +239,7 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 		cancel()
 		cleanup()
 		stdin.Close()
-		return "", fmt.Errorf("start shell: %w", err)
+		return nil, fmt.Errorf("start shell: %w", err)
 	}
 	if err = afterStart(); err != nil {
 		m.mu.Unlock()
@@ -229,7 +248,7 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 		cleanup()
 		cancel()
 		stdin.Close()
-		return "", fmt.Errorf("initialize shell process: %w", err)
+		return nil, fmt.Errorf("initialize shell process: %w", err)
 	}
 	if life.Err() != nil {
 		_ = cmd.Cancel()
@@ -247,6 +266,7 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 		}
 		s.timedOut = life.Err() == context.DeadlineExceeded
 		s.finished = true
+		s.completed = time.Now()
 		s.mu.Unlock()
 		cancel()
 		close(s.done)
@@ -256,6 +276,14 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 		}
 		m.mu.Unlock()
 	}()
+	return s, nil
+}
+
+func (m *processManager) start(ctx context.Context, dir, command string, timeout int, yield time.Duration) (string, error) {
+	s, err := m.launch(ctx, dir, command, timeout)
+	if err != nil {
+		return "", err
+	}
 	s.interaction.Lock()
 	defer s.interaction.Unlock()
 	// Starting a command waits for completion or the initial yield, not each byte.
@@ -390,6 +418,9 @@ func (m *processManager) interact(ctx context.Context, dir, id, input string, cl
 }
 
 func execBash(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
+	return shellProcesses.shell(ctx, workDir, input)
+}
+func (m *processManager) shell(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
 	var p struct {
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`
@@ -401,10 +432,13 @@ func execBash(ctx context.Context, workDir string, input json.RawMessage) (strin
 	if p.Command == "" {
 		return "", fmt.Errorf("command is required")
 	}
-	return shellProcesses.start(ctx, workDir, p.Command, NormalizeBashTimeout(p.Timeout), processYield(p.Yield, 10000))
+	return m.start(ctx, workDir, p.Command, NormalizeBashTimeout(p.Timeout), processYield(p.Yield, 10000))
 }
 
 func execProcess(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
+	return shellProcesses.process(ctx, workDir, input)
+}
+func (m *processManager) process(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
 	var p struct {
 		SessionID  string `json:"session_id"`
 		Input      string `json:"input"`
@@ -425,7 +459,7 @@ func execProcess(ctx context.Context, workDir string, input json.RawMessage) (st
 		return "", fmt.Errorf("terminate cannot be combined with input or close_stdin")
 	}
 	polling := p.Input == "" && !p.CloseStdin && !p.Terminate
-	return shellProcesses.interact(ctx, workDir, p.SessionID, p.Input, p.CloseStdin, p.Terminate, processInteractionYield(p.Yield, polling))
+	return m.interact(ctx, workDir, p.SessionID, p.Input, p.CloseStdin, p.Terminate, processInteractionYield(p.Yield, polling))
 }
 
 // ShutdownProcesses stops background shell processes during application shutdown.
@@ -451,4 +485,79 @@ func (m *processManager) close() {
 	m.mu.Lock()
 	m.closed = false
 	m.mu.Unlock()
+}
+
+// ProcessManager owns sessions for one execution backend. Its factory must return
+// a context-bound command with the backend's environment and isolation applied.
+type ProcessManager = processManager
+
+func NewProcessManager(factory func(context.Context, string, string) (*exec.Cmd, error)) *ProcessManager {
+	return &processManager{sessions: make(map[string]*processSession), command: factory}
+}
+func (m *processManager) Execute(ctx context.Context, dir, name string, input json.RawMessage) (string, error) {
+	switch name {
+	case "shell", "bash", "Bash":
+		return m.shell(ctx, dir, input)
+	case "process":
+		return m.process(ctx, dir, input)
+	default:
+		return "", fmt.Errorf("unknown process tool: %s", name)
+	}
+}
+func (m *processManager) Close() { m.close() }
+
+func localShellCommand(ctx context.Context, command, dir string) (*exec.Cmd, error) {
+	shell, err := executionenv.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, shell.Path, shell.Args(command)...)
+	cmd.Dir = dir
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "CLAUDECODE=") {
+			cmd.Env = append(cmd.Env, e)
+		}
+	}
+	return cmd, nil
+}
+
+// Job is a non-consuming view for a desktop's live jobs panel and explicit job tools.
+// It shares execution, limits, cancellation and expiry with shell/process sessions.
+type Job struct{ session *processSession }
+
+func (j *Job) Done() <-chan struct{} { return j.session.done }
+func (j *Job) Cancel()               { j.session.cancel() }
+func (j *Job) Snapshot() map[string]any {
+	s := j.session
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := map[string]any{"job_id": s.id, "output": string(s.history), "truncated": s.historyDropped, "running": !s.finished, "created_at": s.created}
+	if s.finished {
+		result["exit_code"] = s.exitCode
+		result["timed_out"] = s.timedOut
+		result["finished_at"] = s.completed
+	}
+	return result
+}
+func (m *processManager) StartJob(ctx context.Context, dir, command string, timeout int) (*Job, error) {
+	if strings.TrimSpace(command) == "" {
+		return nil, fmt.Errorf("command is required")
+	}
+	s, err := m.launch(ctx, dir, command, NormalizeBashTimeout(timeout))
+	if err != nil {
+		return nil, err
+	}
+	return &Job{s}, nil
+}
+func (m *processManager) Jobs(id string) []*Job {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	jobs := []*Job{}
+	for _, s := range m.sessions {
+		if id == "" || id == s.id {
+			jobs = append(jobs, &Job{s})
+		}
+	}
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].session.created.Before(jobs[j].session.created) })
+	return jobs
 }
