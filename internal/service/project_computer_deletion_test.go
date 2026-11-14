@@ -93,3 +93,53 @@ func TestComputerFailedProvisioningPreservesCleanupIntent(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, state.CleanupRequired)
 }
+
+func TestComputerStartWaitsForProjectDeletion(t *testing.T) {
+	for _, failDelete := range []bool{false, true} {
+		t.Run(map[bool]string{false: "deleted", true: "deletion rolled back"}[failDelete], func(t *testing.T) {
+			db := teststores.New(t)
+			project := &models.Project{Name: "Concurrent deletion"}
+			require.NoError(t, db.Projects.Create(t.Context(), project))
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{}`) }))
+			defer server.Close()
+			computer := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: server.URL}})
+			require.NoError(t, db.Projects.Computers().Configure(t.Context(), project.ID, "local"))
+			projects := NewProjectService(db.Projects)
+			projects.SetProjectComputerService(computer)
+			projects.SetTaskService(NewTaskService(db.Tasks, nil, nil))
+			deleting := make(chan struct{})
+			finishDelete := make(chan struct{})
+			projects.beforeRelationalDeleteForTest = func() {
+				close(deleting)
+				<-finishDelete
+				if failDelete {
+					// Change the deletion manifest, forcing its transaction to abort.
+					task := &models.Task{ProjectID: project.ID, Title: "New task", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: 1}
+					require.NoError(t, db.Tasks.Create(t.Context(), task))
+				}
+			}
+			deleteDone := make(chan error, 1)
+			go func() { deleteDone <- projects.Delete(t.Context(), project.ID) }()
+			<-deleting
+			// Deletion must own the SAME lock used by all scoped computer services.
+			lock := computer.lifecycle(project.ID)
+			if lock.TryLock() {
+				lock.Unlock()
+				close(finishDelete)
+				t.Fatal("deletion did not hold lifecycle lock")
+			}
+			startDone := make(chan error, 1)
+			go func() { startDone <- computer.Start(t.Context(), project.ID) }()
+			close(finishDelete)
+			deleteErr := <-deleteDone
+			startErr := <-startDone
+			if failDelete {
+				require.Error(t, deleteErr)
+				require.NoError(t, startErr)
+			} else {
+				require.NoError(t, deleteErr)
+				require.Error(t, startErr)
+			}
+		})
+	}
+}

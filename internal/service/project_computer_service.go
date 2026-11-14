@@ -184,6 +184,12 @@ func (s *ProjectComputerService) Stop(ctx context.Context, id string) error {
 	gate := s.lifecycle(id)
 	gate.Lock()
 	defer gate.Unlock()
+	return s.stopLocked(ctx, id)
+}
+
+// stopLocked requires the project lifecycle write lock. Project deletion holds
+// it through the database deletion and resource cleanup, not just the stop.
+func (s *ProjectComputerService) stopLocked(ctx context.Context, id string) error {
 	if s.taskID != "" {
 		return errors.New("stop the project computer in project settings")
 	}

@@ -189,12 +189,19 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("project not found or is the default project")
 	}
 
+	// Serialize the cleanup decision, deletion, and resource removal with starts.
+	// A start that was waiting must recheck project existence after this finishes.
+	if s.computerSvc != nil {
+		gate := s.computerSvc.lifecycle(id)
+		gate.Lock()
+		defer gate.Unlock()
+	}
 	computerCleanupRequired := false
 	if s.computerSvc != nil {
 		if computer, err := s.computerSvc.Get(ctx, id); err == nil {
 			computerCleanupRequired = computer.CleanupRequired
 			if computerCleanupRequired {
-				if err := s.computerSvc.Stop(ctx, id); err != nil {
+				if err := s.computerSvc.stopLocked(ctx, id); err != nil {
 					return fmt.Errorf("cannot delete project while computer cleanup is unavailable; for a local computer, start Docker and retry: %w", err)
 				}
 			}
