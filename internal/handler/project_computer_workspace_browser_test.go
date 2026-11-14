@@ -39,7 +39,16 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>window.taskWorkspace && q('[data-tab="computer"]').hasAttribute('data-computer-allowed'));q('[data-tab="computer"]').click();
  await wait(()=>!q('[data-task-computer-toggle]').disabled);
  if(window.fixtureRFB)throw Error('Computer started without opt-in');
+ const startupFetch=window.fetch,startupToast=window.showToast;const startupErrors=[];
+ window.showToast=(message,type)=>startupErrors.push({message,type});
+ window.fetch=(url,options)=>String(url).includes('/ensure')?Promise.resolve(new Response(JSON.stringify({message:'Docker unavailable'}),{status:502,headers:{'Content-Type':'application/json'}})):startupFetch(url,options);
  q('[data-task-computer-toggle]').click();
+ await wait(()=>startupErrors.length===1,'startup error toast');
+ if(startupErrors[0].message!=='Docker unavailable'||startupErrors[0].type!=='error')throw Error('Missing startup failure toast');
+ if(getComputedStyle(q('[data-computer-status]')).display!=='none')throw Error('Mini status became visible');
+ q('[data-computer-action="ensure"]').click();await wait(()=>startupErrors.length===2,'retry error toast');
+ window.fetch=startupFetch;window.showToast=startupToast;
+ q('[data-computer-action="ensure"]').click();
  await wait(()=>window.fixtureRFB?.painted);
  if(!q('#tab-computer').contains(q('[data-computer-preview]')))throw Error('Preview not in Computer tab');
  const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(!initialRFB.disconnected)throw Error('Hidden preview stayed connected');q('[data-tab="computer"]').click();await wait(()=>window.fixtureRFB!==initialRFB,'preview reconnect');
