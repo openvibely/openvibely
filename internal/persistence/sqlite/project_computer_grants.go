@@ -50,7 +50,7 @@ func (r *ProjectComputerRepo) ChromeGrantsPage(ctx context.Context, id string, o
 }
 
 func (r *ProjectComputerRepo) chromeGrants(ctx context.Context, id string, limit, offset int) ([]models.ComputerChromeGrant, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,project_id,task_id,scope,selections,expires_at,revoked,one_time FROM computer_chrome_grants WHERE project_id=? AND (scope='project' OR task_id=?) ORDER BY expires_at DESC,id DESC LIMIT ? OFFSET ?`, id, r.taskID, limit, offset)
+	rows, err := r.db.QueryContext(ctx, `SELECT id,project_id,COALESCE(task_id,''),scope,selections,expires_at,revoked,one_time FROM computer_chrome_grants WHERE project_id=? AND (scope='project' OR task_id=?) ORDER BY expires_at DESC,id DESC LIMIT ? OFFSET ?`, id, r.taskID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (r *ProjectComputerRepo) ChromeGrant(ctx context.Context, id, grantID strin
 	// expiry or revocation. Preserve the same project/task visibility as the list.
 	var grant models.ComputerChromeGrant
 	var raw string
-	err := r.db.QueryRowContext(ctx, `SELECT id,project_id,task_id,scope,selections,expires_at,revoked,one_time FROM computer_chrome_grants WHERE id=? AND project_id=? AND (scope='project' OR task_id=?)`, grantID, id, r.taskID).Scan(&grant.ID, &grant.ProjectID, &grant.TaskID, &grant.Scope, &raw, &grant.ExpiresAt, &grant.Revoked, &grant.OneTime)
+	err := r.db.QueryRowContext(ctx, `SELECT id,project_id,COALESCE(task_id,''),scope,selections,expires_at,revoked,one_time FROM computer_chrome_grants WHERE id=? AND project_id=? AND (scope='project' OR task_id=?)`, grantID, id, r.taskID).Scan(&grant.ID, &grant.ProjectID, &grant.TaskID, &grant.Scope, &raw, &grant.ExpiresAt, &grant.Revoked, &grant.OneTime)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errors.New("Chrome grant not found for this task")
 	}

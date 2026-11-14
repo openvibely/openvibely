@@ -34,3 +34,16 @@ func TestComputerPreviewLeadsDedicatedPanel(t *testing.T) {
 		t.Fatal("computer setting remains in Details")
 	}
 }
+
+func TestComputerPermissionsAvailableWithoutTask(t *testing.T) {
+	var out bytes.Buffer
+	if err := ProjectComputerContent("project").Render(t.Context(), &out); err != nil {
+		t.Fatal(err)
+	}
+	// Check rendered controls, not their selectors in the embedded script.
+	for _, control := range []string{"<details data-computer-grants>", "data-computer-grants-refresh>", "<div data-computer-grant-list>"} {
+		if !strings.Contains(out.String(), control) {
+			t.Fatalf("project page missing %s", control)
+		}
+	}
+}

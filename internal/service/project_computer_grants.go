@@ -257,7 +257,7 @@ func (s *ProjectComputerService) RevokeChromeGrant(ctx context.Context, id, gran
 	lock := s.grantLock(id)
 	lock.Lock()
 	defer lock.Unlock()
-	grant, err := s.repo.ChromeGrant(ctx, id, grantID)
+	_, err := s.repo.ChromeGrant(ctx, id, grantID)
 	if err != nil {
 		return err
 	}
@@ -268,21 +268,21 @@ func (s *ProjectComputerService) RevokeChromeGrant(ctx context.Context, id, gran
 	if err != nil {
 		return err
 	}
+	var cleanupErrors []error
 	for _, taskID := range tasks {
 		scoped, err := s.ForTask(ctx, id, taskID)
 		if err != nil {
-			return err
+			cleanupErrors = append(cleanupErrors, err)
+			continue
 		}
-		conn, err := scoped.Connection(ctx, id)
-		if err != nil {
-			return errors.New("grant revoked; start the computer and retry to clear installed cookies")
-		}
-		payload, _ := json.Marshal(map[string]any{"action": "clear_cookies", "cookies": grant.Selections})
-		if _, err = scoped.request(ctx, conn, "POST", "/browser", payload); err != nil {
-			return errors.New("grant revoked; retry to finish clearing installed cookies")
+		// Connection clears revoked installations before exposing the browser and
+		// removes tracking only after successful cleanup. Keep trying other tasks
+		// when one desktop is unavailable.
+		if _, err := scoped.Connection(ctx, id); err != nil {
+			cleanupErrors = append(cleanupErrors, errors.New("grant revoked; start the computer and retry to clear installed cookies"))
 		}
 	}
-	return nil
+	return errors.Join(cleanupErrors...)
 }
 
 func (s *ProjectComputerService) grantLock(id string) *sync.Mutex {

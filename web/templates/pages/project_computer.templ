@@ -29,13 +29,13 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <p class="text-sm opacity-70">The computer starts automatically. Each saved task has its own desktop on the Computer tab.</p>
  }
    @ProjectComputerToggle(projectID)
+ <details data-computer-grants><summary class="cursor-pointer">Chrome permissions</summary><button type="button" class="btn" data-computer-grants-refresh>Refresh permissions</button><div data-computer-grant-list></div><nav aria-label="Chrome permissions pages"><button type="button" class="btn btn-sm" data-computer-grants-previous disabled>Previous</button><span data-computer-grants-page></span><button type="button" class="btn btn-sm" data-computer-grants-next disabled>Next</button></nav></details>
  <button type="button" class="btn btn-sm" data-computer-action="ensure" hidden>Retry connection</button>
    if computerTaskID(taskIDs)!="" {
  <label>Run standard shell and file tools in
  <select class="select select-bordered" data-computer-target><option value="worktree">Task worktree</option><option value="computer">Task computer</option></select></label>
  <p class="text-sm">Applies on the next task turn. Git commands follow the shell selection.</p>
  <details data-computer-jobs><summary class="cursor-pointer">Commands and live output</summary><div data-computer-job-list></div></details>
- <details data-computer-grants><summary class="cursor-pointer">Chrome permissions</summary><button type="button" class="btn" data-computer-grants-refresh>Refresh permissions</button><div data-computer-grant-list></div><nav aria-label="Chrome permissions pages"><button type="button" class="btn btn-sm" data-computer-grants-previous disabled>Previous</button><span data-computer-grants-page></span><button type="button" class="btn btn-sm" data-computer-grants-next disabled>Next</button></nav></details>
  <details data-computer-files>
  <summary class="cursor-pointer">Files</summary>
  <p class="text-sm">Take over to upload or download files (up to 25 MB). Existing files are kept.</p>

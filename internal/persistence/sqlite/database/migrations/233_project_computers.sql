@@ -31,7 +31,8 @@ CREATE INDEX task_computer_sessions_project ON task_computer_sessions(project_id
 CREATE TABLE computer_chrome_grants (
  id TEXT PRIMARY KEY,
  project_id TEXT NOT NULL REFERENCES project_computers(project_id) ON DELETE CASCADE,
- task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ -- For project grants this is provenance, not ownership.
+ task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
  scope TEXT NOT NULL CHECK(scope IN ('task','project')),
  selections TEXT NOT NULL,
  expires_at INTEGER NOT NULL,
@@ -39,6 +40,13 @@ CREATE TABLE computer_chrome_grants (
  one_time INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX computer_chrome_grants_project ON computer_chrome_grants(project_id);
+-- Task grants end with their task; project grants survive and lose only provenance.
+-- +goose StatementBegin
+CREATE TRIGGER computer_chrome_task_grant_cleanup BEFORE DELETE ON tasks
+BEGIN
+ DELETE FROM computer_chrome_grants WHERE task_id=OLD.id AND scope='task';
+END;
+-- +goose StatementEnd
 CREATE TABLE computer_chrome_installations (
  grant_id TEXT NOT NULL REFERENCES computer_chrome_grants(id) ON DELETE CASCADE,
  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -62,6 +70,7 @@ CREATE TABLE computer_chrome_profile_imports (
 );
 
 -- +goose Down
+DROP TRIGGER computer_chrome_task_grant_cleanup;
 DROP TABLE computer_chrome_profile_imports;
 DROP TABLE computer_workflows;
 DROP TABLE computer_chrome_installations;
