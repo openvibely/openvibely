@@ -20,7 +20,8 @@
                 revision: node.getAttribute('data-raw-revision') || '',
                 byteLength: node.hasAttribute('data-initial-byte-length') ? Number(node.getAttribute('data-initial-byte-length')) : undefined,
                 offset: node.getAttribute('data-initial-byte-length'),
-                context: node.dataset.outputContext || ''
+                context: node.dataset.outputContext || '',
+                contextOffsets: node.dataset.outputContextOffsets
             };
         });
         for (const [node, controller] of pending) {
@@ -46,6 +47,8 @@
             const existing = node.getAttribute('data-raw-content') || '';
             const text = page.text + (replace ? '' : existing.slice(oldContext.length));
             node.dataset.outputContext = page.context || '';
+            if (page.revision.startsWith('live-')) node.dataset.outputContextOffsets = JSON.stringify(page.context_tool_offsets || {});
+            else delete node.dataset.outputContextOffsets;
             if (replace && node.dataset.streamingResume === 'true') {
                 // A rewritten live source requires a fresh HTTP seed and stream
                 // offset together. Never splice it into an active subscription.

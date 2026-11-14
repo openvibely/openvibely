@@ -88,3 +88,19 @@ func TestRunningWindowMarkdownAndAliases(t *testing.T) {
 		require.Equal(t, prefix+runningWindowFixture(200), tail.Text, "preserve ambiguous or global Markdown/legacy context")
 	}
 }
+
+func TestRunningWindowContextToolOffsets(t *testing.T) {
+	prefix := "Prose café 🌍\n"
+	header := "  [Using tool: read_file | pending]\n"
+	source := prefix + header + runningWindowFixture(200)
+	tail, err := runningDisplayWindow(source, 0, 1024, "")
+	require.NoError(t, err)
+	require.Equal(t, header, tail.Context)
+	require.Equal(t, map[int]int64{2: int64(len(prefix) + 2)}, tail.ContextToolOffsets)
+	for tail.Before != 0 {
+		tail, err = runningDisplayWindow(source, tail.Before, 1024, tail.Revision)
+		require.NoError(t, err)
+	}
+	require.Empty(t, tail.ContextToolOffsets)
+	require.Equal(t, source[:len(tail.Text)], tail.Text)
+}

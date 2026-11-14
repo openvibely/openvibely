@@ -181,6 +181,7 @@
             if (seed.offset == null && Number.isSafeInteger(seed.byteLength) && seed.byteLength >= 0) {
                 node.setAttribute('data-initial-byte-length', String(seed.byteLength));
             }
+            if (seed.contextOffsets != null) node.dataset.outputContextOffsets = seed.contextOffsets;
         });
         // A cached composer is a new DOM instance and needs its own focus attempt.
         clone.querySelectorAll('[data-composer-focus-initialized]').forEach(input => {

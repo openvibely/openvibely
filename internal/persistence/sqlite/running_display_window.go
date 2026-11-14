@@ -98,13 +98,19 @@ func runningDisplayWindow(output string, before int64, budget int, revision stri
 		}
 	}
 	var context strings.Builder
+	contextToolOffsets := make(map[int]int64)
 	for i := 0; i < start; i++ {
 		if retained[i] {
-			context.WriteString(output[offsets[i]:offsets[i+1]])
+			raw := output[offsets[i]:offsets[i+1]]
+			if items[i].Type == "using" {
+				bracket := strings.Index(raw, "[Using tool:")
+				contextToolOffsets[context.Len()+bracket] = int64(offsets[i] + bracket)
+			}
+			context.WriteString(raw)
 		}
 	}
 	prefix := context.String()
-	return models.DisplayTail{Text: strings.Clone(prefix + output[offsets[start]:end]), Context: prefix, Before: int64(offsets[start]), EndOffset: int64(end), Revision: revision}, nil
+	return models.DisplayTail{Text: strings.Clone(prefix + output[offsets[start]:end]), Context: prefix, ContextToolOffsets: contextToolOffsets, Before: int64(offsets[start]), EndOffset: int64(end), Revision: revision}, nil
 }
 
 // Keep FIFO association consistent with the browser's provider aliases.

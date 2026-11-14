@@ -368,3 +368,45 @@ func TestBrowserFunctional_RunningCheckpointSourceStorage(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_RunningWindowToolIdentity(t *testing.T) {
+	for _, mode := range []string{"compact", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			report := runIncrementalChatBrowser(t, fmt.Sprintf(`
+ document.documentElement.setAttribute('data-output-detail',%q);
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');
+ async function showTools() {
+ for (const toggle of stream.querySelectorAll('.stream-activity-summary')) if(toggle.getAttribute('aria-expanded')!=='true') toggle.click();
+ await paint();await materializeVirtualChatRows(messages);
+ }
+ const call=name=>'[Using tool: shell | '+name+']\n[Tool shell done]\n'+('result line\n').repeat(100)+'[/Tool]\n';
+ const recent=call('recent'), older='Earlier café 🌍\n'+call('older!');
+ const encoder=new TextEncoder();
+ const pending='[Using tool: read_file | pending]\n';
+ stream.dataset.outputWindow=String(encoder.encode(pending+older).length)+':live-test';
+ stream.dataset.outputContext=pending;
+ stream.dataset.outputContextOffsets=JSON.stringify({0:0});
+ stream._outputWindowSeed={text:pending+recent};
+ await renderStreamingContent(stream,pending+recent,false);
+ await showTools();
+ const first=stream.querySelector('.stream-tool-output-toggle');
+ assert(first,'output toggle missing'); first.click(); await paint();
+ assert(first.getAttribute('aria-expanded')==='true','setup did not expand');
+ await renderLiveChatContent(stream,pending+recent+call('newest'),false);
+ await showTools();
+ const before=Array.from(stream.querySelectorAll('.stream-tool')).map(x=>({id:x.dataset.toolRenderId,text:x.textContent.slice(0,60),expanded:x.querySelector('.stream-tool-output-toggle')?.getAttribute('aria-expanded')}));
+ stream.dataset.outputWindow='0:live-test';
+ stream.dataset.outputContext='';stream.dataset.outputContextOffsets='{}';
+ await renderStreamingContent(stream,pending+older+recent+call('newest'),false);
+ await showTools();
+ const after=Array.from(stream.querySelectorAll('.stream-tool')).map(x=>({id:x.dataset.toolRenderId,text:x.textContent.slice(0,60),expanded:x.querySelector('.stream-tool-output-toggle')?.getAttribute('aria-expanded')}));
+ assert(after.find(x=>x.text.includes('INrecent'))?.expanded==='true', 'expanded state moved to wrong tool: '+JSON.stringify({before,after}));
+ assert(after.find(x=>x.text.includes('INnewest'))?.expanded==='false', 'new tool inherited expansion');
+ const toolIDs=stream._chatVirtualData.sourceModels.flatMap(row=>row.segments.filter(seg=>seg.type==='using').map(seg=>seg.toolRenderID));
+ assert(before.every(x=>toolIDs.includes(x.id)), 'paging renamed a tool: '+JSON.stringify({before,after,toolIDs}));
+ return {before,after};
+ `, mode))
+			t.Log(string(report))
+		})
+	}
+}

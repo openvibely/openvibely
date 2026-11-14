@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+ "encoding/json"
 	"context"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 
@@ -230,6 +231,11 @@ func displayTailOffset(text string, tails []*models.DisplayTail) string {
 func displayTailContext(tails []*models.DisplayTail) string {
  if len(tails)>0 && tails[0]!=nil { return tails[0].Context }
  return ""
+}
+
+func displayTailContextOffsets(tails []*models.DisplayTail) string {
+ if len(tails)>0 && tails[0]!=nil { value, _ := json.Marshal(tails[0].ContextToolOffsets); return string(value) }
+ return "{}"
 }
 
 templ ChatBubble(role, content string, author ...string) {
@@ -835,7 +841,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
             if len(tail) > 0 && tail[0] != nil && tail[0].Before > 0 {
                 <div data-output-window-hint class="text-xs opacity-50 mb-2">Showing recent output. Scroll up for earlier activity.</div>
             }
-			<div id={ "streaming-message-" + execID } class={ "chat-stream-content leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-output-window={ displayTailCursor(tail) } data-output-context={ displayTailContext(tail) } data-exec-id={ execID } data-initial-byte-length={ displayTailOffset(partialContent, tail) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ partialContent } style="word-wrap: break-word;"></div>
+			<div id={ "streaming-message-" + execID } class={ "chat-stream-content leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-output-window={ displayTailCursor(tail) } data-output-context={ displayTailContext(tail) } data-output-context-offsets={ displayTailContextOffsets(tail) } data-exec-id={ execID } data-initial-byte-length={ displayTailOffset(partialContent, tail) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ partialContent } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -1154,7 +1160,7 @@ templ ChatStreamingResumeInitScript() {
 					var streamTerminalHandled = false;
 					function connectResumeExecutionStream() {
 							eventSource = window.openVibelyThreadController.attach(execId, streamProjectID, cumulativeContent, container, streamOffset);
-							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); container.dataset.outputWindow = ''; container.dataset.outputContext = ''; delete container._outputWindowSeed; persistResumeStreamState(true); });
+							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); container.dataset.outputWindow = ''; container.dataset.outputContext = ''; delete container.dataset.outputContextOffsets; delete container._outputWindowSeed; persistResumeStreamState(true); });
 							registerResumeEventSource(eventSource);
 
 							eventSource.onmessage = function(event) {
@@ -5409,7 +5415,8 @@ templ ChatAutoScrollScript() {
                         }
                         if (seg.type === 'using') {
                             var name = seg.normalizedName || seg.name;
-                            seg.toolRenderID = 'tool-' + (seg.index + (options.offset || 0)) + '-' + ledger.ordinal++;
+                            seg.toolRenderID = options?.toolIdentity?.(seg) || ('tool-' + (seg.index + (options.offset || 0)) + '-' + ledger.ordinal);
+                            ledger.ordinal++;
                             (ledger.queues[name] ||= []).push(seg);
                             ledger.lastUsing = seg;
                         } else if (seg.type === 'tool_result') {
@@ -5433,7 +5440,8 @@ templ ChatAutoScrollScript() {
 				for (var si = 0; si < segments.length; si++) {
 					if (segments[si].type === 'using') {
 						var usingName = segments[si].normalizedName || segments[si].name;
-						segments[si].toolRenderID = 'tool-' + (segments[si].index + (options?.offset || 0)) + '-' + toolRenderOrdinal++;
+						segments[si].toolRenderID = options?.toolIdentity?.(segments[si]) || ('tool-' + (segments[si].index + (options?.offset || 0)) + '-' + toolRenderOrdinal);
+                        toolRenderOrdinal++;
 						if (!toolUseQueues[usingName]) toolUseQueues[usingName] = { calls: [], next: 0 };
 						toolUseQueues[usingName].calls.push(segments[si]);
 						continue;
@@ -5814,6 +5822,7 @@ templ ChatAutoScrollScript() {
                             nextCheckpoint = {
                                 offset: (checkpoint ? checkpoint.offset : 0) + cut,
                                 normalizedLength: base + cut,
+                                normalizedBytes: (checkpoint?.normalizedBytes || 0) + new TextEncoder().encode(textBuffer.slice(0, cut)).length,
                                 normalizedPrefix: unchangedPrefix && textBuffer.slice(0, cut) === parseSource.slice(0, cut) ? null : prefix() + textBuffer.slice(0, cut),
                                 segments: prior.concat(committed)
                             };
@@ -5899,9 +5908,27 @@ templ ChatAutoScrollScript() {
 					function linkToolResults() {
 						// A finalized byte window grows only at its beginning. Anchor IDs
 						// to the unchanged end so prepending cannot rename visible tools.
-						if (container.dataset?.outputWindow || container._outputWindowSeed) {
-							options = Object.assign({}, options, {offset: -textBuffer.length, ordinal: -segments.filter(function(seg) { return seg.type === 'using'; }).length});
-						}
+                        var windowCursor = container.dataset?.outputWindow || '';
+                        if (windowCursor.includes(':live-') || container.hasAttribute('data-output-context-offsets')) {
+                            // Absolute source bytes survive both streaming appends and
+                            // history prepends. Sparse pending calls carry their original offsets.
+                            var contextText = container.dataset.outputContext || '';
+                            var contextOffsets = JSON.parse(container.dataset.outputContextOffsets || '{}') || {};
+                            var bodyStart = Number(windowCursor.split(':')[0] || 0);
+                            var encoder = new TextEncoder();
+                            var index = checkpoint?.normalizedLength || 0;
+                            var bytes = checkpoint?.normalizedBytes || 0;
+                            var contextBytes = encoder.encode(contextText).length;
+                            options = Object.assign({}, options, {toolIdentity:function(seg) {
+                                if (seg.index < index) { index = 0; bytes = 0; }
+                                bytes += encoder.encode(textBuffer.slice(index, seg.index)).length;
+                                index = seg.index;
+                                var absolute = seg.index < contextText.length ? contextOffsets[bytes] : bodyStart + bytes - contextBytes;
+                                return absolute == null ? null : 'tool-byte-' + absolute;
+                            }});
+                        } else if (windowCursor || container._outputWindowSeed) {
+                            options = Object.assign({}, options, {offset: -textBuffer.length, ordinal: -segments.filter(function(seg) { return seg.type === 'using'; }).length});
+                        }
                         if (incrementalProjection && newSegments) {
                             function copyLedger(ledger) {
                                 var queues = Object.create(null);

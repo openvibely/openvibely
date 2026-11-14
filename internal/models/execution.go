@@ -17,12 +17,15 @@ const (
 
 // DisplayTail describes a bounded public view, never provider replay state.
 type DisplayTail struct {
-	EndOffset int64  `json:"end_offset,string"`
-	Plan      string `json:"plan,omitempty"`
-	Text      string `json:"text"`
-	Context   string `json:"context,omitempty"`
-	Before    int64  `json:"before,string"`
-	Revision  string `json:"revision"`
+	Text    string `json:"text"`
+	Context string `json:"context,omitempty"`
+	// ContextToolOffsets maps tool header byte positions in Context to their
+	// original byte positions in the execution output.
+	ContextToolOffsets map[int]int64 `json:"context_tool_offsets,omitempty"`
+	EndOffset          int64         `json:"end_offset,string,omitempty"`
+	Before             int64         `json:"before,string"`
+	Revision           string        `json:"revision"`
+	Plan               string        `json:"plan,omitempty"`
 }
 
 type Execution struct {
