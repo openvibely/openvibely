@@ -310,23 +310,48 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 	routed := state.ToolTarget == "computer"
 	if routed {
 		for _, d := range agenttools.Definitions() {
-			defs = append(defs, llmcontracts.RuntimeToolDefinition{Name: d.Name, Description: "Runs in this task computer, under Files. " + d.Description, Schema: d.Schema, Access: llmcontracts.RuntimeToolAccessWrite})
+			description := "Runs in this task computer, under Files. " + d.Description
+			if d.Name == "shell" || d.Name == "process" {
+				description += " Computer sessions return cumulative output. Interactive stdin and close_stdin are unsupported; use noninteractive commands."
+			}
+			defs = append(defs, llmcontracts.RuntimeToolDefinition{Name: d.Name, Description: description, Schema: d.Schema, Access: llmcontracts.RuntimeToolAccessWrite})
 		}
 	}
 	var releaseOnce sync.Once
 	return &llmcontracts.RuntimeTools{Definitions: defs, SkipDefaultTools: routed, Executor: func(call context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		var session *computerProcessInput
 		if routed {
 			switch name {
-			case "bash":
+			case "bash", "Bash", "shell":
 				var args struct {
 					Command string `json:"command"`
 					Timeout int    `json:"timeout"`
+					Yield   *int   `json:"yield_time_ms"`
 				}
 				if err := json.Unmarshal(input, &args); err != nil {
 					return "", true, true, err
 				}
-				input, _ = json.Marshal(map[string]any{"command": args.Command, "timeout_seconds": args.Timeout})
+				if args.Timeout <= 0 {
+					args.Timeout = 120
+				}
+				if args.Timeout > 600 {
+					args.Timeout = 600
+				}
+				session = &computerProcessInput{Yield: args.Yield}
+				input, _ = json.Marshal(map[string]any{"command": args.Command, "timeout_seconds": args.Timeout, "background": true})
 				name = "computer_shell"
+			case "process":
+				session = &computerProcessInput{}
+				if err := json.Unmarshal(input, session); err != nil {
+					return "", true, true, err
+				}
+				if session.ID == "" {
+					return "", true, true, errors.New("session_id is required")
+				}
+				if session.Input != "" || session.CloseStdin {
+					return "", true, true, errors.New("computer sessions do not support stdin; use a noninteractive shell command")
+				}
+				name = "computer_job"
 			case "read_file", "write_file", "edit_file", "list_files", "grep_search":
 				input, _ = json.Marshal(map[string]any{"operation": name, "input": json.RawMessage(input)})
 				name = "computer_files"
@@ -427,6 +452,15 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 			count, err := s.UseChromeGrant(call, projectID, args.ID)
 			data, _ := json.Marshal(map[string]int{"imported": count})
 			return string(data), true, err != nil, err
+		}
+		if name == "computer_job" && session != nil {
+			if session.Terminate {
+				if err := s.cancelJobs(call, projectID, session.ID); err != nil {
+					return "", true, true, err
+				}
+			}
+			out, bad, err := s.waitComputerSession(call, conn, session.ID, session.Yield, 5000)
+			return out, true, bad, err
 		}
 		if name == "computer_job" {
 			var args struct {
@@ -536,6 +570,16 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 			}
 			input, _ = json.Marshal(args)
 			out, bad, err := s.shell(call, conn, input)
+			if session != nil && err == nil {
+				var result map[string]any
+				if err := json.Unmarshal([]byte(out), &result); err != nil {
+					return "", true, true, err
+				}
+				if running, _ := result["running"].(bool); running {
+					id, _ := result["job_id"].(string)
+					out, bad, err = s.waitComputerSession(call, conn, id, session.Yield, 10000)
+				}
+			}
 			return out, true, bad, err
 		}
 		data, err := s.request(call, conn, "POST", path, input)
