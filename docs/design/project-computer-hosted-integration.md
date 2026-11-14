@@ -162,6 +162,11 @@ primary desktop browser. Removed an unreachable VNC proxy branch after its
 non-VNC routes had already returned. Isolation checks retain coverage of the
 primary browser's CDP proxy.
 
+A later startup-path review removed the shell's obsolete shared-profile and
+fallback-port setup, along with the unused port-zero case in `computerPort`.
+The supervisor exits the shell via `exec`; task desktops receive a positive
+port base and isolated profile. Nonpositive task bases are now rejected.
+
 Staticcheck U1000 checks of the relevant Go packages and Linux bridge found no
 additional computer-specific unused declarations. This does not prove every
 runtime branch is exercised. The hosted provisioner remains reachable through

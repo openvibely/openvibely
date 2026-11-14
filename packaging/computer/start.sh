@@ -21,18 +21,16 @@ base="/home/ubuntu/.desktops/$OPENVIBELY_DESKTOP_ID"
 run_desktop() {
  setpriv --reuid="$OPENVIBELY_DESKTOP_UID" --regid="$OPENVIBELY_DESKTOP_UID" --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$base/home" DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" XDG_CONFIG_HOME="$base/config" XDG_CACHE_HOME="$base/cache" TZ="${TZ:-UTC}" LANG=C.UTF-8 PLAYWRIGHT_BROWSERS_PATH=/opt/browsers "$@"
 }
-profile="$HOME/.browser"
-if [ "$desktop_base" -gt 0 ]; then
-  profile="$base/browser"
-  export DISPLAY=":$((100 + (desktop_base - 10000) / 10))"
-  export XDG_CONFIG_HOME="$base/config"
-  export XDG_CACHE_HOME="$base/cache"
-  [[ ! -L "$base/home/Files" ]] || exit 1
-  mkdir -p "$base/home/Files"
-  cd "$base/home/Files"
-fi
-port() { if [ "$desktop_base" -gt 0 ]; then echo "$((desktop_base + $1))"; else echo "$2"; fi; }
-cdp=$(port 1 9222); vnc=$(port 2 5900); control=$(port 3 5901); view_ws=$(port 4 6080); control_ws=$(port 5 6081)
+# Only isolated task desktops reach this point; the supervisor execs above.
+[ "$desktop_base" -gt 0 ] || exit 1
+profile="$base/browser"
+export DISPLAY=":$((100 + (desktop_base - 10000) / 10))"
+export XDG_CONFIG_HOME="$base/config"
+export XDG_CACHE_HOME="$base/cache"
+[[ ! -L "$base/home/Files" ]] || exit 1
+mkdir -p "$base/home/Files"
+cd "$base/home/Files"
+cdp=$((desktop_base + 1)); vnc=$((desktop_base + 2)); control=$((desktop_base + 3)); view_ws=$((desktop_base + 4)); control_ws=$((desktop_base + 5))
 mkdir -p "$HOME/Files" "$profile"
 # This volume belongs exclusively to this one desktop. Container replacement
 # changes its hostname/PIDs; stale Chromium singleton links must not block it.

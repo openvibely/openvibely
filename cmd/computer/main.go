@@ -228,8 +228,6 @@ func computerPort(offset int) string {
 	base, _ := strconv.Atoi(os.Getenv("OPENVIBELY_DESKTOP_PORT"))
 	if base == 0 {
 		switch offset {
-		case 0:
-			return "8090"
 		case 1:
 			return "9222"
 		case 2:
