@@ -76,6 +76,8 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <details data-workflows><summary>Saved workflows</summary><div data-workflow-list></div></details>
  </div><div data-computer-expanded></div></dialog>
    <style>
+    [data-computer-status] { display:none; }
+    [data-computer-expanded] [data-computer-status] { display:block; }
     [data-computer-dialog][open] { display:flex; flex-direction:column; }
     [data-computer-expanded] { display:flex; flex-direction:column; flex:1; min-height:0; }
     [data-computer-expanded] [data-computer-screen] { flex:1; min-height:0 !important; height:auto !important; border-radius:0; background:var(--shell-card,var(--fallback-b1,oklch(var(--b1)))); }
