@@ -33,9 +33,27 @@ templ ChangesExplorerScript() {
         nav.append(back, search, tree, empty);
         var viewer = null, signature = '', files = [], selected = '', scope = '';
         var states = new Map(), pageSize = 100, shownLimit = pageSize;
-        var more = document.createElement('button'); more.type = 'button'; more.className = 'btn btn-sm btn-ghost';
-        more.textContent = 'Show more files'; more.onclick = function() { shownLimit += pageSize; render(); };
+        var more = document.createElement('div'); more.style.height = '1px'; more.setAttribute('aria-hidden', 'true');
         nav.append(more);
+        var observer = null, scrollHost = null;
+        function observeMore() {
+            if (!observer) return;
+            observer.disconnect();
+            if (!more.hidden) observer.observe(more);
+        }
+        function attachScrollHost(host) {
+            if (host === scrollHost) return;
+            if (observer) observer.disconnect();
+            scrollHost = host;
+            observer = host ? new IntersectionObserver(function(entries) {
+                if (more.hidden || !entries.some(function(entry) { return entry.isIntersecting; })) return;
+                var scrollTop = host.scrollTop;
+                shownLimit += pageSize;
+                render();
+                host.scrollTop = scrollTop;
+            }, {root: host, rootMargin: '0px 0px 200px 0px'}) : null;
+            observeMore();
+        }
         function save() { if (scope) states.set(scope, {selected: selected, query: search.value}); }
         function applySelection(expand) {
             if (!viewer) return;
@@ -101,14 +119,16 @@ templ ChangesExplorerScript() {
             empty.hidden = shown > 0;
             empty.textContent = files.length ? 'No matching files.' : 'No changed files.';
             applySelection(false);
+            observeMore();
         }
         search.oninput = function() { shownLimit = pageSize; save(); render(); };
         window.setChangesExplorerSearch = function(query) { search.value = query; shownLimit = pageSize; save(); render(); };
         window.getChangesExplorerSearch = function() { return search.value; };
         window.syncChangesExplorer = function(active) {
-            if (!active) { nav.remove(); return; }
+            if (!active) { attachScrollHost(null); nav.remove(); return; }
             var host = document.getElementById(document.documentElement.hasAttribute('data-shell-frame') ? 'changes-explorer-host' : 'changes-explorer-mobile');
             if (host && nav.parentNode !== host) host.append(nav);
+            attachScrollHost(host);
             var nextViewer = document.querySelector('#tab-changes #diff-viewer');
             var nextScope = (document.getElementById('changes-content') || {}).dataset;
             nextScope = nextScope ? nextScope.taskId : '';
