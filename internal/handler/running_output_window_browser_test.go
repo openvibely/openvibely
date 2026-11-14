@@ -47,7 +47,7 @@ func TestRunningOutputWindowInChrome(t *testing.T) {
 			other := createTask(t, h, project.ID, "Navigation target")
 			execution := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning })
 			var source strings.Builder
-			source.WriteString("[Using tool: read_file | pending]\n")
+			source.WriteString("  [Using tool: read_file | pending]\n")
 			for i := 0; i < 5000; i++ {
 				fmt.Fprintf(&source, "[Using tool: shell | echo %d]\n[Tool shell done]\nresult %d\n[/Tool]\n", i, i)
 			}
@@ -70,6 +70,10 @@ func TestRunningOutputWindowInChrome(t *testing.T) {
  await until(()=>node()?._chatVirtualData,'initial rows');
  const n=node(),initial=n.getAttribute('data-raw-content'),fullSeed=%t;
  await until(()=>document.getElementById('task-thread-messages')?.dataset.transcriptHydrating!=='true' && !window._chatContentRenderActive && !window._chatContentRenderQueue?.length,'hydration');
+ if(!fullSeed) {
+ const pending=n._chatVirtualData.sourceModels.flatMap(row=>row.segments).find(seg=>seg.type==='using');
+ assert(pending?.toolRenderID==='tool-byte-0','indented pending tool has wrong stable ID: '+pending?.toolRenderID);
+ }
  const openingMS=performance.now();
  window.gc?.();await pause();window.gc?.();
  assert(fullSeed||window._windowStreamBytes===0,'omitted output was replayed over websocket');

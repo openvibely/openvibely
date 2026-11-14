@@ -96,7 +96,7 @@ func TestRunningWindowContextToolOffsets(t *testing.T) {
 	tail, err := runningDisplayWindow(source, 0, 1024, "")
 	require.NoError(t, err)
 	require.Equal(t, header, tail.Context)
-	require.Equal(t, map[int]int64{2: int64(len(prefix) + 2)}, tail.ContextToolOffsets)
+	require.Equal(t, map[int]int64{0: int64(len(prefix))}, tail.ContextToolOffsets)
 	for tail.Before != 0 {
 		tail, err = runningDisplayWindow(source, tail.Before, 1024, tail.Revision)
 		require.NoError(t, err)

@@ -103,8 +103,9 @@ func runningDisplayWindow(output string, before int64, budget int, revision stri
 		if retained[i] {
 			raw := output[offsets[i]:offsets[i+1]]
 			if items[i].Type == "using" {
-				bracket := strings.Index(raw, "[Using tool:")
-				contextToolOffsets[context.Len()+bracket] = int64(offsets[i] + bracket)
+				// The browser's marker match starts at the beginning of the line,
+				// including indentation. Use that same position for stable IDs.
+				contextToolOffsets[context.Len()] = int64(offsets[i])
 			}
 			context.WriteString(raw)
 		}
