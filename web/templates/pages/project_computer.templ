@@ -235,7 +235,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
        const requestedControl=dialog.open;
        const res=await fetch(scoped('/status')+'&viewer_mode='+(requestedControl?'control':'view'),{cache:'no-store'});if(!res.ok)throw new Error('Could not check project computer');
        const state=await res.json();if(closed || pending || closing || !visible() || version!==refreshVersion)return;if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if(state.handoff_kind){recording=false;renderDemo();}root.querySelector('[data-teach-open]').hidden=!!state.handoff_kind;if(state.handoff_kind)teach.hidden=true;
-       if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;status.textContent='Starting project computer… The first start may take several minutes.';try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;await refresh();}catch(e){pending=false;status.textContent=e.message;root.querySelector('[data-computer-action=ensure]').hidden=false;}return;}
+       if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;status.textContent='Starting or updating project computer… Building the image may take several minutes.';try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;await refresh();}catch(e){pending=false;status.textContent=e.message;root.querySelector('[data-computer-action=ensure]').hidden=false;}return;}
        if(state.ready && dialog.open && takeoverRequested){takeoverRequested=false;if(!state.held){pending=true;controlPromise=fetch(scoped('/takeover'),{method:'POST'});try{const response=await controlPromise;if(!response.ok)throw Error('Could not take control. Close and reopen the viewer to retry.');state.held=true;}finally{controlPromise=null;pending=false;}if(!dialog.open||closing)return;await refresh();return;}}
        status.textContent=state.ready?(state.held?'You have control. This task’s computer tools are paused.':state.busy?'An agent is using the computer.':'Ready'):state.enabled===false?'Project computer is disabled. Enable it below.':'Connecting to the computer…';
        root.querySelector('[data-computer-login]').hidden=!state.handoff_kind;
@@ -250,7 +250,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       const button=event.target.closest('[data-computer-action]');if(!button || pending || button.disabled)return;
       pending=true;++refreshVersion;buttons.forEach(b=>b.disabled=true);disconnect();
       const action=button.dataset.computerAction;
-      status.textContent=action==='ensure'?'Starting project computer. The first image build can take several minutes…':'Updating computer…';
+      status.textContent=action==='ensure'?'Starting or updating project computer… Building the image may take several minutes.':'Updating computer…';
       try{
        const res=await fetch(scoped('/'+action),{method:'POST',headers:{'Content-Type':'application/json'}});
        if(!res.ok){const body=await res.json();throw new Error(body.message||'Computer operation failed');}

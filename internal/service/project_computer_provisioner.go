@@ -55,6 +55,30 @@ func (p *LocalComputerProvisioner) docker(ctx context.Context, stdin io.Reader, 
 	}
 	return out, nil
 }
+
+// Current reports whether a running container matches this app's selected image.
+// Keep this separate from Resolve so cleanup can still reach older containers.
+func (p *LocalComputerProvisioner) Current(ctx context.Context, id string) bool {
+	raw, err := p.docker(ctx, nil, "inspect", computerContainerName(id))
+	if err != nil {
+		return false
+	}
+	var rows []struct {
+		Config struct {
+			Image  string
+			Labels map[string]string
+		}
+	}
+	if json.Unmarshal(raw, &rows) != nil || len(rows) != 1 {
+		return false
+	}
+	image := os.Getenv("OPENVIBELY_COMPUTER_IMAGE")
+	if image == "" {
+		image = computerImageTag()
+	}
+	return rows[0].Config.Image == image && rows[0].Config.Labels["openvibely.project"] == id && rows[0].Config.Labels["openvibely.computer-isolation"] == "1"
+}
+
 func (p *LocalComputerProvisioner) Resolve(ctx context.Context, id string) (ComputerConnection, error) {
 	raw, err := p.docker(ctx, nil, "inspect", computerContainerName(id))
 	if err != nil {

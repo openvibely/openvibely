@@ -287,6 +287,12 @@ func (s *ProjectComputerService) request(ctx context.Context, conn ComputerConne
 	return b, nil
 }
 func (s *ProjectComputerService) Ready(ctx context.Context, id string) bool {
+	if checker, ok := s.provisioner.(interface {
+		Current(context.Context, string) bool
+	}); ok && !checker.Current(ctx, id) {
+		return false
+	}
+
 	conn, err := s.Connection(ctx, id)
 	if err != nil {
 		return false
