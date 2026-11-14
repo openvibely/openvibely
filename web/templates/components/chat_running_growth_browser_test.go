@@ -203,7 +203,11 @@ func TestBrowserFunctional_RunningFullRowUpdatesStayBounded(t *testing.T) {
  const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
  const call=i=>'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
  let text='[Using tool: read_file | pending]\n';
- let count=0, reads=0, geometry=0;
+ let count=0, reads=0, geometry=0, comparisons=0, collections=0;
+ const position=Node.prototype.compareDocumentPosition;
+ Node.prototype.compareDocumentPosition=function(other){comparisons++;return position.call(this,other)};
+ const query=Element.prototype.querySelectorAll;
+ Element.prototype.querySelectorAll=function(selector){if(this===messages && selector==='[data-chat-virtual-owner]')collections++;return query.call(this,selector)};
  const rect=Element.prototype.getBoundingClientRect;
  Element.prototype.getBoundingClientRect=function(){if(this.hasAttribute('data-virtual-chat-row')||this.hasAttribute('data-chat-lazy-row'))geometry++;return rect.call(this)};
  const reports=[];
@@ -219,11 +223,12 @@ func TestBrowserFunctional_RunningFullRowUpdatesStayBounded(t *testing.T) {
    let value=row.model;
    Object.defineProperty(row,'model',{get(){reads++;return value},set(next){value=next},configurable:true});
   });
-  reads=0;geometry=0;const started=performance.now();
+  reads=0;geometry=0;comparisons=0;collections=0;const started=performance.now();
   text+=call(count++);await renderLiveChatContent(stream,text,false);
   const updateMS=performance.now()-started;
   await paint();await paint();
-  reports.push({size,reads,geometry,updateMS});
+  reports.push({size,reads,geometry,comparisons,collections,updateMS});
+  assert(comparisons===0 && collections===0,'live update rebuilt the viewport index: '+JSON.stringify(reports));
   assert(reads<150,'live update visited completed row models: '+JSON.stringify(reports));
   assert(geometry<1800,'live update scanned offscreen geometry: '+JSON.stringify(reports));
   assert(stream._chatVirtualRows[20]===old && old.model===model,'completed row was replaced');

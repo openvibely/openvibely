@@ -471,7 +471,20 @@
     window.refreshVirtualChatRows = function (root) {
         lists.forEach(list => { if (!list.messages.isConnected) destroy(list); });
         const messages = root?.matches?.(messagesSelector) ? root : root?.closest?.(messagesSelector);
-        if (messages) { const list = ensureList(messages); list.dirty = true; list.schedule(); }
+        if (messages) {
+            const list = ensureList(messages);
+            const node = root?.closest?.('[data-chat-lazy-row]');
+            const owner = node?.parentElement?.closest('[data-chat-virtual-owner]');
+            const row = owner?._chatVirtualRows?.[Number(node.getAttribute('data-chat-lazy-row'))];
+            // Updating a leaf row changes layout, not index membership. Keep the
+            // scheduled viewport/anchor refresh without recollecting all history.
+            // Nested owners can add or remove rows: inspect both the current DOM
+            // and the previous index so removal is not mistaken for a leaf edit.
+            if (!row || row.node !== node || row.children?.length || node.querySelector('[data-chat-virtual-owner]')) {
+                list.dirty = true;
+            }
+            list.schedule();
+        }
     };
     // A hidden workspace has no viewport to render or restore scroll against.
     // Keep its initial hydration pending until resize makes that viewport real.
