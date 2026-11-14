@@ -167,6 +167,11 @@ fallback-port setup, along with the unused port-zero case in `computerPort`.
 The supervisor exits the shell via `exec`; task desktops receive a positive
 port base and isolated profile. Nonpositive task bases are now rejected.
 
+A field-level review removed `computerViewer.TaskID`, which was assigned but
+never read. Viewer registration and lookup already scope entries by task ID in
+the map key. Every remaining computer-store interface method has a production
+caller.
+
 Staticcheck U1000 checks of the relevant Go packages and Linux bridge found no
 additional computer-specific unused declarations. This does not prove every
 runtime branch is exercised. The hosted provisioner remains reachable through

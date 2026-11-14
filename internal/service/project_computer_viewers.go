@@ -10,7 +10,6 @@ import (
 
 type computerViewer struct {
 	User, Token string
-	TaskID      string
 	Control     bool
 	Cancel      context.CancelFunc
 }
@@ -27,7 +26,7 @@ func (s *ProjectComputerService) RegisterViewer(id, user, session string, contro
 	lock.Lock()
 	defer lock.Unlock()
 	key := s.viewerPrefix(id) + session
-	viewer := &computerViewer{User: user, Token: rand.Text(), Control: control, TaskID: s.taskID}
+	viewer := &computerViewer{User: user, Token: rand.Text(), Control: control}
 	if len(replacements) > 0 {
 		viewer.Cancel = replacements[0]
 	}
