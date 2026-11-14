@@ -21,7 +21,7 @@ func TestComputerChromeRevokeGrantOutsideListWindow(t *testing.T) {
 		}
 		io.WriteString(w, `{}`)
 	})
-	require.NoError(t, svc.repo.RequestLogin(t.Context(), project.ID, "request_chrome_login", "https://example.test"))
+	require.NoError(t, svc.repo.RequestHandoff(t.Context(), project.ID, "request_chrome_login", "https://example.test", "", ""))
 	picks := []models.ChromeCookieSelection{{Profile: "Default", Domain: "example.test", Name: "session", Path: "/"}}
 	old, err := svc.repo.CreateChromeGrant(t.Context(), project.ID, "task", picks, 0)
 	require.NoError(t, err)

@@ -229,7 +229,7 @@ func TestComputerChromeGrantScopeRevocationAndCleanup(t *testing.T) {
 		}
 		io.WriteString(w, `{}`)
 	})
-	require.NoError(t, s.repo.RequestLogin(t.Context(), p.ID, "request_chrome_login", "https://example.test"))
+	require.NoError(t, s.repo.RequestHandoff(t.Context(), p.ID, "request_chrome_login", "https://example.test", "", ""))
 	picks := []models.ChromeCookieSelection{{Profile: "Default", Domain: "example.test", Name: "session", Path: "/"}}
 	g, err := s.repo.CreateChromeGrant(t.Context(), p.ID, "task", picks, time.Now().Add(time.Hour).Unix())
 	require.NoError(t, err)

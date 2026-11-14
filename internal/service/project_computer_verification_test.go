@@ -69,7 +69,7 @@ func TestComputerVisualVerificationRejectsForeignOrInvalidScreenshot(t *testing.
 }
 func TestComputerChromeExtendedGrantDurations(t *testing.T) {
 	_, s, p, _ := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) })
-	require.NoError(t, s.repo.RequestLogin(t.Context(), p.ID, "request_chrome_login", "https://example.test"))
+	require.NoError(t, s.repo.RequestHandoff(t.Context(), p.ID, "request_chrome_login", "https://example.test", "", ""))
 	picks := []models.ChromeCookieSelection{{Profile: "Default", Domain: "example.test", Name: "session", Path: "/"}}
 	for _, expires := range []int64{-1, 0, time.Now().Add(30 * 24 * time.Hour).Unix()} {
 		g, err := s.repo.CreateChromeGrant(t.Context(), p.ID, "project", picks, expires)

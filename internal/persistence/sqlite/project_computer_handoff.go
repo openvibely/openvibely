@@ -8,10 +8,6 @@ import (
 	"strings"
 )
 
-func (r *ProjectComputerRepo) RequestLogin(ctx context.Context, id, kind, url string) error {
-	return r.RequestHandoff(ctx, id, kind, url, "", "")
-}
-
 // The Inbox item and the private desktop hold are committed together.
 func (r *ProjectComputerRepo) RequestHandoff(ctx context.Context, id, kind, url, reason, expected string) error {
 	if r.taskID == "" {
@@ -37,9 +33,6 @@ func (r *ProjectComputerRepo) RequestHandoff(ctx context.Context, id, kind, url,
 		_, err = tx.ExecContext(ctx, `UPDATE task_computer_sessions SET held=1,owner='',lease_until=0,handoff_kind=?,handoff_url=?,handoff_reason=?,handoff_expected_text=?,handoff_alert_id=? WHERE project_id=? AND task_id=?`, kind, url, reason, expected, alertID, id, r.taskID)
 		return err
 	})
-}
-func (r *ProjectComputerRepo) CompleteLogin(ctx context.Context, id string) error {
-	return r.FinishHandoff(ctx, id, false)
 }
 
 // Queueing continuation and clearing the hold are atomic. Duplicate clicks cannot resume twice.

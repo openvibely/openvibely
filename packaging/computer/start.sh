@@ -69,7 +69,6 @@ bridge_pid=$!
 
 shutdown() {
   trap - TERM INT
-  if [ "$desktop_base" -eq 0 ]; then curl --max-time 12 -s -X POST http://127.0.0.1:8090/desktop-shutdown >/dev/null || true; fi
   # Browser.close flushes cookies and profile databases before Docker stops X11.
   OPENVIBELY_CDP_PORT="$cdp" timeout 8s setpriv --reuid="$OPENVIBELY_DESKTOP_UID" --regid="$OPENVIBELY_DESKTOP_UID" --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs node -e '(async()=>{const b=await require("/opt/browser/node_modules/playwright").chromium.connectOverCDP("http://127.0.0.1:"+process.env.OPENVIBELY_CDP_PORT);const s=await b.newBrowserCDPSession();await s.send("Browser.close").catch(()=>{});})().catch(()=>process.exit(1))' >/dev/null 2>&1 || true
   for i in {1..50}; do kill -0 "$browser_pid" 2>/dev/null || break; sleep .1; done

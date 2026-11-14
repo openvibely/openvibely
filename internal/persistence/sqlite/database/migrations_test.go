@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 239
+const latestMigrationVersion = 233
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -4329,6 +4329,43 @@ func TestMigration226CustomPagesFromMain(t *testing.T) {
 		checkExisting()
 		if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE 'page_%'`).Scan(&n); err != nil || n != 0 {
 			t.Fatalf("page tables remain after rollback: %d %v", n, err)
+		}
+	}
+}
+
+func TestComputerMigrationsUpgradeFromMain232(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "computer-upgrade.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 232); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects(id,name) VALUES('p','Existing project');
+INSERT INTO tasks(id,project_id,title,tag) VALUES('t','p','Existing task','custom/computer');`); err != nil {
+		t.Fatal(err)
+	}
+	for pass := 0; pass < 2; pass++ {
+		if err := goose.Up(db, "."); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO project_computers(project_id,provider) VALUES('p','hosted')`); err != nil {
+			t.Fatal(err)
+		}
+		var enabled, idle int
+		var zone, tag string
+		if err := db.QueryRow(`SELECT enabled,idle_minutes,time_zone FROM project_computers WHERE project_id='p'`).Scan(&enabled, &idle, &zone); err != nil {
+			t.Fatal(err)
+		}
+		if enabled != 1 || idle != 30 || zone != "UTC" {
+			t.Fatalf("computer defaults: enabled=%d idle=%d zone=%q", enabled, idle, zone)
+		}
+		if err := goose.DownTo(db, ".", 232); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(`SELECT tag FROM tasks WHERE id='t'`).Scan(&tag); err != nil || tag != "custom/computer" {
+			t.Fatalf("existing task changed: tag=%q err=%v", tag, err)
 		}
 	}
 }

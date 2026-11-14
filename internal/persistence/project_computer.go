@@ -22,9 +22,7 @@ type ProjectComputerStore interface {
 	Workflow(context.Context, string, string) (*models.ComputerWorkflow, error)
 	DeleteWorkflow(context.Context, string, string) error
 	SetEnabled(context.Context, string, bool) error
-	RequestLogin(ctx context.Context, id, kind, url string) error
 	RequestHandoff(ctx context.Context, id, kind, url, reason, expected string) error
-	CompleteLogin(ctx context.Context, id string) error
 	FinishHandoff(ctx context.Context, id string, cancelled bool) error
 	SetToolTarget(ctx context.Context, id, target string) error
 	ThreadAttachments(ctx context.Context, projectID string) ([]models.ChatAttachment, error)

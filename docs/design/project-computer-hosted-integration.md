@@ -141,25 +141,37 @@ entry point reported no unreachable functions. A supplemental reference scan of
 computer Go functions and named functions in the viewer template and packaged
 JavaScript helpers found no unreferenced declarations.
 
-These checks found no confirmed dead code to remove. They do not prove every
-runtime branch is exercised. In particular, the hosted provisioner is reachable
-through configuration and has contract tests; its missing hosted server is an
-integration gap, not an unused implementation. Server-only findings elsewhere
-can also be desktop-entry-point or test helpers and were not removed.
+A second manual pass corrected the initial conclusion: function reachability
+and internal JavaScript references missed an unlaunched script, an unreachable
+shell branch, and repository wrappers retained solely for tests. Removed:
+
+- `packaging/computer/auth-sync.cjs` and its Dockerfile copy instruction. Nothing
+  launched this legacy project-wide browser-auth synchronization helper.
+- The supervisor shutdown call inside the desktop shell shutdown function. The
+  supervisor path already exits via `exec` at the top of that script; the Go
+  supervisor owns its authenticated shutdown request.
+- Repository `RequestLogin` and `CompleteLogin` wrappers and their interface
+  entries. Production uses `RequestHandoff` and `FinishHandoff`; tests now call
+  those active methods directly. The service's distinct `CompleteLogin` method
+  remains in use and was retained.
+
+Staticcheck U1000 checks of the relevant Go packages and Linux bridge found no
+additional computer-specific unused declarations. This does not prove every
+runtime branch is exercised. The hosted provisioner remains reachable through
+configuration and has contract tests; its missing hosted server is an integration
+gap. Server-only findings elsewhere can also be desktop-entry-point or test
+helpers and were not removed.
 
 ## Merge compatibility
 
-Local `main` added migrations 229–232 while this branch independently used
-229–239 for computer tables. During the required merge, the computer migrations
-were moved to 233–243 and the latest-version test updated, preserving main's
-migration numbering and all computer SQL. Generated template conflicts were
-resolved by regenerating from merged `.templ` sources.
+The task branch is rebased onto local `main`. Main's migrations through 232 are
+unchanged. All unmerged computer schema changes are consolidated into
+`233_project_computers.sql`, defining the final columns directly in six CREATE
+TABLE statements. Its rollback drops child tables before their parents.
 
-This numbering supports a fresh database and an upgrade from main. A database
-that already ran the old, unmerged computer migrations needs an explicit history
-reconciliation before adopting the renumbered branch; do not blindly rerun those
-SQL statements against such a database. No existing database was modified in
-this investigation.
+The migration regression test covers upgrade from main's version 232, rollback,
+and re-upgrade while preserving an existing custom-tagged task. No existing
+database was modified during this work.
 
 ## Validation performed
 

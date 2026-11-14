@@ -76,7 +76,7 @@ func TestTaskComputerSessionPersistsLoginAndCascades(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := scoped.RequestLogin(t.Context(), project.ID, "request_browser_login", "https://example.test"); err != nil {
+	if err := scoped.RequestHandoff(t.Context(), project.ID, "request_browser_login", "https://example.test", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	restarted, err := NewProjectRepo(db).Computers().ForTask(t.Context(), project.ID, task.ID)
@@ -90,7 +90,7 @@ func TestTaskComputerSessionPersistsLoginAndCascades(t *testing.T) {
 	if err := restarted.Reserve(t.Context(), project.ID, "agent"); !errors.Is(err, persistence.ErrComputerBusy) {
 		t.Fatal("restart exposed held desktop")
 	}
-	if err := restarted.CompleteLogin(t.Context(), project.ID); err != nil {
+	if err := restarted.FinishHandoff(t.Context(), project.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := restarted.Reserve(t.Context(), project.ID, "agent"); err != nil {

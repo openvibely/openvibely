@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends x11vnc novnc we
 # desktop applications and shells. Only it runs as root.
 ENV HOME=/home/ubuntu
 COPY --from=builder /computer /usr/local/bin/openvibely-computer
-COPY packaging/computer/auth-sync.cjs /usr/local/lib/openvibely-auth-sync.cjs
 COPY packaging/computer/browser.cjs /usr/local/lib/openvibely-browser.cjs
 COPY packaging/computer/start.sh /usr/local/bin/start-computer
 COPY packaging/computer/isolate.sh /usr/local/bin/start-isolated-desktop
