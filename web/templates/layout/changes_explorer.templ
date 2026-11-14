@@ -49,7 +49,7 @@ templ ChangesExplorerScript() {
                 if (more.hidden || !entries.some(function(entry) { return entry.isIntersecting; })) return;
                 var scrollTop = host.scrollTop;
                 shownLimit += pageSize;
-                render();
+                render(true);
                 host.scrollTop = scrollTop;
             }, {root: host, rootMargin: '0px 0px 200px 0px'}) : null;
             observeMore();
@@ -68,14 +68,20 @@ templ ChangesExplorerScript() {
             }
             if (window._refreshDiffPerformance) window._refreshDiffPerformance();
         }
-        function render() {
+        function render(append) {
             var closed = new Set(Array.from(tree.querySelectorAll('details')).filter(function(d) { return !d.open; }).map(function(d) { return d.dataset.folder; }));
-            tree.replaceChildren();
+            // Keep existing rows and folders mounted during pagination so keyboard
+            // focus and folder state survive loading the next batch.
+            var retained = append ? tree.querySelectorAll('[data-explorer-path]').length : 0;
+            if (!append) tree.replaceChildren();
             var folders = new Map(), query = search.value.trim().toLowerCase(), shown = 0;
+            if (append) tree.querySelectorAll('details').forEach(function(details) {
+                folders.set(details.dataset.folder, details.lastElementChild);
+            });
             files.forEach(function(file) {
                 if (query && file.path.toLowerCase().indexOf(query) < 0) return;
                 shown++;
-                if (shown > shownLimit) return;
+                if (shown <= retained || shown > shownLimit) return;
                 var parts = file.path.split('/'), parent = tree, prefix = '';
                 parts.slice(0, -1).forEach(function(part) {
                     prefix += part + '/';
