@@ -9,7 +9,7 @@ runtime="/run/ov-desktops/$name"
 desktop_uid=$OPENVIBELY_DESKTOP_UID
 shell_uid=$OPENVIBELY_SHELL_UID
 # Parent directories are not writable by either untrusted account. Never follow
-# legacy profile/home symlinks while assigning ownership.
+# profile/home symlinks while assigning ownership.
 mkdir -p "$base"
 [[ ! -L "$base" ]] || exit 1
 chown root:root "$base"
@@ -18,26 +18,6 @@ for dir in home browser config cache; do
  [[ ! -L "$base/$dir" ]] || exit 1
  mkdir -p "$base/$dir"
 done
-# Break legacy hard links while the entire task directory is root-only. A
-# retained file must not remain an alias for another task's mutable data.
-python3 -I - "$base" <<'PYTHON'
-import os, shutil, stat, sys, tempfile
-for directory, _, files in os.walk(sys.argv[1], followlinks=False):
-    for name in files:
-        path = os.path.join(directory, name)
-        info = os.lstat(path)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink <= 1:
-            continue
-        fd, temporary = tempfile.mkstemp(dir=directory)
-        try:
-            with os.fdopen(fd, 'wb') as output, open(path, 'rb') as source:
-                shutil.copyfileobj(source, output)
-            os.chmod(temporary, stat.S_IMODE(info.st_mode) & 0o777)
-            os.replace(temporary, path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
-PYTHON
 # IDs are deterministic across restarts; collisions fail closed in the router.
 # Private passwd/group files avoid concurrent useradd mutations across tasks.
 cp /etc/passwd "$runtime/passwd"
@@ -47,11 +27,11 @@ printf 'ov-desktop:x:%s:\nov-shell:x:%s:\n' "$desktop_uid" "$shell_uid" >> "$run
 chmod 0644 "$runtime/passwd" "$runtime/group"
 mount --bind "$runtime/passwd" /etc/passwd
 mount --bind "$runtime/group" /etc/group
-# -P prevents traversal through links placed in persisted task data.
-chown -hR -P "$shell_uid:$desktop_uid" "$base/home"
+# Set directory ownership without walking or modifying retained task files.
+chown -h "$shell_uid:$desktop_uid" "$base/home"
 chmod 0770 "$base/home"
 for dir in browser config cache; do
- chown -hR -P "$desktop_uid:$desktop_uid" "$base/$dir"
+ chown -h "$desktop_uid:$desktop_uid" "$base/$dir"
  chmod 0700 "$base/$dir"
 done
 chmod 0711 "$base"

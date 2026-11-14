@@ -270,7 +270,7 @@ func validateDesktopStorage(name string) error {
 			return fmt.Errorf("unsafe desktop storage")
 		}
 	}
-	// All legacy task IDs were hashed names, never arbitrary filesystem paths.
+	// Task identities must be scoped names, never arbitrary filesystem paths.
 	if !strings.HasPrefix(name, "task-") {
 		return fmt.Errorf("invalid desktop identity")
 	}

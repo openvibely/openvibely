@@ -5,14 +5,9 @@ if [ "$desktop_base" -eq 0 ]; then
   umask 077
   [[ ! -L /home/ubuntu && ! -L /home/ubuntu/.desktops ]] || exit 1
   mkdir -p /run/ov-desktops /home/ubuntu/.desktops
-  # Legacy shared profiles remain preserved but are not exposed to task users.
-  find /home/ubuntu -mindepth 1 -maxdepth 1 ! -name .desktops ! -type l -exec chmod go-rwx -- {} +
   chown root:root /home/ubuntu /home/ubuntu/.desktops
   chmod 0711 /home/ubuntu
   chmod 0700 /run/ov-desktops
-  # Lock every retained task before serving requests. Otherwise an already
-  # migrated task could read an older task that has not started/migrated yet.
-  find /home/ubuntu/.desktops -mindepth 1 -maxdepth 1 -type d -exec chown root:root -- {} + -exec chmod 0700 -- {} +
   chmod 0711 /home/ubuntu/.desktops
   exec openvibely-computer
 fi
