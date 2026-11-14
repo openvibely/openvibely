@@ -41,8 +41,8 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(window.fixtureRFB)throw Error('Computer started without opt-in');
  q('[data-task-computer-toggle]').click();
  await wait(()=>window.fixtureRFB?.painted);
- if(!q('[data-task-computer-preview-slot]').contains(q('[data-computer-preview]')))throw Error('Preview not above tabs');
- const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(initialRFB.disconnected)throw Error('Tab switching disconnected preview');q('[data-tab="computer"]').click();
+ if(!q('#tab-computer').contains(q('[data-computer-preview]')))throw Error('Preview not in Computer tab');
+ const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(!initialRFB.disconnected)throw Error('Hidden preview stayed connected');q('[data-tab="computer"]').click();await wait(()=>window.fixtureRFB!==initialRFB,'preview reconnect');
  if(q('#tab-computer').classList.contains('hidden'))throw Error('Computer tab hidden');
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
  q('[data-computer-preview-open]').click();await wait(()=>q('[data-computer-dialog]').open);
@@ -93,7 +93,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'preview first frame');
 
- await wait(()=>!q('[data-task-computer-toggle]').disabled);q('[data-task-computer-toggle]').click();await wait(()=>q('[data-task-computer-preview-slot]').hidden,'task disabled');
+ await wait(()=>!q('[data-task-computer-toggle]').disabled);q('[data-task-computer-toggle]').click();await wait(()=>q('[data-computer-preview]').hidden,'task disabled');
  finish('pass','Saved task preview, automatic startup, expansion, takeover, release and project toggle');
  }catch(e){finish('fail',e.message);}
 })();</script>`

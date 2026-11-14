@@ -24,7 +24,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  </section>
  } else {
   <section id="project-computer" data-computer-task={computerTaskID(taskIDs)} data-computer-project={ projectID } data-computer-viewer={ static.URL("vendor/novnc/core/rfb.js") } class="flex flex-col gap-4 text-sm">
-   <div data-computer-preview style="position:relative">
+   <div data-computer-preview hidden style="position:relative">
  <div data-computer-screen class="rounded-lg overflow-hidden" style="aspect-ratio:16/10;width:100%;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))"></div>
  <button type="button" data-computer-preview-open aria-label="Open larger computer preview" style="position:absolute;inset:0;width:100%;height:100%;cursor:zoom-in;background:transparent;border:0"></button>
  </div>
@@ -97,8 +97,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const root=document.getElementById('project-computer');
      if(!root || root.dataset.bound) return;
      root.dataset.bound='true';
-     const previewSlot=root.closest('#task-details-panel')?.querySelector('[data-task-computer-preview-slot]');
-     const find=selector=>root.querySelector(selector)||previewSlot?.querySelector(selector);
+     const find=selector=>root.querySelector(selector);
      const preview=root.querySelector('[data-computer-preview]');
      const base='/projects/'+encodeURIComponent(root.dataset.computerProject)+'/computer';
      function computerUUID() {
@@ -152,7 +151,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       if(!currentState?.ready)return;
       status.textContent=connected?(mode==='control'?'You have control. This task’s computer tools are paused.':currentState.busy?'An agent is using the computer.':'Ready'):(connectionMessage||'Connecting to the desktop…');
      }
-     function visible(){const host=previewSlot?.parentElement||root;return !document.hidden && (dialog.open || host.getClientRects().length>0);}
+     function visible(){const host=root;return !document.hidden && (dialog.open || host.getClientRects().length>0);}
      function chord(key,code,{ctrl=false,shift=false,alt=false}={}){
       if(!inputActive())return;
       for(const [sym,name] of [[0xffeb,'MetaLeft'],[0xffec,'MetaRight'],[0xffe3,'ControlLeft'],[0xffe4,'ControlRight'],[0xffe1,'ShiftLeft'],[0xffe2,'ShiftRight'],[0xffe9,'AltLeft'],[0xffea,'AltRight']])rfb.sendKey(sym,name,false);
@@ -289,7 +288,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
        const state=await res.json();
        if(closed || previewDeleted || pending || closing || !visible() || version!==refreshVersion)return;
        const taskToggle=find('[data-task-computer-toggle]');if(taskToggle){taskToggle.checked=!!state.task_enabled;taskToggle.disabled=!state.project_enabled;}
-       if(previewSlot)previewSlot.hidden=!state.enabled;else preview.hidden=!state.enabled;
+       preview.hidden=!state.enabled;
 if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if(state.handoff_kind){recording=false;renderDemo();}find('[data-teach-open]').hidden=!!state.handoff_kind;if(state.handoff_kind)teach.hidden=true;
        if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;status.textContent='Starting or updating project computer… Building the image may take several minutes.';try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;await refresh();}catch(e){pending=false;status.textContent=e.message;find('[data-computer-action=ensure]').hidden=false;}return;}
        if(state.ready && dialog.open && takeoverRequested){takeoverRequested=false;if(!state.held){pending=true;controlPromise=fetch(scoped('/takeover'),{method:'POST'});try{const response=await controlPromise;if(!response.ok)throw Error('Could not take control. Close and reopen the viewer to retry.');state.held=true;}finally{controlPromise=null;pending=false;}if(!dialog.open||closing)return;await refresh();return;}}
@@ -313,7 +312,7 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
        pending=false;await refresh();
       }catch(e){status.textContent=e.message;pending=false;buttons.forEach(b=>b.disabled=false);}
      }
-     root.addEventListener('click',computerAction);previewSlot?.addEventListener('click',computerAction);
+     root.addEventListener('click',computerAction);
      const fileList=find('[data-computer-file-list]');
  const folder=find('[data-computer-folder]');
  const fileURL=path=>{const url=new URL(scoped('/files'),location.href);url.searchParams.set('path',path);return url;};
@@ -348,13 +347,12 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
  const taskToggle=find('[data-task-computer-toggle]');
  if(taskToggle)taskToggle.onchange=async()=>{
   taskToggle.disabled=true;pending=true;
-  try{const res=await fetch(scoped(taskToggle.checked?'/task-enable':'/task-disable'),{method:'POST'});if(!res.ok){const data=await res.json();throw Error(data.message||'Could not update task computer');}attemptedStart=false;if(!taskToggle.checked){disconnect();if(previewSlot)previewSlot.hidden=true;}}
+  try{const res=await fetch(scoped(taskToggle.checked?'/task-enable':'/task-disable'),{method:'POST'});if(!res.ok){const data=await res.json();throw Error(data.message||'Could not update task computer');}attemptedStart=false;if(!taskToggle.checked){disconnect();preview.hidden=true;}}
   catch(e){status.textContent=e.message;taskToggle.checked=!taskToggle.checked;}
   finally{pending=false;taskToggle.disabled=false;await refresh();}
  };
- if(previewSlot){previewSlot.append(preview,status,dialog);}
  restoreFrame();refresh();const timer=setInterval(refresh,5000);
-     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;previewSlot?.removeEventListener('click',computerAction);window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();clearInterval(timer);clearInterval(jobTimer);disconnect();observer.disconnect();}});
+     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();clearInterval(timer);clearInterval(jobTimer);disconnect();observer.disconnect();}});
      observer.observe(document.body,{childList:true,subtree:true});
     })();
    </script>
