@@ -315,7 +315,7 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 					fmt.Fprintln(&out, name+"/")
 					count++
 				}
-				if name != path && !p.Input.Recursive {
+				if p.Operation == "list_files" && name != path && !p.Input.Recursive {
 					return fs.SkipDir
 				}
 				return nil
