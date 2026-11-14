@@ -527,7 +527,7 @@ func localShellCommand(ctx context.Context, command, dir string) (*exec.Cmd, err
 	return cmd, nil
 }
 
-// Job is a non-consuming view for a desktop's live jobs panel and explicit job tools.
+// Job is a non-consuming view for a desktop's live jobs panel.
 // It shares execution, limits, cancellation and expiry with shell/process sessions.
 type Job struct{ session *processSession }
 
@@ -544,16 +544,6 @@ func (j *Job) Snapshot() map[string]any {
 		result["finished_at"] = s.completed
 	}
 	return result
-}
-func (m *processManager) StartJob(ctx context.Context, dir, command string, timeout int) (*Job, error) {
-	if strings.TrimSpace(command) == "" {
-		return nil, fmt.Errorf("command is required")
-	}
-	s, err := m.launch(ctx, dir, command, NormalizeBashTimeout(timeout))
-	if err != nil {
-		return nil, err
-	}
-	return &Job{s}, nil
 }
 func (m *processManager) Jobs(id string) []*Job {
 	m.mu.Lock()

@@ -7,6 +7,7 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -126,21 +127,19 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 		}
 		call(i, "computer", `{"action":"get_desktop_state"}`)
 	}
-	jobOutput := call(0, "computer_shell", `{"command":"printf ready; sleep 30","background":true,"timeout_seconds":60}`)
-	var job struct {
-		ID      string `json:"job_id"`
-		Running bool   `json:"running"`
+	jobOutput := call(0, "computer_shell", `{"command":"printf ready; sleep 30","yield_time_ms":250,"timeout":60}`)
+	session := regexp.MustCompile(`session_id: (sh_[a-f0-9]+)`).FindStringSubmatch(jobOutput)
+	if len(session) != 2 {
+		t.Fatal("session did not start", jobOutput)
 	}
-	if err := json.Unmarshal([]byte(jobOutput), &job); err != nil || job.ID == "" || !job.Running {
-		t.Fatal("background job did not start", jobOutput, err)
+	jobID := session[1]
+	_, handled, bad, err := second.Executor(t.Context(), "computer_job", json.RawMessage(fmt.Sprintf(`{"session_id":%q}`, jobID)))
+	if !handled || !bad || err == nil {
+		t.Fatal("session leaked into another task desktop")
 	}
-	otherJobs := call(1, "computer_job", `{"action":"list"}`)
-	if strings.Contains(otherJobs, job.ID) {
-		t.Fatal("job leaked into another task desktop")
-	}
-	jobRead := call(0, "computer_job", fmt.Sprintf(`{"action":"read","job_id":%q}`, job.ID))
-	if !strings.Contains(jobRead, job.ID) {
-		t.Fatal("job disappeared", jobRead)
+	jobRead := call(0, "computer_job", fmt.Sprintf(`{"session_id":%q}`, jobID))
+	if !strings.Contains(jobRead, jobID) {
+		t.Fatal("session disappeared", jobRead)
 	}
 	call(0, "request_browser_login", `{"url":"http://127.0.0.1:10001/json/version","expected_text":"Protocol-Version"}`)
 	if _, _, _, err := first.Executor(t.Context(), "project_browser", json.RawMessage(`{"action":"read"}`)); err == nil {
@@ -151,7 +150,7 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jobData, err := scoped.Jobs(t.Context(), project.ID, job.ID)
+	jobData, err := scoped.Jobs(t.Context(), project.ID, jobID)
 	if err != nil || strings.Contains(string(jobData), `"running":true`) {
 		t.Fatal("private login left a background command running", err, string(jobData))
 	}

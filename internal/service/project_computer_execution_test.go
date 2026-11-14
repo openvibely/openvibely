@@ -20,7 +20,7 @@ func TestComputerForwardsExecutionCancellation(t *testing.T) {
 			cancelled := make(chan string, 1)
 			_, s, p, task := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) {
 				switch {
-				case strings.HasSuffix(r.URL.Path, "/process-tools"), strings.HasSuffix(r.URL.Path, "/shell"):
+				case strings.HasSuffix(r.URL.Path, "/process-tools"):
 					var body map[string]any
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 					sent <- body["execution_id"].(string)
@@ -39,7 +39,7 @@ func TestComputerForwardsExecutionCancellation(t *testing.T) {
 			owner, cancel := context.WithCancel(llmcontracts.WithArtifactExecutionID(t.Context(), "execution-123"))
 			defer cancel()
 			rt := s.runtimeTools(owner, p.ID, task.ID)
-			_, handled, _, err := rt.Executor(owner, name, json.RawMessage(`{"command":"sleep 30","background":true}`))
+			_, handled, _, err := rt.Executor(owner, name, json.RawMessage(`{"command":"sleep 30","yield_time_ms":250}`))
 			require.NoError(t, err)
 			require.True(t, handled)
 			require.Equal(t, "execution-123", <-sent)

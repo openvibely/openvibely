@@ -7,13 +7,11 @@ import (
 	"github.com/openvibely/openvibely/pkg/agenttools"
 	"net/http"
 	"path/filepath"
-	"strings"
-	"time"
 )
 
 func shellRoutes(mux *http.ServeMux) {
 	manager := agenttools.NewProcessManager(shellCommand)
-	executions := processRoutes(mux, manager)
+	processRoutes(mux, manager)
 	mux.HandleFunc("GET /jobs", func(w http.ResponseWriter, r *http.Request) {
 		values := []map[string]any{}
 		for _, j := range manager.Jobs(r.URL.Query().Get("job_id")) {
@@ -50,73 +48,6 @@ func shellRoutes(mux *http.ServeMux) {
 			}
 		}
 		json.NewEncoder(w).Encode(map[string]bool{"cancelled": true})
-	})
-	mux.HandleFunc("POST /shell", func(w http.ResponseWriter, r *http.Request) {
-		var args struct {
-			Command     string `json:"command"`
-			ExecutionID string `json:"execution_id"`
-			Directory   string `json:"working_directory"`
-			Timeout     int    `json:"timeout_seconds"`
-			Background  bool   `json:"background"`
-		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&args) != nil || strings.TrimSpace(args.Command) == "" {
-			http.Error(w, "Provide a command", 400)
-			return
-		}
-		path, err := homePath(args.Directory)
-		if err != nil {
-			http.Error(w, "Invalid directory", 400)
-			return
-		}
-		parent := r.Context()
-		if args.Background {
-			parent, err = executions.owner(args.ExecutionID)
-			if err != nil {
-				http.Error(w, err.Error(), 409)
-				return
-			}
-		}
-		timeout := agenttools.NormalizeBashTimeout(args.Timeout)
-		job, err := manager.StartJob(agenttools.WithProcessLifetime(parent), filepath.Join(computerHome(), path), args.Command, timeout)
-		if err != nil {
-			http.Error(w, err.Error(), 409)
-			return
-		}
-		if args.Background {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(job.Snapshot())
-			return
-		}
-		defer job.Cancel()
-		if r.Header.Get("Accept") != "application/x-ndjson" {
-			<-job.Done()
-			json.NewEncoder(w).Encode(job.Snapshot())
-			return
-		}
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		enc := json.NewEncoder(w)
-		flush := http.NewResponseController(w)
-		tick := time.NewTicker(200 * time.Millisecond)
-		defer tick.Stop()
-		for {
-			value := job.Snapshot()
-			value["type"] = "output"
-			if value["running"] == false {
-				value["type"] = "result"
-			}
-			if enc.Encode(value) != nil || flush.Flush() != nil {
-				return
-			}
-			if value["running"] == false {
-				return
-			}
-			select {
-			case <-job.Done():
-			case <-tick.C:
-			case <-r.Context().Done():
-				return
-			}
-		}
 	})
 }
 

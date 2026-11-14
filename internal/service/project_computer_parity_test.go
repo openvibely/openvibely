@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 
 	"encoding/json"
@@ -194,30 +193,6 @@ func TestComputerToolRoutingAndAttachments(t *testing.T) {
 	require.Error(t, err)
 	_, err = scoped.attachmentTransfer(t.Context(), p.ID, data)
 	require.Error(t, err)
-}
-func TestComputerShellStreamRequiresFinalResult(t *testing.T) {
-	for _, complete := range []bool{true, false} {
-		t.Run(map[bool]string{true: "complete", false: "interrupted"}[complete], func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, "application/x-ndjson", r.Header.Get("Accept"))
-				w.Header().Set("Content-Type", "application/x-ndjson")
-				io.WriteString(w, "{\"type\":\"output\",\"output\":\"building\"}\n")
-				if complete {
-					io.WriteString(w, "{\"type\":\"result\",\"output\":\"built\",\"exit_code\":0}\n")
-				}
-			}))
-			defer server.Close()
-			s := &ProjectComputerService{client: server.Client()}
-			out, bad, err := s.shell(context.Background(), ComputerConnection{Endpoint: server.URL}, []byte(`{"command":"build"}`))
-			if complete {
-				require.NoError(t, err)
-				require.False(t, bad)
-				require.Contains(t, out, "built")
-			} else {
-				require.Error(t, err)
-			}
-		})
-	}
 }
 func TestComputerChromeGrantScopeRevocationAndCleanup(t *testing.T) {
 	var cleared int

@@ -326,7 +326,15 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 	}
 	var releaseOnce sync.Once
 	return &llmcontracts.RuntimeTools{Definitions: defs, SkipDefaultTools: routed, Executor: func(call context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		explicitProcess := name == "computer_shell" || name == "computer_job"
 		processTool := ""
+		switch name {
+		case "computer_shell":
+			processTool = "shell"
+		case "computer_job":
+			processTool = "process"
+			name = "computer_shell"
+		}
 		if routed {
 			switch name {
 			case "bash", "Bash", "shell", "process":
@@ -337,7 +345,7 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 				name = "computer_files"
 			}
 		}
-		if name != "computer" && name != "computer_shell" && name != "computer_files" && name != "release_computer" && name != "project_browser" && name != "request_browser_login" && name != "request_chrome_login" && name != "request_computer_help" && name != "computer_transfer" && name != "computer_job" && name != "computer_chrome_grant" && name != "computer_attachment" {
+		if name != "computer" && name != "computer_shell" && name != "computer_files" && name != "release_computer" && name != "project_browser" && name != "request_browser_login" && name != "request_chrome_login" && name != "request_computer_help" && name != "computer_transfer" && name != "computer_chrome_grant" && name != "computer_attachment" {
 			return "", false, false, nil
 		}
 		if name != "release_computer" {
@@ -420,6 +428,12 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 			if err := json.Unmarshal(data, &result); err != nil {
 				return "", true, true, err
 			}
+			if explicitProcess {
+				// Keep follow-up instructions on the explicit computer target in local mode.
+				if prefix, ok := strings.CutSuffix(result.Output, "\nnext: call process with this session_id to read output or send input\n[/process]"); ok {
+					result.Output = prefix + "\nnext: call computer_job with this session_id to read output or send input\n[/process]"
+				}
+			}
 			if result.Error != "" {
 				return result.Output, true, true, errors.New(result.Error)
 			}
@@ -460,27 +474,6 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 			}
 			count, err := s.UseChromeGrant(call, projectID, args.ID)
 			data, _ := json.Marshal(map[string]int{"imported": count})
-			return string(data), true, err != nil, err
-		}
-		if name == "computer_job" {
-			var args struct {
-				Action string `json:"action"`
-				ID     string `json:"job_id"`
-			}
-			if err := json.Unmarshal(input, &args); err != nil {
-				return "", true, true, err
-			}
-			if args.Action == "cancel" {
-				if args.ID == "" {
-					return "", true, true, errors.New("job_id is required")
-				}
-				err := s.cancelJobs(call, projectID, args.ID)
-				return "Job cancelled", true, err != nil, err
-			}
-			if args.Action != "list" && args.Action != "read" {
-				return "", true, true, errors.New("choose list, read or cancel")
-			}
-			data, err := s.Jobs(call, projectID, args.ID)
 			return string(data), true, err != nil, err
 		}
 		path := "/action"
@@ -540,27 +533,6 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 		}
 		if name == "computer_files" {
 			path = "/native-files"
-		}
-		if name == "computer_shell" {
-			var args struct {
-				Command     string `json:"command"`
-				ExecutionID string `json:"execution_id"`
-				Directory   string `json:"working_directory"`
-				Timeout     int    `json:"timeout_seconds"`
-				Background  bool   `json:"background"`
-			}
-			if err = json.Unmarshal(input, &args); err != nil {
-				return "", true, true, err
-			}
-			if args.Directory == "" {
-				args.Directory = "Files"
-			}
-			args.ExecutionID = executionID
-			args.Timeout = agenttools.NormalizeBashTimeout(args.Timeout)
-			input, _ = json.Marshal(args)
-			out, bad, err := s.shell(call, conn, input)
-
-			return out, true, bad, err
 		}
 		data, err := s.request(call, conn, "POST", path, input)
 		if err != nil {

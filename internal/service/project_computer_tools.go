@@ -2,7 +2,9 @@ package service
 
 import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"github.com/openvibely/openvibely/pkg/toolschema"
+	"strings"
 )
 
 func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
@@ -79,29 +81,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 				Required:             []string{"action"},
 				AdditionalProperties: toolschema.Pointer(false),
 			}},
-		{Name: "computer_shell",
-			Description: "Execute a Linux command inside the project computer, separate from the coding worktree. Files and browser profiles persist. Output is visible live in the task panel. Set background=true for a job that survives the tool call; read or cancel it with computer_job. Default timeout is 120 seconds; maximum is 600 seconds, matching shell.",
-			Access:      llmcontracts.RuntimeToolAccessWrite,
-			Schema: &toolschema.Schema{
-				Type: "object",
-				Properties: map[string]*toolschema.Schema{
-					"background": &toolschema.Schema{Type: "boolean"},
-					"command": &toolschema.Schema{
-						Type: "string",
-					},
-					"working_directory": &toolschema.Schema{
-						Type:        "string",
-						Description: "Path inside the task desktop home; defaults to Files.",
-					},
-					"timeout_seconds": &toolschema.Schema{
-						Type:    "integer",
-						Minimum: toolschema.Number("1"),
-						Maximum: toolschema.Number("600"),
-					},
-				},
-				Required:             []string{"command"},
-				AdditionalProperties: toolschema.Pointer(false),
-			}},
+		computerProcessDefinition("computer_shell", "shell"),
 		{Name: "computer_files",
 			Description: "Read, write, edit, list or search files inside the project computer. Relative paths use /home/ubuntu/Files, separate from your coding worktree.",
 			Access:      llmcontracts.RuntimeToolAccessWrite,
@@ -216,7 +196,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 				Required:             []string{"action"},
 				AdditionalProperties: toolschema.Pointer(false),
 			}},
-		{Name: "computer_job", Description: "List, read current output, or cancel a job in this task computer. Job IDs only exist in this desktop and are lost when it restarts.", Access: llmcontracts.RuntimeToolAccessWrite, Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"action": {Type: "string", Enum: []any{"list", "read", "cancel"}}, "job_id": {Type: "string"}}, Required: []string{"action"}, AdditionalProperties: toolschema.Pointer(false)}},
+		computerProcessDefinition("computer_job", "process"),
 		{Name: "computer_chrome_grant", Description: "List approved Chrome grants or apply an unexpired grant to this task browser. Task grants are only usable by their task; project grants are usable within this project. Cookie values are never returned.", Access: llmcontracts.RuntimeToolAccessWrite, Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"action": {Type: "string", Enum: []any{"list", "use"}}, "grant_id": {Type: "string"}}, Required: []string{"action"}, AdditionalProperties: toolschema.Pointer(false)}},
 		{Name: "computer_attachment", Description: "List task thread attachments, copy one to computer Files, or attach a computer file to this task thread. Max 25 MB; existing computer files are preserved.", Access: llmcontracts.RuntimeToolAccessWrite, Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"action": {Type: "string", Enum: []any{"list", "to_computer", "from_computer"}}, "attachment_kind": {Type: "string", Enum: []any{"task", "thread"}}, "attachment_id": {Type: "string"}, "computer_path": {Type: "string"}}, Required: []string{"action"}, AdditionalProperties: toolschema.Pointer(false)}},
 		computerHandoffDefinition("request_browser_login", "Request private sign-in. Specify the protected destination and visible text proving access. End this turn; the user completion verifies access and resumes this task.", true),
@@ -233,4 +213,21 @@ func computerHandoffDefinition(name, description string, login bool) llmcontract
 		required = append(required, "url", "expected_text")
 	}
 	return llmcontracts.RuntimeToolDefinition{Name: name, Description: description, Access: llmcontracts.RuntimeToolAccessWrite, Schema: &toolschema.Schema{Type: "object", Properties: props, Required: required, AdditionalProperties: toolschema.Pointer(false)}}
+}
+
+// Explicit computer tools share the standard schemas, including future changes.
+func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDefinition {
+	for _, d := range agenttools.Definitions() {
+		if d.Name == standard {
+			description := strings.Split(strings.Split(d.Description, " Selected shell:")[0], " Shell unavailable:")[0]
+			if name == "computer_shell" {
+				description = strings.ReplaceAll(description, "process", "computer_job")
+			}
+			if name == "computer_job" {
+				description = strings.ReplaceAll(description, "shell", "computer_shell")
+			}
+			return llmcontracts.RuntimeToolDefinition{Name: name, Description: "Always runs in this task computer under Files, using isolated Linux bash. " + description, Schema: d.Schema, Access: llmcontracts.RuntimeToolAccessWrite}
+		}
+	}
+	panic("unknown standard process tool: " + standard)
 }

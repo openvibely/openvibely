@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -74,17 +73,7 @@ func TestComputerProcessHTTPUsesSharedManager(t *testing.T) {
 		return result.Output, nil
 	}
 	tooltest.Processes(t, execute)
-	// A job started through the explicit entry point can be controlled by process.
-	job, err := m.StartJob(context.Background(), filepath.Join(home, "Files"), "read -r x; printf 'explicit:%s' \"$x\"", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := job.Snapshot()["job_id"].(string)
-	data, _ := json.Marshal(map[string]any{"session_id": id, "input": "input\n", "close_stdin": true})
-	out, err := execute(t.Context(), "process", data)
-	if err != nil || !strings.Contains(out, "explicit:input") {
-		t.Fatalf("%s: %v", out, err)
-	}
+
 }
 
 func TestSharedSessionsCannotBypassComputerIsolation(t *testing.T) {
@@ -97,9 +86,7 @@ func TestSharedSessionsCannotBypassComputerIsolation(t *testing.T) {
 	if _, err := manager.Execute(t.Context(), t.TempDir(), "shell", input); err == nil {
 		t.Fatal("shell bypassed isolation")
 	}
-	if _, err := manager.StartJob(t.Context(), t.TempDir(), "touch "+marker, 10); err == nil {
-		t.Fatal("explicit job bypassed isolation")
-	}
+
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("command ran outside isolation")
 	}
