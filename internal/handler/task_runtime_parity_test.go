@@ -88,6 +88,10 @@ func TestInitialTaskRuntimeMatchesFollowupPolicy(t *testing.T) {
 		task.SwarmRole = models.SwarmRoleParent
 		task.SwarmStatus = "planning"
 	})
+	// Match the normal initial-run lifecycle without submitting to the worker.
+	// Runtime tool lookups recover executions whose owning task is inactive.
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	task.Category = models.CategoryActive
 	_, err := h.llmSvc.ExecuteTaskWithAgent(ctx, *task, *agent)
 	require.NoError(t, err)
 	mu.Lock()
