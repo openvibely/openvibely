@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
@@ -149,6 +151,37 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 	}
 	if graph == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "automation not found")
+	}
+	modelIDs := make(map[int]string)
+	for i, node := range graph.Nodes {
+		var config struct {
+			ModelConfigID string `json:"model_config_id"`
+		}
+		if json.Unmarshal([]byte(node.ConfigJSON), &config) == nil {
+			if id := strings.TrimSpace(config.ModelConfigID); id != "" && id != "default" {
+				modelIDs[i] = id
+			}
+		}
+	}
+	if h.llmConfigRepo != nil && len(modelIDs) > 0 {
+		configs, err := h.llmConfigRepo.ListPickerOptions(ctx)
+		if err != nil {
+			return err
+		}
+		labels := make(map[string]string, len(configs))
+		for _, config := range configs {
+			label := strings.TrimSpace(config.Name)
+			model := strings.TrimSpace(config.Model)
+			if label == "" {
+				label = model
+			} else if model != "" {
+				label += " · " + model
+			}
+			labels[config.ID] = label
+		}
+		for i, id := range modelIDs {
+			graph.Nodes[i].ModelLabel = labels[id]
+		}
 	}
 	h.automationLiveViewTracker.MarkViewed(projectID, graph.Automation.ID)
 	deleteAvailable := true
