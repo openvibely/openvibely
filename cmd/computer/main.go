@@ -248,19 +248,9 @@ func desktopServer() http.Handler {
 	browserRoutes(mux)
 
 	viewers := &viewerConnections{}
-	for route, port := range map[string]string{"/vnc/": computerPort(4), "/rfb-view": computerPort(4), "/rfb-control": computerPort(5)} {
-		target, _ := url.Parse("http://127.0.0.1:" + port)
-		proxy := httputil.NewSingleHostReverseProxy(target)
-		original := proxy.Director
+	for route, port := range map[string]string{"/rfb-view": computerPort(4), "/rfb-control": computerPort(5)} {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
-			if route != "/vnc/" {
-				viewers.proxy(w, r, "ws://"+target.Host+"/websockify")
-				return
-			}
-			original(r)
-			r.Host = target.Host
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/vnc")
-			proxy.ServeHTTP(w, r)
+			viewers.proxy(w, r, "ws://127.0.0.1:"+port+"/websockify")
 		})
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {

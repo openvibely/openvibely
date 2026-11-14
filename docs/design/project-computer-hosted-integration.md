@@ -172,6 +172,11 @@ never read. Viewer registration and lookup already scope entries by task ID in
 the map key. Every remaining computer-store interface method has a production
 caller.
 
+Removed the obsolete `/vnc/` static viewer proxy, websockify's static-file
+serving option, and the container's duplicate `novnc` package. The UI loads
+OpenVibely's bundled noVNC module and uses the authenticated `/rfb-view` and
+`/rfb-control` connections, which remain active.
+
 Staticcheck U1000 checks of the relevant Go packages and Linux bridge found no
 additional computer-specific unused declarations. This does not prove every
 runtime branch is exercised. The hosted provisioner remains reachable through

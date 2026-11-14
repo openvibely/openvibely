@@ -54,7 +54,7 @@ xdpyinfo >/dev/null 2>&1 || exit 1
 # Keep both viewing and control streams on the same low-latency settings.
 run_desktop x11vnc -noshm -display "$DISPLAY" -localhost -rfbport "$vnc" -viewonly -forever -shared -nopw -nowait_bog -wait 10 -defer 0 >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/vnc-view.log" 2>&1 &
 run_desktop x11vnc -noshm -display "$DISPLAY" -localhost -rfbport "$control" -forever -shared -nopw -nowait_bog -wait 10 -defer 0 >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/vnc-control.log" 2>&1 &
-run_desktop websockify --web=/usr/share/novnc "127.0.0.1:$view_ws" "127.0.0.1:$vnc" >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/websockify-view.log" 2>&1 &
+run_desktop websockify "127.0.0.1:$view_ws" "127.0.0.1:$vnc" >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/websockify-view.log" 2>&1 &
 run_desktop websockify "127.0.0.1:$control_ws" "127.0.0.1:$control" >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/websockify-control.log" 2>&1 &
 run_desktop dbus-run-session -- xfce4-session >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/xfce.log" 2>&1 &
 chrome=$(node -e 'console.log(require("/opt/browser/node_modules/playwright").chromium.executablePath())')
