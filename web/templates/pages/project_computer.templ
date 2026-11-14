@@ -107,18 +107,21 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      root.querySelector('[data-computer-preview-open]').onclick=openViewer;
      root.querySelector('[data-computer-close]').onclick=()=>{dialog.close();finishViewer();};
      dialog.addEventListener('close',finishViewer);
-     async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;takeoverRequested=false;closing=true;recording=false;renderDemo();disconnect(true);for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='220px';expand.focus();try{if(controlPromise)await controlPromise;const res=await fetch(scoped('/status'),{cache:'no-store'});if(!res.ok)throw Error('Could not check computer control. Reopen the viewer and try exiting again.');const state=await res.json();if((state.held||state.takeover_pending)&&!state.handoff_kind){const released=await fetch(scoped('/release'),{method:'POST'});if(!released.ok)throw Error('Could not return computer control. Reopen the viewer and try exiting again.');}}catch(e){status.textContent=e.message;return;}finally{closing=false;}await refresh();return true;}
+     async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;takeoverRequested=false;closing=true;recording=false;renderDemo();disconnect();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='220px';expand.focus();try{if(controlPromise)await controlPromise;const res=await fetch(scoped('/status'),{cache:'no-store'});if(!res.ok)throw Error('Could not check computer control. Reopen the viewer and try exiting again.');const state=await res.json();if((state.held||state.takeover_pending)&&!state.handoff_kind){const released=await fetch(scoped('/release'),{method:'POST'});if(!released.ok)throw Error('Could not return computer control. Reopen the viewer and try exiting again.');}}catch(e){status.textContent=e.message;return;}finally{closing=false;}await refresh();return true;}
      const status=root.querySelector('[data-computer-status]');
      const screen=root.querySelector('[data-computer-screen]');
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, takeoverRequested=false, closing=false, controlPromise=null, retained=null, frameTimer=null;
+     const previewCache=window.__ovComputerPreviewCache ||= new Map();
+     const previewKey=JSON.stringify([root.dataset.computerProject,root.dataset.computerTask]);
      const clipboardButton=root.querySelector('[data-computer-clipboard]');
      const teach=root.querySelector('[data-computer-teach]');
      const teachNote=root.querySelector('[data-teach-status]');
      let previousCapture=null;
      let connected=false, connectionMessage='', currentState=null, inViewport=true, clipboard='', ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[], savingDemo=false, generationAbort=null, workflowID="";
-     function inputActive(){return connected && mode==='control' && dialog.open && !document.hidden && !closing;}
+     function inputActive(){return connected && !retained && mode==='control' && dialog.open && !document.hidden && !closing;}
      function reportConnection(){
+      if(retained){status.textContent='Reconnecting… Showing last preview.';return;}
       if(!currentState?.ready)return;
       status.textContent=connected?(mode==='control'?'You have control. This task’s computer tools are paused.':currentState.busy?'An agent is using the computer.':'Ready'):(connectionMessage||'Connecting to the desktop…');
      }
@@ -192,27 +195,46 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      function visibilityChanged(){if(!visible()){if(dialog.open && !closing)takeoverRequested=true;++refreshVersion;recording=false;renderDemo();disconnect();}else refresh();}
      document.addEventListener('visibilitychange',visibilityChanged);
      const viewportObserver=new IntersectionObserver(entries=>{inViewport=entries[0].isIntersecting;visibilityChanged()});viewportObserver.observe(root.querySelector('[data-computer-preview]'));
+     // Only capture on disconnect; keep at most 12 task previews, each at most 640x400.
+     function rememberFrame(source){
+      const frame=document.createElement('canvas'),scale=Math.min(1,640/source.width,400/source.height);
+      frame.width=Math.max(1,Math.round(source.width*scale));frame.height=Math.max(1,Math.round(source.height*scale));
+      frame.getContext('2d').drawImage(source,0,0,frame.width,frame.height);
+      previewCache.delete(previewKey);previewCache.set(previewKey,frame);
+      while(previewCache.size>12)previewCache.delete(previewCache.keys().next().value);
+     }
+     function showFrame(frame){
+      retained?.remove();retained=frame;frame.dataset.retainedFrame='';frame.setAttribute('aria-hidden','true');
+      screen.style.position='relative';frame.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1;background:#111';
+      screen.append(frame);reportConnection();
+     }
+     function restoreFrame(){
+      const saved=previewCache.get(previewKey);if(!saved)return;
+      previewCache.delete(previewKey);previewCache.set(previewKey,saved);
+      const frame=document.createElement('canvas');frame.width=saved.width;frame.height=saved.height;
+      frame.getContext('2d').drawImage(saved,0,0);showFrame(frame);
+     }
      // Keep the last painted desktop while the authorized stream changes modes.
      function retainFrame(){
+      if(retained)return;
       const source=screen.querySelector('canvas:not([data-retained-frame])');
       if(!source || !source.width || !source.height)return;
       const frame=document.createElement('canvas');frame.width=source.width;frame.height=source.height;
       try{const ctx=source.getContext('2d');if(![.25,.5,.75].some(v=>ctx.getImageData(Math.floor(source.width*v),Math.floor(source.height*v),1,1).data[3]))return;frame.getContext('2d').drawImage(source,0,0);}catch{return;}
-      retained?.remove();retained=frame;frame.dataset.retainedFrame='';frame.setAttribute('aria-hidden','true');
-      screen.style.position='relative';frame.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1;background:#111';
+      rememberFrame(frame);showFrame(frame);
      }
      function revealFrame(epoch){
       clearTimeout(frameTimer);
       if(closed || epoch!==generation || !retained)return;
       const canvas=screen.querySelector('canvas:not([data-retained-frame])');
-      if(canvas?.width && canvas?.height){try{if([.25,.5,.75].some(v=>canvas.getContext('2d').getImageData(Math.floor(canvas.width*v),Math.floor(canvas.height*v),1,1).data[3])){retained.remove();retained=null;return;}}catch{retained.remove();retained=null;return;}}
+      if(canvas?.width && canvas?.height){try{if([.25,.5,.75].some(v=>canvas.getContext('2d').getImageData(Math.floor(canvas.width*v),Math.floor(canvas.height*v),1,1).data[3])){retained.remove();retained=null;reportConnection();return;}}catch{retained.remove();retained=null;reportConnection();return;}}
       frameTimer=setTimeout(()=>revealFrame(epoch),50);
      }
      async function viewer(held,state){
       held=held && dialog.open;
       const next=held?'control':'view';
       if(rfb && mode===next)return;
-      disconnect(true);mode=next;
+      disconnect();mode=next;
       const epoch=++generation;
       const {default:RFB}=await import(root.dataset.computerViewer);
       if(closed || epoch!==generation)return;
@@ -224,9 +246,9 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;connectionMessage='';reportConnection();if(held)installKeyboard();});
       rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;clipboard=event.detail.text;clipboardButton.disabled=!clipboard;if(document.hasFocus())navigator.clipboard?.writeText(clipboard).catch(()=>{status.textContent='Use Copy clipboard to copy the remote selection.';});});
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;connectionMessage='Desktop authentication failed. Reconnecting…';reportConnection();}});
-      rfb.addEventListener('disconnect',event=>{if(epoch===generation){connected=false;rfb=null;mode='';clipboard='';clipboardButton.disabled=true;recording=false;renderDemo();connectionMessage='Desktop disconnected. Reconnecting…';reportConnection();}});
+      rfb.addEventListener('disconnect',event=>{if(epoch===generation){retainFrame();connected=false;rfb=null;mode='';clipboard='';clipboardButton.disabled=true;recording=false;renderDemo();connectionMessage='Desktop disconnected. Reconnecting…';reportConnection();}});
      }
-     function disconnect(preserve=false){++generation;connected=false;clipboard='';clipboardButton.disabled=true;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(preserve)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(preserve && retained)screen.append(retained);else{retained?.remove();retained=null;}}
+     function disconnect(){++generation;connected=false;clipboard='';clipboardButton.disabled=true;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
      async function refresh(){
       if(closed || pending || closing)return;
  if(!visible()){disconnect();return;}
@@ -281,7 +303,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  document.addEventListener('computer-setting-changed',changed);
  document.addEventListener('computer-tab-change',changed);
  refresh();const timer=setInterval(refresh,5000);
-     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();clearInterval(timer);clearInterval(jobTimer);disconnect();observer.disconnect();}});
+     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();clearInterval(timer);clearInterval(jobTimer);disconnect();observer.disconnect();}});
      observer.observe(document.body,{childList:true,subtree:true});
     })();
    </script>
