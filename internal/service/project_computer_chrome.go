@@ -62,35 +62,6 @@ func (s *ProjectComputerService) ChromeProfiles() ([]string, error) {
 	}
 	return profiles, nil
 }
-func (s *ProjectComputerService) ChromeSites(ctx context.Context, profile string) ([]string, error) {
-	if !s.ChromeImportAvailable() {
-		return nil, errors.New("Chrome import requires local macOS")
-	}
-	root, err := chromeRoot()
-	if err != nil {
-		return nil, err
-	}
-	db, err := chromeDB(root, profile)
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-	rows, err := db.QueryContext(ctx, `SELECT DISTINCT host_key FROM cookies WHERE expires_utc=0 OR expires_utc>? ORDER BY host_key LIMIT 2000`, (time.Now().Unix()+11644473600)*1000000)
-	if err != nil {
-		return nil, errors.New("Chrome cookies unavailable; close Chrome and retry")
-	}
-	defer rows.Close()
-	sites := []string{}
-	for rows.Next() {
-		var site string
-		if err := rows.Scan(&site); err != nil {
-			return nil, errors.New("could not read Chrome sites")
-		}
-		sites = append(sites, site)
-	}
-	return sites, rows.Err()
-}
-
 func decryptChromeCookie(encrypted, key []byte, host string, version int) (string, error) {
 	if len(encrypted) < 19 || string(encrypted[:3]) != "v10" || (len(encrypted)-3)%aes.BlockSize != 0 {
 		return "", fmt.Errorf("unsupported cookie encryption")
