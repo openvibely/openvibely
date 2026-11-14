@@ -89,7 +89,16 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      if(!root || root.dataset.bound) return;
      root.dataset.bound='true';
      const base='/projects/'+encodeURIComponent(root.dataset.computerProject)+'/computer';
-     const viewerID=crypto.randomUUID();
+     function computerUUID() {
+      const cryptoAPI = globalThis.crypto;
+      if (typeof cryptoAPI.randomUUID === 'function') return cryptoAPI.randomUUID();
+      const bytes = cryptoAPI.getRandomValues(new Uint8Array(16));
+      bytes[6] = (bytes[6] & 15) | 64;
+      bytes[8] = (bytes[8] & 63) | 128;
+      const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+      return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+     }
+     const viewerID=computerUUID();
      const scoped=path=>base+path+'?viewer_id='+viewerID+(root.dataset.computerTask?'&task_id='+encodeURIComponent(root.dataset.computerTask):'');
      const dialog=root.querySelector('[data-computer-dialog]');
      const homes=[];

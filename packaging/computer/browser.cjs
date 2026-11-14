@@ -3,11 +3,20 @@ const {chromium}=require('/opt/browser/node_modules/playwright');
 const {createHash}=require('node:crypto');
 async function snapshot(page) {
  const view=await page.evaluate(()=>{
-  const state=window.__ovBrowserRefs ||= {nodes:new Map(),ids:new WeakMap(),document:crypto.randomUUID()};
+function computerUUID() {
+ const cryptoAPI = globalThis.crypto;
+ if (typeof cryptoAPI.randomUUID === 'function') return cryptoAPI.randomUUID();
+ const bytes = cryptoAPI.getRandomValues(new Uint8Array(16));
+ bytes[6] = (bytes[6] & 15) | 64;
+ bytes[8] = (bytes[8] & 63) | 128;
+ const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+ return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+}
+  const state=window.__ovBrowserRefs ||= {nodes:new Map(),ids:new WeakMap(),document:computerUUID()};
   const secret=n=>/password|one[- ]?time|verification[ -]?code|security[ -]?code|passcode|\bpin\b|\btotp\b|\botp\b|\b2fa\b/i.test([n.type,n.autocomplete,n.name,n.id,n.getAttribute('aria-label'),n.getAttribute('placeholder'),...[...(n.labels||[])].map(l=>l.innerText)].join(' '));
   const active=new Map();
   const controls=[...document.querySelectorAll('a,button,input,select,textarea,[role="button"],[contenteditable="true"]')].filter(n=>n.getClientRects().length).slice(0,100).map(n=>{
-   let ref=state.ids.get(n);if(!ref){ref=crypto.randomUUID();state.ids.set(n,ref);}active.set(ref,n);
+   let ref=state.ids.get(n);if(!ref){ref=computerUUID();state.ids.set(n,ref);}active.set(ref,n);
    return {ref,tag:n.tagName.toLowerCase(),text:(n.innerText||n.getAttribute('aria-label')||'').slice(0,200),id:n.id,name:n.getAttribute('name'),type:n.getAttribute('type'),href:n.getAttribute('href'),disabled:!!n.disabled,sensitive:secret(n)};
   });
   state.nodes=active;
