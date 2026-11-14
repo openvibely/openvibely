@@ -42,7 +42,7 @@ func TaskDetailPanel() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div data-task-computer-preview-slot hidden style=\"padding:24px 24px 12px;flex-shrink:0\"></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div data-task-computer-preview-slot hidden style=\"padding:8px 12px 0;flex-shrink:0\"></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
