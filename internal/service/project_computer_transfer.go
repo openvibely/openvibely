@@ -48,7 +48,7 @@ func (s *ProjectComputerService) transfer(ctx context.Context, id, direction, lo
 	var data []byte
 	method := http.MethodGet
 	if direction == "to_computer" {
-		file, err := root.Open(local)
+		file, err := openComputerTransferSource(root, local)
 		if err != nil {
 			return "", err
 		}
@@ -158,4 +158,27 @@ func (s *ProjectComputerService) HumanFiles(ctx context.Context, id, path string
 		return nil
 	})
 	return data, contentType, err
+}
+
+// Check before opening to avoid touching special files, then recheck the opened
+// descriptor. Nonblocking open on Unix also protects against FIFO replacement
+// between the initial stat and open.
+func openComputerTransferSource(root *os.Root, path string) (*os.File, error) {
+	info, err := root.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > computerTransferLimit {
+		return nil, errors.New("choose a regular file up to 25 MB")
+	}
+	f, err := openComputerTransferFile(root, path)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := f.Stat()
+	if err != nil || !opened.Mode().IsRegular() || opened.Size() > computerTransferLimit || !os.SameFile(info, opened) {
+		f.Close()
+		return nil, errors.New("choose an unchanged regular file up to 25 MB")
+	}
+	return f, nil
 }
