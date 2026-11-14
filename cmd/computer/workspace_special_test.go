@@ -64,7 +64,11 @@ func TestNativeFilesRejectAndSkipNamedPipes(t *testing.T) {
 	for _, operation := range []string{"grep_search", "list_files"} {
 		t.Run(operation, func(t *testing.T) {
 			p := nativeFileRequest{Operation: operation}
-			p.Input.Pattern = "needle"
+			if operation == "grep_search" {
+				p.Input.Pattern = "needle"
+			} else {
+				p.Input.Pattern = "*.txt"
+			}
 			p.Input.Recursive = true
 			var out string
 			err := promptly(t, func() error { var err error; out, err = nativeFileOperation(context.Background(), root, p); return err })

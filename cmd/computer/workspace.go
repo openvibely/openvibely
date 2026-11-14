@@ -277,6 +277,11 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 				return "", err
 			}
 		}
+		if p.Operation == "list_files" && p.Input.Pattern != "" {
+			if _, err := filepath.Match(p.Input.Pattern, ""); err != nil {
+				return "", err
+			}
+		}
 		var out strings.Builder
 		count, visited := 0, 0
 		err = fs.WalkDir(root.FS(), filepath.ToSlash(path), func(name string, d fs.DirEntry, walkErr error) error {
@@ -296,7 +301,20 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 				}
 				return nil
 			}
+			if p.Operation == "list_files" && name != path {
+				rel, _ := filepath.Rel(path, name)
+				if strings.Count(rel, string(filepath.Separator)) > 4 {
+					if d.IsDir() {
+						return fs.SkipDir
+					}
+					return nil
+				}
+			}
 			if d.IsDir() {
+				if p.Operation == "list_files" && name != path {
+					fmt.Fprintln(&out, name+"/")
+					count++
+				}
 				if name != path && !p.Input.Recursive {
 					return fs.SkipDir
 				}
@@ -312,6 +330,12 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 				}
 			}
 			if pattern == nil {
+				if p.Input.Pattern != "" {
+					match, _ := filepath.Match(p.Input.Pattern, d.Name())
+					if !match {
+						return nil
+					}
+				}
 				fmt.Fprintln(&out, name)
 				count++
 				return nil
