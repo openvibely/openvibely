@@ -52,7 +52,7 @@ func shellRoutes(mux *http.ServeMux) {
 }
 
 // Standard names and explicit computer tools use the same task-local manager.
-func processRoutes(mux *http.ServeMux, manager *agenttools.ProcessManager) *computerExecutions {
+func processRoutes(mux *http.ServeMux, manager *agenttools.ProcessManager) {
 	executions := &computerExecutions{entries: make(map[string]*computerExecution), manager: manager}
 	mux.HandleFunc("POST /executions/cancel", func(w http.ResponseWriter, r *http.Request) {
 		var p struct {
@@ -91,5 +91,4 @@ func processRoutes(mux *http.ServeMux, manager *agenttools.ProcessManager) *comp
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	})
-	return executions
 }
