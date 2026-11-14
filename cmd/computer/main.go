@@ -240,8 +240,6 @@ func computerPort(offset int) string {
 			return "6080"
 		case 5:
 			return "6081"
-		case 6:
-			return "9223"
 		}
 	}
 	return strconv.Itoa(base + offset)
@@ -251,7 +249,6 @@ func desktopServer() http.Handler {
 	workspaceRoutes(mux)
 	browserRoutes(mux)
 
-	publicBrowserProxy(mux)
 	viewers := &viewerConnections{}
 	for route, port := range map[string]string{"/vnc/": computerPort(4), "/rfb-view": computerPort(4), "/rfb-control": computerPort(5)} {
 		target, _ := url.Parse("http://127.0.0.1:" + port)
@@ -264,11 +261,7 @@ func desktopServer() http.Handler {
 			}
 			original(r)
 			r.Host = target.Host
-			if route == "/vnc/" {
-				r.URL.Path = strings.TrimPrefix(r.URL.Path, "/vnc")
-			} else {
-				r.URL.Path = "/websockify"
-			}
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/vnc")
 			proxy.ServeHTTP(w, r)
 		})
 	}
@@ -284,7 +277,7 @@ func desktopServer() http.Handler {
 			http.Error(w, "Browser is starting", 503)
 			return
 		}
-		for _, port := range []string{computerPort(2), computerPort(3), computerPort(4), computerPort(5), computerPort(6)} {
+		for _, port := range []string{computerPort(2), computerPort(3), computerPort(4), computerPort(5)} {
 			conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 300*time.Millisecond)
 			if err != nil {
 				http.Error(w, "Desktop is starting", 503)
@@ -428,38 +421,4 @@ func scrollAmount(v map[string]any) (string, error) {
 		value = 20
 	}
 	return strconv.Itoa(int(value)), nil
-}
-
-func publicBrowserProxy(mux *http.ServeMux) {
-	target, _ := url.Parse("http://127.0.0.1:" + computerPort(6))
-	mux.HandleFunc("/public-cdp/", func(w http.ResponseWriter, r *http.Request) {
-		externalHost := r.Host
-		proxy := httputil.NewSingleHostReverseProxy(target)
-		director := proxy.Director
-		proxy.Director = func(r *http.Request) {
-			director(r)
-			r.Host = target.Host
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/public-cdp")
-		}
-		if !strings.HasPrefix(r.URL.Path, "/public-cdp/json/") && !strings.HasPrefix(r.URL.Path, "/public-cdp/devtools/") {
-			http.NotFound(w, r)
-			return
-		}
-		if strings.HasPrefix(r.URL.Path, "/public-cdp/json/") {
-			proxy.ModifyResponse = func(res *http.Response) error {
-				b, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-				res.Body.Close()
-				if err != nil {
-					return err
-				}
-				b = bytes.ReplaceAll(b, []byte("ws://"+target.Host+"/"), []byte("ws://"+externalHost+"/public-cdp/"))
-				b = bytes.ReplaceAll(b, []byte("ws://localhost:"+computerPort(6)+"/"), []byte("ws://"+externalHost+"/public-cdp/"))
-				res.Body = io.NopCloser(bytes.NewReader(b))
-				res.ContentLength = int64(len(b))
-				res.Header.Set("Content-Length", strconv.Itoa(len(b)))
-				return nil
-			}
-		}
-		proxy.ServeHTTP(w, r)
-	})
 }

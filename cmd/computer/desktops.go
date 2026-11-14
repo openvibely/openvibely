@@ -177,7 +177,7 @@ func desktopRoutes(mux *http.ServeMux) {
 		proxy.Transport = transport
 		director := proxy.Director
 		proxy.Director = func(req *http.Request) { director(req); req.Host = target.Host; req.URL.Path = "/" + parts[1] }
-		if strings.HasPrefix(parts[1], "json/") || strings.HasPrefix(parts[1], "public-cdp/json/") {
+		if strings.HasPrefix(parts[1], "json/") {
 			proxy.ModifyResponse = func(res *http.Response) error {
 				data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 				res.Body.Close()

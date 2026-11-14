@@ -155,6 +155,13 @@ shell branch, and repository wrappers retained solely for tests. Removed:
   those active methods directly. The service's distinct `CompleteLogin` method
   remains in use and was retained.
 
+A subsequent caller audit also removed the unused secondary research Chromium
+process, its `/public-cdp` proxy, health dependency, and URL rewriting. The only
+caller was an isolation-test assertion; application browser operations use the
+primary desktop browser. Removed an unreachable VNC proxy branch after its
+non-VNC routes had already returned. Isolation checks retain coverage of the
+primary browser's CDP proxy.
+
 Staticcheck U1000 checks of the relevant Go packages and Linux bridge found no
 additional computer-specific unused declarations. This does not prove every
 runtime branch is exercised. The hosted provisioner remains reachable through

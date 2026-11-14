@@ -32,7 +32,7 @@ if [ "$desktop_base" -gt 0 ]; then
   cd "$base/home/Files"
 fi
 port() { if [ "$desktop_base" -gt 0 ]; then echo "$((desktop_base + $1))"; else echo "$2"; fi; }
-cdp=$(port 1 9222); vnc=$(port 2 5900); control=$(port 3 5901); view_ws=$(port 4 6080); control_ws=$(port 5 6081); research=$(port 6 9223)
+cdp=$(port 1 9222); vnc=$(port 2 5900); control=$(port 3 5901); view_ws=$(port 4 6080); control_ws=$(port 5 6081)
 mkdir -p "$HOME/Files" "$profile"
 # This volume belongs exclusively to this one desktop. Container replacement
 # changes its hostname/PIDs; stale Chromium singleton links must not block it.
@@ -62,8 +62,6 @@ run_desktop dbus-run-session -- xfce4-session >"/run/ov-desktops/$OPENVIBELY_DES
 chrome=$(node -e 'console.log(require("/opt/browser/node_modules/playwright").chromium.executablePath())')
 run_desktop "$chrome" --no-sandbox --disable-dev-shm-usage --no-first-run --no-default-browser-check --password-store=basic --remote-debugging-address=127.0.0.1 --remote-debugging-port="$cdp" --user-data-dir="$profile" --window-size=1280,800 about:blank >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/browser.log" 2>&1 &
 browser_pid=$!
-run_desktop "$chrome" --headless=new --no-sandbox --disable-dev-shm-usage --no-first-run --host-resolver-rules="MAP * ~NOTFOUND" --remote-debugging-address=127.0.0.1 --remote-debugging-port="$research" --user-data-dir="/tmp/research-browser-$research" about:blank >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/research-browser.log" 2>&1 &
-research_pid=$!
 openvibely-computer &
 bridge_pid=$!
 
@@ -72,7 +70,7 @@ shutdown() {
   # Browser.close flushes cookies and profile databases before Docker stops X11.
   OPENVIBELY_CDP_PORT="$cdp" timeout 8s setpriv --reuid="$OPENVIBELY_DESKTOP_UID" --regid="$OPENVIBELY_DESKTOP_UID" --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs node -e '(async()=>{const b=await require("/opt/browser/node_modules/playwright").chromium.connectOverCDP("http://127.0.0.1:"+process.env.OPENVIBELY_CDP_PORT);const s=await b.newBrowserCDPSession();await s.send("Browser.close").catch(()=>{});})().catch(()=>process.exit(1))' >/dev/null 2>&1 || true
   for i in {1..50}; do kill -0 "$browser_pid" 2>/dev/null || break; sleep .1; done
-  kill "$bridge_pid" "$browser_pid" "$research_pid" 2>/dev/null || true
+  kill "$bridge_pid" "$browser_pid" 2>/dev/null || true
   wait "$bridge_pid" 2>/dev/null || true
 }
 trap 'shutdown; exit 0' TERM INT

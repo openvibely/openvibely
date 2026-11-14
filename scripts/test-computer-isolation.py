@@ -134,7 +134,6 @@ printf boundary-checks-passed
     assert image_data.startswith(b'\x89PNG'), image_data[:100]
     request('/desktops/task-b/action', {'action': 'press_key', 'values': {'key': 'Escape'}})
     assert json.loads(request('/desktops/task-b/json/version'))['Browser']
-    assert json.loads(request('/desktops/task-b/public-cdp/json/version'))['Browser']
     assert request('/desktops/task-a/files?path=Files/result.txt') == b'durable'
     for mode in ('view', 'control'):
         with socket.create_connection(('127.0.0.1', int(port)), timeout=10) as stream:
