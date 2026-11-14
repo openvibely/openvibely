@@ -14,10 +14,16 @@ import (
 // and the output cursor in the same snapshot. It avoids loading the latest window
 // merely to fetch the preceding one.
 func (r *ExecutionRepo) ReadProjectDisplayTail(ctx context.Context, projectID, id string, before int64, budget int) (models.DisplayTail, error) {
-	return r.ReadProjectDisplayTailRevision(ctx, projectID, id, before, budget, "")
+	return r.readProjectDisplayTail(ctx, projectID, id, before, budget, "", false)
 }
 
+// ReadProjectDisplayTailRevision serves revision-aware browser windows. The
+// original API retains indexed stream/item cursor semantics for existing callers.
 func (r *ExecutionRepo) ReadProjectDisplayTailRevision(ctx context.Context, projectID, id string, before int64, budget int, revision string) (models.DisplayTail, error) {
+	return r.readProjectDisplayTail(ctx, projectID, id, before, budget, revision, true)
+}
+
+func (r *ExecutionRepo) readProjectDisplayTail(ctx context.Context, projectID, id string, before int64, budget int, revision string, runningWindow bool) (models.DisplayTail, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return models.DisplayTail{}, err
@@ -30,7 +36,12 @@ func (r *ExecutionRepo) ReadProjectDisplayTailRevision(ctx context.Context, proj
 	if !exists {
 		return models.DisplayTail{}, persistence.ErrNotFound
 	}
-	result, err := readDisplayTailRevision(ctx, tx, id, before, budget, revision)
+	var result models.DisplayTail
+	if runningWindow {
+		result, err = readDisplayTailRevision(ctx, tx, id, before, budget, revision)
+	} else {
+		result, err = readIndexedDisplayTail(ctx, tx, id, before, budget)
+	}
 	if err != nil {
 		return result, err
 	}
@@ -52,8 +63,20 @@ func readDisplayTailRevision(ctx context.Context, tx sqlExecutor, id string, bef
 		if err := tx.QueryRowContext(ctx, `SELECT `+displayOutputSQL+` FROM executions WHERE id=?`, id).Scan(&output); err != nil {
 			return result, err
 		}
-		return runningDisplayWindow(output, before, budget, revision)
+		window, err := runningDisplayWindow(output, before, budget, revision)
+		if err != nil {
+			return window, err
+		}
+		if before == 0 {
+			err = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT content FROM execution_display_plans WHERE execution_id=?),'')`, id).Scan(&window.Plan)
+		}
+		return window, err
 	}
+	return readIndexedDisplayTail(ctx, tx, id, before, budget)
+}
+
+func readIndexedDisplayTail(ctx context.Context, tx sqlExecutor, id string, before int64, budget int) (models.DisplayTail, error) {
+	result := models.DisplayTail{}
 	if budget <= 0 {
 		budget = 1
 	}

@@ -40,7 +40,7 @@
     // prefix-height estimates. Nested virtual owners form their own sibling level.
     function indexRows(list) {
         // Explicit hydration can run before the mutation observer's microtask.
-        if (list.observer.takeRecords().length) list.dirty = true;
+        if (list.observer.takeRecords().some(record => !record.target.closest?.('[data-chat-lazy-row]'))) list.dirty = true;
         if (!list.dirty) return;
         collect(list);
         const ordered = Array.from(list.rows.values()).sort((a, b) =>
@@ -52,7 +52,8 @@
             row.list = list;
             row.children = [];
             while (stack.length && !element(stack[stack.length - 1]).contains(element(row))) stack.pop();
-            (stack.length ? stack[stack.length - 1].children : list.index).push(row);
+            row.siblings = stack.length ? stack[stack.length - 1].children : list.index;
+            row.siblings.push(row);
             stack.push(row);
             if (row.node?.isConnected) list.mounted.add(row);
         }
@@ -291,7 +292,10 @@
                 }
                 if (list.frame === null) list.frame = requestAnimationFrame(() => refresh(list));
             };
-            list.observer = new MutationObserver(() => { list.dirty = true; list.schedule(); });
+            list.observer = new MutationObserver(records => {
+                if (records.some(record => !record.target.closest?.('[data-chat-lazy-row]'))) list.dirty = true;
+                list.schedule();
+            });
             list.resize = typeof ResizeObserver === 'function' ? new ResizeObserver(list.schedule) : null;
             list.resize?.observe(messages);
             list.rowResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
@@ -301,7 +305,6 @@
                 list.schedule();
             }) : null;
             list.onScroll = () => {
-                if (messages.scrollTop !== list.scrollTop) list.liveUpdates = false;
                 list.schedule();
             };
             messages.addEventListener('scroll', list.onScroll, {passive:true});
@@ -313,11 +316,8 @@
     }
     function collect(list) {
         list.dirty = true;
-        list.owners = new Set();
-        list.fixedRows = new Set();
         // Preserved executions can move to a new transcript during an HTMX swap.
         list.messages.querySelectorAll('[data-chat-virtual-owner]').forEach(owner => {
-            list.owners.add(owner);
             owner._chatVirtualRows?.forEach(row => list.rows.set(row.placeholder, row));
         });
         list.rows.forEach((row, key) => {
@@ -335,7 +335,6 @@
             placeholder.setAttribute('aria-hidden', 'true');
             list.rows.set(node, {node, placeholder});
         });
-        list.rows.forEach(row => { if (!row.lazy) list.fixedRows.add(row); });
     }
     // Paging owns its prepend correction. Its resulting geometry must replace
     // the previous resize snapshot, or the next frame applies that change twice.
@@ -359,7 +358,6 @@
         list.observedRows.forEach(node => { if (!mounted.has(node)) list.rowResize?.unobserve(node); });
         mounted.forEach(node => { if (!list.observedRows.has(node)) list.rowResize?.observe(node); });
         list.observedRows = mounted;
-        list.mountedRows = list.mounted;
         // The final restore already captured this layout for delayed resizing.
     }
     function refresh(list, hydrating) {
@@ -371,14 +369,13 @@
         // those as intersections would render the entire transcript. ResizeObserver
         // schedules another pass when the chat area becomes visible again.
         if (!hasVisibleArea(list.messages)) return [];
-        if (list.width !== list.messages.clientWidth) list.liveUpdates = false;
         compensateLateLayout(list);
         list.observer.disconnect();
         indexRows(list);
         const width = list.messages.clientWidth;
         if (list.width !== width) {
             const restore = saveAnchor(list), restored = [];
-            viewportRows(list).forEach(row => {
+            list.rows.forEach(row => {
                 if (row.lazy) {
                     if (!row.node?.isConnected) sizePlaceholder(row, estimate(row.model, width));
                 } else mount(row, restored);
@@ -581,8 +578,7 @@
                 owner._chatVirtualRows?.[index]?.node?.contains(node));
             const incrementalMedia = stablePreviews && !owner.querySelector('.chat-svg-preview');
             const externalChanges = list.observer.takeRecords().some(record => !record.target.closest?.('[data-chat-lazy-row]'));
-            list.liveUpdates = !!(delta && list.owners?.has(owner) && list.mountedRows && !externalChanges && !list.topologyDirty &&
-                list.width === width && messages.getAttribute('data-transcript-hydrating') !== 'true' && incrementalMedia);
+            if (externalChanges) list.dirty = true;
             list.observer.disconnect();
             const restore = saveAnchor(list);
             // Live projections retain completed model identities. Update changed rows
@@ -613,6 +609,13 @@
                         sizePlaceholder(row, estimate(model, width));
                         list.rows.set(placeholder, row);
                         owner.appendChild(placeholder);
+                        const preceding = rows[index - 1];
+                        if (!list.dirty && preceding?.siblings) {
+                            row.list = list;
+                            row.children = [];
+                            row.siblings = preceding.siblings;
+                            row.siblings.splice(row.siblings.indexOf(preceding) + 1, 0, row);
+                        } else list.dirty = true;
                     }
                     rows[index] = row;
                 };
@@ -623,7 +626,11 @@
                 previous.slice(data.models.length).forEach(row => {
                     row.generation = (row.generation || 0) + 1;
                     list.rows.delete(row.placeholder);
-                    list.mountedRows?.delete(row);
+                    list.mounted.delete(row);
+                    if (row.siblings) {
+                        const position = row.siblings.indexOf(row);
+                        if (position >= 0) row.siblings.splice(position, 1);
+                    } else list.dirty = true;
                     row.node?.remove(); row.placeholder.remove();
                 });
                 rows.length = data.models.length;
@@ -633,8 +640,6 @@
                 if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
                 return window.renderVisibleChatRows(messages);
             }
-            list.liveUpdates = false;
-            list.topologyDirty = true;
             // Prepending a byte window shifts row indexes. Reusing those nodes would
             // apply one tool's DOM/scroll state to another; new nodes recover state
             // by stable tool ID. Ordinary refreshes retain their existing reuse path.
@@ -715,7 +720,7 @@
         if (root.hasAttribute('data-chat-virtual-owner')) owners.push(root);
         owners.forEach(owner => {
             const list = lists.get(owner.closest(messagesSelector));
-            if (list) { list.liveUpdates = false; list.topologyDirty = true; }
+            if (list) list.dirty = true;
             owner._chatVirtualInstallGeneration = (owner._chatVirtualInstallGeneration || 0) + 1;
             delete owner._chatVirtualData;
             delete owner._chatVirtualRows;
@@ -767,7 +772,6 @@
         lists.forEach(list => {
             if (!root.contains(list.messages) && !list.messages.contains(root)) return;
             if (options?.visibleOnly && !hasVisibleArea(list.messages)) return;
-            list.liveUpdates = false;
             list.observer.disconnect();
             collect(list);
             if (options?.renderLazy !== false) anchors.push(saveAnchor(list));

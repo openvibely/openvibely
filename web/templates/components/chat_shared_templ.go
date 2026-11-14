@@ -291,7 +291,7 @@ func displayTailCursor(tails []*models.DisplayTail) string {
 }
 
 func displayTailOffset(text string, tails []*models.DisplayTail) string {
-	if len(tails) > 0 && tails[0] != nil && strings.HasPrefix(tails[0].Revision, "live-") {
+	if len(tails) > 0 && tails[0] != nil {
 		return fmt.Sprint(tails[0].EndOffset)
 	}
 	return fmt.Sprint(len(text))
@@ -2622,9 +2622,9 @@ func chatExecutionPairContent(exec models.Execution, task *models.Task, executio
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var129 string
-			templ_7745c5c3_Var129, templ_7745c5c3_Err = templruntime.NewAttributeExpression(NormalizeDisplayMarkers(exec.DisplayPlan)).Resolve(ctx)
+			templ_7745c5c3_Var129, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.DisplayPlan).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1446, Col: 165}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1446, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var129)
 			if templ_7745c5c3_Err != nil {

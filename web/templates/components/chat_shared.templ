@@ -224,7 +224,7 @@ func displayTailCursor(tails []*models.DisplayTail) string {
 }
 
 func displayTailOffset(text string, tails []*models.DisplayTail) string {
- if len(tails)>0 && tails[0]!=nil && strings.HasPrefix(tails[0].Revision, "live-") { return fmt.Sprint(tails[0].EndOffset) }
+ if len(tails)>0 && tails[0]!=nil { return fmt.Sprint(tails[0].EndOffset) }
  return fmt.Sprint(len(text))
 }
 
@@ -1443,7 +1443,7 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
     if exec.DisplayTail != nil && exec.DisplayPlan != "" && !strings.Contains(exec.Output, strings.TrimSpace(exec.DisplayPlan)) {
         <div data-execution-plan="true" class="rounded-xl p-4">
             <div class="text-xs font-semibold opacity-50 mb-2">Plan</div>
-            <div class="chat-stream-content" data-raw-revision={ chatContentRevision(exec.DisplayPlan) } data-raw-content={ NormalizeDisplayMarkers(exec.DisplayPlan) }></div>
+            <div class="chat-stream-content" data-raw-revision={ chatContentRevision(exec.DisplayPlan) } data-raw-content={ exec.DisplayPlan }></div>
         </div>
     }
 

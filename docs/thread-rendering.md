@@ -37,7 +37,8 @@ still streaming, normal thread navigation refreshes the seed and subscription
 while retaining composer state.
 
 The limits are soft: one indivisible result/thinking/Markdown block, pending-call
-headers, plan content, or ambiguous Markdown/legacy controls can exceed them.
+headers or ambiguous Markdown/legacy controls can exceed them. Plans are
+supplied separately by the persisted plan projection.
 The server currently reads and parses the entire raw transcript to locate safe
 boundaries; this reduces client transfer and rendering, not server scan cost.
 The open view also continues accumulating subsequent deltas. Find/selection/print

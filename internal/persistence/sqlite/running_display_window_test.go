@@ -104,3 +104,20 @@ func TestRunningWindowContextToolOffsets(t *testing.T) {
 	require.Empty(t, tail.ContextToolOffsets)
 	require.Equal(t, source[:len(tail.Text)], tail.Text)
 }
+
+func TestRunningWindowKeepsMainPlanProjection(t *testing.T) {
+	_, repo, owner := conversationTestRepo(t)
+	ctx := t.Context()
+	plan := "<proposed_plan>keep approval</proposed_plan>\n"
+	source := plan + runningWindowFixture(200)
+	require.NoError(t, repo.AppendOutput(ctx, owner.ExecutionID, source))
+	tail, err := repo.ReadProjectDisplayTailRevision(ctx, "default", owner.ExecutionID, 0, 1024, "")
+	require.NoError(t, err)
+	require.NotZero(t, tail.Before)
+	require.NotContains(t, tail.Text, "keep approval")
+	require.Equal(t, plan, tail.Plan)
+	require.Equal(t, int64(len(source)), tail.EndOffset)
+	page, err := repo.GetDisplayExecutionTail(ctx, owner.ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, plan, page.DisplayPlan)
+}

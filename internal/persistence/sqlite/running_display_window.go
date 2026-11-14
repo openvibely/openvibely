@@ -64,10 +64,7 @@ func runningDisplayWindow(output string, before int64, budget int, revision stri
 			break
 		}
 	}
-	// Plans are interpreted outside the renderer and must remain available.
-	if strings.Contains(output[:end], "<proposed_plan>") {
-		start = 0
-	}
+	// Plans are supplied separately by the persisted plan projection.
 	pending := make(map[string][]int)
 	compaction := -1
 	for i := 0; i < start; i++ {
