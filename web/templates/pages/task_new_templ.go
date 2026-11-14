@@ -173,7 +173,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = ProjectComputerContent(project.ID, "").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = TaskComputerToggle(project.ID, "").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

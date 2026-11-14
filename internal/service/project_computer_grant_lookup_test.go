@@ -72,6 +72,7 @@ func TestComputerChromeRevokeGrantOutsideListWindow(t *testing.T) {
 	require.NoError(t, db.Tasks.Create(t.Context(), other))
 	scoped, err := svc.ForTask(t.Context(), project.ID, other.ID)
 	require.NoError(t, err)
+	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 	_, err = scoped.repo.ChromeGrant(t.Context(), project.ID, old.ID)
 	require.Error(t, err)
 	_, err = svc.repo.ChromeGrant(t.Context(), "another-project", old.ID)

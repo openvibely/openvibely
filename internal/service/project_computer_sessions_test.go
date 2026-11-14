@@ -59,6 +59,8 @@ func TestProjectComputerTaskSessionsAndLogin(t *testing.T) {
 	if rt := svc.RuntimeTools(t.Context(), project.ID, "not-a-task"); rt != nil {
 		t.Fatal("invented task got desktop")
 	}
+	enableComputerTaskForTest(t, svc, project.ID, one.ID)
+	enableComputerTaskForTest(t, svc, project.ID, two.ID)
 	first := svc.RuntimeTools(t.Context(), project.ID, one.ID)
 	second := svc.RuntimeTools(t.Context(), project.ID, two.ID)
 	for _, def := range first.Definitions {

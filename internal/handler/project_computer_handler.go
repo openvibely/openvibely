@@ -87,7 +87,7 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "ready": h.computerService(c).Ready(c.Request().Context(), c.Param("id")), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": h.computerService(c).ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
+	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": h.computerService(c).Ready(c.Request().Context(), c.Param("id")), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": h.computerService(c).ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
 	if h.desktopMode && h.computerDesktopURL != "" && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1" && status["ready"] == true {
 		mode := "view"
 		if c.QueryParam("viewer_mode") == "control" && state.Held && !state.TakeoverPending {
@@ -133,8 +133,10 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 		err = h.computerSvc.SetTimeZone(ctx, c.Param("id"), c.FormValue("time_zone"))
 	case "enable", "disable":
 		err = h.computerSvc.SetEnabled(ctx, c.Param("id"), c.Param("action") == "enable")
+	case "task-enable", "task-disable":
+		err = h.computerService(c).SetTaskEnabled(ctx, c.Param("id"), c.Param("action") == "task-enable")
 	case "ensure":
-		err = h.computerSvc.EnsureStarted(ctx, c.Param("id"))
+		err = h.computerService(c).EnsureStarted(ctx, c.Param("id"))
 	case "login-done":
 		err = h.computerService(c).CompleteLogin(ctx, c.Param("id"))
 	case "login-cancel":

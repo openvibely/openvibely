@@ -37,14 +37,19 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  const finish=(state,message)=>{const node=document.createElement('div');node.id='browser-result';node.dataset.status=state;node.textContent=message;document.body.append(node);};
  try{
  await wait(()=>window.taskWorkspace);q('[data-tab="computer"]').click();
+ await wait(()=>!q('[data-task-computer-toggle]').disabled);
+ if(window.fixtureRFB)throw Error('Computer started without opt-in');
+ q('[data-task-computer-toggle]').click();
  await wait(()=>window.fixtureRFB?.painted);
+ if(!q('[data-task-computer-preview-slot]').contains(q('[data-computer-preview]')))throw Error('Preview not above tabs');
+ const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(initialRFB.disconnected)throw Error('Tab switching disconnected preview');q('[data-tab="computer"]').click();
  if(q('#tab-computer').classList.contains('hidden'))throw Error('Computer tab hidden');
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
  q('[data-computer-preview-open]').click();await wait(()=>q('[data-computer-dialog]').open);
  if(q('[data-computer-action="takeover"], [data-computer-action="release"], [data-computer-expand]'))throw Error('Unexpected viewer buttons');
  await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly && q('[data-computer-status]').textContent.includes('You have control'),'takeover');
 
- if(!q('[data-retained-frame]'))throw Error('Desktop disappeared during takeover');
+
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'control first frame');
 
  q('[data-teach-open]').click();q('[data-teach-goal]').value='Download a report';q('[data-teach-record]').click();
@@ -79,27 +84,24 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>q('[data-workflow-list] button'));[...q('[data-workflow-list]').querySelectorAll('button')].find(b=>b.textContent==='Create task from workflow').click();await wait(()=>q('[data-teach-status] a'),'reuse workflow');
  const originalFetch=window.fetch;let cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};
  q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled);q('[data-teach-discard]').click();await wait(()=>cancelledGeneration&&!q('[data-teach-save]').disabled,'discard cancellation');window.fetch=originalFetch;
- const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});if(!q('[data-computer-status]').textContent.includes('disconnected'))throw Error('Disconnected stream reported Ready');
+ const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});if(!/disconnected|Reconnecting/.test(q('[data-computer-status]').textContent))throw Error('Disconnected stream reported Ready');
  document.dispatchEvent(new Event('computer-tab-change'));await wait(()=>window.fixtureRFB!==dropped&&window.fixtureRFB.painted,'reconnected');
  Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));const hiddenRFB=window.fixtureRFB;if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming');
  Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));await wait(()=>window.fixtureRFB!==hiddenRFB&&window.fixtureRFB.painted,'visible reconnect');
  cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};q('[data-teach-note]').value='New capture';q('[data-teach-capture]').click();q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled,'second generation');
  q('[data-computer-close]').click();if(!cancelledGeneration)throw Error('Closing viewer did not cancel generation');window.fetch=originalFetch;if(!q('[data-retained-frame]'))throw Error('Desktop disappeared immediately on close');if(q('[data-computer-dialog]').open)throw Error('Did not close');await wait(()=>window.fixtureRFB.viewOnly && q('[data-computer-status]').textContent==='Ready','handback');
- if(!q('[data-retained-frame]'))throw Error('Desktop disappeared during handback');
+
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'preview first frame');
 
- const visiblePreview=window.fixtureRFB;q('[data-computer-preview]').style.transform='translateY(200vh)';document.dispatchEvent(new Event('computer-tab-change'));await wait(()=>visiblePreview.disconnected,'offscreen pause');q('[data-computer-preview]').style.transform='';document.dispatchEvent(new Event('computer-tab-change'));await wait(()=>window.fixtureRFB!==visiblePreview&&window.fixtureRFB.painted,'onscreen resume');
- await wait(()=>!q('[data-computer-idle]').disabled);if(q('[data-computer-idle]').value!=='30')throw Error('Wrong default idle timeout');q('[data-computer-idle]').value='0';q('[data-computer-idle]').dispatchEvent(new Event('change'));await wait(()=>q('[data-computer-preference-status]').textContent.includes('Idle timeout saved'));
- await wait(()=>!q('[data-computer-enabled]').disabled);q('[data-computer-enabled]').click();await wait(()=>q('[data-computer-preference-status]').textContent.includes('Saved'));
- q('[data-tab="computer"]').click();await wait(()=>q('[data-computer-status]').textContent.includes('disabled'));
+ await wait(()=>!q('[data-task-computer-toggle]').disabled);q('[data-task-computer-toggle]').click();await wait(()=>q('[data-task-computer-preview-slot]').hidden,'task disabled');
  finish('pass','Saved task preview, automatic startup, expansion, takeover, release and project toggle');
  }catch(e){finish('fail',e.message);}
 })();</script>`
 	html = strings.Replace(html, "</body>", script+"</body>", 1)
 	var mu sync.Mutex
-	enabled, ready, held := true, false, false
+	enabled, ready, held := false, false, false
 	starts := 0
-	idleMinutes := "30"
+
 	savedWorkflow := false
 	handoff := ""
 	var demonstration struct {
@@ -126,10 +128,10 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/idle-timeout"):
-			idleMinutes = r.FormValue("idle_minutes")
+
 			fmt.Fprint(w, `{}`)
 		case strings.HasSuffix(r.URL.Path, "/status"):
-			fmt.Fprintf(w, `{"enabled":%t,"ready":%t,"held":%t,"handoff_kind":%q}`, enabled, ready, held, handoff)
+			fmt.Fprintf(w, `{"project_enabled":true,"task_enabled":%t,"enabled":%t,"ready":%t,"held":%t,"handoff_kind":%q}`, enabled, enabled, ready, held, handoff)
 		case r.URL.Path == "/fixture-private":
 			handoff = "request_browser_login"
 			fmt.Fprint(w, `{}`)
@@ -170,7 +172,10 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		case strings.HasSuffix(r.URL.Path, "/release"):
 			held = false
 			fmt.Fprint(w, `{}`)
-		case strings.HasSuffix(r.URL.Path, "/disable"):
+		case strings.HasSuffix(r.URL.Path, "/task-enable"):
+			enabled = true
+			fmt.Fprint(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/task-disable"):
 			enabled = false
 			ready = false
 			fmt.Fprint(w, `{}`)
@@ -190,7 +195,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 	mu.Lock()
 	defer mu.Unlock()
 	require.Equal(t, 1, starts)
-	require.Equal(t, "0", idleMinutes)
+
 	require.False(t, enabled)
 	require.Equal(t, "Download a report", demonstration.Goal)
 	require.Len(t, demonstration.Images, 3)

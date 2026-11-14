@@ -42,7 +42,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      @NewTaskDetails(agents, agentDefs, NewTaskProjectRow(project, projects))
     </div>
     <div id="tab-computer" class="task-tab-panel hidden">
- @ProjectComputerContent(project.ID, "")
+ @TaskComputerToggle(project.ID, "")
  </div>
  <div id="tab-attachments" class="task-tab-panel hidden">
      <div class="flex items-center justify-between mb-3" style="height:20px"><h3 class="text-sm font-semibold">Attachments</h3>

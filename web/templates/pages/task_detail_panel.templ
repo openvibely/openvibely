@@ -5,6 +5,7 @@ import "github.com/openvibely/openvibely/web/templates/components"
 // TaskDetailPanel keeps supporting information outside the permanent thread workspace.
 templ TaskDetailPanel() {
 	@components.SidePanel("task-details-panel", "task-panel-divider", "Task details") {
+        <div data-task-computer-preview-slot hidden style="padding:24px 24px 12px;flex-shrink:0"></div>
         @components.InspectorTabs("inspector-tab-", "tab-", "Task details", []components.InspectorTab{{Key: "details", Label: "Details"}, {Key: "computer", Label: "Computer"}, {Key: "schedules", Label: "Schedule"}, {Key: "chaining", Label: "Chaining"}, {Key: "attachments", Label: "Files"}, {Key: "lifecycle", Label: "Lifecycle"}})
 
 		<div id="task-inspector-body" class="inspector-body flex flex-col">

@@ -14,7 +14,7 @@ func TestComputerPreviewLeadsDedicatedPanel(t *testing.T) {
 	}
 	html := out.String()
 	preview := strings.Index(html, "data-computer-preview")
-	toggle := strings.Index(html, "data-computer-preference=")
+	toggle := strings.Index(html, "data-task-computer-preference")
 	controls := strings.Index(html, "data-computer-dialog")
 	if preview < 0 || toggle < preview || controls < preview {
 		t.Fatal("preview must precede toggle and controls")
@@ -30,7 +30,7 @@ func TestComputerPreviewLeadsDedicatedPanel(t *testing.T) {
 	}
 	_, details, _ := strings.Cut(out.String(), `id="tab-details"`)
 	details, _, _ = strings.Cut(details, `id="tab-schedules"`)
-	if strings.Contains(details, "data-computer-preference=") {
+	if strings.Contains(details, "data-task-computer-preference") {
 		t.Fatal("computer setting remains in Details")
 	}
 }

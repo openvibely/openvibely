@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 233
+const latestMigrationVersion = 234
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -4366,6 +4366,41 @@ INSERT INTO tasks(id,project_id,title,tag) VALUES('t','p','Existing task','custo
 		}
 		if err := db.QueryRow(`SELECT tag FROM tasks WHERE id='t'`).Scan(&tag); err != nil || tag != "custom/computer" {
 			t.Fatalf("existing task changed: tag=%q err=%v", tag, err)
+		}
+	}
+}
+
+func TestComputerTaskOptInUpgradeFrom233(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "task-opt-in.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 233); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects(id,name) VALUES('p','Existing project');
+INSERT INTO tasks(id,project_id,title) VALUES('t','p','Existing task');
+INSERT INTO project_computers(project_id,provider) VALUES('p','local');
+INSERT INTO task_computer_sessions(project_id,task_id) VALUES('p','t');`); err != nil {
+		t.Fatal(err)
+	}
+	for pass := 0; pass < 2; pass++ {
+		if err := goose.Up(db, "."); err != nil {
+			t.Fatal(err)
+		}
+		var enabled int
+		if err := db.QueryRow(`SELECT enabled FROM task_computer_sessions WHERE task_id='t'`).Scan(&enabled); err != nil {
+			t.Fatal(err)
+		}
+		if enabled != 0 {
+			t.Fatal("existing task must require opt-in")
+		}
+		if _, err := db.Exec(`UPDATE task_computer_sessions SET enabled=1 WHERE task_id='t'`); err != nil {
+			t.Fatal(err)
+		}
+		if err := goose.DownTo(db, ".", 233); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

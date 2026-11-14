@@ -39,6 +39,7 @@ func TestComputerProjectGrantSurvivesOriginTaskDeletion(t *testing.T) {
 			require.NoError(t, db.Tasks.Create(t.Context(), other))
 			scoped, err := root.ForTask(t.Context(), project.ID, other.ID)
 			require.NoError(t, err)
+			require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 			require.NoError(t, scoped.repo.RecordChromeInstall(t.Context(), project.ID, shared.ID))
 			require.NoError(t, NewTaskService(db.Tasks, nil, nil).Delete(t.Context(), task.ID))
 			for _, svc := range []*ProjectComputerService{root, scoped} {
@@ -99,6 +100,7 @@ func TestComputerGrantRevocationContinuesPastUnavailableDesktop(t *testing.T) {
 	require.NoError(t, db.Tasks.Create(t.Context(), other))
 	scoped, err := origin.ForTask(t.Context(), project.ID, other.ID)
 	require.NoError(t, err)
+	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 	require.NoError(t, scoped.repo.RecordChromeInstall(t.Context(), project.ID, grant.ID))
 	installs, err := origin.repo.ChromeInstallations(t.Context(), project.ID, grant.ID)
 	require.NoError(t, err)

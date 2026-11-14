@@ -57,6 +57,7 @@ func TestComputerChromeImportResumesProfiles(t *testing.T) {
 	require.NoError(t, db.Tasks.Create(t.Context(), otherTask))
 	otherService, err := svc.ForTask(t.Context(), p.ID, otherTask.ID)
 	require.NoError(t, err)
+	require.NoError(t, otherService.SetTaskEnabled(t.Context(), p.ID, true))
 	absent, err := otherService.PendingChromeImport(t.Context(), p.ID)
 	require.NoError(t, err)
 	require.Nil(t, absent)

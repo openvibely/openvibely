@@ -645,6 +645,25 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		applog.Infof("[handler] CreateTask error: %v", err)
 		return err
 	}
+	// Save task computer opt-in before the first thread turn is submitted.
+	if threadDraft && c.FormValue("computer_enabled") == "on" {
+		var preferenceErr error
+		if h.computerSvc == nil {
+			preferenceErr = errors.New("project computers unavailable")
+		} else {
+			var scoped *service.ProjectComputerService
+			scoped, preferenceErr = h.computerSvc.ForTask(c.Request().Context(), t.ProjectID, t.ID)
+			if preferenceErr == nil {
+				preferenceErr = scoped.SetTaskEnabled(c.Request().Context(), t.ProjectID, true)
+			}
+		}
+		if preferenceErr != nil {
+			if rollbackErr := h.taskRepo.Delete(context.WithoutCancel(c.Request().Context()), t.ID); rollbackErr != nil {
+				return fmt.Errorf("saving computer preference: %w; rollback: %v", preferenceErr, rollbackErr)
+			}
+			return echo.NewHTTPError(http.StatusBadRequest, preferenceErr.Error())
+		}
+	}
 	// Persist the composer's preference before a scheduled task or swarm planner
 	// can run; backlog drafts never pass through TaskThreadSend.
 	if threadDraft && selectedThreadAgent != nil {

@@ -29,7 +29,7 @@ func TestComputerUnusedProjectDeletionWithoutDocker(t *testing.T) {
 			computer := NewProjectComputerService(db.Projects, provisioner)
 			task := &models.Task{ProjectID: project.ID, Title: "Ordinary task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 1}
 			require.NoError(t, db.Tasks.Create(t.Context(), task))
-			require.NotNil(t, computer.RuntimeTools(t.Context(), project.ID, task.ID))
+			require.Nil(t, computer.RuntimeTools(t.Context(), project.ID, task.ID))
 			if attempted {
 				require.Error(t, computer.Start(t.Context(), project.ID))
 			}

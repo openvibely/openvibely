@@ -86,6 +86,16 @@ func (s *ProjectComputerService) Start(ctx context.Context, id string) error {
 	return s.start(ctx, id, false)
 }
 func (s *ProjectComputerService) EnsureStarted(ctx context.Context, id string) error {
+	if s.taskID != "" {
+		state, err := s.repo.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !state.Enabled {
+			return errors.New("computer use is disabled for this task or project")
+		}
+	}
+
 	root := *s
 	root.taskID = ""
 	root.repo = s.projects.Computers()
@@ -287,6 +297,11 @@ func (s *ProjectComputerService) request(ctx context.Context, conn ComputerConne
 	return b, nil
 }
 func (s *ProjectComputerService) Ready(ctx context.Context, id string) bool {
+	state, err := s.repo.Get(ctx, id)
+	if err != nil || !state.Enabled {
+		return false
+	}
+
 	if checker, ok := s.provisioner.(interface {
 		Current(context.Context, string) bool
 	}); ok && !checker.Current(ctx, id) {
@@ -671,6 +686,27 @@ func (s *ProjectComputerService) SetToolTarget(ctx context.Context, id, target s
 	lock.Lock()
 	defer lock.Unlock()
 	return s.repo.SetToolTarget(ctx, id, target)
+}
+
+// SetTaskEnabled changes only this task's permission, preserving its desktop data.
+func (s *ProjectComputerService) SetTaskEnabled(ctx context.Context, id string, enabled bool) error {
+	if s.taskID == "" {
+		return errors.New("task required")
+	}
+	gate := s.lifecycle(id)
+	gate.Lock()
+	defer gate.Unlock()
+	state, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if enabled && !state.ProjectEnabled {
+		return errors.New("enable computer use in project settings first")
+	}
+	if !enabled && (state.Held || state.Owner != "" && state.LeaseUntil >= time.Now().Unix()) {
+		return persistence.ErrComputerBusy
+	}
+	return s.repo.SetEnabled(ctx, id, enabled)
 }
 
 // SetEnabled changes the project preference shared by all task desktops.

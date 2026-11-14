@@ -34,6 +34,7 @@ func computerParityFixture(t *testing.T, handler http.HandlerFunc) (*teststores.
 	svc.SetAttachmentDirectory(t.TempDir())
 	scoped, err := svc.ForTask(t.Context(), p.ID, task.ID)
 	require.NoError(t, err)
+	require.NoError(t, scoped.SetTaskEnabled(t.Context(), p.ID, true))
 	return db, scoped, p, task
 }
 func TestComputerHandoffVerificationAndSingleContinuation(t *testing.T) {
@@ -189,6 +190,7 @@ func TestComputerToolRoutingAndAttachments(t *testing.T) {
 	require.NoError(t, db.Tasks.Create(t.Context(), other))
 	scoped, err := s.ForTask(t.Context(), p.ID, other.ID)
 	require.NoError(t, err)
+	require.NoError(t, scoped.SetTaskEnabled(t.Context(), p.ID, true))
 	_, err = scoped.attachmentTransfer(t.Context(), p.ID, threadInput)
 	require.Error(t, err)
 	_, err = scoped.attachmentTransfer(t.Context(), p.ID, data)
@@ -212,6 +214,7 @@ func TestComputerChromeGrantScopeRevocationAndCleanup(t *testing.T) {
 	require.NoError(t, db.Tasks.Create(t.Context(), other))
 	otherSvc, err := s.ForTask(t.Context(), p.ID, other.ID)
 	require.NoError(t, err)
+	require.NoError(t, otherSvc.SetTaskEnabled(t.Context(), p.ID, true))
 	_, err = otherSvc.repo.ChromeGrant(t.Context(), p.ID, g.ID)
 	require.Error(t, err)
 	require.NoError(t, s.repo.RecordChromeInstall(t.Context(), p.ID, g.ID))
@@ -279,6 +282,7 @@ func TestComputerChatExportKeepsChatOwnership(t *testing.T) {
 	require.NoError(t, db.Executions.Create(t.Context(), execution))
 	scoped, err := svc.ForTask(t.Context(), project.ID, chat.ID)
 	require.NoError(t, err)
+	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 	result, err := scoped.attachmentTransfer(llmcontracts.WithArtifactExecutionID(t.Context(), execution.ID), project.ID, json.RawMessage(`{"action":"from_computer","computer_path":"chat.txt"}`))
 	require.NoError(t, err)
 	require.Contains(t, result, "/chat/attachments/")

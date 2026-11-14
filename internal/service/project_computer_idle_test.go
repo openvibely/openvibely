@@ -59,6 +59,7 @@ func TestComputerIdlePolicyProtectsWorkAndHandoffs(t *testing.T) {
 		require.NoError(t, db.Tasks.Create(t.Context(), task))
 		scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
 		require.NoError(t, err)
+		require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 		switch kind {
 		case "operation":
 			lock := scoped.lock(project.ID)
@@ -164,8 +165,9 @@ func TestComputerToolsDoNotWaitForIdleShutdown(t *testing.T) {
 	require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "hosted"))
 	task := &models.Task{ProjectID: project.ID, Title: "Active desktop", Status: models.StatusRunning, Category: models.CategoryActive, Priority: 2}
 	require.NoError(t, db.Tasks.Create(t.Context(), task))
-	_, err := svc.ForTask(t.Context(), project.ID, task.ID)
+	enabledTask, err := svc.ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
+	require.NoError(t, enabledTask.SetTaskEnabled(t.Context(), project.ID, true))
 	idle := &models.Task{ProjectID: project.ID, Title: "Idle desktop", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: 2}
 	require.NoError(t, db.Tasks.Create(t.Context(), idle))
 	_, err = svc.ForTask(t.Context(), project.ID, idle.ID)
@@ -236,6 +238,7 @@ func TestComputerCleanupDoesNotLockOtherCandidates(t *testing.T) {
 		require.NoError(t, db.Tasks.Create(t.Context(), task))
 		scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
 		require.NoError(t, err)
+		require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 		scopes[ComputerDesktopID(task.ID)] = scoped
 	}
 	ctx, cancel := context.WithCancel(t.Context())

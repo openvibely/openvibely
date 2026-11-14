@@ -44,6 +44,7 @@ func TestProjectComputerLocalDockerLifecycle(t *testing.T) {
 	if err := db.Tasks.Create(t.Context(), task); err != nil {
 		t.Fatal(err)
 	}
+	enableComputerTaskForTest(t, svc, project.ID, task.ID)
 	tools := svc.RuntimeTools(t.Context(), project.ID, task.ID)
 	call := func(name, body string) string {
 		t.Helper()
@@ -106,6 +107,8 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 		}
 		ids = append(ids, task.ID)
 	}
+	enableComputerTaskForTest(t, svc, project.ID, ids[0])
+	enableComputerTaskForTest(t, svc, project.ID, ids[1])
 	first := svc.RuntimeTools(t.Context(), project.ID, ids[0])
 	second := svc.RuntimeTools(t.Context(), project.ID, ids[1])
 	runtimes := []*llmcontracts.RuntimeTools{first, second}

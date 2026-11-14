@@ -194,6 +194,8 @@ func TestProjectComputerTakeoverCancelsAgentAction(t *testing.T) {
 	if err := db.Tasks.Create(t.Context(), other); err != nil {
 		t.Fatal(err)
 	}
+	enableComputerTaskForTest(t, svc, project.ID, task.ID)
+	enableComputerTaskForTest(t, svc, project.ID, other.ID)
 	otherDesktop = ComputerDesktopID(other.ID)
 	runner := &LLMService{computerSvc: svc}
 	tools := runner.taskActionRuntimeTools(t.Context(), *task)
@@ -276,5 +278,16 @@ func TestLocalComputerDeletionChecksVolumeOwnership(t *testing.T) {
 				t.Fatal("owned volume not removed")
 			}
 		})
+	}
+}
+
+func enableComputerTaskForTest(t *testing.T, svc *ProjectComputerService, projectID, taskID string) {
+	t.Helper()
+	scoped, err := svc.ForTask(t.Context(), projectID, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = scoped.SetTaskEnabled(t.Context(), projectID, true); err != nil {
+		t.Fatal(err)
 	}
 }

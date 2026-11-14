@@ -155,7 +155,7 @@ func (r *ProjectComputerRepo) ForTask(ctx context.Context, projectID, taskID str
 }
 func (r *ProjectComputerRepo) getSession(ctx context.Context, id string) (*models.ProjectComputer, error) {
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT s.project_id,p.provider,s.held,s.owner,s.lease_until,s.handoff_kind,s.handoff_url,s.handoff_reason,s.handoff_expected_text,s.handoff_alert_id,s.tool_target,p.enabled,p.time_zone,s.takeover_pending,p.idle_minutes FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.HandoffKind, &c.HandoffURL, &c.HandoffReason, &c.HandoffExpectedText, &c.HandoffAlertID, &c.ToolTarget, &c.Enabled, &c.TimeZone, &c.TakeoverPending, &c.IdleMinutes)
+	err := r.db.QueryRowContext(ctx, `SELECT s.project_id,p.provider,s.held,s.owner,s.lease_until,s.handoff_kind,s.handoff_url,s.handoff_reason,s.handoff_expected_text,s.handoff_alert_id,s.tool_target,(p.enabled AND s.enabled),p.time_zone,s.takeover_pending,p.idle_minutes,s.enabled,p.enabled FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.HandoffKind, &c.HandoffURL, &c.HandoffReason, &c.HandoffExpectedText, &c.HandoffAlertID, &c.ToolTarget, &c.Enabled, &c.TimeZone, &c.TakeoverPending, &c.IdleMinutes, &c.TaskEnabled, &c.ProjectEnabled)
 	return c, err
 }
 func (r *ProjectComputerRepo) SessionsBusy(ctx context.Context, id string) (bool, error) {
@@ -176,6 +176,13 @@ func (r *ProjectComputerRepo) Attachments() persistence.AttachmentStore {
 }
 
 func (r *ProjectComputerRepo) SetEnabled(ctx context.Context, id string, enabled bool) error {
+	if r.taskID != "" {
+		return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+			_, err := tx.ExecContext(ctx, `UPDATE task_computer_sessions SET enabled=? WHERE project_id=? AND task_id=?`, enabled, id, r.taskID)
+			return err
+		})
+	}
+
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		_, err := tx.ExecContext(ctx, `UPDATE project_computers SET enabled=? WHERE project_id=?`, enabled, id)
 		return err

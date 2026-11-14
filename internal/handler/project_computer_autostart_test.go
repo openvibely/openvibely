@@ -36,7 +36,10 @@ func TestComputerPanelAvailableForUnexecutedTask(t *testing.T) {
 	require.Equal(t, 200, rec.Code)
 	var state models.ProjectComputer
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &state))
-	require.True(t, state.Enabled)
+	require.False(t, state.Enabled)
+	require.True(t, state.ProjectEnabled)
+	require.Equal(t, 400, request("POST", "ensure").Code)
+	require.Equal(t, 200, request("POST", "task-enable").Code)
 	require.Equal(t, 200, request("POST", "ensure").Code)
 	require.Equal(t, 200, request("POST", "disable").Code)
 	rec = request("GET", "status")
