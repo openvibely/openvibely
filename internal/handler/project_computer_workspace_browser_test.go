@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func TestNewTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
+func TestSavedTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("browser test")
 	}
@@ -27,7 +27,7 @@ func TestNewTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
 		t.Skip("Chrome unavailable")
 	}
 	var page bytes.Buffer
-	require.NoError(t, pages.NewTask(nil, &models.Project{ID: "project", Name: "Preview"}, nil, nil).Render(t.Context(), &page))
+	require.NoError(t, pages.TaskDetailPage(nil, &models.Task{ID: "task", ProjectID: "project", Title: "Preview", Category: models.CategoryActive, Status: models.StatusPending}, nil, nil, nil, nil, nil, nil, "computer", nil).Render(t.Context(), &page))
 	html := strings.ReplaceAll(page.String(), static.URL("vendor/novnc/core/rfb.js"), "/fixture-rfb.js")
 	script := `<script>
 Object.defineProperty(navigator,'platform',{value:'MacIntel',configurable:true});
@@ -36,7 +36,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  const q=s=>document.querySelector(s);const wait=async (f,label="")=>{for(let n=0;n<200;n++){if(f())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label+': '+q('[data-computer-status]').textContent);};
  const finish=(state,message)=>{const node=document.createElement('div');node.id='browser-result';node.dataset.status=state;node.textContent=message;document.body.append(node);};
  try{
- await wait(()=>window.taskWorkspace);q('#task-details-opener').click();q('[data-tab="computer"]').click();
+ await wait(()=>window.taskWorkspace);q('[data-tab="computer"]').click();
  await wait(()=>window.fixtureRFB?.painted);
  if(q('#tab-computer').classList.contains('hidden'))throw Error('Computer tab hidden');
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
@@ -92,7 +92,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>!q('[data-computer-idle]').disabled);if(q('[data-computer-idle]').value!=='30')throw Error('Wrong default idle timeout');q('[data-computer-idle]').value='0';q('[data-computer-idle]').dispatchEvent(new Event('change'));await wait(()=>q('[data-computer-preference-status]').textContent.includes('Idle timeout saved'));
  await wait(()=>!q('[data-computer-enabled]').disabled);q('[data-computer-enabled]').click();await wait(()=>q('[data-computer-preference-status]').textContent.includes('Saved'));
  q('[data-tab="computer"]').click();await wait(()=>q('[data-computer-status]').textContent.includes('disabled'));
- finish('pass','New task preview, automatic startup, expansion, takeover, release and project toggle');
+ finish('pass','Saved task preview, automatic startup, expansion, takeover, release and project toggle');
  }catch(e){finish('fail',e.message);}
 })();</script>`
 	html = strings.Replace(html, "</body>", script+"</body>", 1)

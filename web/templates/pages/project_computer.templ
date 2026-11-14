@@ -15,23 +15,23 @@ templ ProjectComputer(projects []models.Project, projectID string, taskIDs ...st
 func computerTaskID(ids []string)string {if len(ids)>0{return ids[0]};return ""}
 
 templ ProjectComputerContent(projectID string, taskIDs ...string) {
+ if computerTaskID(taskIDs)=="" {
+ <section id="project-computer" data-computer-project={projectID} class="p-4 flex flex-col gap-4">
+ <h1 class="text-xl font-bold">Project computer</h1>
+ <p class="text-sm opacity-70">Each task has its own desktop. Open a task’s Computer tab to view it.</p>
+ @ProjectComputerToggle(projectID)
+ @ProjectComputerPermissions(projectID, "")
+ </section>
+ } else {
   <section id="project-computer" data-computer-task={computerTaskID(taskIDs)} data-computer-project={ projectID } data-computer-viewer={ static.URL("vendor/novnc/core/rfb.js") } class="p-4 flex flex-col gap-4">
    <div data-computer-preview style="position:relative">
  <div data-computer-screen class="bg-base-200 rounded-lg overflow-hidden" style="height:220px;min-height:180px"></div>
  <button type="button" data-computer-preview-open aria-label="Open larger computer preview" style="position:absolute;inset:0;width:100%;height:100%;cursor:zoom-in;background:transparent;border:0"></button>
  </div>
-   if computerTaskID(taskIDs)=="" {
- <h1 class="text-xl font-bold">Project computer</h1>
- } else {
  <h3 class="font-semibold">Computer</h3>
- }
-   if computerTaskID(taskIDs)=="" {
- <p class="text-sm opacity-70">The computer starts automatically. Each saved task has its own desktop on the Computer tab.</p>
- }
    @ProjectComputerToggle(projectID)
- <details data-computer-grants><summary class="cursor-pointer">Chrome permissions</summary><button type="button" class="btn" data-computer-grants-refresh>Refresh permissions</button><div data-computer-grant-list></div><nav aria-label="Chrome permissions pages"><button type="button" class="btn btn-sm" data-computer-grants-previous disabled>Previous</button><span data-computer-grants-page></span><button type="button" class="btn btn-sm" data-computer-grants-next disabled>Next</button></nav></details>
+ @ProjectComputerPermissions(projectID, computerTaskID(taskIDs))
  <button type="button" class="btn btn-sm" data-computer-action="ensure" hidden>Retry connection</button>
-   if computerTaskID(taskIDs)!="" {
  <label>Run standard shell and file tools in
  <select class="select select-bordered" data-computer-target><option value="worktree">Task worktree</option><option value="computer">Task computer</option></select></label>
  <p class="text-sm">Applies on the next task turn. Git commands follow the shell selection.</p>
@@ -44,7 +44,6 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <label>Upload file <input type="file" data-computer-upload/></label>
  <div data-computer-file-list></div>
  </details>
- }
  <div data-computer-login hidden class="p-3 bg-base-200 rounded-lg">
  <p data-computer-login-site></p>
  <p class="text-sm">Complete the requested step privately. Done checks access and resumes this task. If needed, your task model checks a screenshot.</p>
@@ -265,11 +264,6 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  root.querySelector('[data-computer-chrome]').onclick=async()=>{try{const res=await fetch(scoped('/chrome'),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Chrome profiles unavailable');pendingImport=data.pending_import?.id||'';if(pendingImport){status.textContent='An approved import is incomplete. Retry to resume remaining profiles.';root.querySelector('[data-computer-import]').textContent='Resume approved import';}profile.replaceChildren();for(const name of data.profiles){profile.add(new Option(name,name));}root.querySelector('[data-computer-chrome-form]').hidden=false;updateSelection();if(profile.value)await chromeSites();}catch(e){status.textContent=e.message;}};
  root.querySelector('[data-computer-import]').onclick=async event=>{if(!pendingImport&&!selectedCookies.size){status.textContent='Select at least one cookie.';return;}event.target.disabled=true;pending=true;try{const res=await fetch(scoped('/chrome-import'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:pendingImport,scope:root.querySelector('[data-computer-grant-scope]').value,hours:Number(root.querySelector('[data-computer-grant-hours]').value),selections:[...selectedCookies.values()]})});const data=await res.json();if(!res.ok){if(data.grant_id){pendingImport=data.grant_id;root.querySelector('[data-computer-import]').textContent='Resume approved import';}throw Error(data.message||'Import failed');}pendingImport='';root.querySelector('[data-computer-import]').textContent='Approve selected sign-ins';status.textContent='Imported '+data.imported+' cookies. Check your sign-in, then select Done.';root.querySelector('[data-computer-chrome-form]').hidden=true;selectedCookies.clear();updateSelection();}catch(e){status.textContent=e.message;}finally{event.target.disabled=false;pending=false;}};
  const target=root.querySelector('[data-computer-target]');if(target)target.onchange=async()=>{target.disabled=true;try{const res=await fetch(scoped('/target-'+target.value),{method:'POST'});if(!res.ok)throw Error('Could not change tool destination');status.textContent='Tool destination saved for the next turn.';}catch(e){status.textContent=e.message;}finally{target.disabled=false;}};
- const grantList=root.querySelector('[data-computer-grant-list]');
- let grantOffset=0,grantPageVersion=0;
- const grantPrevious=root.querySelector('[data-computer-grants-previous]'),grantNext=root.querySelector('[data-computer-grants-next]');
- async function showGrants(offset=grantOffset){const version=++grantPageVersion;grantPrevious.disabled=true;grantNext.disabled=true;const res=await fetch(scoped('/chrome-grants')+'&offset='+offset,{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Permissions unavailable');if(version!==grantPageVersion)return;grantOffset=data.offset;grantPrevious.disabled=grantOffset===0;grantNext.disabled=!data.has_more;root.querySelector('[data-computer-grants-page]').textContent='Page '+(Math.floor(grantOffset/200)+1);grantList.replaceChildren();for(const grant of data.grants){const row=document.createElement('div');row.textContent=grant.scope+' — '+grant.selections.map(c=>c.profile+': '+c.domain+'/'+c.name).join(', ')+' — '+(grant.revoked?'Revoked':(grant.one_time?'One import — ':'')+(grant.expires_at?'Expires '+new Date(grant.expires_at*1000).toLocaleString():'Until revoked'));const button=document.createElement('button');button.className='btn btn-sm';button.textContent=grant.revoked?'Retry clearing cookies':'Revoke';button.onclick=async()=>{button.disabled=true;try{const response=await fetch(scoped('/chrome-grants'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:grant.id})});const data=await response.json();if(!response.ok)throw Error(data.message||'Could not revoke');await showGrants();}catch(e){status.textContent=e.message;}finally{button.disabled=false;}};row.append(button);grantList.append(row);}}
- if(grantList){root.querySelector('[data-computer-grants-refresh]').onclick=()=>showGrants(0).catch(e=>status.textContent=e.message);grantPrevious.onclick=()=>showGrants(Math.max(0,grantOffset-200)).catch(e=>status.textContent=e.message);grantNext.onclick=()=>showGrants(grantOffset+200).catch(e=>status.textContent=e.message);}
  const jobDetails=root.querySelector('[data-computer-jobs]');const jobList=root.querySelector('[data-computer-job-list]');let jobsPending=false;
  async function showJobs(){if(!jobDetails||!jobDetails.open||closed||jobsPending||!visible())return;jobsPending=true;try{const res=await fetch(scoped('/jobs'),{cache:'no-store'});if(!res.ok)return;const data=await res.json();if(closed)return;jobList.replaceChildren();for(const job of data.jobs){const label=document.createElement('p');label.textContent=job.job_id+' — '+(job.running?'Running':'Exited '+job.exit_code);const output=document.createElement('pre');output.style.cssText='max-height:240px;overflow:auto;white-space:pre-wrap';output.textContent=job.output;jobList.append(label,output);if(job.running){const stop=document.createElement('button');stop.className='btn btn-sm';stop.textContent='Stop command';stop.onclick=async()=>{stop.disabled=true;try{const res=await fetch(scoped('/jobs'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:job.job_id})});if(!res.ok)throw Error('Could not stop command');await showJobs();}catch(e){status.textContent=e.message;}finally{stop.disabled=false;}};jobList.append(stop);}}}catch{}finally{jobsPending=false;}}
  if(jobDetails)jobDetails.addEventListener('toggle',showJobs);
@@ -283,6 +277,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
     })();
    </script>
   </section>
+ }
  }
 
 templ ProjectComputerToggle(projectID string) {
@@ -309,4 +304,24 @@ templ ProjectComputerToggle(projectID string) {
  });})();
  </script>
  </div>
+}
+
+templ ProjectComputerPermissions(projectID, taskID string) {
+ <details data-computer-grants data-grants-project={projectID} data-grants-task={taskID}><summary class="cursor-pointer">Chrome permissions</summary><button type="button" class="btn" data-computer-grants-refresh>Refresh permissions</button><div data-computer-grant-list></div><nav aria-label="Chrome permissions pages"><button type="button" class="btn btn-sm" data-computer-grants-previous disabled>Previous</button><span data-computer-grants-page></span><button type="button" class="btn btn-sm" data-computer-grants-next disabled>Next</button></nav><p role="status" data-grants-status></p>
+ <script>
+ (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{
+ if(root.dataset.bound)return;root.dataset.bound='true';
+ const status=root.querySelector('[data-grants-status]');
+ const base='/projects/'+encodeURIComponent(root.dataset.grantsProject)+'/computer';
+ const scoped=path=>base+path+'?'+(root.dataset.grantsTask?'task_id='+encodeURIComponent(root.dataset.grantsTask):'');
+ const grantList=root.querySelector('[data-computer-grant-list]');
+ let grantOffset=0,grantPageVersion=0;
+ const grantPrevious=root.querySelector('[data-computer-grants-previous]'),grantNext=root.querySelector('[data-computer-grants-next]');
+ async function showGrants(offset=grantOffset){const version=++grantPageVersion;grantPrevious.disabled=true;grantNext.disabled=true;const res=await fetch(scoped('/chrome-grants')+'&offset='+offset,{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Permissions unavailable');if(version!==grantPageVersion)return;grantOffset=data.offset;grantPrevious.disabled=grantOffset===0;grantNext.disabled=!data.has_more;root.querySelector('[data-computer-grants-page]').textContent='Page '+(Math.floor(grantOffset/200)+1);grantList.replaceChildren();for(const grant of data.grants){const row=document.createElement('div');row.textContent=grant.scope+' — '+grant.selections.map(c=>c.profile+': '+c.domain+'/'+c.name).join(', ')+' — '+(grant.revoked?'Revoked':(grant.one_time?'One import — ':'')+(grant.expires_at?'Expires '+new Date(grant.expires_at*1000).toLocaleString():'Until revoked'));const button=document.createElement('button');button.className='btn btn-sm';button.textContent=grant.revoked?'Retry clearing cookies':'Revoke';button.onclick=async()=>{button.disabled=true;try{const response=await fetch(scoped('/chrome-grants'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:grant.id})});const data=await response.json();if(!response.ok)throw Error(data.message||'Could not revoke');await showGrants();}catch(e){status.textContent=e.message;}finally{button.disabled=false;}};row.append(button);grantList.append(row);}}
+ if(grantList){root.querySelector('[data-computer-grants-refresh]').onclick=()=>showGrants(0).catch(e=>status.textContent=e.message);grantPrevious.onclick=()=>showGrants(Math.max(0,grantOffset-200)).catch(e=>status.textContent=e.message);grantNext.onclick=()=>showGrants(grantOffset+200).catch(e=>status.textContent=e.message);}
+
+ root.addEventListener('toggle',()=>{if(root.open)showGrants(0).catch(e=>status.textContent=e.message);});
+ });})();
+ </script>
+ </details>
 }
