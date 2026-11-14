@@ -186,12 +186,15 @@ func taskMkdirAll(root *os.Root, path string) error {
 	return nil
 }
 func taskWriteFile(root *os.Root, path string, data []byte) error {
-	f, err := root.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	f, err := openWorkspaceFile(root, path, os.O_CREATE|os.O_WRONLY, false)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	if err = taskOwnFile(f); err != nil {
+		return err
+	}
+	if err = f.Truncate(0); err != nil {
 		return err
 	}
 	_, err = f.Write(data)

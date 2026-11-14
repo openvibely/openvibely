@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 const transferLimit = 25 << 20
@@ -81,7 +83,7 @@ func workspaceRoutes(mux *http.ServeMux) {
 			return
 		}
 		defer root.Close()
-		f, err := root.Open(path)
+		f, err := openWorkspaceFile(root, path, os.O_RDONLY, true)
 		if err != nil {
 			http.Error(w, err.Error(), 404)
 			return
@@ -104,7 +106,7 @@ func workspaceRoutes(mux *http.ServeMux) {
 					continue
 				}
 				info, err := entry.Info()
-				if err != nil {
+				if err != nil || (!info.IsDir() && !info.Mode().IsRegular()) {
 					continue
 				}
 				items = append(items, map[string]any{"name": entry.Name(), "path": filepath.Join(path, entry.Name()), "directory": entry.IsDir(), "size": info.Size()})
@@ -228,7 +230,7 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 		err = taskWriteFile(root, path, []byte(p.Input.Content))
 		return "Saved " + raw, err
 	case "read_file", "edit_file":
-		f, err := root.Open(path)
+		f, err := openWorkspaceFile(root, path, os.O_RDONLY, false)
 		if err != nil {
 			return "", err
 		}
@@ -300,6 +302,9 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 				}
 				return nil
 			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
 			if p.Input.Include != "" {
 				match, _ := filepath.Match(p.Input.Include, d.Name())
 				if !match {
@@ -311,7 +316,7 @@ func nativeFileOperation(ctx context.Context, root *os.Root, p nativeFileRequest
 				count++
 				return nil
 			}
-			f, err := root.Open(name)
+			f, err := openWorkspaceFile(root, name, os.O_RDONLY, false)
 			if err != nil {
 				return nil
 			}
@@ -350,4 +355,31 @@ func computerShellTimeout(seconds int, background bool) int {
 		limit = 3600
 	}
 	return min(seconds, limit)
+}
+
+// Check before opening to avoid touching special files, then check the opened
+// descriptor too: the path can change between stat and open. NONBLOCK prevents
+// a substituted FIFO from waiting for a peer. Never truncate before validation.
+func openWorkspaceFile(root *os.Root, path string, flags int, allowDirectory bool) (*os.File, error) {
+	acceptable := func(info os.FileInfo) bool { return info.Mode().IsRegular() || (allowDirectory && info.IsDir()) }
+	info, err := root.Stat(path)
+	if err == nil && !acceptable(info) {
+		return nil, fmt.Errorf("choose a regular file")
+	}
+	if err != nil && !(errors.Is(err, os.ErrNotExist) && flags&os.O_CREATE != 0) {
+		return nil, err
+	}
+	f, err := root.OpenFile(path, flags|syscall.O_NONBLOCK, 0600)
+	if err != nil {
+		return nil, err
+	}
+	info, err = f.Stat()
+	if err != nil || !acceptable(info) {
+		f.Close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("choose a regular file")
+	}
+	return f, nil
 }
