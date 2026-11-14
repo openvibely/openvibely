@@ -90,7 +90,10 @@ func (h *Handler) ProjectComputerNativeStream(c echo.Context) error {
 		return echo.NewHTTPError(403, "Computer viewer ticket required")
 	}
 	c.SetRequest(c.Request().WithContext(models.WithPrincipal(c.Request().Context(), ticket.Principal)))
-	q := c.Request().URL.Query()
+	// Echo caches parsed query parameters. Update that same map so middleware
+	// that already parsed the query cannot hide the ticket's task/viewer scope.
+	// Ticket values override any caller-supplied scope.
+	q := c.QueryParams()
 	q.Set("task_id", ticket.TaskID)
 	q.Set("viewer_id", ticket.ViewerID)
 	c.Request().URL.RawQuery = q.Encode()
