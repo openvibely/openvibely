@@ -14,8 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends x11vnc websocki
 COPY --from=builder /licenses/ /usr/share/licenses/openvibely-computer/
 COPY packaging/computer/licenses.cjs /tmp/openvibely-licenses.cjs
 RUN node /tmp/openvibely-licenses.cjs && rm /tmp/openvibely-licenses.cjs
-COPY packaging/computer/export-sources.sh /usr/local/bin/export-computer-sources
-RUN chmod +x /usr/local/bin/export-computer-sources
+COPY packaging/computer/SOURCE-OFFER.txt /usr/share/licenses/openvibely-computer/SOURCE-OFFER.txt
 # The trusted supervisor creates task namespaces and drops all capabilities in
 # desktop applications and shells. Only it runs as root.
 ENV HOME=/home/ubuntu

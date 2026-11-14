@@ -43,18 +43,6 @@ async function main() {
   } finally {
     await browser.close();
   }
-  fs.writeFileSync(`${root}/SOURCE.txt`, `Dependency notices for this image are collected here. Original Ubuntu notices
-also remain under /usr/share/doc and /usr/share/common-licenses.
 
-Before redistributing this image, export its matching dependency source bundle:
-  scripts/export-computer-sources.sh IMAGE OUTPUT_DIRECTORY
-Publish the resulting directory alongside the image, with equivalent access,
-and retain it for recipients. A source-download script alone is not a source
-release. The bundle includes the exact Ubuntu source package versions (including
-packaging patches), the Chromium release source archive, npm package sources,
-and an image identity and checksum manifest. Export fails if a source is missing.
-Review chromium-build.txt against the Chromium archive and upstream build
-configuration before release; the export is not a certification of compliance.
-`);
 }
 main().catch(error => {console.error(error); process.exitCode = 1;});

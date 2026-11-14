@@ -1,0 +1,23 @@
+OpenVibely computer image — offer of corresponding source
+
+For the GPL/LGPL-covered software distributed in this image, OpenVibely
+offers to provide any third party the complete corresponding machine-readable
+source code under the applicable licenses, including applicable patches and
+scripts used to control compilation and installation.
+
+Send requests to admin@openvibely.ai. Please identify the image tag or digest
+and, if available, the package names and versions. Package versions and notices
+are recorded in /usr/share/licenses/openvibely-computer/; Ubuntu's original
+notices also remain in /usr/share/doc/ and /usr/share/common-licenses/.
+
+This offer remains valid for at least three years after our last distribution
+of the covered binaries, and for as long as we offer spare parts or customer
+support for a product model containing them where the applicable license
+requires that longer period.
+
+Electronic delivery is free. On request, source can also be supplied on a
+durable physical medium customarily used for software interchange, for no more
+than the reasonable cost of physically performing source distribution.
+
+This offer supplements, and does not restrict, your rights under the included
+licenses.
