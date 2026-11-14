@@ -248,6 +248,11 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 			if !projectDeletionManifestsEqual(preview, manifest) {
 				return errors.New("project-owned tasks or files changed during deletion")
 			}
+			if computerCleanupRequired {
+				if err := s.computerSvc.cleanupProjectResources(ctx, id); err != nil {
+					return fmt.Errorf("computer cleanup failed; retry project deletion: %w", err)
+				}
+			}
 			return nil
 		})
 		if deleteErr != nil {
@@ -262,11 +267,6 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cleanupCancel()
 		var cleanupErrors []error
-		if computerCleanupRequired {
-			if err := s.computerSvc.CleanupDeletedProject(cleanupCtx, id); err != nil {
-				cleanupErrors = append(cleanupErrors, err)
-			}
-		}
 		if s.taskSvc != nil {
 			if runtimeErr := s.taskSvc.cleanupDeletedProjectRuntime(cleanupCtx, manifest.TaskIDs); runtimeErr != nil {
 				cleanupErrors = append(cleanupErrors, runtimeErr)

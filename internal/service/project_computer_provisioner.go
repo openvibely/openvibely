@@ -191,9 +191,6 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 			return ComputerConnection{}, err
 		}
 	}
-	if err := p.ensureHomeVolume(ctx, id); err != nil {
-		return ComputerConnection{}, err
-	}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return ComputerConnection{}, err
@@ -293,44 +290,54 @@ func defaultComputerProvisioner() ComputerProvisioner {
 	return &LocalComputerProvisioner{}
 }
 
-// RemoveProject is invoked only after project deletion commits. Never remove an
-// unrelated volume or a container whose ownership label does not match.
+// RemoveProject removes resources before project records are deleted. Each part
+// is checked independently so retries can finish after a partial removal.
 func (p *LocalComputerProvisioner) RemoveProject(ctx context.Context, id string) error {
 	name := computerContainerName(id)
+	volume := name + "-home"
 	existing, err := p.docker(ctx, nil, "container", "ls", "--all", "--filter", "name=^/"+name+"$", "--format", "{{.Names}}")
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(string(existing)) == "" {
-		return nil
+	if strings.TrimSpace(string(existing)) != "" {
+		raw, err := p.docker(ctx, nil, "inspect", name)
+		if err != nil {
+			return err
+		}
+		var rows []struct {
+			Config struct{ Labels map[string]string }
+			Mounts []struct{ Name, Destination, Type string }
+			State  struct{ Running bool }
+		}
+		if json.Unmarshal(raw, &rows) != nil || len(rows) != 1 || rows[0].Config.Labels["openvibely.project"] != id {
+			return errors.New("computer ownership mismatch")
+		}
+		if rows[0].State.Running {
+			return errors.New("stop computer before removing project resources")
+		}
+		owned := false
+		for _, m := range rows[0].Mounts {
+			if m.Destination == "/home/ubuntu" && m.Type == "volume" && m.Name == volume {
+				owned = true
+			}
+		}
+		if !owned {
+			return errors.New("computer volume ownership mismatch")
+		}
+		if _, err := p.docker(ctx, nil, "rm", name); err != nil {
+			return err
+		}
 	}
-	raw, err := p.docker(ctx, nil, "inspect", name)
+	// The durable project record and deterministic volume name allow retrying
+	// even when the container was already removed. Never scan other volumes.
+	volumes, err := p.docker(ctx, nil, "volume", "ls", "--filter", "name=^"+volume+"$", "--format", "{{.Name}}")
 	if err != nil {
 		return err
 	}
-	var rows []struct {
-		Config struct{ Labels map[string]string }
-		Mounts []struct{ Name, Destination, Type string }
-		State  struct{ Running bool }
+	if strings.TrimSpace(string(volumes)) == "" {
+		return nil
 	}
-	if json.Unmarshal(raw, &rows) != nil || len(rows) != 1 || rows[0].Config.Labels["openvibely.project"] != id {
-		return errors.New("computer ownership mismatch")
-	}
-	if rows[0].State.Running {
-		return errors.New("stop computer before removing project resources")
-	}
-	volume := ""
-	for _, m := range rows[0].Mounts {
-		if m.Destination == "/home/ubuntu" && m.Type == "volume" && m.Name == name+"-home" {
-			volume = m.Name
-		}
-	}
-	if volume == "" {
-		return errors.New("computer volume ownership mismatch")
-	}
-	if _, err := p.docker(ctx, nil, "rm", name); err != nil {
-		return err
-	}
+	// Docker rejects removal if any container (including stopped ones) uses it.
 	_, err = p.docker(ctx, nil, "volume", "rm", volume)
 	return err
 }

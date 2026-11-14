@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -142,4 +143,73 @@ func TestComputerStartWaitsForProjectDeletion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComputerCleanupFailurePreservesProjectForRetry(t *testing.T) {
+	db := teststores.New(t)
+	project := &models.Project{Name: "Retry cleanup"}
+	require.NoError(t, db.Projects.Create(t.Context(), project))
+	attempts := 0
+	p := &removingComputerProvisioner{removed: func(context.Context, string) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("volume is in use")
+		}
+		return nil
+	}}
+	computer := NewProjectComputerService(db.Projects, p)
+	require.NoError(t, db.Projects.Computers().Configure(t.Context(), project.ID, "local"))
+	require.NoError(t, db.Projects.Computers().MarkCleanupRequired(t.Context(), project.ID))
+	projects := NewProjectService(db.Projects)
+	projects.SetProjectComputerService(computer)
+	require.ErrorContains(t, projects.Delete(t.Context(), project.ID), "retry project deletion")
+	found, err := db.Projects.GetByID(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	state, err := computer.Get(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.True(t, state.CleanupRequired)
+	require.NoError(t, projects.Delete(t.Context(), project.ID))
+	found, err = db.Projects.GetByID(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Nil(t, found)
+	require.Equal(t, 2, attempts)
+}
+
+func TestComputerVolumeRemovalRetriesWithoutContainer(t *testing.T) {
+	name := computerContainerName("project")
+	container, volume := true, true
+	attempts := 0
+	p := &LocalComputerProvisioner{run: func(ctx context.Context, in io.Reader, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "container":
+			if container {
+				return []byte(name), nil
+			}
+		case "inspect":
+			return []byte(fmt.Sprintf(`[{"Config":{"Labels":{"openvibely.project":"project"}},"State":{"Running":false},"Mounts":[{"Name":%q,"Destination":"/home/ubuntu","Type":"volume"}]}]`, name+"-home")), nil
+		case "rm":
+			container = false
+		case "volume":
+			if args[1] == "ls" && volume {
+				return []byte(name + "-home"), nil
+			}
+			if args[1] == "rm" {
+				require.Equal(t, name+"-home", args[2])
+				attempts++
+				if attempts == 1 {
+					return nil, errors.New("volume removal failed")
+				}
+				volume = false
+			}
+		}
+		return nil, nil
+	}}
+	require.Error(t, p.RemoveProject(t.Context(), "project"))
+	require.False(t, container)
+	require.True(t, volume)
+	require.NoError(t, p.RemoveProject(t.Context(), "project"))
+	require.False(t, volume)
+	require.NoError(t, p.RemoveProject(t.Context(), "project"))
+	require.Equal(t, 2, attempts)
 }

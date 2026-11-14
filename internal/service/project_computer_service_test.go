@@ -251,6 +251,10 @@ func TestLocalComputerDeletionChecksVolumeOwnership(t *testing.T) {
 				switch args[0] {
 				case "container":
 					return []byte(name), nil
+				case "volume":
+					if args[1] == "ls" {
+						return []byte(name + "-home"), nil
+					}
 				case "inspect":
 					volume := name + "-home"
 					if !owned {

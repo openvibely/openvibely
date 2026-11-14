@@ -155,7 +155,7 @@ type removingComputerProvisioner struct {
 func (p *removingComputerProvisioner) RemoveProject(ctx context.Context, id string) error {
 	return p.removed(ctx, id)
 }
-func TestProjectComputerDeletionCleansAfterCommit(t *testing.T) {
+func TestProjectComputerDeletionCleansBeforeCommit(t *testing.T) {
 	db := teststores.New(t)
 	projects := db.Projects
 	project := &models.Project{Name: "Deletion"}
@@ -174,13 +174,6 @@ func TestProjectComputerDeletionCleansAfterCommit(t *testing.T) {
 	}))
 	defer server.Close()
 	p := &removingComputerProvisioner{fakeComputerProvisioner: fakeComputerProvisioner{connection: ComputerConnection{Endpoint: server.URL, Token: "fixture"}}, removed: func(ctx context.Context, id string) error {
-		got, err := projects.GetByID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if got != nil {
-			t.Error("computer data removed before deletion committed")
-		}
 		removed = true
 		return nil
 	}}

@@ -171,7 +171,6 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 				return err
 			}
 
-			s.startOrphanVolumeCleanup(ctx)
 			return nil
 		}
 		select {
@@ -647,7 +646,7 @@ func (s *ProjectComputerService) CloseTaskDesktop(ctx context.Context, projectID
 	return nil
 }
 
-func (s *ProjectComputerService) CleanupDeletedProject(ctx context.Context, id string) error {
+func (s *ProjectComputerService) cleanupProjectResources(ctx context.Context, id string) error {
 	if local, ok := s.provisioner.(interface {
 		RemoveProject(context.Context, string) error
 	}); ok {
