@@ -1455,6 +1455,7 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 }
 
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	messages = omitEmptyRequestTextBlocks(messages)
 	prepared, err := prepareAgenticMessages(messages)
 	if err != nil {
 		return nil, err

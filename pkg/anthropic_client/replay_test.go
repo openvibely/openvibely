@@ -78,7 +78,7 @@ func TestSendAgenticRepairsRestoredToolCall(t *testing.T) {
 			old := AnthropicAPIHost
 			AnthropicAPIHost = server.URL
 			defer func() { AnthropicAPIHost = old }()
-			history := []Message{{Role: "assistant", ContentBlocks: json.RawMessage(`[{"type":"tool_use","id":"interrupted","name":"shell","input":{}}]`)}}
+			history := []Message{{Role: "assistant", ContentBlocks: json.RawMessage(`[{"type":"text","text":""},{"type":"tool_use","id":"interrupted","name":"shell","input":{}}]`)}}
 			client := NewWithAPIKey("test")
 			client.History = history
 			opts := &AgenticOptions{Model: "claude-test", DisableTools: true, OmitExecutionEnvironment: true, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
@@ -90,11 +90,22 @@ func TestSendAgenticRepairsRestoredToolCall(t *testing.T) {
 			}
 			if recovery == "checkpoint" {
 				client.History = nil
-				opts.NativeCompactionStateJSON = `{"version":1,"messages":[{"role":"assistant","content":[{"type":"compaction","content":"summary"},{"type":"tool_use","id":"interrupted","name":"shell","input":{}}]}]}`
+				opts.NativeCompactionStateJSON = `{"version":1,"messages":[{"role":"assistant","content":[{"type":"compaction","content":"summary"},{"type":"text","text":""},{"type":"tool_use","id":"interrupted","name":"shell","input":{}}]}]}`
 			}
 			_, err := client.SendAgentic(context.Background(), "followup", opts)
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, len(request.Messages), 2)
+			for _, message := range request.Messages {
+				parts, _ := contentBlocksJSON(message.Content)
+				for _, raw := range parts {
+					var block agenticBlock
+					require.NoError(t, json.Unmarshal(raw, &block))
+					if block.Type == "text" {
+						require.NotEmpty(t, block.Text, "outgoing requests must satisfy Anthropic's non-empty text requirement")
+					}
+				}
+			}
+
 			blocks, err := contentBlocksJSON(request.Messages[1].Content)
 			require.NoError(t, err)
 			var b agenticBlock
