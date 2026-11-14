@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"net/http"
 	"net/url"
@@ -238,6 +239,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	u.Path = strings.TrimRight(u.Path, "/") + "/rfb-" + mode
 	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}, "X-OV-Viewer-ID": {token}}, Subprotocols: []string{"binary"}})
 	if err != nil {
+		applog.Infof("computer viewer upstream failed project=%s task=%s mode=%s: %v", id, taskID, mode, err)
 		return echo.NewHTTPError(502, "Computer viewer unavailable")
 	}
 	defer upstream.CloseNow()
