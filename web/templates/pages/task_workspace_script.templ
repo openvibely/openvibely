@@ -16,7 +16,9 @@ templ TaskWorkspaceScript() {
 		var back = root.querySelector('#task-workspace-back');
 		var abort = new AbortController();
 		var signal = abort.signal;
-		var tabNames = ['details', 'computer', 'schedules', 'chaining', 'attachments', 'lifecycle'];
+		var allTabNames = ['details', 'computer', 'schedules', 'chaining', 'attachments', 'lifecycle'];
+        var tabNames = allTabNames.filter(name => name !== 'computer');
+        var computerPermissionVersion = 0;
 		var selected = 'details', scrollState = null, returnFocus = null, composerFocus = null;
 		var summary = null, timer = null, pending = false, dirty = false, titleVersion = 0, actionRevision = null;
 		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
@@ -42,7 +44,7 @@ templ TaskWorkspaceScript() {
 			if (context) context.value = tab;
 		}
 		function selectTab(name, push) {
-			if (tabNames.indexOf(name) < 0) name = selected;
+			if (tabNames.indexOf(name) < 0) name = tabNames.includes(selected) ? selected : 'details';
 			selected = name;
  root.dispatchEvent(new CustomEvent('computer-tab-change',{bubbles:true}));
 			store('task-inspector-tab-' + taskID, name);
@@ -327,7 +329,7 @@ templ TaskWorkspaceScript() {
 			if (tab && !event.defaultPrevented && !event.isComposing && !event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) >= 0) {
 				event.preventDefault();
 				var index = tabNames.indexOf(selected);
-				index = event.key === 'Home' ? 0 : event.key === 'End' ? 4 : (index + (event.key === 'ArrowRight' ? 1 : 4)) % 5;
+				index = event.key === 'Home' ? 0 : event.key === 'End' ? tabNames.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : tabNames.length - 1)) % tabNames.length;
 				selectTab(tabNames[index], true);
 				panel.querySelector('[aria-selected="true"]').focus();
 			}
@@ -338,6 +340,28 @@ templ TaskWorkspaceScript() {
 			openChanges: function() { workspace(true); }, openThread: function() { workspace(false); },
 			openPanel: openPanel, closePanel: closePanel, togglePanel: function() { if (panel.hidden) openPanel(); else closePanel(); }, destroy: destroy
 		};
+        async function updateComputerPermission() {
+            var version = ++computerPermissionVersion;
+            var project = root.querySelector('#new-task-project')?.value || root.dataset.projectId;
+            var allowed = false;
+            try {
+                if (project) {
+                    var response = await fetch('/projects/' + encodeURIComponent(project) + '/computer/status', {signal:signal, cache:'no-store'});
+                    if (response.ok) allowed = (await response.json()).enabled === true;
+                }
+            } catch (_) {}
+            if (signal.aborted || version !== computerPermissionVersion) return;
+            var button = panel.querySelector('[data-tab="computer"]');
+            button.toggleAttribute('data-computer-allowed', allowed);
+            button.hidden = !allowed;
+            tabNames = allTabNames.filter(name => name !== 'computer' || allowed);
+            if (!allowed && selected === 'computer') selectTab('details', false);
+            else if (allowed && ((displayedURL().searchParams.get('tab') || root.dataset.initialTab) === 'computer')) openPanel('computer', false, false);
+        }
+        on(document, 'computer-setting-changed', updateComputerPermission);
+        var destination = root.querySelector('#new-task-project');
+        if (destination) on(destination, 'change', updateComputerPermission);
+        updateComputerPermission();
 		resize(read('task-inspector-width'));
 		applyURL();
 		refreshSummary();

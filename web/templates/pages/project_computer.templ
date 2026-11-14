@@ -428,7 +428,6 @@ templ ProjectComputerPermissions(projectID, taskID string) {
 templ TaskComputerToggle(projectID, taskID string) {
  <div data-task-computer-preference data-project-id={projectID} class="flex flex-col gap-2">
  <label class="flex items-center gap-3 text-sm"><input type="checkbox" class="toggle toggle-sm toggle-primary shrink-0" data-task-computer-toggle name="computer_enabled" value="on" form="task-thread-form" disabled/>Use computer for this task</label>
- <p class="text-sm opacity-60">Optional. Requires computer use to be allowed in project settings.</p>
  if taskID=="" {
  <p class="text-sm opacity-60">The desktop and preview start after you send the first message.</p>
  <script>

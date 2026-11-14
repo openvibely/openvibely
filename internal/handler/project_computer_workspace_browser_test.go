@@ -36,7 +36,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  const q=s=>document.querySelector(s);const wait=async (f,label="")=>{for(let n=0;n<200;n++){if(f())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label+': '+q('[data-computer-status]').textContent);};
  const finish=(state,message)=>{const node=document.createElement('div');node.id='browser-result';node.dataset.status=state;node.textContent=message;document.body.append(node);};
  try{
- await wait(()=>window.taskWorkspace);q('[data-tab="computer"]').click();
+ await wait(()=>window.taskWorkspace && q('[data-tab="computer"]').hasAttribute('data-computer-allowed'));q('[data-tab="computer"]').click();
  await wait(()=>!q('[data-task-computer-toggle]').disabled);
  if(window.fixtureRFB)throw Error('Computer started without opt-in');
  q('[data-task-computer-toggle]').click();
@@ -94,6 +94,13 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'preview first frame');
 
  await wait(()=>!q('[data-task-computer-toggle]').disabled);q('[data-task-computer-toggle]').click();await wait(()=>q('[data-computer-preview]').hidden,'task disabled');
+ window.fetch=(url,options)=>String(url).endsWith('/computer/status')?Promise.resolve(new Response(JSON.stringify({enabled:false}),{status:200})):originalFetch(url,options);
+ document.dispatchEvent(new Event('computer-setting-changed'));
+ await wait(()=>q('[data-tab="computer"]').hidden,'project permission hides tab');
+ if(q('[data-tab="details"]').getAttribute('aria-selected')!=='true')throw Error('Disabled computer tab did not return to Details');
+ window.taskWorkspace.openPanel('computer');
+ if(!q('#tab-computer').classList.contains('hidden'))throw Error('Disabled tab could be reopened');
+ window.fetch=originalFetch;
  finish('pass','Saved task preview, automatic startup, expansion, takeover, release and project toggle');
  }catch(e){finish('fail',e.message);}
 })();</script>`
@@ -131,6 +138,10 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 
 			fmt.Fprint(w, `{}`)
 		case strings.HasSuffix(r.URL.Path, "/status"):
+			if r.URL.Query().Get("task_id") == "" {
+				fmt.Fprint(w, `{"enabled":true}`)
+				return
+			}
 			fmt.Fprintf(w, `{"project_enabled":true,"task_enabled":%t,"enabled":%t,"ready":%t,"held":%t,"handoff_kind":%q}`, enabled, enabled, ready, held, handoff)
 		case r.URL.Path == "/fixture-private":
 			handoff = "request_browser_login"

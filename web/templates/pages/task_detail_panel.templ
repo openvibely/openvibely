@@ -12,6 +12,7 @@ templ TaskDetailPanel() {
 		</div>
 	}
 	<style>
+        #inspector-tab-computer:not([data-computer-allowed]) { display:none; }
 		/* Prevent scroll-boundary gestures from bouncing the app shell independently
 		   of the fixed inspector. The thread and panel retain their own scrolling. */
 		html:has(#task-detail-content), body:has(#task-detail-content), #main-content:has(#task-detail-content) { overscroll-behavior-y:none; }

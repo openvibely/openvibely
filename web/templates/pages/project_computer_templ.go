@@ -343,7 +343,7 @@ func TaskComputerToggle(projectID, taskID string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" class=\"flex flex-col gap-2\"><label class=\"flex items-center gap-3 text-sm\"><input type=\"checkbox\" class=\"toggle toggle-sm toggle-primary shrink-0\" data-task-computer-toggle name=\"computer_enabled\" value=\"on\" form=\"task-thread-form\" disabled>Use computer for this task</label><p class=\"text-sm opacity-60\">Optional. Requires computer use to be allowed in project settings.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" class=\"flex flex-col gap-2\"><label class=\"flex items-center gap-3 text-sm\"><input type=\"checkbox\" class=\"toggle toggle-sm toggle-primary shrink-0\" data-task-computer-toggle name=\"computer_enabled\" value=\"on\" form=\"task-thread-form\" disabled>Use computer for this task</label> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
