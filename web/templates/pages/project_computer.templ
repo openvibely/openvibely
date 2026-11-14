@@ -3,6 +3,7 @@ package pages
 import (
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/web/templates/layout"
+ "github.com/openvibely/openvibely/web/templates/components"
  "github.com/openvibely/openvibely/web/static"
 )
 
@@ -33,8 +34,16 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  @ProjectComputerPermissions(projectID, computerTaskID(taskIDs))
  <button type="button" class="btn btn-sm" data-computer-action="ensure" hidden>Retry connection</button>
  <div class="flex flex-col gap-2">
- <label class="inspector-property-row computer-target-row"><span class="opacity-60">Run tools in:</span>
- <select aria-label="Run standard shell and file tools in" data-computer-target><option value="worktree">Task worktree</option><option value="computer">Task computer</option></select><span aria-hidden="true">⌄</span></label>
+ <button type="button" class="inspector-property-row" data-computer-target data-value="worktree" aria-haspopup="dialog">
+ @components.InspectorPropertyContent("Run tools in", "Task worktree")
+ </button>
+ @components.InspectorPicker("computer-target-picker") {
+ <div data-options="target">
+ <button type="button" data-value="worktree" class="ov-menu-option w-full">Task worktree</button>
+ <button type="button" data-value="computer" class="ov-menu-option w-full">Task computer</button>
+ </div>
+ }
+
  <p class="text-sm opacity-60">Applies on the next task turn. Git commands follow the shell selection.</p>
  </div>
  <details data-computer-jobs><summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Commands and live output</span><span aria-hidden="true">›</span></summary><div data-computer-job-list></div></details>
@@ -78,7 +87,6 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <details data-workflows><summary>Saved workflows</summary><div data-workflow-list></div></details>
  </div><div data-computer-expanded></div></dialog>
    <style>
-    .computer-target-row select { appearance:none; width:100%; min-width:0; border:0; background:transparent; color:inherit; font:inherit; padding:0; cursor:pointer; }
     .computer-summary { cursor:pointer; list-style:none; }
     .computer-summary::-webkit-details-marker { display:none; }
     details[open] > .computer-summary > [aria-hidden] { transform:rotate(90deg); }
@@ -295,7 +303,7 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
        status.textContent=state.ready?(state.held?'You have control. This task’s computer tools are paused.':state.busy?'An agent is using the computer.':'Ready'):state.enabled===false?'Computer use is off for this task or project.':'Connecting to the computer…';
        find('[data-computer-login]').hidden=!state.handoff_kind;
  find('[data-computer-login-site]').textContent=state.handoff_kind?(state.handoff_reason||'Computer help requested')+(state.handoff_url?' — '+state.handoff_url:''):'';
- const target=find('[data-computer-target]');if(target&&!pending)target.value=state.tool_target||'worktree';
+ const target=find('[data-computer-target]');if(target&&!target.disabled){target.dataset.value=state.tool_target||'worktree';target.querySelector('[data-property-label]').textContent=target.dataset.value==='computer'?'Task computer':'Task worktree';}
  find('[data-computer-chrome]').hidden=state.handoff_kind!=='request_chrome_login'||!state.chrome_available;
  buttons.forEach(b=>{const a=b.dataset.computerAction;if(a==='ensure')b.hidden=state.ready||state.enabled===false;b.disabled=a==='ensure'?state.enabled===false:a.startsWith('login-')?!state.handoff_kind:a==='release'?!state.held||!!state.handoff_kind:a==='takeover'?!state.ready||state.held:!state.ready||state.held||state.busy;});
        if(state.ready){await viewer(state.held,state);reportConnection();}else disconnect();
@@ -328,7 +336,16 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
  profile.onchange=()=>chromeSites().catch(e=>status.textContent=e.message);
  find('[data-computer-chrome]').onclick=async()=>{try{const res=await fetch(scoped('/chrome'),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Chrome profiles unavailable');pendingImport=data.pending_import?.id||'';if(pendingImport){status.textContent='An approved import is incomplete. Retry to resume remaining profiles.';find('[data-computer-import]').textContent='Resume approved import';}profile.replaceChildren();for(const name of data.profiles){profile.add(new Option(name,name));}find('[data-computer-chrome-form]').hidden=false;updateSelection();if(profile.value)await chromeSites();}catch(e){status.textContent=e.message;}};
  find('[data-computer-import]').onclick=async event=>{if(!pendingImport&&!selectedCookies.size){status.textContent='Select at least one cookie.';return;}event.target.disabled=true;pending=true;try{const res=await fetch(scoped('/chrome-import'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:pendingImport,scope:find('[data-computer-grant-scope]').value,hours:Number(find('[data-computer-grant-hours]').value),selections:[...selectedCookies.values()]})});const data=await res.json();if(!res.ok){if(data.grant_id){pendingImport=data.grant_id;find('[data-computer-import]').textContent='Resume approved import';}throw Error(data.message||'Import failed');}pendingImport='';find('[data-computer-import]').textContent='Approve selected sign-ins';status.textContent='Imported '+data.imported+' cookies. Check your sign-in, then select Done.';find('[data-computer-chrome-form]').hidden=true;selectedCookies.clear();updateSelection();}catch(e){status.textContent=e.message;}finally{event.target.disabled=false;pending=false;}};
- const target=find('[data-computer-target]');if(target)target.onchange=async()=>{target.disabled=true;try{const res=await fetch(scoped('/target-'+target.value),{method:'POST'});if(!res.ok)throw Error('Could not change tool destination');status.textContent='Tool destination saved for the next turn.';}catch(e){status.textContent=e.message;}finally{target.disabled=false;}};
+ const target=find('[data-computer-target]'), targetPicker=find('#computer-target-picker');
+ const targetPickerUI=window.createInspectorPicker(root,targetPicker,()=>target.disabled);
+ target.onclick=()=>targetPickerUI.open(target);
+ targetPicker.addEventListener('click',async event=>{
+ const option=event.target.closest('button[data-value]');if(!option||target.disabled)return;
+ target.disabled=true;
+ try{const res=await fetch(scoped('/target-'+option.dataset.value),{method:'POST'});if(!res.ok)throw Error('Could not change tool destination');target.dataset.value=option.dataset.value;target.querySelector('[data-property-label]').textContent=option.textContent;targetPickerUI.close();targetPickerUI.returnFocus(target);}
+ catch(e){targetPicker.querySelector('[data-property-error]').textContent=e.message;}
+ finally{target.disabled=false;}
+ });
  const jobDetails=find('[data-computer-jobs]');const jobList=find('[data-computer-job-list]');let jobsPending=false;
  async function showJobs(){if(!jobDetails||!jobDetails.open||closed||jobsPending||!visible())return;jobsPending=true;try{const res=await fetch(scoped('/jobs'),{cache:'no-store'});if(!res.ok)return;const data=await res.json();if(closed)return;jobList.replaceChildren();for(const job of data.jobs){const label=document.createElement('p');label.textContent=job.job_id+' — '+(job.running?'Running':'Exited '+job.exit_code);const output=document.createElement('pre');output.style.cssText='max-height:240px;overflow:auto;white-space:pre-wrap';output.textContent=job.output;jobList.append(label,output);if(job.running){const stop=document.createElement('button');stop.className='btn btn-sm';stop.textContent='Stop command';stop.onclick=async()=>{stop.disabled=true;try{const res=await fetch(scoped('/jobs'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:job.job_id})});if(!res.ok)throw Error('Could not stop command');await showJobs();}catch(e){status.textContent=e.message;}finally{stop.disabled=false;}};jobList.append(stop);}}}catch{}finally{jobsPending=false;}}
  if(jobDetails)jobDetails.addEventListener('toggle',showJobs);
