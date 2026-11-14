@@ -139,6 +139,14 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 	if !automatic && (c.Held || (c.Owner != "" && c.LeaseUntil >= time.Now().Unix())) {
 		return persistence.ErrComputerBusy
 	}
+	if checker, ok := s.provisioner.(interface{ CheckAvailable(context.Context) error }); ok {
+		if err := checker.CheckAvailable(ctx); err != nil {
+			return err
+		}
+	}
+	if err := s.repo.MarkCleanupRequired(ctx, id); err != nil {
+		return err
+	}
 	var conn ComputerConnection
 	if local, ok := s.provisioner.(interface {
 		StartWithTimeZone(context.Context, string, string) (ComputerConnection, error)
@@ -737,7 +745,7 @@ func (s *ProjectComputerService) requireIsolation(data []byte) error {
 	switch s.provisioner.(type) {
 	case *LocalComputerProvisioner, *HostedComputerProvisioner:
 		var health struct {
-			Isolation  int `json:"isolation"`
+			Isolation         int `json:"isolation"`
 			ViewerConnections int `json:"viewer_connections"`
 		}
 		if json.Unmarshal(data, &health) != nil || health.Isolation != 1 || health.ViewerConnections != 1 {

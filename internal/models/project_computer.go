@@ -2,6 +2,7 @@ package models
 
 // ProjectComputer records application ownership; credentials never enter this row.
 type ProjectComputer struct {
+	CleanupRequired     bool   `json:"-"`
 	IdleMinutes         int    `json:"idle_minutes"`
 	TakeoverPending     bool   `json:"takeover_pending"`
 	TimeZone            string `json:"time_zone"`

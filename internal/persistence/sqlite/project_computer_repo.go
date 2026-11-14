@@ -21,7 +21,7 @@ func (r *ProjectComputerRepo) Get(ctx context.Context, id string) (*models.Proje
 		return r.getSession(ctx, id)
 	}
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,held,owner,lease_until,enabled,time_zone,takeover_pending,idle_minutes FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.TakeoverPending, &c.IdleMinutes)
+	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,held,owner,lease_until,enabled,time_zone,takeover_pending,idle_minutes,cleanup_required FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.TakeoverPending, &c.IdleMinutes, &c.CleanupRequired)
 	return c, err
 }
 func (r *ProjectComputerRepo) Configure(ctx context.Context, id, provider string) error {
@@ -248,4 +248,20 @@ func (r *ProjectComputerRepo) TaskIDsForDesktopCleanup(ctx context.Context, id s
 		ids = append(ids, task)
 	}
 	return ids, rows.Err()
+}
+
+// Record intent before provisioning so an interrupted or partially failed start
+// cannot leave resources behind without a cleanup record.
+func (r *ProjectComputerRepo) MarkCleanupRequired(ctx context.Context, id string) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		result, err := tx.ExecContext(ctx, `UPDATE project_computers SET cleanup_required=1 WHERE project_id=?`, id)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err == nil && n == 0 {
+			return sql.ErrNoRows
+		}
+		return err
+	})
 }

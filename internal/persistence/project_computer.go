@@ -30,6 +30,7 @@ type ProjectComputerStore interface {
 	CreateThreadAttachment(ctx context.Context, projectID string, a *models.ChatAttachment) (taskAttachment bool, err error)
 	Get(ctx context.Context, id string) (*models.ProjectComputer, error)
 	Configure(ctx context.Context, id, provider string) error
+	MarkCleanupRequired(ctx context.Context, id string) error
 	Hold(ctx context.Context, id string, held bool) error
 	Reserve(ctx context.Context, id, owner string) error
 	Release(ctx context.Context, id, owner string) error

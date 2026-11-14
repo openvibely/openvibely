@@ -189,12 +189,14 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("project not found or is the default project")
 	}
 
-	computerConfigured := false
+	computerCleanupRequired := false
 	if s.computerSvc != nil {
-		if _, err := s.computerSvc.Get(ctx, id); err == nil {
-			computerConfigured = true
-			if err := s.computerSvc.Stop(ctx, id); err != nil {
-				return fmt.Errorf("stop project computer before deleting project: %w", err)
+		if computer, err := s.computerSvc.Get(ctx, id); err == nil {
+			computerCleanupRequired = computer.CleanupRequired
+			if computerCleanupRequired {
+				if err := s.computerSvc.Stop(ctx, id); err != nil {
+					return fmt.Errorf("cannot delete project while computer cleanup is unavailable; for a local computer, start Docker and retry: %w", err)
+				}
 			}
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -253,7 +255,7 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cleanupCancel()
 		var cleanupErrors []error
-		if computerConfigured {
+		if computerCleanupRequired {
 			if err := s.computerSvc.CleanupDeletedProject(cleanupCtx, id); err != nil {
 				cleanupErrors = append(cleanupErrors, err)
 			}

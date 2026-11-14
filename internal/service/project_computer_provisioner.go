@@ -331,3 +331,10 @@ func (p *LocalComputerProvisioner) RemoveProject(ctx context.Context, id string)
 	_, err = p.docker(ctx, nil, "volume", "rm", volume)
 	return err
 }
+
+// Check availability before recording provisioning intent. An unavailable daemon
+// cannot have created resources for a computer that has never been started.
+func (p *LocalComputerProvisioner) CheckAvailable(ctx context.Context) error {
+	_, err := p.docker(ctx, nil, "info", "--format", "{{.ServerVersion}}")
+	return err
+}
