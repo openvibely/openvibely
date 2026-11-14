@@ -10,6 +10,33 @@ async function main() {
   const inventory = execFileSync('dpkg-query', ['-W', '-f=${db:Status-Status}\t${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n'], {encoding: 'utf8'})
     .split('\n').filter(line => line.startsWith('installed\t')).map(line => line.slice(10)).join('\n') + '\n';
   fs.writeFileSync(path.join(root, 'ubuntu-packages.tsv'), inventory);
+  const sources = new Map();
+  for (const line of inventory.trim().split('\n')) {
+    const [, , name, version] = line.split('\t');
+    if (!name || !version) throw new Error(`Missing Ubuntu source identity: ${line}`);
+    sources.set(`${name}\t${version}`, `https://launchpad.net/ubuntu/+source/${encodeURIComponent(name)}/${encodeURIComponent(version)}`);
+  }
+  fs.writeFileSync(`${root}/ubuntu-sources.tsv`, 'source_package\tsource_version\tsource_url\n' +
+    [...sources].sort(([a], [b]) => a.localeCompare(b)).map(([identity, url]) => `${identity}\t${url}`).join('\n') + '\n');
+  fs.writeFileSync(`${root}/SOURCES.txt`, `Ubuntu dependency source downloads
+
+Ubuntu publishes the source for the Ubuntu packages in this image:
+https://launchpad.net/ubuntu/+source
+
+See ubuntu-sources.tsv in this directory for a link to each exact source
+package version installed in this image. Open its link and use the source
+package downloads, including the .dsc file, original source archive(s), and
+Debian/Ubuntu patch or packaging archive. These include Ubuntu's changes;
+the upstream project's latest source alone may not match the installed binary.
+ubuntu-packages.tsv maps installed binary packages to those source versions.
+
+These links cover packages installed through Ubuntu, not the separately
+installed Playwright, Chromium, or Go dependencies. Their notices and version
+information are also recorded in this directory.
+
+If matching source cannot be obtained, contact admin@openvibely.ai and identify
+the image and package version. See SOURCE-OFFER.txt for our source offer.
+`);
   for (const line of inventory.trim().split('\n')) {
     const name = line.split('\t')[0].split(':')[0];
     const copyright = `/usr/share/doc/${name}/copyright`;

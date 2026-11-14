@@ -5,6 +5,10 @@ offers to provide any third party the complete corresponding machine-readable
 source code under the applicable licenses, including applicable patches and
 scripts used to control compilation and installation.
 
+Ubuntu package sources are available directly from Ubuntu. See SOURCES.txt
+and ubuntu-sources.tsv in /usr/share/licenses/openvibely-computer/ for download
+directions and links to the exact source versions installed in this image.
+
 Send requests to admin@openvibely.ai. Please identify the image tag or digest
 and, if available, the package names and versions. Package versions and notices
 are recorded in /usr/share/licenses/openvibely-computer/; Ubuntu's original
