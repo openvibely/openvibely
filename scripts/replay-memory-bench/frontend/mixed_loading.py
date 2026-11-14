@@ -12,6 +12,22 @@ import subprocess
 HERE = Path(__file__).resolve().parent
 
 
+def summarize_rows(rows):
+    """Keep cancelled render outcomes separate from numeric measurements."""
+    return {
+        "medians": {
+            key: statistics.median(row[key] for row in rows)
+            for key in (rows[0] if rows else {})
+            if all(isinstance(row.get(key), (int, float)) for row in rows)
+        },
+        "render_outcomes": {
+            key: {outcome: sum(row.get(key) == outcome for row in rows)
+                  for outcome in sorted({row[key] for row in rows if key in row})}
+            for key in ["updateRenderOutcome", "splitRenderOutcome"]
+        },
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
@@ -108,9 +124,7 @@ def main():
                           (variant, size, mode)]
                 rows = [row for sample in subset if sample["status"] == 0 for row in sample["rows"]]
                 summary.append(dict(variant=variant, sizeMiB=size, mode=mode, passed=len(rows),
-                                    attempted=len(subset), medians={
-                                        key: statistics.median(row[key] for row in rows)
-                                        for key in rows[0]} if rows else {}))
+                                    attempted=len(subset), **summarize_rows(rows)))
     (output / "summary.json").write_text(json.dumps(summary, indent=2))
     print(output / "summary.json")
     if any(sample["status"] != 0 or len(sample["rows"]) != 1 for sample in samples):

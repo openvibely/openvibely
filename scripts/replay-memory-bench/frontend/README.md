@@ -120,9 +120,15 @@ failed samples remain recorded rather than being silently retried.
 Results include navigation-to-renderer-idle latency (not first paint), uncompressed
 initial HTML and source bytes, retained JS heap after GC, DOM count, and a single
 absolute process-tree RSS sample. `updateMS` includes the append HTTP request,
-stream delivery, waiting for renderers to become idle, and a 30 ms polling interval;
-it is **not** comparable to renderer-only update timings. A renderer timeout also
-ends that wait: idle does not prove a successful visual update. In `--huge` cases,
+stream delivery, waiting for the live render promise for the exact received source,
+and a 30 ms polling interval; it is **not** comparable to renderer-only update timings.
+Global idle flags alone are insufficient: a streaming timer/frame may not have started
+rendering yet. The fixture tracks the renderer's source and promise across reopening.
+`updateRenderOutcome` and `splitRenderOutcome` distinguish `rendered` from `cancelled`
+(including timeout); summaries count each outcome separately. Cancelled renders are
+not counted as successful tool pairing and their old row models are not inspected.
+Earlier results using only idle flags may undercount HTTP update latency or falsely
+report a missing result association; rerun them with this harness. In `--huge` cases,
 the update closes the large unfinished result before delivering the late result.
 RSS is not a peak, is not baseline-adjusted, and can count shared memory twice.
 There are no previews. Paging/concurrent updates are checked when a revision

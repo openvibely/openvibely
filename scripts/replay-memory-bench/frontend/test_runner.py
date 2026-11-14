@@ -2,9 +2,21 @@
 import unittest
 
 from run import summarize
+from mixed_loading import summarize_rows
 
 
 class SummaryTests(unittest.TestCase):
+    def test_http_render_outcomes_are_not_numeric_medians(self):
+        summary = summarize_rows([
+            {"updateMS": 50, "updateRenderOutcome": "rendered", "splitRenderOutcome": "rendered"},
+            {"updateMS": 30000, "updateRenderOutcome": "cancelled", "splitRenderOutcome": "rendered"},
+        ])
+        self.assertEqual(summary["medians"], {"updateMS": 15025})
+        self.assertEqual(summary["render_outcomes"]["updateRenderOutcome"],
+                         {"cancelled": 1, "rendered": 1})
+        self.assertEqual(summary["render_outcomes"]["splitRenderOutcome"], {"rendered": 2})
+        self.assertEqual(summarize_rows([])["medians"], {})
+
     def test_each_run_uses_its_own_empty_baseline(self):
         mib = 1048576
         samples = []

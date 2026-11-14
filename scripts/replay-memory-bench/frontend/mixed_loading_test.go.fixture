@@ -83,6 +83,27 @@ func TestMixedRunningLoadingInChrome(t *testing.T) {
  const pause=()=>new Promise(r=>setTimeout(r,30));
  const until=async(fn,label)=>{const end=performance.now()+120000;while(!fn()){if(performance.now()>end)throw Error('timeout '+label);await pause()}};
  const node=()=>document.getElementById('streaming-message-'+%q);
+ // Raw text arrives before the stream's timer/animation frame starts rendering.
+ // Track the actual render promise and its exact input, not global idle flags.
+ const renders=new WeakMap();
+ const originalLiveRender=window.renderLiveChatContent;
+ assert(typeof originalLiveRender==='function','live renderer unavailable');
+ window.renderLiveChatContent=function(container,text,...args){
+  const record={source:text,finished:false,outcome:'pending'};
+  renders.set(container,record);
+  let promise;
+  try { promise=originalLiveRender.call(this,container,text,...args); }
+  catch(error){record.finished=true;record.outcome='error';throw error;}
+  return Promise.resolve(promise).then(result=>{
+   record.finished=true;record.outcome=result===false?'cancelled':'rendered';return result;
+  },error=>{record.finished=true;record.outcome='error';throw error;});
+ };
+ const waitForUpdate=async(container,label)=>{
+  await until(()=>{const record=renders.get(container);return record?.finished&&record.source===container.getAttribute('data-raw-content');},label);
+  const record=renders.get(container);
+  assert(record.outcome!=='error',label+' failed');
+  return record.outcome;
+ };
  await until(()=>node()?.hasAttribute('data-raw-content'),'initial output');
  const n=node(),initial=n.getAttribute('data-raw-content'); const fullSeed=!n.dataset.outputWindow?.includes(':live-'); const huge=%t;
  await until(()=>document.getElementById('task-thread-messages')?.dataset.transcriptHydrating!=='true' && !window._liveChatRenderActive && !window._chatContentRenderActive && !window._chatContentRenderQueue?.length,'hydration');
@@ -97,7 +118,7 @@ func TestMixedRunningLoadingInChrome(t *testing.T) {
  assert(Number(n.dataset.initialByteLength)===%d,'wrong absolute offset');
  const updateStart=performance.now(); await fetch('/fixture-append',{method:'POST'});
  await until(()=>n.getAttribute('data-raw-content').includes('UPDATED_TAIL'),'incoming update');
- await until(()=>!window._liveChatRenderActive && !window._chatContentRenderActive && !window._chatContentRenderQueue?.length,'updated rows'); initialMetrics.updateMS=performance.now()-updateStart;
+ initialMetrics.updateRenderOutcome=await waitForUpdate(n,'updated rows'); initialMetrics.updateMS=performance.now()-updateStart;
  assert(fullSeed||huge||n.getAttribute('data-raw-content').length<16000,'background replay downloaded omitted history');
  if(!fullSeed){
  const before=n.dataset.outputWindow;
@@ -123,9 +144,11 @@ func TestMixedRunningLoadingInChrome(t *testing.T) {
  await fetch('/fixture-partial?i='+i,{method:'POST'});received+=parts[i];
  await until(()=>node().getAttribute('data-raw-content').endsWith(received),'partial control '+i);
  }
- await until(()=>!window._liveChatRenderActive && !window._chatContentRenderActive&&!window._chatContentRenderQueue?.length,'split rendering');
+ initialMetrics.splitRenderOutcome=await waitForUpdate(node(),'split rendering');
  const models=node()._chatVirtualData?.sourceModels;
- if(models) {
+ // A cancelled/timed-out render is reported explicitly, never counted as
+ // successful pairing or checked against stale models from an earlier source.
+ if(models && initialMetrics.splitRenderOutcome==='rendered') {
   const tools=models.flatMap(row=>row.segments).filter(seg=>seg.type==='using');
   assert(!tools.some(tool=>tool.secondary==='example'),'code example became a tool');
   assert(tools.some(tool=>tool.resultOutput?.includes('LATE_RESULT')),'late result not associated');
