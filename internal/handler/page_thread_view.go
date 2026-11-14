@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -13,23 +14,44 @@ func pluginThreadSurface(instanceID, projectID string) components.ThreadSurface 
 	return components.ThreadSurface{BaseURL: "/api/plugin-pages/" + url.PathEscape(instanceID) + "/chat/thread", ProjectID: projectID, SendURL: pluginAPI(instanceID, projectID, "/chat"), StopURL: pluginAPI(instanceID, projectID, "/chat/stop")}
 }
 
-// Resolve the owning page before delegating to the proven task-thread readers.
-// Client-supplied task IDs never select a conversation here.
-func (h *Handler) pluginThreadContext(c echo.Context) error {
+// pluginConversationTask resolves the authorized owning page and its persisted
+// conversation. Client-supplied task IDs never select a conversation here.
+func (h *Handler) pluginConversationTask(c echo.Context) (*pageplugins.Resolved, string, error) {
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	taskID, err := h.pagePlugins.Conversation(r.Ref()).Store.TaskID(c.Request().Context())
+	if err != nil {
+		return nil, "", err
+	}
+	if taskID != "" {
+		names, values := append([]string{}, c.ParamNames()...), append([]string{}, c.ParamValues()...)
+		found := false
+		for i, name := range names {
+			if name == "taskId" {
+				values[i] = taskID
+				found = true
+			}
+		}
+		if !found {
+			names = append(names, "taskId")
+			values = append(values, taskID)
+		}
+		c.SetParamNames(names...)
+		c.SetParamValues(values...)
+	}
+	return r, taskID, nil
+}
+
+func (h *Handler) pluginThreadContext(c echo.Context) error {
+	r, taskID, err := h.pluginConversationTask(c)
 	if err != nil {
 		return err
 	}
 	if taskID == "" {
 		return pluginNotFound()
 	}
-	names, values := append([]string{}, c.ParamNames()...), append([]string{}, c.ParamValues()...)
-	c.SetParamNames(append(names, "taskId")...)
-	c.SetParamValues(append(values, taskID)...)
 	c.SetRequest(c.Request().WithContext(components.WithThreadSurface(c.Request().Context(), pluginThreadSurface(r.Instance.ID, r.Instance.ProjectID))))
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return nil

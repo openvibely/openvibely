@@ -1111,20 +1111,13 @@ func (h *Handler) pluginSteeringTask(c echo.Context) error {
 	if err := requirePluginMutation(c); err != nil {
 		return err
 	}
-	r, err := h.resolvePluginForRequest(c, false)
-	if err != nil {
-		return err
-	}
-	taskID, err := h.pagePlugins.Conversation(r.Ref()).Store.TaskID(c.Request().Context())
+	_, taskID, err := h.pluginConversationTask(c)
 	if err != nil {
 		return err
 	}
 	if taskID == "" {
 		return echo.NewHTTPError(http.StatusConflict, "no active response to steer")
 	}
-	names, values := append([]string{}, c.ParamNames()...), append([]string{}, c.ParamValues()...)
-	c.SetParamNames(append(names, "taskId")...)
-	c.SetParamValues(append(values, taskID)...)
 	return nil
 }
 
