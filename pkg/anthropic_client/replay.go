@@ -78,3 +78,40 @@ func repairInterruptedToolCalls(messages []agenticMessage) []agenticMessage {
 	}
 	return out
 }
+
+// Anthropic can return empty text blocks but rejects them as request input.
+// Keep the durable transcript verbatim and omit empty blocks only on the wire.
+func omitEmptyRequestTextBlocks(messages []agenticMessage) []agenticMessage {
+	out := make([]agenticMessage, 0, len(messages))
+	for _, message := range messages {
+		if text, ok := message.Content.(string); ok {
+			if text != "" {
+				out = append(out, message)
+			}
+			continue
+		}
+		blocks, err := contentBlocksJSON(message.Content)
+		if err != nil {
+			out = append(out, message)
+			continue
+		}
+		kept := make([]json.RawMessage, 0, len(blocks))
+		for _, raw := range blocks {
+			var block struct {
+				Type string
+				Text *string
+			}
+			if json.Unmarshal(raw, &block) == nil && block.Type == "text" && block.Text != nil && *block.Text == "" {
+				continue
+			}
+			kept = append(kept, raw)
+		}
+		if len(kept) == len(blocks) {
+			out = append(out, message)
+		} else if len(kept) > 0 {
+			message.Content = kept
+			out = append(out, message)
+		}
+	}
+	return out
+}

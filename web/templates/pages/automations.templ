@@ -943,9 +943,9 @@ func automationLiveNodeAria(node models.AutomationLiveNode) string { return node
 
 type automationLiveCardField struct { Key string; Label string; Value string }
 
-func automationLiveCardFields(raw string) []automationLiveCardField {
+func automationLiveCardFields(node models.AutomationLiveNode) []automationLiveCardField {
 	var config map[string]any
-	if json.Unmarshal([]byte(raw), &config) != nil || len(config) == 0 { return nil }
+	if json.Unmarshal([]byte(node.ConfigJSON), &config) != nil || len(config) == 0 { return nil }
 	keys := make([]string, 0, len(config))
 	for key := range config { keys = append(keys, key) }
 	sort.Strings(keys)
@@ -959,9 +959,7 @@ func automationLiveCardFields(raw string) []automationLiveCardField {
 		label := strings.Title(strings.ReplaceAll(key, "_", " "))
 		if key == "model_config_id" {
 			label = "Model"
-			if value == "default" || strings.TrimSpace(value) == "" {
-				value = "Project default"
-			}
+			value = automationLiveModelName(value, node.ModelLabel)
 		}
 		fields = append(fields, automationLiveCardField{Key: key, Label: label, Value: value})
 	}
@@ -989,7 +987,7 @@ templ automationLiveDetailsPanel(graph models.AutomationLiveGraph, currentProjec
                         <a class="btn btn-outline btn-sm mb-4" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-node-task>Open task</a>
                     }
 					<dl class="grid grid-cols-1 gap-3 text-sm">
-						for _, field := range automationLiveCardFields(node.ConfigJSON) {
+						for _, field := range automationLiveCardFields(node) {
 							<div data-inspector-live-field={ field.Key }><dt class="text-xs font-medium text-base-content/55">{ field.Label }</dt><dd class="mt-1 whitespace-pre-wrap break-words">{ field.Value }</dd></div>
 						}
 					</dl>
@@ -2471,10 +2469,16 @@ func automationLiveNodeModelLabel(node models.AutomationLiveNode) string {
 	}
 	modelID, _ := config["model_config_id"].(string)
 	modelID = strings.TrimSpace(modelID)
-	if modelID == "" || modelID == "default" {
-		return "Model: Project default"
+	return "Model: " + automationLiveModelName(modelID, node.ModelLabel)
+}
+func automationLiveModelName(modelID, label string) string {
+	if strings.TrimSpace(modelID) == "" || strings.TrimSpace(modelID) == "default" {
+		return "Project default"
 	}
-	return "Model: " + modelID
+	if strings.TrimSpace(label) != "" {
+		return label
+	}
+	return "Unavailable model"
 }
 func automationNodeDetailsHeading(nodeType models.AutomationNodeType) string {
  if nodeType == models.AutomationNodeTrigger { return "Task" }

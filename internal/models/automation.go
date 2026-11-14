@@ -381,6 +381,7 @@ type AutomationLiveNode struct {
 	AutomationNode
 	Counts       AutomationNodeCounts `json:"counts"`
 	DisplayState string               `json:"display_state"`
+	ModelLabel   string               `json:"model_label,omitempty"`
 }
 
 type AutomationLiveEdge struct {

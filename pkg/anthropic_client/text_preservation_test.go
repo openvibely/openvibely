@@ -35,7 +35,7 @@ func TestTextBlocksPreserveVerbatimContent(t *testing.T) {
 				if callback {
 					require.Equal(t, expected, delivered.String())
 				}
-				// The same block encoding is used for durable replay and live requests.
+				// Durable replay retains empty text; request preparation filters it later.
 				raw, err := json.Marshal(result.contentBlocks)
 				require.NoError(t, err)
 				var blocks []map[string]any
@@ -75,5 +75,34 @@ func TestAgenticBlockTextFieldOnlyOnText(t *testing.T) {
 		if block.Type == "tool_use" {
 			require.Equal(t, map[string]any{}, fields["input"])
 		}
+	}
+}
+
+func TestOmitEmptyRequestTextBlocksPreservesHistory(t *testing.T) {
+	messages := []agenticMessage{
+		{Role: "user", Content: "question"},
+		{Role: "assistant", Content: []agenticBlock{{Type: "text"}}},
+		{Role: "assistant", Content: json.RawMessage(`[{"type":"thinking","thinking":"reason","signature":"keep"},{"type":"text","text":""},{"type":"text","text":" <tool_call>literal</tool_call> "},{"type":"tool_use","id":"a","name":"shell","input":{}},{"type":"future_block","opaque":true}]`)},
+	}
+	before := mustReplayJSON(t, messages)
+	got := omitEmptyRequestTextBlocks(messages)
+	require.Len(t, got, 2)
+	require.JSONEq(t, `[{"type":"thinking","thinking":"reason","signature":"keep"},{"type":"text","text":" <tool_call>literal</tool_call> "},{"type":"tool_use","id":"a","name":"shell","input":{}},{"type":"future_block","opaque":true}]`, string(mustReplayJSON(t, got[1].Content)))
+	require.Equal(t, before, mustReplayJSON(t, messages))
+	require.Equal(t, got, omitEmptyRequestTextBlocks(got))
+}
+
+func TestOmitEmptyRequestTextBlocksDoesNotHideMalformedText(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"text"}`,
+		`{"type":"text","text":null}`,
+		`{"type":"text","text":123}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			messages := []agenticMessage{{Role: "assistant", Content: json.RawMessage(`[` + raw + `,{"type":"text","text":""}]`)}}
+			got := omitEmptyRequestTextBlocks(messages)
+			require.Len(t, got, 1, "malformed blocks must remain visible to request validation")
+			require.JSONEq(t, `[`+raw+`]`, string(mustReplayJSON(t, got[0].Content)))
+		})
 	}
 }
