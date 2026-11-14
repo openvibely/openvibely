@@ -5919,13 +5919,24 @@ templ ChatAutoScrollScript() {
                             var index = checkpoint?.normalizedLength || 0;
                             var bytes = checkpoint?.normalizedBytes || 0;
                             var contextBytes = encoder.encode(contextText).length;
-                            options = Object.assign({}, options, {toolIdentity:function(seg) {
+                            function sourceIdentity(seg) {
                                 if (seg.index < index) { index = 0; bytes = 0; }
                                 bytes += encoder.encode(textBuffer.slice(index, seg.index)).length;
                                 index = seg.index;
                                 var absolute = seg.index < contextText.length ? contextOffsets[bytes] : bodyStart + bytes - contextBytes;
-                                return absolute == null ? null : 'tool-byte-' + absolute;
-                            }});
+                                return absolute == null ? null : 'byte-' + absolute;
+                            }
+                            // Assign identities in source order, scanning only the new suffix.
+                            // Both tools and thinking disclosures must survive history prepends.
+                            (newSegments || segments).forEach(function(seg) {
+                                if (seg.type !== 'using' && seg.type !== 'thinking') return;
+                                var identity = sourceIdentity(seg);
+                                if (identity !== null) {
+                                    if (seg.type === 'using') seg.toolRenderID = 'tool-' + identity;
+                                    else seg.thinkingRenderID = 'thinking-' + identity;
+                                }
+                            });
+                            options = Object.assign({}, options, {toolIdentity:function(seg) { return seg.toolRenderID; }});
                         } else if (windowCursor || container._outputWindowSeed) {
                             options = Object.assign({}, options, {offset: -textBuffer.length, ordinal: -segments.filter(function(seg) { return seg.type === 'using'; }).length});
                         }
@@ -6110,7 +6121,7 @@ templ ChatAutoScrollScript() {
 			}
             if (options?.activityShell) {
                 var first = segments[0];
-                var firstKey = first.type === 'using' ? first.toolRenderID : 'thinking-' + ((first.index || 0) + (container._chatActivityOffset || 0));
+                var firstKey = first.type === 'using' ? first.toolRenderID : (first.thinkingRenderID || 'thinking-' + ((first.index || 0) + (container._chatActivityOffset || 0)));
                 var activityKey = (toolContainerKey || 'chat') + ':activity:' + firstKey;
                 var existingActivity = container.querySelector('.stream-activity');
                 if (existingActivity?.getAttribute('data-tool-disclosure-key') !== activityKey) existingActivity = null;
@@ -6238,13 +6249,20 @@ templ ChatAutoScrollScript() {
 				// Merge all consecutive thinking blocks into one collapsible element
 				var merged = pendingThinking.join('\n\n');
 				pendingThinking = [];
-                var thinkingID = 'thinking-' + pendingThinkingID;
+                var thinkingID = pendingThinkingID;
+                var stableThinkingKey = thinkingID.startsWith('thinking-byte-') ? (toolContainerKey || 'chat') + ':' + thinkingID : null;
                 var previous = previousThinking?.get(thinkingID);
                 var details = previous || document.createElement('details');
                 var body = previous?.querySelector('.stream-thinking-body');
                 if (!previous) {
                     details.className = 'stream-thinking';
                     details.setAttribute('data-activity-id', thinkingID);
+                    if (stableThinkingKey) {
+                        details.open = window._toolOutputRowStates[stableThinkingKey]?.expanded === true;
+                        details.addEventListener('toggle', function() {
+                            if (details.isConnected) window._toolOutputRowStates[stableThinkingKey] = {expanded:details.open};
+                        });
+                    }
                     details.addEventListener('toggle', persistThinkingStates);
                     var summary = document.createElement('summary');
                     summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
@@ -6684,7 +6702,7 @@ templ ChatAutoScrollScript() {
 							flushText();
 						}
 						if (Object.prototype.hasOwnProperty.call(seg, 'thinkingRenderedContent')) pendingThinkingRenderedContent = seg.thinkingRenderedContent;
-						if (!pendingThinking.length) pendingThinkingID = (seg.index || 0) + (options?.offset || container._chatActivityOffset || 0);
+						if (!pendingThinking.length) pendingThinkingID = seg.thinkingRenderID || 'thinking-' + ((seg.index || 0) + (options?.offset || container._chatActivityOffset || 0));
                         pendingThinking.push(c);
 					}
 					return;
@@ -6845,7 +6863,7 @@ templ ChatAutoScrollScript() {
 			if (prevThinkingStates.length > 0) {
 				var newThinkingSections = container.querySelectorAll('details.stream-thinking');
 				for (var ti = 0; ti < newThinkingSections.length && ti < prevThinkingStates.length; ti++) {
-				if (prevThinkingStates[ti]) {
+				if (prevThinkingStates[ti] && !newThinkingSections[ti].dataset.activityId?.startsWith('thinking-byte-')) {
                     newThinkingSections[ti]._ensureThinkingContent?.();
 						newThinkingSections[ti].open = true;
 					}

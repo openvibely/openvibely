@@ -410,3 +410,36 @@ func TestBrowserFunctional_RunningWindowToolIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_RunningWindowThinkingIdentity(t *testing.T) {
+	for _, mode := range []string{"compact", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			report := runIncrementalChatBrowser(t, fmt.Sprintf(`
+ document.documentElement.setAttribute('data-output-detail',%q);
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');
+ const old='[Thinking]\nolder thinking\n[/Thinking]\n\n'+'Older café 🌍 prose. '.repeat(20)+'\n\n';
+ const recent='[Thinking]\nrecent thinking\n[/Thinking]\n\n'+'Recent prose. '.repeat(20)+'\n\n';
+ const newest='[Thinking]\nnewest thinking\n[/Thinking]\n';
+ stream.dataset.outputWindow=String(new TextEncoder().encode(old).length)+':live-test';
+ stream.dataset.outputContext='';stream.dataset.outputContextOffsets='{}';stream._outputWindowSeed={text:recent};
+ async function show(){await paint();for(const t of stream.querySelectorAll('.stream-activity-summary'))if(t.getAttribute('aria-expanded')!=='true')t.click();await materializeVirtualChatRows(messages);await paint();}
+ await renderStreamingContent(stream,recent,false);await show();
+ const thinking=stream.querySelector('details.stream-thinking');assert(thinking,'missing thinking');thinking.open=true;await paint();
+ const originalID=thinking.dataset.activityId;
+ await renderLiveChatContent(stream,recent+newest,false);await show();
+ stream.dataset.outputWindow='0:live-test';
+ await renderStreamingContent(stream,old+recent+newest,false);await show();
+ const rows=Array.from(stream.querySelectorAll('details.stream-thinking')).map(d=>({source:d._thinkingSource,open:d.open,id:d.dataset.activityId}));
+ assert(rows.find(d=>d.source.includes('recent thinking'))?.open,'recent thinking collapsed: '+JSON.stringify(rows));
+ assert(!rows.find(d=>d.source.includes('older thinking'))?.open,'older thinking inherited state: '+JSON.stringify(rows));assert(rows.find(d=>d.source.includes('recent thinking'))?.id===originalID,'recent ID changed');
+ assert(!rows.find(d=>d.source.includes('newest thinking'))?.open,'new thinking inherited state');
+ const reopened=Array.from(stream.querySelectorAll('details.stream-thinking')).find(d=>d._thinkingSource.includes('recent thinking'));
+ reopened.open=false;await paint();
+ await renderLiveChatContent(stream,old+recent+newest+'\nFinal prose.',false);await show();
+ assert(!Array.from(stream.querySelectorAll('details.stream-thinking')).find(d=>d._thinkingSource.includes('recent thinking'))?.open,'closed section reopened');
+ return rows;
+ `, mode))
+			t.Log(string(report))
+		})
+	}
+}
