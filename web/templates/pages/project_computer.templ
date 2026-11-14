@@ -25,7 +25,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  } else {
   <section id="project-computer" data-computer-task={computerTaskID(taskIDs)} data-computer-project={ projectID } data-computer-viewer={ static.URL("vendor/novnc/core/rfb.js") } class="p-4 flex flex-col gap-4">
    <div data-computer-preview style="position:relative">
- <div data-computer-screen class="bg-base-200 rounded-lg overflow-hidden" style="height:220px;min-height:180px"></div>
+ <div data-computer-screen class="rounded-lg overflow-hidden" style="height:220px;min-height:180px;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))"></div>
  <button type="button" data-computer-preview-open aria-label="Open larger computer preview" style="position:absolute;inset:0;width:100%;height:100%;cursor:zoom-in;background:transparent;border:0"></button>
  </div>
  <h3 class="font-semibold">Computer</h3>
@@ -78,7 +78,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
    <style>
     [data-computer-dialog][open] { display:flex; flex-direction:column; }
     [data-computer-expanded] { display:flex; flex-direction:column; flex:1; min-height:0; }
-    [data-computer-expanded] [data-computer-screen] { flex:1; min-height:0 !important; height:auto !important; border-radius:0; background:#111; }
+    [data-computer-expanded] [data-computer-screen] { flex:1; min-height:0 !important; height:auto !important; border-radius:0; background:var(--shell-card,var(--fallback-b1,oklch(var(--b1)))); }
     [data-computer-expanded] [data-computer-status] { position:absolute; bottom:16px; left:50%; transform:translateX(-50%); z-index:3; padding:6px 12px; border-radius:8px; background:var(--fallback-b1,oklch(var(--b1))); font-size:12px; pointer-events:none; }
     [data-computer-expanded] [data-computer-files] { max-height:30vh; overflow:auto; flex-shrink:0; }
     [data-computer-expanded] [data-computer-login] { max-height:35vh; overflow:auto; flex-shrink:0; }
@@ -112,7 +112,22 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const screen=root.querySelector('[data-computer-screen]');
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, takeoverRequested=false, closing=false, controlPromise=null, retained=null, frameTimer=null;
-     const previewCache=window.__ovComputerPreviewCache ||= new Map();
+     if(!window.__ovComputerPreviewCache){
+      window.__ovComputerPreviewCache=new Map();
+      function evictDeletedPreview(event){
+       const data=event.detail||{};
+       if((event.type!=='taskDeleted' && data.type!=='task_deleted') || !data.task_id)return;
+       for(const key of window.__ovComputerPreviewCache.keys()){
+        const [project,task]=JSON.parse(key);
+        if(task===data.task_id && (!data.project_id || project===data.project_id))window.__ovComputerPreviewCache.delete(key);
+       }
+       window.dispatchEvent(new CustomEvent('computer-preview-deleted',{detail:data}));
+      }
+      window.addEventListener('sse-task-event',evictDeletedPreview,true);
+      document.body.addEventListener('taskDeleted',evictDeletedPreview,true);
+     }
+     const previewCache=window.__ovComputerPreviewCache;
+     let previewDeleted=false;
      const previewKey=JSON.stringify([root.dataset.computerProject,root.dataset.computerTask]);
      const clipboardButton=root.querySelector('[data-computer-clipboard]');
      const teach=root.querySelector('[data-computer-teach]');
@@ -197,6 +212,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const viewportObserver=new IntersectionObserver(entries=>{inViewport=entries[0].isIntersecting;visibilityChanged()});viewportObserver.observe(root.querySelector('[data-computer-preview]'));
      // Only capture on disconnect; keep at most 12 task previews, each at most 640x400.
      function rememberFrame(source){
+      if(previewDeleted)return;
       const frame=document.createElement('canvas'),scale=Math.min(1,640/source.width,400/source.height);
       frame.width=Math.max(1,Math.round(source.width*scale));frame.height=Math.max(1,Math.round(source.height*scale));
       frame.getContext('2d').drawImage(source,0,0,frame.width,frame.height);
@@ -205,10 +221,11 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      }
      function showFrame(frame){
       retained?.remove();retained=frame;frame.dataset.retainedFrame='';frame.setAttribute('aria-hidden','true');
-      screen.style.position='relative';frame.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1;background:#111';
+      screen.style.position='relative';frame.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
       screen.append(frame);reportConnection();
      }
      function restoreFrame(){
+      if(previewDeleted)return;
       const saved=previewCache.get(previewKey);if(!saved)return;
       previewCache.delete(previewKey);previewCache.set(previewKey,saved);
       const frame=document.createElement('canvas');frame.width=saved.width;frame.height=saved.height;
@@ -216,7 +233,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      }
      // Keep the last painted desktop while the authorized stream changes modes.
      function retainFrame(){
-      if(retained)return;
+      if(previewDeleted || retained)return;
       const source=screen.querySelector('canvas:not([data-retained-frame])');
       if(!source || !source.width || !source.height)return;
       const frame=document.createElement('canvas');frame.width=source.width;frame.height=source.height;
@@ -237,10 +254,11 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       disconnect();mode=next;
       const epoch=++generation;
       const {default:RFB}=await import(root.dataset.computerViewer);
-      if(closed || epoch!==generation)return;
+      if(closed || previewDeleted || epoch!==generation)return;
       const ws=new URL(state.stream_url || scoped('/stream/'+next),location.href);ws.protocol=ws.protocol==='https:'?'wss:':'ws:';
       rfb=new RFB(screen,ws.href,{wsProtocols:state.ticket?['binary',state.ticket]:['binary']});
       if(retained)screen.append(retained);
+      rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
       rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=!held;
       revealFrame(epoch);
       rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;connectionMessage='';reportConnection();if(held)installKeyboard();});
@@ -250,13 +268,13 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      }
      function disconnect(){++generation;connected=false;clipboard='';clipboardButton.disabled=true;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
      async function refresh(){
-      if(closed || pending || closing)return;
+      if(closed || previewDeleted || pending || closing)return;
  if(!visible()){disconnect();return;}
       const version=++refreshVersion;
       try{
        const requestedControl=dialog.open;
        const res=await fetch(scoped('/status')+'&viewer_mode='+(requestedControl?'control':'view'),{cache:'no-store'});if(!res.ok)throw new Error('Could not check project computer');
-       const state=await res.json();if(closed || pending || closing || !visible() || version!==refreshVersion)return;if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if(state.handoff_kind){recording=false;renderDemo();}root.querySelector('[data-teach-open]').hidden=!!state.handoff_kind;if(state.handoff_kind)teach.hidden=true;
+       const state=await res.json();if(closed || previewDeleted || pending || closing || !visible() || version!==refreshVersion)return;if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if(state.handoff_kind){recording=false;renderDemo();}root.querySelector('[data-teach-open]').hidden=!!state.handoff_kind;if(state.handoff_kind)teach.hidden=true;
        if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;status.textContent='Starting or updating project computer… Building the image may take several minutes.';try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;await refresh();}catch(e){pending=false;status.textContent=e.message;root.querySelector('[data-computer-action=ensure]').hidden=false;}return;}
        if(state.ready && dialog.open && takeoverRequested){takeoverRequested=false;if(!state.held){pending=true;controlPromise=fetch(scoped('/takeover'),{method:'POST'});try{const response=await controlPromise;if(!response.ok)throw Error('Could not take control. Close and reopen the viewer to retry.');state.held=true;}finally{controlPromise=null;pending=false;}if(!dialog.open||closing)return;await refresh();return;}}
        status.textContent=state.ready?(state.held?'You have control. This task’s computer tools are paused.':state.busy?'An agent is using the computer.':'Ready'):state.enabled===false?'Project computer is disabled. Enable it below.':'Connecting to the computer…';
@@ -302,8 +320,16 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  function changed(){attemptedStart=false;setTimeout(visibilityChanged,0);}
  document.addEventListener('computer-setting-changed',changed);
  document.addEventListener('computer-tab-change',changed);
- refresh();const timer=setInterval(refresh,5000);
-     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();clearInterval(timer);clearInterval(jobTimer);disconnect();observer.disconnect();}});
+ function previewWasDeleted(event){
+  const data=event.detail||{};
+  if(data.task_id!==root.dataset.computerTask || (data.project_id && data.project_id!==root.dataset.computerProject))return;
+  previewDeleted=true;retained?.remove();retained=null;disconnect();
+ }
+ window.addEventListener('computer-preview-deleted',previewWasDeleted);
+ function beforeCleanup(event){if(event.detail?.elt===root || event.detail?.elt?.contains(root))disconnect();}
+ document.addEventListener('htmx:beforeCleanupElement',beforeCleanup);
+ restoreFrame();refresh();const timer=setInterval(refresh,5000);
+     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();clearInterval(timer);clearInterval(jobTimer);disconnect();observer.disconnect();}});
      observer.observe(document.body,{childList:true,subtree:true});
     })();
    </script>
