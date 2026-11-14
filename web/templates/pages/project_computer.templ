@@ -46,7 +46,6 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
 
  <p class="text-sm opacity-60">Applies on the next task turn. Git commands follow the shell selection.</p>
  </div>
- <details data-computer-jobs><summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Commands and live output</span><span aria-hidden="true">›</span></summary><div data-computer-job-list></div></details>
  <details data-computer-files>
  <summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Files</span><span aria-hidden="true">›</span></summary>
  <p class="text-sm">Take over to upload or download files (up to 25 MB). Existing files are kept.</p>
@@ -346,10 +345,6 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
  catch(e){targetPicker.querySelector('[data-property-error]').textContent=e.message;}
  finally{target.disabled=false;}
  });
- const jobDetails=find('[data-computer-jobs]');const jobList=find('[data-computer-job-list]');let jobsPending=false;
- async function showJobs(){if(!jobDetails||!jobDetails.open||closed||jobsPending||!visible())return;jobsPending=true;try{const res=await fetch(scoped('/jobs'),{cache:'no-store'});if(!res.ok)return;const data=await res.json();if(closed)return;jobList.replaceChildren();for(const job of data.jobs){const label=document.createElement('p');label.textContent=job.job_id+' — '+(job.running?'Running':'Exited '+job.exit_code);const output=document.createElement('pre');output.style.cssText='max-height:240px;overflow:auto;white-space:pre-wrap';output.textContent=job.output;jobList.append(label,output);if(job.running){const stop=document.createElement('button');stop.className='btn btn-sm';stop.textContent='Stop command';stop.onclick=async()=>{stop.disabled=true;try{const res=await fetch(scoped('/jobs'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:job.job_id})});if(!res.ok)throw Error('Could not stop command');await showJobs();}catch(e){status.textContent=e.message;}finally{stop.disabled=false;}};jobList.append(stop);}}}catch{}finally{jobsPending=false;}}
- if(jobDetails)jobDetails.addEventListener('toggle',showJobs);
- const jobTimer=setInterval(showJobs,1000);
  function changed(){attemptedStart=false;setTimeout(visibilityChanged,0);}
  document.addEventListener('computer-setting-changed',changed);
  document.addEventListener('computer-tab-change',changed);
@@ -369,7 +364,7 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
   finally{pending=false;taskToggle.disabled=false;await refresh();}
  };
  restoreFrame();refresh();const timer=setInterval(refresh,5000);
-     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();clearInterval(timer);clearInterval(jobTimer);disconnect();observer.disconnect();}});
+     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();clearInterval(timer);disconnect();observer.disconnect();}});
      observer.observe(document.body,{childList:true,subtree:true});
     })();
    </script>
