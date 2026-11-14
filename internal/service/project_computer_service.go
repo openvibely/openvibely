@@ -171,6 +171,7 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 				return err
 			}
 
+			s.startOrphanVolumeCleanup(ctx)
 			return nil
 		}
 		select {

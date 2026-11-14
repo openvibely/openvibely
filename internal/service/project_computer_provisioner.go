@@ -191,6 +191,9 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 			return ComputerConnection{}, err
 		}
 	}
+	if err := p.ensureHomeVolume(ctx, id); err != nil {
+		return ComputerConnection{}, err
+	}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return ComputerConnection{}, err
