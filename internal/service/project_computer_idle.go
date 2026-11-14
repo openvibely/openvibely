@@ -79,43 +79,63 @@ func (s *ProjectComputerService) reapIdleDesktops(ctx context.Context, id string
 	if err != nil {
 		return err
 	}
-	names := make([]string, 0, len(ids))
-	for _, task := range ids {
-		// Never wait behind a live operation: takeover must still be able to
-		// cancel it promptly. Hold control and task locks only for idle tasks.
-		value, _ := root.locks.LoadOrStore("control:"+id+":"+task, &sync.Mutex{})
-		control := value.(*sync.Mutex)
-		if !control.TryLock() {
-			continue
-		}
-		scoped := root
-		scoped.taskID = task
-		taskLock := scoped.lock(id)
-		if !taskLock.TryLock() {
-			control.Unlock()
-			continue
-		}
-		repo, err := root.repo.ForTask(ctx, id, task)
-		if err != nil {
-			taskLock.Unlock()
-			control.Unlock()
-			continue
-		}
-		current, err := repo.Get(ctx, id)
-		if err != nil || current.Held || current.TakeoverPending || current.HandoffKind != "" || (current.Owner != "" && current.LeaseUntil >= time.Now().Unix()) {
-			taskLock.Unlock()
-			control.Unlock()
-			continue
-		}
-		defer control.Unlock()
-		defer taskLock.Unlock()
-		names = append(names, ComputerDesktopID(task))
-	}
 	conn, err := root.provisioner.Resolve(ctx, id)
 	if err != nil {
 		return err
 	}
+	// Refresh protection once for the full candidate set. Per-desktop requests
+	// must not refresh the idle clocks of unrelated desktops.
+	names := make([]string, 0, len(ids))
+	for _, task := range ids {
+		names = append(names, ComputerDesktopID(task))
+	}
 	body, _ := json.Marshal(map[string]any{"idle_seconds": state.IdleMinutes * 60, "candidates": names})
-	_, err = root.request(ctx, conn, "POST", "/desktop-reap", body)
+	if _, err = root.request(ctx, conn, "POST", "/desktop-idle-protection", body); err != nil {
+		return err
+	}
+	var failures []error
+	for _, task := range ids {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := root.reapIdleTask(ctx, id, task, conn, state.IdleMinutes); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (s *ProjectComputerService) reapIdleTask(ctx context.Context, id, task string, conn ComputerConnection, minutes int) error {
+	value, _ := s.locks.LoadOrStore("control:"+id+":"+task, &sync.Mutex{})
+	control := value.(*sync.Mutex)
+	if !control.TryLock() {
+		return nil
+	}
+	defer control.Unlock()
+	scoped := *s
+	scoped.taskID = task
+	lock := scoped.lock(id)
+	if !lock.TryLock() {
+		return nil
+	}
+	defer lock.Unlock()
+	// Re-read eligibility after acquiring this task's locks: it may have
+	// started work or entered takeover while another desktop was stopping.
+	ids, err := s.repo.IdleDesktopCandidates(ctx, id)
+	if err != nil {
+		return err
+	}
+	eligible := false
+	for _, candidate := range ids {
+		if candidate == task {
+			eligible = true
+			break
+		}
+	}
+	if !eligible {
+		return nil
+	}
+	body, _ := json.Marshal(map[string]any{"idle_seconds": minutes * 60, "candidates": []string{ComputerDesktopID(task)}})
+	_, err = s.request(ctx, conn, "POST", "/desktop-reap-one", body)
 	return err
 }

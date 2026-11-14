@@ -107,3 +107,31 @@ func TestJobsPollingDoesNotStartDesktop(t *testing.T) {
 		t.Fatal(rec.Body.String())
 	}
 }
+
+func TestTargetedReapPreservesOtherIdleClocks(t *testing.T) {
+	var mu sync.Mutex
+	old := time.Now().Add(-time.Hour)
+	a := &desktopProcess{done: make(chan struct{}), lastActivity: old, requests: 1}
+	b := &desktopProcess{done: make(chan struct{}), lastActivity: old, requests: 1}
+	protected := &desktopProcess{done: make(chan struct{}), lastActivity: old}
+	sessions := map[string]*desktopProcess{"task-a": a, "task-b": b, "task-protected": protected}
+	mux := http.NewServeMux()
+	registerDesktopReaper(mux, &mu, sessions)
+	for _, path := range []string{"/desktop-idle-protection", "/desktop-reap-one"} {
+		candidates := `["task-a","task-b"]`
+		if path == "/desktop-reap-one" {
+			candidates = `["task-a"]`
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("POST", path, strings.NewReader(`{"idle_seconds":60,"candidates":`+candidates+`}`)))
+		if rec.Code != 200 {
+			t.Fatal(rec.Body.String())
+		}
+		if !b.lastActivity.Equal(old) {
+			t.Fatal("unrelated candidate's idle clock was reset")
+		}
+	}
+	if !protected.lastActivity.After(old) {
+		t.Fatal("protected desktop's idle clock was not refreshed")
+	}
+}

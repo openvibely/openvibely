@@ -15,7 +15,7 @@ import (
 // private handoffs. The supervisor independently checks live connections and jobs.
 // No cached authorization is used: each sweep needs a fresh application request.
 func registerDesktopReaper(mux *http.ServeMux, mu *sync.Mutex, sessions map[string]*desktopProcess) {
-	mux.HandleFunc("POST /desktop-reap", func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			IdleSeconds int      `json:"idle_seconds"`
 			Candidates  []string `json:"candidates"`
@@ -37,7 +37,7 @@ func registerDesktopReaper(mux *http.ServeMux, mu *sync.Mutex, sessions map[stri
 		}
 		mu.Lock()
 		for name, p := range sessions {
-			if !allowed[name] {
+			if r.URL.Path != "/desktop-reap-one" && !allowed[name] {
 				p.lastActivity = time.Now()
 			}
 		}
@@ -46,6 +46,10 @@ func registerDesktopReaper(mux *http.ServeMux, mu *sync.Mutex, sessions map[stri
 			return a != nil && (b == nil || a.lastActivity.Before(b.lastActivity))
 		})
 		mu.Unlock()
+		if r.URL.Path == "/desktop-idle-protection" {
+			json.NewEncoder(w).Encode(stopped)
+			return
+		}
 		for _, name := range names {
 			if r.Context().Err() != nil {
 				break
@@ -55,7 +59,10 @@ func registerDesktopReaper(mux *http.ServeMux, mu *sync.Mutex, sessions map[stri
 			}
 		}
 		json.NewEncoder(w).Encode(stopped)
-	})
+	}
+	mux.HandleFunc("POST /desktop-reap", handler)
+	mux.HandleFunc("POST /desktop-reap-one", handler)
+	mux.HandleFunc("POST /desktop-idle-protection", handler)
 }
 
 // reapDesktop stops one idle desktop. Only the shared lock's quick checks run

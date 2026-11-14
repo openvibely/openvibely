@@ -21,13 +21,17 @@ func TestComputerIdlePolicyProtectsWorkAndHandoffs(t *testing.T) {
 	var candidates []string
 	seconds, calls := 0, 0
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/desktop-reap", r.URL.Path)
+		if r.URL.Path == "/desktop-idle-protection" {
+			w.Write([]byte(`[]`))
+			return
+		}
+		require.Equal(t, "/desktop-reap-one", r.URL.Path)
 		var input struct {
 			Candidates []string `json:"candidates"`
 			Seconds    int      `json:"idle_seconds"`
 		}
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
-		candidates = input.Candidates
+		candidates = append(candidates, input.Candidates...)
 		seconds = input.Seconds
 		calls++
 		w.Write([]byte(`[]`))
@@ -85,7 +89,7 @@ func TestComputerIdlePolicyProtectsWorkAndHandoffs(t *testing.T) {
 	}
 	require.NoError(t, svc.SetIdleMinutes(t.Context(), project.ID, 0))
 	require.NoError(t, svc.reapIdleDesktops(t.Context(), project.ID))
-	require.Equal(t, 1, calls, "Never must not reap")
+	require.Equal(t, 2, calls, "Never must not reap")
 	require.Error(t, svc.SetIdleMinutes(t.Context(), project.ID, -1))
 	require.Error(t, svc.SetIdleMinutes(t.Context(), project.ID, 10081))
 	require.NoError(t, svc.SetIdleMinutes(t.Context(), project.ID, 15))
@@ -139,7 +143,7 @@ func TestComputerToolsDoNotWaitForIdleShutdown(t *testing.T) {
 		switch r.URL.Path {
 		case "/health":
 			w.Write([]byte(`{"ready":true,"isolation":1,"viewer_idle":1}`))
-		case "/desktop-reap":
+		case "/desktop-reap-one":
 			started <- struct{}{}
 			select {
 			case <-release:
@@ -197,6 +201,69 @@ func TestComputerToolsDoNotWaitForIdleShutdown(t *testing.T) {
 	cancel()
 	select {
 	case <-maintenanceDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup did not cancel")
+	}
+}
+
+func TestComputerCleanupDoesNotLockOtherCandidates(t *testing.T) {
+	db := teststores.New(t)
+	project := &models.Project{Name: "Separate cleanup locks"}
+	require.NoError(t, db.Projects.Create(t.Context(), project))
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/desktop-reap-one" {
+			var input struct {
+				Candidates []string `json:"candidates"`
+			}
+			json.NewDecoder(r.Body).Decode(&input)
+			started <- input.Candidates[0]
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}
+		w.Write([]byte(`[]`))
+	}))
+	defer backend.Close()
+	defer close(release)
+	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: backend.URL}})
+	require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "local"))
+	scopes := map[string]*ProjectComputerService{}
+	for _, title := range []string{"A", "B"} {
+		task := &models.Task{ProjectID: project.ID, Title: title, Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: 2}
+		require.NoError(t, db.Tasks.Create(t.Context(), task))
+		scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
+		require.NoError(t, err)
+		scopes[ComputerDesktopID(task.ID)] = scoped
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- svc.reapIdleDesktops(ctx, project.ID) }()
+	var stopping string
+	select {
+	case stopping = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup did not start")
+	}
+	for name, scoped := range scopes {
+		if name == stopping {
+			continue
+		}
+		taken := make(chan error, 1)
+		go func() { taken <- scoped.Control(ctx, project.ID, true, func() error { return nil }) }()
+		select {
+		case err := <-taken:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("takeover waited for unrelated shutdown")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("cleanup did not cancel")
 	}
