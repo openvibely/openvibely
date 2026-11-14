@@ -23,24 +23,26 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  @ProjectComputerPermissions(projectID, "")
  </section>
  } else {
-  <section id="project-computer" data-computer-task={computerTaskID(taskIDs)} data-computer-project={ projectID } data-computer-viewer={ static.URL("vendor/novnc/core/rfb.js") } class="p-4 flex flex-col gap-4">
+  <section id="project-computer" data-computer-task={computerTaskID(taskIDs)} data-computer-project={ projectID } data-computer-viewer={ static.URL("vendor/novnc/core/rfb.js") } class="flex flex-col gap-4 text-sm">
    <div data-computer-preview style="position:relative">
  <div data-computer-screen class="rounded-lg overflow-hidden" style="aspect-ratio:16/10;width:100%;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))"></div>
  <button type="button" data-computer-preview-open aria-label="Open larger computer preview" style="position:absolute;inset:0;width:100%;height:100%;cursor:zoom-in;background:transparent;border:0"></button>
  </div>
- <h3 class="font-semibold">Computer</h3>
+ <h3 class="text-sm font-semibold">Computer</h3>
    @TaskComputerToggle(projectID, computerTaskID(taskIDs))
  @ProjectComputerPermissions(projectID, computerTaskID(taskIDs))
  <button type="button" class="btn btn-sm" data-computer-action="ensure" hidden>Retry connection</button>
- <label>Run standard shell and file tools in
- <select class="select select-bordered" data-computer-target><option value="worktree">Task worktree</option><option value="computer">Task computer</option></select></label>
- <p class="text-sm">Applies on the next task turn. Git commands follow the shell selection.</p>
- <details data-computer-jobs><summary class="cursor-pointer">Commands and live output</summary><div data-computer-job-list></div></details>
+ <div class="flex flex-col gap-2">
+ <label class="inspector-property-row computer-target-row"><span class="opacity-60">Run tools in:</span>
+ <select aria-label="Run standard shell and file tools in" data-computer-target><option value="worktree">Task worktree</option><option value="computer">Task computer</option></select><span aria-hidden="true">⌄</span></label>
+ <p class="text-sm opacity-60">Applies on the next task turn. Git commands follow the shell selection.</p>
+ </div>
+ <details data-computer-jobs><summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Commands and live output</span><span aria-hidden="true">›</span></summary><div data-computer-job-list></div></details>
  <details data-computer-files>
- <summary class="cursor-pointer">Files</summary>
+ <summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Files</span><span aria-hidden="true">›</span></summary>
  <p class="text-sm">Take over to upload or download files (up to 25 MB). Existing files are kept.</p>
- <label>Folder in Files <input class="input input-bordered" data-computer-folder placeholder="Leave empty for Files"/></label>
- <button type="button" class="btn" data-computer-files-refresh>Show files</button>
+ <label class="flex flex-col gap-2 text-sm">Folder in Files <input class="input input-sm input-bordered" data-computer-folder placeholder="Leave empty for Files"/></label>
+ <button type="button" class="btn btn-sm" data-computer-files-refresh>Show files</button>
  <label>Upload file <input type="file" data-computer-upload/></label>
  <div data-computer-file-list></div>
  </details>
@@ -76,6 +78,11 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <details data-workflows><summary>Saved workflows</summary><div data-workflow-list></div></details>
  </div><div data-computer-expanded></div></dialog>
    <style>
+    .computer-target-row select { appearance:none; width:100%; min-width:0; border:0; background:transparent; color:inherit; font:inherit; padding:0; cursor:pointer; }
+    .computer-summary { cursor:pointer; list-style:none; }
+    .computer-summary::-webkit-details-marker { display:none; }
+    details[open] > .computer-summary > [aria-hidden] { transform:rotate(90deg); }
+    #project-computer[data-computer-task] > details > :not(summary) { margin-top:12px; }
     [data-computer-status] { display:none; }
     [data-computer-expanded] [data-computer-status] { display:block; }
     [data-computer-dialog][open] { display:flex; flex-direction:column; }
@@ -382,7 +389,13 @@ templ ProjectComputerToggle(projectID string) {
 }
 
 templ ProjectComputerPermissions(projectID, taskID string) {
- <details data-computer-grants data-grants-project={projectID} data-grants-task={taskID}><summary class="cursor-pointer">Chrome permissions</summary><button type="button" class="btn" data-computer-grants-refresh>Refresh permissions</button><div data-computer-grant-list></div><nav aria-label="Chrome permissions pages"><button type="button" class="btn btn-sm" data-computer-grants-previous disabled>Previous</button><span data-computer-grants-page></span><button type="button" class="btn btn-sm" data-computer-grants-next disabled>Next</button></nav><p role="status" data-grants-status></p>
+ <details data-computer-grants data-grants-project={projectID} data-grants-task={taskID}>
+ if taskID != "" {
+ <summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Chrome permissions</span><span aria-hidden="true">›</span></summary>
+ } else {
+ <summary class="cursor-pointer">Chrome permissions</summary>
+ }
+<button type="button" class="btn btn-sm" data-computer-grants-refresh>Refresh permissions</button><div data-computer-grant-list></div><nav aria-label="Chrome permissions pages"><button type="button" class="btn btn-sm" data-computer-grants-previous disabled>Previous</button><span data-computer-grants-page></span><button type="button" class="btn btn-sm" data-computer-grants-next disabled>Next</button></nav><p role="status" data-grants-status></p>
  <script>
  (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{
  if(root.dataset.bound)return;root.dataset.bound='true';
@@ -404,10 +417,10 @@ templ ProjectComputerPermissions(projectID, taskID string) {
 // TaskComputerToggle never changes project-wide permission.
 templ TaskComputerToggle(projectID, taskID string) {
  <div data-task-computer-preference data-project-id={projectID} class="flex flex-col gap-2">
- <label class="flex items-center gap-2"><input type="checkbox" class="toggle toggle-primary" data-task-computer-toggle name="computer_enabled" value="on" form="task-thread-form" disabled/>Use computer for this task</label>
- <p class="text-sm opacity-70">Optional. Requires computer use to be allowed in project settings.</p>
+ <label class="flex items-center gap-3 text-sm"><input type="checkbox" class="toggle toggle-sm toggle-primary shrink-0" data-task-computer-toggle name="computer_enabled" value="on" form="task-thread-form" disabled/>Use computer for this task</label>
+ <p class="text-sm opacity-60">Optional. Requires computer use to be allowed in project settings.</p>
  if taskID=="" {
- <p class="text-sm opacity-70">The desktop and preview start after you send the first message.</p>
+ <p class="text-sm opacity-60">The desktop and preview start after you send the first message.</p>
  <script>
  (()=>{
  const box=document.querySelector('[data-task-computer-preference]');if(!box)return;
