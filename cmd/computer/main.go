@@ -252,9 +252,7 @@ func desktopServer() http.Handler {
 	browserRoutes(mux)
 
 	publicBrowserProxy(mux)
-	viewers := &viewerLeases{}
-	mux.HandleFunc("POST /viewer-activity", viewers.activity)
-	mux.HandleFunc("POST /viewer-policy", viewers.policy)
+	viewers := &viewerConnections{}
 	for route, port := range map[string]string{"/vnc/": computerPort(4), "/rfb-view": computerPort(4), "/rfb-control": computerPort(5)} {
 		target, _ := url.Parse("http://127.0.0.1:" + port)
 		proxy := httputil.NewSingleHostReverseProxy(target)
@@ -294,7 +292,7 @@ func desktopServer() http.Handler {
 			}
 			conn.Close()
 		}
-		io.WriteString(w, `{"ready":true,"version":8,"isolation":1,"viewer_idle":1,"features":["desktop","shell","files"]}`)
+		io.WriteString(w, `{"ready":true,"version":8,"isolation":1,"viewer_connections":1,"features":["desktop","shell","files"]}`)
 	})
 	mux.HandleFunc("GET /screen", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -364,7 +362,7 @@ func server() http.Handler {
 	mux := http.NewServeMux()
 	desktopRoutes(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `{"ready":true,"version":8,"isolation":1,"viewer_idle":1}`)
+		io.WriteString(w, `{"ready":true,"version":8,"isolation":1,"viewer_connections":1}`)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")

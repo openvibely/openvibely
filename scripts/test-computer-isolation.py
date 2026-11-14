@@ -141,7 +141,7 @@ printf boundary-checks-passed
             key = base64.b64encode(secrets.token_bytes(16)).decode()
             handshake = (f'GET /desktops/task-b/rfb-{mode} HTTP/1.1\r\n'
                          f'Host: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\n'
-                         f'X-OV-Viewer-ID: live-{mode}\r\nX-OV-Viewer-Idle-Seconds: 1800\r\n'
+                         f'X-OV-Viewer-ID: live-{mode}\r\n'
                          'Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n'
                          f'Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Protocol: binary\r\n\r\n')
             stream.sendall(handshake.encode())
@@ -156,7 +156,7 @@ printf boundary-checks-passed
                 assert chunk, 'Viewer closed before RFB greeting'
                 received += chunk
             time.sleep(1.2)
-            assert json.loads(request('/desktop-reap', {'idle_seconds': 1, 'candidates': ['task-b']})) == [], 'Open viewer must prevent idle shutdown'
+            assert json.loads(request('/desktop-reap-one', {'idle_seconds': 1, 'candidates': ['task-b']})) == [], 'Open viewer must prevent idle shutdown'
     print('PASS: authorized screen/input/browser/files and both viewer WebSockets', flush=True)
     # A detached shell must not survive takeover's cancel-all operation.
     shell('task-a', "setsid bash -c 'while :; do echo tick >> escaped.txt; sleep .1; done' >/dev/null 2>&1 & sleep 1")
@@ -185,7 +185,12 @@ printf boundary-checks-passed
     print('PASS: task and container restart preserve files and browser logins', flush=True)
     # A short supervisor timeout exercises the same path as the app's minutes policy.
     def reap(seconds=1, candidates=None):
-        return json.loads(request('/desktop-reap', {'idle_seconds': seconds, 'candidates': candidates if candidates is not None else ['task-a']}))
+        names = candidates if candidates is not None else ['task-a']
+        request('/desktop-idle-protection', {'idle_seconds': seconds, 'candidates': names})
+        stopped = []
+        for desktop in names:
+            stopped.extend(json.loads(request('/desktop-reap-one', {'idle_seconds': seconds, 'candidates': [desktop]})))
+        return stopped
     time.sleep(1.2)
     assert reap(0) == [], 'Never must preserve desktop'
     assert reap(candidates=[]) == [], 'Protected task must stay running'

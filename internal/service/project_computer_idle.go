@@ -24,7 +24,7 @@ func (s *ProjectComputerService) SetIdleMinutes(ctx context.Context, id string, 
 	if err := root.repo.SetIdleMinutes(ctx, id, minutes); err != nil {
 		return err
 	}
-	return root.updateViewerPolicy(ctx, id, minutes)
+	return nil
 }
 
 // StartIdleMaintenance reconciles existing computers on startup and retries

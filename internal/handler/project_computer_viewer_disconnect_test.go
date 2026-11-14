@@ -16,13 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestComputerViewerIdleReasonAndAutomaticHandback(t *testing.T) {
+func TestComputerViewerDisconnectAndAutomaticHandback(t *testing.T) {
 	db := teststores.New(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	expire := make(chan struct{})
+	disconnect := make(chan struct{})
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-OV-Viewer-ID") == "" || r.Header.Get("X-OV-Viewer-Idle-Seconds") != "0" {
+		if r.Header.Get("X-OV-Viewer-ID") == "" {
 			http.Error(w, "missing policy", 400)
 			return
 		}
@@ -32,13 +32,13 @@ func TestComputerViewerIdleReasonAndAutomaticHandback(t *testing.T) {
 		}
 		defer conn.CloseNow()
 		select {
-		case <-expire:
-			conn.Close(websocket.StatusCode(4001), "viewer-idle")
+		case <-disconnect:
+			conn.CloseNow()
 		case <-ctx.Done():
 		}
 	}))
 	defer backend.Close()
-	project := &models.Project{Name: "Idle viewer"}
+	project := &models.Project{Name: "Viewer disconnect"}
 	require.NoError(t, db.Projects.Create(ctx, project))
 	svc := service.NewProjectComputerService(db.Projects, liveComputerFixture{service.ComputerConnection{Endpoint: backend.URL, Token: "test"}})
 	require.NoError(t, db.Projects.Computers().Configure(ctx, project.ID, "local"))
@@ -51,8 +51,8 @@ func TestComputerViewerIdleReasonAndAutomaticHandback(t *testing.T) {
 	conn, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http", "ws", 1)+"/projects/"+project.ID+"/stream/control", &websocket.DialOptions{Subprotocols: []string{"binary"}})
 	require.NoError(t, err)
 	defer conn.CloseNow()
-	close(expire)
+	close(disconnect)
 	_, _, err = conn.Read(ctx)
-	require.Equal(t, websocket.StatusCode(4001), websocket.CloseStatus(err))
+	require.Error(t, err)
 	require.Eventually(t, func() bool { state, err := svc.Get(ctx, project.ID); return err == nil && !state.Held }, 5*time.Second, 20*time.Millisecond)
 }

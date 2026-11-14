@@ -60,7 +60,6 @@ func registerDesktopReaper(mux *http.ServeMux, mu *sync.Mutex, sessions map[stri
 		}
 		json.NewEncoder(w).Encode(stopped)
 	}
-	mux.HandleFunc("POST /desktop-reap", handler)
 	mux.HandleFunc("POST /desktop-reap-one", handler)
 	mux.HandleFunc("POST /desktop-idle-protection", handler)
 }

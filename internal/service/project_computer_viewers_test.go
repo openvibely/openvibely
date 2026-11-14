@@ -20,6 +20,8 @@ func TestComputerViewerReleaseProtectsOtherControllers(t *testing.T) {
 	require.NoError(t, err)
 	_, leaveB, err := svc.RegisterViewer(project.ID, "bob", "b", true)
 	require.NoError(t, err)
+	_, _, err = svc.RegisterViewer(project.ID, "alice", "b", true)
+	require.Error(t, err, "another user cannot replace a viewer")
 	leaveA()
 	released, err := svc.ReleaseUnviewed(ctx, project.ID)
 	require.NoError(t, err)
@@ -27,7 +29,6 @@ func TestComputerViewerReleaseProtectsOtherControllers(t *testing.T) {
 	state, err := svc.Get(ctx, project.ID)
 	require.NoError(t, err)
 	require.True(t, state.Held)
-	require.Error(t, svc.ViewerActivity(ctx, project.ID, "alice", "b"), "another user's activity is rejected")
 	leaveB()
 	// A failed/pending takeover must not be silently cleared by disconnection.
 	require.NoError(t, svc.repo.SetTakeoverPending(ctx, project.ID, true))

@@ -109,16 +109,6 @@ mkdir -p "$cache/novnc" "$dist/vendor/novnc"
 tar -xzf "$novnc" -C "$cache/novnc" --strip-components=1 "noVNC-${NOVNC_VERSION}/core" "noVNC-${NOVNC_VERSION}/vendor" "noVNC-${NOVNC_VERSION}/LICENSE.txt" "noVNC-${NOVNC_VERSION}/docs/LICENSE.MPL-2.0" "noVNC-${NOVNC_VERSION}/docs/LICENSE.BSD-3-Clause"
 cp -R "$cache/novnc/core" "$cache/novnc/vendor" "$dist/vendor/novnc/"
 cp "$cache/novnc/LICENSE.txt" "$cache/novnc/docs/LICENSE.MPL-2.0" "$cache/novnc/docs/LICENSE.BSD-3-Clause" "$dist/vendor/novnc/"
-# Preserve idle-timeout close codes in the public disconnect event.
-python3 - "$dist/vendor/novnc/core/rfb.js" <<'PYCODE'
-import pathlib, sys
-p = pathlib.Path(sys.argv[1])
-s = p.read_text()
-assert '_socketClose(e) {' in s and '{ clean: this._rfbCleanDisconnect }' in s
-s = s.replace('_socketClose(e) {', '_socketClose(e) {\n        this._closeCode = e.code;')
-s = s.replace('{ clean: this._rfbCleanDisconnect }', '{ clean: this._rfbCleanDisconnect, code: this._closeCode }')
-p.write_text(s)
-PYCODE
 
 cp "$assets/kanban.js" "$dist/kanban.js"
 cp "$assets/thread-navigation.js" "$dist/thread-navigation.js"

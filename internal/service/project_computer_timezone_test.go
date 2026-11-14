@@ -19,7 +19,7 @@ func TestComputerTimeZoneReachesDockerAndReplacesChangedContainer(t *testing.T) 
 	db := teststores.New(t)
 	project := &models.Project{Name: "Desktop zone"}
 	require.NoError(t, db.Projects.Create(t.Context(), project))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"isolation":1,"viewer_idle":1}`)) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"isolation":1,"viewer_connections":1}`)) }))
 	defer server.Close()
 	port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
 	t.Setenv("OPENVIBELY_COMPUTER_IMAGE", "timezone-fixture")

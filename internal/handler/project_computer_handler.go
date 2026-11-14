@@ -122,9 +122,6 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 	defer cancel()
 	var err error
 	switch c.Param("action") {
-	case "viewer-activity":
-		principal, _ := models.PrincipalFromContext(ctx)
-		err = h.computerService(c).ViewerActivity(ctx, c.Param("id"), principal.UserID, c.QueryParam("viewer_id"))
 	case "idle-timeout":
 		minutes, parseErr := strconv.Atoi(c.FormValue("idle_minutes"))
 		if parseErr != nil {
@@ -238,10 +235,8 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 			}()
 		}
 	}()
-	// Zero also disables inactivity expiry when connecting to an older helper.
-	// An open viewer is activity; only the desktop idle timer may stop it.
 	u.Path = strings.TrimRight(u.Path, "/") + "/rfb-" + mode
-	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}, "X-OV-Viewer-ID": {token}, "X-OV-Viewer-Idle-Seconds": {"0"}}, Subprotocols: []string{"binary"}})
+	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}, "X-OV-Viewer-ID": {token}}, Subprotocols: []string{"binary"}})
 	if err != nil {
 		return echo.NewHTTPError(502, "Computer viewer unavailable")
 	}
@@ -283,10 +278,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 			}
 		}
 	}()
-	streamErr := <-done
-	if websocket.CloseStatus(streamErr) == 4001 {
-		downstream.Close(websocket.StatusCode(4001), "viewer-idle")
-	}
+	<-done
 	cancel()
 	return nil
 }

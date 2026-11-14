@@ -126,8 +126,8 @@ viewer protection, background commands, and saved login/file persistence.
 Visible previews and open desktop viewers protect the desktop for the entire
 connection lifetime. No viewer inactivity timeout applies; watching without
 clicking or typing is active use. The UI disconnects hidden viewers. Ordinary
-network errors reconnect automatically. Legacy idle-close handling is retained
-for compatibility, but new connections send a zero viewer timeout to older helpers.
+network errors reconnect automatically. Viewer connections have no separate
+inactivity policy or activity-ping endpoint.
 
 The desktop idle timer starts after the last viewer or operation finishes.
 Active tasks, private handoffs, and running commands protect the desktop.

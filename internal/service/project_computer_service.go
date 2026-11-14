@@ -738,9 +738,9 @@ func (s *ProjectComputerService) requireIsolation(data []byte) error {
 	case *LocalComputerProvisioner, *HostedComputerProvisioner:
 		var health struct {
 			Isolation  int `json:"isolation"`
-			ViewerIdle int `json:"viewer_idle"`
+			ViewerConnections int `json:"viewer_connections"`
 		}
-		if json.Unmarshal(data, &health) != nil || health.Isolation != 1 || health.ViewerIdle != 1 {
+		if json.Unmarshal(data, &health) != nil || health.Isolation != 1 || health.ViewerConnections != 1 {
 			return errors.New("update the project computer image: isolated task desktops and viewer connection tracking are required")
 		}
 	}

@@ -142,7 +142,7 @@ func TestComputerToolsDoNotWaitForIdleShutdown(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
-			w.Write([]byte(`{"ready":true,"isolation":1,"viewer_idle":1}`))
+			w.Write([]byte(`{"ready":true,"isolation":1,"viewer_connections":1}`))
 		case "/desktop-reap-one":
 			started <- struct{}{}
 			select {

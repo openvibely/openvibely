@@ -10,7 +10,7 @@ func TestProjectComputerRejectsLegacyImages(t *testing.T) {
 				t.Fatalf("%s accepted legacy image %s", p.Provider(), data)
 			}
 		}
-		if err := s.requireIsolation([]byte(`{"isolation":1,"viewer_idle":1}`)); err != nil {
+		if err := s.requireIsolation([]byte(`{"isolation":1,"viewer_connections":1}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
