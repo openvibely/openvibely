@@ -31,7 +31,18 @@ func (h *Handler) ChatOutputBefore(c echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusNotImplemented)
 	}
-	tail, err := store.ReadProjectDisplayTail(ctx, project, c.Param("id"), before, 1024*1024)
+	var tail models.DisplayTail
+	if reader, ok := h.execRepo.(interface {
+		ReadProjectDisplayTailRevision(context.Context, string, string, int64, int, string) (models.DisplayTail, error)
+	}); ok {
+		revision := c.QueryParam("revision")
+		if before == 0 {
+			revision = ""
+		}
+		tail, err = reader.ReadProjectDisplayTailRevision(ctx, project, c.Param("id"), before, 1024*1024, revision)
+	} else {
+		tail, err = store.ReadProjectDisplayTail(ctx, project, c.Param("id"), before, 1024*1024)
+	}
 	if errors.Is(err, persistence.ErrNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound)
 	}

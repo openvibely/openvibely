@@ -9,7 +9,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
-	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -41,7 +40,6 @@ func (s *Service) SetLineageResolver(lr LineageResolver) {
 // CleanOutputForChain strips internal markers from task output so the child task
 // receives only meaningful response text.
 func CleanOutputForChain(output string) string {
-	output = llmtranscript.NormalizeMarkers(output)
 	output = llmoutput.StripFinalStatusControl(output)
 	output = llmoutput.ReplaceOutsideMarkdownCode(output, reThinkingBlock, "")
 	output = llmoutput.ReplaceOutsideMarkdownCode(output, reToolMarker, "")

@@ -5,6 +5,7 @@ This directory contains reusable streaming and persistence benchmark tools. Keep
 - [History loading](history/README.md): file-backed synthetic thread opens and older pages, completed/running/plan responses, server duration, allocations, response sizes, and driver row counts.
 - [Repeated checkpoint follow-ups](checkpoint/README.md): generated 11 MiB image checkpoint, real local provider transports, cache reuse/invalidation/eviction, allocations and retained memory. No user data or paid calls.
 - [Concurrent streaming](concurrent/README.md): one or ten tasks in one backend/database process; text-only and tool-use separately; CPU, allocation/reclamation rates, heap/RSS, output gaps, and storage throughout each turn.
+- [Frontend renderer updates and memory](frontend/README.md): real Chrome, ordinary output and one-preview cases separately; pinned Git comparisons with live-update timing, JS heap, process RSS, and reopen checks.
 - [Sequential app flow and browser loading](app-flow/README.md): empty task followed by five completed follow-ups, native compaction/continuation, cold opens, and verified cache-hit reopens.
 
 Build model peers and injected test harnesses in temporary checkouts. Keep generated results, profiles, model binaries, and databases outside this worktree. Pin baseline and candidate revisions, run identical workloads separately from compilation/tests, and report each operation and mode separately. The two model peers are different: concurrent tests require the concurrent peer.

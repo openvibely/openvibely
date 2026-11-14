@@ -28,3 +28,28 @@ func TestBrowserFunctional_VirtualIndexRetainsMediaAndMaterializesPrint(t *testi
  return {};
  `)
 }
+
+func TestBrowserFunctional_VirtualLeafRefreshPreservesMembership(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
+ const models=[{kind:'text',height:100,width:640,segments:[{content:'outer'}]}];
+ await installChatVirtualRows(stream,{models,ungrouped:true},node=>{node.textContent='outer';});
+ await renderVisibleChatRows(messages);await paint();await paint();
+ const outer=stream._chatVirtualRows[0],node=outer.node;
+ let collections=0;
+ const query=Element.prototype.querySelectorAll;
+ Element.prototype.querySelectorAll=function(selector){if(this===messages&&selector==='[data-chat-virtual-owner]')collections++;return query.call(this,selector)};
+ node.style.height='160px';refreshVirtualChatRows(node);await paint();await paint();
+ assert(collections===0,'leaf layout refresh rebuilt membership');
+ assert(Math.abs(outer.model.height-160)<1,'leaf height was not refreshed');
+ const nested=document.createElement('div');node.append(nested);
+ await installChatVirtualRows(nested,{models:[{kind:'text',segments:[{content:'nested'}]}],ungrouped:true},child=>{child.textContent='nested'});
+ refreshVirtualChatRows(node);await renderVisibleChatRows(messages);await paint();await paint();
+ assert(collections>0,'nested owner was not indexed');
+ assert(outer.children.length===1,'nested row missing from parent index');
+ collections=0;nested.remove();refreshVirtualChatRows(node);await paint();await paint();
+ assert(collections>0,'removed nested owner did not invalidate membership');
+ assert(outer.children.length===0,'removed nested row retained in index');
+ return {};
+ `)
+}

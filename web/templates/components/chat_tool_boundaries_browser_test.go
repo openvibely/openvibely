@@ -72,9 +72,9 @@ func TestBrowserFunctional_PendingToolDetectionPreservesLaterThinking(t *testing
 	runIncrementalChatBrowser(t, `
  const tick = String.fromCharCode(96);
  const cases = [
-  {text:'[Using tool: bash]\n[Tool bash done]\noutput[/Tool]\n<thinking>Real reasoning.</thinking>\nFinal answer.', tools:1},
+  {text:'[Using tool: bash]\n[Tool bash done]\noutput[/Tool]\n[Thinking]\nReal reasoning.\n[/Thinking]\nFinal answer.', tools:1},
   {text:'Example '+tick+'literal\n[Tool bash done]\ninline'+tick+'\n[Thinking]\nReal reasoning.\n[/Thinking]\nFinal answer.', tools:0},
-  {text:'Example '+tick.repeat(2)+'literal\n[Tool bash done]\ninline'+tick.repeat(2)+'\n'+fence+'text\n[Using tool: read_file]\n'+fence+'\n<thinking>Real reasoning.</thinking>\nFinal answer.', tools:0}
+  {text:'Example '+tick.repeat(2)+'literal\n[Tool bash done]\ninline'+tick.repeat(2)+'\n'+fence+'text\n[Using tool: read_file]\n'+fence+'\n[Thinking]\nReal reasoning.\n[/Thinking]\nFinal answer.', tools:0}
  ];
  for (const sample of cases) {
   for (const prefix of ['', 'long transcript prose '.repeat(4000)+'\n']) {
@@ -84,7 +84,7 @@ func TestBrowserFunctional_PendingToolDetectionPreservesLaterThinking(t *testing
     assert(stream.querySelectorAll('.stream-thinking').length === 1, 'later thinking was swallowed');
     assert(stream.querySelector('.stream-thinking').textContent.includes('Real reasoning.'), 'reasoning changed');
     assert(stream.textContent.includes('Final answer.'), 'final answer lost');
-    assert(!stream.textContent.includes('<thinking>'), 'raw thinking alias leaked');
+    assert(!stream.textContent.includes('[Thinking]'), 'raw thinking marker leaked');
    }
   }
  }

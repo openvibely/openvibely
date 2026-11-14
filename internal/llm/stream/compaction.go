@@ -43,7 +43,7 @@ func CompactionReporter(writer *Writer, inThinking *bool) func(llmcontracts.Comp
 var thinkingStateMarkers = regexp.MustCompile(`(?m)^[\t ]*(\[/?Thinking\]|\[Tool \S+ (?:done|error)\]|\[/Tool\])[\t ]*\r?$`)
 
 func unfinishedThinking(text string) bool {
-	text = transcript.NormalizeMarkers(withoutToolOutput(text))
+	text = withoutToolOutput(text)
 	if !thinkingStateMarkers.MatchString(text) {
 		return false
 	}

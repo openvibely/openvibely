@@ -174,11 +174,14 @@
             node.setAttribute('data-raw-content', seed.text);
             node.setAttribute('data-raw-revision', seed.revision);
             node.dataset.outputWindow = seed.cursor;
+            if (seed.offset != null) node.setAttribute('data-initial-byte-length', String(seed.offset));
+            if (seed.context != null) node.dataset.outputContext = seed.context;
             // The retained seed predates any live bytes received since opening.
             // Restore its matching absolute cursor, not the current view's cursor.
-            if (Number.isSafeInteger(seed.byteLength) && seed.byteLength >= 0) {
+            if (seed.offset == null && Number.isSafeInteger(seed.byteLength) && seed.byteLength >= 0) {
                 node.setAttribute('data-initial-byte-length', String(seed.byteLength));
             }
+            if (seed.contextOffsets != null) node.dataset.outputContextOffsets = seed.contextOffsets;
         });
         // A cached composer is a new DOM instance and needs its own focus attempt.
         clone.querySelectorAll('[data-composer-focus-initialized]').forEach(input => {

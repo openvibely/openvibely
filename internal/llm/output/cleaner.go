@@ -299,7 +299,7 @@ func cleanUnclosedThinkingBlocks(text string) string {
 // When stripSummaries is true, it also removes the result/summary sections
 // (used for LLM history context). When false, summaries are preserved (used for display).
 func doCleanChatOutput(output string, stripSummaries bool) string {
-	result := llmtranscript.NormalizeMarkers(output)
+	result := output
 	// Scope status handling against the original normalized message before any
 	// thinking/tool cleanup can make an earlier inert status line appear final.
 	result = StripFinalStatusControl(result)

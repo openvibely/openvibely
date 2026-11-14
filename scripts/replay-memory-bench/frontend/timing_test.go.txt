@@ -1,0 +1,43 @@
+package components
+
+import (
+	"fmt"
+	"testing"
+)
+
+// Diagnostics use the actual renderer and wall time in Chrome. Timing is reported,
+// not asserted: deterministic work counters catch regressions without CI jitter.
+func TestFrontendBenchmarkTiming(t *testing.T) {
+	for _, mode := range []string{"compact", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			report := runIncrementalChatBrowser(t, fmt.Sprintf(`
+ document.documentElement.setAttribute('data-output-detail',%q);
+ const messages=document.getElementById('messages');messages.setAttribute('data-chat-transcript','');messages.style.width='640px';
+ const parser=window.stripFinalStatusControl, linker=window.linkStreamingToolResults;
+ let processedSource=0, linked=0;
+ window.stripFinalStatusControl=function(text,...rest){processedSource+=text.length;return parser(text,...rest)};
+ window.linkStreamingToolResults=function(segments,...rest){linked+=segments.length;return linker(segments,...rest)};
+ const reports=[];
+ for(const scenario of ['tools','unmatched','thinking','unfinished']) {
+  let node=document.createElement('div');stream.replaceChildren(node);
+  let text=scenario==='unmatched'?'[Using tool: read_file | pending]\n':'';
+  const call=i=>scenario==='thinking'?'[Thinking]\nReason '+i+'\n[/Thinking]\n':'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+  let count=0;
+  for(const size of [200,1000,5000]) {
+   while(count<size)text+=call(count++);
+   if(scenario==='unfinished')text+='[Using tool: shell | long]\n[Tool shell done]\n'+('output\n').repeat(10000);
+   let start=performance.now();await renderLiveChatContent(node,text,false);const initialMS=performance.now()-start;
+   if(scenario==='unfinished'){text+='warm output\n';await renderLiveChatContent(node,text,false);}
+   processedSource=0;linked=0;start=performance.now();
+   text+=scenario==='unfinished'?'more output\n':call(count++);
+   await renderLiveChatContent(node,text,false);
+   reports.push({scenario,size,initialMS,updateMS:performance.now()-start,processedSource,linked,dom:node.querySelectorAll('*').length,tools:node.querySelectorAll('.stream-tool').length});
+   if(scenario==='unfinished')text+='[/Tool]\n';
+  }
+ }
+ return reports;
+ `, mode))
+			t.Log("FRONTEND_RESULT", string(report))
+		})
+	}
+}

@@ -172,6 +172,12 @@
         start(run);
         return run;
     }
+    function suppressReplay(id, project) {
+        const key = runKey(projectID(project), id);
+        const run = runs.get(key);
+        if (run) discard(run);
+        suppressedExecutions.add(key);
+    }
     function execution(id, project, seed, container, initialOffset) {
         project = projectID(project);
         const seedBytes = encoder.encode(seed || '').length;
@@ -304,6 +310,8 @@
             active.forEach(item => {
                 if (!item.id || !item.project_id || !item.task_id) return;
                 const task = item.category === 'chat' ? 'chat' : item.task_id;
+                const bounded = Array.from(document.querySelectorAll('[data-output-window]')).some(node => node.dataset.execId === item.id && node.dataset.outputWindow.includes(':live-'));
+                if (bounded) { suppressReplay(item.id, item.project_id); return; }
                 if (suppressedThreads.has(threadKey(item.project_id, task)) || suppressedExecutions.has(runKey(item.project_id, item.id))) return;
                 ensure(item.id, item.project_id, task, '', item.started_at, item.history_order);
                 sweep();
@@ -324,7 +332,7 @@
         clearTimeout(sweepTimer); sweepTimer = null;
     }
     window.openVibelyThreadCache = {pages, runs, execution, sweep, discover, threadKey,
-        source: key => runs.get(key), clear};
+        source: key => runs.get(key), suppressReplay, clear};
     document.addEventListener('htmx:afterSwap', scheduleSweep);
     document.addEventListener('htmx:historyRestore', scheduleSweep);
     window.addEventListener('live-transport-connected', discover);

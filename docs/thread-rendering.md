@@ -10,11 +10,40 @@ Cached Chat previews do not advance the authoritative input revision, so their p
 
 While a preview is visible, an inert template retains the outgoing history element until HTMX commits navigation. This prevents saving the destination under the previous URL, including when a warm navigation is aborted by another navigation. Browser back/forward remains owned by HTMX.
 
-`web/assets/chat-virtual-list.js` renders terminal executions and sealed streaming sections from lightweight row descriptions. The existing control-marker parser links tool calls/results and groups message text, thinking and compaction activity without creating their HTML. Only rows in the viewport plus 250 pixels above and below it receive Markdown parsing and tool DOM. Unvisited rows use estimated heights; visited rows retain their nodes and measurements. User bubbles and other already-rendered rows still use measured spacers once the list reaches 40 rows. Execution wrappers and raw source stay intact; the mutable streaming tail remains mounted.
+`web/assets/chat-virtual-list.js` renders terminal and running executions from lightweight row descriptions. The existing control-marker parser links tool calls/results and groups message text, thinking and compaction activity without creating their HTML. Only rows in the viewport plus 250 pixels above and below it receive Markdown parsing and tool DOM. Unvisited rows use estimated heights; visited rows retain their nodes and measurements. User bubbles and other already-rendered rows still use measured spacers once the list reaches 40 rows. Execution wrappers and raw source stay intact. Only bracketed transcript controls are interpreted; XML-style thinking and tool invocations are no longer converted. Running parser checkpoints preserve completed controls independently of display groups; only the provisional suffix is parsed again. Unmatched tool calls retain their FIFO result queues. Full-mode live updates identify changed rows directly, including earlier tools receiving results, and locate the visible range by binary search over existing row positions. Hydration, source replacement, mode changes and ordinary scrolling retain full reconciliation; cumulative-source checks and array copies still scale with loaded history. Compact summaries retain aggregate counts, and closed thinking defers its Markdown body until opening or explicit materialization. Enhanced SVG previews retain their existing DOM-preserving path.
 
 Height corrections preserve the visible row or bottom pin. Width changes invalidate offscreen estimates and measure visible content without rendering the rest of the transcript. Focused rows and active media stay mounted. Selection, native find/select-all and printing explicitly materialize offscreen rows; new and changed rows continue rendering while Find is active. Escape, page navigation and history restoration resume windowing. Hidden workspaces skip normal virtualization work until their chat area becomes visible again, when ResizeObserver schedules the visible window. Initial hydration waits for that measurable viewport before restoring scroll and revealing messages; leaving the page releases a pending viewport wait. Find/select-all also skip hidden transcripts and do not suspend chat windowing when invoked from Changes. Navigation and history serialization retain source and placeholders without rendering unvisited rows. Composer history and keyboard bubble navigation only materialize existing user-bubble DOM. Detached transcripts release their observers and row references without remounting discarded rows.
 
 Cold transcript history is revealed together after its visible window has rendered and height estimates have settled, without waiting for fonts or attachment images. Data-only cached transcripts follow the same rule: the stripped shell stays hidden until its visible rows and scroll position are ready, without waiting for the server refresh. Already-rendered content stays visible during hydration. Visibility uses the `data-transcript-hydrating` attribute rather than an inline style, so HTMX's delayed style settling cannot hide a completed transcript again. The existing layout observer follows late growth only while the user is pinned to the bottom. Deferred image-scroll callbacks recheck that the original transcript is still mounted and that the reader still wants to follow output.
+
+## Running output windows
+
+Running executions initially send the newest 75 parsed display items, targeting
+1 MiB of source. A tool header and its result are separate items. Earlier pending
+call headers and an active compaction marker are included as boundary context;
+completed intervening calls do not keep the entire history in the browser.
+The resume byte offset is the end of the original transcript, not the size of
+this smaller display seed. Windowed views bypass the full-source snapshot
+subscription, and discovery does not replay their omitted prefix in the background.
+
+Upward scrolling requests earlier windows through `/chat/output/:id`. The cursor
+contains a source byte boundary and a digest of the initial prefix: appends keep
+it valid, while rewritten output conflicts instead of mixing revisions. Paging
+replaces the previous boundary context and keeps incoming deltas and the stream
+position intact. Navigation caches the latest seed and its absolute offset,
+excluding history browsed during that visit. Normal full-source snapshots remain
+in use for small executions. If history conflicts while a windowed execution is
+still streaming, normal thread navigation refreshes the seed and subscription
+while retaining composer state.
+
+The limits are soft: one indivisible result/thinking/Markdown block, pending-call
+headers or ambiguous Markdown/legacy controls can exceed them. Plans are
+supplied separately by the persisted plan projection.
+The server currently reads and parses the entire raw transcript to locate safe
+boundaries; this reduces client transfer and rendering, not server scan cost.
+The open view also continues accumulating subsequent deltas. Find/selection/print
+materialize loaded rows; fetching all unloaded history for those actions is not
+implemented. Export/provider replay APIs remain complete.
 
 ## Limits
 

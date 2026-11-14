@@ -328,7 +328,6 @@ func TestCleanChatOutput(t *testing.T) {
 		{name: "preserves normal multi-tool text", input: "The multi-tool approach works well.", expected: "The multi-tool approach works well."},
 		{name: "strips thinking blocks", input: "\n[Thinking]\nLet me analyze this question.\n\nCOBOL was created in 1959.", expected: "COBOL was created in 1959."},
 		{name: "strips bare CR unclosed thinking block", input: "\r[Thinking]\rLet me analyze this question.\r\rCOBOL was created in 1959.\r[STATUS: SUCCESS]", expected: "COBOL was created in 1959."},
-		{name: "strips legacy raw thinking close tags without eating final answer", input: "\n[Thinking]\nLet me analyze this question.\n</thinking>\nCOBOL was created in 1959.", expected: "COBOL was created in 1959."},
 		{name: "empty input", input: "", expected: ""},
 	}
 
@@ -358,40 +357,6 @@ func TestCleanChatOutputForDisplay_StatusControlsAreFinalStandaloneOnly(t *testi
 		t.Run(tt.name, func(t *testing.T) {
 			if got := CleanChatOutputForDisplay(tt.input); got != tt.expected {
 				t.Errorf("CleanChatOutputForDisplay() = %q, want %q", got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestCleanChatOutput_PreservesCodedAliasesAndCleansRealAliases(t *testing.T) {
-	codedTool := `[Using tool: bash"> <parameter name="command">echo coded</parameter> </invoke>`
-	input := "Inline `\u003cthinking\u003ecoded\u003c/thinking\u003e` and `" + codedTool + "`.\n" +
-		"```text\n\u003cthinking\u003efenced\u003c/thinking\u003e\n" + codedTool + "\n```\n" +
-		"~~~text\n\u003cthinking\u003etilde\u003c/thinking\u003e\n" + codedTool + "\n~~~\n" +
-		"\u003cthinking\u003ereal internal\u003c/thinking\u003e\nVisible answer.\n" +
-		`[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
-
-	for _, clean := range []struct {
-		name string
-		fn   func(string) string
-	}{
-		{name: "history", fn: CleanChatOutput},
-		{name: "display", fn: CleanChatOutputForDisplay},
-	} {
-		t.Run(clean.name, func(t *testing.T) {
-			got := clean.fn(input)
-			for _, literal := range []string{
-				"`\u003cthinking\u003ecoded\u003c/thinking\u003e`",
-				"`" + codedTool + "`",
-				"```text\n\u003cthinking\u003efenced\u003c/thinking\u003e\n" + codedTool + "\n```",
-				"~~~text\n\u003cthinking\u003etilde\u003c/thinking\u003e\n" + codedTool + "\n~~~",
-			} {
-				if !strings.Contains(got, literal) {
-					t.Fatalf("coded alias changed or disappeared %q in:\n%q", literal, got)
-				}
-			}
-			if strings.Contains(got, "real internal") || strings.Contains(got, "echo real") || !strings.Contains(got, "Visible answer.") {
-				t.Fatalf("real aliases were not cleaned normally:\n%q", got)
 			}
 		})
 	}

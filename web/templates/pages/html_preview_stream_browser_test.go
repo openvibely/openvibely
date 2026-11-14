@@ -44,12 +44,14 @@ func TestBrowserFunctional_StreamingHTMLPreview(t *testing.T) {
  const tools=Array.from({length:160},(_,i)=>'[Using tool: bash | echo '+i+']\n[Tool bash done]\nresult '+i+'\n[/Tool]\n').join('');
  const pendingSource=finalSource+' Additional text.\n\n'+tools;
  await renderStreamingContent(root,pendingSource,false,{stable:true});
- if(!root._filePreviewPool?.contains(previewFrame))throw Error('missing pending preview');
+ // A live row can now retain its preview directly during hydration; a pool
+ // is only required when the old row is being replaced.
+ if(!root.contains(previewFrame))throw Error('missing pending preview');
  const snapshot=root.cloneNode(true);cloneVirtualChatRows(root,snapshot);
  if(snapshot.querySelector('[data-chat-preview-pool]'))throw Error('pending preview leaked into snapshot');
  await renderStreamingContent(root,pendingSource,false,{stable:true});
  await renderStreamingContent(root,pendingSource+' Done.',false,{stable:true});
- if(!root._filePreviewPool?.contains(previewFrame))throw Error('refresh discarded pending preview');
+ if(!root.contains(previewFrame))throw Error('refresh discarded pending preview');
  messages.removeAttribute('data-transcript-hydrating');
  await renderVisibleChatRows(messages);
  await new Promise(resolve=>setTimeout(resolve,100));
@@ -222,6 +224,12 @@ func TestBrowserFunctional_HTMLPreviewFallbackOwnership(t *testing.T) {
 					if result != "true" {
 						t.Fatal("return to compact mode lost preview or lazy tools")
 					}
+					b.evaluate(`root.querySelector('.stream-activity-summary').click();'expanded'`)
+					b.waitFor("all tools restored", `String(root.querySelectorAll('.stream-tool').length)`, "3")
+					result = b.evaluate(`(()=>{root.querySelector('.stream-activity-summary').click();return String(root.querySelectorAll('.stream-tool').length===0&&frame.isConnected&&loads===1)})()`)
+					if result != "true" {
+						t.Fatal("repeated collapse retained tools or disturbed preview")
+					}
 				}
 			})
 		})
@@ -295,6 +303,101 @@ func TestBrowserFunctional_HTMLPreviewDuplicateLinkSections(t *testing.T) {
     return String(loads===1&&root._chatVirtualRows.at(-1).node?.contains(frame));
    })()`)
 				if result != "true" {
+					t.Fatal(result)
+				}
+			})
+		})
+	}
+}
+
+func TestBrowserFunctional_ThinkingPreviewPreservation(t *testing.T) {
+	for _, mode := range []string{"full", "compact"} {
+		for _, moves := range []string{"native", "fallback"} {
+			for _, size := range []string{"small", "worker"} {
+				t.Run(mode+"/"+moves+"/"+size, func(t *testing.T) {
+					runStreamingMathBrowser(t, func(b *composerFocusCDP) {
+						b.waitFor("renderer ready", `String(document.readyState==='complete' && !!window.OVFileViewer && !!window.renderLiveChatContent)`, "true")
+						b.evaluate(`window.thinkingSize='` + size + `';document.documentElement.setAttribute('data-output-detail','` + mode + `'); if('` + moves + `'==='fallback')Element.prototype.moveBefore=undefined; 'ready'`)
+						b.evaluateAwait(`(async()=>{
+ const root=document.getElementById('math-stream');root.parentElement.dataset.execStatus='running';
+ window.thinkingSource='[Thinking]\nPublished [Preview](/files/abcdef). Equation \\(x=1\\).\n';
+ await renderLiveChatContent(root,thinkingSource,false);
+ const activity=root.querySelector('.stream-activity'); if(activity&&document.documentElement.getAttribute('data-output-detail')==='compact'){activity.querySelector('.stream-activity-summary').click();await new Promise(resolve=>setTimeout(resolve,100));}
+ window.thinkingDetails=root.querySelector('details.stream-thinking');thinkingDetails.open=true;await thinkingDetails._ensureThinkingContent?.();
+ window.thinkingBody=thinkingDetails.querySelector('.stream-thinking-body');
+ const link=thinkingDetails.querySelector('a');link.dataset.fileLinkBound='true';link.dataset.filePreview='true';
+ const canvas=document.createElement('div');canvas.className='file-html-canvas';
+ window.thinkingFrame=document.createElement('iframe');thinkingFrame.setAttribute('sandbox','allow-scripts');
+ window.thinkingLoads=0;thinkingFrame.addEventListener('load',()=>thinkingLoads++);thinkingFrame.srcdoc='<html><body><input value="retained"></body></html>';
+ canvas.append(thinkingFrame);link.after(canvas);return 'ready';
+ })()`)
+						b.waitFor("thinking preview loaded", `String(thinkingLoads)`, "1")
+						b.waitFor("thinking equation", `String(!!thinkingBody.querySelector('[data-math-ready="true"] .katex'))`, "true")
+						result := b.evaluateAwait(`(async()=>{
+ const root=document.getElementById('math-stream'), equation=thinkingBody.querySelector('[data-math-ready]');
+ const assertPreview=()=>{if(root.querySelector('iframe')!==thinkingFrame||thinkingLoads!==1)throw Error('preview lost/reloaded: '+thinkingLoads);if(root.querySelector('[data-math-ready]')!==equation)throw Error('equation replaced');};
+ await renderLiveChatContent(root,thinkingSource+'\n',false);
+ await new Promise(resolve=>setTimeout(resolve,100));assertPreview();
+ if(root.querySelector('details.stream-thinking')!==thinkingDetails||thinkingDetails.querySelector('.stream-thinking-body')!==thinkingBody)throw Error('unchanged thinking replaced');
+
+ const changed=thinkingSource+'\nAdditional reasoning. '+(thinkingSize==='worker'?'Detailed reasoning. '.repeat(4000):'')+'\n[/Thinking]\n';
+ await renderLiveChatContent(root,changed,false);
+ await root.querySelector('details.stream-thinking')._ensureThinkingContent?.();
+ await new Promise(resolve=>setTimeout(resolve,100));assertPreview();
+ if(!root.textContent.includes('Additional reasoning.'))throw Error('changed thinking not rendered');
+ await renderLiveChatContent(root,changed+'[Using tool: shell | actual]\n',false);
+ await new Promise(resolve=>setTimeout(resolve,100));assertPreview();
+ root.parentElement.dataset.execStatus='completed';await renderLiveChatContent(root,changed+'[Using tool: shell | actual]\n',true,true);
+ await new Promise(resolve=>setTimeout(resolve,100));assertPreview();
+ await renderLiveChatContent(root,'Preview removed.',true,true);
+ if(root.querySelector('iframe'))throw Error('obsolete preview retained');
+ return 'pass';
+ })()`)
+						if result != "pass" {
+							t.Fatal(result)
+						}
+					})
+				})
+			}
+		}
+	}
+
+}
+
+// A connected preview must not turn an append into a rebuild of completed rows.
+func TestBrowserFunctional_StreamingPreviewDeltaRows(t *testing.T) {
+	for _, moves := range []string{"native", "fallback"} {
+		t.Run(moves, func(t *testing.T) {
+			runStreamingMathBrowser(t, func(b *composerFocusCDP) {
+				b.waitFor("renderer ready", `String(document.readyState==='complete' && !!window.OVFileViewer && !!window.renderLiveChatContent)`, "true")
+				b.evaluate(`document.documentElement.setAttribute('data-output-detail','full'); if('` + moves + `'==='fallback')Element.prototype.moveBefore=undefined; 'ready'`)
+				result := b.evaluateAwait(`(async()=>{
+ const root=document.getElementById('math-stream');root.parentElement.dataset.execStatus='running';
+ root.parentElement.style.cssText='height:500px;overflow:auto;width:640px';
+ const call=i=>'[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ let text=Array.from({length:1000},(_,i)=>call(i)).join('')+'\n[Preview](/files/abcdef)\n';
+ await renderLiveChatContent(root,text,false);
+ const messages=root.closest('[data-chat-transcript]');
+ for(let i=0;i<3;i++){messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);await new Promise(r=>requestAnimationFrame(r));}
+ const link=root.querySelector('a[href="/files/abcdef"]');if(!link)throw Error('preview link missing');
+ link.dataset.fileLinkBound='true';link.dataset.filePreview='true';
+ const canvas=document.createElement('div');canvas.className='file-html-canvas';
+ const frame=document.createElement('iframe');frame.srcdoc='<input value="retained">';let loads=0;
+ frame.addEventListener('load',()=>loads++);canvas.append(frame);link.after(canvas);
+ await new Promise(r=>setTimeout(r,100));
+ const previewRow=root._chatVirtualRows.find(row=>row.node?.contains(frame));
+ const untouched=root._chatVirtualRows[20];let reads=0;
+ root._chatVirtualRows.forEach(row=>{let value=row.model;Object.defineProperty(row,'model',{get(){reads++;return value},set(next){value=next},configurable:true});});
+ text+=call(1000);await renderLiveChatContent(root,text,false);await new Promise(r=>setTimeout(r,100));
+ if(root.querySelector('iframe')!==frame||loads!==1)throw Error('preview replaced or reloaded');
+ if(root._chatVirtualRows[20]!==untouched||!root._chatVirtualRows.includes(previewRow))throw Error('rows rebuilt');
+ // The older-browser relocation planner still reads models to identify previews.
+ if(root.moveBefore&&reads>150)throw Error('completed history visited: '+reads);
+ await renderLiveChatContent(root,'Removed preview.',true,true);
+ if(root.querySelector('iframe'))throw Error('obsolete preview retained');
+ return 'pass';
+ })()`)
+				if result != "pass" {
 					t.Fatal(result)
 				}
 			})

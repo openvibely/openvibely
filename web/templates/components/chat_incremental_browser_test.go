@@ -511,11 +511,11 @@ func TestBrowserFunctional_VirtualizedCompletedTranscript(t *testing.T) {
  await renderLiveChatContent(stream, text+text+'\nWorking...', true);
  await paint(); await paint();
  assert(messages.querySelectorAll('[data-virtual-chat-row]').length>100, 'sealed live output was not virtualized');
- const tail=stream._incrementalChat.tail;
- assert(tail.isConnected, 'mutable live tail detached');
+ assert(stream._chatVirtualData, 'running output lost its row ledger');
  await renderLiveChatContent(stream, text+text+'\nWorking... still streaming.', true);
  await paint(); await paint();
- assert(stream._incrementalChat.tail.textContent.includes('still streaming'), 'stream failed after windowing');
+ messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);
+ assert(stream.textContent.includes('still streaming'), 'stream failed after windowing');
  return {passed:true};
  `)
 }
@@ -1041,8 +1041,10 @@ func TestBrowserFunctional_VirtualScrollLargeThinkingGroupYields(t *testing.T) {
  let asyncCalls=0;const original=window.renderChatMarkdownAsync;
  window.renderChatMarkdownAsync=function(text,...args){if(text.length>=65536)asyncCalls++;return original.call(this,text,...args)};
  messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await new Promise(resolve=>requestAnimationFrame(resolve));
- assert(!row.ready && row.loading,'large thinking group completed synchronously');
  const deadline=performance.now()+10000;while(!row.ready && performance.now()<deadline)await pause(20);
+ assert(asyncCalls===0,'closed thinking eagerly parsed Markdown');
+ const details=row.node.querySelector('details.stream-thinking');details.open=true;
+ await details._ensureThinkingContent();
  assert(asyncCalls===1,'large thinking group bypassed the Markdown worker: '+asyncCalls);
  assert(row.ready && row.node.querySelectorAll('details.stream-thinking').length===1,'thinking group failed to render');
  assert(row.node.textContent.includes('Thought 0') && row.node.textContent.includes('Thought 79'),'thinking content was lost');

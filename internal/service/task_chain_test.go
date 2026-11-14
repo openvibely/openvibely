@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -801,34 +800,6 @@ func TestCleanOutputForChain(t *testing.T) {
 				t.Errorf("CleanOutputForChain()\ngot:  %q\nwant: %q", got, tt.expected)
 			}
 		})
-	}
-}
-
-func TestCleanOutputForChain_PreservesCodedAliasesAndCleansRealAliases(t *testing.T) {
-	codedTool := `[Using tool: bash"> <parameter name="command">echo coded</parameter> </invoke>`
-	multilineThinking := "`<thinking>multiline\nthought</thinking>`"
-	multilineTool := "``[Using tool: bash\">\n<parameter name=\"command\">echo multiline</parameter>\n</invoke>``"
-	input := "Inline `<thinking>coded</thinking>` and `" + codedTool + "`.\n" + multilineThinking + "\n" + multilineTool + "\n" +
-		"```text\n<thinking>fenced</thinking>\n" + codedTool + "\n```\n" +
-		"~~~text\r<thinking>bare CR fenced</thinking>\r~~~\r" +
-		"<thinking>real internal</thinking>\nVisible child context.\n" +
-		`[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
-
-	got := llmworkflow.CleanOutputForChain(input)
-	for _, literal := range []string{
-		"`<thinking>coded</thinking>`",
-		"`" + codedTool + "`",
-		multilineThinking,
-		multilineTool,
-		"```text\n<thinking>fenced</thinking>\n" + codedTool + "\n```",
-		"~~~text\r<thinking>bare CR fenced</thinking>\r~~~",
-	} {
-		if !strings.Contains(got, literal) {
-			t.Fatalf("coded alias changed in workflow handoff %q:\n%q", literal, got)
-		}
-	}
-	if strings.Contains(got, "real internal") || strings.Contains(got, "echo real") || !strings.Contains(got, "Visible child context.") {
-		t.Fatalf("real aliases were not cleaned in workflow handoff:\n%q", got)
 	}
 }
 

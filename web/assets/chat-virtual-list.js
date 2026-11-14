@@ -40,7 +40,7 @@
     // prefix-height estimates. Nested virtual owners form their own sibling level.
     function indexRows(list) {
         // Explicit hydration can run before the mutation observer's microtask.
-        if (list.observer.takeRecords().length) list.dirty = true;
+        if (list.observer.takeRecords().some(record => !record.target.closest?.('[data-chat-lazy-row]'))) list.dirty = true;
         if (!list.dirty) return;
         collect(list);
         const ordered = Array.from(list.rows.values()).sort((a, b) =>
@@ -52,7 +52,8 @@
             row.list = list;
             row.children = [];
             while (stack.length && !element(stack[stack.length - 1]).contains(element(row))) stack.pop();
-            (stack.length ? stack[stack.length - 1].children : list.index).push(row);
+            row.siblings = stack.length ? stack[stack.length - 1].children : list.index;
+            row.siblings.push(row);
             stack.push(row);
             if (row.node?.isConnected) list.mounted.add(row);
         }
@@ -186,7 +187,8 @@
                 row.ready = true;
                 row.loading = null;
                 if (row.node.isConnected) row.node.style.minHeight = '';
-                lists.get(row.owner.closest(messagesSelector))?.schedule();
+                const list = lists.get(row.owner.closest(messagesSelector));
+                if (list) { list.renderRevision = (list.renderRevision || 0) + 1; list.schedule(); }
                 row.restoreFocus?.();
             };
             try {
@@ -266,7 +268,7 @@
         list.resize?.disconnect();
         list.rowResize?.disconnect();
         list.messages.style.overflowAnchor = list.overflowAnchor;
-        list.messages.removeEventListener('scroll', list.schedule);
+        list.messages.removeEventListener('scroll', list.onScroll);
         if (list.wheel) list.messages.removeEventListener('wheel', list.wheel);
         list.rows.clear();
         list.index = [];
@@ -290,7 +292,10 @@
                 }
                 if (list.frame === null) list.frame = requestAnimationFrame(() => refresh(list));
             };
-            list.observer = new MutationObserver(() => { list.dirty = true; list.schedule(); });
+            list.observer = new MutationObserver(records => {
+                if (records.some(record => !record.target.closest?.('[data-chat-lazy-row]'))) list.dirty = true;
+                list.schedule();
+            });
             list.resize = typeof ResizeObserver === 'function' ? new ResizeObserver(list.schedule) : null;
             list.resize?.observe(messages);
             list.rowResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
@@ -299,7 +304,10 @@
                 compensateLateLayout(list);
                 list.schedule();
             }) : null;
-            messages.addEventListener('scroll', list.schedule, {passive:true});
+            list.onScroll = () => {
+                list.schedule();
+            };
+            messages.addEventListener('scroll', list.onScroll, {passive:true});
             list.wheel = event => scrollTranscript(list, event);
             messages.addEventListener('wheel', list.wheel, {passive:false});
             lists.set(messages, list);
@@ -463,7 +471,20 @@
     window.refreshVirtualChatRows = function (root) {
         lists.forEach(list => { if (!list.messages.isConnected) destroy(list); });
         const messages = root?.matches?.(messagesSelector) ? root : root?.closest?.(messagesSelector);
-        if (messages) { const list = ensureList(messages); list.dirty = true; list.schedule(); }
+        if (messages) {
+            const list = ensureList(messages);
+            const node = root?.closest?.('[data-chat-lazy-row]');
+            const owner = node?.parentElement?.closest('[data-chat-virtual-owner]');
+            const row = owner?._chatVirtualRows?.[Number(node.getAttribute('data-chat-lazy-row'))];
+            // Updating a leaf row changes layout, not index membership. Keep the
+            // scheduled viewport/anchor refresh without recollecting all history.
+            // Nested owners can add or remove rows: inspect both the current DOM
+            // and the previous index so removal is not mistaken for a leaf edit.
+            if (!row || row.node !== node || row.children?.length || node.querySelector('[data-chat-virtual-owner]')) {
+                list.dirty = true;
+            }
+            list.schedule();
+        }
     };
     // A hidden workspace has no viewport to render or restore scroll against.
     // Keep its initial hydration pending until resize makes that viewport real.
@@ -479,10 +500,11 @@
         // New measurements can bring more rows into view. Fill that window before
         // revealing cold history; no Markdown work is done for the other rows.
         for (let pass = 0; pass <= list.rows.size + 1 && messages.isConnected; pass++) {
-            const before = Array.from(list.rows.values()).filter(row => row.lazy && !row.ready).length;
+            // Count completed renders rather than recounting every pending row.
+            // A shrinking row can expose a different window with the same count.
+            const before = list.renderRevision || 0;
             await Promise.all(refresh(list, true));
-            const after = Array.from(list.rows.values()).filter(row => row.lazy && !row.ready).length;
-            if (before === after) break;
+            if (before === (list.renderRevision || 0)) break;
         }
         return true;
     };
@@ -493,21 +515,61 @@
             if (!data?.ungrouped && owner._chatVirtualRender && data?.sourceModels?.some((model, index, all) => index > 0 && work(model) && work(all[index - 1]))) window.installChatVirtualRows(owner, data, owner._chatVirtualRender);
         });
     };
+    // A retained row must not keep a previous cumulative projection alive through
+    // an old renderer closure. Dispatch through its owner's current renderer.
+    function renderCurrentRow(...args) {
+        return this.owner._chatVirtualRender(...args);
+    }
     window.installChatVirtualRows = function (owner, data, render) {
         const generation = owner._chatVirtualInstallGeneration = (owner._chatVirtualInstallGeneration || 0) + 1;
         const renderVersion = owner._streamRenderVersion;
         owner._chatVirtualRender = render;
         const compact = !data.ungrouped && document.documentElement.getAttribute('data-output-detail') === 'compact';
         data.sourceModels ||= data.models;
-        if (data.activityMode !== compact) {
-            const grouped = [];
-            data.sourceModels.forEach(model => {
-                const previous = grouped[grouped.length - 1];
-                if (compact && (model.kind === 'using' || model.kind === 'thinking') && previous && (previous.kind === 'using' || previous.kind === 'thinking')) {
+        if (!compact) {
+            data.models = data.sourceModels;
+            data.activityMode = false;
+        } else if (data.activityMode !== compact) {
+            let grouped = [], start = 0, checkpoints = [];
+            const prior = owner._chatVirtualData;
+            if (compact && data.incremental && prior?.activityMode && prior.groupCheckpoints) {
+                // Keep aggregate counts at source-row boundaries. Appending to one
+                // Compact group need not enumerate all its tools to rebuild its label.
+                while (start < data.sourceModels.length && start < prior.sourceModels.length &&
+                    data.sourceModels[start] === prior.sourceModels[start] &&
+                    prior.groupCheckpoints[start].version === data.sourceModels[start].segments[0]?._version) start++;
+                if (start) {
+                    const saved = prior.groupCheckpoints[start - 1];
+                    grouped = prior.models.slice(0, saved.group + 1);
+                    const last = grouped[saved.group];
+                    grouped[saved.group] = {...last, segments:last.segments.slice(0, saved.length), activitySummary:{...saved.summary}};
+                    checkpoints = prior.groupCheckpoints.slice(0, start);
+                }
+            }
+            for (let index = start; index < data.sourceModels.length; index++) {
+                const model = data.sourceModels[index];
+                let previous = grouped[grouped.length - 1];
+                const work = model.kind === 'using' || model.kind === 'thinking';
+                if (compact && work && previous && (previous.kind === 'using' || previous.kind === 'thinking')) {
                     previous.segments.push(...model.segments);
                     delete previous.height;
-                } else grouped.push(compact ? {...model, segments: model.segments.slice()} : model);
-            });
+                } else {
+                    previous = compact ? {...model, segments:model.segments.slice(), activitySummary:{count:0, failures:0, running:null}} : model;
+                    grouped.push(previous);
+                }
+                if (compact) {
+                    if (work) model.segments.forEach(seg => {
+                        if (seg.type !== 'using') return;
+                        const summary = previous.activitySummary;
+                        summary.count++;
+                        if (seg.resultStatus === 'error') summary.failures++;
+                        if (!seg.completed && !summary.running) summary.running = seg;
+                    });
+                    checkpoints.push({group:grouped.length - 1, length:previous.segments.length,
+                        summary:{...previous.activitySummary}, version:model.segments[0]?._version});
+                }
+            }
+            data.groupCheckpoints = checkpoints;
             data.models = grouped;
             data.activityMode = compact;
         }
@@ -519,7 +581,78 @@
             const messages = owner.closest(messagesSelector);
             const list = ensureList(messages);
             const width = messages.clientWidth;
+            const delta = !compact && data.incremental && data._rowDelta?.base === owner._chatVirtualData &&
+                owner._chatVirtualData?.activityMode === false ? data._rowDelta : null;
+            delete data._rowDelta;
+            // Incremental installation leaves existing row nodes connected. A
+            // preview needs the relocation fallback only when its destination
+            // differs from the row that already owns it.
+            const stablePreviews = Array.from(previews).every(([index, node]) =>
+                owner._chatVirtualRows?.[index]?.node?.contains(node));
+            const incrementalMedia = stablePreviews && !owner.querySelector('.chat-svg-preview');
+            const externalChanges = list.observer.takeRecords().some(record => !record.target.closest?.('[data-chat-lazy-row]'));
+            if (externalChanges) list.dirty = true;
+            list.observer.disconnect();
             const restore = saveAnchor(list);
+            // Live projections retain completed model identities. Update changed rows
+            // in place instead of detaching the entire response for every delta.
+            const previous = owner._chatVirtualRows;
+            if (data.incremental && previous && owner._chatVirtualData?.activityMode === data.activityMode && incrementalMedia) {
+                owner._chatVirtualData = data;
+                const rows = previous;
+                const update = index => {
+                    const model = data.models[index];
+                    let row = previous[index];
+                    const version = model.segments.length === 1 ? model.segments[0]._version : undefined;
+                    if (row) {
+                        if (row.model !== model || row.version !== version) {
+                            row.generation = (row.generation || 0) + 1;
+                            row.ready = false;
+                            row.loading = null;
+                            row.sourceSize = undefined;
+                            if (!row.node?.isConnected) sizePlaceholder(row, estimate(model, width));
+                        }
+                        Object.assign(row, {model, version, render:renderCurrentRow});
+                    } else {
+                        const placeholder = document.createElement('div');
+                        placeholder.setAttribute('data-virtual-chat-row', String(++nextID));
+                        placeholder.setAttribute('data-chat-lazy-row', String(index));
+                        placeholder.setAttribute('aria-hidden', 'true');
+                        row = {lazy:true, owner, model, version, index, render:renderCurrentRow, placeholder, node:null, ready:false};
+                        sizePlaceholder(row, estimate(model, width));
+                        list.rows.set(placeholder, row);
+                        owner.appendChild(placeholder);
+                        const preceding = rows[index - 1];
+                        if (!list.dirty && preceding?.siblings) {
+                            row.list = list;
+                            row.children = [];
+                            row.siblings = preceding.siblings;
+                            row.siblings.splice(row.siblings.indexOf(preceding) + 1, 0, row);
+                        } else list.dirty = true;
+                    }
+                    rows[index] = row;
+                };
+                if (delta) {
+                    delta.changed.forEach(index => { if (index < data.models.length) update(index); });
+                    for (let index = delta.start; index < data.models.length; index++) update(index);
+                } else data.models.forEach((model, index) => update(index));
+                previous.slice(data.models.length).forEach(row => {
+                    row.generation = (row.generation || 0) + 1;
+                    list.rows.delete(row.placeholder);
+                    list.mounted.delete(row);
+                    if (row.siblings) {
+                        const position = row.siblings.indexOf(row);
+                        if (position >= 0) row.siblings.splice(position, 1);
+                    } else list.dirty = true;
+                    row.node?.remove(); row.placeholder.remove();
+                });
+                rows.length = data.models.length;
+                owner._chatVirtualRows = rows;
+                restore();
+                list.observer.observe(messages, {childList:true, subtree:true});
+                if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
+                return window.renderVisibleChatRows(messages);
+            }
             // Prepending a byte window shifts row indexes. Reusing those nodes would
             // apply one tool's DOM/scroll state to another; new nodes recover state
             // by stable tool ID. Ordinary refreshes retain their existing reuse path.
@@ -541,20 +674,24 @@
             const reused = [];
             owner._chatVirtualData = data;
             owner.setAttribute('data-chat-virtual-owner', 'true');
+            const previousRows = owner._chatVirtualRows || [];
             owner._chatVirtualRows = data.models.map((model, index) => {
-                const placeholder = document.createElement('div');
+                const previousRow = previousRows[index];
+                const version = model.segments.length === 1 ? model.segments[0]._version : undefined;
+                const unchanged = !shiftedWindow && previousRow?.model === model && previousRow.version === version;
+                const placeholder = unchanged ? previousRow.placeholder : document.createElement('div');
                 placeholder.setAttribute('data-virtual-chat-row', String(++nextID));
                 placeholder.setAttribute('data-chat-lazy-row', String(index));
                 placeholder.setAttribute('aria-hidden', 'true');
                 const indexed = old.get(index);
-                const prior = previews.get(index) || (previewAncestors.has(indexed) ? null : indexed);
+                const prior = previews.get(index) || (unchanged && previousRow.node) || (previewAncestors.has(indexed) ? null : indexed);
                 const node = prior && !prior.hasAttribute('data-virtual-chat-row') ? prior : null;
                 if (!model.height && prior?.dataset.chatRowHeight) {
                     model.height = Number(prior.dataset.chatRowHeight);
                     model.width = Number(prior.dataset.chatRowWidth);
                 }
                 if (node) node.setAttribute('data-chat-lazy-row', String(index));
-                const row = {lazy:true, owner, model, index, render, placeholder, node, ready:false};
+                const row = unchanged ? Object.assign(previousRow, {render:renderCurrentRow, node}) : {lazy:true, owner, model, index, render:renderCurrentRow, placeholder, node, ready:false, version};
                 if (focusedActivityKey) row.restoreFocus = () => {
                     if (!focusedActivityKey || !row.node?.isConnected) return;
                     const fold = Array.from(row.node.querySelectorAll('[data-tool-disclosure-key]')).find(el => el.getAttribute('data-tool-disclosure-key') === focusedActivityKey);
@@ -585,6 +722,7 @@
             else owner.replaceChildren(fragment);
             list.dirty = true;
             restore();
+            list.observer.observe(messages, {childList:true, subtree:true});
             if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
             return window.renderVisibleChatRows(messages);
         }
@@ -594,6 +732,8 @@
         const owners = Array.from(root.querySelectorAll('[data-chat-virtual-owner]'));
         if (root.hasAttribute('data-chat-virtual-owner')) owners.push(root);
         owners.forEach(owner => {
+            const list = lists.get(owner.closest(messagesSelector));
+            if (list) list.dirty = true;
             owner._chatVirtualInstallGeneration = (owner._chatVirtualInstallGeneration || 0) + 1;
             delete owner._chatVirtualData;
             delete owner._chatVirtualRows;
@@ -608,7 +748,12 @@
     window.captureChatVirtualData = function (root) {
         // Expanded activity bodies are derived from the outer transcript models.
         // They have no source/key and must not be retained as standalone snapshots.
-        return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(data => data && !data.ungrouped);
+        return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(data => data && !data.ungrouped).map(data => {
+            // Live FIFO matching updates existing tool models. Navigation snapshots
+            // must not acquire later results while retaining an older source revision.
+            if (!data.incremental) return data;
+            return window.structuredClone ? structuredClone(data) : JSON.parse(JSON.stringify(data));
+        });
     };
     // Query transcript content in display order without mounting offscreen rows.
     // Unrendered models can be projected by the caller into lightweight elements.
@@ -660,7 +805,10 @@
         scrollRestores.forEach(restore => restore());
         restoreScroll(restored);
         anchors.forEach(restore => restore());
-        return Promise.all(pending);
+        if (options?.synchronousThinking) root.querySelectorAll('details.stream-thinking').forEach(details => details._ensureThinkingContent?.(true));
+        return Promise.all(pending).then(() => {
+            if (options?.renderLazy !== false) return Promise.all(Array.from(root.querySelectorAll('details.stream-thinking'), details => details._ensureThinkingContent?.(options?.synchronousThinking)));
+        });
     };
     window.cloneVirtualChatRows = function (source, clone) {
         clone.querySelectorAll('[data-chat-preview-pool]').forEach(pool => pool.remove());
@@ -716,7 +864,7 @@
             else list.schedule();
         });
     });
-    window.addEventListener('beforeprint', () => { suspended = true; window.materializeVirtualChatRows(document.body); });
+    window.addEventListener('beforeprint', () => { suspended = true; window.materializeVirtualChatRows(document.body, {synchronousThinking:true}); });
     window.addEventListener('afterprint', () => { suspended = false; lists.forEach(list => list.schedule()); });
     window.addEventListener('resize', () => lists.forEach(list => list.schedule()));
 })();

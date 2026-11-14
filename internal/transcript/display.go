@@ -105,7 +105,6 @@ func findDisplayControls(s string) [][]int {
 // ParseDisplay converts historical marker output once, during migration or an
 // completed unstructured execution result. Raw streaming stays outside this parser.
 func ParseDisplay(output string) []DisplayItem {
-	output = markers.NormalizeMarkers(output)
 	matches := findDisplayControls(output)
 	if len(matches) == 0 {
 		if output == "" {
