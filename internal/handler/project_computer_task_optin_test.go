@@ -17,6 +17,7 @@ func TestNewTaskComputerOptInIsSavedBeforeExecution(t *testing.T) {
 			h, e, _ := setupTestHandler(t)
 			project := createProject(t, h, "Task computer opt-in")
 			h.computerSvc = service.NewProjectComputerService(h.projectRepo, handlerComputerProvisioner{})
+			require.NoError(t, h.computerSvc.SetEnabled(t.Context(), project.ID, true))
 			form := url.Values{"message": {"Do later"}, "category": {"backlog"}}
 			if enabled {
 				form.Set("computer_enabled", "on")

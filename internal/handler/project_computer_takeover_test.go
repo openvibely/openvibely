@@ -32,6 +32,9 @@ func TestComputerTakeoverInterruptsAndQueuesOnce(t *testing.T) {
 	h.computerSvc = service.NewProjectComputerService(h.projectRepo, liveComputerFixture{service.ComputerConnection{Endpoint: bridge.URL}})
 	scopedComputer, scopeErr := h.computerSvc.ForTask(t.Context(), p.ID, task.ID)
 	require.NoError(t, scopeErr)
+	if err := scopedComputer.SetEnabled(t.Context(), p.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, scopedComputer.SetTaskEnabled(t.Context(), p.ID, true))
 	e := echo.New()
 	e.POST("/projects/:id/computer/:action", h.ProjectComputerLifecycle)

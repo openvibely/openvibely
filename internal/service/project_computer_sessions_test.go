@@ -53,6 +53,9 @@ func TestProjectComputerTaskSessionsAndLogin(t *testing.T) {
 	}))
 	defer server.Close()
 	svc := NewProjectComputerService(projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: server.URL, Token: "secret"}})
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -180,6 +183,9 @@ func TestProjectComputerDeletionCleansBeforeCommit(t *testing.T) {
 		return nil
 	}}
 	svc := NewProjectComputerService(projects, p)
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
 	}

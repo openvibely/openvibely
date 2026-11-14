@@ -576,7 +576,7 @@ func (h *Handler) EditProjectDialog(c echo.Context) error {
 	}
 
 	repoPathHealth := h.projectSvc.RepoPathHealth(p)
-	enabled := true
+	enabled := false
 	if h.computerSvc != nil {
 		state, err := h.computerSvc.Get(c.Request().Context(), projectID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

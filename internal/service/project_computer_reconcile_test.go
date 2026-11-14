@@ -68,6 +68,9 @@ func TestDeletedDesktopReconciliationRetriesAfterRestart(t *testing.T) {
 	provider := &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: backend.URL, Token: "secret"}}
 	svc := NewProjectComputerService(db.Projects, provider)
 	require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "local"))
+	if err := svc.repo.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, svc.repo.SetIdleMinutes(t.Context(), project.ID, 0))
 	require.NoError(t, svc.repo.SetEnabled(t.Context(), project.ID, false))
 	// A database failure must not be treated as an empty task list.
@@ -115,6 +118,9 @@ func TestDeletedDesktopReconciliationMaintenanceStartup(t *testing.T) {
 	defer backend.Close()
 	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: backend.URL}})
 	require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "local"))
+	if err := svc.repo.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, svc.repo.SetIdleMinutes(t.Context(), project.ID, 0))
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

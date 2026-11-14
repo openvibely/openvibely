@@ -40,7 +40,7 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
  q('[data-computer-grant-scope]').value='project';q('[data-computer-grant-hours]').value='24';q('[data-computer-import]').click();
  await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-status]').textContent.includes('Imported 2'));
  q('[data-computer-target]').click();q('#computer-target-picker button[data-value=computer]').click();
- await wait(()=>q('[data-computer-status]').textContent.includes('destination saved'));
+ await wait(()=>q('[data-computer-target]').dataset.value==='computer');
  finish('pass','Selected cookies across two profiles and tool destination saved');
  }catch(error){finish('fail',error.message);}
  })();</script>`

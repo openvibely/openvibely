@@ -51,6 +51,9 @@ func TestComputerAutomaticStartUpgradesHealthyOldImage(t *testing.T) {
 	provider := &upgradeComputerFixture{startingComputerFixture: startingComputerFixture{endpoint: server.URL, running: true}}
 	svc := NewProjectComputerService(db.Projects, provider)
 	require.NoError(t, db.Projects.Computers().Configure(t.Context(), project.ID, "local"))
+	if err := db.Projects.Computers().SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.False(t, svc.Ready(t.Context(), project.ID))
 	require.NoError(t, svc.EnsureStarted(t.Context(), project.ID))
 	require.Equal(t, 1, provider.starts)

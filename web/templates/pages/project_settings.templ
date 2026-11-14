@@ -198,7 +198,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 				}
 				@ProjectDefaultsFields("edit-project", project, agents, globalMaxWorkers)
-				@ProjectComputerFormOption(len(computerEnabled)==0 || computerEnabled[0])
+				@ProjectComputerFormOption(len(computerEnabled)>0 && computerEnabled[0])
 </section>
 				@ProjectKnowledgePanel("edit-project", project.ManagedPermissions())
 </div>
@@ -547,7 +547,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
 						</div>				}
 				@ProjectDefaultsFields("new-project", &models.Project{}, agents, globalMaxWorkers)
-				@ProjectComputerFormOption(true)
+				@ProjectComputerFormOption(false)
 </section>
 				@ProjectKnowledgePanel("new-project", models.NewProjectPermissions())
 </div>

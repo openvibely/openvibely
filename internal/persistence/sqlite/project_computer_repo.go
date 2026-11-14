@@ -26,7 +26,7 @@ func (r *ProjectComputerRepo) Get(ctx context.Context, id string) (*models.Proje
 }
 func (r *ProjectComputerRepo) Configure(ctx context.Context, id, provider string) error {
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO project_computers(project_id,provider) VALUES (?,?) ON CONFLICT(project_id) DO NOTHING`, id, provider)
+		_, err := tx.ExecContext(ctx, `INSERT INTO project_computers(project_id,provider,enabled) VALUES (?,?,0) ON CONFLICT(project_id) DO NOTHING`, id, provider)
 		return err
 	})
 }

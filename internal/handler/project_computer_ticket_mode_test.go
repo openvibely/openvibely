@@ -20,6 +20,9 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 	h.computerSvc = service.NewProjectComputerService(h.projectRepo, liveComputerFixture{service.ComputerConnection{Endpoint: backend.URL}})
 	repo := h.projectRepo.Computers()
 	require.NoError(t, repo.Configure(t.Context(), project.ID, "local"))
+	if err := repo.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	h.SetDesktopMode(true)
 	h.SetComputerDesktopBackendURL("http://127.0.0.1:1234")
 	e := echo.New()

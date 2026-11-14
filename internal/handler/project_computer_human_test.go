@@ -45,6 +45,9 @@ func TestComputerHumanImportsAndDemonstration(t *testing.T) {
 	svc.SetAttachmentDirectory(t.TempDir())
 	scoped, err := svc.ForTask(t.Context(), p.ID, task.ID)
 	require.NoError(t, err)
+	if err := scoped.SetEnabled(t.Context(), p.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, scoped.SetTaskEnabled(t.Context(), p.ID, true))
 	h := &Handler{projectRepo: db.Projects, computerSvc: svc, taskSvc: service.NewTaskService(db.Tasks, db.Attachments, nil)}
 	llm := service.NewLLMService(db.LLMConfigs, db.Executions, db.Tasks, db.Projects, db.Schedules, db.Attachments)

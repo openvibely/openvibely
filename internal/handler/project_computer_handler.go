@@ -82,7 +82,7 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	state, err := h.computerService(c).Get(c.Request().Context(), c.Param("id"))
 	if errors.Is(err, sql.ErrNoRows) {
-		return c.JSON(200, map[string]any{"idle_minutes": 30, "time_zone": "UTC", "configured": false, "ready": false, "enabled": true})
+		return c.JSON(200, map[string]any{"idle_minutes": 30, "time_zone": "UTC", "configured": false, "ready": false, "enabled": false})
 	}
 	if err != nil {
 		return err

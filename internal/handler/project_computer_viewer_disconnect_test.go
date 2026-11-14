@@ -42,6 +42,9 @@ func TestComputerViewerDisconnectAndAutomaticHandback(t *testing.T) {
 	require.NoError(t, db.Projects.Create(ctx, project))
 	svc := service.NewProjectComputerService(db.Projects, liveComputerFixture{service.ComputerConnection{Endpoint: backend.URL, Token: "test"}})
 	require.NoError(t, db.Projects.Computers().Configure(ctx, project.ID, "local"))
+	if err := db.Projects.Computers().SetEnabled(ctx, project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, db.Projects.Computers().Hold(ctx, project.ID, true))
 	h := &Handler{projectRepo: db.Projects, computerSvc: svc}
 	e := echo.New()

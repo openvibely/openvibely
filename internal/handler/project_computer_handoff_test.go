@@ -31,6 +31,9 @@ func TestComputerPanelCompletionResumesExactTask(t *testing.T) {
 	defer bridge.Close()
 	h.computerSvc = service.NewProjectComputerService(h.projectRepo, liveComputerFixture{service.ComputerConnection{Endpoint: bridge.URL, Token: "fixture"}})
 	require.NoError(t, h.projectRepo.Computers().Configure(t.Context(), project.ID, "local"))
+	if err := h.projectRepo.Computers().SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	scoped, err := h.projectRepo.Computers().ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
 	require.NoError(t, scoped.SetEnabled(t.Context(), project.ID, true))
@@ -88,6 +91,9 @@ func TestComputerPanelVisualCheckResumesOriginalTask(t *testing.T) {
 	h.computerSvc = service.NewProjectComputerService(h.projectRepo, liveComputerFixture{service.ComputerConnection{Endpoint: bridge.URL, Token: "fixture"}})
 	h.llmSvc.SetProjectComputerService(h.computerSvc)
 	require.NoError(t, h.projectRepo.Computers().Configure(t.Context(), project.ID, "local"))
+	if err := h.projectRepo.Computers().SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	scoped, err := h.projectRepo.Computers().ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
 	require.NoError(t, scoped.SetEnabled(t.Context(), project.ID, true))

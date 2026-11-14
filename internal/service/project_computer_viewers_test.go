@@ -14,6 +14,9 @@ func TestComputerViewerReleaseProtectsOtherControllers(t *testing.T) {
 	require.NoError(t, db.Projects.Create(ctx, project))
 	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{})
 	require.NoError(t, svc.repo.Configure(ctx, project.ID, "local"))
+	if err := svc.repo.SetEnabled(ctx, project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	// No backend work is necessary to test the ownership/lifecycle boundary.
 	require.NoError(t, svc.repo.Hold(ctx, project.ID, true))
 	_, leaveA, err := svc.RegisterViewer(project.ID, "alice", "a", true)
@@ -50,6 +53,9 @@ func TestComputerViewerDisconnectKeepsPrivateHandoff(t *testing.T) {
 	require.NoError(t, db.Tasks.Create(ctx, task))
 	root := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{})
 	require.NoError(t, root.repo.Configure(ctx, project.ID, "local"))
+	if err := root.repo.SetEnabled(ctx, project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	svc, err := root.ForTask(ctx, project.ID, task.ID)
 	require.NoError(t, err)
 	require.NoError(t, svc.repo.RequestHandoff(ctx, project.ID, "login", "https://example.com", "Sign in", ""))

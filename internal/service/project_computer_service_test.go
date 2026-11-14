@@ -62,6 +62,9 @@ func TestProjectComputerOwnershipTakeoverAndImages(t *testing.T) {
 	if rt := svc.runtimeTools(t.Context(), project.ID, "one"); rt != nil {
 		t.Fatal("tools enabled before setup")
 	}
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -183,6 +186,9 @@ func TestProjectComputerTakeoverCancelsAgentAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := NewProjectComputerService(projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: server.URL, Token: "secret"}})
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -285,6 +291,9 @@ func enableComputerTaskForTest(t *testing.T, svc *ProjectComputerService, projec
 	t.Helper()
 	scoped, err := svc.ForTask(t.Context(), projectID, taskID)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetEnabled(t.Context(), projectID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err = scoped.SetTaskEnabled(t.Context(), projectID, true); err != nil {

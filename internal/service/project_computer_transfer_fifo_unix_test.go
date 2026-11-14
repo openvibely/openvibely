@@ -35,6 +35,9 @@ func TestComputerTransferRejectsPipesAndTransfersRegularFiles(t *testing.T) {
 	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: server.URL}})
 	scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
+	if err := scoped.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 	pipe := filepath.Join(dir, "pipe")
 	require.NoError(t, unix.Mkfifo(pipe, 0600))

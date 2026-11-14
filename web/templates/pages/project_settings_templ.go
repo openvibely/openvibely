@@ -466,7 +466,7 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = ProjectComputerFormOption(len(computerEnabled) == 0 || computerEnabled[0]).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ProjectComputerFormOption(len(computerEnabled) > 0 && computerEnabled[0]).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -617,7 +617,7 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glob
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = ProjectComputerFormOption(true).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ProjectComputerFormOption(false).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

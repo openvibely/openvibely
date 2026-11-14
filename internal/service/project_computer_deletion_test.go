@@ -56,6 +56,9 @@ func TestComputerProvisionedProjectDeletionRetainsRecordsWhenDockerUnavailable(t
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{}`) }))
 	defer server.Close()
 	computer := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: server.URL}})
+	if err := computer.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, computer.Start(t.Context(), project.ID))
 	state, err := computer.Get(t.Context(), project.ID)
 	require.NoError(t, err)
@@ -90,6 +93,7 @@ func TestComputerFailedProvisioningPreservesCleanupIntent(t *testing.T) {
 	project := &models.Project{Name: "Partial computer"}
 	require.NoError(t, db.Projects.Create(t.Context(), project))
 	computer := NewProjectComputerService(db.Projects, &partialComputerProvisioner{})
+	require.NoError(t, computer.SetEnabled(t.Context(), project.ID, true))
 	require.Error(t, computer.Start(t.Context(), project.ID))
 	state, err := computer.Get(t.Context(), project.ID)
 	require.NoError(t, err)
@@ -106,6 +110,9 @@ func TestComputerStartWaitsForProjectDeletion(t *testing.T) {
 			defer server.Close()
 			computer := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: server.URL}})
 			require.NoError(t, db.Projects.Computers().Configure(t.Context(), project.ID, "local"))
+			if err := db.Projects.Computers().SetEnabled(t.Context(), project.ID, true); err != nil {
+				t.Fatal(err)
+			}
 			projects := NewProjectService(db.Projects)
 			projects.SetProjectComputerService(computer)
 			projects.SetTaskService(NewTaskService(db.Tasks, nil, nil))
@@ -160,6 +167,9 @@ func TestComputerCleanupFailurePreservesProjectForRetry(t *testing.T) {
 	}}
 	computer := NewProjectComputerService(db.Projects, p)
 	require.NoError(t, db.Projects.Computers().Configure(t.Context(), project.ID, "local"))
+	if err := db.Projects.Computers().SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, db.Projects.Computers().MarkCleanupRequired(t.Context(), project.ID))
 	projects := NewProjectService(db.Projects)
 	projects.SetProjectComputerService(computer)
@@ -236,6 +246,9 @@ func TestComputerCleanupAllowsUnrelatedDatabaseWrites(t *testing.T) {
 			}}
 			computer := NewProjectComputerService(db.Projects, p)
 			require.NoError(t, db.Projects.Computers().Configure(t.Context(), project.ID, "local"))
+			if err := db.Projects.Computers().SetEnabled(t.Context(), project.ID, true); err != nil {
+				t.Fatal(err)
+			}
 			require.NoError(t, db.Projects.Computers().MarkCleanupRequired(t.Context(), project.ID))
 			projects := NewProjectService(db.Projects)
 			projects.SetProjectComputerService(computer)

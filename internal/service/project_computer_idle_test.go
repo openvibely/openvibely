@@ -39,6 +39,9 @@ func TestComputerIdlePolicyProtectsWorkAndHandoffs(t *testing.T) {
 	defer backend.Close()
 	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: backend.URL}})
 	require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "local"))
+	if err := svc.repo.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	state, err := svc.Get(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.Equal(t, 30, state.IdleMinutes)
@@ -59,6 +62,9 @@ func TestComputerIdlePolicyProtectsWorkAndHandoffs(t *testing.T) {
 		require.NoError(t, db.Tasks.Create(t.Context(), task))
 		scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
 		require.NoError(t, err)
+		if err := scoped.SetEnabled(t.Context(), project.ID, true); err != nil {
+			t.Fatal(err)
+		}
 		require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 		switch kind {
 		case "operation":
@@ -115,6 +121,9 @@ func TestComputerIdleMaintenanceRestoresAndRetries(t *testing.T) {
 	defer backend.Close()
 	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: backend.URL}})
 	require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "local"))
+	if err := svc.repo.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan struct{})
@@ -163,10 +172,16 @@ func TestComputerToolsDoNotWaitForIdleShutdown(t *testing.T) {
 	defer control.Close()
 	svc := NewProjectComputerService(db.Projects, &HostedComputerProvisioner{URL: control.URL, Token: "test-token"})
 	require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "hosted"))
+	if err := svc.repo.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	task := &models.Task{ProjectID: project.ID, Title: "Active desktop", Status: models.StatusRunning, Category: models.CategoryActive, Priority: 2}
 	require.NoError(t, db.Tasks.Create(t.Context(), task))
 	enabledTask, err := svc.ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
+	if err := enabledTask.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, enabledTask.SetTaskEnabled(t.Context(), project.ID, true))
 	idle := &models.Task{ProjectID: project.ID, Title: "Idle desktop", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: 2}
 	require.NoError(t, db.Tasks.Create(t.Context(), idle))
@@ -232,12 +247,18 @@ func TestComputerCleanupDoesNotLockOtherCandidates(t *testing.T) {
 	defer close(release)
 	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: backend.URL}})
 	require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "local"))
+	if err := svc.repo.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	scopes := map[string]*ProjectComputerService{}
 	for _, title := range []string{"A", "B"} {
 		task := &models.Task{ProjectID: project.ID, Title: title, Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: 2}
 		require.NoError(t, db.Tasks.Create(t.Context(), task))
 		scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
 		require.NoError(t, err)
+		if err := scoped.SetEnabled(t.Context(), project.ID, true); err != nil {
+			t.Fatal(err)
+		}
 		require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 		scopes[ComputerDesktopID(task.ID)] = scoped
 	}

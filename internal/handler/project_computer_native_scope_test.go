@@ -39,8 +39,14 @@ func TestComputerNativeStreamPreservesTicketScopeWithCachedQuery(t *testing.T) {
 			h.computerSvc = service.NewProjectComputerService(h.projectRepo, liveComputerFixture{service.ComputerConnection{Endpoint: bridge.URL, Token: "fixture"}})
 			scopedComputer, scopeErr := h.computerSvc.ForTask(t.Context(), project.ID, task.ID)
 			require.NoError(t, scopeErr)
+			if err := scopedComputer.SetEnabled(t.Context(), project.ID, true); err != nil {
+				t.Fatal(err)
+			}
 			require.NoError(t, scopedComputer.SetTaskEnabled(t.Context(), project.ID, true))
 			require.NoError(t, h.projectRepo.Computers().Configure(t.Context(), project.ID, "local"))
+			if err := h.projectRepo.Computers().SetEnabled(t.Context(), project.ID, true); err != nil {
+				t.Fatal(err)
+			}
 			h.SetDesktopMode(true)
 			e := echo.New()
 			e.Use(h.AuthMiddleware())

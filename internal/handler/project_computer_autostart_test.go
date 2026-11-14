@@ -32,12 +32,20 @@ func TestComputerPanelAvailableForUnexecutedTask(t *testing.T) {
 		e.ServeHTTP(rec, httptest.NewRequest(method, "/projects/"+project.ID+"/computer/"+path+"?task_id="+task.ID, nil))
 		return rec
 	}
+
+	missing := httptest.NewRecorder()
+	e.ServeHTTP(missing, httptest.NewRequest("GET", "/projects/"+project.ID+"/computer/status", nil))
+	require.Equal(t, 200, missing.Code)
+	require.Contains(t, missing.Body.String(), `"enabled":false`)
+	require.Contains(t, missing.Body.String(), `"configured":false`)
 	rec := request("GET", "status")
 	require.Equal(t, 200, rec.Code)
 	var state models.ProjectComputer
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &state))
 	require.False(t, state.Enabled)
-	require.True(t, state.ProjectEnabled)
+	require.False(t, state.ProjectEnabled)
+	require.Equal(t, 400, request("POST", "task-enable").Code)
+	require.Equal(t, 200, request("POST", "enable").Code)
 	require.Equal(t, 400, request("POST", "ensure").Code)
 	require.Equal(t, 200, request("POST", "task-enable").Code)
 	require.Equal(t, 200, request("POST", "ensure").Code)

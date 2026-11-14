@@ -62,17 +62,29 @@ func TestComputerTimeZoneReachesDockerAndReplacesChangedContainer(t *testing.T) 
 	}}
 	svc := NewProjectComputerService(db.Projects, p)
 	require.NoError(t, svc.SetTimeZone(t.Context(), project.ID, "America/New_York"))
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, svc.Start(t.Context(), project.ID))
 	require.Equal(t, "America/New_York", zone)
 	require.Equal(t, 1, runs)
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, svc.Start(t.Context(), project.ID))
 	require.Equal(t, 1, runs, "unchanged zone should reuse container")
 	require.NoError(t, svc.SetTimeZone(t.Context(), project.ID, "Asia/Kathmandu"))
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, svc.Start(t.Context(), project.ID))
 	require.Equal(t, "Asia/Kathmandu", zone)
 	require.Equal(t, 2, runs)
 	require.Equal(t, 1, removes)
 	isolation = "" // Older containers must be replaced even with the same image tag.
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, svc.Start(t.Context(), project.ID))
 	require.Equal(t, 3, runs)
 	require.Equal(t, 2, removes)
@@ -83,6 +95,9 @@ func TestComputerTimeZoneReachesDockerAndReplacesChangedContainer(t *testing.T) 
 	require.NoError(t, db.Tasks.Create(t.Context(), task))
 	scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
+	if err := scoped.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 	state, err := scoped.Get(t.Context(), project.ID)
 	require.NoError(t, err)

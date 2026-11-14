@@ -53,6 +53,9 @@ func TestComputerStreamAccessRevocation(t *testing.T) {
 			defer bridge.Close()
 			tc.handler.computerSvc = service.NewProjectComputerService(tc.stores.Projects, liveComputerFixture{service.ComputerConnection{Endpoint: bridge.URL, Token: "fixture"}})
 			require.NoError(t, tc.stores.Projects.Computers().Configure(ctx, project.ID, "local"))
+			if err := tc.stores.Projects.Computers().SetEnabled(ctx, project.ID, true); err != nil {
+				t.Fatal(err)
+			}
 			require.NoError(t, tc.stores.Projects.Computers().Hold(ctx, project.ID, true))
 			bobCtx := models.WithPrincipal(ctx, bob.Principal)
 			e := echo.New()

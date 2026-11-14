@@ -37,6 +37,9 @@ func TestProjectComputerLocalDockerLifecycle(t *testing.T) {
 		}
 	})
 	svc := NewProjectComputerService(repo, &LocalComputerProvisioner{})
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +67,9 @@ func TestProjectComputerLocalDockerLifecycle(t *testing.T) {
 	}
 	if out, err := exec.Command("docker", "rm", name).CombinedOutput(); err != nil {
 		t.Fatalf("replace fixture container: %v %s", err, out)
+	}
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
 	}
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
@@ -95,6 +101,9 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 		}
 	})
 	svc := NewProjectComputerService(repo, &LocalComputerProvisioner{})
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -168,6 +177,9 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 	}
 	if out, err := exec.Command("docker", "rm", name).CombinedOutput(); err != nil {
 		t.Fatalf("%v %s", err, out)
+	}
+	if err := svc.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
 	}
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)

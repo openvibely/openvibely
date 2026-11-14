@@ -22,6 +22,9 @@ func TestComputerFailedTakeoverKeepsInputBlocked(t *testing.T) {
 	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{connection: ComputerConnection{Endpoint: bridge.URL}})
 	scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
+	if err := scoped.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 	require.ErrorIs(t, scoped.Control(t.Context(), project.ID, true, func() error { return context.DeadlineExceeded }), context.DeadlineExceeded)
 	blocked := func() {
@@ -30,6 +33,9 @@ func TestComputerFailedTakeoverKeepsInputBlocked(t *testing.T) {
 	blocked()
 	reloaded, err := svc.ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
+	if err := reloaded.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, reloaded.SetTaskEnabled(t.Context(), project.ID, true))
 	state, err := reloaded.Get(t.Context(), project.ID)
 	require.NoError(t, err)
