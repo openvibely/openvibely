@@ -306,6 +306,11 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 		return nil
 	}
 	owner += ":" + persistence.NewID()
+	executionID := llmcontracts.ArtifactExecutionIDFromContext(ctx)
+	if executionID == "" {
+		executionID = owner
+	}
+	var cancelExecutionOnce sync.Once
 	defs := projectComputerToolDefinitions()
 	routed := state.ToolTarget == "computer"
 	if routed {
@@ -391,8 +396,16 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 		if err != nil {
 			return "", true, true, err
 		}
+		if name == "computer_shell" {
+			if err := ctx.Err(); err != nil {
+				return "", true, true, err
+			}
+			cancelExecutionOnce.Do(func() {
+				context.AfterFunc(ctx, func() { s.cancelRemoteExecution(conn, executionID) })
+			})
+		}
 		if processTool != "" {
-			body, err := json.Marshal(map[string]any{"name": processTool, "input": input})
+			body, err := json.Marshal(map[string]any{"name": processTool, "input": input, "execution_id": executionID})
 			if err != nil {
 				return "", true, true, err
 			}
@@ -530,10 +543,11 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 		}
 		if name == "computer_shell" {
 			var args struct {
-				Command    string `json:"command"`
-				Directory  string `json:"working_directory"`
-				Timeout    int    `json:"timeout_seconds"`
-				Background bool   `json:"background"`
+				Command     string `json:"command"`
+				ExecutionID string `json:"execution_id"`
+				Directory   string `json:"working_directory"`
+				Timeout     int    `json:"timeout_seconds"`
+				Background  bool   `json:"background"`
 			}
 			if err = json.Unmarshal(input, &args); err != nil {
 				return "", true, true, err
@@ -541,6 +555,7 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 			if args.Directory == "" {
 				args.Directory = "Files"
 			}
+			args.ExecutionID = executionID
 			args.Timeout = agenttools.NormalizeBashTimeout(args.Timeout)
 			input, _ = json.Marshal(args)
 			out, bad, err := s.shell(call, conn, input)

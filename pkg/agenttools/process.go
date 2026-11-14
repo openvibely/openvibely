@@ -36,7 +36,12 @@ type processLifetimeKey struct{}
 // Child tool-request cancellation only ends the wait; execution cancellation
 // terminates the processes, including sessions that have already yielded.
 func WithProcessLifetime(ctx context.Context) context.Context {
-	return context.WithValue(ctx, processLifetimeKey{}, ctx)
+	return WithProcessOwner(ctx, ctx)
+}
+
+// WithProcessOwner separates an execution's lifetime from an individual request.
+func WithProcessOwner(request, owner context.Context) context.Context {
+	return context.WithValue(request, processLifetimeKey{}, owner)
 }
 
 func processLifetime(ctx context.Context) context.Context {
@@ -55,6 +60,7 @@ type processManager struct {
 }
 
 type processSession struct {
+	owner              context.Context
 	created, completed time.Time
 	history            []byte
 	historyDropped     bool
@@ -196,7 +202,7 @@ func (m *processManager) launch(ctx context.Context, dir, command string, timeou
 		cleanup()
 		return nil, err
 	}
-	s := &processSession{created: time.Now(), dir: dir, cmd: cmd, stdin: stdin, cancel: cancel, done: make(chan struct{}), changed: make(chan struct{}, 1), timeout: timeout}
+	s := &processSession{owner: processLifetime(ctx), created: time.Now(), dir: dir, cmd: cmd, stdin: stdin, cancel: cancel, done: make(chan struct{}), changed: make(chan struct{}, 1), timeout: timeout}
 	cmd.Stdout, cmd.Stderr = s, s
 	m.mu.Lock()
 	if err := ctx.Err(); err != nil {
@@ -560,4 +566,25 @@ func (m *processManager) Jobs(id string) []*Job {
 	}
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].session.created.Before(jobs[j].session.created) })
 	return jobs
+}
+
+// WaitForOwner acknowledges process termination after the owner has been canceled.
+// Launch registers under the same lock and rejects an already canceled owner.
+func (m *processManager) WaitForOwner(ctx, owner context.Context) error {
+	m.mu.Lock()
+	var sessions []*processSession
+	for _, s := range m.sessions {
+		if s.owner == owner {
+			sessions = append(sessions, s)
+		}
+	}
+	m.mu.Unlock()
+	for _, s := range sessions {
+		select {
+		case <-s.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }

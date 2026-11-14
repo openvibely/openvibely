@@ -57,7 +57,7 @@ func TestComputerProcessHTTPUsesSharedManager(t *testing.T) {
 	mux := http.NewServeMux()
 	processRoutes(mux, m)
 	execute := func(ctx context.Context, name string, input json.RawMessage) (string, error) {
-		body, _ := json.Marshal(map[string]any{"name": name, "input": input})
+		body, _ := json.Marshal(map[string]any{"name": name, "input": input, "execution_id": "contract"})
 		r := httptest.NewRequest("POST", "/process-tools", bytes.NewReader(body)).WithContext(ctx)
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)

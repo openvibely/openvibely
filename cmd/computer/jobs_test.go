@@ -54,7 +54,7 @@ func TestComputerJobsHTTPStreamAndBackground(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	for _, background := range []bool{false, true} {
-		body := `{"command":"printf ready; sleep 1; printf done","working_directory":".","timeout_seconds":10,"background":false}`
+		body := `{"command":"printf ready; sleep 1; printf done","execution_id":"http-test","working_directory":".","timeout_seconds":10,"background":false}`
 		if background {
 			body = strings.Replace(body, `false`, `true`, 1)
 		}
