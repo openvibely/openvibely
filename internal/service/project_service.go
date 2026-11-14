@@ -236,6 +236,14 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 				return validateErr
 			}
 		}
+		// Keep slow Docker operations outside SQLite's write transaction. The
+		// project lifecycle lock still prevents computer starts during cleanup.
+		// On failure, neither project records nor staged files have changed.
+		if computerCleanupRequired {
+			if err := s.computerSvc.cleanupProjectResources(ctx, id); err != nil {
+				return fmt.Errorf("computer cleanup failed; retry project deletion: %w", err)
+			}
+		}
 		stage, err = s.stageProjectDeletionFiles(ctx, project, preview, managedRepo)
 		if err != nil {
 			return err
@@ -247,11 +255,6 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		manifest, _, deleteErr := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest persistence.TaskDeletionManifest) error {
 			if !projectDeletionManifestsEqual(preview, manifest) {
 				return errors.New("project-owned tasks or files changed during deletion")
-			}
-			if computerCleanupRequired {
-				if err := s.computerSvc.cleanupProjectResources(ctx, id); err != nil {
-					return fmt.Errorf("computer cleanup failed; retry project deletion: %w", err)
-				}
 			}
 			return nil
 		})

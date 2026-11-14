@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -212,4 +213,57 @@ func TestComputerVolumeRemovalRetriesWithoutContainer(t *testing.T) {
 	require.False(t, volume)
 	require.NoError(t, p.RemoveProject(t.Context(), "project"))
 	require.Equal(t, 2, attempts)
+}
+
+func TestComputerCleanupAllowsUnrelatedDatabaseWrites(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			db := teststores.New(t)
+			project := &models.Project{Name: "Deleting computer"}
+			require.NoError(t, db.Projects.Create(t.Context(), project))
+			entered, release := make(chan struct{}), make(chan struct{})
+			p := &removingComputerProvisioner{removed: func(ctx context.Context, id string) error {
+				close(entered)
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				if fail {
+					return errors.New("volume removal failed")
+				}
+				return nil
+			}}
+			computer := NewProjectComputerService(db.Projects, p)
+			require.NoError(t, db.Projects.Computers().Configure(t.Context(), project.ID, "local"))
+			require.NoError(t, db.Projects.Computers().MarkCleanupRequired(t.Context(), project.ID))
+			projects := NewProjectService(db.Projects)
+			projects.SetProjectComputerService(computer)
+			done := make(chan error, 1)
+			go func() { done <- projects.Delete(t.Context(), project.ID) }()
+			<-entered
+			// Bound the write so a regression releases the blocked deletion cleanly.
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			writeErr := db.Projects.Create(ctx, &models.Project{Name: "Unrelated project"})
+			cancel()
+			gate := computer.lifecycle(project.ID)
+			locked := !gate.TryLock()
+			if !locked {
+				gate.Unlock()
+			}
+			close(release)
+			deleteErr := <-done
+			require.NoError(t, writeErr, "Docker cleanup must not hold the database transaction")
+			require.True(t, locked, "cleanup must retain the computer lifecycle lock")
+			found, err := db.Projects.GetByID(t.Context(), project.ID)
+			require.NoError(t, err)
+			if fail {
+				require.ErrorContains(t, deleteErr, "retry project deletion")
+				require.NotNil(t, found)
+			} else {
+				require.NoError(t, deleteErr)
+				require.Nil(t, found)
+			}
+		})
+	}
 }
