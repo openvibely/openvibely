@@ -16,6 +16,9 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive DISPLAY=:99 PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
 RUN apt-get update && apt-get install -y --no-install-recommends x11vnc websockify git curl python3 python3-venv jq ripgrep zip unzip xfce4 xfce4-terminal x11-utils wmctrl xvfb xdotool imagemagick dbus-x11 nodejs npm ca-certificates tzdata fonts-dejavu tini util-linux iproute2 iptables slirp4netns xauth && npm install --prefix /opt/browser playwright@1.58.2 && /opt/browser/node_modules/.bin/playwright install --with-deps --no-shell chromium && chmod -R a+rX /opt/browsers && rm -rf /opt/browsers/ffmpeg-* /var/lib/apt/lists/* /root/.npm
 # Only the visible Chromium executable is used; recordings and headless shell are not shipped.
+# Resolve the architecture-specific executable once, rather than loading Playwright
+# for every task desktop startup.
+RUN node -e 'const fs = require("fs"); const path = require("/opt/browser/node_modules/playwright").chromium.executablePath(); fs.accessSync(path, fs.constants.X_OK); fs.writeFileSync("/usr/local/lib/openvibely-chromium-path", path + "\n", {mode: 0o644});'
 COPY --from=builder /licenses/ /usr/share/licenses/openvibely-computer/
 COPY packaging/computer/licenses.cjs /tmp/openvibely-licenses.cjs
 RUN node /tmp/openvibely-licenses.cjs && rm /tmp/openvibely-licenses.cjs
