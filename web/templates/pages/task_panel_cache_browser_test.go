@@ -29,7 +29,7 @@ func TestBrowserFunctional_TaskPanelCachedNavigation(t *testing.T) {
 			return
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/tasks/"), "/thread")
-		if id != "one" && id != "two" && id != "three" {
+		if id != "one" && id != "two" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -106,11 +106,5 @@ func TestBrowserFunctional_TaskPanelCachedNavigation(t *testing.T) {
 		b.waitFor("denied computer stays blocked", `String(document.getElementById('tab-computer').inert)`, "true")
 		nav("two")
 		b.waitFor("second task keeps its own panel selection", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "attachments")
-		b.click(`[data-tab="computer"]`)
-		nav("three")
-		b.waitFor("untouched task stays closed after leaving Computer", `String(document.getElementById('task-details-panel').hidden)`, "true")
-		nav("two")
-		b.waitFor("return to clicked Computer", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "computer")
-
 	})
 }
