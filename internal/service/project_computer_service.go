@@ -23,6 +23,7 @@ import (
 )
 
 type ProjectComputerService struct {
+	onFilePublished     func(context.Context, string, string)
 	verifyLoginVisual   func(context.Context, string, string, string, []byte) (bool, error)
 	attachmentDirectory string
 	repo                persistence.ProjectComputerStore
@@ -611,7 +612,7 @@ func (s *ProjectComputerService) ForTask(ctx context.Context, projectID, taskID 
 	if err != nil {
 		return nil, err
 	}
-	return &ProjectComputerService{repo: repo, projects: s.projects, provisioner: s.provisioner, client: s.client, locks: s.locks, active: s.active, taskID: taskID, attachmentDirectory: s.attachmentDirectory, verifyLoginVisual: s.verifyLoginVisual}, nil
+	return &ProjectComputerService{repo: repo, projects: s.projects, provisioner: s.provisioner, client: s.client, locks: s.locks, active: s.active, taskID: taskID, attachmentDirectory: s.attachmentDirectory, verifyLoginVisual: s.verifyLoginVisual, onFilePublished: s.onFilePublished}, nil
 }
 func ComputerDesktopID(taskID string) string {
 	sum := sha256.Sum256([]byte(taskID))

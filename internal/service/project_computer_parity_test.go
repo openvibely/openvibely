@@ -3,6 +3,7 @@ package service
 import (
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 
+	"context"
 	"encoding/json"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"io"
@@ -104,11 +105,7 @@ func TestComputerToolRoutingAndAttachments(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "/files") {
 			if r.Method == "PUT" {
 				body, _ := io.ReadAll(r.Body)
-				expected := "uploaded"
-				if strings.HasSuffix(r.URL.Query().Get("path"), "roundtrip.txt") {
-					expected = "downloaded"
-				}
-				require.Equal(t, expected, string(body))
+				require.Equal(t, "uploaded", string(body))
 				io.WriteString(w, `{}`)
 			} else {
 				w.Header().Set("Content-Type", "application/octet-stream")
@@ -170,25 +167,28 @@ func TestComputerToolRoutingAndAttachments(t *testing.T) {
 	source := NewTaskAttachmentContextSource(db.Attachments, db.Tasks, *task)
 	require.NoError(t, source.Load(t.Context()))
 	require.NotContains(t, source.References(t.Context()), "reply.txt")
+	published := false
+	s.onFilePublished = func(ctx context.Context, projectID, executionID string) {
+		require.Equal(t, p.ID, projectID)
+		require.Equal(t, running.ID, executionID)
+		published = true
+	}
 	rt := s.runtimeTools(llmcontracts.WithArtifactExecutionID(t.Context(), running.ID), p.ID, task.ID)
 	exported, handled, bad, err := rt.Executor(t.Context(), "computer_attachment", json.RawMessage(`{"action":"from_computer","computer_path":"reply.txt"}`))
 	require.NoError(t, err)
 	require.True(t, handled)
 	require.False(t, bad)
-	require.Contains(t, exported, "/attachments/")
-	require.NotContains(t, exported, "/chat/attachments/")
-	threadAttachments, err := db.ChatAttachments.ListByExecution(t.Context(), running.ID)
+	require.True(t, published)
+	require.Contains(t, exported, "/files/")
+	files, err := db.Attachments.ListGeneratedFiles(t.Context(), p.ID, task.ID)
 	require.NoError(t, err)
-	require.Empty(t, threadAttachments)
-	taskFiles, err := db.Attachments.ListByExecutionIDs(t.Context(), []string{running.ID})
+	require.Len(t, files, 1)
+	require.Equal(t, "reply.txt", files[0].FileName)
+	require.Equal(t, running.ID, files[0].ExecutionID)
+	stored, err := os.ReadFile(files[0].FilePath)
 	require.NoError(t, err)
-	require.Len(t, taskFiles[running.ID], 1)
-	require.Equal(t, task.ID, taskFiles[running.ID][0].TaskID)
-	require.Equal(t, "reply.txt", taskFiles[running.ID][0].FileName)
-	require.Contains(t, source.References(t.Context()), "reply.txt")
-	imported, _ := json.Marshal(map[string]string{"action": "to_computer", "attachment_kind": "task", "attachment_id": taskFiles[running.ID][0].ID, "computer_path": "roundtrip.txt"})
-	_, err = s.attachmentTransfer(t.Context(), p.ID, imported)
-	require.NoError(t, err)
+	require.Equal(t, "downloaded", string(stored))
+	require.NotContains(t, source.References(t.Context()), "reply.txt")
 	listing, err := s.attachmentTransfer(t.Context(), p.ID, json.RawMessage(`{"action":"list"}`))
 	require.NoError(t, err)
 	require.Contains(t, listing, "thread.txt")
@@ -300,10 +300,17 @@ func TestComputerChatExportKeepsChatOwnership(t *testing.T) {
 	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 	result, err := scoped.attachmentTransfer(llmcontracts.WithArtifactExecutionID(t.Context(), execution.ID), project.ID, json.RawMessage(`{"action":"from_computer","computer_path":"chat.txt"}`))
 	require.NoError(t, err)
-	require.Contains(t, result, "/chat/attachments/")
+	require.Contains(t, result, "/files/")
 	chatFiles, err := db.ChatAttachments.ListByExecution(t.Context(), execution.ID)
 	require.NoError(t, err)
-	require.Len(t, chatFiles, 1)
+	require.Empty(t, chatFiles)
+	generated, err := db.Attachments.ListGeneratedFiles(t.Context(), project.ID, chat.ID)
+	require.NoError(t, err)
+	require.Len(t, generated, 1)
+	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, false))
+	contents, err := os.ReadFile(generated[0].FilePath)
+	require.NoError(t, err)
+	require.Equal(t, "chat report", string(contents))
 	taskFiles, err := db.Attachments.ListByTask(t.Context(), chat.ID)
 	require.NoError(t, err)
 	require.Empty(t, taskFiles)

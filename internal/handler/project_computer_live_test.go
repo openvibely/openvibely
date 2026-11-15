@@ -108,16 +108,12 @@ func TestProjectComputerLiveViewer(t *testing.T) {
   const filesURL='/projects/'+root.dataset.computerProject+'/computer/files?task_id='+root.dataset.computerTask+'&path=viewer-fixture.txt';
   const statusURL='/projects/'+root.dataset.computerProject+'/computer/status?task_id='+root.dataset.computerTask;
   if((await (await fetch(statusURL)).json()).held)throw Error('Fullscreen acquired exclusive control');
-  if(document.querySelector('[data-computer-dialog]').contains(document.querySelector('[data-computer-files]')))throw Error('Files moved into fullscreen');
+  if(document.querySelector('[data-computer-files]'))throw Error('Obsolete Files section remains');
   document.querySelector('[data-computer-close]').click();
   await wait(()=>!document.querySelector('[data-computer-dialog]').open && !document.querySelector('[aria-label="Remote computer keyboard"]'));
   await wait(liveFrame);
   const uploaded=await fetch(filesURL,{method:'PUT',body:'viewer-file'});if(!uploaded.ok)throw Error('upload failed');
   const downloaded=await fetch(filesURL);if(await downloaded.text()!=='viewer-file')throw Error('download differed');
-  document.querySelector('[data-computer-files]').open=true;
-  document.querySelector('[data-computer-files-refresh]').click();
-  const importButton=()=>[...document.querySelectorAll('[data-computer-file-list] button')].find(b=>b.textContent==='Add to task'||b.textContent==='Added');
-  await wait(()=>importButton());importButton().click();await wait(()=>importButton().textContent==='Added');
   const duplicate=await fetch(filesURL,{method:'PUT',body:'replacement'});if(duplicate.ok)throw Error('overwrote user file');
   if(takeoverCalls)throw Error('Normal viewer requested takeover or release');
   const handoff=await fetch('/fixture-login',{method:'POST'});if(!handoff.ok)throw Error('Private handoff failed');

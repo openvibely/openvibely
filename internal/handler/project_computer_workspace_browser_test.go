@@ -51,18 +51,11 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  q('[data-computer-action="ensure"]').click();
  await wait(()=>window.fixtureRFB?.painted);
  if(!q('#tab-computer').contains(q('[data-computer-preview]')))throw Error('Preview not in Computer tab');
- const filesFetch=window.fetch,filesToast=window.showToast,fileErrors=[];
- window.showToast=(message,type)=>fileErrors.push({message,type});
- window.fetch=(url,options)=>String(url).includes('/files')?Promise.resolve(new Response(JSON.stringify({message:'File access failed'}),{status:400,headers:{'Content-Type':'application/json'}})):filesFetch(url,options);
- q('[data-computer-files-refresh]').click();await wait(()=>fileErrors.length===1,'file error toast');
- if(fileErrors[0].message!=='File access failed'||fileErrors[0].type!=='error')throw Error('Missing file failure toast');
- window.fetch=filesFetch;window.showToast=filesToast;
-
+ if(q('[data-computer-files]'))throw Error('Obsolete Files section remains');
  const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(!initialRFB.disconnected)throw Error('Hidden preview stayed connected');q('[data-tab="computer"]').click();await wait(()=>window.fixtureRFB!==initialRFB,'preview reconnect');
  if(q('#tab-computer').classList.contains('hidden'))throw Error('Computer tab hidden');
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
  q('[data-computer-preview-open]').click();await wait(()=>q('[data-computer-dialog]').open);
- if(q('[data-computer-dialog]').contains(q('[data-computer-files]'))||!q('#tab-computer').contains(q('[data-computer-files]')))throw Error('Files must stay in the Computer tab');
  if(q('[data-computer-action="takeover"], [data-computer-action="release"], [data-computer-expand]'))throw Error('Unexpected viewer buttons');
  await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly,'takeover');
 

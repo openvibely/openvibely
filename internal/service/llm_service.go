@@ -102,6 +102,7 @@ func NewLLMService(llmConfigRepo persistence.LLMConfigStore, execRepo persistenc
 	if projectRepo != nil {
 		s.computerSvc = NewProjectComputerService(projectRepo, nil)
 		s.computerSvc.verifyLoginVisual = s.verifyComputerLoginVisual
+		s.computerSvc.onFilePublished = s.notifyGeneratedFile
 	}
 	s.initProviderAdapters()
 	s.routing = newAgentRoutingStrategy(s)
@@ -2748,6 +2749,7 @@ func isTaskPreClaimed(ctx context.Context) bool {
 func (s *LLMService) SetProjectComputerService(computer *ProjectComputerService) {
 	if computer != nil {
 		computer.verifyLoginVisual = s.verifyComputerLoginVisual
+		computer.onFilePublished = s.notifyGeneratedFile
 	}
 	s.computerSvc = computer
 }

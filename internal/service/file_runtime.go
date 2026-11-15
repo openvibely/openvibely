@@ -75,33 +75,48 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 		if s.taskSvc != nil && s.taskSvc.uploadsDir != "" {
 			root = s.taskSvc.uploadsDir
 		}
-		root, err = filepath.Abs(filepath.Join(root, "generated"))
+		out, err := publishGeneratedFile(ctx, s.attachmentRepo, root, req.ProjectID, req.ExecID, path, data)
 		if err != nil {
 			return "", true, true, err
 		}
-		if err = os.MkdirAll(root, 0700); err != nil {
-			return "", true, true, err
-		}
-		dir, err := os.MkdirTemp(root, "file-")
-		if err != nil {
-			return "", true, true, err
-		}
-		stored := filepath.Join(dir, filepath.Base(path))
-		if err = os.WriteFile(stored, data, 0600); err != nil {
-			os.RemoveAll(dir)
-			return "", true, true, err
-		}
-		f := models.GeneratedFile{ProjectID: req.ProjectID, ExecutionID: req.ExecID, FileName: filepath.Base(path), FilePath: stored, MediaType: filecontent.FileMediaType(path, data), FileSize: int64(len(data))}
-		if err = s.attachmentRepo.CreateGeneratedFile(ctx, &f); err != nil {
-			os.RemoveAll(dir)
-			return "", true, true, err
-		}
-		if s.broadcaster != nil && s.execRepo != nil {
-			if execution, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), req.ExecID); err == nil && execution != nil {
-				s.broadcaster.Publish(events.TaskEvent{Type: events.TaskFilesChanged, ProjectID: req.ProjectID, TaskID: execution.TaskID, ExecID: req.ExecID})
-			}
-		}
-		out, _ := json.Marshal(map[string]any{"id": f.ID, "name": f.FileName, "url": "/files/" + f.ID + "?project_id=" + url.QueryEscape(f.ProjectID)})
-		return string(out), true, false, nil
+
+		s.notifyGeneratedFile(ctx, req.ProjectID, req.ExecID)
+
+		return out, true, false, nil
 	}}
+}
+
+// publishGeneratedFile stores a durable artifact shared by local and computer tools.
+func publishGeneratedFile(ctx context.Context, repo persistence.AttachmentStore, root, projectID, executionID, path string, data []byte) (string, error) {
+	root, err := filepath.Abs(filepath.Join(root, "generated"))
+	if err != nil {
+		return "", err
+	}
+	if err = os.MkdirAll(root, 0700); err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp(root, "file-")
+	if err != nil {
+		return "", err
+	}
+	stored := filepath.Join(dir, filepath.Base(path))
+	if err = os.WriteFile(stored, data, 0600); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	f := models.GeneratedFile{ProjectID: projectID, ExecutionID: executionID, FileName: filepath.Base(path), FilePath: stored, MediaType: filecontent.FileMediaType(path, data), FileSize: int64(len(data))}
+	if err = repo.CreateGeneratedFile(ctx, &f); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	out, _ := json.Marshal(map[string]any{"id": f.ID, "name": f.FileName, "url": "/files/" + f.ID + "?project_id=" + url.QueryEscape(f.ProjectID)})
+	return string(out), nil
+}
+
+func (s *LLMService) notifyGeneratedFile(ctx context.Context, projectID, executionID string) {
+	if s.broadcaster != nil && s.execRepo != nil {
+		if execution, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), executionID); err == nil && execution != nil {
+			s.broadcaster.Publish(events.TaskEvent{Type: events.TaskFilesChanged, ProjectID: projectID, TaskID: execution.TaskID, ExecID: executionID})
+		}
+	}
 }

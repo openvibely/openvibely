@@ -44,16 +44,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  </div>
  }
 
- <p class="text-sm opacity-60">Applies on the next task turn. Git commands follow the shell selection.</p>
  </div>
- <details data-computer-files>
- <summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Files</span><span aria-hidden="true">›</span></summary>
- <p class="text-sm">Upload or download files (up to 25 MB). Existing files are kept.</p>
- <label class="flex flex-col gap-2 text-sm">Folder in Files <input class="input input-sm input-bordered" data-computer-folder placeholder="Leave empty for Files"/></label>
- <button type="button" class="btn btn-sm" data-computer-files-refresh>Show files</button>
- <label>Upload file <input type="file" data-computer-upload/></label>
- <div data-computer-file-list></div>
- </details>
  <div data-computer-login hidden class="p-3 bg-base-200 rounded-lg">
  <p data-computer-login-site></p>
  <p class="text-sm">Complete the requested step privately. Done checks access and resumes this task. If needed, your task model checks a screenshot.</p>
@@ -305,11 +296,6 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
       }catch(e){window.showToast(e.message,'error');pending=false;buttons.forEach(b=>b.disabled=false);}
      }
      root.addEventListener('click',computerAction);
-     const fileList=find('[data-computer-file-list]');
- const folder=find('[data-computer-folder]');
- const fileURL=path=>{const url=new URL(scoped('/files'),location.href);url.searchParams.set('path',path);return url;};
- async function showFiles(){const res=await fetch(fileURL(folder.value),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Files unavailable');fileList.replaceChildren();for(const item of data.entries||[]){const relative=item.path.replace(/^Files\/?/,'');const entry=document.createElement(item.directory?'button':'a');entry.textContent=item.name+(item.directory?'/':'');entry.className='block';if(item.directory){entry.type='button';entry.onclick=()=>{folder.value=relative;showFiles().catch(e=>window.showToast(e.message,'error'));};}else{entry.href=fileURL(relative);entry.download=item.name;}fileList.append(entry);if(!item.directory){const add=document.createElement('button');add.type='button';add.className='btn btn-sm';add.textContent='Add to task';add.onclick=async()=>{add.disabled=true;try{const url=new URL(scoped('/import-file'),location.href);url.searchParams.set('path',relative);const response=await fetch(url,{method:'POST'});const saved=await response.json();if(!response.ok)throw Error(saved.message||'Could not add file');add.textContent='Added';window.showToast('File added to task attachments.','info');document.body.dispatchEvent(new Event('taskAttachmentsChanged',{bubbles:true}));}catch(e){window.showToast(e.message,'error');add.disabled=false;}};fileList.append(add);}}}
- if(fileList){find('[data-computer-files-refresh]').onclick=()=>showFiles().catch(e=>window.showToast(e.message,'error'));find('[data-computer-upload]').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>25*1024*1024){window.showToast('Choose a file up to 25 MB.','error');return;}try{const path=(folder.value?folder.value.replace(/\/$/,'')+'/':'')+file.name;const res=await fetch(fileURL(path),{method:'PUT',body:file});if(!res.ok){const data=await res.json();throw Error(data.message||'Upload failed');}await showFiles();window.showToast('File uploaded.','info');}catch(e){window.showToast(e.message,'error');}finally{event.target.value='';}};}
  const profile=find('[data-computer-profile]');
  const sites=find('[data-computer-sites]');
 

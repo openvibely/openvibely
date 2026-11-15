@@ -132,6 +132,13 @@ func (s *ProjectComputerService) attachmentTransfer(ctx context.Context, id stri
 	if s.attachmentDirectory == "" {
 		return "", errors.New("attachment storage is not configured")
 	}
+	if executionID := llmcontracts.ArtifactExecutionIDFromContext(ctx); executionID != "" {
+		out, err := publishGeneratedFile(ctx, repo, s.attachmentDirectory, id, executionID, args.Path, data)
+		if err == nil && s.onFilePublished != nil {
+			s.onFilePublished(ctx, id, executionID)
+		}
+		return out, err
+	}
 	dir := filepath.Join(s.attachmentDirectory, s.taskID)
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return "", err
@@ -147,20 +154,6 @@ func (s *ProjectComputerService) attachmentTransfer(ctx context.Context, id stri
 	if err != nil || closeErr != nil {
 		os.Remove(path)
 		return "", errors.New("could not save attachment")
-	}
-	if executionID := llmcontracts.ArtifactExecutionIDFromContext(ctx); executionID != "" {
-		att := &models.ChatAttachment{ExecutionID: executionID, FileName: name, FilePath: path, FileSize: int64(len(data)), MediaType: http.DetectContentType(data)}
-		taskAttachment, err := s.repo.CreateThreadAttachment(ctx, id, att)
-		if err != nil {
-			os.Remove(path)
-			return "", err
-		}
-		kind, prefix := "thread", "/chat/attachments/"
-		if taskAttachment {
-			kind, prefix = "task", "/attachments/"
-		}
-		out, _ := json.Marshal(map[string]any{"attachment_id": att.ID, "attachment_kind": kind, "name": name, "size": len(data), "url": prefix + att.ID + "/download"})
-		return string(out), nil
 	}
 	att := &models.Attachment{TaskID: s.taskID, FileName: name, FilePath: path, FileSize: int64(len(data)), MediaType: http.DetectContentType(data)}
 	if err = repo.Create(ctx, att); err != nil {
