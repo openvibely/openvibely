@@ -1572,11 +1572,17 @@ func forEachAgenticContentBlock(value any, visit func(map[string]any)) {
 		for _, item := range typed {
 			forEachAgenticContentBlock(item, visit)
 		}
+	case []map[string]any:
+		// Computer tool images use typed block slices before JSON persistence.
+		// Traverse them just like the []any slices produced when reloading JSON.
+		for _, item := range typed {
+			forEachAgenticContentBlock(item, visit)
+		}
 	case map[string]any:
 		visit(typed)
 		for _, nested := range typed {
 			switch nested.(type) {
-			case []any, map[string]any:
+			case []any, []map[string]any, map[string]any:
 				forEachAgenticContentBlock(nested, visit)
 			}
 		}

@@ -1,11 +1,16 @@
 package openaiclient
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/openvibely/openvibely/pkg/agenttools"
+	"image"
+	"image/png"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,10 +26,69 @@ func computerImageFixture(t *testing.T) string {
 	return raw
 }
 
+// Use an incompressible PNG so a text-based estimate would exceed the context
+// budget. This exercises the real computer envelope, not a hand-built image block.
+func largeComputerImageFixture(t *testing.T) string {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+	rng := rand.New(rand.NewSource(1))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = byte(rng.Intn(256)), byte(rng.Intn(256)), byte(rng.Intn(256)), 255
+	}
+	var data bytes.Buffer
+	if err := png.Encode(&data, img); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(agenttools.ImageResult{Content: []agenttools.ToolImage{{Type: "image", MIME: "image/png", Data: base64.StdEncoding.EncodeToString(data.Bytes())}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := agenttools.EncodeImageResult(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestComputerImageTokenEstimateMatchesReload(t *testing.T) {
+	for name, output := range map[string]string{"small": computerImageFixture(t), "large": largeComputerImageFixture(t)} {
+		t.Run(name, func(t *testing.T) {
+			item := agenticInputItem{"type": "function_call_output", "call_id": "screen", "output": agenttools.ResponsesImageOutput(output)}
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reloaded agenticInputItem
+			if err := json.Unmarshal(encoded, &reloaded); err != nil {
+				t.Fatal(err)
+			}
+			fresh, restored := estimateInputItemsTokens([]any{item}), estimateInputItemsTokens([]any{reloaded})
+			if fresh != restored {
+				t.Errorf("fresh screenshot estimate %d differs from reloaded estimate %d", fresh, restored)
+			}
+			if fresh < 1800 || fresh > 2200 {
+				t.Errorf("screenshot estimated at %d tokens; expected image budget", fresh)
+			}
+			// Text beside an image must still count in full.
+			blocks := item["output"].([]map[string]any)
+			blocks = append(blocks, map[string]any{"type": "input_text", "text": strings.Repeat("x", 100000)})
+			item["output"] = blocks
+			if got := estimateInputItemsTokens([]any{item}); got < fresh+25000 {
+				t.Errorf("ordinary text discounted: %d tokens", got)
+			}
+		})
+	}
+}
+
 func TestComputerImagesReachResponsesRequest(t *testing.T) {
 	count := 0
 	found := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/responses/compact") {
+			t.Error("computer screenshot alone triggered compaction")
+			http.Error(w, "unexpected compaction", http.StatusBadRequest)
+			return
+		}
 		count++
 		body, _ := io.ReadAll(r.Body)
 		if count == 2 {
@@ -42,8 +106,8 @@ func TestComputerImagesReachResponsesRequest(t *testing.T) {
 	old := OpenAIAPIBaseURL
 	OpenAIAPIBaseURL = server.URL + "/"
 	defer func() { OpenAIAPIBaseURL = old }()
-	raw := computerImageFixture(t)
-	_, err := newHTTPTestAPIKeyClient("test").SendAgentic(t.Context(), "inspect", &AgenticOptions{Model: "gpt-5.3-codex", SkipDefaultTools: true, ToolOutputTokenLimit: 1, ExtraTools: []ToolDefinition{{Type: "function", Name: "computer", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) { return raw, false, nil }})
+	raw := largeComputerImageFixture(t)
+	_, err := newHTTPTestAPIKeyClient("test").SendAgentic(t.Context(), "inspect", &AgenticOptions{Model: "gpt-5.3-codex", AutoCompaction: true, CompactionTokenThreshold: 20000, ContextWindow: 32000, MaxOutputTokens: 4096, SkipDefaultTools: true, ToolOutputTokenLimit: 1, ExtraTools: []ToolDefinition{{Type: "function", Name: "computer", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) { return raw, false, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
