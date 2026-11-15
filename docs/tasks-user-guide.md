@@ -47,6 +47,29 @@ You can configure a schedule before the first send. Existing tasks open directly
 
 Optional: enable `Auto-merge to target branch on successful completion` to merge after a successful task run, or independently enable `Auto-merge to target branch when goal is achieved` to merge only when the stored Task Goal reaches `achieved`. Both options are off by default.
 
+## Using a Task Computer
+
+The **Computer** tab appears only when computer use is allowed in project settings. **Use computer for this task** defaults off. On a new, unsaved task, the choice is stored when you send the first message; no desktop is created before Send. On an existing task, enabling it lets the preview connect immediately. Agents can use the enabled computer without keeping the tab open.
+
+The mini preview is a live desktop stream. Click it to open the larger interactive preview. Opening or using it does not cancel execution or block agent tools; you and the agent can both send input. Explicit private login/help handoffs remain separate and restrict agent access until completed. Switching away disconnects the preview, not the browser login. A cached frame may appear while reconnecting.
+
+**Run tools in** selects the target for `shell`, `process`, `read_file`, `write_file`, `edit_file`, `list_files`, and `grep_search`:
+
+| Selection | Target |
+|---|---|
+| Task worktree (default) | The task's local Git checkout on the OpenVibely host. |
+| Task computer | The task's isolated Linux computer, normally under `Files`. |
+
+Explicit `computer_shell`, `computer_job`, and `computer_files` tools always use the computer. Browser and desktop tools also always use it. Files do not automatically sync with the worktree: code created in the computer must be transferred back before it can appear in worktree changes or be merged. Shell sessions support polling, input, and cancellation; stopping their owning execution cancels its remote commands.
+
+Known limitation: an agent configured with Scoped Files can still route file operations to the host despite selecting Task computer. Do not rely on this combination to confine those operations to the computer.
+
+**Chrome permissions** lists approved Chrome-cookie imports with their task/project scope and expiration. Selecting a permission revokes it. Imports require explicit approval on supported local macOS setups; enabling the computer does not automatically import logins. Project-scoped grants survive deletion of the task that created them. Revocation keeps tracking for unavailable desktops so cleanup can be retried.
+
+The larger preview's **Teach a task** control records a demonstration for review, then generates editable workflow instructions with the configured model. Review captures before saving; pause recording before entering private information.
+
+Disabling task computer use preserves saved files and browser profiles. Use the composer for file uploads and ask the agent to copy or share files as needed; see [computer attachments](chat-user-guide.md#files-in-computer-enabled-tasks).
+
 ## Swarm Tasks
 
 Enable `Swarm mode` in the task workspace when a job should be split across planner, worker, reviewer, and merger child tasks. OpenVibely creates a swarm parent card plus real child tasks, so each worker keeps its own thread, diff, retry, follow-up, and worktree context.

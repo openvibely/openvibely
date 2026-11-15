@@ -61,6 +61,7 @@ Useful starting points:
 |---|---|
 | Multi-project operations | Run coding agents across projects while keeping each repository's context, work, memory, schedules, and integrations separate. |
 | Autonomous SDLC | Use [Native](./docs/openvibely-native-autonomous-sdlc-user-guide.md) or [GitHub](./docs/github-autonomous-sdlc-user-guide.md) automation to inspect projects for vision gaps, bugs, performance opportunities, and redundant code; propose findings for approval and start implementation when approved. |
+| Project computers | Optional Linux desktops and browsers for selected tasks, with live previews, file sharing, and separate task profiles. Requires Docker for local provisioning; see [setup](docs/project-setup-user-guide.md#project-computers). |
 | Parallel task execution | Queue coding work, run tasks concurrently, stream progress, inspect logs and threads, and decide what ships. |
 | Continued execution | Use goals, schedules, and task chains to keep longer efforts moving across agent runs. |
 | Reviewable changes | Use isolated Git worktrees and GitHub issue-to-PR workflows so AI output becomes visible diffs, pull requests, and review follow-ups rather than hidden edits. |

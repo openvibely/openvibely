@@ -26,6 +26,21 @@ Chat embeds clickable task links inline as it creates work, so you can jump to a
 - Accept steering or queue new prompts while a response is already in progress
 - Answer structured clarification questions in place before Chat continues
 
+## Files in Computer-Enabled Tasks
+
+These operations belong to a saved task with computer use enabled, not an unscoped project Chat desktop.
+
+Attach files through the task composer. Uploading an attachment does not automatically copy it into the computer. The model can read the attachment normally, or copy it when a browser or command inside the computer needs it.
+
+| Request | Tool behavior |
+|---|---|
+| “Copy this attached PDF into the computer.” | `computer_attachment` with `action: "to_computer"` copies the attachment and supplies a computer path. |
+| “Share the PDF you made so I can download it.” | `computer_attachment` with `action: "from_computer"` publishes through the same artifact publisher as `publish_file`, returning a download link and making it available in the Files gallery. |
+| “Copy this source file into the computer to test it.” | `computer_transfer` copies from the task worktree into the computer. |
+| “Bring that source file back into my worktree.” | `computer_transfer` copies from the computer into the worktree. |
+
+Each is one tool call, not a chain of tool names. Transfers are limited to 25 MB per file and existing destination files are not overwritten. Published artifacts remain available after the computer stops. Files merely stored inside the computer are not published automatically. Host paths are not usable inside the computer until transferred.
+
 ## How Chat Writes Task Prompts
 
 When Chat creates a task, it does not paste your words verbatim. It rewrites your request into a detailed, actionable instruction the executing agent can work from immediately.

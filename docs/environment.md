@@ -28,6 +28,21 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 
 For background services and remote/headless servers, set `OPENVIBELY_NO_BROWSER=true` in the service environment. For example, use `Environment=OPENVIBELY_NO_BROWSER=true` in a systemd service. To opt out locally, run `OPENVIBELY_NO_BROWSER=true ./start.sh`. No browser CLI flag is required.
 
+## Project Computers
+
+Project and task opt-in are saved settings, not environment variables. Local computer use requires a working `docker` CLI and daemon accessible to the OpenVibely process.
+
+| Variable | Purpose | Default behavior |
+|---|---|---|
+| `OPENVIBELY_COMPUTER_IMAGE` | Prebuilt computer-runtime image reference; prefer an immutable tag or digest. | Unset: use `openvibely-computer:<source-hash>` and build from embedded sources if missing locally. Set: skip the embedded build and run that image. Reusing a mutable tag does not guarantee an update is detected. |
+| `OPENVIBELY_COMPUTER_CONTROL_URL` | Endpoint for an externally supplied hosted computer control service. | Unset: local Docker provisioner unless hosted instance mode is selected. Setting it selects the hosted client, not local Docker. |
+| `OPENVIBELY_HOSTED_INSTANCE_ID` | Hosted instance marker used when choosing the computer provisioner. | A nonempty value selects the hosted client, which requires a working control URL. |
+| `OPENVIBELY_HOSTED_AGENT_TOKEN` | Authentication token for the hosted computer control service. | Supplied by the hosted deployment; not required for local Docker use. |
+
+The hosted client is an integration hook; this repository does not provide its external control-plane server. Setting a URL alone does not provision that service. Container-internal variables such as `OPENVIBELY_COMPUTER_TOKEN` and task user IDs are managed by the provisioner/runtime, not user configuration.
+
+See [project setup](project-setup-user-guide.md#project-computers) for engine requirements and [task controls](tasks-user-guide.md#using-a-task-computer) for tool targets and persistence.
+
 ## Live WebSocket Limits
 
 These startup settings apply to server and desktop backends. Values are positive
