@@ -276,7 +276,7 @@ func (h *Handler) renderLoginPage(c echo.Context, status int, username, nextValu
   </div>
 </body>
 </html>`
-	return c.HTML(status, body)
+	return h.renderAuthDocument(c, status, body)
 }
 
 func (h *Handler) AuthLogin(c echo.Context) error {
@@ -455,7 +455,7 @@ func (h *Handler) LoggedOut(c echo.Context) error {
 		return c.Redirect(http.StatusFound, "/login")
 	}
 	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out - OpenVibely</title></head><body><main><h1>Workspace session ended</h1><p>You have logged out of this workspace. Your hosted account session may still be active.</p><a href="/auth/sso/start">Sign in again</a></main></body></html>`
-	return c.HTML(http.StatusOK, body)
+	return h.renderAuthDocument(c, http.StatusOK, body)
 }
 
 func (h *Handler) hostedSecureCookies() bool {
@@ -495,7 +495,7 @@ func (h *Handler) clearHostedBrowserCookie() *http.Cookie {
 func (h *Handler) hostedRetryPage(c echo.Context, status int, destination string) error {
 	restart := template.HTMLEscapeString(auth.HostedSSOStartURL(destination))
 	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign-in failed - OpenVibely</title></head><body><main><h1>Sign-in could not be completed</h1><p>Please restart workspace sign-in.</p><a href="` + restart + `">Try again</a></main></body></html>`
-	return c.HTML(status, body)
+	return h.renderAuthDocument(c, status, body)
 }
 
 func (h *Handler) isConfiguredLoginUser(username string) bool {

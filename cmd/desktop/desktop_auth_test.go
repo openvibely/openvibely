@@ -86,6 +86,14 @@ func TestDesktopAuthentication(t *testing.T) {
 					t.Fatalf("got %d want %d: %s", rec.Code, status, rec.Body.String())
 				}
 			}
+			for _, path := range []string{"/login", "/invite?token=missing"} {
+				page := request("GET", path, "", "", "")
+				for _, marker := range []string{`id="desktop-project-titlebar"`, `--wails-draggable: drag`, `/wails/runtime.js`} {
+					if !strings.Contains(page.Body.String(), marker) {
+						t.Errorf("%s missing native auth chrome %q", path, marker)
+					}
+				}
+			}
 			login := request("POST", "/login", origin, "username=alice&password=alice-password-long", "")
 			check(login, 302)
 			stale := ""

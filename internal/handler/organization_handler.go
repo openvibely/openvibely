@@ -279,7 +279,7 @@ func (h *Handler) renderOrganization(c echo.Context, data organizationPageData) 
 		if status == 0 {
 			status = http.StatusOK
 		}
-		return c.HTML(status, b.String())
+		return h.renderAuthDocument(c, status, b.String())
 	}
 	content := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 		_, err := io.WriteString(w, b.String())
