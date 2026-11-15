@@ -846,6 +846,11 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 		}
 		navigate("/tasks/two?project_id=two", "false")
 		navigate("/tasks/new?project_id=three", "false")
+		b.click("#task-details-opener")
+		b.waitFor("new task panel opened manually", `String(document.getElementById('task-details-opener').getAttribute('aria-expanded'))`, "true")
+		navigate("/tasks/two?project_id=two", "false")
+		b.evaluate(`localStorage.setItem('task-inspector-open-new-three','true'); localStorage.setItem('task-inspector-open','true'); 'seeded'`)
+		navigate("/tasks/new?project_id=three", "false")
 		navigate("/tasks/one?project_id=one", "true")
 		b.click("#task-details-opener")
 		b.waitFor("closed preference saved", `localStorage.getItem('task-inspector-open-one')`, "false")
