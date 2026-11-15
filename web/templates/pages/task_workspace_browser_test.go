@@ -869,6 +869,15 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 		navigate("/tasks/two?project_id=two", "false")
 		navigate("/tasks/one?project_id=one", "true")
 		b.waitFor("computer selection restored", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "computer")
+		navigate("/tasks/two?project_id=two", "false")
+		b.call("Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": `window.panelTabWrites=[]; const originalSetItem=Storage.prototype.setItem; Storage.prototype.setItem=function(key,value){if(key==='task-inspector-tab-one')window.panelTabWrites.push(value);return originalSetItem.call(this,key,value);};`}, nil)
+		navigate("/tasks/one?project_id=one&tab=changes", "true")
+		b.waitFor("computer selection restored alongside Changes", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "computer")
+		b.waitFor("Changes remains visible", `String(!document.getElementById('tab-changes').classList.contains('hidden'))`, "true")
+		b.waitFor("computer preference preserved", `localStorage.getItem('task-inspector-tab-one')`, "computer")
+		b.waitFor("temporary Details never overwrites preference", `String(!window.panelTabWrites.includes('details'))`, "true")
+		navigate("/tasks/one?project_id=one&tab=details", "true")
+		b.waitFor("explicit Details link overrides saved Computer tab", `localStorage.getItem('task-inspector-tab-one')`, "details")
 	})
 }
 

@@ -50,7 +50,8 @@ templ TaskWorkspaceScript() {
 			if (tabNames.indexOf(name) < 0) name = tabNames.includes(selected) ? selected : 'details';
 			selected = name;
  root.dispatchEvent(new CustomEvent('computer-tab-change',{bubbles:true}));
-			if (taskID) store('task-inspector-tab-' + taskID, name);
+			// Details may be temporary until the computer permission snapshot arrives.
+            if (taskID && (!restoreComputerTab || name === 'computer')) store('task-inspector-tab-' + taskID, name);
 			panel.querySelectorAll('[role="tab"]').forEach(function(tab) {
 				var active = !panel.hidden && tab.dataset.tab === name;
 				tab.classList.toggle('tab-active', active);
@@ -142,7 +143,10 @@ templ TaskWorkspaceScript() {
 		function applyURL(url) {
 			var tab = (url || displayedURL()).searchParams.get('tab') || root.dataset.initialTab || 'chat';
 			if (taskID) workspace(tab === 'changes', false);
-			if (tabNames.indexOf(tab) >= 0) openPanel(tab, false, false);
+			if (tabNames.indexOf(tab) >= 0) {
+                restoreComputerTab = false;
+                openPanel(tab, false, false);
+            }
 			else if (panelOpenKey && read(panelOpenKey) === 'true') openPanel(selected, false, false);
 			else closePanel(false, false);
 		}
@@ -359,7 +363,7 @@ templ TaskWorkspaceScript() {
                 if (!allowed && selected === 'computer') selectTab('details', false);
                 else if (allowed) {
                     var requestedTab = displayedURL().searchParams.get('tab') || root.dataset.initialTab;
-                    if (requestedTab === 'computer' || (restoreComputerTab && !panel.hidden && (!requestedTab || requestedTab === 'chat'))) openPanel('computer', false, false);
+                    if (requestedTab === 'computer' || (restoreComputerTab && !panel.hidden && (!requestedTab || ['chat', 'thread', 'history', 'changes'].includes(requestedTab)))) openPanel('computer', false, false);
                 }
                 restoreComputerTab = false;
             }
