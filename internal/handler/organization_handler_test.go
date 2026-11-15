@@ -55,6 +55,45 @@ func orgCookie(t *testing.T, r *httptest.ResponseRecorder) *http.Cookie {
 	return nil
 }
 
+func TestOrganizationDesktopInvitationBaseURL(t *testing.T) {
+	t.Setenv("APP_BASE_URL", "")
+	t.Setenv("OAUTH_REDIRECT_MODE", "auto")
+	tc, e := organizationTestApp(t, true)
+	h := tc.handler
+	h.SetDesktopMode(true)
+	h.SetDesktopInvitationBaseURL("http://127.0.0.1:43210/")
+	require.Empty(t, h.configuredAppBaseURL())
+	require.False(t, shouldUsePublicOAuthCallback(resolveOAuthRedirectMode(), h.configuredAppBaseURL()))
+	login := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}}, nil)
+	require.Equal(t, http.StatusFound, login.Code)
+	cookie := orgCookie(t, login)
+	for _, tt := range []struct {
+		name, origin, publicBase, want string
+		native                         bool
+	}{
+		{"native", "http://localhost", "", "http://127.0.0.1:43210", true},
+		{"browser", "http://192.168.1.10:43210", "", "http://192.168.1.10:43210", false},
+		{"configured native", "http://localhost", "https://app.example.com", "https://app.example.com", true},
+		{"configured browser", "http://192.168.1.10:43210", "https://app.example.com", "https://app.example.com", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h.SetAppBaseURL(tt.publicBase)
+			req := httptest.NewRequest(http.MethodPost, tt.origin+"/organization/invitations", strings.NewReader("role=member"))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Origin", tt.origin)
+			if tt.native {
+				req.Header.Set("X-OpenVibely-Native-Window", "1")
+			}
+			req.AddCookie(cookie)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), "<code>"+tt.want+"/invite?token=")
+			require.Equal(t, tt.publicBase, h.configuredAppBaseURL())
+		})
+	}
+}
+
 func TestOrganizationHTTPJoinRolesPreferencesAndRemoval(t *testing.T) {
 	tc, e := organizationTestApp(t, true)
 	login := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}}, nil)
