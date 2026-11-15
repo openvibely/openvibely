@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -269,16 +270,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	downstream.SetReadLimit(1 << 20)
 	done := make(chan error, 2)
 	go func() {
-		for {
-			kind, data, err := upstream.Read(ctx)
-			if err == nil {
-				err = downstream.Write(ctx, kind, data)
-			}
-			if err != nil {
-				done <- err
-				return
-			}
-		}
+		done <- forwardComputerScreen(ctx, downstream, upstream)
 	}()
 	go func() {
 		for {
@@ -300,6 +292,29 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	<-done
 	cancel()
 	return nil
+}
+
+// forwardComputerScreen preserves message boundaries without buffering entire
+// screen updates. A failed partial message is abandoned when the caller closes
+// the connection; it must not be finalized as a successful truncated update.
+func forwardComputerScreen(ctx context.Context, dst, src *websocket.Conn) error {
+	buffer := make([]byte, 32<<10)
+	for {
+		kind, reader, err := src.Reader(ctx)
+		if err != nil {
+			return err
+		}
+		writer, err := dst.Writer(ctx, kind)
+		if err != nil {
+			return err
+		}
+		if _, err := io.CopyBuffer(writer, reader, buffer); err != nil {
+			return err
+		}
+		if err := writer.Close(); err != nil {
+			return err
+		}
+	}
 }
 
 func (h *Handler) ProjectComputerSelectedPage(c echo.Context) error {
