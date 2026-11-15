@@ -80,12 +80,22 @@ func (p *LocalComputerProvisioner) Current(ctx context.Context, id string) bool 
 }
 
 func (p *LocalComputerProvisioner) Resolve(ctx context.Context, id string) (ComputerConnection, error) {
+	return p.resolve(ctx, id, false)
+}
+
+// ResolveCurrent validates image and connection from a single Docker inspection.
+// Resolve remains usable for cleaning up containers running an older image.
+func (p *LocalComputerProvisioner) ResolveCurrent(ctx context.Context, id string) (ComputerConnection, error) {
+	return p.resolve(ctx, id, true)
+}
+func (p *LocalComputerProvisioner) resolve(ctx context.Context, id string, current bool) (ComputerConnection, error) {
 	raw, err := p.docker(ctx, nil, "inspect", computerContainerName(id))
 	if err != nil {
 		return ComputerConnection{}, err
 	}
 	var rows []struct {
 		Config struct {
+			Image  string
 			Env    []string
 			Labels map[string]string
 		}
@@ -99,6 +109,15 @@ func (p *LocalComputerProvisioner) Resolve(ctx context.Context, id string) (Comp
 	}
 	if len(rows) != 1 || rows[0].Config.Labels["openvibely.project"] != id {
 		return ComputerConnection{}, errors.New("computer ownership mismatch")
+	}
+	if current {
+		image := os.Getenv("OPENVIBELY_COMPUTER_IMAGE")
+		if image == "" {
+			image = computerImageTag()
+		}
+		if rows[0].Config.Image != image || rows[0].Config.Labels["openvibely.computer-isolation"] != "1" {
+			return ComputerConnection{}, errors.New("project computer image is outdated")
+		}
 	}
 	if !rows[0].State.Running {
 		return ComputerConnection{}, errors.New("project computer is stopped")

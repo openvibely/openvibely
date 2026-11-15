@@ -88,6 +88,7 @@ func (s *ProjectComputerService) ReleaseUnviewed(ctx context.Context, id string,
 	if err = s.Hold(ctx, id, false); err != nil {
 		return false, err
 	}
+	defer s.publishStatus(id, false)
 	return true, s.repo.SetTakeoverPending(ctx, id, false)
 }
 
@@ -102,6 +103,7 @@ func (s *ProjectComputerService) viewerGate(id string) *sync.RWMutex {
 // durable state. Registration cannot race the change; failed changes require a
 // fresh permission check too. View-only connections are unaffected.
 func (s *ProjectComputerService) changeViewerPermission(id string, allTasks bool, change func() error) error {
+	defer s.publishStatus(id, allTasks)
 	gate := s.viewerGate(id)
 	gate.Lock()
 	defer gate.Unlock()

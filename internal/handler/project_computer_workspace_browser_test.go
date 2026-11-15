@@ -29,11 +29,22 @@ func TestSavedTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
 	var page bytes.Buffer
 	require.NoError(t, pages.TaskDetailPage(nil, &models.Task{ID: "task", ProjectID: "project", Title: "Preview", Category: models.CategoryActive, Status: models.StatusPending}, nil, nil, nil, nil, nil, nil, "computer", nil).Render(t.Context(), &page))
 	html := strings.ReplaceAll(page.String(), static.URL("vendor/novnc/core/rfb.js"), "/fixture-rfb.js")
+
+	html = strings.Replace(html, "const root=document.getElementById('project-computer');", `
+ window.addEventListener('live-transport-disconnected',event=>event.stopImmediatePropagation());
+ const originalLive=window.openVibelyLive.live.bind(window.openVibelyLive);
+ window.openVibelyLive.live=(project,task,handlers)=>{
+  if(!handlers?.listeners?.computer_status_changed || !handlers.listeners.retry)return originalLive(project,task,handlers);
+  window.computerLive=handlers;setTimeout(()=>handlers.onopen(),0);return {close(){window.computerLiveClosed=true}};
+ };
+ window.computerStatusReads=0;const statusFetch=window.fetch;
+ window.fetch=(url,options)=>{if(String(url).includes('/computer/status?'))window.computerStatusReads++;return statusFetch(url,options)};
+ const root=document.getElementById('project-computer');`, 1)
 	script := `<script>
 Object.defineProperty(navigator,'platform',{value:'MacIntel',configurable:true});
 Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copiedRemote=text}},configurable:true});
 (async()=>{
- const q=s=>document.querySelector(s);const wait=async (f,label="")=>{for(let n=0;n<200;n++){if(f())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label);};
+ const q=s=>document.querySelector(s);const wait=async (f,label="")=>{for(let n=0;n<320;n++){if(f())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label);};
  const finish=(state,message)=>{const node=document.createElement('div');node.id='browser-result';node.dataset.status=state;node.textContent=message;document.body.append(node);};
  try{
  await wait(()=>window.taskWorkspace && q('[data-tab="computer"]').hasAttribute('data-computer-allowed'));q('[data-tab="computer"]').click();
@@ -55,12 +66,28 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(!initialRFB.disconnected)throw Error('Hidden preview stayed connected');q('[data-tab="computer"]').click();await wait(()=>window.fixtureRFB!==initialRFB,'preview reconnect');
  if(q('#tab-computer').classList.contains('hidden'))throw Error('Computer tab hidden');
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
+ await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'mini preview settled');
+ await new Promise(r=>setTimeout(r,250));const miniReads=window.computerStatusReads;
+ await new Promise(r=>setTimeout(r,5500));if(window.computerStatusReads!==miniReads)throw Error('Mini preview still polls status');
  q('[data-computer-preview-open]').click();await wait(()=>q('[data-computer-dialog]').open);
  if(q('[data-computer-action="takeover"], [data-computer-action="release"], [data-computer-expand]'))throw Error('Unexpected viewer buttons');
  await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly,'takeover');
 
 
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'control first frame');
+ await new Promise(r=>setTimeout(r,250));const controlReads=window.computerStatusReads;
+ await new Promise(r=>setTimeout(r,5500));if(window.computerStatusReads!==controlReads)throw Error('Expanded preview still polls status');
+ window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'other',task_id:'task'})});
+ window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'project',task_id:'other'})});
+ await new Promise(r=>setTimeout(r,100));if(window.computerStatusReads!==controlReads)throw Error('Unrelated event refreshed computer');
+ window.computerLive.onopen();await wait(()=>window.computerStatusReads>controlReads,'live reconnect status refresh');
+ await new Promise(r=>setTimeout(r,100));const beforeOutage=window.computerStatusReads;
+ window.computerLive.listeners.retry();await wait(()=>window.computerStatusReads>beforeOutage,'status fallback after live outage');
+ window.computerLive.onopen();await new Promise(r=>setTimeout(r,100));
+ const beforeFailure=window.computerStatusReads, reliableFetch=window.fetch;let failStatus=true;
+ window.fetch=(url,options)=>{if(failStatus&&String(url).includes('/computer/status?')){failStatus=false;return Promise.resolve(new Response('{}',{status:503}));}return reliableFetch(url,options)};
+ window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'project',task_id:'task'})});
+ await wait(()=>!failStatus&&window.computerStatusReads>beforeFailure,'retry failed event refresh while desktop connected');window.fetch=reliableFetch;
 
  q('[data-teach-open]').click();q('[data-teach-goal]').value='Download a report';q('[data-teach-record]').click();
  const ime=q('[aria-label="Remote computer keyboard"]');if(!ime)throw Error('No IME field');
@@ -81,11 +108,11 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>q('[data-teach-images]').children.length===3,'changed screen capture');
  q('[data-teach-record]').click();window.fixtureRFB.canvas.getContext('2d').fillStyle='red';window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
  await new Promise(r=>setTimeout(r,1400));if(q('[data-teach-images]').children.length!==3)throw Error('Captured while paused');
- q('[data-teach-record]').click();await fetch('/fixture-private');document.dispatchEvent(new Event('computer-tab-change'));
+ q('[data-teach-record]').click();await fetch('/fixture-private');window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'project',task_id:'task'})});
  await wait(()=>q('[data-teach-record]').textContent==='Record steps','private recording pause');
  const privateCount=q('[data-teach-images]').children.length;window.fixtureRFB.canvas.getContext('2d').fillStyle='blue';window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
  await new Promise(r=>setTimeout(r,1400));if(q('[data-teach-images]').children.length!==privateCount)throw Error('Captured private handoff');
- await fetch('/fixture-public');document.dispatchEvent(new Event('computer-tab-change'));await wait(()=>!q('[data-teach-open]').hidden);q('[data-teach-open]').click();
+ await fetch('/fixture-public');window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'project'})});await wait(()=>!q('[data-teach-open]').hidden);q('[data-teach-open]').click();
  q('[data-teach-save]').click();await wait(()=>!q('[data-teach-draft]').hidden,'generated workflow');
  if(q('[data-workflow-name]').value!=='Reusable report')throw Error('Generated draft missing');
  q('[data-workflow-instructions]').value='Reviewed report instructions';q('[data-workflow-save]').click();await wait(()=>q('[data-teach-status]').textContent.includes('Reusable workflow saved'),'saved workflow');
@@ -95,7 +122,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  const originalFetch=window.fetch;let cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};
  q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled);q('[data-teach-discard]').click();await wait(()=>cancelledGeneration&&!q('[data-teach-save]').disabled,'discard cancellation');window.fetch=originalFetch;
  const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});
- document.dispatchEvent(new Event('computer-tab-change'));await wait(()=>window.fixtureRFB!==dropped&&window.fixtureRFB.painted,'reconnected');
+ await wait(()=>window.fixtureRFB!==dropped&&window.fixtureRFB.painted,'reconnected');
  Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));const hiddenRFB=window.fixtureRFB;if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming');
  Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));await wait(()=>window.fixtureRFB!==hiddenRFB&&window.fixtureRFB.painted,'visible reconnect');
  cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};q('[data-teach-note]').value='New capture';q('[data-teach-capture]').click();q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled,'second generation');
@@ -105,7 +132,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 
  await wait(()=>!q('[data-task-computer-toggle]').disabled);q('[data-task-computer-toggle]').click();await wait(()=>q('[data-computer-preview]').hidden,'task disabled');
  window.fetch=(url,options)=>String(url).endsWith('/computer/status')?Promise.resolve(new Response(JSON.stringify({enabled:false}),{status:200})):originalFetch(url,options);
- document.dispatchEvent(new Event('computer-setting-changed'));
+ window.dispatchEvent(new CustomEvent('computer-status-changed',{detail:{project_id:'project'}}));
  await wait(()=>q('[data-tab="computer"]').hidden,'project permission hides tab');
  if(q('[data-tab="details"]').getAttribute('aria-selected')!=='true')throw Error('Disabled computer tab did not return to Details');
  window.taskWorkspace.openPanel('computer');
@@ -206,9 +233,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		}
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--user-data-dir="+t.TempDir(), "--virtual-time-budget=25000", "--dump-dom", server.URL)
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--user-data-dir="+t.TempDir(), "--virtual-time-budget=45000", "--dump-dom", server.URL)
 	out, err := runHandlerBrowserProcess(t, cmd)
 	require.NoError(t, err)
 	if !bytes.Contains(out, []byte(`id="browser-result" data-status="pass"`)) {

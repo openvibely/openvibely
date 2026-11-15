@@ -89,6 +89,7 @@
             var entry = subscriptions.get(frame.id);
             if (!entry) return; // A late frame from a detached view or old project.
             if (frame.event === 'retry') {
+                notify(entry, 'retry', frame.data || '');
                 clearTimeout(entry.retryTimer);
                 entry.retryDelay = Math.min(15000, (entry.retryDelay || 500) * 2);
                 entry.retryTimer = setTimeout(function() {
@@ -123,6 +124,7 @@
             if (socket !== ws) return;
             socket = null;
             connected = false;
+            window.dispatchEvent(new CustomEvent('live-transport-disconnected'));
             // Connection failures are not execution failures. Keep buffers and
             // offsets and replay only unapplied bytes after the new handshake.
             scheduleReconnect();

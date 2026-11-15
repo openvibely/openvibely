@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -23,6 +24,7 @@ import (
 )
 
 type ProjectComputerService struct {
+	broadcaster         *events.Broadcaster
 	onFilePublished     func(context.Context, string, string)
 	verifyLoginVisual   func(context.Context, string, string, string, []byte) (bool, error)
 	attachmentDirectory string
@@ -41,6 +43,22 @@ func NewProjectComputerService(projects persistence.ProjectStore, p ComputerProv
 	}
 	return &ProjectComputerService{repo: projects.Computers(), locks: &sync.Map{}, active: &sync.Map{}, projects: projects, provisioner: p, client: &http.Client{Timeout: (agenttools.MaxBashTimeoutSeconds + 10) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
+
+// SetBroadcaster wires status invalidations into the app's existing live transport.
+// Configure before serving requests; task-scoped services share the broadcaster.
+func (s *ProjectComputerService) SetBroadcaster(b *events.Broadcaster) { s.broadcaster = b }
+func (s *ProjectComputerService) publishStatus(id string, allTasks bool) {
+	if s.broadcaster == nil {
+		return
+	}
+	taskID := s.taskID
+	if allTasks {
+		taskID = ""
+	}
+	// Only identifiers are broadcast. Status details still require the computer
+	// endpoint's editor authorization, unlike ordinary task notifications.
+	s.broadcaster.Publish(events.TaskEvent{Type: events.ComputerStatusChanged, ProjectID: id, TaskID: taskID})
+}
 func (s *ProjectComputerService) lock(id string) *sync.Mutex {
 	m, _ := s.locks.LoadOrStore(id+":"+s.taskID, &sync.Mutex{})
 	return m.(*sync.Mutex)
@@ -53,6 +71,9 @@ func (s *ProjectComputerService) Get(ctx context.Context, id string) (*models.Pr
 	return s.repo.Get(ctx, id)
 }
 func (s *ProjectComputerService) Connection(ctx context.Context, id string) (ComputerConnection, error) {
+	return s.connection(ctx, id, false)
+}
+func (s *ProjectComputerService) connection(ctx context.Context, id string, current bool) (ComputerConnection, error) {
 	c, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return ComputerConnection{}, err
@@ -63,7 +84,19 @@ func (s *ProjectComputerService) Connection(ctx context.Context, id string) (Com
 	if c.Provider != s.provisioner.Provider() {
 		return ComputerConnection{}, errors.New("computer provider differs from this installation")
 	}
-	conn, err := s.provisioner.Resolve(ctx, id)
+	var conn ComputerConnection
+	if resolver, ok := s.provisioner.(interface {
+		ResolveCurrent(context.Context, string) (ComputerConnection, error)
+	}); current && ok {
+		conn, err = resolver.ResolveCurrent(ctx, id)
+	} else {
+		if checker, ok := s.provisioner.(interface {
+			Current(context.Context, string) bool
+		}); current && ok && !checker.Current(ctx, id) {
+			return ComputerConnection{}, errors.New("project computer image is outdated")
+		}
+		conn, err = s.provisioner.Resolve(ctx, id)
+	}
 
 	if err == nil && s.taskID != "" {
 		conn.Endpoint += "/desktops/" + ComputerDesktopID(s.taskID)
@@ -155,6 +188,7 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 			return err
 		}
 	}
+	defer s.publishStatus(id, true)
 	if err := s.repo.MarkCleanupRequired(ctx, id); err != nil {
 		return err
 	}
@@ -228,6 +262,7 @@ func (s *ProjectComputerService) stopLocked(ctx context.Context, id string) erro
 	return s.changeViewerPermission(id, true, func() error { return s.provisioner.Stop(ctx, id) })
 }
 func (s *ProjectComputerService) Hold(ctx context.Context, id string, held bool) error {
+	defer s.publishStatus(id, false)
 	if held {
 		// Block new actions before cancelling the in-flight action. Only return control
 		// after it has stopped, so no agent screenshot overlaps a private user session.
@@ -318,18 +353,7 @@ func (s *ProjectComputerService) request(ctx context.Context, conn ComputerConne
 	return b, nil
 }
 func (s *ProjectComputerService) Ready(ctx context.Context, id string) bool {
-	state, err := s.repo.Get(ctx, id)
-	if err != nil || !state.Enabled {
-		return false
-	}
-
-	if checker, ok := s.provisioner.(interface {
-		Current(context.Context, string) bool
-	}); ok && !checker.Current(ctx, id) {
-		return false
-	}
-
-	conn, err := s.Connection(ctx, id)
+	conn, err := s.connection(ctx, id, true)
 	if err != nil {
 		return false
 	}
@@ -367,6 +391,7 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 		}
 	}
 	var releaseOnce sync.Once
+	var reserved bool // Accessed under the desktop lock below.
 	return &llmcontracts.RuntimeTools{Definitions: defs, SkipDefaultTools: routed, Executor: func(call context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		explicitProcess := name == "computer_shell" || name == "computer_job"
 		processTool := ""
@@ -403,10 +428,18 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 		defer lock.Unlock()
 		if name == "release_computer" {
 			err := s.repo.Release(call, projectID, owner)
+			if err == nil {
+				reserved = false
+			}
+			s.publishStatus(projectID, false)
 			return "Computer released", true, err != nil, err
 		}
 		if err := s.repo.Reserve(call, projectID, owner); err != nil {
 			return "", true, true, err
+		}
+		if !reserved {
+			reserved = true
+			s.publishStatus(projectID, false)
 		}
 		releaseOnce.Do(func() {
 			if ctx.Done() == nil {
@@ -419,6 +452,7 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 					cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					s.repo.Release(cleanup, projectID, owner)
+					s.publishStatus(projectID, false)
 				}()
 				for {
 					select {
@@ -610,7 +644,7 @@ func (s *ProjectComputerService) ForTask(ctx context.Context, projectID, taskID 
 	if err != nil {
 		return nil, err
 	}
-	return &ProjectComputerService{repo: repo, projects: s.projects, provisioner: s.provisioner, client: s.client, locks: s.locks, active: s.active, taskID: taskID, attachmentDirectory: s.attachmentDirectory, verifyLoginVisual: s.verifyLoginVisual, onFilePublished: s.onFilePublished}, nil
+	return &ProjectComputerService{broadcaster: s.broadcaster, repo: repo, projects: s.projects, provisioner: s.provisioner, client: s.client, locks: s.locks, active: s.active, taskID: taskID, attachmentDirectory: s.attachmentDirectory, verifyLoginVisual: s.verifyLoginVisual, onFilePublished: s.onFilePublished}, nil
 }
 func ComputerDesktopID(taskID string) string {
 	sum := sha256.Sum256([]byte(taskID))
@@ -710,6 +744,7 @@ func (s *ProjectComputerService) CancelHandoff(ctx context.Context, id string) e
 	return s.changeViewerPermission(id, false, func() error { return s.repo.FinishHandoff(ctx, id, true) })
 }
 func (s *ProjectComputerService) SetToolTarget(ctx context.Context, id, target string) error {
+	defer s.publishStatus(id, false)
 	lock := s.lock(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -718,6 +753,7 @@ func (s *ProjectComputerService) SetToolTarget(ctx context.Context, id, target s
 
 // SetTaskEnabled changes only this task's permission, preserving its desktop data.
 func (s *ProjectComputerService) SetTaskEnabled(ctx context.Context, id string, enabled bool) error {
+	defer s.publishStatus(id, false)
 	if s.taskID == "" {
 		return errors.New("task required")
 	}
@@ -742,6 +778,7 @@ func (s *ProjectComputerService) SetTaskEnabled(ctx context.Context, id string, 
 
 // SetEnabled changes the project preference shared by all task desktops.
 func (s *ProjectComputerService) SetEnabled(ctx context.Context, id string, enabled bool) error {
+	defer s.publishStatus(id, true)
 	gate := s.lifecycle(id)
 	gate.Lock()
 	defer gate.Unlock()
@@ -778,6 +815,7 @@ func (s *ProjectComputerService) SetEnabled(ctx context.Context, id string, enab
 
 // Control serializes takeover/interruption with handback for the same desktop.
 func (s *ProjectComputerService) Control(ctx context.Context, id string, held bool, interrupt func() error) error {
+	defer s.publishStatus(id, false)
 	value, _ := s.locks.LoadOrStore("control:"+id+":"+s.taskID, &sync.Mutex{})
 	lock := value.(*sync.Mutex)
 	lock.Lock()
@@ -808,6 +846,7 @@ func validateComputerTimeZone(zone string) error {
 	return nil
 }
 func (s *ProjectComputerService) SetTimeZone(ctx context.Context, id, zone string) error {
+	defer s.publishStatus(id, true)
 	if err := validateComputerTimeZone(zone); err != nil {
 		return err
 	}

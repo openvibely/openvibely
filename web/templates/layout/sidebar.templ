@@ -508,6 +508,10 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const data = JSON.parse(event.data);
 							const eventType = data.type || event.type;
 							if (!eventType) return;
+                            if (eventType === 'computer_status_changed') {
+                                window._tabVisibility.dispatchSSEEvent('computer-status-changed', data);
+                                return;
+                            }
 
 							if (eventType === 'plugin_pages_changed') {
                                     if (window.htmx) htmx.trigger(document.body, 'plugin-nav-refresh');
@@ -596,7 +600,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									console.error('[SSE-Live] Connection error:', err);
 								},
 								listeners: {
-									'plugin_pages_changed': handleLiveEvent,
+									'computer_status_changed': handleLiveEvent,
+                                    'plugin_pages_changed': handleLiveEvent,
                                 'task_deleted': handleLiveEvent,
                                     'task_board_updated': handleLiveEvent,
                                     'task_files_changed': handleLiveEvent,

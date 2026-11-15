@@ -9,6 +9,7 @@ import (
 )
 
 func (s *ProjectComputerService) SetIdleMinutes(ctx context.Context, id string, minutes int) error {
+	defer s.publishStatus(id, true)
 	if minutes < 0 || minutes > 10080 {
 		return errors.New("choose 0 (Never) or an idle timeout of 1–10080 minutes")
 	}

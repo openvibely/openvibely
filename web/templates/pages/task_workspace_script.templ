@@ -359,6 +359,11 @@ templ TaskWorkspaceScript() {
             else if (allowed && ((displayedURL().searchParams.get('tab') || root.dataset.initialTab) === 'computer')) openPanel('computer', false, false);
         }
         on(document, 'computer-setting-changed', updateComputerPermission);
+        on(window, 'computer-status-changed', function(event) {
+            var data = event.detail || {};
+            var project = root.querySelector('#new-task-project')?.value || root.dataset.projectId;
+            if (!data.task_id && data.project_id === project) updateComputerPermission();
+        });
         var destination = root.querySelector('#new-task-project');
         if (destination) on(destination, 'change', updateComputerPermission);
         updateComputerPermission();

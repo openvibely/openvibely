@@ -362,6 +362,7 @@ func New(
 		if h.computerSvc == nil {
 			h.computerSvc = service.NewProjectComputerService(projectRepo, nil)
 		}
+		h.computerSvc.SetBroadcaster(broadcaster)
 		if taskSvc != nil {
 			taskSvc.SetProjectComputerService(h.computerSvc)
 		}

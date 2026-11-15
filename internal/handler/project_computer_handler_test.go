@@ -48,7 +48,8 @@ func TestProjectComputerHandlersScopeAndTakeover(t *testing.T) {
 		{"POST", "/projects/" + project.ID + "/computer/takeover", "https://evil.example", 403},
 		{"POST", "/projects/" + project.ID + "/computer/takeover", "", 200},
 		{"POST", "/projects/" + project.ID + "/computer/release", "", 200},
-		{"GET", "/projects/" + project.ID + "/computer/stream/control", "", 409},
+		// This fixture configures the computer but never enables it.
+		{"GET", "/projects/" + project.ID + "/computer/stream/control", "", 503},
 		{"GET", "/projects/" + project.ID + "/computer/vnc/other/file", "", 405},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
