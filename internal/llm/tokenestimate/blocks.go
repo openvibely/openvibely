@@ -11,20 +11,16 @@ import (
 )
 
 // ContentBlock is a borrowed JSON object or an in-memory content block. Visitors
-// must not modify it. Raw blocks remain encoded until a provider needs their fields.
+// must not modify it. Raw blocks are inspected without decoding the full object.
 type ContentBlock struct {
 	value map[string]any
 	raw   json.RawMessage
 }
 
-// Object returns the decoded fields. In-memory blocks are returned without a copy.
-func (b ContentBlock) Object() (map[string]any, error) {
-	if b.raw == nil {
-		return b.value, nil
-	}
-	var value map[string]any
-	err := json.Unmarshal(b.raw, &value)
-	return value, err
+// DecodedObject returns an existing in-memory object. It does not decode raw
+// JSON; providers that consume encoded blocks use ContentFields and Size instead.
+func (b ContentBlock) DecodedObject() (map[string]any, bool) {
+	return b.value, b.raw == nil
 }
 
 // ContentFields uses the message APIs' case-insensitive field-name rules.

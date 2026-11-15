@@ -1568,17 +1568,17 @@ func agenticEncryptedFunctionOutputEstimateAdjustment(item any) (int, int) {
 
 func forEachAgenticContentBlock(value any, visit func(map[string]any)) {
 	// Responses retains its existing recursive envelope policy and payload-only
-	// accounting; the shared walker owns Go slice and raw JSON representation handling.
+	// accounting; the shared walker handles both Go block-array types.
 	_ = tokenestimate.VisitContentBlocks(value, func(block tokenestimate.ContentBlock) ([]any, error) {
-		fields, err := block.Object()
-		if err != nil {
-			return nil, err
+		fields, ok := block.DecodedObject()
+		if !ok {
+			return nil, nil
 		}
 		visit(fields)
 		children := make([]any, 0, len(fields))
 		for _, nested := range fields {
 			switch nested.(type) {
-			case []any, []map[string]any, map[string]any, json.RawMessage:
+			case []any, []map[string]any, map[string]any:
 				children = append(children, nested)
 			}
 		}

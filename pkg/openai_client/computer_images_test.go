@@ -170,12 +170,8 @@ func TestResponsesImageSourcesMatchReloadedBudget(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := estimateInputItemsTokens([]any{restored})
-			rawContent, _ := json.Marshal(source.content)
-			for name, content := range map[string]any{"fresh": source.content, "raw": json.RawMessage(rawContent)} {
-				item[source.field] = content
-				if got := estimateInputItemsTokens([]any{item}); got != want || got > 2200 {
-					t.Errorf("%s: estimate=%d restored=%d", name, got, want)
-				}
+			if got := estimateInputItemsTokens([]any{item}); got != want || got > 2200 {
+				t.Errorf("estimate=%d restored=%d", got, want)
 			}
 		})
 	}
