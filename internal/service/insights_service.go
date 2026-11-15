@@ -742,7 +742,7 @@ Respond with ONLY the JSON array, no markdown fences.`, project.Name, strings.Jo
 	entries, err := parseKnowledgeEntries(output)
 	if err != nil {
 		applog.Infof("[insights-svc] failed to parse knowledge entries: %v", err)
-		return nil, nil
+		return nil, fmt.Errorf("knowledge extraction returned an unreadable result: %w", err)
 	}
 
 	var results []models.KnowledgeEntry
