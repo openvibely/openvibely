@@ -23,7 +23,9 @@ templ TaskWorkspaceScript() {
 		var summary = null, timer = null, pending = false, dirty = false, titleVersion = 0, actionRevision = null;
 		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
 		function store(key, value) { try { localStorage.setItem(key, value); } catch (_) {} }
+		var panelOpenKey = 'task-inspector-open-' + (taskID || ('new-' + root.dataset.projectId));
 		var saved = read('task-inspector-tab-' + taskID);
+        var restoreComputerTab = saved === 'computer' && read(panelOpenKey) === 'true';
 		if (tabNames.indexOf(saved) >= 0) selected = saved;
 		function on(el, name, fn) { el.addEventListener(name, fn, {signal: signal}); }
 		function alignActions() {
@@ -44,6 +46,7 @@ templ TaskWorkspaceScript() {
 			if (context) context.value = tab;
 		}
 		function selectTab(name, push) {
+            if (push) restoreComputerTab = false;
 			if (tabNames.indexOf(name) < 0) name = tabNames.includes(selected) ? selected : 'details';
 			selected = name;
  root.dispatchEvent(new CustomEvent('computer-tab-change',{bubbles:true}));
@@ -65,7 +68,8 @@ templ TaskWorkspaceScript() {
 			if (push) historyView(changes.classList.contains('hidden') ? name : 'changes');
 		}
 		function closePanel(push, focus) {
-			if (push !== false) store('task-inspector-open', 'false');
+            if (push !== false) restoreComputerTab = false;
+			if (push !== false) store(panelOpenKey, 'false');
 			sidePanel.setOpen(false);
 			selectTab(selected, false);
 			resize();
@@ -73,7 +77,7 @@ templ TaskWorkspaceScript() {
 			if (focus !== false) opener.focus({preventScroll:true});
 		}
 		function openPanel(name, push, focus) {
-			if (push !== false) store('task-inspector-open', 'true');
+			if (push !== false) store(panelOpenKey, 'true');
 			sidePanel.setOpen(true);
 			selectTab(name || selected, push !== false);
 			resize();
@@ -139,7 +143,7 @@ templ TaskWorkspaceScript() {
 			var tab = (url || displayedURL()).searchParams.get('tab') || root.dataset.initialTab || 'chat';
 			if (taskID) workspace(tab === 'changes', false);
 			if (tabNames.indexOf(tab) >= 0) openPanel(tab, false, false);
-			else if (read('task-inspector-open') === 'true') openPanel(selected, false, false);
+			else if (read(panelOpenKey) === 'true') openPanel(selected, false, false);
 			else closePanel(false, false);
 		}
 		// Session-local task visits are separate from the server's breadcrumb ordering.
@@ -353,7 +357,11 @@ templ TaskWorkspaceScript() {
                 tabNames = allTabNames.filter(name => name !== 'computer' || allowed);
                 if (wasAllowed === allowed) return;
                 if (!allowed && selected === 'computer') selectTab('details', false);
-                else if (allowed && ((displayedURL().searchParams.get('tab') || root.dataset.initialTab) === 'computer')) openPanel('computer', false, false);
+                else if (allowed) {
+                    var requestedTab = displayedURL().searchParams.get('tab') || root.dataset.initialTab;
+                    if (requestedTab === 'computer' || (restoreComputerTab && !panel.hidden && (!requestedTab || requestedTab === 'chat'))) openPanel('computer', false, false);
+                }
+                restoreComputerTab = false;
             }
             if (!project || !window.openVibelyLive) { apply(false); return; }
             computerPermissionStream = window.openVibelyLive.computer(project, '', {}, {listeners:{

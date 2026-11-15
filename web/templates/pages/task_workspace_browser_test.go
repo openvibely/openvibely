@@ -787,6 +787,10 @@ func TestBrowserFunctional_TaskChangesStickyHeadersStayInsideWorkspace(t *testin
 func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/events/ws" {
+			serveBrowserLiveFixtureWithComputer(w, r, nil, true)
+			return
+		}
 		if r.URL.Path == "/tasks/sidebar" {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -829,24 +833,37 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/one?project_id=one", "panel-preference", func(b *composerFocusCDP) {
 		b.waitFor("initially closed", `String(document.getElementById('task-details-opener')?.getAttribute('aria-expanded'))`, "false")
 		b.click("#task-details-opener")
-		b.waitFor("open preference saved", `localStorage.getItem('task-inspector-open')`, "true")
+		b.waitFor("open preference saved", `localStorage.getItem('task-inspector-open-one')`, "true")
 		navigate := func(path, expected string) {
 			b.call("Page.navigate", map[string]any{"url": server.URL + path}, nil)
 			b.waitFor("navigation ready", `location.pathname + location.search + ':' + (document.getElementById('task-detail-content')?.dataset.projectId || '')`, path+":"+strings.Split(strings.Split(path, "project_id=")[1], "&")[0])
 			b.waitFor("restored panel", `String(document.getElementById('task-details-opener')?.getAttribute('aria-expanded'))`, expected)
 		}
-		for _, path := range []string{"/tasks/other?project_id=one&tab=details", "/tasks/two?project_id=two", "/tasks/one?project_id=one&tab=details"} {
+		for _, path := range []string{"/tasks/other?project_id=one&tab=details", "/tasks/two?project_id=two&tab=details", "/tasks/one?project_id=one&tab=details"} {
 			b.evaluate(`window.panelSwapSettled = false; window.openVibelyNavigate('` + path + `').then(function(){setTimeout(function(){window.panelSwapSettled=true},100)}); 'started'`)
 			b.waitFor("task swap settled", `String(window.panelSwapSettled)`, "true")
 			b.waitFor("Details content visible after task/project swap", `String(!document.getElementById('task-details-panel').hidden && !document.getElementById('tab-details').classList.contains('hidden') && document.querySelector('[data-detail-property=priority]').checkVisibility() && document.getElementById('task-detail-view').getBoundingClientRect().height > 100)`, "true")
 		}
-		navigate("/tasks/two?project_id=two", "true")
-		navigate("/tasks/new?project_id=three", "true")
+		navigate("/tasks/two?project_id=two", "false")
+		navigate("/tasks/new?project_id=three", "false")
+		navigate("/tasks/one?project_id=one", "true")
 		b.click("#task-details-opener")
-		b.waitFor("closed preference saved", `localStorage.getItem('task-inspector-open')`, "false")
+		b.waitFor("closed preference saved", `localStorage.getItem('task-inspector-open-one')`, "false")
 		navigate("/tasks/one?project_id=one", "false")
 		navigate("/tasks/two?project_id=two&tab=details", "true")
+		b.click("#task-details-opener")
 		navigate("/tasks/one?project_id=one", "false")
+		b.click("#task-details-opener")
+		navigate("/tasks/two?project_id=two", "false")
+		navigate("/tasks/one?project_id=one", "true")
+		b.click("#task-details-opener")
+		navigate("/tasks/one?project_id=one", "false")
+		b.click("#task-details-opener")
+		b.waitFor("computer tab available", `String(!document.querySelector('[data-tab="computer"]').hidden)`, "true")
+		b.click(`[data-tab="computer"]`)
+		navigate("/tasks/two?project_id=two", "false")
+		navigate("/tasks/one?project_id=one", "true")
+		b.waitFor("computer selection restored", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "computer")
 	})
 }
 
