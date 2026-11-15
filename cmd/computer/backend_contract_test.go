@@ -34,21 +34,27 @@ func TestComputerFileContract(t *testing.T) {
 	})
 }
 func TestComputerProcessContract(t *testing.T) {
-	dir := t.TempDir()
-	m := agenttools.NewProcessManager(shellCommand)
-	defer m.Close()
-	tooltest.Processes(t, func(ctx context.Context, name string, input json.RawMessage) (string, error) {
-		return m.Execute(ctx, dir, name, input)
-	})
+	for _, delay := range []bool{false, true} {
+		t.Run(fmt.Sprintf("delayed-output=%t", delay), func(t *testing.T) {
+			dir := t.TempDir()
+			m := agenttools.NewProcessManager(func(ctx context.Context, command, directory string) (*exec.Cmd, error) {
+				// Exercise a child that produces no output during the initial 250ms yield.
+				if delay {
+					command = "sleep 0.4; " + command
+				}
+				return shellCommand(ctx, command, directory)
+			})
+			defer m.Close()
+			tooltest.Processes(t, func(ctx context.Context, name string, input json.RawMessage) (string, error) {
+				return m.Execute(ctx, dir, name, input)
+			})
+		})
+	}
 }
 
 func TestComputerProcessHTTPUsesSharedManager(t *testing.T) {
 	t.Setenv("OPENVIBELY_DESKTOP_ID", "task-process-contract")
-	home := computerHome()
-	if err := os.MkdirAll(filepath.Join(home, "Files"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(home)
+	temporaryComputerHome(t)
 	m := agenttools.NewProcessManager(func(ctx context.Context, command, dir string) (*exec.Cmd, error) {
 		return exec.CommandContext(ctx, "/bin/bash", "-c", command), nil
 	})

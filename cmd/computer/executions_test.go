@@ -8,9 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,10 +17,7 @@ import (
 
 func TestRemoteExecutionCancellation(t *testing.T) {
 	t.Setenv("OPENVIBELY_DESKTOP_ID", "task-execution-test")
-	if err := os.MkdirAll(filepath.Join(computerHome(), "Files"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(computerHome())
+	temporaryComputerHome(t)
 	manager := agenttools.NewProcessManager(func(ctx context.Context, command, dir string) (*exec.Cmd, error) {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", command), nil
 	})

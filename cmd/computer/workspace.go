@@ -20,11 +20,14 @@ import (
 
 const transferLimit = 25 << 20
 
+// computerHomeRoot is fixed in production; tests substitute a temporary root.
+var computerHomeRoot = "/home/ubuntu"
+
 func computerHome() string {
 	if name := os.Getenv("OPENVIBELY_DESKTOP_ID"); name != "" && desktopName.MatchString(name) {
-		return filepath.Join("/home/ubuntu/.desktops", name, "home")
+		return filepath.Join(computerHomeRoot, ".desktops", name, "home")
 	}
-	return "/home/ubuntu"
+	return computerHomeRoot
 }
 
 func homePath(path string) (string, error) {

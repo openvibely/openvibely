@@ -80,3 +80,17 @@ func TestTaskDesktopFileRoots(t *testing.T) {
 		}
 	}
 }
+
+// Tests exercise the same rooted filesystem without requiring a container's
+// /home/ubuntu or permission to modify a real user's home. Do not run in parallel.
+func temporaryComputerHome(t *testing.T) string {
+	t.Helper()
+	previous := computerHomeRoot
+	computerHomeRoot = t.TempDir()
+	t.Cleanup(func() { computerHomeRoot = previous })
+	home := computerHome()
+	if err := os.MkdirAll(filepath.Join(home, "Files"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}

@@ -87,15 +87,7 @@ func TestNativeFilesRejectAndSkipNamedPipes(t *testing.T) {
 }
 
 func TestFileTransferRejectsNamedPipe(t *testing.T) {
-	// Runtime integration test runs inside the Linux computer container.
-	if err := os.MkdirAll(computerHome(), 0700); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(computerHome(), "file-transfer-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := temporaryComputerHome(t)
 	pipe := filepath.Join(dir, "pipe")
 	if err := syscall.Mkfifo(pipe, 0600); err != nil {
 		t.Fatal(err)

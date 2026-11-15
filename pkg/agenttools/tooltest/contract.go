@@ -65,16 +65,26 @@ func Processes(t *testing.T, execute Execute) {
 	t.Helper()
 	out := call(t, execute, "shell", map[string]any{"command": "printf first; read -r value; printf 'received:%s' \"$value\"", "yield_time_ms": 250})
 	id := sessionID(t, out)
-	if !strings.Contains(out, "first") {
-		t.Fatal(out)
+	// A loaded runner may not schedule the child during the initial yield.
+	// Poll for its handshake before sending input; this also verifies that the
+	// output is consumed before the incremental-output assertion below.
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(out, "first") {
+		if strings.Contains(out, "status: completed") || time.Now().After(deadline) {
+			t.Fatalf("missing initial output: %s", out)
+		}
+		out += call(t, execute, "process", map[string]any{"session_id": id, "yield_time_ms": 250})
 	}
 	out = call(t, execute, "process", map[string]any{"session_id": id, "input": "hello\n", "close_stdin": true})
+	deadline = time.Now().Add(10 * time.Second)
+	for !strings.Contains(out, "status: completed") {
+		if time.Now().After(deadline) {
+			t.Fatalf("command did not complete: %s", out)
+		}
+		out += call(t, execute, "process", map[string]any{"session_id": id, "yield_time_ms": 250})
+	}
 	if !strings.Contains(out, "received:hello") || strings.Contains(out, "first") {
 		t.Fatalf("stdin/incremental output: %s", out)
-	}
-	// Completion may race the output notification. Drain the final result if needed.
-	if !strings.Contains(out, "status: completed") {
-		out = call(t, execute, "process", map[string]any{"session_id": id})
 	}
 	if !strings.Contains(out, "exit_code: 0") {
 		t.Fatal(out)
