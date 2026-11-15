@@ -263,14 +263,14 @@ func ProjectComputerPermissions(projectID, taskID string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<details data-computer-grants data-grants-project=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div data-computer-grants data-grants-project=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_computer.templ`, Line: 373, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_computer.templ`, Line: 373, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
@@ -283,28 +283,47 @@ func ProjectComputerPermissions(projectID, taskID string) templ.Component {
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(taskID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_computer.templ`, Line: 373, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_computer.templ`, Line: 373, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\"><button type=\"button\" class=\"inspector-property-row\" data-computer-grants-open aria-haspopup=\"dialog\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if taskID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<summary class=\"inspector-summary computer-summary\"><span class=\"text-sm font-semibold\">Chrome permissions</span><span aria-hidden=\"true\">›</span></summary> ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<summary class=\"cursor-pointer\">Chrome permissions</summary> ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
+		templ_7745c5c3_Err = components.InspectorPropertyContent("Chrome permissions", "").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<button type=\"button\" class=\"btn btn-sm\" data-computer-grants-refresh>Refresh permissions</button><div data-computer-grant-list></div><nav aria-label=\"Chrome permissions pages\"><button type=\"button\" class=\"btn btn-sm\" data-computer-grants-previous disabled>Previous</button><span data-computer-grants-page></span><button type=\"button\" class=\"btn btn-sm\" data-computer-grants-next disabled>Next</button></nav><p role=\"status\" data-grants-status></p><script>\n (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{\n if(root.dataset.bound)return;root.dataset.bound='true';\n const status=root.querySelector('[data-grants-status]');\n const base='/projects/'+encodeURIComponent(root.dataset.grantsProject)+'/computer';\n const scoped=path=>base+path+'?'+(root.dataset.grantsTask?'task_id='+encodeURIComponent(root.dataset.grantsTask):'');\n const grantList=root.querySelector('[data-computer-grant-list]');\n let grantOffset=0,grantPageVersion=0;\n const grantPrevious=root.querySelector('[data-computer-grants-previous]'),grantNext=root.querySelector('[data-computer-grants-next]');\n async function showGrants(offset=grantOffset){const version=++grantPageVersion;grantPrevious.disabled=true;grantNext.disabled=true;const res=await fetch(scoped('/chrome-grants')+'&offset='+offset,{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Permissions unavailable');if(version!==grantPageVersion)return;grantOffset=data.offset;grantPrevious.disabled=grantOffset===0;grantNext.disabled=!data.has_more;root.querySelector('[data-computer-grants-page]').textContent='Page '+(Math.floor(grantOffset/200)+1);grantList.replaceChildren();for(const grant of data.grants){const row=document.createElement('div');row.textContent=grant.scope+' — '+grant.selections.map(c=>c.profile+': '+c.domain+'/'+c.name).join(', ')+' — '+(grant.revoked?'Revoked':(grant.one_time?'One import — ':'')+(grant.expires_at?'Expires '+new Date(grant.expires_at*1000).toLocaleString():'Until revoked'));const button=document.createElement('button');button.className='btn btn-sm';button.textContent=grant.revoked?'Retry clearing cookies':'Revoke';button.onclick=async()=>{button.disabled=true;try{const response=await fetch(scoped('/chrome-grants'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:grant.id})});const data=await response.json();if(!response.ok)throw Error(data.message||'Could not revoke');await showGrants();}catch(e){status.textContent=e.message;}finally{button.disabled=false;}};row.append(button);grantList.append(row);}}\n if(grantList){root.querySelector('[data-computer-grants-refresh]').onclick=()=>showGrants(0).catch(e=>status.textContent=e.message);grantPrevious.onclick=()=>showGrants(Math.max(0,grantOffset-200)).catch(e=>status.textContent=e.message);grantNext.onclick=()=>showGrants(grantOffset+200).catch(e=>status.textContent=e.message);}\n\n root.addEventListener('toggle',()=>{if(root.open)showGrants(0).catch(e=>status.textContent=e.message);});\n });})();\n </script></details>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</button>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var14 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<div data-options=\"grants\" data-computer-grant-list></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = components.InspectorPicker("computer-grants-picker").Render(templ.WithChildren(ctx, templ_7745c5c3_Var14), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<script>\n (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{\n if(root.dataset.bound)return;root.dataset.bound='true';\n const trigger=root.querySelector('[data-computer-grants-open]'),picker=root.querySelector('.inspector-picker'),list=root.querySelector('[data-computer-grant-list]');\n picker.setAttribute('aria-label','Chrome permissions');\n const search=picker.querySelector('input');search.setAttribute('aria-label','Search Chrome permissions');\n const ui=window.createInspectorPicker(root,picker,()=>busy);\n const base='/projects/'+encodeURIComponent(root.dataset.grantsProject)+'/computer/chrome-grants';\n const url=offset=>base+'?offset='+offset+(root.dataset.grantsTask?'&task_id='+encodeURIComponent(root.dataset.grantsTask):'');\n let busy=false,version=0;\n async function load(){const current=++version;list.textContent='Loading permissions…';try{\n let grants=[],offset=0;\n for(;;){const res=await fetch(url(offset),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Permissions unavailable');if(current!==version)return;grants.push(...data.grants);if(!data.has_more)break;if(data.next_offset<=offset)throw Error('Could not load remaining permissions');offset=data.next_offset;}\n list.replaceChildren();if(!grants.length){const empty=document.createElement('p');empty.className='p-3 text-sm opacity-60';empty.textContent='No Chrome permissions';list.append(empty);}\n for(const grant of grants){const button=document.createElement('button');button.type='button';button.dataset.value=grant.id;button.className='ov-menu-option w-full flex flex-col items-start gap-1';\n const title=document.createElement('span');title.className='text-sm';title.textContent=grant.selections.map(c=>c.profile+': '+c.domain+' / '+c.name).join(', ');\n const detail=document.createElement('span');detail.className='text-xs opacity-60';detail.textContent=(grant.scope==='project'?'This project':'This task')+' · '+(grant.revoked?'Revoked':(grant.one_time?'One import · ':'')+(grant.expires_at?'Expires '+new Date(grant.expires_at*1000).toLocaleString():'Until revoked'));\n const action=document.createElement('span');action.className='text-xs text-error';action.textContent=grant.revoked?'Retry clearing cookies':'Revoke';button.append(title,detail,action);\n button.onclick=async()=>{if(busy)return;busy=true;button.disabled=true;try{const res=await fetch(url(0),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:grant.id})});const data=await res.json();if(!res.ok)throw Error(data.message||'Could not revoke');await load();}catch(e){window.showToast(e.message,'error');}finally{busy=false;button.disabled=false;}};list.append(button);}\n search.dispatchEvent(new Event('input'));\n }catch(e){if(current!==version)return;list.textContent='Could not load permissions. Close and reopen to retry.';window.showToast(e.message,'error');}}\n trigger.onclick=()=>{ui.open(trigger);if(ui.isOpen())load();};\n root.addEventListener('htmx:beforeCleanupElement',e=>{if(e.target===root)version++;});\n });})();\n </script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -334,12 +353,12 @@ func TaskComputerToggle(projectID, taskID string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var15 string
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectID).Resolve(ctx)
+		var templ_7745c5c3_Var16 string
+		templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_computer.templ`, Line: 400, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_computer.templ`, Line: 410, Col: 62}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -84,10 +84,12 @@ func TestComputerGrantPaginationBrowser(t *testing.T) {
  const q=s=>document.querySelector(s);const wait=async(f,label)=>{for(let n=0;n<200;n++){if(f())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label);};
  const result=document.createElement('div');result.id='grant-result';
  try {
- q('[data-computer-grants]').open=true;q('[data-computer-grants-refresh]').click();await wait(()=>!q('[data-computer-grants-next]').disabled,'first permissions page');
- q('[data-computer-grants-next]').click();await wait(()=>q('[data-computer-grants-page]').textContent==='Page 2','older permissions page');if(!q('[data-computer-grant-list]').textContent.includes('old.example'))throw Error('Older grant missing');if(!q('[data-computer-grants-next]').disabled)throw Error('Last page has next');
- q('[data-computer-grant-list] button').click();await wait(()=>q('[data-computer-grant-list]').textContent.includes('Revoked'),'older grant revoked');if(q('[data-computer-grants-page]').textContent!=='Page 2')throw Error('Revocation changed page');
- q('[data-computer-grants-previous]').click();await wait(()=>q('[data-computer-grants-page]').textContent==='Page 1','previous permissions page');
+ q('[data-computer-grants-open]').click();await wait(()=>q('[data-computer-grant-list]').textContent.includes('old.example'),'all permissions loaded');
+ if(!q('#computer-grants-picker').matches(':popover-open'))throw Error('Permissions dropdown closed');
+ if(q('[data-computer-grants-next]'))throw Error('Obsolete pagination controls');
+ q('[data-computer-grant-list] button').click();await wait(()=>q('[data-computer-grant-list]').textContent.includes('Revoked'),'permission revoked');
+ const search=q('#computer-grants-picker input');search.value='missing.example';search.dispatchEvent(new Event('input'));if(!q('[data-computer-grant-list] button').hidden)throw Error('Search did not filter grant');
+ search.value='old.example';search.dispatchEvent(new Event('input'));if(q('[data-computer-grant-list] button').hidden)throw Error('Matching grant hidden');
 
  result.dataset.status='pass';
  } catch(e) { result.dataset.status='fail';result.textContent=e.message; }

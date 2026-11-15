@@ -370,29 +370,39 @@ templ ProjectComputerToggle(projectID string) {
 }
 
 templ ProjectComputerPermissions(projectID, taskID string) {
- <details data-computer-grants data-grants-project={projectID} data-grants-task={taskID}>
- if taskID != "" {
- <summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Chrome permissions</span><span aria-hidden="true">›</span></summary>
- } else {
- <summary class="cursor-pointer">Chrome permissions</summary>
+ <div data-computer-grants data-grants-project={projectID} data-grants-task={taskID}>
+ <button type="button" class="inspector-property-row" data-computer-grants-open aria-haspopup="dialog">
+ @components.InspectorPropertyContent("Chrome permissions", "")
+ </button>
+ @components.InspectorPicker("computer-grants-picker") {
+ <div data-options="grants" data-computer-grant-list></div>
  }
-<button type="button" class="btn btn-sm" data-computer-grants-refresh>Refresh permissions</button><div data-computer-grant-list></div><nav aria-label="Chrome permissions pages"><button type="button" class="btn btn-sm" data-computer-grants-previous disabled>Previous</button><span data-computer-grants-page></span><button type="button" class="btn btn-sm" data-computer-grants-next disabled>Next</button></nav><p role="status" data-grants-status></p>
  <script>
  (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{
  if(root.dataset.bound)return;root.dataset.bound='true';
- const status=root.querySelector('[data-grants-status]');
- const base='/projects/'+encodeURIComponent(root.dataset.grantsProject)+'/computer';
- const scoped=path=>base+path+'?'+(root.dataset.grantsTask?'task_id='+encodeURIComponent(root.dataset.grantsTask):'');
- const grantList=root.querySelector('[data-computer-grant-list]');
- let grantOffset=0,grantPageVersion=0;
- const grantPrevious=root.querySelector('[data-computer-grants-previous]'),grantNext=root.querySelector('[data-computer-grants-next]');
- async function showGrants(offset=grantOffset){const version=++grantPageVersion;grantPrevious.disabled=true;grantNext.disabled=true;const res=await fetch(scoped('/chrome-grants')+'&offset='+offset,{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Permissions unavailable');if(version!==grantPageVersion)return;grantOffset=data.offset;grantPrevious.disabled=grantOffset===0;grantNext.disabled=!data.has_more;root.querySelector('[data-computer-grants-page]').textContent='Page '+(Math.floor(grantOffset/200)+1);grantList.replaceChildren();for(const grant of data.grants){const row=document.createElement('div');row.textContent=grant.scope+' — '+grant.selections.map(c=>c.profile+': '+c.domain+'/'+c.name).join(', ')+' — '+(grant.revoked?'Revoked':(grant.one_time?'One import — ':'')+(grant.expires_at?'Expires '+new Date(grant.expires_at*1000).toLocaleString():'Until revoked'));const button=document.createElement('button');button.className='btn btn-sm';button.textContent=grant.revoked?'Retry clearing cookies':'Revoke';button.onclick=async()=>{button.disabled=true;try{const response=await fetch(scoped('/chrome-grants'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:grant.id})});const data=await response.json();if(!response.ok)throw Error(data.message||'Could not revoke');await showGrants();}catch(e){status.textContent=e.message;}finally{button.disabled=false;}};row.append(button);grantList.append(row);}}
- if(grantList){root.querySelector('[data-computer-grants-refresh]').onclick=()=>showGrants(0).catch(e=>status.textContent=e.message);grantPrevious.onclick=()=>showGrants(Math.max(0,grantOffset-200)).catch(e=>status.textContent=e.message);grantNext.onclick=()=>showGrants(grantOffset+200).catch(e=>status.textContent=e.message);}
-
- root.addEventListener('toggle',()=>{if(root.open)showGrants(0).catch(e=>status.textContent=e.message);});
+ const trigger=root.querySelector('[data-computer-grants-open]'),picker=root.querySelector('.inspector-picker'),list=root.querySelector('[data-computer-grant-list]');
+ picker.setAttribute('aria-label','Chrome permissions');
+ const search=picker.querySelector('input');search.setAttribute('aria-label','Search Chrome permissions');
+ const ui=window.createInspectorPicker(root,picker,()=>busy);
+ const base='/projects/'+encodeURIComponent(root.dataset.grantsProject)+'/computer/chrome-grants';
+ const url=offset=>base+'?offset='+offset+(root.dataset.grantsTask?'&task_id='+encodeURIComponent(root.dataset.grantsTask):'');
+ let busy=false,version=0;
+ async function load(){const current=++version;list.textContent='Loading permissions…';try{
+ let grants=[],offset=0;
+ for(;;){const res=await fetch(url(offset),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Permissions unavailable');if(current!==version)return;grants.push(...data.grants);if(!data.has_more)break;if(data.next_offset<=offset)throw Error('Could not load remaining permissions');offset=data.next_offset;}
+ list.replaceChildren();if(!grants.length){const empty=document.createElement('p');empty.className='p-3 text-sm opacity-60';empty.textContent='No Chrome permissions';list.append(empty);}
+ for(const grant of grants){const button=document.createElement('button');button.type='button';button.dataset.value=grant.id;button.className='ov-menu-option w-full flex flex-col items-start gap-1';
+ const title=document.createElement('span');title.className='text-sm';title.textContent=grant.selections.map(c=>c.profile+': '+c.domain+' / '+c.name).join(', ');
+ const detail=document.createElement('span');detail.className='text-xs opacity-60';detail.textContent=(grant.scope==='project'?'This project':'This task')+' · '+(grant.revoked?'Revoked':(grant.one_time?'One import · ':'')+(grant.expires_at?'Expires '+new Date(grant.expires_at*1000).toLocaleString():'Until revoked'));
+ const action=document.createElement('span');action.className='text-xs text-error';action.textContent=grant.revoked?'Retry clearing cookies':'Revoke';button.append(title,detail,action);
+ button.onclick=async()=>{if(busy)return;busy=true;button.disabled=true;try{const res=await fetch(url(0),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:grant.id})});const data=await res.json();if(!res.ok)throw Error(data.message||'Could not revoke');await load();}catch(e){window.showToast(e.message,'error');}finally{busy=false;button.disabled=false;}};list.append(button);}
+ search.dispatchEvent(new Event('input'));
+ }catch(e){if(current!==version)return;list.textContent='Could not load permissions. Close and reopen to retry.';window.showToast(e.message,'error');}}
+ trigger.onclick=()=>{ui.open(trigger);if(ui.isOpen())load();};
+ root.addEventListener('htmx:beforeCleanupElement',e=>{if(e.target===root)version++;});
  });})();
  </script>
- </details>
+ </div>
 }
 
 // TaskComputerToggle never changes project-wide permission.
