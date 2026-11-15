@@ -55,6 +55,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(q('#tab-computer').classList.contains('hidden'))throw Error('Computer tab hidden');
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
  q('[data-computer-preview-open]').click();await wait(()=>q('[data-computer-dialog]').open);
+ if(q('[data-computer-dialog]').contains(q('[data-computer-files]'))||!q('#tab-computer').contains(q('[data-computer-files]')))throw Error('Files must stay in the Computer tab');
  if(q('[data-computer-action="takeover"], [data-computer-action="release"], [data-computer-expand]'))throw Error('Unexpected viewer buttons');
  await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly && q('[data-computer-status]').textContent.includes('Mouse and keyboard enabled.'),'takeover');
 
