@@ -27,7 +27,7 @@ func AuthTitlebar(platform string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n  body { padding-top: 78px !important; box-sizing: border-box; }\n  #desktop-project-titlebar { position: fixed; inset: 0 0 auto; height: 54px; z-index: 100; display: flex; align-items: center; justify-content: flex-end; --wails-draggable: drag; cursor: default; -webkit-user-select: none; user-select: none; }\n </style><header id=\"desktop-project-titlebar\" data-platform=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n  body { padding-top: 78px !important; box-sizing: border-box; }\n  #desktop-project-titlebar { position: fixed; inset: 0 0 auto; height: 54px; z-index: 100; background-color: var(--fallback-b2, oklch(var(--b2, 1 0 0) / 1)); display: flex; align-items: center; justify-content: flex-end; --wails-draggable: drag; cursor: default; -webkit-user-select: none; user-select: none; }\n </style><header id=\"desktop-project-titlebar\" data-platform=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
