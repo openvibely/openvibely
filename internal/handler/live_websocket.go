@@ -168,6 +168,15 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		}
 		return true
 	}
+	var reconciliation liveReconcileSchedule
+	// Apply pacing after dispatch's ownership check. All subscription types
+	// share this schedule, and ordinary frames never wait for its cooldown.
+	writeSubscriptionFrame := func(f liveFrame) bool {
+		if f.Event == "reconcile" && !reconciliation.request(time.Now()) {
+			return true
+		}
+		return writeFrame(f)
+	}
 	out := make(chan liveFrame, 128)
 	// Never block a broadcaster or accumulate unbounded output for a slow window.
 	// Disconnecting makes its next subscription replay from the last applied byte.
@@ -391,13 +400,16 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 			}(cmd)
 		case f := <-out:
 			// Frames from a subscription retired by revocation are discarded here.
-			if !dispatchLiveFrame(subscriptions, f, writeFrame) {
+			if !dispatchLiveFrame(subscriptions, f, writeSubscriptionFrame) {
 				return nil
 			}
 			if f.finished || f.Event == "done" || f.Event == "error" || f.Event == "retry" {
 				updateWatchProjects()
 			}
 		case <-ticker.C:
+			if reconciliation.due(time.Now()) && !writeFrame(liveFrame{Event: "reconcile"}) {
+				return nil
+			}
 			ticks++
 			if ticks%15 == 0 {
 				if !authorized() {
