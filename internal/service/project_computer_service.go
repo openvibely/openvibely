@@ -225,7 +225,7 @@ func (s *ProjectComputerService) stopLocked(ctx context.Context, id string) erro
 	if c.Provider != s.provisioner.Provider() {
 		return errors.New("computer provider differs from this installation")
 	}
-	return s.provisioner.Stop(ctx, id)
+	return s.changeViewerPermission(id, true, func() error { return s.provisioner.Stop(ctx, id) })
 }
 func (s *ProjectComputerService) Hold(ctx context.Context, id string, held bool) error {
 	if held {
@@ -257,15 +257,11 @@ func (s *ProjectComputerService) Hold(ctx context.Context, id string, held bool)
 	if state.HandoffKind != "" {
 		return errors.New("complete or cancel the private login request first")
 	}
-	return s.repo.Hold(ctx, id, false)
+	return s.changeViewerPermission(id, false, func() error { return s.repo.Hold(ctx, id, false) })
 }
 
-// WithViewerInput permits ordinary viewer input alongside agent operations.
-// Private handoffs still hold agent tools; their transition must finish first.
-func (s *ProjectComputerService) WithViewerInput(ctx context.Context, id string, fn func() error) error {
-	gate := s.lifecycle(id)
-	gate.RLock()
-	defer gate.RUnlock()
+// checkViewerPermission is called once when registering a control connection.
+func (s *ProjectComputerService) checkViewerPermission(ctx context.Context, id string) error {
 	state, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -276,7 +272,7 @@ func (s *ProjectComputerService) WithViewerInput(ctx context.Context, id string,
 	if state.TakeoverPending || (state.HandoffKind != "" && !state.Held) {
 		return persistence.ErrComputerBusy
 	}
-	return fn()
+	return nil
 }
 
 // WithHumanInput serializes human file/workflow operations with agent actions
@@ -542,7 +538,7 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 				if strings.TrimSpace(args.Reason) == "" {
 					return "", true, true, errors.New("describe the help needed")
 				}
-				err := s.repo.RequestHandoff(call, projectID, name, "", args.Reason, "")
+				err := s.changeViewerPermission(projectID, false, func() error { return s.repo.RequestHandoff(call, projectID, name, "", args.Reason, "") })
 				return "Computer help requested in Inbox. End this turn; the task resumes after the user responds.", true, err != nil, err
 			}
 			parsed, err := url.Parse(args.URL)
@@ -562,7 +558,9 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 			if _, err := s.request(call, conn, "POST", "/browser", body); err != nil {
 				return "", true, true, err
 			}
-			err = s.repo.RequestHandoff(call, projectID, name, args.URL, args.Reason, args.Expected)
+			err = s.changeViewerPermission(projectID, false, func() error {
+				return s.repo.RequestHandoff(call, projectID, name, args.URL, args.Reason, args.Expected)
+			})
 			return "Private login requested in Inbox. End this turn. Completing the handoff verifies access and resumes this task.", true, err != nil, err
 		}
 		if name == "project_browser" {
@@ -647,7 +645,7 @@ func (s *ProjectComputerService) CompleteLogin(ctx context.Context, id string) e
 			return err
 		}
 	}
-	return s.repo.FinishHandoff(ctx, id, false)
+	return s.changeViewerPermission(id, false, func() error { return s.repo.FinishHandoff(ctx, id, false) })
 }
 
 // CloseTaskDesktop frees processes after deletion while retaining files until project cleanup.
@@ -657,6 +655,9 @@ func (s *ProjectComputerService) CloseTaskDesktop(ctx context.Context, projectID
 	} else if err != nil {
 		return err
 	}
+	scoped := *s
+	scoped.taskID = taskID
+	_ = scoped.changeViewerPermission(projectID, false, func() error { return nil })
 	key := projectID + ":" + taskID
 	if cancel, ok := s.active.Load(key); ok {
 		cancel.(context.CancelFunc)()
@@ -704,7 +705,7 @@ func (s *ProjectComputerService) CancelHandoff(ctx context.Context, id string) e
 	lock := s.lock(id)
 	lock.Lock()
 	defer lock.Unlock()
-	return s.repo.FinishHandoff(ctx, id, true)
+	return s.changeViewerPermission(id, false, func() error { return s.repo.FinishHandoff(ctx, id, true) })
 }
 func (s *ProjectComputerService) SetToolTarget(ctx context.Context, id, target string) error {
 	lock := s.lock(id)
@@ -731,7 +732,10 @@ func (s *ProjectComputerService) SetTaskEnabled(ctx context.Context, id string, 
 	if !enabled && (state.Held || state.Owner != "" && state.LeaseUntil >= time.Now().Unix()) {
 		return persistence.ErrComputerBusy
 	}
-	return s.repo.SetEnabled(ctx, id, enabled)
+	if enabled {
+		return s.repo.SetEnabled(ctx, id, true)
+	}
+	return s.changeViewerPermission(id, false, func() error { return s.repo.SetEnabled(ctx, id, false) })
 }
 
 // SetEnabled changes the project preference shared by all task desktops.
@@ -743,28 +747,31 @@ func (s *ProjectComputerService) SetEnabled(ctx context.Context, id string, enab
 	if err := repo.Configure(ctx, id, s.provisioner.Provider()); err != nil {
 		return err
 	}
-	if !enabled {
-		busy, err := repo.SessionsBusy(ctx, id)
-		if err != nil {
-			return err
-		}
-		if busy {
-			return persistence.ErrComputerBusy
-		}
-		state, err := repo.Get(ctx, id)
-		if err != nil {
-			return err
-		}
-		if state.Held || state.Owner != "" && state.LeaseUntil >= time.Now().Unix() {
-			return persistence.ErrComputerBusy
-		}
+	if enabled {
+		return repo.SetEnabled(ctx, id, true)
+	}
+	busy, err := repo.SessionsBusy(ctx, id)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return persistence.ErrComputerBusy
+	}
+	state, err := repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if state.Held || state.Owner != "" && state.LeaseUntil >= time.Now().Unix() {
+		return persistence.ErrComputerBusy
+	}
+	return s.changeViewerPermission(id, true, func() error {
 		if _, err := s.provisioner.Resolve(ctx, id); err == nil {
 			if err = s.provisioner.Stop(ctx, id); err != nil {
 				return err
 			}
 		}
-	}
-	return repo.SetEnabled(ctx, id, enabled)
+		return repo.SetEnabled(ctx, id, false)
+	})
 }
 
 // Control serializes takeover/interruption with handback for the same desktop.
@@ -774,7 +781,7 @@ func (s *ProjectComputerService) Control(ctx context.Context, id string, held bo
 	lock.Lock()
 	defer lock.Unlock()
 	if held {
-		if err := s.repo.SetTakeoverPending(ctx, id, true); err != nil {
+		if err := s.changeViewerPermission(id, false, func() error { return s.repo.SetTakeoverPending(ctx, id, true) }); err != nil {
 			return err
 		}
 	}

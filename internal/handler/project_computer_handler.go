@@ -190,11 +190,6 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	}
 	id := c.Param("id")
 
-	if mode == "control" {
-		if err := h.computerService(c).WithViewerInput(ctx, id, func() error { return nil }); err != nil {
-			return echo.NewHTTPError(409, err.Error())
-		}
-	}
 	conn, err := h.computerService(c).Connection(ctx, id)
 	if err != nil {
 		return echo.NewHTTPError(503, "Start the project computer")
@@ -217,7 +212,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	}
 	principal, _ := models.PrincipalFromContext(ctx)
 	svc := h.computerService(c)
-	token, detach, err := svc.RegisterViewer(id, principal.UserID, session, mode == "control", cancel)
+	token, detach, err := svc.RegisterViewer(ctx, id, principal.UserID, session, mode == "control", cancel)
 	if err != nil {
 		return echo.NewHTTPError(409, err.Error())
 	}
@@ -271,7 +266,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 			if err == nil {
 				write := func() error { return upstream.Write(ctx, kind, data) }
 				if mode == "control" {
-					err = h.computerService(c).WithViewerInput(ctx, id, write)
+					err = svc.ForwardViewerInput(id, session, token, write)
 				} else {
 					err = write()
 				}

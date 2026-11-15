@@ -14,11 +14,14 @@ import (
 func TestComputerViewerInputDoesNotHoldAgentTools(t *testing.T) {
 	_, s, p, task := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{}`) })
 	require.NoError(t, s.repo.Reserve(t.Context(), p.ID, task.ID))
+	token, leave, err := s.RegisterViewer(t.Context(), p.ID, "user", "session", true)
+	require.NoError(t, err)
+	defer leave()
 	// A long-running agent action must not serialize ordinary viewer input.
 	lock := s.lock(p.ID)
 	lock.Lock()
 	done := make(chan error, 1)
-	go func() { done <- s.WithViewerInput(t.Context(), p.ID, func() error { return nil }) }()
+	go func() { done <- s.ForwardViewerInput(p.ID, "session", token, func() error { return nil }) }()
 	select {
 	case err := <-done:
 		lock.Unlock()
@@ -40,9 +43,9 @@ func TestComputerViewerInputDoesNotHoldAgentTools(t *testing.T) {
 	require.False(t, bad)
 
 	require.NoError(t, s.repo.RequestHandoff(t.Context(), p.ID, "request_browser_login", "https://example.test", "Sign in", "Account"))
-	require.NoError(t, s.WithViewerInput(t.Context(), p.ID, func() error { return nil }))
+	require.NoError(t, s.checkViewerPermission(t.Context(), p.ID))
 	_, _, _, err = rt.Executor(t.Context(), "computer", json.RawMessage(`{"action":"get_desktop_state"}`))
 	require.ErrorIs(t, err, persistence.ErrComputerBusy)
 	require.NoError(t, s.repo.SetTakeoverPending(t.Context(), p.ID, true))
-	require.ErrorIs(t, s.WithViewerInput(t.Context(), p.ID, func() error { t.Fatal("input during private transition"); return nil }), persistence.ErrComputerBusy)
+	require.ErrorIs(t, s.checkViewerPermission(t.Context(), p.ID), persistence.ErrComputerBusy)
 }

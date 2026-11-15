@@ -50,7 +50,7 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 			require.NotEmpty(t, response.Ticket)
 			ticket := h.computerTickets[strings.TrimPrefix(response.Ticket, "computer-ticket.")]
 			require.Equal(t, tc.want, ticket.Mode)
-			_, detach, err := h.computerSvc.RegisterViewer(project.ID, "owner", "native-window", ticket.Mode == "control")
+			_, detach, err := h.computerSvc.RegisterViewer(t.Context(), project.ID, "owner", "native-window", ticket.Mode == "control")
 			require.NoError(t, err)
 			defer detach()
 			released, err := h.computerSvc.ReleaseUnviewed(t.Context(), project.ID)

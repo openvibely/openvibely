@@ -6,12 +6,16 @@ import (
 	"errors"
 	"strings"
 	"sync"
+
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type computerViewer struct {
 	User, Token string
 	Control     bool
 	Cancel      context.CancelFunc
+	input       sync.RWMutex
+	revoked     bool
 }
 
 func (s *ProjectComputerService) viewerPrefix(id string) string {
@@ -21,10 +25,22 @@ func (s *ProjectComputerService) viewerLock(id string) *sync.Mutex {
 	value, _ := s.locks.LoadOrStore("control:"+id+":"+s.taskID, &sync.Mutex{})
 	return value.(*sync.Mutex)
 }
-func (s *ProjectComputerService) RegisterViewer(id, user, session string, control bool, replacements ...context.CancelFunc) (string, func(), error) {
+func (s *ProjectComputerService) RegisterViewer(ctx context.Context, id, user, session string, control bool, replacements ...context.CancelFunc) (string, func(), error) {
 	lock := s.viewerLock(id)
-	lock.Lock()
+	// Takeover may wait for agent cleanup. Reject reconnects during that
+	// transition instead of waiting behind it with an open HTTP request.
+	if !lock.TryLock() {
+		return "", nil, persistence.ErrComputerBusy
+	}
 	defer lock.Unlock()
+	gate := s.viewerGate(id)
+	gate.Lock()
+	defer gate.Unlock()
+	if control {
+		if err := s.checkViewerPermission(ctx, id); err != nil {
+			return "", nil, err
+		}
+	}
 	key := s.viewerPrefix(id) + session
 	viewer := &computerViewer{User: user, Token: rand.Text(), Control: control}
 	if len(replacements) > 0 {
@@ -35,9 +51,7 @@ func (s *ProjectComputerService) RegisterViewer(id, user, session string, contro
 		if old.User != user {
 			return "", nil, errors.New("viewer belongs to another user")
 		}
-		if old.Cancel != nil {
-			old.Cancel()
-		}
+		old.revoke()
 	}
 	s.active.Store(key, viewer)
 	return viewer.Token, func() { s.active.CompareAndDelete(key, viewer) }, nil
@@ -75,4 +89,62 @@ func (s *ProjectComputerService) ReleaseUnviewed(ctx context.Context, id string,
 		return false, err
 	}
 	return true, s.repo.SetTakeoverPending(ctx, id, false)
+}
+
+// viewerGate serializes registration with permission changes.
+// It is separate from the agent/lifecycle locks: ordinary input may run alongside tools.
+func (s *ProjectComputerService) viewerGate(id string) *sync.RWMutex {
+	value, _ := s.locks.LoadOrStore("viewer-gate:"+id, &sync.RWMutex{})
+	return value.(*sync.RWMutex)
+}
+
+// changeViewerPermission revokes existing control connections before changing
+// durable state. Registration cannot race the change; failed changes require a
+// fresh permission check too. View-only connections are unaffected.
+func (s *ProjectComputerService) changeViewerPermission(id string, allTasks bool, change func() error) error {
+	gate := s.viewerGate(id)
+	gate.Lock()
+	defer gate.Unlock()
+	prefix := s.viewerPrefix(id)
+	if allTasks {
+		prefix = "viewer:" + id + ":"
+	}
+	s.active.Range(func(key, value any) bool {
+		if strings.HasPrefix(key.(string), prefix) {
+			viewer := value.(*computerViewer)
+			if viewer.Control {
+				s.active.CompareAndDelete(key, viewer)
+				viewer.revoke()
+			}
+		}
+		return true
+	})
+	return change()
+}
+
+// ForwardViewerInput only checks connection membership in memory. Permissions
+// were checked at registration; state changes remove and cancel that connection.
+func (s *ProjectComputerService) ForwardViewerInput(id, session, token string, write func() error) error {
+	value, ok := s.active.Load(s.viewerPrefix(id) + session)
+	if !ok {
+		return errors.New("computer control connection revoked")
+	}
+	viewer := value.(*computerViewer)
+	viewer.input.RLock()
+	defer viewer.input.RUnlock()
+	if viewer.revoked || !viewer.Control || viewer.Token != token {
+		return errors.New("computer control connection revoked")
+	}
+	return write()
+}
+
+// Cancel first to interrupt a blocked network write, then drain in-flight input.
+// Each connection has its own lock so a slow viewer cannot stall other desktops.
+func (v *computerViewer) revoke() {
+	if v.Cancel != nil {
+		v.Cancel()
+	}
+	v.input.Lock()
+	defer v.input.Unlock()
+	v.revoked = true
 }
