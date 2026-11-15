@@ -34,13 +34,13 @@ func TestSavedTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
  window.addEventListener('live-transport-disconnected',event=>event.stopImmediatePropagation());
  window.computerStatusReads=0;const statusFetch=window.fetch;
  window.fetch=(url,options)=>{if(String(url).includes('/computer/status'))window.computerStatusReads++;return statusFetch(url,options)};
- window.computerSubscriptions=0;
+ window.computerSubscriptions=0;window.closedComputerSubscriptions=0;
  window.openVibelyLive.computer=(project,task,options,handlers)=>{
   window.computerSubscriptions++;let closed=false;
   const push=async()=>{const state=await (await statusFetch('/fixture-snapshot?task_id='+task)).json();if(!closed)handlers.listeners.computer_status({data:JSON.stringify({...state,project_id:project,task_id:task,viewer_mode:options.viewer_mode||''})});};
   if(task){window.computerLive=handlers;window.pushComputer=push;}else window.permissionLive=handlers;
   setTimeout(()=>{if(!closed){handlers.onopen?.();push();}},0);
-  return {close(){closed=true}};
+  return {close(){if(!closed)window.closedComputerSubscriptions++;closed=true}};
  };
  const root=document.getElementById('project-computer');`, 1)
 	// Count retry-controller attempts, not status subscriptions also opened by
@@ -148,6 +148,22 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(!q('#tab-computer').classList.contains('hidden'))throw Error('Disabled tab could be reopened');
  window.fetch=originalFetch;
  if(takeoverCalls)throw Error('Fullscreen interrupted the task through takeover/release');
+ window.permissionLive.listeners.computer_status({data:JSON.stringify({project_id:'project',task_id:'',enabled:true})});
+ window.taskWorkspace.openPanel('computer');
+ await wait(()=>!q('[data-task-computer-toggle]').disabled);q('[data-task-computer-toggle]').click();
+ await wait(()=>window.fixtureRFB.painted&&!window.fixtureRFB.disconnected,'stream before cleanup');
+ const liveBeforeCleanup=window.fixtureRFB;
+ htmx.trigger(q('[data-teach-note]'),'htmx:beforeCleanupElement');
+ if(liveBeforeCleanup.disconnected)throw Error('Child cleanup disconnected preview');
+ const closedBeforeCleanup=window.closedComputerSubscriptions;
+ htmx.swap(q('#task-detail-content'),'<div id="cleaned-task">Task removed</div>',{swapStyle:'outerHTML',settleDelay:0});
+ if(!liveBeforeCleanup.disconnected)throw Error('Task cleanup left screen connected');
+ if(window.closedComputerSubscriptions<=closedBeforeCleanup)throw Error('Task cleanup left status subscription open');
+ const subscriptionsAfterCleanup=window.computerSubscriptions;
+ document.dispatchEvent(new Event('visibilitychange'));document.dispatchEvent(new Event('computer-tab-change'));
+ await new Promise(resolve=>setTimeout(resolve,100));
+ if(window.computerSubscriptions!==subscriptionsAfterCleanup)throw Error('Removed preview reopened subscription');
+
  finish('pass','Saved task preview, automatic startup, expansion, takeover, release and project toggle');
  }catch(e){finish('fail',e.message);}
 })();</script>`
@@ -252,9 +268,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	require.Equal(t, 1, starts)
+	require.Equal(t, 2, starts) // Initial opt-in, then re-enable for cleanup coverage.
 
-	require.False(t, enabled)
+	require.True(t, enabled) // Removing the preview must not disable the computer.
 	require.Equal(t, "Download a report", demonstration.Goal)
 	require.Len(t, demonstration.Images, 3)
 	require.NotContains(t, strings.Join(demonstration.Steps, " "), "private-value")
