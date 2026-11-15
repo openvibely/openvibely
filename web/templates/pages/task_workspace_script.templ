@@ -18,7 +18,7 @@ templ TaskWorkspaceScript() {
 		var signal = abort.signal;
 		var allTabNames = ['details', 'computer', 'schedules', 'chaining', 'attachments', 'lifecycle'];
         var tabNames = allTabNames.filter(name => name !== 'computer');
-        var computerPermissionVersion = 0, computerPermissionStream = null;
+        var computerPermissionVersion = 0, computerPermissionStream = null, computerAllowed = null;
 		var selected = 'details', scrollState = null, returnFocus = null, composerFocus = null;
 		var summary = null, timer = null, pending = false, dirty = false, titleVersion = 0, actionRevision = null;
 		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
@@ -355,7 +355,10 @@ templ TaskWorkspaceScript() {
             function apply(allowed) {
                 if (signal.aborted || version !== computerPermissionVersion) return;
                 var button = panel.querySelector('[data-tab="computer"]');
-                var wasAllowed = button.hasAttribute('data-computer-allowed');
+                // Cached markup can retain this attribute before the new controller
+                // has received any permissions. Track observations per controller.
+                var wasAllowed = computerAllowed;
+                computerAllowed = allowed;
                 button.toggleAttribute('data-computer-allowed', allowed);
                 button.hidden = !allowed;
                 tabNames = allTabNames.filter(name => name !== 'computer' || allowed);
