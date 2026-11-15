@@ -839,7 +839,9 @@ func TestTaskDetailContent_LiveConnectedHandler_ReconcilesWithoutForcedThreadRel
 		t.Fatal("focus reconnect must not blindly replace the loaded task thread")
 	}
 	for _, required := range []string{
-		"if (!taskId || !_isChatTabActive()) return;",
+		"if (!taskId) return;",
+		"if (_isChangesTabActive()) { _updateDiffViewer(); return; }",
+		"if (!_isChatTabActive()) return;",
 		"threadContent.dataset.loaded !== 'true'",
 		"window.reconcileTaskThreadState(taskId)",
 	} {
