@@ -98,8 +98,8 @@ func TestProjectComputerOwnershipTakeoverAndImages(t *testing.T) {
 	if err = svc.Hold(t.Context(), project.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if err = svc.WithHumanInput(t.Context(), project.ID, func() error { t.Fatal("input accepted after release"); return nil }); err == nil {
-		t.Fatal("expected refusal")
+	if err = svc.WithHumanInput(t.Context(), project.ID, func() error { return nil }); err != nil {
+		t.Fatal(err)
 	}
 	if _, _, _, err = two.Executor(t.Context(), "computer", json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)

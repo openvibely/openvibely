@@ -82,10 +82,11 @@ func TestComputerHumanImportsAndDemonstration(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		return rec
 	}
-	require.Equal(t, 400, send("import-file", nil, "").Code)
 	store, err := db.Projects.Computers().ForTask(t.Context(), p.ID, task.ID)
 	require.NoError(t, err)
-	require.NoError(t, store.Hold(t.Context(), p.ID, true))
+	state, err := scoped.Get(t.Context(), p.ID)
+	require.NoError(t, err)
+	require.False(t, state.Held, "file import and workflow generation must work without takeover")
 	require.Equal(t, 403, send("import-file", nil, "https://other.test").Code)
 	rec := send("import-file", nil, "")
 	require.Equal(t, 200, rec.Code, rec.Body.String())
@@ -152,7 +153,13 @@ func TestComputerHumanImportsAndDemonstration(t *testing.T) {
 	demo.Images = nil
 	demo.Goal = "Private attempt"
 	require.NoError(t, store.RequestHandoff(t.Context(), p.ID, "request_browser_login", "https://example.test", "Sign in", "Dashboard"))
-	require.Equal(t, 400, send("teach", demo, "").Code)
+	rec = send("teach", demo, "")
+	require.Equal(t, 400, rec.Code)
+	require.Contains(t, rec.Body.String(), "finish the private request")
 	require.NoError(t, scoped.CancelHandoff(t.Context(), p.ID))
-	require.Equal(t, 400, send("teach", demo, "").Code)
+	mock.OnCall = nil
+	mock.Response = `{"name":"After login","instructions":"Open Reports."}`
+	mock.TextOnly = mock.Response
+	rec = send("teach", demo, "")
+	require.Equal(t, 200, rec.Code, rec.Body.String())
 }

@@ -278,6 +278,8 @@ func (s *ProjectComputerService) WithViewerInput(ctx context.Context, id string,
 	return fn()
 }
 
+// WithHumanInput serializes human file/workflow operations with agent actions
+// without requiring an exclusive takeover. Private transitions remain blocked.
 func (s *ProjectComputerService) WithHumanInput(ctx context.Context, id string, fn func() error) error {
 	lock := s.lock(id)
 	lock.Lock()
@@ -286,8 +288,11 @@ func (s *ProjectComputerService) WithHumanInput(ctx context.Context, id string, 
 	if err != nil {
 		return err
 	}
-	if !c.Held || c.TakeoverPending {
-		return errors.New("take over the computer before sending input")
+	if !c.Enabled {
+		return errors.New("computer use is disabled")
+	}
+	if c.TakeoverPending || (c.HandoffKind != "" && !c.Held) {
+		return persistence.ErrComputerBusy
 	}
 	return fn()
 }
