@@ -152,6 +152,9 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.typeText("A draft goal")
 		b.click(`#task-detail-text-editor [type="submit"]`)
 		b.waitFor("draft goal", `document.querySelector('[data-draft-property="goal"]').value`, "A draft goal")
+		// This fixture has no live permission response. Computer remains hidden
+		// while pending and must not enter the keyboard tab order.
+		b.waitFor("pending Computer tab remains hidden", `String(document.getElementById('task-detail-content').hasAttribute('data-computer-permission-pending') && document.getElementById('inspector-tab-computer').getClientRects().length===0)`, "true")
 		b.evaluate(`document.getElementById('inspector-tab-details').focus(); 'focused'`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
 		b.waitFor("keyboard-selected tab uses underline without focus box", `(function(){var tab=document.activeElement,s=getComputedStyle(tab);return String(tab.id==='inspector-tab-schedules' && tab.getAttribute('aria-selected')==='true' && s.outlineStyle==='none' && s.boxShadow==='none' && s.fontWeight==='400' && s.borderBottomColor===s.color)})()`, "true")
