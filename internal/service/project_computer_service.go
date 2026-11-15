@@ -259,6 +259,25 @@ func (s *ProjectComputerService) Hold(ctx context.Context, id string, held bool)
 	return s.repo.Hold(ctx, id, false)
 }
 
+// WithViewerInput permits ordinary viewer input alongside agent operations.
+// Private handoffs still hold agent tools; their transition must finish first.
+func (s *ProjectComputerService) WithViewerInput(ctx context.Context, id string, fn func() error) error {
+	gate := s.lifecycle(id)
+	gate.RLock()
+	defer gate.RUnlock()
+	state, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !state.Enabled {
+		return errors.New("computer use is disabled")
+	}
+	if state.TakeoverPending || (state.HandoffKind != "" && !state.Held) {
+		return persistence.ErrComputerBusy
+	}
+	return fn()
+}
+
 func (s *ProjectComputerService) WithHumanInput(ctx context.Context, id string, fn func() error) error {
 	lock := s.lock(id)
 	lock.Lock()

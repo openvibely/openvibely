@@ -90,7 +90,7 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": h.computerService(c).Ready(c.Request().Context(), c.Param("id")), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": h.computerService(c).ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
 	if h.desktopMode && h.computerDesktopURL != "" && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1" && status["ready"] == true {
 		mode := "view"
-		if c.QueryParam("viewer_mode") == "control" && state.Held && !state.TakeoverPending {
+		if c.QueryParam("viewer_mode") == "control" && state.Enabled && !state.TakeoverPending {
 			mode = "control"
 		}
 		ticket, err := h.issueComputerTicket(c.Request().Context(), c.Param("id"), mode, c.QueryParam("task_id"), c.QueryParam("viewer_id"))
@@ -191,7 +191,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	id := c.Param("id")
 
 	if mode == "control" {
-		if err := h.computerService(c).WithHumanInput(ctx, id, func() error { return nil }); err != nil {
+		if err := h.computerService(c).WithViewerInput(ctx, id, func() error { return nil }); err != nil {
 			return echo.NewHTTPError(409, err.Error())
 		}
 	}
@@ -271,7 +271,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 			if err == nil {
 				write := func() error { return upstream.Write(ctx, kind, data) }
 				if mode == "control" {
-					err = h.computerService(c).WithHumanInput(ctx, id, write)
+					err = h.computerService(c).WithViewerInput(ctx, id, write)
 				} else {
 					err = write()
 				}

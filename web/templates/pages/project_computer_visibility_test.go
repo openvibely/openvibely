@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestComputerVisibilityRestoresFullscreenControl(t *testing.T) {
+func TestComputerVisibilityReconnectsWithoutTakeover(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node unavailable")
@@ -22,19 +22,19 @@ func TestComputerVisibilityRestoresFullscreenControl(t *testing.T) {
 	}
 	script := `const assert=require('node:assert/strict');
  let shown=true, dialog={open:true}, closing=false, takeoverRequested=false,
- refreshVersion=0,recording=true,disconnections=0,requests=0;
+ refreshVersion=0,recording=true,disconnections=0,requests=0,refreshes=0;
  function visible(){return shown}
  function renderDemo(){}
  function disconnect(){disconnections++}
- function refresh(){if(takeoverRequested && dialog.open){requests++;takeoverRequested=false}}
+ function refresh(){refreshes++;if(takeoverRequested && dialog.open){requests++;takeoverRequested=false}}
  ` + string(function) + `
- // Disconnect releases server control; returning must request it again.
+ // Returning refreshes the stream without claiming exclusive control.
  shown=false;visibilityChanged();
  assert.equal(disconnections,1);assert.equal(requests,0);
- shown=true;visibilityChanged();assert.equal(requests,1);
+ shown=true;visibilityChanged();assert.equal(requests,0);assert.ok(refreshes>0);
  // A mini preview must never take control.
  dialog.open=false;shown=false;visibilityChanged();
- shown=true;visibilityChanged();assert.equal(requests,1);
+ shown=true;visibilityChanged();assert.equal(requests,0);assert.ok(refreshes>0);
  // Closing fullscreen must not schedule another takeover.
  dialog.open=true;closing=true;shown=false;visibilityChanged();
  assert.equal(takeoverRequested,false);

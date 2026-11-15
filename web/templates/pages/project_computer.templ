@@ -121,15 +121,15 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const dialog=find('[data-computer-dialog]');
      const homes=[];
      const expand=find('[data-computer-preview-open]');
-     function openViewer(){if(closing)return;if(dialog.open){takeoverRequested=true;refresh();return;}takeoverRequested=true;for(const node of [find('[data-computer-status]'),find('[data-computer-login]'),find('[data-computer-files]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();refresh();}
+     function openViewer(){if(closing)return;if(dialog.open){refresh();return;}for(const node of [find('[data-computer-status]'),find('[data-computer-login]'),find('[data-computer-files]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();refresh();}
      find('[data-computer-preview-open]').onclick=openViewer;
      find('[data-computer-close]').onclick=()=>{dialog.close();finishViewer();};
      dialog.addEventListener('close',finishViewer);
-     async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;takeoverRequested=false;closing=true;recording=false;renderDemo();disconnect();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();try{if(controlPromise)await controlPromise;const res=await fetch(scoped('/status'),{cache:'no-store'});if(!res.ok)throw Error('Could not check computer control. Reopen the viewer and try exiting again.');const state=await res.json();if((state.held||state.takeover_pending)&&!state.handoff_kind){const released=await fetch(scoped('/release'),{method:'POST'});if(!released.ok)throw Error('Could not return computer control. Reopen the viewer and try exiting again.');}}catch(e){status.textContent=e.message;return;}finally{closing=false;}await refresh();return true;}
+     async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();disconnect();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
      const status=find('[data-computer-status]');
      const screen=find('[data-computer-screen]');
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
-     let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, takeoverRequested=false, closing=false, controlPromise=null, retained=null, frameTimer=null;
+     let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null;
      if(!window.__ovComputerPreviewCache){
       window.__ovComputerPreviewCache=new Map();
       function evictDeletedPreview(event){
@@ -155,7 +155,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      function reportConnection(){
       if(retained){status.textContent='Reconnecting… Showing last preview.';return;}
       if(!currentState?.ready)return;
-      status.textContent=connected?(mode==='control'?'You have control. This task’s computer tools are paused.':currentState.busy?'An agent is using the computer.':'Ready'):(connectionMessage||'Connecting to the desktop…');
+      status.textContent=connected?(mode==='control'?'Mouse and keyboard enabled.':currentState.busy?'An agent is using the computer.':'Ready'):(connectionMessage||'Connecting to the desktop…');
      }
      function visible(){const host=root;return !document.hidden && (dialog.open || host.getClientRects().length>0);}
      function chord(key,code,{ctrl=false,shift=false,alt=false}={}){
@@ -223,7 +223,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      async function workflowAction(body){const res=await fetch(scoped('/workflows'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await res.json();if(!res.ok)throw Error(data.message||'Workflow operation failed');return data;}
      find('[data-workflow-save]').onclick=async e=>{e.target.disabled=true;try{await workflowAction({action:'save',id:workflowID,name:find('[data-workflow-name]').value,instructions:find('[data-workflow-instructions]').value});find('[data-teach-draft]').hidden=true;teachNote.textContent='Reusable workflow saved.';await loadWorkflows();}catch(e){teachNote.textContent=e.message;}finally{e.target.disabled=false;}};
      async function loadWorkflows(){const res=await fetch(scoped('/workflows'),{cache:'no-store'});if(!res.ok)throw Error('Could not load workflows');const items=await res.json();const list=find('[data-workflow-list]');list.replaceChildren();for(const item of items){const row=document.createElement('details'),title=document.createElement('summary'),instructions=document.createElement('pre');title.textContent=item.name;instructions.textContent=item.instructions;instructions.style.whiteSpace='pre-wrap';row.append(title,instructions);for(const [action,label] of [['edit','Edit workflow'],['use','Create task from workflow'],['delete','Delete workflow']]){const button=document.createElement('button');button.type='button';button.className='btn btn-sm';button.textContent=label;button.onclick=async()=>{if(action==='edit'){generationAbort?.abort();workflowID=item.id;find('[data-workflow-name]').value=item.name;find('[data-workflow-instructions]').value=item.instructions;find('[data-teach-draft]').hidden=false;return;}button.disabled=true;try{const data=await workflowAction({action,id:item.id});if(action==='delete'){await loadWorkflows();return;}teachNote.replaceChildren(document.createTextNode('Backlog task created. '));const link=document.createElement('a');link.href=data.url;link.textContent='Review task';link.onclick=async event=>{if(event.metaKey||event.ctrlKey)return;event.preventDefault();dialog.close();if(await finishViewer())location.assign(data.url);};teachNote.append(link);}catch(e){teachNote.textContent=e.message;}finally{button.disabled=false;}};row.append(button);}list.append(row);}}
-     function visibilityChanged(){if(!visible()){if(dialog.open && !closing)takeoverRequested=true;++refreshVersion;recording=false;renderDemo();disconnect();}else refresh();}
+     function visibilityChanged(){if(!visible()){++refreshVersion;recording=false;renderDemo();disconnect();}else refresh();}
      document.addEventListener('visibilitychange',visibilityChanged);
      const viewportObserver=new IntersectionObserver(entries=>{inViewport=entries[0].isIntersecting;visibilityChanged()});viewportObserver.observe(preview);
      // Only capture on disconnect; keep at most 12 task previews, each at most 640x400.
@@ -263,8 +263,8 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       if(canvas?.width && canvas?.height){try{if([.25,.5,.75].some(v=>canvas.getContext('2d').getImageData(Math.floor(canvas.width*v),Math.floor(canvas.height*v),1,1).data[3])){retained.remove();retained=null;reportConnection();return;}}catch{retained.remove();retained=null;reportConnection();return;}}
       frameTimer=setTimeout(()=>revealFrame(epoch),50);
      }
-     async function viewer(held,state){
-      held=held && dialog.open;
+     async function viewer(state){
+      const held=dialog.open && !state.takeover_pending;
       const next=held?'control':'view';
       if(rfb && mode===next)return;
       disconnect();mode=next;
@@ -296,14 +296,13 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
        preview.hidden=!state.enabled;
 if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if(state.handoff_kind){recording=false;renderDemo();}find('[data-teach-open]').hidden=!!state.handoff_kind;if(state.handoff_kind)teach.hidden=true;
        if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;status.textContent='Starting or updating project computer… Building the image may take several minutes.';try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;await refresh();}catch(e){pending=false;status.textContent=e.message;window.showToast(e.message,'error');find('[data-computer-action=ensure]').hidden=false;find('[data-computer-action=ensure]').disabled=false;}return;}
-       if(state.ready && dialog.open && takeoverRequested){takeoverRequested=false;if(!state.held){pending=true;controlPromise=fetch(scoped('/takeover'),{method:'POST'});try{const response=await controlPromise;if(!response.ok)throw Error('Could not take control. Close and reopen the viewer to retry.');state.held=true;}finally{controlPromise=null;pending=false;}if(!dialog.open||closing)return;await refresh();return;}}
-       status.textContent=state.ready?(state.held?'You have control. This task’s computer tools are paused.':state.busy?'An agent is using the computer.':'Ready'):state.enabled===false?'Computer use is off for this task or project.':'Connecting to the computer…';
+       status.textContent=state.ready?(state.held?'Mouse and keyboard enabled.':state.busy?'An agent is using the computer.':'Ready'):state.enabled===false?'Computer use is off for this task or project.':'Connecting to the computer…';
        find('[data-computer-login]').hidden=!state.handoff_kind;
  find('[data-computer-login-site]').textContent=state.handoff_kind?(state.handoff_reason||'Computer help requested')+(state.handoff_url?' — '+state.handoff_url:''):'';
  const target=find('[data-computer-target]');if(target&&!target.disabled){target.dataset.value=state.tool_target||'worktree';target.querySelector('[data-property-label]').textContent=target.dataset.value==='computer'?'Task computer':'Task worktree';}
  find('[data-computer-chrome]').hidden=state.handoff_kind!=='request_chrome_login'||!state.chrome_available;
  buttons.forEach(b=>{const a=b.dataset.computerAction;if(a==='ensure')b.hidden=state.ready||state.enabled===false;b.disabled=a==='ensure'?state.enabled===false:a.startsWith('login-')?!state.handoff_kind:a==='release'?!state.held||!!state.handoff_kind:a==='takeover'?!state.ready||state.held:!state.ready||state.held||state.busy;});
-       if(state.ready){await viewer(state.held,state);reportConnection();}else disconnect();
+       if(state.ready){await viewer(state);reportConnection();}else disconnect();
       }catch(e){status.textContent=e.message;}
      }
      async function computerAction(event){

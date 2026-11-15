@@ -34,7 +34,7 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 		{"preview while held", "view", "view", true},
 		{"legacy unspecified preview", "", "view", true},
 		{"controller while held", "control", "control", true},
-		{"control without takeover", "control", "view", false},
+		{"control without takeover", "control", "control", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NoError(t, repo.Hold(t.Context(), project.ID, tc.held))

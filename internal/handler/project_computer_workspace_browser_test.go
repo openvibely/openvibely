@@ -39,7 +39,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>window.taskWorkspace && q('[data-tab="computer"]').hasAttribute('data-computer-allowed'));q('[data-tab="computer"]').click();
  await wait(()=>!q('[data-task-computer-toggle]').disabled);
  if(window.fixtureRFB)throw Error('Computer started without opt-in');
- const startupFetch=window.fetch,startupToast=window.showToast;const startupErrors=[];
+ let takeoverCalls=0;const viewerFetch=window.fetch;window.fetch=(url,options)=>{if(/\/(takeover|release)(?:\?|$)/.test(String(url)))takeoverCalls++;return viewerFetch(url,options);};const startupFetch=window.fetch,startupToast=window.showToast;const startupErrors=[];
  window.showToast=(message,type)=>startupErrors.push({message,type});
  window.fetch=(url,options)=>String(url).includes('/ensure')?Promise.resolve(new Response(JSON.stringify({message:'Docker unavailable'}),{status:502,headers:{'Content-Type':'application/json'}})):startupFetch(url,options);
  q('[data-task-computer-toggle]').click();
@@ -56,7 +56,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
  q('[data-computer-preview-open]').click();await wait(()=>q('[data-computer-dialog]').open);
  if(q('[data-computer-action="takeover"], [data-computer-action="release"], [data-computer-expand]'))throw Error('Unexpected viewer buttons');
- await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly && q('[data-computer-status]').textContent.includes('You have control'),'takeover');
+ await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly && q('[data-computer-status]').textContent.includes('Mouse and keyboard enabled.'),'takeover');
 
 
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'control first frame');
@@ -110,6 +110,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  window.taskWorkspace.openPanel('computer');
  if(!q('#tab-computer').classList.contains('hidden'))throw Error('Disabled tab could be reopened');
  window.fetch=originalFetch;
+ if(takeoverCalls)throw Error('Fullscreen interrupted the task through takeover/release');
  finish('pass','Saved task preview, automatic startup, expansion, takeover, release and project toggle');
  }catch(e){finish('fail',e.message);}
 })();</script>`
