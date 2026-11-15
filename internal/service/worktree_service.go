@@ -19,6 +19,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmgitdiff "github.com/openvibely/openvibely/internal/llm/gitdiff"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/pkg/agenttools"
@@ -2663,22 +2664,17 @@ func captureWorktreeUntracked(worktreePath string) string {
 	}
 
 	var result strings.Builder
-	untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
+	// -z: exact pathnames, split on NUL only (see gitdiff.Capture).
+	untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard", "-z")
 	untrackedCmd.Dir = worktreePath
 	untrackedOut, _ := untrackedCmd.Output()
-	if len(untrackedOut) > 0 {
-		untracked := strings.TrimSpace(string(untrackedOut))
-		if untracked != "" {
-			for _, f := range strings.Split(untracked, "\n") {
-				f = strings.TrimSpace(f)
-				if f == "" {
-					continue
-				}
-				fileDiff := generateNewFileDiffForWorktree(worktreePath, f)
-				if fileDiff != "" {
-					result.WriteString(fileDiff)
-				}
-			}
+	for _, f := range strings.Split(string(untrackedOut), "\x00") {
+		if f == "" {
+			continue
+		}
+		fileDiff := generateNewFileDiffForWorktree(worktreePath, f)
+		if fileDiff != "" {
+			result.WriteString(fileDiff)
 		}
 	}
 
@@ -2705,7 +2701,7 @@ func generateNewFileDiffForWorktree(worktreePath, relPath string) string {
 	}
 	for i := 0; i < checkLen; i++ {
 		if content[i] == 0 {
-			return fmt.Sprintf("\ndiff --git a/%s b/%s\nnew file mode 100644\nBinary files /dev/null and b/%s differ\n", relPath, relPath, relPath)
+			return fmt.Sprintf("\ndiff --git %s %s\nnew file mode 100644\nBinary files /dev/null and %s differ\n", llmgitdiff.QuoteHeaderPath("a/", relPath), llmgitdiff.QuoteHeaderPath("b/", relPath), llmgitdiff.QuoteHeaderPath("b/", relPath))
 		}
 	}
 
@@ -2714,14 +2710,14 @@ func generateNewFileDiffForWorktree(worktreePath, relPath string) string {
 		lines = lines[:len(lines)-1]
 	}
 	if len(lines) == 0 {
-		return fmt.Sprintf("\ndiff --git a/%s b/%s\nnew file mode 100644\n", relPath, relPath)
+		return fmt.Sprintf("\ndiff --git %s %s\nnew file mode 100644\n", llmgitdiff.QuoteHeaderPath("a/", relPath), llmgitdiff.QuoteHeaderPath("b/", relPath))
 	}
 
 	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("\ndiff --git a/%s b/%s\n", relPath, relPath))
+	buf.WriteString(fmt.Sprintf("\ndiff --git %s %s\n", llmgitdiff.QuoteHeaderPath("a/", relPath), llmgitdiff.QuoteHeaderPath("b/", relPath)))
 	buf.WriteString("new file mode 100644\n")
 	buf.WriteString("--- /dev/null\n")
-	buf.WriteString(fmt.Sprintf("+++ b/%s\n", relPath))
+	buf.WriteString(fmt.Sprintf("+++ %s\n", llmgitdiff.QuoteHeaderPath("b/", relPath)))
 	buf.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(lines)))
 	for _, l := range lines {
 		buf.WriteString("+" + l + "\n")
