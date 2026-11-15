@@ -97,6 +97,7 @@ output_dist="$dist"
 dist=$(mktemp -d "$root/web/static/.dist-build.XXXXXX")
 trap 'rm -rf "$dist"' EXIT
 mkdir -p "$dist/vendor"
+cp "$assets/retry.js" "$dist/retry.js"
 cp "$assets/panel-scroll.js" "$dist/panel-scroll.js"
 cp "$assets/permission-errors.js" "$dist/permission-errors.js"
 cp "$assets/plugin-nav-overflow.js" "$dist/plugin-nav-overflow.js"
