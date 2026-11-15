@@ -75,7 +75,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'mini preview settled');
  await new Promise(r=>setTimeout(r,250));const miniReads=window.computerStatusReads;
  await new Promise(r=>setTimeout(r,5500));if(window.computerStatusReads!==miniReads)throw Error('Mini preview still polls status');
- q('[data-computer-preview-open]').click();await wait(()=>q('[data-computer-dialog]').open);
+ q('[data-computer-preview-open]').click();
+ if(document.activeElement!==q('[data-computer-screen]'))throw Error('Expanded preview must initially focus the computer screen');
+ await wait(()=>q('[data-computer-dialog]').open);
  if(q('[data-computer-action="takeover"], [data-computer-action="release"], [data-computer-expand]'))throw Error('Unexpected viewer buttons');
  await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly,'takeover');
 
