@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
@@ -24,6 +26,7 @@ import (
 )
 
 type ProjectComputerService struct {
+	readinessLookups    *singleflight.Group
 	broadcaster         *events.Broadcaster
 	onFilePublished     func(context.Context, string, string)
 	verifyLoginVisual   func(context.Context, string, string, string, []byte) (bool, error)
@@ -41,7 +44,7 @@ func NewProjectComputerService(projects persistence.ProjectStore, p ComputerProv
 	if p == nil {
 		p = defaultComputerProvisioner()
 	}
-	return &ProjectComputerService{repo: projects.Computers(), locks: &sync.Map{}, active: &sync.Map{}, projects: projects, provisioner: p, client: &http.Client{Timeout: (agenttools.MaxBashTimeoutSeconds + 10) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return &ProjectComputerService{repo: projects.Computers(), readinessLookups: &singleflight.Group{}, locks: &sync.Map{}, active: &sync.Map{}, projects: projects, provisioner: p, client: &http.Client{Timeout: (agenttools.MaxBashTimeoutSeconds + 10) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
 // SetBroadcaster wires status invalidations into the app's existing live transport.
@@ -84,19 +87,7 @@ func (s *ProjectComputerService) connection(ctx context.Context, id string, curr
 	if c.Provider != s.provisioner.Provider() {
 		return ComputerConnection{}, errors.New("computer provider differs from this installation")
 	}
-	var conn ComputerConnection
-	if resolver, ok := s.provisioner.(interface {
-		ResolveCurrent(context.Context, string) (ComputerConnection, error)
-	}); current && ok {
-		conn, err = resolver.ResolveCurrent(ctx, id)
-	} else {
-		if checker, ok := s.provisioner.(interface {
-			Current(context.Context, string) bool
-		}); current && ok && !checker.Current(ctx, id) {
-			return ComputerConnection{}, errors.New("project computer image is outdated")
-		}
-		conn, err = s.provisioner.Resolve(ctx, id)
-	}
+	conn, err := s.resolveConnection(ctx, id, current)
 
 	if err == nil && s.taskID != "" {
 		conn.Endpoint += "/desktops/" + ComputerDesktopID(s.taskID)
@@ -114,6 +105,46 @@ func (s *ProjectComputerService) connection(ctx context.Context, id string, curr
 			}
 		}
 	}
+	return conn, err
+}
+
+// Only concurrent readiness lookups share a result; nothing is cached afterward.
+// Task authorization, cookie cleanup, and desktop health remain caller-specific.
+func (s *ProjectComputerService) resolveConnection(ctx context.Context, id string, current bool) (ComputerConnection, error) {
+	if !current || s.readinessLookups == nil {
+		return s.resolveContainer(ctx, id, current)
+	}
+	result := s.readinessLookups.DoChan(id, func() (any, error) {
+		check, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return s.resolveContainer(check, id, true)
+	})
+	select {
+	case <-ctx.Done():
+		return ComputerConnection{}, ctx.Err()
+	case resolved := <-result:
+		if resolved.Err != nil {
+			return ComputerConnection{}, resolved.Err
+		}
+		return resolved.Val.(ComputerConnection), nil
+	}
+}
+func (s *ProjectComputerService) resolveContainer(ctx context.Context, id string, current bool) (ComputerConnection, error) {
+	var conn ComputerConnection
+	var err error
+	if resolver, ok := s.provisioner.(interface {
+		ResolveCurrent(context.Context, string) (ComputerConnection, error)
+	}); current && ok {
+		conn, err = resolver.ResolveCurrent(ctx, id)
+	} else {
+		if checker, ok := s.provisioner.(interface {
+			Current(context.Context, string) bool
+		}); current && ok && !checker.Current(ctx, id) {
+			return ComputerConnection{}, errors.New("project computer image is outdated")
+		}
+		conn, err = s.provisioner.Resolve(ctx, id)
+	}
+
 	return conn, err
 }
 func (s *ProjectComputerService) Start(ctx context.Context, id string) error {
@@ -644,7 +675,7 @@ func (s *ProjectComputerService) ForTask(ctx context.Context, projectID, taskID 
 	if err != nil {
 		return nil, err
 	}
-	return &ProjectComputerService{broadcaster: s.broadcaster, repo: repo, projects: s.projects, provisioner: s.provisioner, client: s.client, locks: s.locks, active: s.active, taskID: taskID, attachmentDirectory: s.attachmentDirectory, verifyLoginVisual: s.verifyLoginVisual, onFilePublished: s.onFilePublished}, nil
+	return &ProjectComputerService{broadcaster: s.broadcaster, readinessLookups: s.readinessLookups, repo: repo, projects: s.projects, provisioner: s.provisioner, client: s.client, locks: s.locks, active: s.active, taskID: taskID, attachmentDirectory: s.attachmentDirectory, verifyLoginVisual: s.verifyLoginVisual, onFilePublished: s.onFilePublished}, nil
 }
 func ComputerDesktopID(taskID string) string {
 	sum := sha256.Sum256([]byte(taskID))

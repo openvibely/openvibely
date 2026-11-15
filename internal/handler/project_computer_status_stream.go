@@ -45,7 +45,14 @@ func (h *Handler) streamComputerStatus(ctx context.Context, cmd liveCommand, sen
 				return false
 			}
 		}
-		status, err := h.computerStatus(readCtx, svc, cmd.ProjectID, cmd.TaskID, cmd.ViewerID, cmd.ViewerMode, cmd.Native)
+		var status map[string]any
+		var err error
+		if cmd.TaskID == "" && cmd.ViewerID == "" {
+			// Tab availability needs configuration, not a running desktop.
+			status, err = h.computerAvailability(readCtx, svc, cmd.ProjectID)
+		} else {
+			status, err = h.computerStatus(readCtx, svc, cmd.ProjectID, cmd.TaskID, cmd.ViewerID, cmd.ViewerMode, cmd.Native)
+		}
 		if err != nil {
 			send(liveFrame{Event: "retry", Data: "Computer status unavailable"})
 			return false

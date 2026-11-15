@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/events"
@@ -62,4 +65,30 @@ func TestComputerStatusReloadsOnResubscription(t *testing.T) {
 	client.send(t, cmd)
 	client.next(t, cmd.ID, "subscribed")
 	require.Equal(t, true, client.next(t, cmd.ID, "computer_status").Data.(map[string]any)["enabled"])
+}
+
+// Availability subscriptions must not contact the computer at all.
+type unavailableComputerFixture struct {
+	liveComputerFixture
+	calls *atomic.Int32
+}
+
+func (p unavailableComputerFixture) Resolve(context.Context, string) (service.ComputerConnection, error) {
+	p.calls.Add(1)
+	return service.ComputerConnection{}, errors.New("computer offline")
+}
+func TestComputerAvailabilitySkipsReadiness(t *testing.T) {
+	tc, server := liveTestServer(t)
+	var calls atomic.Int32
+	svc := service.NewProjectComputerService(tc.handler.projectRepo, unavailableComputerFixture{calls: &calls})
+	tc.handler.computerSvc = svc
+	require.NoError(t, svc.SetEnabled(t.Context(), "default", true))
+	client := dialLive(t, server.URL)
+	cmd := liveCommand{Op: "computer", ID: "availability", ProjectID: "default"}
+	client.send(t, cmd)
+	client.next(t, cmd.ID, "subscribed")
+	state := client.next(t, cmd.ID, "computer_status").Data.(map[string]any)
+	require.Equal(t, true, state["enabled"])
+	require.NotContains(t, state, "ready")
+	require.Zero(t, calls.Load())
 }

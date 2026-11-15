@@ -88,6 +88,17 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 }
 
 // computerStatus is shared by HTTP callers and authorized WebSocket subscriptions.
+func (h *Handler) computerAvailability(ctx context.Context, svc *service.ProjectComputerService, projectID string) (map[string]any, error) {
+	state, err := svc.Get(ctx, projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return map[string]any{"configured": false, "enabled": false}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"configured": true, "enabled": state.Enabled}, nil
+}
+
 func (h *Handler) computerStatus(ctx context.Context, svc *service.ProjectComputerService, projectID, taskID, viewerID, viewerMode string, native bool) (map[string]any, error) {
 	state, err := svc.Get(ctx, projectID)
 	if errors.Is(err, sql.ErrNoRows) {
