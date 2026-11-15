@@ -1354,6 +1354,11 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	}
 	baseURL := fmt.Sprintf("http://%s:%s", host, port)
 	h.SetComputerDesktopBackendURL(baseURL)
+	// Native requests carry the WebView host (localhost or wails.localhost),
+	// which has no backend port. Shareable links need the bound HTTP address.
+	if cfg.Mode == config.ModeDesktop && cfg.AppBaseURL == "" {
+		h.SetAppBaseURL(baseURL)
+	}
 	if binaryUpdateInstaller != nil {
 		binaryUpdateInstaller.HealthURL = baseURL + "/api/system/health"
 		updateCoordinator.StartRecovery(srvCtx)

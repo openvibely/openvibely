@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -126,6 +127,100 @@ func TestDesktopAuthentication(t *testing.T) {
 			}
 			check(request("POST", "/logout", origin, "", ""), 302)
 			check(request("GET", "/auth/me", origin, "", ""), 401)
+		})
+	}
+}
+
+// Invitations created in a native window are opened and submitted in a browser.
+func TestDesktopInvitationBrowserSignup(t *testing.T) {
+	backend := desktopAuthBackend(t)
+	target, err := url.Parse(backend.BaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, origin := range []string{"wails://localhost", "http://wails.localhost", "https://wails.localhost"} {
+		t.Run(origin, func(t *testing.T) {
+			proxy := desktopAssetProxy(target)
+			post := func(path, form string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPost, origin+path, strings.NewReader(form))
+				req.Header.Set("Origin", origin)
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				rec := httptest.NewRecorder()
+				proxy.ServeHTTP(rec, req)
+				return rec
+			}
+			if rec := post("/login", "username=alice&password=alice-password-long"); rec.Code != http.StatusFound {
+				t.Fatalf("login: %d %s", rec.Code, rec.Body.String())
+			}
+			invitation := post("/organization/invitations", "role=member")
+			if invitation.Code != http.StatusOK {
+				t.Fatalf("invite: %d %s", invitation.Code, invitation.Body.String())
+			}
+			match := regexp.MustCompile(`<code>(https?://[^<]+/invite\?token=[A-Za-z0-9_-]+)</code>`).FindStringSubmatch(invitation.Body.String())
+			if len(match) != 2 {
+				t.Fatal("missing invitation URL")
+			}
+			if !strings.HasPrefix(match[1], backend.BaseURL+"/invite?") {
+				t.Fatalf("invitation URL must use bound backend address: %s", match[1])
+			}
+			client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			page, err := client.Get(match[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(page.Body)
+			page.Body.Close()
+			if err != nil || page.StatusCode != http.StatusOK {
+				t.Fatalf("invite page: %d %v %s", page.StatusCode, err, body)
+			}
+			token := regexp.MustCompile(`name="token" value="([A-Za-z0-9_-]+)"`).FindSubmatch(body)
+			if len(token) != 2 {
+				t.Fatal("missing signup form token")
+			}
+			form := url.Values{"token": {string(token[1])}, "username": {"browser-member-" + string(rune('a'+i))}, "password": {"member-password-long"}}
+			join := func() *http.Response {
+				req, err := http.NewRequest(http.MethodPost, backend.BaseURL+"/invite", strings.NewReader(form.Encode()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Header.Set("Origin", backend.BaseURL)
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				response, err := client.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return response
+			}
+			joined := join()
+			body, err = io.ReadAll(joined.Body)
+			joined.Body.Close()
+			if err != nil || joined.StatusCode != http.StatusSeeOther {
+				t.Fatalf("signup: %d %v %s", joined.StatusCode, err, body)
+			}
+			if joined.Header.Get("Location") != "/organization" || len(joined.Cookies()) == 0 {
+				t.Fatal("signup did not establish a session and redirect to organization")
+			}
+			meRequest, err := http.NewRequest(http.MethodGet, backend.BaseURL+"/auth/me", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, cookie := range joined.Cookies() {
+				meRequest.AddCookie(cookie)
+			}
+			me, err := client.Do(meRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err = io.ReadAll(me.Body)
+			me.Body.Close()
+			if err != nil || me.StatusCode != http.StatusOK || !strings.Contains(string(body), `"role":"member"`) || !strings.Contains(string(body), form.Get("username")) {
+				t.Fatalf("member session: %d %v %s", me.StatusCode, err, body)
+			}
+			reused := join()
+			reused.Body.Close()
+			if reused.StatusCode != http.StatusBadRequest {
+				t.Fatalf("reused invitation: %d", reused.StatusCode)
+			}
 		})
 	}
 }
