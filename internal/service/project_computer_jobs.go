@@ -3,22 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/openvibely/openvibely/internal/applog"
-	"net/url"
 	"time"
 )
 
-func (s *ProjectComputerService) Jobs(ctx context.Context, id, jobID string) ([]byte, error) {
-	if s.taskID == "" {
-		return nil, errors.New("choose a task desktop")
-	}
-	conn, err := s.Connection(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return s.request(ctx, conn, "GET", "/jobs?job_id="+url.QueryEscape(jobID), nil)
-}
 func (s *ProjectComputerService) cancelJobs(ctx context.Context, id, jobID string) error {
 	conn, err := s.Connection(ctx, id)
 	if err != nil {
@@ -27,16 +15,6 @@ func (s *ProjectComputerService) cancelJobs(ctx context.Context, id, jobID strin
 	body, _ := json.Marshal(map[string]string{"job_id": jobID})
 	_, err = s.request(ctx, conn, "POST", "/jobs/cancel", body)
 	return err
-}
-
-func (s *ProjectComputerService) CancelJob(ctx context.Context, id, jobID string) error {
-	if s.taskID == "" || jobID == "" {
-		return errors.New("choose a task job")
-	}
-	gate := s.lifecycle(id)
-	gate.RLock()
-	defer gate.RUnlock()
-	return s.cancelJobs(ctx, id, jobID)
 }
 
 // Cancellation must not reuse the canceled execution/request context or wait

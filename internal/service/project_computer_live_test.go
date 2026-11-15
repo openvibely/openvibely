@@ -162,7 +162,11 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jobData, err := scoped.Jobs(t.Context(), project.ID, jobID)
+	conn, err := scoped.Connection(t.Context(), project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobData, err := scoped.request(t.Context(), conn, "GET", "/jobs?job_id="+jobID, nil)
 	if err != nil || strings.Contains(string(jobData), `"running":true`) {
 		t.Fatal("private login left a background command running", err, string(jobData))
 	}

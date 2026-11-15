@@ -12,19 +12,6 @@ import (
 	"time"
 )
 
-func (h *Handler) ProjectComputerImportFile(c echo.Context) error {
-	if err := h.computerProject(c); err != nil {
-		return err
-	}
-	if !computerSameOrigin(c.Request()) {
-		return echo.NewHTTPError(403)
-	}
-	result, err := h.computerService(c).ImportHumanFile(c.Request().Context(), c.Param("id"), c.QueryParam("path"))
-	if err != nil {
-		return echo.NewHTTPError(400, err.Error())
-	}
-	return c.Blob(200, "application/json", []byte(result))
-}
 func (h *Handler) ProjectComputerTeach(c echo.Context) error {
 	if h.llmSvc == nil {
 		return echo.NewHTTPError(503, "Model service unavailable")

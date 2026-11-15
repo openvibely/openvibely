@@ -86,7 +86,6 @@ func TestProjectComputerTaskRoutesRejectCrossProjectAndUnapprovedImports(t *test
 	e.GET("/projects/:id/computer/status", h.ProjectComputerStatus)
 	e.POST("/projects/:id/computer/chrome-import", h.ProjectComputerChromeImport)
 	e.POST("/projects/:id/computer/:action", h.ProjectComputerLifecycle)
-	e.GET("/projects/:id/computer/files", h.ProjectComputerFiles)
 	for _, tc := range []struct {
 		method, path, body, origin string
 		want                       int
@@ -96,7 +95,6 @@ func TestProjectComputerTaskRoutesRejectCrossProjectAndUnapprovedImports(t *test
 		{"POST", "/projects/" + project.ID + "/computer/chrome-import?task_id=" + task.ID, `{}`, "https://other.example", 403},
 		{"POST", "/projects/" + project.ID + "/computer/login-done?task_id=" + task.ID, `{}`, "", 400},
 		{"POST", "/projects/" + project.ID + "/computer/start?task_id=" + task.ID, `{}`, "", 400},
-		{"GET", "/projects/" + project.ID + "/computer/files?task_id=" + task.ID, "", "", 400},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		req.Header.Set("Origin", tc.origin)

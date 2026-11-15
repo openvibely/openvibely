@@ -16,24 +16,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// ImportHumanFile uses the same task-scoped attachment path as agent transfers.
-func (s *ProjectComputerService) ImportHumanFile(ctx context.Context, id, path string) (string, error) {
-	if s.taskID == "" {
-		return "", errors.New("save the task before adding files")
-	}
-	gate := s.lifecycle(id)
-	gate.RLock()
-	defer gate.RUnlock()
-	var result string
-	err := s.WithHumanInput(ctx, id, func() error {
-		input, _ := json.Marshal(map[string]string{"action": "from_computer", "computer_path": path})
-		var err error
-		result, err = s.attachmentTransfer(ctx, id, input)
-		return err
-	})
-	return result, err
-}
-
 type ComputerDemonstration struct {
 	Goal   string   `json:"goal"`
 	Steps  []string `json:"steps"`

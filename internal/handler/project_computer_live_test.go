@@ -80,9 +80,6 @@ func TestProjectComputerLiveViewer(t *testing.T) {
 	defer backend.Close()
 	h.SetComputerDesktopBackendURL(backend.URL)
 	e.GET("/projects/:id/computer/status", h.ProjectComputerStatus)
-	e.GET("/projects/:id/computer/files", h.ProjectComputerFiles)
-	e.PUT("/projects/:id/computer/files", h.ProjectComputerFiles)
-	e.POST("/projects/:id/computer/import-file", h.ProjectComputerImportFile)
 	e.POST("/projects/:id/computer/:action", h.ProjectComputerLifecycle)
 	e.GET("/projects/:id/computer/stream/:mode", h.ProjectComputerStream)
 	var page bytes.Buffer
@@ -105,23 +102,19 @@ func TestProjectComputerLiveViewer(t *testing.T) {
   await wait(liveFrame);
   if(document.querySelector('[data-computer-status]'))throw Error('Obsolete status element remains');
   const root=document.querySelector('[data-computer-project]');
-  const filesURL='/projects/'+root.dataset.computerProject+'/computer/files?task_id='+root.dataset.computerTask+'&path=viewer-fixture.txt';
   const statusURL='/projects/'+root.dataset.computerProject+'/computer/status?task_id='+root.dataset.computerTask;
   if((await (await fetch(statusURL)).json()).held)throw Error('Fullscreen acquired exclusive control');
   if(document.querySelector('[data-computer-files]'))throw Error('Obsolete Files section remains');
   document.querySelector('[data-computer-close]').click();
   await wait(()=>!document.querySelector('[data-computer-dialog]').open && !document.querySelector('[aria-label="Remote computer keyboard"]'));
   await wait(liveFrame);
-  const uploaded=await fetch(filesURL,{method:'PUT',body:'viewer-file'});if(!uploaded.ok)throw Error('upload failed');
-  const downloaded=await fetch(filesURL);if(await downloaded.text()!=='viewer-file')throw Error('download differed');
-  const duplicate=await fetch(filesURL,{method:'PUT',body:'replacement'});if(duplicate.ok)throw Error('overwrote user file');
   if(takeoverCalls)throw Error('Normal viewer requested takeover or release');
   const handoff=await fetch('/fixture-login',{method:'POST'});if(!handoff.ok)throw Error('Private handoff failed');
   await wait(()=>!document.querySelector('[data-computer-login]').hidden);
   document.querySelector('[data-computer-preview-open]').click();await wait(()=>document.querySelector('[data-computer-dialog]').open);document.querySelector('[data-computer-close]').click();await wait(()=>!document.querySelector('[data-computer-dialog]').open);if(document.querySelector('[data-computer-login]').hidden)throw Error('Closing viewer cleared private login');
   document.querySelector('[data-computer-action="login-done"]').click();
   await wait(()=>document.querySelector('[data-computer-login]').hidden);
-  finish('pass','desktop frame, shared control, files, private handoff verified');
+  finish('pass','desktop frame, shared control, private handoff verified');
  }catch(e){finish('fail',e.message);}
 })();</script>`
 	html := strings.Replace(page.String(), "</body>", script+"</body>", 1)

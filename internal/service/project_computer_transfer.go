@@ -109,57 +109,6 @@ func (s *ProjectComputerService) transfer(ctx context.Context, id, direction, lo
 	return "File transferred", nil
 }
 
-// HumanFiles is the user's file picker path, separate from model tool execution.
-func (s *ProjectComputerService) HumanFiles(ctx context.Context, id, path string, upload []byte, write bool) ([]byte, string, error) {
-	if s.taskID == "" {
-		return nil, "", errors.New("choose a task desktop")
-	}
-	if path != "" && !safeTransferPath(path) {
-		return nil, "", errors.New("choose a relative path inside Files")
-	}
-	if write && (path == "" || len(upload) > computerTransferLimit) {
-		return nil, "", errors.New("choose a file up to 25 MB")
-	}
-	gate := s.lifecycle(id)
-	gate.RLock()
-	defer gate.RUnlock()
-	var data []byte
-	var contentType string
-	err := s.WithHumanInput(ctx, id, func() error {
-		conn, err := s.Connection(ctx, id)
-		if err != nil {
-			return err
-		}
-		method := http.MethodGet
-		if write {
-			method = http.MethodPut
-		}
-		req, err := http.NewRequestWithContext(ctx, method, conn.Endpoint+"/files?path="+url.QueryEscape("Files/"+path), bytes.NewReader(upload))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Authorization", "Bearer "+conn.Token)
-		res, err := s.client.Do(req)
-		if err != nil {
-			return errors.New("computer files unavailable")
-		}
-		defer res.Body.Close()
-		if res.StatusCode != 200 {
-			return errors.New("file operation failed; check the path and use a new filename for uploads")
-		}
-		data, err = io.ReadAll(io.LimitReader(res.Body, computerTransferLimit+1))
-		if err != nil {
-			return err
-		}
-		if len(data) > computerTransferLimit {
-			return errors.New("file exceeds 25 MB")
-		}
-		contentType = res.Header.Get("Content-Type")
-		return nil
-	})
-	return data, contentType, err
-}
-
 // Check before opening to avoid touching special files, then recheck the opened
 // descriptor. Nonblocking open on Unix also protects against FIFO replacement
 // between the initial stat and open.

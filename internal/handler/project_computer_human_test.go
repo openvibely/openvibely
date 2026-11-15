@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestComputerHumanImportsAndDemonstration(t *testing.T) {
+func TestComputerHumanDemonstration(t *testing.T) {
 	db := teststores.New(t)
 	p := &models.Project{Name: "Human computer"}
 	require.NoError(t, db.Projects.Create(t.Context(), p))
@@ -68,7 +68,6 @@ func TestComputerHumanImportsAndDemonstration(t *testing.T) {
 	}
 	llm.SetLLMCaller(mock)
 	e := echo.New()
-	e.POST("/projects/:id/computer/import-file", h.ProjectComputerImportFile)
 	e.POST("/projects/:id/computer/teach", h.ProjectComputerTeach)
 	e.POST("/projects/:id/computer/workflows", h.ProjectComputerWorkflows)
 	send := func(action string, body any, origin string) *httptest.ResponseRecorder {
@@ -86,21 +85,12 @@ func TestComputerHumanImportsAndDemonstration(t *testing.T) {
 	require.NoError(t, err)
 	state, err := scoped.Get(t.Context(), p.ID)
 	require.NoError(t, err)
-	require.False(t, state.Held, "file import and workflow generation must work without takeover")
-	require.Equal(t, 403, send("import-file", nil, "https://other.test").Code)
-	rec := send("import-file", nil, "")
-	require.Equal(t, 200, rec.Code, rec.Body.String())
-	attachments, err := db.Attachments.ListByTask(t.Context(), task.ID)
-	require.NoError(t, err)
-	require.Len(t, attachments, 1)
-	data, err := os.ReadFile(attachments[0].FilePath)
-	require.NoError(t, err)
-	require.Equal(t, "report content", string(data))
+	require.False(t, state.Held, "workflow generation must work without takeover")
 	var capture bytes.Buffer
 	require.NoError(t, jpeg.Encode(&capture, image.NewRGBA(image.Rect(0, 0, 10, 10)), nil))
 	demo := service.ComputerDemonstration{Goal: "Download the report", Steps: []string{"Open Reports", "Type [user-provided value] into the focused field."}, Images: []string{base64.StdEncoding.EncodeToString(capture.Bytes())}}
 	require.Equal(t, 403, send("teach", demo, "https://other.test").Code)
-	rec = send("teach", demo, "")
+	rec := send("teach", demo, "")
 	require.Equal(t, 200, rec.Code, rec.Body.String())
 	require.True(t, mock.LastAgentRequest().DisableTools)
 	require.Nil(t, llmcontracts.RuntimeToolsFromContext(mock.LastAgentRequest().Ctx))
