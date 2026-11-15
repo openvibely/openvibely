@@ -26,7 +26,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  } else {
   <section id="project-computer" data-computer-task={computerTaskID(taskIDs)} data-computer-project={ projectID } data-computer-viewer={ static.URL("vendor/novnc/core/rfb.js") } class="flex flex-col gap-4 text-sm">
    <div data-computer-preview hidden style="position:relative">
- <div data-computer-screen tabindex="-1" aria-label="Computer screen" class="rounded-lg overflow-hidden outline-none" style="aspect-ratio:16/10;width:100%;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))"></div>
+ <div data-computer-screen tabindex="-1" aria-label="Computer screen" class="rounded-lg overflow-hidden outline-none" style="aspect-ratio:16/10;width:100%;user-select:none;-webkit-user-select:none;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))"></div>
  <button type="button" data-computer-preview-open aria-label="Open larger computer preview" style="position:absolute;inset:0;width:100%;height:100%;cursor:zoom-in;background:transparent;border:0"></button>
  </div>
  <h3 class="text-sm font-semibold">Computer</h3>

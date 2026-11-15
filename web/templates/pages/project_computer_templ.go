@@ -153,7 +153,7 @@ func ProjectComputerContent(projectID string, taskIDs ...string) templ.Component
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"flex flex-col gap-4 text-sm\"><div data-computer-preview hidden style=\"position:relative\"><div data-computer-screen tabindex=\"-1\" aria-label=\"Computer screen\" class=\"rounded-lg overflow-hidden outline-none\" style=\"aspect-ratio:16/10;width:100%;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))\"></div><button type=\"button\" data-computer-preview-open aria-label=\"Open larger computer preview\" style=\"position:absolute;inset:0;width:100%;height:100%;cursor:zoom-in;background:transparent;border:0\"></button></div><h3 class=\"text-sm font-semibold\">Computer</h3>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"flex flex-col gap-4 text-sm\"><div data-computer-preview hidden style=\"position:relative\"><div data-computer-screen tabindex=\"-1\" aria-label=\"Computer screen\" class=\"rounded-lg overflow-hidden outline-none\" style=\"aspect-ratio:16/10;width:100%;user-select:none;-webkit-user-select:none;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))\"></div><button type=\"button\" data-computer-preview-open aria-label=\"Open larger computer preview\" style=\"position:absolute;inset:0;width:100%;height:100%;cursor:zoom-in;background:transparent;border:0\"></button></div><h3 class=\"text-sm font-semibold\">Computer</h3>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
