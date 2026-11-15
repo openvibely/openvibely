@@ -146,11 +146,11 @@ func TestComputerToolRoutingAndAttachments(t *testing.T) {
 	_, err = s.attachmentTransfer(t.Context(), p.ID, data)
 	require.NoError(t, err)
 	out, err = s.attachmentTransfer(t.Context(), p.ID, json.RawMessage(`{"action":"from_computer","computer_path":"result.txt"}`))
-	require.NoError(t, err)
-	require.Contains(t, out, "attachment_id")
+	require.EqualError(t, err, "an execution is required to publish a computer file")
+	require.Empty(t, out)
 	attachments, err := db.Attachments.ListByTask(t.Context(), task.ID)
 	require.NoError(t, err)
-	require.Len(t, attachments, 2)
+	require.Len(t, attachments, 1)
 	config := &models.LLMConfig{Name: "fixture", Provider: models.ProviderTest, Model: "test", AuthMethod: models.AuthMethodAPIKey}
 	require.NoError(t, db.LLMConfigs.Create(t.Context(), config))
 	execution := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecCompleted, PromptSent: "with file"}

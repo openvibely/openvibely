@@ -6,13 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
-	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -53,6 +50,10 @@ func (s *ProjectComputerService) attachmentTransfer(ctx context.Context, id stri
 	}
 	if !safeTransferPath(args.Path) {
 		return "", errors.New("choose a relative file in the computer Files directory")
+	}
+	executionID := llmcontracts.ArtifactExecutionIDFromContext(ctx)
+	if args.Action == "from_computer" && executionID == "" {
+		return "", errors.New("an execution is required to publish a computer file")
 	}
 	conn, err := s.Connection(ctx, id)
 	if err != nil {
@@ -132,34 +133,9 @@ func (s *ProjectComputerService) attachmentTransfer(ctx context.Context, id stri
 	if s.attachmentDirectory == "" {
 		return "", errors.New("attachment storage is not configured")
 	}
-	if executionID := llmcontracts.ArtifactExecutionIDFromContext(ctx); executionID != "" {
-		out, err := publishGeneratedFile(ctx, repo, s.attachmentDirectory, id, executionID, args.Path, data)
-		if err == nil && s.onFilePublished != nil {
-			s.onFilePublished(ctx, id, executionID)
-		}
-		return out, err
+	out, err := publishGeneratedFile(ctx, repo, s.attachmentDirectory, id, executionID, args.Path, data)
+	if err == nil && s.onFilePublished != nil {
+		s.onFilePublished(ctx, id, executionID)
 	}
-	dir := filepath.Join(s.attachmentDirectory, s.taskID)
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return "", err
-	}
-	name := filepath.Base(args.Path)
-	path := filepath.Join(dir, persistence.NewID()+"-"+name)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return "", err
-	}
-	_, err = file.Write(data)
-	closeErr := file.Close()
-	if err != nil || closeErr != nil {
-		os.Remove(path)
-		return "", errors.New("could not save attachment")
-	}
-	att := &models.Attachment{TaskID: s.taskID, FileName: name, FilePath: path, FileSize: int64(len(data)), MediaType: http.DetectContentType(data)}
-	if err = repo.Create(ctx, att); err != nil {
-		os.Remove(path)
-		return "", err
-	}
-	out, _ := json.Marshal(map[string]any{"attachment_id": att.ID, "name": name, "size": len(data), "url": "/attachments/" + att.ID + "/download"})
-	return string(out), nil
+	return out, err
 }
