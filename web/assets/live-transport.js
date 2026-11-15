@@ -82,6 +82,14 @@
                 return;
             }
             if (frame.event === 'reconcile') {
+                // Only sent after notification loss. Renew computer subscriptions
+                // to receive authorized snapshots over this socket, not HTTP.
+                subscriptions.forEach(function (entry, id) {
+                    if (entry.command.op !== 'computer') return;
+                    clearTimeout(entry.retryTimer);
+                    send({op:'unsubscribe', id:id});
+                    send(command(entry));
+                });
                 window.dispatchEvent(new CustomEvent('sse-live-connected', {detail: {reconnected: true, reconciliation: true}}));
                 if (window.htmx) window.htmx.trigger('body', 'alertUpdate');
                 return;

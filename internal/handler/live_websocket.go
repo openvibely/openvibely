@@ -64,6 +64,9 @@ func dispatchLiveFrame(subscriptions map[string]*liveSubscription, frame liveFra
 	if frame.finished {
 		return true
 	}
+	if frame.Event == "reconcile" {
+		frame.ID = ""
+	}
 	return write(frame)
 }
 
@@ -409,9 +412,6 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 					}
 				}()
 			}
-			if ticks%30 == 0 {
-				writeFrame(liveFrame{Event: "reconcile"})
-			}
 			var snapshot any
 			if h.updateCoordinator != nil && h.updateCoordinator.Visible() {
 				snapshot = h.updateCoordinator.Snapshot()
@@ -489,6 +489,7 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 	var tasks events.Subscriber
 	var chats events.ChatSubscriber
 	var files events.FileChangeSubscriber
+	var taskMissed, chatMissed, fileMissed <-chan struct{}
 	var err error
 	if h.broadcaster != nil {
 		if cmd.ProjectID == models.AllProjectsID {
@@ -501,6 +502,7 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 			return
 		}
 		defer h.broadcaster.Unsubscribe(tasks)
+		taskMissed = h.broadcaster.Missed(tasks)
 	}
 	if h.chatBroadcaster != nil {
 		chats, err = h.chatBroadcaster.SubscribeProject(cmd.ProjectID)
@@ -509,6 +511,7 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 			return
 		}
 		defer h.chatBroadcaster.Unsubscribe(chats)
+		chatMissed = h.chatBroadcaster.Missed(chats)
 	}
 	if h.fileChangeBroadcaster != nil && cmd.TaskID != "" {
 		files, err = h.fileChangeBroadcaster.SubscribeTask(cmd.TaskID)
@@ -517,6 +520,7 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 			return
 		}
 		defer h.fileChangeBroadcaster.Unsubscribe(files)
+		fileMissed = h.fileChangeBroadcaster.Missed(files)
 	}
 	if !send(liveFrame{Event: "subscribed"}) {
 		return
@@ -525,6 +529,21 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 		select {
 		case <-ctx.Done():
 			return
+		case <-taskMissed:
+			discardLiveBacklog(tasks)
+			if !send(liveFrame{Event: "reconcile"}) {
+				return
+			}
+		case <-chatMissed:
+			discardLiveBacklog(chats)
+			if !send(liveFrame{Event: "reconcile"}) {
+				return
+			}
+		case <-fileMissed:
+			discardLiveBacklog(files)
+			if !send(liveFrame{Event: "reconcile"}) {
+				return
+			}
 		case ev, ok := <-tasks:
 			if !ok {
 				return
@@ -708,4 +727,17 @@ func (h *Handler) RunningExecutions(c echo.Context) error {
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, items)
+}
+
+// Once delivery has a gap, discard the already-buffered stale notifications
+// before requesting authoritative state. Bound draining so publishers cannot
+// starve recovery by continuing to produce events.
+func discardLiveBacklog[T any](events <-chan T) {
+	for remaining := len(events); remaining > 0; remaining-- {
+		select {
+		case <-events:
+		default:
+			return
+		}
+	}
 }

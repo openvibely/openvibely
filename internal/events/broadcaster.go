@@ -138,3 +138,6 @@ func (e TaskEvent) ToSSE() string {
 	data, _ := json.Marshal(e)
 	return "data: " + string(data) + "\n\n"
 }
+
+// Missed signals that this subscriber lost one or more events.
+func (b *Broadcaster) Missed(sub Subscriber) <-chan struct{} { return b.core.Missed(sub) }

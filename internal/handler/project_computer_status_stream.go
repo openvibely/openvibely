@@ -17,6 +17,7 @@ func (h *Handler) streamComputerStatus(ctx context.Context, cmd liveCommand, sen
 	}
 	defer h.liveSubscriptionCount.Add(-1)
 	var updates events.Subscriber
+	var missed <-chan struct{}
 	if h.broadcaster != nil {
 		var err error
 		updates, err = h.broadcaster.SubscribeProject(cmd.ProjectID)
@@ -25,6 +26,7 @@ func (h *Handler) streamComputerStatus(ctx context.Context, cmd liveCommand, sen
 			return
 		}
 		defer h.broadcaster.Unsubscribe(updates)
+		missed = h.broadcaster.Missed(updates)
 	}
 	// Subscribe before the initial snapshot so mutations during the read are kept.
 	snapshot := func() bool {
@@ -59,6 +61,11 @@ func (h *Handler) streamComputerStatus(ctx context.Context, cmd liveCommand, sen
 		select {
 		case <-ctx.Done():
 			return
+		case <-missed:
+			discardLiveBacklog(updates)
+			if !send(liveFrame{Event: "reconcile"}) {
+				return
+			}
 		case ev, ok := <-updates:
 			if !ok {
 				return

@@ -227,3 +227,45 @@ func TestTypedBroadcasters_UseConfiguredBufferCapacities(t *testing.T) {
 		t.Fatalf("file-change subscriber capacity = %d, want 50", got)
 	}
 }
+
+func TestBroadcasterCore_MissedSignalsAreScopedAndCoalesced(t *testing.T) {
+	b := newBroadcaster[broadcasterCoreTestEvent, broadcasterCoreTestSubscriber](1)
+	slow, _ := b.SubscribeScoped("p")
+	global, _ := b.Subscribe()
+	defer b.Unsubscribe(global)
+	fast, _ := b.SubscribeScoped("p")
+	other, _ := b.SubscribeScoped("other")
+	defer b.Unsubscribe(slow)
+	defer b.Unsubscribe(fast)
+	defer b.Unsubscribe(other)
+	for i := 0; i < 10; i++ {
+		b.PublishScoped("p", broadcasterCoreTestEvent{Value: i})
+		<-fast
+	}
+	if len(slow) != 1 {
+		t.Fatal("loss signal must not require space in event queue")
+	}
+	select {
+	case <-b.Missed(slow):
+	default:
+		t.Fatal("missing overflow signal")
+	}
+	select {
+	case <-b.Missed(global):
+	default:
+		t.Fatal("missing global overflow signal")
+	}
+	for name, sub := range map[string]broadcasterCoreTestSubscriber{"slow": slow, "fast": fast, "other": other, "global": global} {
+		select {
+		case <-b.Missed(sub):
+			t.Fatalf("unexpected extra signal for %s", name)
+		default:
+		}
+	}
+	b.PublishScoped("p", broadcasterCoreTestEvent{})
+	select {
+	case <-b.Missed(slow):
+	default:
+		t.Fatal("later overflow did not rearm signal")
+	}
+}

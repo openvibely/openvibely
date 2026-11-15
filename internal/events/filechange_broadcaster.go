@@ -83,3 +83,8 @@ func (e FileChangeEvent) ToSSE() string {
 	data, _ := json.Marshal(e)
 	return "data: " + string(data) + "\n\n"
 }
+
+// Missed signals that this subscriber lost one or more events.
+func (b *FileChangeBroadcaster) Missed(sub FileChangeSubscriber) <-chan struct{} {
+	return b.core.Missed(sub)
+}

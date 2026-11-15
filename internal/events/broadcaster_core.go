@@ -11,6 +11,7 @@ import (
 type subscriberGuard struct {
 	mu     sync.Mutex
 	closed bool
+	missed chan struct{}
 }
 
 type broadcasterEntry[T any, S ~chan T] struct {
@@ -62,7 +63,7 @@ func (b *broadcaster[T, S]) SubscribeScoped(scope string) (S, error) {
 	}
 
 	sub := make(S, b.bufferSize)
-	guard := &subscriberGuard{}
+	guard := &subscriberGuard{missed: make(chan struct{}, 1)}
 	b.subscribers[sub] = broadcasterSubscription{guard: guard, scope: scope}
 	if b.scopedSubscribers[scope] == nil {
 		b.scopedSubscribers[scope] = make(map[S]*subscriberGuard)
@@ -134,7 +135,11 @@ func (b *broadcaster[T, S]) PublishScoped(scope string, event T) {
 			select {
 			case entry.ch <- event:
 			default:
-				// Drop events for slow subscribers rather than blocking producers.
+				// Keep one loss notification pending until the subscriber handles it.
+				select {
+				case entry.guard.missed <- struct{}{}:
+				default:
+				}
 			}
 		}
 	}
@@ -144,7 +149,11 @@ func (b *broadcaster[T, S]) PublishScoped(scope string, event T) {
 				select {
 				case entry.ch <- event:
 				default:
-					// Drop events for slow subscribers rather than blocking producers.
+					// Keep one loss notification pending until the subscriber handles it.
+					select {
+					case entry.guard.missed <- struct{}{}:
+					default:
+					}
 				}
 			}
 		}
@@ -162,4 +171,15 @@ func (b *broadcaster[T, S]) SubscriberCount() int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return len(b.subscribers)
+}
+
+// Missed returns a coalescing loss signal independent of the bounded event queue.
+// It is not closed on unsubscribe; consumers stop using their subscription context.
+func (b *broadcaster[T, S]) Missed(sub S) <-chan struct{} {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if entry, ok := b.subscribers[sub]; ok {
+		return entry.guard.missed
+	}
+	return nil
 }

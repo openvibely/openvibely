@@ -136,3 +136,6 @@ func (b *ChatBroadcaster) DeliveryAttempts() uint64 {
 func (b *ChatBroadcaster) SubscriberCount() int {
 	return b.core.SubscriberCount()
 }
+
+// Missed signals that this subscriber lost one or more events.
+func (b *ChatBroadcaster) Missed(sub ChatSubscriber) <-chan struct{} { return b.core.Missed(sub) }

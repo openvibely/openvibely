@@ -63,7 +63,7 @@ assert(output === finalOutput, 'content changed across frame/navigation boundary
 assert(subscription.readyState === 2 && sockets.length === 2 && socket.readyState === 1, 'completion replaced the shared connection');
 assert(timers.size === 0, 'unexpected timer left after recovery');
 `},
-		{name: "computer_changes_and_reconnect_only", script: `
+		{name: "computer_recovers_after_loss_and_reconnect", script: `
 let snapshots=0;
 openVibelyLive.live('project','task',{});
 const computer=openVibelyLive.computer('project','task',{viewer_mode:'view'}, {listeners:{computer_status:()=>snapshots++}});
@@ -74,7 +74,12 @@ const commands=socket.sent.filter(command=>command.op==='computer');
 assert(commands.length===2,'missing computer subscriptions');
 socket.sent=[];
 frame(socket,{event:'reconcile'});
-assert(socket.sent.length===0,'periodic reconciliation refreshed computer status');
+assert(socket.sent.length===4,'loss recovery did not renew both computer subscriptions');
+for (const command of commands) {
+  assert(socket.sent.some(c=>c.op==='unsubscribe' && c.id===command.id),'missing unsubscribe');
+  assert(socket.sent.some(c=>c.op==='computer' && c.id===command.id),'missing replacement subscription');
+}
+assert(timers.size===0,'loss recovery installed a timer');
 frame(socket,{id:commands[0].id,event:'computer_status',data:{enabled:true}});
 assert(snapshots===1,'snapshot not delivered');
 socket.close();
