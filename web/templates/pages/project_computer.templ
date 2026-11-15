@@ -365,7 +365,22 @@ if(requestedControl!==dialog.open){refreshQueued=true;return;}currentState=state
   previewDeleted=true;retained?.remove();retained=null;disconnect();
  }
  window.addEventListener('computer-preview-deleted',previewWasDeleted);
- function beforeCleanup(event){if(event.detail?.elt===root || event.detail?.elt?.contains(root))disconnect();}
+ function dispose(){
+  if(closed)return;
+  closed=true;generationAbort?.abort();statusStream?.close();statusStream=null;
+  clearTimeout(statusTimer);screenRetry.dispose();clearInterval(autoCaptureTimer);
+  viewportObserver.disconnect();
+  window.removeEventListener('live-transport-disconnected',statusDisconnected);
+  window.removeEventListener('computer-preview-deleted',previewWasDeleted);
+  document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);
+  document.removeEventListener('visibilitychange',visibilityChanged);
+  document.removeEventListener('computer-setting-changed',changed);
+  document.removeEventListener('computer-tab-change',changed);
+  dialog.removeEventListener('close',finishViewer);
+  if(dialog.open)dialog.close();
+  disconnect();
+ }
+ function beforeCleanup(event){if(event.detail?.elt===root || event.detail?.elt?.contains(root))dispose();}
  document.addEventListener('htmx:beforeCleanupElement',beforeCleanup);
  const taskToggle=find('[data-task-computer-toggle]');
  if(taskToggle)taskToggle.onchange=async()=>{
@@ -375,8 +390,7 @@ if(requestedControl!==dialog.open){refreshQueued=true;return;}currentState=state
   finally{pending=false;taskToggle.disabled=false;await refresh();}
  };
  restoreFrame();screenRetry.start();
-     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;statusStream?.close();window.removeEventListener('live-transport-disconnected',statusDisconnected);clearTimeout(statusTimer);screenRetry.dispose();window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();disconnect();observer.disconnect();}});
-     observer.observe(document.body,{childList:true,subtree:true});
+
     })();
    </script>
   </section>
