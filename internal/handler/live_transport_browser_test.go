@@ -29,6 +29,40 @@ func TestLiveWebSocketBrowserByteReplayAndNativeTicketRecovery(t *testing.T) {
 		native bool
 		script string
 	}{
+		{name: "retry_controller_serializes_attempts", script: `
+frame(sockets[0],{event:'ready'});
+let attempts=[];
+const retry=openVibelyRetry(attempt=>attempts.push(attempt));
+assert(retry.start() && attempts.length===1,'initial attempt');
+assert(!retry.start() && timers.size===0,'overlapping attempt');
+attempts[0].fail();attempts[0].fail();
+assert(timers.size===1,'duplicate failure scheduled extra retry');
+assert(!retry.start(),'started during backoff');
+fireTimer(delay=>delay===1000);
+assert(attempts.length===2 && retry.active,'retry not active');
+attempts[0].success();
+assert(retry.active,'late success cancelled current attempt');
+attempts[1].fail();fireTimer(delay=>delay===2000);
+attempts[2].fail();fireTimer(delay=>delay===4000);
+attempts[3].success();assert(timers.size===0 && !retry.active,'success left work pending');
+retry.fail();fireTimer(delay=>delay===1000);
+retry.cancel();attempts[4].fail();assert(timers.size===0,'cancelled attempt scheduled retry');
+retry.fail();retry.dispose();assert(timers.size===0 && !retry.start(),'disposed retry restarted');
+`},
+		{name: "subscription_retry_waits_for_status", script: `
+frame(sockets[0],{event:'ready'});
+const sub=openVibelyLive.computer('project','task',{},{}), socket=sockets[0];
+const id=socket.sent.find(c=>c.op==='computer').id;
+frame(socket,{id,event:'subscribed'});frame(socket,{id,event:'retry'});
+fireTimer(delay=>delay===1000);
+frame(socket,{id,event:'subscribed'});frame(socket,{id,event:'retry'});
+fireTimer(delay=>delay===2000);
+frame(socket,{id,event:'computer_status',data:{ready:false}});
+frame(socket,{id,event:'retry'});fireTimer(delay=>delay===1000);
+frame(socket,{id,event:'retry'});sub.close();
+assert(timers.size===0,'closed subscription retained retry');
+`},
+
 		{name: "byte_exact_replay", script: `
 const encoder = new TextEncoder();
 const length = value => encoder.encode(value).length;
@@ -172,7 +206,7 @@ window.addEventListener('load', async function() {
         await reportFetch('/test/result?result=' + encodeURIComponent(error.stack));
     }
 });
-</script><script src="/static/live-transport.js"></script></head><body></body></html>`
+</script><script src="/static/retry.js"></script><script src="/static/live-transport.js"></script></head><body></body></html>`
 			result := make(chan string, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if static.ServeAsset(w, r) {

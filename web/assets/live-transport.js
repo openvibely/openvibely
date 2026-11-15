@@ -3,7 +3,8 @@
 (function () {
     'use strict';
     if (window.openVibelyLive) return;
-    var socket = null, retry = null, attempt = 0, nextID = 0, connected = false, connecting = false;
+    var socket = null, nextID = 0, connected = false;
+    var connectionRetry = window.openVibelyRetry(connect, {initialDelay:250, jitter:250});
     var subscriptions = new Map();
     // U+FEFF is output content, including at a replay/frame boundary.
     var encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {ignoreBOM: true});
@@ -18,10 +19,6 @@
     }
     function command(entry) {
         return Object.assign({}, entry.command, {offset: entry.offset});
-    }
-    function scheduleReconnect() {
-        if (retry) return;
-        retry = setTimeout(function () { retry = null; connect(); }, Math.min(15000, 250 * Math.pow(2, attempt++)) + Math.random() * 250);
     }
     async function nativeTicket() {
         var controller = new AbortController();
@@ -46,9 +43,8 @@
             clearTimeout(deadline);
         }
     }
-    async function connect() {
-        if (socket || retry || connecting) return;
-        connecting = true;
+    async function connect(attempt) {
+        if (socket) return;
         var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/events/ws';
         var protocols = [];
         var ws;
@@ -60,20 +56,19 @@
             }
             ws = new WebSocket(url, protocols);
         } catch (error) {
-            connecting = false;
-            scheduleReconnect();
+            attempt.fail();
             return;
         }
-        connecting = false;
+        if (!attempt.current()) { ws.close(); return; }
         socket = ws;
         ws.onmessage = function (event) {
             if (socket !== ws) return;
             var frame;
             try { frame = JSON.parse(event.data); } catch (_) { ws.close(); return; }
             if (frame.event === 'ready') {
-                attempt = 0;
-                subscriptions.forEach(function (entry) { clearTimeout(entry.retryTimer); send(command(entry)); });
+                attempt.success();
                 connected = true;
+                subscriptions.forEach(function (entry) { entry.retry.cancel(); entry.retry.start(); });
                 window.dispatchEvent(new CustomEvent('live-transport-connected'));
                 return;
             }
@@ -86,9 +81,9 @@
                 // to receive authorized snapshots over this socket, not HTTP.
                 subscriptions.forEach(function (entry, id) {
                     if (entry.command.op !== 'computer') return;
-                    clearTimeout(entry.retryTimer);
+                    entry.retry.cancel();
                     send({op:'unsubscribe', id:id});
-                    send(command(entry));
+                    entry.retry.start();
                 });
                 window.dispatchEvent(new CustomEvent('sse-live-connected', {detail: {reconnected: true, reconciliation: true}}));
                 if (window.htmx) window.htmx.trigger('body', 'alertUpdate');
@@ -98,15 +93,17 @@
             if (!entry) return; // A late frame from a detached view or old project.
             if (frame.event === 'retry') {
                 notify(entry, 'retry', frame.data || '');
-                clearTimeout(entry.retryTimer);
-                entry.retryDelay = Math.min(15000, (entry.retryDelay || 500) * 2);
-                entry.retryTimer = setTimeout(function() {
-                    if (connected && subscriptions.get(frame.id) === entry) send(command(entry));
-                }, entry.retryDelay);
+                entry.retry.fail();
                 return;
             }
-            if (frame.event === 'subscribed') { notify(entry, 'open', ''); return; }
+            if (frame.event === 'subscribed') {
+                // Computer admission precedes its fallible status read. Wait for the snapshot.
+                if (entry.command.op !== 'computer') entry.retry.success();
+                notify(entry, 'open', ''); return;
+            }
+            if (frame.event === 'computer_status') entry.retry.success();
             if (frame.event === 'message') {
+                entry.retry.success();
                 var start = frame.start || 0, end = frame.offset || 0;
                 if (end <= entry.offset) return;
                 if (start > entry.offset) { ws.close(); return; }
@@ -117,13 +114,14 @@
                 return;
             }
             if (frame.event === 'reset') {
+                entry.retry.success();
                 entry.offset = frame.offset || 0;
                 notify(entry, 'reset', frame.data || '');
                 return;
             }
             if (frame.event === 'done' || frame.event === 'error') {
                 subscriptions.delete(frame.id);
-                clearTimeout(entry.retryTimer);
+                entry.retry.dispose();
                 entry.readyState = 2;
             }
             notify(entry, frame.event, typeof frame.data === 'string' ? frame.data : JSON.stringify(frame.data));
@@ -135,7 +133,8 @@
             window.dispatchEvent(new CustomEvent('live-transport-disconnected'));
             // Connection failures are not execution failures. Keep buffers and
             // offsets and replay only unapplied bytes after the new handshake.
-            scheduleReconnect();
+            subscriptions.forEach(function (entry) { entry.retry.cancel(); });
+            connectionRetry.fail();
         };
         ws.onerror = function () { ws.close(); };
     }
@@ -143,11 +142,15 @@
         var id = String(++nextID);
         cmd.id = id;
         var entry = {command: cmd, offset: cmd.offset || 0, listeners: {}, readyState: 1};
+        entry.retry = window.openVibelyRetry(function () {
+            if (connected && subscriptions.get(id) === entry) send(command(entry));
+            else entry.retry.cancel();
+        });
         entry.addEventListener = function (name, fn) { (entry.listeners[name] || (entry.listeners[name] = [])).push(fn); };
         entry.close = function () {
             if (!subscriptions.has(id)) return;
             subscriptions.delete(id);
-            clearTimeout(entry.retryTimer);
+            entry.retry.dispose();
             entry.readyState = 2;
             send({op: 'unsubscribe', id: id});
         };
@@ -157,8 +160,8 @@
             Object.keys(handlers.listeners || {}).forEach(function (name) { entry.addEventListener(name, handlers.listeners[name]); });
         }
         subscriptions.set(id, entry);
-        if (connected) send(command(entry));
-        connect();
+        if (connected) entry.retry.start();
+        if (!socket) connectionRetry.start();
         return entry;
     }
     window.openVibelyLive = {
@@ -176,9 +179,9 @@
             return subscribe({op: 'live', project_id: projectID, task_id: taskID || ''}, handlers);
         }
     };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', connect, {once: true});
-    else connect();
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { connectionRetry.start(); }, {once: true});
+    else connectionRetry.start();
     window.addEventListener('online', function () {
-        if (!socket) { clearTimeout(retry); retry = null; connect(); }
+        if (!socket && !connectionRetry.active) { connectionRetry.cancel(); connectionRetry.start(); }
     });
 })();

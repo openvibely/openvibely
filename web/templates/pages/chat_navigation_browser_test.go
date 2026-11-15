@@ -268,7 +268,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(fragment))
 				return
 			}
-			doc := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.11.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
+			doc := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.11.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("retry.js") + `"></script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -721,7 +721,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(chatFragment))
 				return
 			}
-			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.11.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
+			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.11.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("retry.js") + `"></script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

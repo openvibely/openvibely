@@ -478,6 +478,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		return out.String()
 	}
 	var summaryRequests, diffRequests, threadRequests atomic.Int32
+	var recoveredDiff atomic.Bool
 	var summaryRequestsBeforeBurst int32
 	var files atomic.Int32
 	var summaryStatus atomic.Value
@@ -533,7 +534,11 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 				return
 			}
 			diffRequests.Add(1)
-			fmt.Fprint(w, `<div id="diff-viewer">Authoritative full diff</div>`)
+			if recoveredDiff.Load() {
+				fmt.Fprint(w, `<div id="diff-viewer">Recovered full diff</div>`)
+			} else {
+				fmt.Fprint(w, `<div id="diff-viewer">Authoritative full diff</div>`)
+			}
 		case "/auth/me":
 			fmt.Fprint(w, `{"authenticated":false}`)
 		default:
@@ -642,6 +647,11 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.evaluate(`window.savedScroll=document.getElementById('task-thread-messages').scrollTop; 'saved'`)
 		b.click("[data-review-changes]")
 		b.waitFor("one click full diff", `String(document.getElementById('diff-viewer')&&document.getElementById('diff-viewer').textContent)`, "Authoritative full diff")
+		recoveredDiff.Store(true)
+		b.evaluate(`window.dispatchEvent(new CustomEvent('sse-live-connected',{detail:{reconnected:true,reconciliation:true}})); 'recover'`)
+		b.waitFor("missed file event refreshes open diff", `document.getElementById('diff-viewer').textContent`, "Recovered full diff")
+		recoveredDiff.Store(false)
+
 		b.waitFor("changes breadcrumb and separate task menu", `String(!document.getElementById('task-breadcrumb-changes').hidden && !document.getElementById('task-breadcrumb-title').disabled && document.getElementById('task-resource-selector-button').hasAttribute('data-breadcrumb-selector-caret-only') && document.getElementById('task-workspace-back').getAttribute('aria-label')==='Back to thread')`, "true")
 		b.waitFor("return controls advertise diff toggle shortcut", `String(['task-workspace-back','task-breadcrumb-title'].every(function(id){var el=document.getElementById(id),apple=/Mac|iPhone|iPad/.test(navigator.platform);return (el.dataset.ovTooltip||el.title)==='Back to thread ('+(apple?'⌘⇧D':'Ctrl+Shift+D')+')' && el.getAttribute('aria-keyshortcuts')===(apple?'Meta+Shift+D':'Control+Shift+D')}))`, "true")
 		b.waitFor("context retained", `new URLSearchParams(location.search).get('from')+':'+new URLSearchParams(location.search).get('tab')`, "alerts:changes")
@@ -686,12 +696,14 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		key("Escape")
 		b.waitFor("Escape restores opener focus", `document.getElementById('task-details-panel').hidden+':'+document.activeElement.id`, "true:task-details-opener")
 	})
-	if threadRequests.Load() != 1 {
-		t.Errorf("thread was replaced: %d requests", threadRequests.Load())
+	// Initial load plus the explicit missed-event reconciliation above.
+	if threadRequests.Load() != 2 {
+		t.Errorf("unexpected thread refreshes: %d requests", threadRequests.Load())
 	}
 	// The burst may cause one refresh plus one coalesced follow-up if events
 	// arrive during the request. Earlier status transitions are independent.
-	if requests := summaryRequests.Load() - summaryRequestsBeforeBurst; requests > 2 {
+	// Reconciliation also refreshes the summary once.
+	if requests := summaryRequests.Load() - summaryRequestsBeforeBurst; requests > 3 {
 		t.Errorf("file invalidations not debounced: %d", requests)
 	}
 	if diffRequests.Load() == 0 {

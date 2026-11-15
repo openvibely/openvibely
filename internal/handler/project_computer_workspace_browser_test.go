@@ -59,6 +59,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  q('[data-task-computer-toggle]').click();
  await wait(()=>startupErrors.length===1,'startup error toast');
  if(startupErrors[0].message!=='Docker unavailable'||startupErrors[0].type!=='error')throw Error('Missing startup failure toast');
+ const outageSubscriptions=window.computerSubscriptions;await new Promise(r=>setTimeout(r,7500));
+ const outageRetries=window.computerSubscriptions-outageSubscriptions;
+ if(outageRetries<2||outageRetries>3)throw Error('Unavailable screen retries did not back off: '+outageRetries);
  if(q('[data-computer-status]'))throw Error('Obsolete status element remains');
  q('[data-computer-action="ensure"]').click();await wait(()=>startupErrors.length===2,'retry error toast');
  window.fetch=startupFetch;window.showToast=startupToast;
@@ -85,7 +88,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await new Promise(r=>setTimeout(r,100));if(window.computerStatusReads!==0)throw Error('Status was fetched over HTTP');
  window.computerLive.onopen();await window.pushComputer();
  const subscriptions=window.computerSubscriptions;
- window.computerLive.listeners.retry();await wait(()=>window.computerSubscriptions>subscriptions,'retry status subscription');
+ window.computerLive.listeners.retry();await new Promise(r=>setTimeout(r,1200));
+ if(window.computerSubscriptions!==subscriptions)throw Error('Preview duplicated transport subscription retry');
+ window.computerLive.onopen();await window.pushComputer();
  await new Promise(r=>setTimeout(r,100));if(window.computerStatusReads!==0)throw Error('Retry fetched HTTP status');
 
  q('[data-teach-open]').click();q('[data-teach-goal]').value='Download a report';q('[data-teach-record]').click();

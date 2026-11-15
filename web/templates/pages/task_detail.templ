@@ -2024,7 +2024,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						// The initial SSE connection is handled by the page-load init below.
 						if (!detail.reconnected) return;
 						var taskId = _currentTaskIdFromPath();
-						if (!taskId || !_isChatTabActive()) return;
+						if (!taskId) return;
+                        if (_isChangesTabActive()) { _updateDiffViewer(); return; }
+                        if (!_isChatTabActive()) return;
 						var threadContent = document.getElementById('thread-content');
 						if (!threadContent || threadContent.dataset.taskId !== taskId) return;
 						// Never replace the composer while it owns a pending upload session.

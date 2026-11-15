@@ -116,20 +116,20 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const screen=find('[data-computer-screen]');
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null;
-     let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, retryTimer=null, connectTimer=null, retryDelay=1000, refreshPromise=null, refreshQueued=false, pendingState=null;
+     let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, connectTimer=null, refreshPromise=null, refreshQueued=false, pendingState=null;
      function queueStatus(){
       if(closed || previewDeleted)return;
       clearTimeout(statusTimer);statusTimer=setTimeout(()=>{statusTimer=null;refresh();},50);
      }
+     const screenRetry=window.openVibelyRetry(()=>refresh());
      function retryStatus(){
-      if(closed || previewDeleted || !visible() || retryTimer)return;
-      if(connected && statusLive && !statusFailed)return;
-      if(currentState?.enabled===false && statusLive && !statusFailed)return;
-      const delay=statusLive?retryDelay:Math.max(5000,retryDelay);
-      retryDelay=Math.min(15000,retryDelay*2);
-      retryTimer=setTimeout(()=>{retryTimer=null;refresh();},delay);
+      if(closed || previewDeleted || !visible() || pending || closing || !statusLive || statusFailed)return;
+      if(connected || currentState?.enabled===false){screenRetry.cancel();return;}
+      // A status read or screen handshake must finish before another attempt.
+      if(rfb || !currentState)return;
+      screenRetry.fail();
      }
-     function statusDisconnected(){statusLive=false;retryStatus();}
+     function statusDisconnected(){statusLive=false;screenRetry.cancel();}
      function statusChanged(event){
       let data;try{data=JSON.parse(event.data);}catch{return;}
       if(data.project_id!==root.dataset.computerProject || data.task_id!==root.dataset.computerTask)return;
@@ -137,9 +137,9 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      }
      function subscribeStatus(force=false){
       if((statusStream&&!force) || !window.openVibelyLive)return;
-      statusStream?.close();statusLive=false;
+      statusStream?.close();statusLive=false;statusFailed=true;
       statusStream=window.openVibelyLive.computer(root.dataset.computerProject,root.dataset.computerTask,{viewer_id:viewerID,viewer_mode:dialog.open?'control':'view'},{
-       onopen:()=>{statusLive=true;retryDelay=1000;clearTimeout(retryTimer);retryTimer=null;},
+       onopen:()=>{statusLive=true;},
        listeners:{computer_status:statusChanged,
         task_deleted:event=>{let data;try{data=JSON.parse(event.data);}catch{return;}previewWasDeleted({detail:data});},
         retry:()=>{statusFailed=true;statusDisconnected();},error:()=>{statusStream?.close();statusStream=null;pendingState=null;disconnect();statusFailed=true;statusDisconnected();}}
@@ -291,12 +291,12 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=!held;
       revealFrame(epoch);
       connectTimer=setTimeout(()=>{if(epoch===generation&&!connected){disconnect();retryStatus();}},10000);
-      rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;clearTimeout(connectTimer);retryDelay=1000;clearTimeout(retryTimer);retryTimer=null;retryStatus();if(held)installKeyboard();});
+      rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;clearTimeout(connectTimer);screenRetry.success();retryStatus();if(held)installKeyboard();});
       rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;if(document.hasFocus())navigator.clipboard?.writeText(event.detail.text).catch(()=>{});});
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;window.showToast('Desktop authentication failed.','error','',{toastKey:previewKey+':authentication'});}});
       rfb.addEventListener('disconnect',event=>{if(epoch===generation){clearTimeout(connectTimer);retainFrame();connected=false;rfb=null;mode='';recording=false;renderDemo();retryStatus();}});
      }
-     function disconnect(){++generation;clearTimeout(connectTimer);clearTimeout(retryTimer);retryTimer=null;connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
+     function disconnect(){++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
      function refresh(){
       if(refreshPromise){refreshQueued=true;return refreshPromise;}
       refreshPromise=(async()=>{do{refreshQueued=false;await refreshStatus();}while(refreshQueued&&!closed&&!previewDeleted);})().finally(()=>{refreshPromise=null;retryStatus();});
@@ -306,7 +306,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       if(closed || previewDeleted || pending || closing)return;
  if(!visible()){disconnect();return;}
       if(!pendingState){subscribeStatus(true);return;}
-      clearTimeout(retryTimer);retryTimer=null;
+      screenRetry.cancel();
       const version=++refreshVersion;
       try{
        const requestedControl=dialog.open;
@@ -323,7 +323,7 @@ if(requestedControl!==dialog.open){refreshQueued=true;return;}currentState=state
  find('[data-computer-chrome]').hidden=state.handoff_kind!=='request_chrome_login'||!state.chrome_available;
  buttons.forEach(b=>{const a=b.dataset.computerAction;if(a==='ensure')b.hidden=state.ready||state.enabled===false;b.disabled=a==='ensure'?state.enabled===false:a.startsWith('login-')?!state.handoff_kind:a==='release'?!state.held||!!state.handoff_kind:a==='takeover'?!state.ready||state.held:!state.ready||state.held||state.busy;});
        if(state.ready){await viewer(state);}else disconnect();
-      }catch(e){statusFailed=true;window.showToast(e.message,'error');}
+      }catch(e){window.showToast(e.message,'error');if(visible())screenRetry.fail();}
      }
      async function computerAction(event){
       const button=event.target.closest('[data-computer-action]');if(!button || pending || button.disabled)return;
@@ -374,8 +374,8 @@ if(requestedControl!==dialog.open){refreshQueued=true;return;}currentState=state
   catch(e){window.showToast(e.message,'error');taskToggle.checked=!taskToggle.checked;}
   finally{pending=false;taskToggle.disabled=false;await refresh();}
  };
- restoreFrame();refresh();
-     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;statusStream?.close();window.removeEventListener('live-transport-disconnected',statusDisconnected);clearTimeout(statusTimer);clearTimeout(retryTimer);window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();disconnect();observer.disconnect();}});
+ restoreFrame();screenRetry.start();
+     const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;statusStream?.close();window.removeEventListener('live-transport-disconnected',statusDisconnected);clearTimeout(statusTimer);screenRetry.dispose();window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();disconnect();observer.disconnect();}});
      observer.observe(document.body,{childList:true,subtree:true});
     })();
    </script>

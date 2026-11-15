@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/require"
 )
@@ -54,11 +55,14 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
 	target := ""
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/":
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<!doctype html><html><body><script>window.openVibelyLive={computer:(project,task,options,handlers)=>{setTimeout(()=>{handlers.onopen?.();handlers.listeners.computer_status({data:JSON.stringify({project_id:project,task_id:task,viewer_mode:options.viewer_mode,enabled:false,ready:false,held:true,handoff_kind:'request_chrome_login',handoff_url:'https://example.test',chrome_available:true})});},0);return {close(){}};}};window.toastMessages=[];window.showToast=(message,type)=>toastMessages.push({message,type});</script>"+fragment.String()+runner+"</body></html>")
+			fmt.Fprint(w, "<!doctype html><html><body><script src=\"/static/retry.js\"></script><script>window.openVibelyLive={computer:(project,task,options,handlers)=>{setTimeout(()=>{handlers.onopen?.();handlers.listeners.computer_status({data:JSON.stringify({project_id:project,task_id:task,viewer_mode:options.viewer_mode,enabled:false,ready:false,held:true,handoff_kind:'request_chrome_login',handoff_url:'https://example.test',chrome_available:true})});},0);return {close(){}};}};window.toastMessages=[];window.showToast=(message,type)=>toastMessages.push({message,type});</script>"+fragment.String()+runner+"</body></html>")
 		case strings.HasSuffix(r.URL.Path, "/chrome"):
 			profile := r.URL.Query().Get("profile")
 			if profile == "" {
