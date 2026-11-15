@@ -43,6 +43,9 @@ func TestSavedTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
   return {close(){closed=true}};
  };
  const root=document.getElementById('project-computer');`, 1)
+	// Count retry-controller attempts, not status subscriptions also opened by
+	// startup and visibility events while the initial failure is settling.
+	html = strings.Replace(html, "const screenRetry=window.openVibelyRetry(()=>refresh());", "window.screenRetryAttempts=[];const screenRetry=window.openVibelyRetry(()=>{window.screenRetryAttempts.push(performance.now());return refresh();});", 1)
 	script := `<script>
 Object.defineProperty(navigator,'platform',{value:'MacIntel',configurable:true});
 Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copiedRemote=text}},configurable:true});
@@ -59,9 +62,10 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  q('[data-task-computer-toggle]').click();
  await wait(()=>startupErrors.length===1,'startup error toast');
  if(startupErrors[0].message!=='Docker unavailable'||startupErrors[0].type!=='error')throw Error('Missing startup failure toast');
- const outageSubscriptions=window.computerSubscriptions;await new Promise(r=>setTimeout(r,7500));
- const outageRetries=window.computerSubscriptions-outageSubscriptions;
- if(outageRetries<2||outageRetries>3)throw Error('Unavailable screen retries did not back off: '+outageRetries);
+ const outageStart=window.screenRetryAttempts.length;await new Promise(r=>setTimeout(r,7500));
+ const outageAttempts=window.screenRetryAttempts.slice(outageStart);
+ if(outageAttempts.length<2||outageAttempts.length>3)throw Error('Unavailable screen retries did not back off: '+JSON.stringify(outageAttempts));
+ for(let i=1;i<outageAttempts.length;i++){if(outageAttempts[i]-outageAttempts[i-1]<1900*Math.pow(2,i-1))throw Error('Screen retry delay did not increase: '+JSON.stringify(outageAttempts));}
  if(q('[data-computer-status]'))throw Error('Obsolete status element remains');
  q('[data-computer-action="ensure"]').click();await wait(()=>startupErrors.length===2,'retry error toast');
  window.fetch=startupFetch;window.showToast=startupToast;
