@@ -48,7 +48,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  </div>
  <details data-computer-files>
  <summary class="inspector-summary computer-summary"><span class="text-sm font-semibold">Files</span><span aria-hidden="true">›</span></summary>
- <p class="text-sm">Take over to upload or download files (up to 25 MB). Existing files are kept.</p>
+ <p class="text-sm">Upload or download files (up to 25 MB). Existing files are kept.</p>
  <label class="flex flex-col gap-2 text-sm">Folder in Files <input class="input input-sm input-bordered" data-computer-folder placeholder="Leave empty for Files"/></label>
  <button type="button" class="btn btn-sm" data-computer-files-refresh>Show files</button>
  <label>Upload file <input type="file" data-computer-upload/></label>
@@ -70,7 +70,6 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <button type="button" class="btn" data-computer-action="login-done">Done — resume task</button>
  <button type="button" class="btn" data-computer-action="login-cancel">Decline request</button>
  </div>
- <p role="status" aria-live="polite" data-computer-status>Checking computer…</p>
    <dialog data-computer-dialog aria-label="Live computer screen" class="bg-base-100 text-base-content" style="position:fixed;inset:0;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;padding:0;border:0;border-radius:0;overflow:hidden"><header style="display:flex;justify-content:flex-end;height:52px;flex-shrink:0;padding:8px 16px;align-items:center"><button type="button" class="btn btn-ghost btn-sm" data-teach-open>Teach a task</button><button type="button" class="btn btn-ghost btn-sm btn-square" data-computer-close aria-label="Exit fullscreen" title="Exit fullscreen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 9h5V4m11 5h-5V4M4 15h5v5m11-5h-5v5"></path></svg></button></header><div data-computer-teach hidden style="max-height:40vh;overflow:auto;padding:12px">
  <p>Demonstrate the task, then review the steps and captures before generating a workflow. Typed values are omitted. Pause before entering private information.</p>
  <label>Goal <input class="input input-bordered" data-teach-goal maxlength="2000"/></label>
@@ -90,12 +89,9 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
     .computer-summary::-webkit-details-marker { display:none; }
     details[open] > .computer-summary > [aria-hidden] { transform:rotate(90deg); }
     #project-computer[data-computer-task] > details > :not(summary) { margin-top:12px; }
-    [data-computer-status] { display:none; }
-    [data-computer-expanded] [data-computer-status] { display:block; }
     [data-computer-dialog][open] { display:flex; flex-direction:column; }
     [data-computer-expanded] { display:flex; flex-direction:column; flex:1; min-height:0; }
     [data-computer-expanded] [data-computer-screen] { flex:1; min-height:0 !important; height:auto !important; border-radius:0; background:var(--shell-card,var(--fallback-b1,oklch(var(--b1)))); }
-    [data-computer-expanded] [data-computer-status] { position:absolute; bottom:16px; left:50%; transform:translateX(-50%); z-index:3; padding:6px 12px; border-radius:8px; background:var(--fallback-b1,oklch(var(--b1))); font-size:12px; pointer-events:none; }
     [data-computer-expanded] [data-computer-login] { max-height:35vh; overflow:auto; flex-shrink:0; }
    </style>
    <script>
@@ -120,12 +116,11 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const dialog=find('[data-computer-dialog]');
      const homes=[];
      const expand=find('[data-computer-preview-open]');
-     function openViewer(){if(closing)return;if(dialog.open){refresh();return;}for(const node of [find('[data-computer-status]'),find('[data-computer-login]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();refresh();}
+     function openViewer(){if(closing)return;if(dialog.open){refresh();return;}for(const node of [find('[data-computer-login]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();refresh();}
      find('[data-computer-preview-open]').onclick=openViewer;
      find('[data-computer-close]').onclick=()=>{dialog.close();finishViewer();};
      dialog.addEventListener('close',finishViewer);
      async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();disconnect();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
-     const status=find('[data-computer-status]');
      const screen=find('[data-computer-screen]');
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null;
@@ -149,13 +144,9 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const teach=find('[data-computer-teach]');
      const teachNote=find('[data-teach-status]');
      let previousCapture=null;
-     let connected=false, connectionMessage='', currentState=null, inViewport=true, ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[], savingDemo=false, generationAbort=null, workflowID="";
+     let connected=false, currentState=null, inViewport=true, ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[], savingDemo=false, generationAbort=null, workflowID="";
      function inputActive(){return connected && !retained && mode==='control' && dialog.open && !document.hidden && !closing;}
-     function reportConnection(){
-      if(retained){status.textContent='Reconnecting… Showing last preview.';return;}
-      if(!currentState?.ready)return;
-      status.textContent=connected?(mode==='control'?'Mouse and keyboard enabled.':currentState.busy?'An agent is using the computer.':'Ready'):(connectionMessage||'Connecting to the desktop…');
-     }
+
      function visible(){const host=root;return !document.hidden && (dialog.open || host.getClientRects().length>0);}
      function chord(key,code,{ctrl=false,shift=false,alt=false}={}){
       if(!inputActive())return;
@@ -237,7 +228,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      function showFrame(frame){
       retained?.remove();retained=frame;frame.dataset.retainedFrame='';frame.setAttribute('aria-hidden','true');
       screen.style.position='relative';frame.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;z-index:1;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
-      screen.append(frame);reportConnection();
+      screen.append(frame);
      }
      function restoreFrame(){
       if(previewDeleted)return;
@@ -259,7 +250,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       clearTimeout(frameTimer);
       if(closed || epoch!==generation || !retained)return;
       const canvas=screen.querySelector('canvas:not([data-retained-frame])');
-      if(canvas?.width && canvas?.height){try{if([.25,.5,.75].some(v=>canvas.getContext('2d').getImageData(Math.floor(canvas.width*v),Math.floor(canvas.height*v),1,1).data[3])){retained.remove();retained=null;reportConnection();return;}}catch{retained.remove();retained=null;reportConnection();return;}}
+      if(canvas?.width && canvas?.height){try{if([.25,.5,.75].some(v=>canvas.getContext('2d').getImageData(Math.floor(canvas.width*v),Math.floor(canvas.height*v),1,1).data[3])){retained.remove();retained=null;return;}}catch{retained.remove();retained=null;return;}}
       frameTimer=setTimeout(()=>revealFrame(epoch),50);
      }
      async function viewer(state){
@@ -276,10 +267,10 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
       rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=!held;
       revealFrame(epoch);
-      rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;connectionMessage='';reportConnection();if(held)installKeyboard();});
+      rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;if(held)installKeyboard();});
       rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;if(document.hasFocus())navigator.clipboard?.writeText(event.detail.text).catch(()=>{});});
-      rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;connectionMessage='Desktop authentication failed. Reconnecting…';reportConnection();}});
-      rfb.addEventListener('disconnect',event=>{if(epoch===generation){retainFrame();connected=false;rfb=null;mode='';recording=false;renderDemo();connectionMessage='Desktop disconnected. Reconnecting…';reportConnection();}});
+      rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;window.showToast('Desktop authentication failed.','error','',{toastKey:previewKey+':authentication'});}});
+      rfb.addEventListener('disconnect',event=>{if(epoch===generation){retainFrame();connected=false;rfb=null;mode='';recording=false;renderDemo();}});
      }
      function disconnect(){++generation;connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
      async function refresh(){
@@ -294,33 +285,31 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
        const taskToggle=find('[data-task-computer-toggle]');if(taskToggle){taskToggle.checked=!!state.task_enabled;taskToggle.disabled=!state.project_enabled;}
        preview.hidden=!state.enabled;
 if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if(state.handoff_kind){recording=false;renderDemo();}find('[data-teach-open]').hidden=!!state.handoff_kind;if(state.handoff_kind)teach.hidden=true;
-       if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;status.textContent='Starting or updating project computer… Building the image may take several minutes.';try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;await refresh();}catch(e){pending=false;status.textContent=e.message;window.showToast(e.message,'error');find('[data-computer-action=ensure]').hidden=false;find('[data-computer-action=ensure]').disabled=false;}return;}
-       status.textContent=state.ready?(state.held?'Mouse and keyboard enabled.':state.busy?'An agent is using the computer.':'Ready'):state.enabled===false?'Computer use is off for this task or project.':'Connecting to the computer…';
+       if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;await refresh();}catch(e){pending=false;window.showToast(e.message,'error');find('[data-computer-action=ensure]').hidden=false;find('[data-computer-action=ensure]').disabled=false;}return;}
        find('[data-computer-login]').hidden=!state.handoff_kind;
  find('[data-computer-login-site]').textContent=state.handoff_kind?(state.handoff_reason||'Computer help requested')+(state.handoff_url?' — '+state.handoff_url:''):'';
  const target=find('[data-computer-target]');if(target&&!target.disabled){target.dataset.value=state.tool_target||'worktree';target.querySelector('[data-property-label]').textContent=target.dataset.value==='computer'?'Task computer':'Task worktree';}
  find('[data-computer-chrome]').hidden=state.handoff_kind!=='request_chrome_login'||!state.chrome_available;
  buttons.forEach(b=>{const a=b.dataset.computerAction;if(a==='ensure')b.hidden=state.ready||state.enabled===false;b.disabled=a==='ensure'?state.enabled===false:a.startsWith('login-')?!state.handoff_kind:a==='release'?!state.held||!!state.handoff_kind:a==='takeover'?!state.ready||state.held:!state.ready||state.held||state.busy;});
-       if(state.ready){await viewer(state);reportConnection();}else disconnect();
-      }catch(e){status.textContent=e.message;}
+       if(state.ready){await viewer(state);}else disconnect();
+      }catch(e){window.showToast(e.message,'error');}
      }
      async function computerAction(event){
       const button=event.target.closest('[data-computer-action]');if(!button || pending || button.disabled)return;
       pending=true;++refreshVersion;buttons.forEach(b=>b.disabled=true);disconnect();
       const action=button.dataset.computerAction;
-      status.textContent=action==='ensure'?'Starting or updating project computer… Building the image may take several minutes.':'Updating computer…';
       try{
        const res=await fetch(scoped('/'+action),{method:'POST',headers:{'Content-Type':'application/json'}});
        if(!res.ok){const body=await res.json();throw new Error(body.message||'Computer operation failed');}
        pending=false;await refresh();
-      }catch(e){status.textContent=e.message;window.showToast(e.message,'error');pending=false;buttons.forEach(b=>b.disabled=false);}
+      }catch(e){window.showToast(e.message,'error');pending=false;buttons.forEach(b=>b.disabled=false);}
      }
      root.addEventListener('click',computerAction);
      const fileList=find('[data-computer-file-list]');
  const folder=find('[data-computer-folder]');
  const fileURL=path=>{const url=new URL(scoped('/files'),location.href);url.searchParams.set('path',path);return url;};
- async function showFiles(){const res=await fetch(fileURL(folder.value),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Files unavailable');fileList.replaceChildren();for(const item of data.entries||[]){const relative=item.path.replace(/^Files\/?/,'');const entry=document.createElement(item.directory?'button':'a');entry.textContent=item.name+(item.directory?'/':'');entry.className='block';if(item.directory){entry.type='button';entry.onclick=()=>{folder.value=relative;showFiles().catch(e=>status.textContent=e.message);};}else{entry.href=fileURL(relative);entry.download=item.name;}fileList.append(entry);if(!item.directory){const add=document.createElement('button');add.type='button';add.className='btn btn-sm';add.textContent='Add to task';add.onclick=async()=>{add.disabled=true;try{const url=new URL(scoped('/import-file'),location.href);url.searchParams.set('path',relative);const response=await fetch(url,{method:'POST'});const saved=await response.json();if(!response.ok)throw Error(saved.message||'Could not add file');add.textContent='Added';status.textContent='File added to task attachments.';document.body.dispatchEvent(new Event('taskAttachmentsChanged',{bubbles:true}));}catch(e){status.textContent=e.message;add.disabled=false;}};fileList.append(add);}}}
- if(fileList){find('[data-computer-files-refresh]').onclick=()=>showFiles().catch(e=>status.textContent=e.message);find('[data-computer-upload]').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>25*1024*1024){status.textContent='Choose a file up to 25 MB.';return;}try{const path=(folder.value?folder.value.replace(/\/$/,'')+'/':'')+file.name;const res=await fetch(fileURL(path),{method:'PUT',body:file});if(!res.ok){const data=await res.json();throw Error(data.message||'Upload failed');}await showFiles();status.textContent='File uploaded.';}catch(e){status.textContent=e.message;}finally{event.target.value='';}};}
+ async function showFiles(){const res=await fetch(fileURL(folder.value),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Files unavailable');fileList.replaceChildren();for(const item of data.entries||[]){const relative=item.path.replace(/^Files\/?/,'');const entry=document.createElement(item.directory?'button':'a');entry.textContent=item.name+(item.directory?'/':'');entry.className='block';if(item.directory){entry.type='button';entry.onclick=()=>{folder.value=relative;showFiles().catch(e=>window.showToast(e.message,'error'));};}else{entry.href=fileURL(relative);entry.download=item.name;}fileList.append(entry);if(!item.directory){const add=document.createElement('button');add.type='button';add.className='btn btn-sm';add.textContent='Add to task';add.onclick=async()=>{add.disabled=true;try{const url=new URL(scoped('/import-file'),location.href);url.searchParams.set('path',relative);const response=await fetch(url,{method:'POST'});const saved=await response.json();if(!response.ok)throw Error(saved.message||'Could not add file');add.textContent='Added';window.showToast('File added to task attachments.','info');document.body.dispatchEvent(new Event('taskAttachmentsChanged',{bubbles:true}));}catch(e){window.showToast(e.message,'error');add.disabled=false;}};fileList.append(add);}}}
+ if(fileList){find('[data-computer-files-refresh]').onclick=()=>showFiles().catch(e=>window.showToast(e.message,'error'));find('[data-computer-upload]').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>25*1024*1024){window.showToast('Choose a file up to 25 MB.','error');return;}try{const path=(folder.value?folder.value.replace(/\/$/,'')+'/':'')+file.name;const res=await fetch(fileURL(path),{method:'PUT',body:file});if(!res.ok){const data=await res.json();throw Error(data.message||'Upload failed');}await showFiles();window.showToast('File uploaded.','info');}catch(e){window.showToast(e.message,'error');}finally{event.target.value='';}};}
  const profile=find('[data-computer-profile]');
  const sites=find('[data-computer-sites]');
 
@@ -328,9 +317,9 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
  const cookieKey=c=>JSON.stringify([c.profile,c.domain,c.name,c.path]);
  const updateSelection=()=>find('[data-computer-selection-count]').textContent=selectedCookies.size+' cookies selected across profiles';
  async function chromeSites(){sites.replaceChildren();const url=new URL(scoped('/chrome'),location.href);url.searchParams.set('profile',profile.value);const res=await fetch(url,{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Could not load Chrome cookies');for(const cookie of data.cookies){const label=document.createElement('label');label.style.display='block';const check=document.createElement('input');check.type='checkbox';const key=cookieKey(cookie);check.checked=selectedCookies.has(key);check.onchange=()=>{if(check.checked)selectedCookies.set(key,cookie);else selectedCookies.delete(key);updateSelection();};label.append(check,document.createTextNode(' '+cookie.domain+' — '+cookie.name+' ('+cookie.path+')'));sites.append(label);}}
- profile.onchange=()=>chromeSites().catch(e=>status.textContent=e.message);
- find('[data-computer-chrome]').onclick=async()=>{try{const res=await fetch(scoped('/chrome'),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Chrome profiles unavailable');pendingImport=data.pending_import?.id||'';if(pendingImport){status.textContent='An approved import is incomplete. Retry to resume remaining profiles.';find('[data-computer-import]').textContent='Resume approved import';}profile.replaceChildren();for(const name of data.profiles){profile.add(new Option(name,name));}find('[data-computer-chrome-form]').hidden=false;updateSelection();if(profile.value)await chromeSites();}catch(e){status.textContent=e.message;}};
- find('[data-computer-import]').onclick=async event=>{if(!pendingImport&&!selectedCookies.size){status.textContent='Select at least one cookie.';return;}event.target.disabled=true;pending=true;try{const res=await fetch(scoped('/chrome-import'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:pendingImport,scope:find('[data-computer-grant-scope]').value,hours:Number(find('[data-computer-grant-hours]').value),selections:[...selectedCookies.values()]})});const data=await res.json();if(!res.ok){if(data.grant_id){pendingImport=data.grant_id;find('[data-computer-import]').textContent='Resume approved import';}throw Error(data.message||'Import failed');}pendingImport='';find('[data-computer-import]').textContent='Approve selected sign-ins';status.textContent='Imported '+data.imported+' cookies. Check your sign-in, then select Done.';find('[data-computer-chrome-form]').hidden=true;selectedCookies.clear();updateSelection();}catch(e){status.textContent=e.message;}finally{event.target.disabled=false;pending=false;}};
+ profile.onchange=()=>chromeSites().catch(e=>window.showToast(e.message,'error'));
+ find('[data-computer-chrome]').onclick=async()=>{try{const res=await fetch(scoped('/chrome'),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Chrome profiles unavailable');pendingImport=data.pending_import?.id||'';if(pendingImport){window.showToast('An approved import is incomplete. Retry to resume remaining profiles.','info');find('[data-computer-import]').textContent='Resume approved import';}profile.replaceChildren();for(const name of data.profiles){profile.add(new Option(name,name));}find('[data-computer-chrome-form]').hidden=false;updateSelection();if(profile.value)await chromeSites();}catch(e){window.showToast(e.message,'error');}};
+ find('[data-computer-import]').onclick=async event=>{if(!pendingImport&&!selectedCookies.size){window.showToast('Select at least one cookie.','error');return;}event.target.disabled=true;pending=true;try{const res=await fetch(scoped('/chrome-import'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:pendingImport,scope:find('[data-computer-grant-scope]').value,hours:Number(find('[data-computer-grant-hours]').value),selections:[...selectedCookies.values()]})});const data=await res.json();if(!res.ok){if(data.grant_id){pendingImport=data.grant_id;find('[data-computer-import]').textContent='Resume approved import';}throw Error(data.message||'Import failed');}pendingImport='';find('[data-computer-import]').textContent='Approve selected sign-ins';window.showToast('Imported '+data.imported+' cookies. Check your sign-in, then select Done.','success');find('[data-computer-chrome-form]').hidden=true;selectedCookies.clear();updateSelection();}catch(e){window.showToast(e.message,'error');}finally{event.target.disabled=false;pending=false;}};
  const target=find('[data-computer-target]'), targetPicker=find('#computer-target-picker');
  const targetPickerUI=window.createInspectorPicker(root,targetPicker,()=>target.disabled);
  target.onclick=()=>targetPickerUI.open(target);
@@ -356,7 +345,7 @@ if(requestedControl!==dialog.open){await refresh();return;}currentState=state;if
  if(taskToggle)taskToggle.onchange=async()=>{
   taskToggle.disabled=true;pending=true;
   try{const res=await fetch(scoped(taskToggle.checked?'/task-enable':'/task-disable'),{method:'POST'});if(!res.ok){const data=await res.json();throw Error(data.message||'Could not update task computer');}attemptedStart=false;if(!taskToggle.checked){disconnect();preview.hidden=true;}}
-  catch(e){status.textContent=e.message;window.showToast(e.message,'error');taskToggle.checked=!taskToggle.checked;}
+  catch(e){window.showToast(e.message,'error');taskToggle.checked=!taskToggle.checked;}
   finally{pending=false;taskToggle.disabled=false;await refresh();}
  };
  restoreFrame();refresh();const timer=setInterval(refresh,5000);

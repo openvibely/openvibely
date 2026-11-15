@@ -38,7 +38,7 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
  q('[data-computer-profile]').value='Profile 1';q('[data-computer-profile]').dispatchEvent(new Event('change'));
  await wait(()=>q('[data-computer-sites]').textContent.includes('second-session'));q('[data-computer-sites] input').click();
  q('[data-computer-grant-scope]').value='project';q('[data-computer-grant-hours]').value='24';q('[data-computer-import]').click();
- await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-status]').textContent.includes('Imported 2'));
+ await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-chrome-form]').hidden && toastMessages.some(t=>t.message.includes('Imported 2')));
  q('[data-computer-target]').click();q('#computer-target-picker button[data-value=computer]').click();
  await wait(()=>q('[data-computer-target]').dataset.value==='computer');
  finish('pass','Selected cookies across two profiles and tool destination saved');
@@ -58,7 +58,7 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
 		switch {
 		case r.URL.Path == "/":
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<!doctype html><html><body>"+fragment.String()+runner+"</body></html>")
+			fmt.Fprint(w, "<!doctype html><html><body><script>window.toastMessages=[];window.showToast=(message,type)=>toastMessages.push({message,type});</script>"+fragment.String()+runner+"</body></html>")
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			fmt.Fprint(w, `{"enabled":false,"ready":false,"held":true,"handoff_kind":"request_chrome_login","handoff_url":"https://example.test","chrome_available":true}`)
 		case strings.HasSuffix(r.URL.Path, "/chrome"):

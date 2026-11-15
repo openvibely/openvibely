@@ -33,7 +33,7 @@ func TestSavedTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
 Object.defineProperty(navigator,'platform',{value:'MacIntel',configurable:true});
 Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copiedRemote=text}},configurable:true});
 (async()=>{
- const q=s=>document.querySelector(s);const wait=async (f,label="")=>{for(let n=0;n<200;n++){if(f())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label+': '+q('[data-computer-status]').textContent);};
+ const q=s=>document.querySelector(s);const wait=async (f,label="")=>{for(let n=0;n<200;n++){if(f())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label);};
  const finish=(state,message)=>{const node=document.createElement('div');node.id='browser-result';node.dataset.status=state;node.textContent=message;document.body.append(node);};
  try{
  await wait(()=>window.taskWorkspace && q('[data-tab="computer"]').hasAttribute('data-computer-allowed'));q('[data-tab="computer"]').click();
@@ -45,19 +45,26 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  q('[data-task-computer-toggle]').click();
  await wait(()=>startupErrors.length===1,'startup error toast');
  if(startupErrors[0].message!=='Docker unavailable'||startupErrors[0].type!=='error')throw Error('Missing startup failure toast');
- if(getComputedStyle(q('[data-computer-status]')).display!=='none')throw Error('Mini status became visible');
+ if(q('[data-computer-status]'))throw Error('Obsolete status element remains');
  q('[data-computer-action="ensure"]').click();await wait(()=>startupErrors.length===2,'retry error toast');
  window.fetch=startupFetch;window.showToast=startupToast;
  q('[data-computer-action="ensure"]').click();
  await wait(()=>window.fixtureRFB?.painted);
  if(!q('#tab-computer').contains(q('[data-computer-preview]')))throw Error('Preview not in Computer tab');
+ const filesFetch=window.fetch,filesToast=window.showToast,fileErrors=[];
+ window.showToast=(message,type)=>fileErrors.push({message,type});
+ window.fetch=(url,options)=>String(url).includes('/files')?Promise.resolve(new Response(JSON.stringify({message:'File access failed'}),{status:400,headers:{'Content-Type':'application/json'}})):filesFetch(url,options);
+ q('[data-computer-files-refresh]').click();await wait(()=>fileErrors.length===1,'file error toast');
+ if(fileErrors[0].message!=='File access failed'||fileErrors[0].type!=='error')throw Error('Missing file failure toast');
+ window.fetch=filesFetch;window.showToast=filesToast;
+
  const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(!initialRFB.disconnected)throw Error('Hidden preview stayed connected');q('[data-tab="computer"]').click();await wait(()=>window.fixtureRFB!==initialRFB,'preview reconnect');
  if(q('#tab-computer').classList.contains('hidden'))throw Error('Computer tab hidden');
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
  q('[data-computer-preview-open]').click();await wait(()=>q('[data-computer-dialog]').open);
  if(q('[data-computer-dialog]').contains(q('[data-computer-files]'))||!q('#tab-computer').contains(q('[data-computer-files]')))throw Error('Files must stay in the Computer tab');
  if(q('[data-computer-action="takeover"], [data-computer-action="release"], [data-computer-expand]'))throw Error('Unexpected viewer buttons');
- await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly && q('[data-computer-status]').textContent.includes('Mouse and keyboard enabled.'),'takeover');
+ await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly,'takeover');
 
 
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'control first frame');
@@ -94,12 +101,12 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>q('[data-workflow-list] button'));[...q('[data-workflow-list]').querySelectorAll('button')].find(b=>b.textContent==='Create task from workflow').click();await wait(()=>q('[data-teach-status] a'),'reuse workflow');
  const originalFetch=window.fetch;let cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};
  q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled);q('[data-teach-discard]').click();await wait(()=>cancelledGeneration&&!q('[data-teach-save]').disabled,'discard cancellation');window.fetch=originalFetch;
- const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});if(!/disconnected|Reconnecting/.test(q('[data-computer-status]').textContent))throw Error('Disconnected stream reported Ready');
+ const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});
  document.dispatchEvent(new Event('computer-tab-change'));await wait(()=>window.fixtureRFB!==dropped&&window.fixtureRFB.painted,'reconnected');
  Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));const hiddenRFB=window.fixtureRFB;if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming');
  Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));await wait(()=>window.fixtureRFB!==hiddenRFB&&window.fixtureRFB.painted,'visible reconnect');
  cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};q('[data-teach-note]').value='New capture';q('[data-teach-capture]').click();q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled,'second generation');
- q('[data-computer-close]').click();if(!cancelledGeneration)throw Error('Closing viewer did not cancel generation');window.fetch=originalFetch;if(!q('[data-retained-frame]'))throw Error('Desktop disappeared immediately on close');if(q('[data-computer-dialog]').open)throw Error('Did not close');await wait(()=>window.fixtureRFB.viewOnly && q('[data-computer-status]').textContent==='Ready','handback');
+ q('[data-computer-close]').click();if(!cancelledGeneration)throw Error('Closing viewer did not cancel generation');window.fetch=originalFetch;if(!q('[data-retained-frame]'))throw Error('Desktop disappeared immediately on close');if(q('[data-computer-dialog]').open)throw Error('Did not close');await wait(()=>window.fixtureRFB.viewOnly,'handback');
 
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'preview first frame');
 
