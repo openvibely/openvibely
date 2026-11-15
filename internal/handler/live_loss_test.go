@@ -65,7 +65,7 @@ func TestLiveNotificationLossTriggersReconcile(t *testing.T) {
 				t.Fatal("subscribe timed out")
 			}
 			// The worker is blocked after subscribing. Fill its actual bounded queue.
-			for i := 0; i < 100; i++ {
+			for i := 0; i < 200; i++ {
 				switch kind {
 				case "computer":
 					h.broadcaster.Publish(events.TaskEvent{ProjectID: "default", Type: events.ComputerStatusChanged})

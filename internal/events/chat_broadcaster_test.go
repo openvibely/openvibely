@@ -214,8 +214,8 @@ func TestChatBroadcaster_NonBlockingPublish(t *testing.T) {
 	}
 	defer b.Unsubscribe(sub)
 
-	// Fill the buffer (channel size is 10)
-	for i := 0; i < 15; i++ {
+	// Fill the buffer (channel size is 100)
+	for i := 0; i < cap(sub)+5; i++ {
 		b.Publish(ChatEvent{
 			Type:      ChatNewMessage,
 			ExecID:    "exec",
@@ -235,8 +235,8 @@ func TestChatBroadcaster_NonBlockingPublish(t *testing.T) {
 		}
 	}
 done:
-	if count != 10 {
-		t.Errorf("expected 10 buffered events (channel buffer size), got %d", count)
+	if count != 100 {
+		t.Errorf("expected 100 buffered events (channel buffer size), got %d", count)
 	}
 }
 
@@ -279,13 +279,9 @@ func TestChatBroadcaster_EventPairDelivery(t *testing.T) {
 		}
 	}
 check:
-	// With buffer size 10, rapid bursts will overflow. But with an active consumer
-	// (which is how SSE handlers work), all events should be received.
-	// In this test the consumer drains after all publishes, so buffer overflow is expected
-	// for bursts > 10. The important thing is that for normal operation (consumer is active),
-	// the first 10 are buffered and the rest overflow.
-	if received < 10 {
-		t.Errorf("expected at least 10 events (buffer size), got %d", received)
+	// The queue can absorb all 50 pairs before the consumer drains it.
+	if received != 100 {
+		t.Errorf("expected all 100 burst events, got %d", received)
 	}
 }
 

@@ -94,7 +94,7 @@ func NewBroadcaster() *Broadcaster {
 
 // NewBroadcasterWithLimit sets the subscriber budget. Nonpositive values use the default.
 func NewBroadcasterWithLimit(limit int) *Broadcaster {
-	b := &Broadcaster{core: newBroadcaster[TaskEvent, Subscriber](10)}
+	b := &Broadcaster{core: newBroadcaster[TaskEvent, Subscriber](100)}
 	if limit > 0 {
 		b.core.maxSubscribers = limit
 	}

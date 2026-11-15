@@ -203,8 +203,8 @@ func TestTypedBroadcasters_UseConfiguredBufferCapacities(t *testing.T) {
 		t.Fatalf("task Subscribe: %v", err)
 	}
 	defer task.Unsubscribe(taskSub)
-	if got := cap(taskSub); got != 10 {
-		t.Fatalf("task subscriber capacity = %d, want 10", got)
+	if got := cap(taskSub); got != 100 {
+		t.Fatalf("task subscriber capacity = %d, want 100", got)
 	}
 
 	chat := NewChatBroadcaster()
@@ -213,8 +213,8 @@ func TestTypedBroadcasters_UseConfiguredBufferCapacities(t *testing.T) {
 		t.Fatalf("chat Subscribe: %v", err)
 	}
 	defer chat.Unsubscribe(chatSub)
-	if got := cap(chatSub); got != 10 {
-		t.Fatalf("chat subscriber capacity = %d, want 10", got)
+	if got := cap(chatSub); got != 100 {
+		t.Fatalf("chat subscriber capacity = %d, want 100", got)
 	}
 
 	fileChanges := NewFileChangeBroadcaster()
@@ -223,8 +223,8 @@ func TestTypedBroadcasters_UseConfiguredBufferCapacities(t *testing.T) {
 		t.Fatalf("file-change Subscribe: %v", err)
 	}
 	defer fileChanges.Unsubscribe(fileSub)
-	if got := cap(fileSub); got != 50 {
-		t.Fatalf("file-change subscriber capacity = %d, want 50", got)
+	if got := cap(fileSub); got != 100 {
+		t.Fatalf("file-change subscriber capacity = %d, want 100", got)
 	}
 }
 

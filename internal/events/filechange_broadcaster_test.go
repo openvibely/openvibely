@@ -138,14 +138,14 @@ func TestFileChangeBroadcaster_NonBlockingPublish(t *testing.T) {
 	}
 	defer b.Unsubscribe(sub)
 
-	for i := 0; i < 55; i++ {
+	for i := 0; i < cap(sub)+5; i++ {
 		b.Publish(FileChangeEvent{Type: DiffSnapshot, TaskID: "task", ExecID: "exec"})
 	}
-	if got := cap(sub); got != 50 {
-		t.Fatalf("subscriber capacity = %d, want 50", got)
+	if got := cap(sub); got != 100 {
+		t.Fatalf("subscriber capacity = %d, want 100", got)
 	}
-	if got := len(sub); got != 50 {
-		t.Fatalf("buffered events = %d, want 50 after dropping full-buffer events", got)
+	if got := len(sub); got != 100 {
+		t.Fatalf("buffered events = %d, want 100 after dropping full-buffer events", got)
 	}
 }
 

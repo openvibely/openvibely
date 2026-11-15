@@ -67,7 +67,7 @@ func TestComputerSubscriptionFiltersBeforeQueueing(t *testing.T) {
 		t.Fatalf("project computer should only receive project-wide change, got %d", len(project))
 	}
 	// Relevant events still use the bounded queue and signal genuine overflow.
-	for i := 0; i < 11; i++ {
+	for i := 0; i < cap(task)+1; i++ {
 		b.Publish(expected[1])
 	}
 	select {

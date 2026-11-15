@@ -163,11 +163,11 @@ func TestBroadcaster_NonBlockingPublish(t *testing.T) {
 	}
 	defer b.Unsubscribe(sub)
 
-	for i := 0; i < 15; i++ {
+	for i := 0; i < cap(sub)+5; i++ {
 		b.Publish(TaskEvent{TaskID: "task1", Status: "running"})
 	}
-	if got := len(sub); got != 10 {
-		t.Fatalf("buffered events = %d, want 10 after dropping full-buffer events", got)
+	if got := len(sub); got != 100 {
+		t.Fatalf("buffered events = %d, want 100 after dropping full-buffer events", got)
 	}
 }
 
