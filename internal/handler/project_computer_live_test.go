@@ -61,6 +61,17 @@ func TestProjectComputerLiveViewer(t *testing.T) {
 	fixture := liveComputerFixture{service.ComputerConnection{Endpoint: endpoint, Token: os.Getenv("OPENVIBELY_TEST_COMPUTER_TOKEN")}}
 	h := &Handler{projectRepo: repo, projectSvc: service.NewProjectService(repo), computerSvc: service.NewProjectComputerService(repo, fixture)}
 	h.computerSvc.SetAttachmentDirectory(t.TempDir())
+	scoped, err := h.computerSvc.ForTask(t.Context(), project.ID, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scoped.SetEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := scoped.SetTaskEnabled(t.Context(), project.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
 	e := echo.New()
 	h.SetDesktopMode(true)
 	e.Use(h.AuthMiddleware())
@@ -80,17 +91,27 @@ func TestProjectComputerLiveViewer(t *testing.T) {
 	}
 	script := `<script>(async()=>{
  const finish=(status,message)=>{let node=document.createElement('div');node.id='computer-test-result';node.dataset.status=status;node.textContent=message;document.body.append(node);};
- const wait=async f=>{for(let n=0;n<100;n++){if(f())return;await new Promise(r=>setTimeout(r,100));}throw new Error('viewer timed out: '+document.querySelector('[data-computer-status]').textContent);};
+ const wait=async f=>{for(let n=0;n<100;n++){if(f())return;await new Promise(r=>setTimeout(r,100));}throw new Error('viewer timed out');};
+ let takeoverCalls=0;const originalFetch=window.fetch;window.fetch=(url,options)=>{if(/\/(takeover|release)(?:\?|$)/.test(String(url)))takeoverCalls++;return originalFetch(url,options);};
+ const liveFrame=()=>{const c=document.querySelector('[data-computer-screen] canvas:not([data-retained-frame])');return c && c.width===1440 && c.height===900 && c.getContext('2d').getImageData(720,450,1,1).data[3]>0;};
  try{
   await wait(()=>document.querySelector('[data-computer-screen] canvas'));
-  await wait(()=>{const c=document.querySelector('[data-computer-screen] canvas');return c && c.width===1440 && c.height===900;});
+  await wait(liveFrame);
   const canvas=document.querySelector('[data-computer-screen] canvas');
   document.querySelector('[data-computer-preview-open]').click();
   if(!document.querySelector('[data-computer-dialog]').open || !document.querySelector('[data-computer-expanded]').contains(canvas))throw Error('full viewer did not retain live screen');
 
-  await wait(()=>document.querySelector('[data-computer-status]').textContent.includes('You have control'));
+  await wait(()=>document.querySelector('[aria-label="Remote computer keyboard"]'));
+  await wait(liveFrame);
+  if(document.querySelector('[data-computer-status]'))throw Error('Obsolete status element remains');
   const root=document.querySelector('[data-computer-project]');
   const filesURL='/projects/'+root.dataset.computerProject+'/computer/files?task_id='+root.dataset.computerTask+'&path=viewer-fixture.txt';
+  const statusURL='/projects/'+root.dataset.computerProject+'/computer/status?task_id='+root.dataset.computerTask;
+  if((await (await fetch(statusURL)).json()).held)throw Error('Fullscreen acquired exclusive control');
+  if(document.querySelector('[data-computer-dialog]').contains(document.querySelector('[data-computer-files]')))throw Error('Files moved into fullscreen');
+  document.querySelector('[data-computer-close]').click();
+  await wait(()=>!document.querySelector('[data-computer-dialog]').open && !document.querySelector('[aria-label="Remote computer keyboard"]'));
+  await wait(liveFrame);
   const uploaded=await fetch(filesURL,{method:'PUT',body:'viewer-file'});if(!uploaded.ok)throw Error('upload failed');
   const downloaded=await fetch(filesURL);if(await downloaded.text()!=='viewer-file')throw Error('download differed');
   document.querySelector('[data-computer-files]').open=true;
@@ -98,16 +119,13 @@ func TestProjectComputerLiveViewer(t *testing.T) {
   const importButton=()=>[...document.querySelectorAll('[data-computer-file-list] button')].find(b=>b.textContent==='Add to task'||b.textContent==='Added');
   await wait(()=>importButton());importButton().click();await wait(()=>importButton().textContent==='Added');
   const duplicate=await fetch(filesURL,{method:'PUT',body:'replacement'});if(duplicate.ok)throw Error('overwrote user file');
-  document.querySelector('[data-computer-close]').click();
-  await wait(()=>document.querySelector('[data-computer-status]').textContent==='Ready');
-  document.querySelector('[data-computer-close]').click();
-  await wait(()=>!document.querySelector('[data-computer-dialog]').open);
-  await fetch('/fixture-login',{method:'POST'});
+  if(takeoverCalls)throw Error('Normal viewer requested takeover or release');
+  const handoff=await fetch('/fixture-login',{method:'POST'});if(!handoff.ok)throw Error('Private handoff failed');
   await wait(()=>!document.querySelector('[data-computer-login]').hidden);
   document.querySelector('[data-computer-preview-open]').click();await wait(()=>document.querySelector('[data-computer-dialog]').open);document.querySelector('[data-computer-close]').click();await wait(()=>!document.querySelector('[data-computer-dialog]').open);if(document.querySelector('[data-computer-login]').hidden)throw Error('Closing viewer cleared private login');
   document.querySelector('[data-computer-action="login-done"]').click();
   await wait(()=>document.querySelector('[data-computer-login]').hidden);
-  finish('pass','desktop frame, expansion, takeover, private login verified');
+  finish('pass','desktop frame, shared control, files, private handoff verified');
  }catch(e){finish('fail',e.message);}
 })();</script>`
 	html := strings.Replace(page.String(), "</body>", script+"</body>", 1)
@@ -117,7 +135,7 @@ func TestProjectComputerLiveViewer(t *testing.T) {
 		}
 		if r.URL.Path == "/fixture-login" {
 			rt := h.computerSvc.RuntimeTools(r.Context(), project.ID, task.ID)
-			_, _, _, err := rt.Executor(r.Context(), "request_browser_login", json.RawMessage(`{"url":"http://127.0.0.1:9222/json/version","expected_text":"Protocol-Version"}`))
+			_, _, _, err := rt.Executor(r.Context(), "request_computer_help", json.RawMessage(`{"reason":"Verify the disposable test desktop"}`))
 			if err != nil {
 				http.Error(w, err.Error(), 500)
 			} else {
