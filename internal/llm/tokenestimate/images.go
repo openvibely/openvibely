@@ -116,32 +116,9 @@ func contentImageAdjustment(content []byte, imageType string, imageTokens int) i
 	return contentImageAdjustmentSized(content, imageType, imageTokens, false)
 }
 func contentImageAdjustmentSized(content []byte, imageType string, imageTokens int, normalize bool) int {
-	d := jsontext.NewDecoder(bytes.NewBuffer(content), jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
-	token, err := d.ReadToken()
-	if err != nil || token.Kind() != '[' {
+	adjustment, err := adjustContentImages(json.RawMessage(content), imageType, imageTokens, normalize)
+	if err != nil {
 		return 0
-	}
-	adjustment := 0
-	for d.PeekKind() != ']' {
-		block, err := d.ReadValue()
-		if err != nil {
-			return 0
-		}
-		nested, kind, err := contentFields(block, true)
-		if err != nil {
-			continue
-		}
-		if kind == imageType {
-			size := len(block)
-			if normalize {
-				if n, err := jsonview.EncodedSize(block); err == nil {
-					size = n
-				}
-			}
-			adjustment += ByteBudget(imageTokens) - size
-		} else if kind == "tool_result" {
-			adjustment += contentImageAdjustmentSized(nested, imageType, imageTokens, normalize)
-		}
 	}
 	return adjustment
 }
@@ -149,32 +126,11 @@ func contentImageAdjustmentSized(content []byte, imageType string, imageTokens i
 func messageImageAdjustment(messages []struct {
 	Content json.RawMessage `json:"content"`
 }, imageType string, imageTokens int) int {
-	bytes := 0
-	var countContent func(json.RawMessage)
-	countContent = func(content json.RawMessage) {
-		var blocks []json.RawMessage
-		if json.Unmarshal(content, &blocks) != nil {
-			return // Plain text content is already included in the byte count.
-		}
-		for _, block := range blocks {
-			var fields struct {
-				Type    string          `json:"type"`
-				Content json.RawMessage `json:"content"`
-			}
-			if json.Unmarshal(block, &fields) != nil {
-				continue
-			}
-			if fields.Type == imageType {
-				bytes += ByteBudget(imageTokens) - len(block)
-			} else if fields.Type == "tool_result" {
-				countContent(fields.Content)
-			}
-		}
-	}
+	adjustment := 0
 	for _, message := range messages {
-		countContent(message.Content)
+		adjustment += contentImageAdjustment(message.Content, imageType, imageTokens)
 	}
-	return bytes
+	return adjustment
 }
 
 // FromMessageArray estimates an already encoded array without constructing an

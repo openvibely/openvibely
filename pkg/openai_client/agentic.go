@@ -1567,26 +1567,23 @@ func agenticEncryptedFunctionOutputEstimateAdjustment(item any) (int, int) {
 }
 
 func forEachAgenticContentBlock(value any, visit func(map[string]any)) {
-	switch typed := value.(type) {
-	case []any:
-		for _, item := range typed {
-			forEachAgenticContentBlock(item, visit)
+	// Responses retains its existing recursive envelope policy and payload-only
+	// accounting; the shared walker owns Go slice and raw JSON representation handling.
+	_ = tokenestimate.VisitContentBlocks(value, func(block tokenestimate.ContentBlock) ([]any, error) {
+		fields, err := block.Object()
+		if err != nil {
+			return nil, err
 		}
-	case []map[string]any:
-		// Computer tool images use typed block slices before JSON persistence.
-		// Traverse them just like the []any slices produced when reloading JSON.
-		for _, item := range typed {
-			forEachAgenticContentBlock(item, visit)
-		}
-	case map[string]any:
-		visit(typed)
-		for _, nested := range typed {
+		visit(fields)
+		children := make([]any, 0, len(fields))
+		for _, nested := range fields {
 			switch nested.(type) {
-			case []any, []map[string]any, map[string]any:
-				forEachAgenticContentBlock(nested, visit)
+			case []any, []map[string]any, map[string]any, json.RawMessage:
+				children = append(children, nested)
 			}
 		}
-	}
+		return children, nil
+	})
 }
 
 func parseAgenticBase64DataURL(url string, mediaTypePrefix string) (string, bool) {

@@ -1,61 +1,54 @@
 package tokenestimate
 
 import (
+	"bytes"
 	"encoding/json"
-	"github.com/openvibely/openvibely/internal/llm/jsonview"
-	"strings"
 )
 
 // ContentAdjustment applies the existing image budget to immutable raw blocks
 // or decoded content, without encoding a complete message array.
 func ContentAdjustment(content any, imageType string, imageTokens int) (int, error) {
-	if raw, ok := content.(json.RawMessage); ok {
-		return contentImageAdjustmentSized(raw, imageType, imageTokens, true), nil
-	}
-	var blocks []any
-	switch v := content.(type) {
-	case []any:
-		blocks = v
-	case []map[string]interface{}:
-		for _, block := range v {
-			blocks = append(blocks, block)
-		}
-	default:
+	return adjustContentImages(content, imageType, imageTokens, true)
+}
+
+func adjustContentImages(content any, imageType string, imageTokens int, normalize bool) (int, error) {
+	if !isContentArray(content) {
 		return 0, nil
 	}
 	adjustment := 0
-	for _, value := range blocks {
-		block, ok := value.(map[string]any)
-		if !ok {
-			continue
+	err := VisitContentBlocks(content, func(block ContentBlock) ([]any, error) {
+		nested, kind, err := block.ContentFields()
+		if err != nil {
+			// Non-content objects are not image blocks.
+			return nil, nil
 		}
-		unusual := false
-		for key := range block {
-			if (strings.EqualFold(key, "type") && key != "type") || (strings.EqualFold(key, "content") && key != "content") {
-				unusual = true
-			}
-		}
-		if unusual {
-			encoded, err := json.Marshal([]any{block})
+		if kind == imageType {
+			size, err := block.Size(normalize)
 			if err != nil {
-				return 0, err
-			}
-			adjustment += contentImageAdjustmentSized(encoded, imageType, imageTokens, true)
-			continue
-		}
-		if block["type"] == imageType {
-			size, err := jsonview.Size(block)
-			if err != nil {
-				return 0, err
+				return nil, err
 			}
 			adjustment += ByteBudget(imageTokens) - size
-		} else if block["type"] == "tool_result" {
-			n, err := ContentAdjustment(block["content"], imageType, imageTokens)
-			if err != nil {
-				return 0, err
-			}
-			adjustment += n
+		} else if kind == "tool_result" && isContentArray(nested) {
+			return []any{nested}, nil
 		}
+		return nil, nil
+	})
+	if err != nil {
+		return 0, err
 	}
 	return adjustment, nil
+}
+
+// Message API content must be a block array; an object-shaped tool payload is
+// not itself an image. Responses selects its own envelope traversal separately.
+func isContentArray(value any) bool {
+	switch v := value.(type) {
+	case []any, []map[string]any:
+		return true
+	case json.RawMessage:
+		raw := bytes.TrimSpace(v)
+		return len(raw) > 0 && raw[0] == '['
+	default:
+		return false
+	}
 }

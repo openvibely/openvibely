@@ -140,3 +140,43 @@ func TestComputerImagesReachCompletionsReplay(t *testing.T) {
 		t.Fatal("screenshot lost during replay")
 	}
 }
+
+// All Responses image producers use the same traversal for representation
+// fallbacks, while retaining the Responses-specific payload token estimate.
+func TestResponsesImageSourcesMatchReloadedBudget(t *testing.T) {
+	output := largeComputerImageFixture(t)
+	image, ok := agenttools.DecodeImageResult(output)
+	if !ok {
+		t.Fatal("invalid fixture")
+	}
+	block := map[string]any{"type": "input_image", "detail": "auto", "image_url": "data:image/png;base64," + image.Content[0].Data}
+	for _, source := range []struct {
+		name, itemType, field string
+		content               any
+	}{
+		{"computer", "function_call_output", "output", agenttools.ResponsesImageOutput(output)},
+		{"view_image", "message", "content", []any{map[string]any{"type": "input_text", "text": "Image returned by view_image"}, block}},
+		{"generated image", "function_call_output", "output", []any{map[string]any{"type": "input_text", "text": "Generated image"}, block}},
+		{"attachment", "message", "content", []any{block}},
+	} {
+		t.Run(source.name, func(t *testing.T) {
+			item := map[string]any{"type": source.itemType, source.field: source.content}
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var restored map[string]any
+			if err := json.Unmarshal(encoded, &restored); err != nil {
+				t.Fatal(err)
+			}
+			want := estimateInputItemsTokens([]any{restored})
+			rawContent, _ := json.Marshal(source.content)
+			for name, content := range map[string]any{"fresh": source.content, "raw": json.RawMessage(rawContent)} {
+				item[source.field] = content
+				if got := estimateInputItemsTokens([]any{item}); got != want || got > 2200 {
+					t.Errorf("%s: estimate=%d restored=%d", name, got, want)
+				}
+			}
+		})
+	}
+}
