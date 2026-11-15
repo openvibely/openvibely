@@ -332,9 +332,15 @@ templ TaskWorkspaceScript() {
 			var tab = event.target.closest('[role="tab"]');
 			if (tab && !event.defaultPrevented && !event.isComposing && !event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) >= 0) {
 				event.preventDefault();
-				var index = tabNames.indexOf(selected);
-				index = event.key === 'Home' ? 0 : event.key === 'End' ? tabNames.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : tabNames.length - 1)) % tabNames.length;
-				selectTab(tabNames[index], true);
+				// Saved Computer selections may remain pending, but hidden tabs
+				// must not become reachable through keyboard navigation.
+				var visibleTabs = Array.from(panel.querySelectorAll('[role="tab"]')).filter(function(button) {
+					return !button.hidden && !button.disabled && button.getClientRects().length > 0 && getComputedStyle(button).visibility !== 'hidden';
+				}).map(function(button) { return button.dataset.tab; });
+				if (!visibleTabs.length) return;
+				var index = visibleTabs.indexOf(selected);
+				index = event.key === 'Home' ? 0 : event.key === 'End' ? visibleTabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : visibleTabs.length - 1)) % visibleTabs.length;
+				selectTab(visibleTabs[index], true);
 				panel.querySelector('[aria-selected="true"]').focus();
 			}
 		});
