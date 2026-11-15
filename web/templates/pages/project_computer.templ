@@ -170,7 +170,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      let connected=false, currentState=null, inViewport=true, ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[], savingDemo=false, generationAbort=null, workflowID="";
      function inputActive(){return connected && !retained && mode==='control' && dialog.open && !document.hidden && !closing;}
 
-     function visible(){const host=root;return !document.hidden && (dialog.open || host.getClientRects().length>0);}
+     function visible(){const host=root;return !host.closest('[data-computer-permission-pending]') && !document.hidden && (dialog.open || host.getClientRects().length>0);}
      function chord(key,code,{ctrl=false,shift=false,alt=false}={}){
       if(!inputActive())return;
       for(const [sym,name] of [[0xffeb,'MetaLeft'],[0xffec,'MetaRight'],[0xffe3,'ControlLeft'],[0xffe4,'ControlRight'],[0xffe1,'ShiftLeft'],[0xffe2,'ShiftRight'],[0xffe9,'AltLeft'],[0xffea,'AltRight']])rfb.sendKey(sym,name,false);
