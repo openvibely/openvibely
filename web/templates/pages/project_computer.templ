@@ -71,7 +71,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <button type="button" class="btn" data-computer-action="login-cancel">Decline request</button>
  </div>
  <p role="status" aria-live="polite" data-computer-status>Checking computer…</p>
-   <dialog data-computer-dialog aria-label="Live computer screen" class="bg-base-100 text-base-content" style="position:fixed;inset:0;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;padding:0;border:0;border-radius:0;overflow:hidden"><header style="display:flex;justify-content:flex-end;height:52px;flex-shrink:0;padding:8px 16px;align-items:center"><button type="button" class="btn btn-ghost btn-sm" data-computer-clipboard disabled>Copy clipboard</button><button type="button" class="btn btn-ghost btn-sm" data-teach-open>Teach a task</button><button type="button" class="btn btn-ghost btn-sm btn-square" data-computer-close aria-label="Exit fullscreen" title="Exit fullscreen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 9h5V4m11 5h-5V4M4 15h5v5m11-5h-5v5"></path></svg></button></header><div data-computer-teach hidden style="max-height:40vh;overflow:auto;padding:12px">
+   <dialog data-computer-dialog aria-label="Live computer screen" class="bg-base-100 text-base-content" style="position:fixed;inset:0;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;padding:0;border:0;border-radius:0;overflow:hidden"><header style="display:flex;justify-content:flex-end;height:52px;flex-shrink:0;padding:8px 16px;align-items:center"><button type="button" class="btn btn-ghost btn-sm" data-teach-open>Teach a task</button><button type="button" class="btn btn-ghost btn-sm btn-square" data-computer-close aria-label="Exit fullscreen" title="Exit fullscreen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 9h5V4m11 5h-5V4M4 15h5v5m11-5h-5v5"></path></svg></button></header><div data-computer-teach hidden style="max-height:40vh;overflow:auto;padding:12px">
  <p>Demonstrate the task, then review the steps and captures before generating a workflow. Typed values are omitted. Pause before entering private information.</p>
  <label>Goal <input class="input input-bordered" data-teach-goal maxlength="2000"/></label>
  <button type="button" class="btn btn-sm" data-teach-record>Record steps</button>
@@ -147,11 +147,10 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const previewCache=window.__ovComputerPreviewCache;
      let previewDeleted=false;
      const previewKey=JSON.stringify([root.dataset.computerProject,root.dataset.computerTask]);
-     const clipboardButton=find('[data-computer-clipboard]');
      const teach=find('[data-computer-teach]');
      const teachNote=find('[data-teach-status]');
      let previousCapture=null;
-     let connected=false, connectionMessage='', currentState=null, inViewport=true, clipboard='', ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[], savingDemo=false, generationAbort=null, workflowID="";
+     let connected=false, connectionMessage='', currentState=null, inViewport=true, ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[], savingDemo=false, generationAbort=null, workflowID="";
      function inputActive(){return connected && !retained && mode==='control' && dialog.open && !document.hidden && !closing;}
      function reportConnection(){
       if(retained){status.textContent='Reconnecting… Showing last preview.';return;}
@@ -190,7 +189,6 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      screen.addEventListener('focusin',e=>{if(e.target.tagName==='CANVAS')queueMicrotask(focusKeyboard)});
      screen.addEventListener('pointerup',e=>{if(e.target.tagName!=='CANVAS'||!inputActive())return;const r=e.target.getBoundingClientRect();addStep((e.button===2?'Right-click':'Click')+' at '+Math.round((e.clientX-r.left)*e.target.width/r.width)+', '+Math.round((e.clientY-r.top)*e.target.height/r.height)+' (locate the current semantic target).');queueMicrotask(focusKeyboard);},true);
      screen.addEventListener('wheel',e=>{if(inputActive())addStep('Scroll '+(e.deltaY<0?'up':'down')+'.')},{passive:true,capture:true});
-     clipboardButton.onclick=async()=>{if(!inputActive()||!clipboard)return;try{await navigator.clipboard.writeText(clipboard);status.textContent='Remote clipboard copied.';}catch{status.textContent='Clipboard access was denied by your browser.';}};
      function renderDemo(){
       find('[data-teach-record]').textContent=recording?'Pause recording':'Record steps';
       const list=find('[data-teach-steps]');list.replaceChildren();steps.forEach((step,i)=>{const row=document.createElement('li');const text=document.createElement('textarea');text.value=step;text.maxLength=2000;text.setAttribute('aria-label','Step '+(i+1));text.onchange=()=>{steps[i]=text.value};const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.onclick=()=>{steps.splice(i,1);renderDemo()};row.append(text,remove);list.append(row)});
@@ -280,11 +278,11 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=!held;
       revealFrame(epoch);
       rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;connectionMessage='';reportConnection();if(held)installKeyboard();});
-      rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;clipboard=event.detail.text;clipboardButton.disabled=!clipboard;if(document.hasFocus())navigator.clipboard?.writeText(clipboard).catch(()=>{status.textContent='Use Copy clipboard to copy the remote selection.';});});
+      rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;if(document.hasFocus())navigator.clipboard?.writeText(event.detail.text).catch(()=>{});});
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;connectionMessage='Desktop authentication failed. Reconnecting…';reportConnection();}});
-      rfb.addEventListener('disconnect',event=>{if(epoch===generation){retainFrame();connected=false;rfb=null;mode='';clipboard='';clipboardButton.disabled=true;recording=false;renderDemo();connectionMessage='Desktop disconnected. Reconnecting…';reportConnection();}});
+      rfb.addEventListener('disconnect',event=>{if(epoch===generation){retainFrame();connected=false;rfb=null;mode='';recording=false;renderDemo();connectionMessage='Desktop disconnected. Reconnecting…';reportConnection();}});
      }
-     function disconnect(){++generation;connected=false;clipboard='';clipboardButton.disabled=true;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
+     function disconnect(){++generation;connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
      async function refresh(){
       if(closed || previewDeleted || pending || closing)return;
  if(!visible()){disconnect();return;}

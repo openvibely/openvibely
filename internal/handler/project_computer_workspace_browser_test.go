@@ -70,7 +70,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(!window.fixtureRFB.keys.some(k=>k[0]===0xffe3&&k[2]===true))throw Error('Command did not become Control');
  const paste=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(paste,'clipboardData',{value:{getData:()=> 'private-paste'}});ime.dispatchEvent(paste);
  if(window.fixtureRFB.pasted!=='private-paste')throw Error('Paste not bridged');
- window.fixtureRFB.listeners.clipboard({detail:{text:'remote-copy'}});q('[data-computer-clipboard]').click();await wait(()=>window.copiedRemote==='remote-copy','clipboard');
+ if(q('[data-computer-clipboard]'))throw Error('Manual clipboard control remains');window.fixtureRFB.listeners.clipboard({detail:{text:'remote-copy'}});await wait(()=>window.copiedRemote==='remote-copy','clipboard');
  q('[data-teach-note]').value='Choose Reports';q('[data-teach-capture]').click();if(!q('[data-teach-images] img'))throw Error('Capture missing');
  if(q('[data-teach-steps]').textContent.includes('private-value'))throw Error('Typed value recorded');
  q('[data-teach-auto]').checked=true;
