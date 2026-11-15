@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/service"
@@ -48,44 +46,20 @@ func TestComputerStatusUsesExistingLiveWebSocket(t *testing.T) {
 }
 
 func TestComputerStatusRecoversMissedNotification(t *testing.T) {
-	tc, _ := liveTestServer(t)
+	tc, server := liveTestServer(t)
 	svc := service.NewProjectComputerService(tc.handler.projectRepo, liveComputerFixture{})
 	tc.handler.computerSvc = svc
 	require.NoError(t, svc.SetEnabled(t.Context(), "default", false))
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	frames := make(chan liveFrame, 20)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		tc.handler.streamComputerStatusEvery(ctx, liveCommand{Op: "computer", ProjectID: "default"}, func(f liveFrame) bool {
-			select {
-			case frames <- f:
-				return true
-			case <-ctx.Done():
-				return false
-			}
-		}, 20*time.Millisecond)
-	}()
-	next := func() map[string]any {
-		t.Helper()
-		for {
-			select {
-			case f := <-frames:
-				if f.Event == "computer_status" {
-					return f.Data.(map[string]any)
-				}
-				require.NotEqual(t, "error", f.Event)
-			case <-time.After(time.Second):
-				t.Fatal("missing status snapshot")
-				return nil
-			}
-		}
-	}
-	require.Equal(t, false, next()["enabled"])
-	// Deliberately bypass publication: equivalent to losing its notification.
+	client := dialLive(t, server.URL)
+	cmd := liveCommand{Op: "computer", ID: "computer", ProjectID: "default"}
+	client.send(t, cmd)
+	client.next(t, cmd.ID, "subscribed")
+	require.Equal(t, false, client.next(t, cmd.ID, "computer_status").Data.(map[string]any)["enabled"])
+	// Bypass publication to simulate a dropped change notification.
 	require.NoError(t, tc.handler.projectRepo.Computers().SetEnabled(t.Context(), "default", true))
-	require.Eventually(t, func() bool { return next()["enabled"] == true }, time.Second, time.Millisecond)
-	cancel()
-	<-done
+	// The transport sends this pair upon the app-wide reconcile signal.
+	client.send(t, liveCommand{Op: "unsubscribe", ID: cmd.ID})
+	client.send(t, cmd)
+	client.next(t, cmd.ID, "subscribed")
+	require.Equal(t, true, client.next(t, cmd.ID, "computer_status").Data.(map[string]any)["enabled"])
 }

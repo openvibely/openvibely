@@ -10,10 +10,6 @@ import (
 // Status snapshots have editor-only authorization; never put private desktop
 // state on the project's general task notification subscription.
 func (h *Handler) streamComputerStatus(ctx context.Context, cmd liveCommand, send func(liveFrame) bool) {
-	h.streamComputerStatusEvery(ctx, cmd, send, 30*time.Second)
-}
-
-func (h *Handler) streamComputerStatusEvery(ctx context.Context, cmd liveCommand, send func(liveFrame) bool, recoveryInterval time.Duration) {
 	if h.liveSubscriptionCount.Add(1) > int64(h.liveLimits.WithDefaults().LiveSubscriptions) {
 		h.liveSubscriptionCount.Add(-1)
 		send(liveFrame{Event: "retry", Data: "live subscription limit reached"})
@@ -59,17 +55,10 @@ func (h *Handler) streamComputerStatusEvery(ctx context.Context, cmd liveCommand
 	if !send(liveFrame{Event: "subscribed"}) || !snapshot() {
 		return
 	}
-	// Resend authoritative state even if the bounded broadcaster dropped an event.
-	recovery := time.NewTicker(recoveryInterval)
-	defer recovery.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-recovery.C:
-			if !snapshot() {
-				return
-			}
 		case ev, ok := <-updates:
 			if !ok {
 				return
