@@ -123,16 +123,6 @@ func contentImageAdjustmentSized(content []byte, imageType string, imageTokens i
 	return adjustment
 }
 
-func messageImageAdjustment(messages []struct {
-	Content json.RawMessage `json:"content"`
-}, imageType string, imageTokens int) int {
-	adjustment := 0
-	for _, message := range messages {
-		adjustment += contentImageAdjustment(message.Content, imageType, imageTokens)
-	}
-	return adjustment
-}
-
 // FromMessageArray estimates an already encoded array without constructing an
 // envelope or copying content blocks merely to inspect images.
 func FromMessageArray(encoded []byte, imageType string, imageTokens int) (int, error) {
