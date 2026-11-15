@@ -48,7 +48,9 @@ func TestBrowserFunctional_NewTaskPastedTextProjectSelection(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/new", "new-task-paste-project", func(b *composerFocusCDP) {
 		b.waitFor("composer initialized", `String(document.readyState==='complete' && !!document.getElementById('task-thread-form')?._captureChatSubmission)`, "true")
 		b.evaluateAwait(`(async function(){const picker=document.querySelector('.chat-model-select');if(picker?._ovModelState)await picker._ovModelState.ready;return 'ready';})()`)
-		b.evaluate(`(function(){const input=document.getElementById('task-message-input'),data=new DataTransfer();input.value='Instructions';data.setData('text/plain','pasted context '.repeat(500));input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));document.getElementById('task-thread-form').requestSubmit();return 'submitted';})()`)
+		b.evaluate(`(function(){const input=document.getElementById('task-message-input'),data=new DataTransfer();input.value='Instructions';data.setData('text/plain','pasted context '.repeat(500));input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));return 'pasted';})()`)
+		b.waitFor("pasted preview visible", `String((function(){const card=document.querySelector('[aria-label="Edit pasted text"]');return !!card && card.getBoundingClientRect().height>0 && !card.closest('[hidden], .hidden');})())`, "true")
+		b.evaluate(`document.getElementById('task-thread-form').requestSubmit();'submitted'`)
 		b.waitFor("project picker", `String(document.querySelector('#task-property-picker')?.matches(':popover-open'))`, "true")
 		if sends.Load() != 0 {
 			t.Fatal("sent before selecting project")
