@@ -11,6 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func newInsightsHandlerTestContext(t *testing.T) (*TestContext, persistence.InsightsStore) {
@@ -248,6 +249,41 @@ func TestExtractInsightsKnowledge_NilService(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/insights/extract-knowledge?project_id=proj-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
+}
+
+func TestExtractInsightsKnowledge_UnreadableOutputShowsFailure(t *testing.T) {
+	tc, _ := newInsightsHandlerTestContext(t)
+	ctx := context.Background()
+	stores := tc.stores
+
+	llmSvc := service.NewLLMService(stores.LLMConfigs, stores.Executions, stores.Tasks, stores.Projects, stores.Schedules, stores.Attachments)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "not json"
+	llmSvc.SetLLMCaller(mock)
+	tc.handler.insightsSvc.SetLLMService(llmSvc)
+
+	project := &models.Project{Name: "Knowledge Render Project", RepoPath: t.TempDir()}
+	if err := stores.Projects.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "knowledge-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	if err := stores.LLMConfigs.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Fixed bug", Prompt: strings.Repeat("meaningful task prompt ", 12), Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 1, Tag: models.TagBug, AgentID: &agent.ID}
+	if err := stores.Tasks.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	rec := tc.HTTP().Post("/insights/extract-knowledge?project_id=" + project.ID).Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, "Knowledge extraction failed") {
+		t.Fatalf("response does not report extraction failure: %s", body)
+	}
+	if strings.Contains(body, "No new knowledge entries to extract.") {
+		t.Fatalf("response reports a successful empty result for unreadable output: %s", body)
+	}
 }
 
 func TestUpdateInsightStatus_NilService(t *testing.T) {

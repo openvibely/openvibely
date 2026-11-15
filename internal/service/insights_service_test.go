@@ -692,6 +692,48 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	}
 }
 
+func TestInsightsService_ExtractKnowledgeRejectsUnreadableOutput(t *testing.T) {
+	for _, output := range []string{"not json", `[{"topic":"Retry policy","content":"Bounded`} {
+		env := teststores.New(t)
+		ctx := context.Background()
+
+		llmSvc := NewLLMService(env.LLMConfigs, env.Executions, env.Tasks, env.Projects, env.Schedules, env.Attachments)
+		mock := testutil.NewMockLLMCaller()
+		llmSvc.SetLLMCaller(mock)
+		svc := NewInsightsService(env.Insights, env.Tasks, env.Projects, env.LLMConfigs, env.Executions)
+		svc.SetLLMService(llmSvc)
+
+		project := &models.Project{Name: "Unreadable Knowledge Project", RepoPath: t.TempDir()}
+		if err := env.Projects.Create(ctx, project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+		agent := &models.LLMConfig{Name: "knowledge-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+		if err := env.LLMConfigs.Create(ctx, agent); err != nil {
+			t.Fatalf("create agent: %v", err)
+		}
+		task := &models.Task{ProjectID: project.ID, Title: "Fixed bug", Prompt: strings.Repeat("meaningful task prompt ", 12), Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 1, Tag: models.TagBug, AgentID: &agent.ID}
+		if err := env.Tasks.Create(ctx, task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+
+		mock.Response = output
+		knowledge, err := svc.ExtractKnowledge(ctx, project.ID)
+		if err == nil {
+			t.Fatalf("ExtractKnowledge(%q) error = nil, want parse failure", output)
+		}
+		if knowledge != nil {
+			t.Fatalf("ExtractKnowledge(%q) returned entries %#v, want none", output, knowledge)
+		}
+		persisted, err := env.Insights.ListKnowledge(ctx, project.ID, 10)
+		if err != nil {
+			t.Fatalf("ListKnowledge: %v", err)
+		}
+		if len(persisted) != 0 {
+			t.Fatalf("persisted knowledge = %d, want 0", len(persisted))
+		}
+	}
+}
+
 func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	env := teststores.New(t)
 	ctx := context.Background()
