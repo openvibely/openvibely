@@ -45,7 +45,7 @@ func TestComputerStatusUsesExistingLiveWebSocket(t *testing.T) {
 	client.next(t, cmd.ID, "error")
 }
 
-func TestComputerStatusRecoversMissedNotification(t *testing.T) {
+func TestComputerStatusReloadsOnResubscription(t *testing.T) {
 	tc, server := liveTestServer(t)
 	svc := service.NewProjectComputerService(tc.handler.projectRepo, liveComputerFixture{})
 	tc.handler.computerSvc = svc
@@ -57,7 +57,7 @@ func TestComputerStatusRecoversMissedNotification(t *testing.T) {
 	require.Equal(t, false, client.next(t, cmd.ID, "computer_status").Data.(map[string]any)["enabled"])
 	// Bypass publication to simulate a dropped change notification.
 	require.NoError(t, tc.handler.projectRepo.Computers().SetEnabled(t.Context(), "default", true))
-	// The transport sends this pair upon the app-wide reconcile signal.
+	// Reopening the subscription reads current state without needing a new event.
 	client.send(t, liveCommand{Op: "unsubscribe", ID: cmd.ID})
 	client.send(t, cmd)
 	client.next(t, cmd.ID, "subscribed")

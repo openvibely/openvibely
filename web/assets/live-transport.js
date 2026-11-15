@@ -82,15 +82,6 @@
                 return;
             }
             if (frame.event === 'reconcile') {
-                // Computer views recover through the same connection-wide signal
-                // as task views. Re-subscribe for an authorized current snapshot;
-                // do not add a per-computer timer or an HTTP status request.
-                subscriptions.forEach(function (entry, id) {
-                    if (entry.command.op !== 'computer') return;
-                    clearTimeout(entry.retryTimer);
-                    send({op:'unsubscribe', id:id});
-                    send(command(entry));
-                });
                 window.dispatchEvent(new CustomEvent('sse-live-connected', {detail: {reconnected: true, reconciliation: true}}));
                 if (window.htmx) window.htmx.trigger('body', 'alertUpdate');
                 return;

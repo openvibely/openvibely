@@ -63,7 +63,7 @@ assert(output === finalOutput, 'content changed across frame/navigation boundary
 assert(subscription.readyState === 2 && sockets.length === 2 && socket.readyState === 1, 'completion replaced the shared connection');
 assert(timers.size === 0, 'unexpected timer left after recovery');
 `},
-		{name: "computer_shared_reconciliation", script: `
+		{name: "computer_changes_and_reconnect_only", script: `
 let snapshots=0;
 openVibelyLive.live('project','task',{});
 const computer=openVibelyLive.computer('project','task',{viewer_mode:'view'}, {listeners:{computer_status:()=>snapshots++}});
@@ -74,17 +74,21 @@ const commands=socket.sent.filter(command=>command.op==='computer');
 assert(commands.length===2,'missing computer subscriptions');
 socket.sent=[];
 frame(socket,{event:'reconcile'});
-assert(socket.sent.length===4,'reconciliation should only renew computer subscriptions');
-for(let i=0;i<2;i++){
- assert(socket.sent[i*2].op==='unsubscribe' && socket.sent[i*2].id===commands[i].id,'wrong subscription removed');
- assert(socket.sent[i*2+1].op==='computer' && socket.sent[i*2+1].id===commands[i].id,'snapshot not requested on existing socket');
-}
+assert(socket.sent.length===0,'periodic reconciliation refreshed computer status');
 frame(socket,{id:commands[0].id,event:'computer_status',data:{enabled:true}});
 assert(snapshots===1,'snapshot not delivered');
-computer.close();permission.close();socket.sent=[];
-frame(socket,{event:'reconcile'});
-assert(socket.sent.length===0,'closed computer subscriptions were recovered');
-assert(sockets.length===1 && timers.size===0,'reconciliation created a socket or timer');
+socket.close();
+fireTimer(delay=>delay<1000);
+const reconnected=sockets[1];
+frame(reconnected,{event:'ready'});
+assert(reconnected.sent.filter(command=>command.op==='computer').length===2,'reconnect did not restore computer subscriptions');
+frame(reconnected,{id:commands[0].id,event:'computer_status',data:{enabled:false}});
+assert(snapshots===2,'reconnect snapshot not delivered');
+
+computer.close();permission.close();reconnected.sent=[];
+frame(reconnected,{event:'reconcile'});
+assert(reconnected.sent.length===0,'closed computer subscriptions were recovered');
+assert(sockets.length===2 && timers.size===0,'reconciliation created a socket or timer');
 `},
 		{name: "stalled_native_headers", native: true},
 		{name: "stalled_native_body", native: true},
