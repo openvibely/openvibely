@@ -183,7 +183,7 @@ func NewMCPManager(ctx context.Context, configs []models.MCPServerConfig, workDi
 		cold = append(cold, i)
 	}
 
-	acquireColdServers(ctx, configs, cold, workDir, results)
+	acquireColdServers(ctx, configs, cold, workDir, false, results)
 
 	// Duplicates reuse the first entry's outcome so they never launch another process,
 	// while still holding their own reference to keep Close symmetric.
@@ -237,15 +237,18 @@ func NewMCPManager(ctx context.Context, configs []models.MCPServerConfig, workDi
 func EnsurePersistentServers(ctx context.Context, configs []models.MCPServerConfig, workDir string) error {
 	var errs []string
 	started := 0
-	for _, cfg := range configs {
-		_, err := acquireServer(ctx, cfg, workDir, true)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, err))
-			applog.Infof("[mcp] persistent server %q failed: %v", cfg.Name, err)
+	results := acquirePersistentServers(ctx, configs, workDir)
+	for i, cfg := range configs {
+		r := results[i]
+		if r.err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, r.err))
+			applog.Infof("[mcp] persistent server %q failed: %v", cfg.Name, r.err)
 			continue
 		}
 		started++
-		releaseServer(cfg)
+		if r.srv != nil {
+			releaseServer(cfg)
+		}
 	}
 	if started == 0 && len(errs) > 0 {
 		return fmt.Errorf("starting persistent MCP servers failed: %s", strings.Join(errs, " | "))
@@ -272,15 +275,18 @@ func ReconcilePersistentServers(ctx context.Context, configs []models.MCPServerC
 
 	var errs []string
 	started := 0
-	for _, cfg := range ordered {
-		_, err := acquireServer(ctx, cfg, workDir, true)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, err))
-			applog.Infof("[mcp] reconcile persistent server %q failed: %v", cfg.Name, err)
+	results := acquirePersistentServers(ctx, ordered, workDir)
+	for i, cfg := range ordered {
+		r := results[i]
+		if r.err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, r.err))
+			applog.Infof("[mcp] reconcile persistent server %q failed: %v", cfg.Name, r.err)
 			continue
 		}
 		started++
-		releaseServer(cfg)
+		if r.srv != nil {
+			releaseServer(cfg)
+		}
 	}
 
 	var toClose []*MCPServer
@@ -350,13 +356,46 @@ func PersistentRuntimeState() []models.PluginRuntimeMCP {
 	return out
 }
 
-func acquireColdServers(ctx context.Context, configs []models.MCPServerConfig, idxs []int, workDir string, results []serverAcquireResult) {
+// acquirePersistentServers takes one persistent reference per config, in config order.
+// Distinct cold servers start concurrently (bounded by mcpStartupConcurrency); duplicate
+// keys reuse the first entry's outcome and take their own warm reference.
+func acquirePersistentServers(ctx context.Context, configs []models.MCPServerConfig, workDir string) []serverAcquireResult {
+	results := make([]serverAcquireResult, len(configs))
+	firstIdx := make(map[string]int, len(configs))
+	var cold []int
+	for i, cfg := range configs {
+		key := serverConfigKey(cfg)
+		results[i].key = key
+		if _, dup := firstIdx[key]; dup {
+			continue
+		}
+		firstIdx[key] = i
+		cold = append(cold, i)
+	}
+
+	acquireColdServers(ctx, configs, cold, workDir, true, results)
+
+	for i := range configs {
+		first := firstIdx[results[i].key]
+		if first == i {
+			continue
+		}
+		if results[first].err != nil {
+			results[i].err = results[first].err
+			continue
+		}
+		results[i].srv = acquireWarmServer(results[i].key, true)
+	}
+	return results
+}
+
+func acquireColdServers(ctx context.Context, configs []models.MCPServerConfig, idxs []int, workDir string, persistent bool, results []serverAcquireResult) {
 	acquire := func(i int) {
 		if err := ctx.Err(); err != nil {
 			results[i].err = err
 			return
 		}
-		results[i].srv, results[i].err = acquireServer(ctx, configs[i], workDir, false)
+		results[i].srv, results[i].err = acquireServer(ctx, configs[i], workDir, persistent)
 	}
 
 	workers := min(mcpStartupConcurrency, len(idxs))
