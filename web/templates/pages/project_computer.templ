@@ -61,7 +61,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <button type="button" class="btn" data-computer-action="login-done">Done — resume task</button>
  <button type="button" class="btn" data-computer-action="login-cancel">Decline request</button>
  </div>
-   <dialog data-computer-dialog aria-label="Live computer screen" class="bg-base-100 text-base-content" style="position:fixed;inset:0;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;padding:0;border:0;border-radius:0;overflow:hidden"><header style="display:flex;justify-content:flex-end;height:52px;flex-shrink:0;padding:8px 16px;align-items:center"><button type="button" class="btn btn-ghost btn-sm" data-teach-open>Teach a task</button><button type="button" class="btn btn-ghost btn-sm btn-square" data-computer-close aria-label="Exit fullscreen" title="Exit fullscreen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 9h5V4m11 5h-5V4M4 15h5v5m11-5h-5v5"></path></svg></button></header><div data-computer-teach hidden style="max-height:40vh;overflow:auto;padding:12px">
+   <dialog data-computer-dialog aria-label="Live computer screen" class="bg-base-100 text-base-content" style="position:fixed;inset:0;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;padding:0;border:0;border-radius:0;overflow:hidden"><header style="display:flex;justify-content:flex-end;gap:12px;height:52px;flex-shrink:0;padding:8px 16px;align-items:center"><button type="button" class="btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal" data-teach-open>Teach a task</button><button type="button" class="btn btn-ghost btn-sm btn-square rounded-md" data-computer-close aria-label="Exit fullscreen" title="Exit fullscreen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 9h5V4m11 5h-5V4M4 15h5v5m11-5h-5v5"></path></svg></button></header><div data-computer-teach hidden style="max-height:40vh;overflow:auto;padding:12px">
  <p>Demonstrate the task, then review the steps and captures before generating a workflow. Typed values are omitted. Pause before entering private information.</p>
  <label>Goal <input class="input input-bordered" data-teach-goal maxlength="2000"/></label>
  <button type="button" class="btn btn-sm" data-teach-record>Record steps</button>
@@ -80,6 +80,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
     .computer-summary::-webkit-details-marker { display:none; }
     details[open] > .computer-summary > [aria-hidden] { transform:rotate(90deg); }
     #project-computer[data-computer-task] > details > :not(summary) { margin-top:12px; }
+    [data-computer-dialog] > header > button:focus:not(:focus-visible) { outline:none; }
     [data-computer-dialog][open] { display:flex; flex-direction:column; }
     [data-computer-expanded] { display:flex; flex-direction:column; flex:1; min-height:0; }
     [data-computer-expanded] [data-computer-screen] { flex:1; min-height:0 !important; height:auto !important; border-radius:0; background:var(--shell-card,var(--fallback-b1,oklch(var(--b1)))); }
