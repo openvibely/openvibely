@@ -650,14 +650,16 @@ func (s *ProjectComputerService) CompleteLogin(ctx context.Context, id string) e
 
 // CloseTaskDesktop frees processes after deletion while retaining files until project cleanup.
 func (s *ProjectComputerService) CloseTaskDesktop(ctx context.Context, projectID, taskID string) error {
+	// The task is already deleted. Revoke control even if subsequent cleanup
+	// fails or its request context has been cancelled.
+	scoped := *s
+	scoped.taskID = taskID
+	_ = scoped.changeViewerPermission(projectID, false, func() error { return nil })
 	if _, err := s.repo.Get(ctx, projectID); errors.Is(err, sql.ErrNoRows) {
 		return nil
 	} else if err != nil {
 		return err
 	}
-	scoped := *s
-	scoped.taskID = taskID
-	_ = scoped.changeViewerPermission(projectID, false, func() error { return nil })
 	key := projectID + ":" + taskID
 	if cancel, ok := s.active.Load(key); ok {
 		cancel.(context.CancelFunc)()

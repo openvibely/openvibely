@@ -219,3 +219,25 @@ func TestComputerViewerRevocationCancelsBlockedWrite(t *testing.T) {
 	}
 	require.ErrorIs(t, <-done, context.Canceled)
 }
+
+func TestComputerDeletedTaskRevokesViewerBeforeFailedCleanup(t *testing.T) {
+	db, svc, project, task := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{}`) })
+	root := *svc
+	root.taskID = ""
+	root.repo = db.Projects.Computers()
+	cancelled := false
+	token, leave, err := svc.RegisterViewer(t.Context(), project.ID, "user", "session", true, func() { cancelled = true })
+	require.NoError(t, err)
+	defer leave()
+	require.NoError(t, db.Tasks.Delete(t.Context(), task.ID))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, root.CloseTaskDesktop(ctx, project.ID, task.ID), context.Canceled)
+	require.True(t, cancelled, "cleanup failure must not leave the connection open")
+	require.Error(t, svc.ForwardViewerInput(project.ID, "session", token, func() error {
+		t.Fatal("deleted task forwarded input after cleanup failed")
+		return nil
+	}))
+	_, _, err = svc.RegisterViewer(t.Context(), project.ID, "user", "retry", true)
+	require.Error(t, err, "deleted task must reject reconnect")
+}
