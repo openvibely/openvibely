@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
@@ -19,6 +21,9 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -45,7 +50,7 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
 			fmt.Fprint(w, html.EscapeString(r.FormValue("message")))
 		default:
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending"><script src="/htmx.js"></script><div id="messages"></div><div id="pending-thread-inputs"></div><div id="composer-fixture">%s</div><div id="browser-result"></div><script>
+			fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending" hx-ext="morph"><script src="/htmx.js"></script><script src="%s"></script><div id="messages"></div><div id="pending-thread-inputs"></div><div id="composer-fixture">%s</div><div id="browser-result"></div><script>
 (async function() {
  let form=document.getElementById('paste-form'), input=document.getElementById('paste-input');
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)};
@@ -66,6 +71,19 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  // Wait for HTMX to bind the form before exercising Send.
  await wait();
  assert(!paste('short text'),'short paste intercepted');
+ // Polling morphs retain the form and its listeners. Preview ownership must survive too.
+ await htmx.ajax('GET','/composer',{target:'#composer-fixture',swap:'morph:innerHTML'});
+ await wait();
+ assert(form===document.getElementById('paste-form'),'morph replaced the composer');
+ paste(large);
+ assert(cards().length===1 && cards()[0].getBoundingClientRect().height>0,'paste after polling has no visible preview');
+ await htmx.ajax('GET','/composer',{target:'#composer-fixture',swap:'morph:innerHTML'});
+ await wait();
+ assert(cards().length===1 && cards()[0].getBoundingClientRect().height>0,'polling removed pending paste preview');
+ assert(form._captureChatSubmission().message===large,'polling changed pasted text');
+ input.value='Explain this log';send();await wait();
+ assert(document.getElementById('messages').textContent==='Explain this log\n\n'+large,'send after polling lost or duplicated paste');
+ assertDraftCleared();document.getElementById('messages').replaceChildren();
  // Model a plain HTTP browser: randomUUID is absent, getRandomValues still works.
  const nativeUUID=crypto.randomUUID, nativeRandomValues=crypto.getRandomValues;
  try {
@@ -235,7 +253,7 @@ func TestBrowserFunctional_ComposerPastedText(t *testing.T) {
  assert(window._ovPasteDrafts[pasteKey][0].text===large,'detached editor overwrote saved draft');
  document.body.setAttribute('data-test-result','pass');document.getElementById('browser-result').textContent='PASS';
 })().catch(error=>{document.body.setAttribute('data-test-result','fail');document.body.setAttribute('data-test-error',error.stack);const failure=document.createElement('pre');failure.textContent=error.stack;document.body.append(failure)});
-</script></body></html>`, markup.String())
+</script></body></html>`, static.URL("vendor/idiomorph-ext.min.js"), markup.String())
 		}
 	}))
 	defer server.Close()

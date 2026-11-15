@@ -1670,6 +1670,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				<div id={ chatAttachmentListID(config.FormID) } class="space-y-1"></div>
 			</div>
 			@ChatComposerQueuedInputRowsForTask(config.PendingInputs, config.QueuedSteerEndpointFor, config.TaskID)
+			<!-- Keep the client-owned paste preview through polling morphs. -->
+			<div id={ config.FormID + "-pasted-text" } data-pasted-text-cards class="flex flex-wrap gap-2 mb-2" hidden></div>
 			<!-- Textarea -->
 			<div>
 				<textarea
@@ -2099,12 +2101,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				if (!Array.isArray(pastedTexts)) pastedTexts = [];
 				pastedTexts = pastedTexts.filter(function(item) { return item && typeof item.text === 'string' && typeof item.id === 'string'; });
 			}
-			form.querySelectorAll('[data-pasted-text-cards]').forEach(function(oldCards) { oldCards.remove(); });
 			if (pasteKey) window._ovPasteDrafts[pasteKey] = pastedTexts;
-			var pasteCards = document.createElement('div');
-			pasteCards.className = 'flex flex-wrap gap-2 mb-2';
-			pasteCards.setAttribute('data-pasted-text-cards', '');
-			messageInput.parentElement.before(pasteCards);
+			var pasteCards = form.querySelector('[data-pasted-text-cards]');
 			function composerMessage() {
 				return [messageInput.value].concat(pastedTexts.map(function(item) { return item.text; })).filter(function(text) { return text !== ''; }).join('\n\n');
 			}
@@ -2619,6 +2617,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							submitComposer(steerEndpoint, 'steer', payload);
 						}
 									function handleComposerStateMutation() {
+										// Polling keeps the form's listeners but resets server-rendered
+										// children. Restore the client-owned draft preview in its stable slot.
+										if (pasteCards.children.length !== pastedTexts.length || pasteCards.hidden !== (pastedTexts.length === 0)) renderPastes();
 										clearExpectedTurnIDWhenIdle();
 										refreshPrimaryActionForInput();
 										flushDeferredSteer();
