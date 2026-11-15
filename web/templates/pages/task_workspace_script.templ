@@ -25,7 +25,7 @@ templ TaskWorkspaceScript() {
 		function store(key, value) { try { localStorage.setItem(key, value); } catch (_) {} }
 		var panelOpenKey = taskID ? 'task-inspector-open-' + taskID : null;
 		var saved = taskID ? read('task-inspector-tab-' + taskID) : null;
-        var restoreComputerTab = saved === 'computer' && read(panelOpenKey) === 'true';
+        var restoreComputerTab = saved === 'computer';
 		if (tabNames.indexOf(saved) >= 0) selected = saved;
 		function on(el, name, fn) { el.addEventListener(name, fn, {signal: signal}); }
 		function alignActions() {
@@ -363,7 +363,8 @@ templ TaskWorkspaceScript() {
                 if (!allowed && selected === 'computer') selectTab('details', false);
                 else if (allowed) {
                     var requestedTab = displayedURL().searchParams.get('tab') || root.dataset.initialTab;
-                    if (requestedTab === 'computer' || (restoreComputerTab && !panel.hidden && (!requestedTab || ['chat', 'thread', 'history', 'changes'].includes(requestedTab)))) openPanel('computer', false, false);
+                    if (requestedTab === 'computer') openPanel('computer', false, false);
+                    else if (restoreComputerTab && (!requestedTab || ['chat', 'thread', 'history', 'changes'].includes(requestedTab))) selectTab('computer', false);
                 }
                 restoreComputerTab = false;
             }

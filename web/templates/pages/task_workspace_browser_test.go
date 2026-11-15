@@ -834,6 +834,22 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 		b.waitFor("initially closed", `String(document.getElementById('task-details-opener')?.getAttribute('aria-expanded'))`, "false")
 		b.click("#task-details-opener")
 		b.waitFor("open preference saved", `localStorage.getItem('task-inspector-open-one')`, "true")
+		softNavigate := func(path, open, tab string) {
+			b.evaluate(`window.panelSwapSettled=false; window.openVibelyNavigate('` + path + `').then(function(){setTimeout(function(){window.panelSwapSettled=true},100)}); 'started'`)
+			b.waitFor("task navigation settled", `String(window.panelSwapSettled)`, "true")
+			b.waitFor("task-specific panel state", `String(document.getElementById('task-details-opener').getAttribute('aria-expanded'))`, open)
+			if tab != "" {
+				b.waitFor("task-specific selected tab", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, tab)
+			}
+		}
+		b.click(`[data-tab="attachments"]`)
+		softNavigate("/tasks/other?project_id=one", "false", "")
+		b.click("#task-details-opener")
+		b.click(`[data-tab="chaining"]`)
+		softNavigate("/tasks/one?project_id=one", "true", "attachments")
+		softNavigate("/tasks/other?project_id=one", "true", "chaining")
+		b.click("#task-details-opener")
+		softNavigate("/tasks/one?project_id=one", "true", "attachments")
 		navigate := func(path, expected string) {
 			b.call("Page.navigate", map[string]any{"url": server.URL + path}, nil)
 			b.waitFor("navigation ready", `location.pathname + location.search + ':' + (document.getElementById('task-detail-content')?.dataset.projectId || '')`, path+":"+strings.Split(strings.Split(path, "project_id=")[1], "&")[0])
@@ -869,6 +885,13 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 		navigate("/tasks/two?project_id=two", "false")
 		navigate("/tasks/one?project_id=one", "true")
 		b.waitFor("computer selection restored", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "computer")
+		b.click("#task-details-opener")
+		softNavigate("/tasks/two?project_id=two", "false", "")
+		softNavigate("/tasks/one?project_id=one", "false", "")
+		b.waitFor("computer allowed while panel is closed", `String(!document.querySelector('[data-tab="computer"]').hidden)`, "true")
+		b.waitFor("closed panel keeps Computer preference", `localStorage.getItem('task-inspector-tab-one')`, "computer")
+		b.click("#task-details-opener")
+		b.waitFor("reopened panel selects Computer", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "computer")
 		navigate("/tasks/two?project_id=two", "false")
 		b.call("Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": `window.panelTabWrites=[]; const originalSetItem=Storage.prototype.setItem; Storage.prototype.setItem=function(key,value){if(key==='task-inspector-tab-one')window.panelTabWrites.push(value);return originalSetItem.call(this,key,value);};`}, nil)
 		navigate("/tasks/one?project_id=one&tab=changes", "true")

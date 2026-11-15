@@ -121,7 +121,9 @@ func breadcrumbSelectorItemURL(resource, id, projectID, tab, view, from, automat
 	} else if resource == "tasks" {
 		path = "/tasks/" + url.PathEscape(id)
 		switch tab {
-		case "details", "chat", "changes", "schedules", "chaining", "attachments", "lifecycle":
+		// Only carry the main workspace view between tasks. Inspector tabs
+		// belong to each task's saved preference, not the outgoing task.
+		case "chat", "changes":
 			values.Set("tab", tab)
 		}
 		switch from {
