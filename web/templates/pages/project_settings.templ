@@ -767,6 +767,7 @@ templ ProjectSettingsTabs(prefix string) {
   :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }
   :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }
   [data-project-tab-content], [data-project-sharing-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; padding-right: 1rem; }
+  #new_project_modal [data-project-tab-content] { height: min(41rem, calc(100dvh - 16rem)); }
   [data-project-panel][hidden], [data-project-tab-content][hidden], .modal-action[hidden] { display: none !important; }
   [data-project-repo-fields][hidden] { display: none !important; }
   [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }

@@ -102,7 +102,7 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 					     }
 					     if (Math.abs(w.height - document.getElementById('standard-modal-input').getBoundingClientRect().height) > 1) return 'controls differ from standard modal height';
 					     if (content.scrollWidth > content.clientWidth) return 'controls overflow';
-					     if (innerWidth > 640 && innerHeight >= 900 && (content.scrollHeight > content.clientHeight || Math.max(m.bottom, w.bottom) > content.getBoundingClientRect().bottom)) return 'defaults require desktop scrolling';
+					     if (innerWidth > 640 && innerHeight >= 900 && (content.scrollHeight > content.clientHeight || Math.max(m.bottom, w.bottom) > content.getBoundingClientRect().bottom)) return 'defaults require desktop scrolling ' + JSON.stringify({content:content.getBoundingClientRect().toJSON(),scrollHeight:content.scrollHeight,general:general.getBoundingClientRect().toJSON()});
 					   }
 					   if (box.querySelector('thead th').textContent !== 'Resource') return 'missing resource heading';
 					   const after = box.getBoundingClientRect();

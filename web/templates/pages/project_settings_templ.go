@@ -689,14 +689,14 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "<style>\n  #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }\n  :is(#edit_project_modal, #new_project_modal) .modal-action { flex-wrap: wrap; gap: 0.5rem; }\n  :is(#edit_project_modal, #new_project_modal) .modal-action > button { margin-left: 0; }\n  :is(#edit_project_modal, #new_project_modal) .modal-action > :is(button[type=\"submit\"], [data-sharing-save]) { min-width: 6rem; }\n  :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }\n  :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }\n  [data-project-tab-content], [data-project-sharing-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; padding-right: 1rem; }\n  [data-project-panel][hidden], [data-project-tab-content][hidden], .modal-action[hidden] { display: none !important; }\n  [data-project-repo-fields][hidden] { display: none !important; }\n  [data-project-panel=\"general\"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }\n  [data-project-panel=\"general\"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }\n  [data-project-panel=\"general\"] .flex > .btn { flex-shrink: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }\n  [data-project-panel=\"general\"] .project-defaults-fields .form-control { min-width: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields :is(.input, .select) { width: 100%; min-width: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields .label { justify-content: flex-start; gap: 0.375rem; }\n  [data-project-panel=\"general\"] input[name=\"max_workers\"] { -moz-appearance: textfield; appearance: textfield; }\n  [data-project-panel=\"general\"] input[name=\"max_workers\"]::-webkit-inner-spin-button,\n  [data-project-panel=\"general\"] input[name=\"max_workers\"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }\n  [data-project-panel=\"knowledge\"] .table { table-layout: fixed; }\n  [data-project-panel=\"knowledge\"] .table :is(th, td) { padding: 0.75rem 0; }\n  [data-project-panel=\"knowledge\"] .table th:first-child { width: 50%; }\n  @media (max-width: 640px) { [data-project-panel=\"general\"] .project-defaults-fields { grid-template-columns: minmax(0, 1fr); } }\n\n </style><div role=\"tablist\" aria-label=\"Project settings\" class=\"tabs tabs-bordered mb-4\" onkeydown=\"window.projectSettingsTabKey(event)\"><button type=\"button\" role=\"tab\" id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "<style>\n  #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }\n  :is(#edit_project_modal, #new_project_modal) .modal-action { flex-wrap: wrap; gap: 0.5rem; }\n  :is(#edit_project_modal, #new_project_modal) .modal-action > button { margin-left: 0; }\n  :is(#edit_project_modal, #new_project_modal) .modal-action > :is(button[type=\"submit\"], [data-sharing-save]) { min-width: 6rem; }\n  :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }\n  :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }\n  [data-project-tab-content], [data-project-sharing-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; padding-right: 1rem; }\n  #new_project_modal [data-project-tab-content] { height: min(41rem, calc(100dvh - 16rem)); }\n  [data-project-panel][hidden], [data-project-tab-content][hidden], .modal-action[hidden] { display: none !important; }\n  [data-project-repo-fields][hidden] { display: none !important; }\n  [data-project-panel=\"general\"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }\n  [data-project-panel=\"general\"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }\n  [data-project-panel=\"general\"] .flex > .btn { flex-shrink: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }\n  [data-project-panel=\"general\"] .project-defaults-fields .form-control { min-width: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields :is(.input, .select) { width: 100%; min-width: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields .label { justify-content: flex-start; gap: 0.375rem; }\n  [data-project-panel=\"general\"] input[name=\"max_workers\"] { -moz-appearance: textfield; appearance: textfield; }\n  [data-project-panel=\"general\"] input[name=\"max_workers\"]::-webkit-inner-spin-button,\n  [data-project-panel=\"general\"] input[name=\"max_workers\"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }\n  [data-project-panel=\"knowledge\"] .table { table-layout: fixed; }\n  [data-project-panel=\"knowledge\"] .table :is(th, td) { padding: 0.75rem 0; }\n  [data-project-panel=\"knowledge\"] .table th:first-child { width: 50%; }\n  @media (max-width: 640px) { [data-project-panel=\"general\"] .project-defaults-fields { grid-template-columns: minmax(0, 1fr); } }\n\n </style><div role=\"tablist\" aria-label=\"Project settings\" class=\"tabs tabs-bordered mb-4\" onkeydown=\"window.projectSettingsTabKey(event)\"><button type=\"button\" role=\"tab\" id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-general-tab").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 789, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 790, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
@@ -709,7 +709,7 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-general").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 789, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 790, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -722,7 +722,7 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge-tab").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 790, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 791, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -735,7 +735,7 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		var templ_7745c5c3_Var23 string
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 790, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 791, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
@@ -783,7 +783,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		var templ_7745c5c3_Var25 string
 		templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 836, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 837, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
@@ -796,7 +796,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge-tab").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 836, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 837, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 		if templ_7745c5c3_Err != nil {
@@ -889,7 +889,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		var templ_7745c5c3_Var27 string
 		templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectGlobalSkillWriteValue(permissions)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 846, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 847, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 		if templ_7745c5c3_Err != nil {
@@ -934,7 +934,7 @@ func projectPermissionHelp(label, help string) templ.Component {
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templruntime.NewAttributeExpression(help).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 856, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 857, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 		if templ_7745c5c3_Err != nil {
@@ -947,7 +947,7 @@ func projectPermissionHelp(label, help string) templ.Component {
 		var templ_7745c5c3_Var30 string
 		templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression("About " + label).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 856, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 857, Col: 126}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 		if templ_7745c5c3_Err != nil {
@@ -985,7 +985,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-default-model").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 865, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 866, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
@@ -1006,7 +1006,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var33 string
 		templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-default-model").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 868, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 869, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 		if templ_7745c5c3_Err != nil {
@@ -1024,7 +1024,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 871, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 			if templ_7745c5c3_Err != nil {
@@ -1047,7 +1047,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 19}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 873, Col: 19}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -1060,7 +1060,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.Provider))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 873, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -1073,7 +1073,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 873, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
@@ -1101,7 +1101,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-max-workers").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 882, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 883, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 		if templ_7745c5c3_Err != nil {
@@ -1122,7 +1122,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-max-workers").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 885, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 886, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
@@ -1135,7 +1135,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectMaxWorkersValue(project)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 885, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 886, Col: 114}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 		if templ_7745c5c3_Err != nil {
@@ -1153,7 +1153,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", globalMaxWorkers)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 885, Col: 192}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 886, Col: 192}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 			if templ_7745c5c3_Err != nil {
@@ -1176,7 +1176,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", globalMaxWorkers))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 887, Col: 133}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 888, Col: 133}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
