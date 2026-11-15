@@ -50,6 +50,13 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 			require.NotEmpty(t, response.Ticket)
 			ticket := h.computerTickets[strings.TrimPrefix(response.Ticket, "computer-ticket.")]
 			require.Equal(t, tc.want, ticket.Mode)
+			// The WebSocket uses the same builder and must preserve native mode
+			// and viewer identity without fetching the HTTP status endpoint.
+			pushed, err := h.computerStatus(t.Context(), h.computerSvc, project.ID, "", "native-viewer", tc.requested, true)
+			require.NoError(t, err)
+			pushedTicket := h.computerTickets[strings.TrimPrefix(pushed["ticket"].(string), "computer-ticket.")]
+			require.Equal(t, tc.want, pushedTicket.Mode)
+			require.Equal(t, "native-viewer", pushedTicket.ViewerID)
 			_, detach, err := h.computerSvc.RegisterViewer(t.Context(), project.ID, "owner", "native-window", ticket.Mode == "control")
 			require.NoError(t, err)
 			defer detach()

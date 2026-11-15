@@ -56,7 +56,7 @@ func TestComputerProjectPageHasNoDesktopRuntime(t *testing.T) {
 	if err := ProjectComputerContent("project", "task").Render(t.Context(), &task); err != nil {
 		t.Fatal(err)
 	}
-	for _, viewer := range []string{"data-computer-preview", "data-computer-dialog", "new RFB(", "scoped('/ensure')", "setInterval(refresh"} {
+	for _, viewer := range []string{"data-computer-preview", "data-computer-dialog", "new RFB(", "scoped('/ensure')", "window.openVibelyLive.computer("} {
 		if strings.Contains(project.String(), viewer) {
 			t.Fatalf("project page includes desktop runtime: %s", viewer)
 		}

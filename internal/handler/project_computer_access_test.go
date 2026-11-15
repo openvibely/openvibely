@@ -42,6 +42,8 @@ func TestProjectComputerSharingPermissions(t *testing.T) {
 				expected = http.StatusForbidden
 			}
 			require.Equal(t, expected, status.Code, status.Body.String())
+			memberContext := models.WithPrincipal(ctx, models.Principal{UserID: user.UserID})
+			require.Equal(t, role == "editor" || role == "maintainer", tc.handler.liveSubscriptionAllowed(memberContext, liveCommand{Op: "computer", ProjectID: project.ID}), "private status subscriptions require editor access")
 			save := orgRequest(e, http.MethodPost, "/projects/"+project.ID+"/computer/time-zone", url.Values{"time_zone": {"UTC"}}, cookie)
 			expected = http.StatusForbidden
 			if role == "" {

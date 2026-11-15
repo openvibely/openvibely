@@ -20,12 +20,15 @@ import (
 // A subscription ID belongs to one view generation, not to an execution. Late
 // frames from an unsubscribed view can therefore never modify its replacement.
 type liveCommand struct {
-	Op        string `json:"op"`
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
-	TaskID    string `json:"task_id"`
-	ExecID    string `json:"exec_id"`
-	Offset    int    `json:"offset"`
+	Op         string `json:"op"`
+	ID         string `json:"id"`
+	ProjectID  string `json:"project_id"`
+	TaskID     string `json:"task_id"`
+	ExecID     string `json:"exec_id"`
+	Offset     int    `json:"offset"`
+	ViewerID   string `json:"viewer_id,omitempty"`
+	ViewerMode string `json:"viewer_mode,omitempty"`
+	Native     bool   `json:"native,omitempty"`
 }
 type liveFrame struct {
 	// Internal owner identity prevents an old worker's terminal frame from
@@ -319,7 +322,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription limit reached"})
 				continue
 			}
-			if cmd.Op != "execution" && cmd.Op != "live" {
+			if cmd.Op != "execution" && cmd.Op != "live" && cmd.Op != "computer" {
 				return nil
 			}
 			if !authorized() {
@@ -377,6 +380,8 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				}
 				if cmd.Op == "execution" {
 					h.streamExecution(subctx, cmd, emit)
+				} else if cmd.Op == "computer" {
+					h.streamComputerStatus(subctx, cmd, emit)
 				} else {
 					h.streamLive(subctx, cmd, emit)
 				}
@@ -437,7 +442,14 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 		task, err := h.taskRepo.GetByID(ctx, cmd.TaskID)
 		return err == nil && task != nil && (h.projectAccessSvc == nil || h.projectAccessSvc.Require(ctx, task.ProjectID, authz.View) == nil)
 	}
-	if h.projectAccessSvc != nil && h.projectAccessSvc.Require(ctx, cmd.ProjectID, authz.View) != nil {
+	permission := authz.View
+	if cmd.Op == "computer" {
+		permission = authz.Edit
+		if h.computerSvc == nil || cmd.ProjectID == models.AllProjectsID {
+			return false
+		}
+	}
+	if h.projectAccessSvc != nil && h.projectAccessSvc.Require(ctx, cmd.ProjectID, permission) != nil {
 		return false
 	}
 	project, err := h.projectRepo.GetByID(ctx, cmd.ProjectID)
@@ -462,7 +474,7 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 		task, err := h.taskRepo.GetThreadRenderMetadata(ctx, taskID)
 		return err == nil && task != nil && task.ProjectID == cmd.ProjectID
 	}
-	return cmd.Op == "live"
+	return cmd.Op == "live" || cmd.Op == "computer"
 }
 
 func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liveFrame) bool) {

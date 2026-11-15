@@ -1,5 +1,5 @@
 // One transport owner per document (browser tab or native window). View cleanup
-// releases subscriptions only. HTTP remains authoritative for history and state.
+// releases subscriptions only. Computer subscriptions deliver authorized state snapshots.
 (function () {
     'use strict';
     if (window.openVibelyLive) return;
@@ -158,6 +158,9 @@
             var selector = document.getElementById('project-selector');
             projectID = projectID || (selector && selector.value) || new URLSearchParams(location.search).get('project_id');
             return subscribe({op: 'execution', exec_id: execID, project_id: projectID, offset: offset});
+        },
+        computer: function (projectID, taskID, options, handlers) {
+            return subscribe(Object.assign({op:'computer', project_id:projectID, task_id:taskID || '', native:!!options?.viewer_id && document.documentElement.dataset.runtime === 'desktop'}, options || {}), handlers);
         },
         live: function (projectID, taskID, handlers) {
             // Notification scope is independent of execution subscriptions, which

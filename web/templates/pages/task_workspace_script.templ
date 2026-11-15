@@ -18,7 +18,7 @@ templ TaskWorkspaceScript() {
 		var signal = abort.signal;
 		var allTabNames = ['details', 'computer', 'schedules', 'chaining', 'attachments', 'lifecycle'];
         var tabNames = allTabNames.filter(name => name !== 'computer');
-        var computerPermissionVersion = 0;
+        var computerPermissionVersion = 0, computerPermissionStream = null;
 		var selected = 'details', scrollState = null, returnFocus = null, composerFocus = null;
 		var summary = null, timer = null, pending = false, dirty = false, titleVersion = 0, actionRevision = null;
 		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
@@ -334,36 +334,37 @@ templ TaskWorkspaceScript() {
 				panel.querySelector('[aria-selected="true"]').focus();
 			}
 		});
-		function destroy() { if (unregisterView) unregisterView(); abort.abort(); clearTimeout(timer); sidePanel.destroy(); }
+		function destroy() { computerPermissionStream?.close(); if (unregisterView) unregisterView(); abort.abort(); clearTimeout(timer); sidePanel.destroy(); }
 		on(document, 'htmx:beforeCleanupElement', function(event) { if (event.target === root) destroy(); });
 		window.taskWorkspace = {
 			openChanges: function() { workspace(true); }, openThread: function() { workspace(false); },
 			openPanel: openPanel, closePanel: closePanel, togglePanel: function() { if (panel.hidden) openPanel(); else closePanel(); }, destroy: destroy
 		};
-        async function updateComputerPermission() {
+        function updateComputerPermission() {
             var version = ++computerPermissionVersion;
             var project = root.querySelector('#new-task-project')?.value || root.dataset.projectId;
-            var allowed = false;
-            try {
-                if (project) {
-                    var response = await fetch('/projects/' + encodeURIComponent(project) + '/computer/status', {signal:signal, cache:'no-store'});
-                    if (response.ok) allowed = (await response.json()).enabled === true;
-                }
-            } catch (_) {}
-            if (signal.aborted || version !== computerPermissionVersion) return;
-            var button = panel.querySelector('[data-tab="computer"]');
-            button.toggleAttribute('data-computer-allowed', allowed);
-            button.hidden = !allowed;
-            tabNames = allTabNames.filter(name => name !== 'computer' || allowed);
-            if (!allowed && selected === 'computer') selectTab('details', false);
-            else if (allowed && ((displayedURL().searchParams.get('tab') || root.dataset.initialTab) === 'computer')) openPanel('computer', false, false);
+            computerPermissionStream?.close();
+            function apply(allowed) {
+                if (signal.aborted || version !== computerPermissionVersion) return;
+                var button = panel.querySelector('[data-tab="computer"]');
+                var wasAllowed = button.hasAttribute('data-computer-allowed');
+                button.toggleAttribute('data-computer-allowed', allowed);
+                button.hidden = !allowed;
+                tabNames = allTabNames.filter(name => name !== 'computer' || allowed);
+                if (wasAllowed === allowed) return;
+                if (!allowed && selected === 'computer') selectTab('details', false);
+                else if (allowed && ((displayedURL().searchParams.get('tab') || root.dataset.initialTab) === 'computer')) openPanel('computer', false, false);
+            }
+            if (!project || !window.openVibelyLive) { apply(false); return; }
+            computerPermissionStream = window.openVibelyLive.computer(project, '', {}, {listeners:{
+                computer_status:function(event) {
+                    var data; try { data=JSON.parse(event.data); } catch (_) { return; }
+                    if (data.project_id === project && !data.task_id) apply(data.enabled === true);
+                },
+                error:function(){apply(false);}
+            }});
         }
         on(document, 'computer-setting-changed', updateComputerPermission);
-        on(window, 'computer-status-changed', function(event) {
-            var data = event.detail || {};
-            var project = root.querySelector('#new-task-project')?.value || root.dataset.projectId;
-            if (!data.task_id && data.project_id === project) updateComputerPermission();
-        });
         var destination = root.querySelector('#new-task-project');
         if (destination) on(destination, 'change', updateComputerPermission);
         updateComputerPermission();

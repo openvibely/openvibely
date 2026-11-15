@@ -21,6 +21,7 @@ import (
 
 func TestProjectAccessWebSocketRevokesOnlyDeniedSubscription(t *testing.T) {
 	tc, e := organizationTestApp(t, true)
+	tc.handler.computerSvc = service.NewProjectComputerService(tc.handler.projectRepo, liveComputerFixture{})
 	tc.handler.broadcaster = events.NewBroadcaster()
 	access := service.NewProjectAccessService(tc.stores.ProjectAccess)
 	tc.handler.SetProjectAccessService(access)
@@ -63,6 +64,15 @@ func TestProjectAccessWebSocketRevokesOnlyDeniedSubscription(t *testing.T) {
 	next("private", "subscribed")
 	require.NoError(t, wsjson.Write(ctx, conn, liveCommand{Op: "live", ID: "shared", ProjectID: "default"}))
 	next("shared", "subscribed")
+
+	require.NoError(t, wsjson.Write(ctx, conn, liveCommand{Op: "computer", ID: "computer-denied", ProjectID: project.ID}))
+	next("computer-denied", "error")
+	require.NoError(t, access.SetMember(ownerCtx, project.ID, bob.UserID, "editor"))
+	require.NoError(t, wsjson.Write(ctx, conn, liveCommand{Op: "computer", ID: "computer", ProjectID: project.ID}))
+	next("computer", "subscribed")
+	next("computer", "computer_status")
+	require.NoError(t, access.SetMember(ownerCtx, project.ID, bob.UserID, "viewer"))
+	next("computer", "error")
 	require.NoError(t, access.SetMember(ownerCtx, project.ID, bob.UserID, ""))
 	next("private", "error")
 	// The same socket remains usable for accessible projects.

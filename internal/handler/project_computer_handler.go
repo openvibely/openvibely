@@ -80,27 +80,36 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 		return err
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
-	state, err := h.computerService(c).Get(c.Request().Context(), c.Param("id"))
-	if errors.Is(err, sql.ErrNoRows) {
-		return c.JSON(200, map[string]any{"idle_minutes": 30, "time_zone": "UTC", "configured": false, "ready": false, "enabled": false})
-	}
+	status, err := h.computerStatus(c.Request().Context(), h.computerService(c), c.Param("id"), c.QueryParam("task_id"), c.QueryParam("viewer_id"), c.QueryParam("viewer_mode"), c.Request().Header.Get("X-OpenVibely-Native-Window") == "1")
 	if err != nil {
 		return err
 	}
-	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": h.computerService(c).Ready(c.Request().Context(), c.Param("id")), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": h.computerService(c).ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
-	if h.desktopMode && h.computerDesktopURL != "" && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1" && status["ready"] == true {
+	return c.JSON(200, status)
+}
+
+// computerStatus is shared by HTTP callers and authorized WebSocket subscriptions.
+func (h *Handler) computerStatus(ctx context.Context, svc *service.ProjectComputerService, projectID, taskID, viewerID, viewerMode string, native bool) (map[string]any, error) {
+	state, err := svc.Get(ctx, projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return map[string]any{"idle_minutes": 30, "time_zone": "UTC", "configured": false, "ready": false, "enabled": false}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": svc.Ready(ctx, projectID), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": svc.ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
+	if h.desktopMode && h.computerDesktopURL != "" && native && status["ready"] == true {
 		mode := "view"
-		if c.QueryParam("viewer_mode") == "control" && state.Enabled && !state.TakeoverPending {
+		if viewerMode == "control" && state.Enabled && !state.TakeoverPending {
 			mode = "control"
 		}
-		ticket, err := h.issueComputerTicket(c.Request().Context(), c.Param("id"), mode, c.QueryParam("task_id"), c.QueryParam("viewer_id"))
+		ticket, err := h.issueComputerTicket(ctx, projectID, mode, taskID, viewerID)
 		if err != nil {
-			return echo.NewHTTPError(429, err.Error())
+			return nil, echo.NewHTTPError(429, err.Error())
 		}
 		status["stream_url"] = h.computerDesktopURL + "/computer-stream"
 		status["ticket"] = ticket
 	}
-	return c.JSON(200, status)
+	return status, nil
 }
 func computerSameOrigin(r *http.Request) bool {
 	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {

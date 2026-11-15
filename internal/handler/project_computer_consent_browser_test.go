@@ -58,9 +58,7 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
 		switch {
 		case r.URL.Path == "/":
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<!doctype html><html><body><script>window.toastMessages=[];window.showToast=(message,type)=>toastMessages.push({message,type});</script>"+fragment.String()+runner+"</body></html>")
-		case strings.HasSuffix(r.URL.Path, "/status"):
-			fmt.Fprint(w, `{"enabled":false,"ready":false,"held":true,"handoff_kind":"request_chrome_login","handoff_url":"https://example.test","chrome_available":true}`)
+			fmt.Fprint(w, "<!doctype html><html><body><script>window.openVibelyLive={computer:(project,task,options,handlers)=>{setTimeout(()=>{handlers.onopen?.();handlers.listeners.computer_status({data:JSON.stringify({project_id:project,task_id:task,viewer_mode:options.viewer_mode,enabled:false,ready:false,held:true,handoff_kind:'request_chrome_login',handoff_url:'https://example.test',chrome_available:true})});},0);return {close(){}};}};window.toastMessages=[];window.showToast=(message,type)=>toastMessages.push({message,type});</script>"+fragment.String()+runner+"</body></html>")
 		case strings.HasSuffix(r.URL.Path, "/chrome"):
 			profile := r.URL.Query().Get("profile")
 			if profile == "" {

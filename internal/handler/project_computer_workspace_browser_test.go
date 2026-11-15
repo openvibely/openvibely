@@ -32,13 +32,16 @@ func TestSavedTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
 
 	html = strings.Replace(html, "const root=document.getElementById('project-computer');", `
  window.addEventListener('live-transport-disconnected',event=>event.stopImmediatePropagation());
- const originalLive=window.openVibelyLive.live.bind(window.openVibelyLive);
- window.openVibelyLive.live=(project,task,handlers)=>{
-  if(!handlers?.listeners?.computer_status_changed || !handlers.listeners.retry)return originalLive(project,task,handlers);
-  window.computerLive=handlers;setTimeout(()=>handlers.onopen(),0);return {close(){window.computerLiveClosed=true}};
- };
  window.computerStatusReads=0;const statusFetch=window.fetch;
- window.fetch=(url,options)=>{if(String(url).includes('/computer/status?'))window.computerStatusReads++;return statusFetch(url,options)};
+ window.fetch=(url,options)=>{if(String(url).includes('/computer/status'))window.computerStatusReads++;return statusFetch(url,options)};
+ window.computerSubscriptions=0;
+ window.openVibelyLive.computer=(project,task,options,handlers)=>{
+  window.computerSubscriptions++;let closed=false;
+  const push=async()=>{const state=await (await statusFetch('/fixture-snapshot?task_id='+task)).json();if(!closed)handlers.listeners.computer_status({data:JSON.stringify({...state,project_id:project,task_id:task,viewer_mode:options.viewer_mode||''})});};
+  if(task){window.computerLive=handlers;window.pushComputer=push;}else window.permissionLive=handlers;
+  setTimeout(()=>{if(!closed){handlers.onopen?.();push();}},0);
+  return {close(){closed=true}};
+ };
  const root=document.getElementById('project-computer');`, 1)
 	script := `<script>
 Object.defineProperty(navigator,'platform',{value:'MacIntel',configurable:true});
@@ -77,17 +80,13 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'control first frame');
  await new Promise(r=>setTimeout(r,250));const controlReads=window.computerStatusReads;
  await new Promise(r=>setTimeout(r,5500));if(window.computerStatusReads!==controlReads)throw Error('Expanded preview still polls status');
- window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'other',task_id:'task'})});
- window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'project',task_id:'other'})});
- await new Promise(r=>setTimeout(r,100));if(window.computerStatusReads!==controlReads)throw Error('Unrelated event refreshed computer');
- window.computerLive.onopen();await wait(()=>window.computerStatusReads>controlReads,'live reconnect status refresh');
- await new Promise(r=>setTimeout(r,100));const beforeOutage=window.computerStatusReads;
- window.computerLive.listeners.retry();await wait(()=>window.computerStatusReads>beforeOutage,'status fallback after live outage');
- window.computerLive.onopen();await new Promise(r=>setTimeout(r,100));
- const beforeFailure=window.computerStatusReads, reliableFetch=window.fetch;let failStatus=true;
- window.fetch=(url,options)=>{if(failStatus&&String(url).includes('/computer/status?')){failStatus=false;return Promise.resolve(new Response('{}',{status:503}));}return reliableFetch(url,options)};
- window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'project',task_id:'task'})});
- await wait(()=>!failStatus&&window.computerStatusReads>beforeFailure,'retry failed event refresh while desktop connected');window.fetch=reliableFetch;
+ window.computerLive.listeners.computer_status({data:JSON.stringify({project_id:'other',task_id:'task'})});
+ window.computerLive.listeners.computer_status({data:JSON.stringify({project_id:'project',task_id:'other'})});
+ await new Promise(r=>setTimeout(r,100));if(window.computerStatusReads!==0)throw Error('Status was fetched over HTTP');
+ window.computerLive.onopen();await window.pushComputer();
+ const subscriptions=window.computerSubscriptions;
+ window.computerLive.listeners.retry();await wait(()=>window.computerSubscriptions>subscriptions,'retry status subscription');
+ await new Promise(r=>setTimeout(r,100));if(window.computerStatusReads!==0)throw Error('Retry fetched HTTP status');
 
  q('[data-teach-open]').click();q('[data-teach-goal]').value='Download a report';q('[data-teach-record]').click();
  const ime=q('[aria-label="Remote computer keyboard"]');if(!ime)throw Error('No IME field');
@@ -108,11 +107,11 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>q('[data-teach-images]').children.length===3,'changed screen capture');
  q('[data-teach-record]').click();window.fixtureRFB.canvas.getContext('2d').fillStyle='red';window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
  await new Promise(r=>setTimeout(r,1400));if(q('[data-teach-images]').children.length!==3)throw Error('Captured while paused');
- q('[data-teach-record]').click();await fetch('/fixture-private');window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'project',task_id:'task'})});
+ q('[data-teach-record]').click();await fetch('/fixture-private');await window.pushComputer();
  await wait(()=>q('[data-teach-record]').textContent==='Record steps','private recording pause');
  const privateCount=q('[data-teach-images]').children.length;window.fixtureRFB.canvas.getContext('2d').fillStyle='blue';window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
  await new Promise(r=>setTimeout(r,1400));if(q('[data-teach-images]').children.length!==privateCount)throw Error('Captured private handoff');
- await fetch('/fixture-public');window.computerLive.listeners.computer_status_changed({data:JSON.stringify({project_id:'project'})});await wait(()=>!q('[data-teach-open]').hidden);q('[data-teach-open]').click();
+ await fetch('/fixture-public');await window.pushComputer();await wait(()=>!q('[data-teach-open]').hidden);q('[data-teach-open]').click();
  q('[data-teach-save]').click();await wait(()=>!q('[data-teach-draft]').hidden,'generated workflow');
  if(q('[data-workflow-name]').value!=='Reusable report')throw Error('Generated draft missing');
  q('[data-workflow-instructions]').value='Reviewed report instructions';q('[data-workflow-save]').click();await wait(()=>q('[data-teach-status]').textContent.includes('Reusable workflow saved'),'saved workflow');
@@ -131,8 +130,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'preview first frame');
 
  await wait(()=>!q('[data-task-computer-toggle]').disabled);q('[data-task-computer-toggle]').click();await wait(()=>q('[data-computer-preview]').hidden,'task disabled');
- window.fetch=(url,options)=>String(url).endsWith('/computer/status')?Promise.resolve(new Response(JSON.stringify({enabled:false}),{status:200})):originalFetch(url,options);
- window.dispatchEvent(new CustomEvent('computer-status-changed',{detail:{project_id:'project'}}));
+ window.permissionLive.listeners.computer_status({data:JSON.stringify({project_id:'project',task_id:'',enabled:false})});
  await wait(()=>q('[data-tab="computer"]').hidden,'project permission hides tab');
  if(q('[data-tab="details"]').getAttribute('aria-selected')!=='true')throw Error('Disabled computer tab did not return to Details');
  window.taskWorkspace.openPanel('computer');
@@ -175,7 +173,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		case strings.HasSuffix(r.URL.Path, "/idle-timeout"):
 
 			fmt.Fprint(w, `{}`)
-		case strings.HasSuffix(r.URL.Path, "/status"):
+		case r.URL.Path == "/fixture-snapshot":
 			if r.URL.Query().Get("task_id") == "" {
 				fmt.Fprint(w, `{"enabled":true}`)
 				return

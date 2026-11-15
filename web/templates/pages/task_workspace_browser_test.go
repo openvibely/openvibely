@@ -500,7 +500,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		case "/ui/preferences":
 			w.WriteHeader(http.StatusNoContent)
 		case "/events/ws":
-			serveBrowserLiveFixture(w, r, fileEvents)
+			serveBrowserLiveFixtureWithComputer(w, r, fileEvents, true)
 
 		case "/tasks/workspace-task":
 			tab := r.URL.Query().Get("tab")
@@ -512,10 +512,6 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 			} else {
 				fmt.Fprint(w, render(TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, tab, nil)))
 			}
-		case "/projects/workspace-project/computer/status":
-			// Computer deep links require the project-level permission to be enabled.
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"enabled":true}`)
 		case "/tasks/workspace-task/thread":
 			threadRequests.Add(1)
 			fmt.Fprint(w, render(components.TaskThreadView(task, executions, nil, nil, nil, nil, false, 30)))

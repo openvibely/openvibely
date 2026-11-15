@@ -13,6 +13,9 @@ import (
 // A real WebSocket transport for page-only fixtures. Legacy event text is
 // decoded at the fixture boundary; the browser receives the production protocol.
 func serveBrowserLiveFixture(w http.ResponseWriter, r *http.Request, events <-chan string, intercept ...func(string) bool) {
+	serveBrowserLiveFixtureWithComputer(w, r, events, false, intercept...)
+}
+func serveBrowserLiveFixtureWithComputer(w http.ResponseWriter, r *http.Request, events <-chan string, computerEnabled bool, intercept ...func(string) bool) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
@@ -50,6 +53,15 @@ func serveBrowserLiveFixture(w http.ResponseWriter, r *http.Request, events <-ch
 		case <-ctx.Done():
 			return
 		case cmd := <-commands:
+			if cmd["op"] == "computer" {
+				if wsjson.Write(ctx, conn, map[string]any{"id": cmd["id"], "event": "subscribed"}) != nil {
+					return
+				}
+				state := map[string]any{"project_id": cmd["project_id"], "task_id": cmd["task_id"], "enabled": computerEnabled && cmd["task_id"] == "", "project_enabled": computerEnabled, "task_enabled": false, "ready": false, "viewer_mode": cmd["viewer_mode"]}
+				if wsjson.Write(ctx, conn, map[string]any{"id": cmd["id"], "event": "computer_status", "data": state}) != nil {
+					return
+				}
+			}
 			if cmd["op"] == "live" {
 				id, _ = cmd["id"].(string)
 				if wsjson.Write(ctx, conn, map[string]any{"id": id, "event": "subscribed"}) != nil {

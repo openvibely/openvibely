@@ -116,7 +116,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const screen=find('[data-computer-screen]');
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null;
-     let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, retryTimer=null, connectTimer=null, retryDelay=1000, refreshPromise=null, refreshQueued=false;
+     let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, retryTimer=null, connectTimer=null, retryDelay=1000, refreshPromise=null, refreshQueued=false, pendingState=null;
      function queueStatus(){
       if(closed || previewDeleted)return;
       clearTimeout(statusTimer);statusTimer=setTimeout(()=>{statusTimer=null;refresh();},50);
@@ -132,16 +132,17 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      function statusDisconnected(){statusLive=false;retryStatus();}
      function statusChanged(event){
       let data;try{data=JSON.parse(event.data);}catch{return;}
-      if(data.project_id!==root.dataset.computerProject || (data.task_id && data.task_id!==root.dataset.computerTask))return;
-      queueStatus();
+      if(data.project_id!==root.dataset.computerProject || data.task_id!==root.dataset.computerTask)return;
+      pendingState=data;statusFailed=false;queueStatus();
      }
-     function subscribeStatus(){
-      if(statusStream || !window.openVibelyLive)return;
-      statusStream=window.openVibelyLive.live(root.dataset.computerProject,root.dataset.computerTask,{
-       onopen:()=>{statusLive=true;retryDelay=1000;clearTimeout(retryTimer);retryTimer=null;queueStatus();},
-       listeners:{computer_status_changed:statusChanged,task_status_changed:statusChanged,
+     function subscribeStatus(force=false){
+      if((statusStream&&!force) || !window.openVibelyLive)return;
+      statusStream?.close();statusLive=false;
+      statusStream=window.openVibelyLive.computer(root.dataset.computerProject,root.dataset.computerTask,{viewer_id:viewerID,viewer_mode:dialog.open?'control':'view'},{
+       onopen:()=>{statusLive=true;retryDelay=1000;clearTimeout(retryTimer);retryTimer=null;},
+       listeners:{computer_status:statusChanged,
         task_deleted:event=>{let data;try{data=JSON.parse(event.data);}catch{return;}previewWasDeleted({detail:data});},
-        retry:statusDisconnected,error:()=>{statusStream?.close();statusStream=null;disconnect();statusDisconnected();}}
+        retry:()=>{statusFailed=true;statusDisconnected();},error:()=>{statusStream?.close();statusStream=null;pendingState=null;disconnect();statusFailed=true;statusDisconnected();}}
       });
      }
      window.addEventListener('live-transport-disconnected',statusDisconnected);
@@ -304,14 +305,13 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      async function refreshStatus(){
       if(closed || previewDeleted || pending || closing)return;
  if(!visible()){disconnect();return;}
-      subscribeStatus();
+      if(!pendingState){subscribeStatus(true);return;}
       clearTimeout(retryTimer);retryTimer=null;
       const version=++refreshVersion;
-      const controller=new AbortController(), deadline=setTimeout(()=>controller.abort(),10000);
       try{
        const requestedControl=dialog.open;
-       const res=await fetch(scoped('/status')+'&viewer_mode='+(requestedControl?'control':'view'),{cache:'no-store',signal:controller.signal});if(!res.ok)throw new Error('Could not check project computer');
-       const state=await res.json();statusFailed=false;
+       const state=pendingState;pendingState=null;statusFailed=false;
+       if(state.viewer_mode!==(requestedControl?'control':'view')){refreshQueued=true;return;}
        if(closed || previewDeleted || pending || closing || !visible() || version!==refreshVersion)return;
        const taskToggle=find('[data-task-computer-toggle]');if(taskToggle){taskToggle.checked=!!state.task_enabled;taskToggle.disabled=!state.project_enabled;}
        preview.hidden=!state.enabled;
@@ -324,7 +324,6 @@ if(requestedControl!==dialog.open){refreshQueued=true;return;}currentState=state
  buttons.forEach(b=>{const a=b.dataset.computerAction;if(a==='ensure')b.hidden=state.ready||state.enabled===false;b.disabled=a==='ensure'?state.enabled===false:a.startsWith('login-')?!state.handoff_kind:a==='release'?!state.held||!!state.handoff_kind:a==='takeover'?!state.ready||state.held:!state.ready||state.held||state.busy;});
        if(state.ready){await viewer(state);}else disconnect();
       }catch(e){statusFailed=true;window.showToast(e.message,'error');}
-      finally{clearTimeout(deadline);}
      }
      async function computerAction(event){
       const button=event.target.closest('[data-computer-action]');if(!button || pending || button.disabled)return;
@@ -375,7 +374,7 @@ if(requestedControl!==dialog.open){refreshQueued=true;return;}currentState=state
   catch(e){window.showToast(e.message,'error');taskToggle.checked=!taskToggle.checked;}
   finally{pending=false;taskToggle.disabled=false;await refresh();}
  };
- restoreFrame();subscribeStatus();refresh();
+ restoreFrame();refresh();
      const observer=new MutationObserver(()=>{if(!root.isConnected){closed=true;statusStream?.close();window.removeEventListener('live-transport-disconnected',statusDisconnected);clearTimeout(statusTimer);clearTimeout(retryTimer);window.removeEventListener('computer-preview-deleted',previewWasDeleted);document.removeEventListener('htmx:beforeCleanupElement',beforeCleanup);clearInterval(autoCaptureTimer);viewportObserver.disconnect();document.removeEventListener('visibilitychange',visibilityChanged);document.removeEventListener('computer-setting-changed',changed);document.removeEventListener('computer-tab-change',changed);if(dialog.open)dialog.close();disconnect();observer.disconnect();}});
      observer.observe(document.body,{childList:true,subtree:true});
     })();
