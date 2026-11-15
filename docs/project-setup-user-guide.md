@@ -44,6 +44,32 @@ The current local implementation invokes Docker directly. Podman and rootless en
 
 Project computer controls also configure desktop time zone and idle shutdown. Idle shutdown keeps stored files and browser profiles but closes applications and loses unsaved work. Deleting a provisioned project removes its container and volume before deleting project records. If Docker cleanup fails, start Docker or resolve the reported problem and retry deletion.
 
+### Container Setup by Operating System
+
+Choose one local engine below and keep it running while using project computers. These are engine setup options, not a claim that every OS/engine combination has passed OpenVibely integration tests.
+
+| OS | Docker setup | Rancher Desktop setup |
+|---|---|---|
+| macOS | Install [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/) for your processor and start it. | Install [Rancher Desktop for macOS](https://docs.rancherdesktop.io/getting-started/installation/#macos), start it, and select **dockerd (Moby)**. |
+| Windows | Install [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/), enable its WSL 2 backend, and use **Linux containers**, not Windows containers. | Install [Rancher Desktop for Windows](https://docs.rancherdesktop.io/getting-started/installation/#windows), complete its WSL 2 requirements, and select **dockerd (Moby)**. |
+| Linux | Install [Docker Engine](https://docs.docker.com/engine/install/) for your distribution and start its service, or install and start [Docker Desktop for Linux](https://docs.docker.com/desktop/setup/install/linux/), which requires KVM. | Install [Rancher Desktop for Linux](https://docs.rancherdesktop.io/getting-started/installation/#linux), meet its virtualization requirements, and select **dockerd (Moby)**. |
+
+In Rancher Desktop, choose the engine under **Preferences → Container Engine → General**. [dockerd (Moby) provides the Docker CLI/API](https://docs.rancherdesktop.io/ui/preferences/container-engine/general/); **containerd/nerdctl mode is not supported by OpenVibely's current local provisioner**. Kubernetes is not required for project computers.
+
+Before enabling a project computer, verify these commands as the same OS user that runs OpenVibely:
+
+```sh
+docker context show
+docker version
+docker info
+```
+
+`docker version` must include a responding server, not just an installed client. The selected context must point to your intended local Docker or Rancher engine. OpenVibely connects to published loopback ports, so a remote Docker context is not a substitute. If several engines are installed, use `docker context ls` and select the intended context before launching OpenVibely; their images and volumes are separate.
+
+The OpenVibely process must find `docker` on its `PATH`. After installing CLI tools or changing permissions, restart OpenVibely; a GUI-launched app may have a different environment from your terminal. On Linux, configure [Docker access for the OpenVibely user](https://docs.docker.com/engine/install/linux-postinstall/) so commands work without an interactive `sudo` prompt. Docker-group membership grants root-level engine access; it is not rootless mode.
+
+**Validation status:** development checks have exercised Docker-backed computers on macOS and Linux container runtime tests. Rancher Desktop on all three OSes, Windows provisioning, Linux Desktop engine variants, and rootless engines have not been validated end to end. Meeting the upstream installation requirements alone does not establish compatibility with OpenVibely's nested isolation and networking setup.
+
 ## Before You Create A Project
 
 Recommended first steps:
