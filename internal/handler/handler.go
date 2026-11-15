@@ -132,6 +132,7 @@ type Handler struct {
 	hostedSSOKey               []byte
 	hostedSSOInstanceID        string
 	appBaseURL                 string
+	desktopInvitationBaseURL   string
 	desktopMode                bool
 	buildIdentity              buildinfo.Build
 	updateMode                 string

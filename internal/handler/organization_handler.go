@@ -24,6 +24,12 @@ import (
 
 func (h *Handler) SetOrganizationService(s *service.OrganizationService) { h.organizationSvc = s }
 
+// SetDesktopInvitationBaseURL supplies the HTTP address for links created in
+// the native window without changing the public base URL used by OAuth.
+func (h *Handler) SetDesktopInvitationBaseURL(base string) {
+	h.desktopInvitationBaseURL = strings.TrimRight(base, "/")
+}
+
 func requireOrgSameOrigin(c echo.Context) error {
 	raw := c.Request().Header.Get("Origin")
 	if raw == "" {
@@ -380,6 +386,11 @@ func (h *Handler) CreateOrgInvitation(c echo.Context) error {
 		return err
 	}
 	base := strings.TrimRight(h.appBaseURL, "/")
+	// Only native-window requests need the bound address: browser requests
+	// must retain their reachable host, including when accessed over a LAN.
+	if base == "" && h.desktopMode && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1" {
+		base = h.desktopInvitationBaseURL
+	}
 	if base == "" {
 		base = c.Scheme() + "://" + c.Request().Host
 	}
