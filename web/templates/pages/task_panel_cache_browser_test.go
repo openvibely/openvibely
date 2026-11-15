@@ -64,7 +64,7 @@ func TestBrowserFunctional_TaskPanelCachedNavigation(t *testing.T) {
 		}
 		// Hold permission delivery independently of page delivery. Inspect the
 		// panel before authorization, not just its eventual restored state.
-		b.evaluate(`window.holdPanelPermission=true;window.panelPermissions=[];const originalComputer=window.openVibelyLive.computer;window.openVibelyLive.computer=function(project,task,params,options){if(!task){const listener=options.listeners.computer_status;window.deliverPanelPermission=listener;options.listeners.computer_status=function(event){if(window.holdPanelPermission)window.panelPermissions.push(()=>listener(event));else listener(event);};}return originalComputer.call(this,project,task,params,options);};'installed'`)
+		b.evaluate(`window.holdPanelPermission=true;window.panelPermissions=[];const originalComputer=window.openVibelyLive.computer;window.openVibelyLive.computer=function(project,task,params,options){if(!task){const listener=options.listeners.computer_status;window.deliverPanelPermission=listener;window.deliverPanelPermissionError=options.listeners.error;options.listeners.computer_status=function(event){if(window.holdPanelPermission)window.panelPermissions.push(()=>listener(event));else listener(event);};}return originalComputer.call(this,project,task,params,options);};'installed'`)
 		nav("one")
 		b.waitFor("initial Computer restored", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "computer")
 		b.waitFor("fresh panel selected while permission pending", `String(document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab==='computer' && document.getElementById('tab-computer').inert && document.getElementById('task-detail-content').hasAttribute('data-computer-permission-pending'))`, "true")
@@ -97,6 +97,10 @@ func TestBrowserFunctional_TaskPanelCachedNavigation(t *testing.T) {
 		b.waitFor("cached open markup respects latest closed preference", `String(document.getElementById('task-details-panel').hidden)`, "true")
 		b.click("#task-details-opener")
 		b.waitFor("reopening cached task retains Computer", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "computer")
+		b.evaluate(`window.deliverPanelPermissionError({data:'access blocked'});'revoked'`)
+		b.waitFor("permission error returns to Details", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "details")
+		b.waitFor("permission error blocks Computer", `String(document.getElementById('tab-computer').inert && document.querySelector('[data-tab="computer"]').hidden)`, "true")
+		b.evaluate(`window.deliverPanelPermission({data:JSON.stringify({project_id:'project',task_id:'',enabled:true})});window.taskWorkspace.openPanel('computer');'allowed'`)
 		b.evaluate(`window.deliverPanelPermission({data:JSON.stringify({project_id:'project',task_id:'',enabled:false})});'denied'`)
 		b.waitFor("confirmed denial falls back to Details", `document.querySelector('#task-details-panel [aria-selected="true"]')?.dataset.tab`, "details")
 		b.waitFor("denied computer stays blocked", `String(document.getElementById('tab-computer').inert)`, "true")

@@ -380,8 +380,7 @@ templ TaskWorkspaceScript() {
                     var data; try { data=JSON.parse(event.data); } catch (_) { return; }
                     if (data.project_id === project && !data.task_id) apply(data.enabled === true);
                 },
-                // Transport failures are not permission denials. Stay blocked until a snapshot arrives.
-                error:function(){}
+                error:function(){apply(false);}
             }});
         }
         on(document, 'computer-setting-changed', updateComputerPermission);
