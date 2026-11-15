@@ -20,7 +20,7 @@ func (h *Handler) streamComputerStatus(ctx context.Context, cmd liveCommand, sen
 	var missed <-chan struct{}
 	if h.broadcaster != nil {
 		var err error
-		updates, err = h.broadcaster.SubscribeProject(cmd.ProjectID)
+		updates, err = h.broadcaster.SubscribeComputer(cmd.ProjectID, cmd.TaskID)
 		if err != nil {
 			send(liveFrame{Event: "retry", Data: "live subscription unavailable"})
 			return
@@ -69,9 +69,6 @@ func (h *Handler) streamComputerStatus(ctx context.Context, cmd liveCommand, sen
 		case ev, ok := <-updates:
 			if !ok {
 				return
-			}
-			if ev.TaskID != "" && ev.TaskID != cmd.TaskID {
-				continue
 			}
 			if ev.Type == events.TaskDeleted && ev.TaskID == cmd.TaskID {
 				send(liveFrame{Event: "task_deleted", Data: ev})

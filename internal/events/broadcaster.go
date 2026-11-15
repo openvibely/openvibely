@@ -113,6 +113,24 @@ func (b *Broadcaster) SubscribeProject(projectID string) (Subscriber, error) {
 	return b.core.SubscribeScoped(projectID)
 }
 
+// SubscribeComputer queues only events that can change this computer's status.
+// Project-wide status changes also affect task-scoped computers.
+func (b *Broadcaster) SubscribeComputer(projectID, taskID string) (Subscriber, error) {
+	return b.core.subscribeFiltered(projectID, func(event TaskEvent) bool {
+		if event.ProjectID != projectID || (event.TaskID != "" && event.TaskID != taskID) {
+			return false
+		}
+		switch event.Type {
+		case ComputerStatusChanged, TaskStatusChanged:
+			return true
+		case TaskDeleted:
+			return event.TaskID == taskID
+		default:
+			return false
+		}
+	})
+}
+
 // Unsubscribe removes a subscriber and closes its channel.
 func (b *Broadcaster) Unsubscribe(sub Subscriber) {
 	b.core.Unsubscribe(sub)

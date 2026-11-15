@@ -15,19 +15,21 @@ type subscriberGuard struct {
 }
 
 type broadcasterEntry[T any, S ~chan T] struct {
-	ch    S
-	guard *subscriberGuard
+	ch     S
+	guard  *subscriberGuard
+	accept func(T) bool
 }
 
-type broadcasterSubscription struct {
-	guard *subscriberGuard
-	scope string
+type broadcasterSubscription[T any] struct {
+	accept func(T) bool
+	guard  *subscriberGuard
+	scope  string
 }
 
 // broadcaster owns the shared subscriber lifecycle for typed event channels.
 type broadcaster[T any, S ~chan T] struct {
 	mu                sync.RWMutex
-	subscribers       map[S]broadcasterSubscription
+	subscribers       map[S]broadcasterSubscription[T]
 	scopedSubscribers map[string]map[S]*subscriberGuard
 	scopedSnapshots   map[string][]broadcasterEntry[T, S]
 	bufferSize        int
@@ -37,7 +39,7 @@ type broadcaster[T any, S ~chan T] struct {
 
 func newBroadcaster[T any, S ~chan T](bufferSize int) broadcaster[T, S] {
 	return broadcaster[T, S]{
-		subscribers:       make(map[S]broadcasterSubscription),
+		subscribers:       make(map[S]broadcasterSubscription[T]),
 		scopedSubscribers: make(map[string]map[S]*subscriberGuard),
 		scopedSnapshots:   make(map[string][]broadcasterEntry[T, S]),
 		bufferSize:        bufferSize,
@@ -54,6 +56,11 @@ func (b *broadcaster[T, S]) Subscribe() (S, error) {
 // SubscribeScoped adds a subscriber that receives events for one scope. An empty scope
 // is the deliberate global subscription bucket.
 func (b *broadcaster[T, S]) SubscribeScoped(scope string) (S, error) {
+	return b.subscribeFiltered(scope, nil)
+}
+
+// accept runs under the broadcaster read lock and must not block or mutate the broadcaster.
+func (b *broadcaster[T, S]) subscribeFiltered(scope string, accept func(T) bool) (S, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -64,7 +71,7 @@ func (b *broadcaster[T, S]) SubscribeScoped(scope string) (S, error) {
 
 	sub := make(S, b.bufferSize)
 	guard := &subscriberGuard{missed: make(chan struct{}, 1)}
-	b.subscribers[sub] = broadcasterSubscription{guard: guard, scope: scope}
+	b.subscribers[sub] = broadcasterSubscription[T]{guard: guard, scope: scope, accept: accept}
 	if b.scopedSubscribers[scope] == nil {
 		b.scopedSubscribers[scope] = make(map[S]*subscriberGuard)
 	}
@@ -86,7 +93,7 @@ func (b *broadcaster[T, S]) rebuildScopedSnapshotLocked(scope string) {
 
 	snapshot := make([]broadcasterEntry[T, S], 0, len(members))
 	for sub, guard := range members {
-		snapshot = append(snapshot, broadcasterEntry[T, S]{ch: sub, guard: guard})
+		snapshot = append(snapshot, broadcasterEntry[T, S]{ch: sub, guard: guard, accept: b.subscribers[sub].accept})
 	}
 	b.scopedSnapshots[scope] = snapshot
 }
@@ -131,7 +138,7 @@ func (b *broadcaster[T, S]) PublishScoped(scope string, event T) {
 	b.deliveryAttempts.Add(uint64(deliveryAttempts))
 
 	for _, entry := range globalSnapshot {
-		if !entry.guard.closed {
+		if !entry.guard.closed && (entry.accept == nil || entry.accept(event)) {
 			select {
 			case entry.ch <- event:
 			default:
@@ -145,7 +152,7 @@ func (b *broadcaster[T, S]) PublishScoped(scope string, event T) {
 	}
 	if scope != "" {
 		for _, entry := range scopedSnapshot {
-			if !entry.guard.closed {
+			if !entry.guard.closed && (entry.accept == nil || entry.accept(event)) {
 				select {
 				case entry.ch <- event:
 				default:

@@ -67,7 +67,9 @@ func TestLiveNotificationLossTriggersReconcile(t *testing.T) {
 			// The worker is blocked after subscribing. Fill its actual bounded queue.
 			for i := 0; i < 100; i++ {
 				switch kind {
-				case "task", "computer":
+				case "computer":
+					h.broadcaster.Publish(events.TaskEvent{ProjectID: "default", Type: events.ComputerStatusChanged})
+				case "task":
 					h.broadcaster.Publish(events.TaskEvent{ProjectID: "default", Type: events.TaskBoardUpdated})
 				case "chat":
 					h.chatBroadcaster.Publish(events.ChatEvent{ProjectID: "default", Type: events.ChatNewMessage})
