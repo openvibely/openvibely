@@ -1,0 +1,20 @@
+package layout
+
+// AuthTitlebar keeps standalone authentication pages usable in a native window.
+templ AuthTitlebar(platform string) {
+ <style>
+  body { padding-top: 78px !important; box-sizing: border-box; }
+  #desktop-project-titlebar { position: fixed; inset: 0 0 auto; height: 54px; z-index: 100; display: flex; align-items: center; justify-content: flex-end; --wails-draggable: drag; cursor: default; -webkit-user-select: none; user-select: none; }
+ </style>
+ <header id="desktop-project-titlebar" data-platform={ platform } aria-label="Window title bar">
+  @DesktopWindowControls(platform)
+ </header>
+ <script type="module">
+  import * as runtime from '/wails/runtime.js';
+  window.wails = runtime;
+  window.openVibelyInstallWindowControls && window.openVibelyInstallWindowControls(runtime);
+  if (runtime.Events && runtime.Events.Emit) {
+   runtime.Events.Emit('desktop:controls-theme', {dark: document.documentElement.getAttribute('data-theme') === 'dark'});
+  }
+ </script>
+}

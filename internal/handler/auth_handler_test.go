@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,16 +32,26 @@ func authTestHandler(t *testing.T) (*Handler, *echo.Echo) {
 }
 
 func TestAuthLoginPage_Render(t *testing.T) {
-	_, e := authTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/login", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "Sign in") {
-		t.Fatalf("expected login page content, got %s", rec.Body.String())
+	for _, desktop := range []bool{false, true} {
+		t.Run(fmt.Sprintf("desktop=%t", desktop), func(t *testing.T) {
+			h, e := authTestHandler(t)
+			h.SetDesktopMode(desktop)
+			req := httptest.NewRequest(http.MethodGet, "/login", nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "Sign in") {
+				t.Fatalf("expected login page content, got %s", rec.Body.String())
+			}
+			// Browser visits to a desktop backend must not load native window APIs.
+			for _, marker := range []string{"desktop-project-titlebar", "/wails/runtime.js"} {
+				if strings.Contains(rec.Body.String(), marker) {
+					t.Errorf("browser login includes native chrome %q", marker)
+				}
+			}
+		})
 	}
 }
 
