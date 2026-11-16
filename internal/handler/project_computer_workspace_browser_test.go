@@ -73,8 +73,21 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>window.fixtureRFB?.painted);
  if(!q('#tab-computer').contains(q('[data-computer-preview]')))throw Error('Preview not in Computer tab');
  if(q('[data-computer-files]'))throw Error('Obsolete Files section remains');
- const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(!initialRFB.disconnected)throw Error('Hidden preview stayed connected');q('[data-tab="computer"]').click();await wait(()=>window.fixtureRFB!==initialRFB,'preview reconnect');
+ window.holdComputerFrame=true;const initialRFB=window.fixtureRFB;q('[data-tab="details"]').click();await new Promise(r=>setTimeout(r,100));if(!initialRFB.disconnected)throw Error('Hidden preview stayed connected');q('[data-tab="computer"]').click();await wait(()=>window.fixtureRFB!==initialRFB,'preview reconnect');
  if(q('#tab-computer').classList.contains('hidden'))throw Error('Computer tab hidden');
+ await wait(()=>window.fixtureRFB.connected,'connected before first frame');
+ const overlay=q('[data-computer-connection]');
+ if(overlay.style.display==='none'||!q('[data-retained-frame]'))throw Error('Reconnect must retain thumbnail with overlay');
+ if(!overlay.textContent.includes('Reconnecting to computer'))throw Error('Missing reconnect status');
+ q('[data-computer-preview-open]').click();
+ if(!q('[data-computer-dialog]').open||!q('[data-computer-expanded]').contains(overlay))throw Error('Overlay did not follow expansion');
+ if(!window.fixtureRFB.viewOnly||q('[aria-label="Remote computer keyboard"]'))throw Error('Input enabled before live frame');
+ await new Promise(r=>setTimeout(r,150));if(overlay.style.display==='none')throw Error('Handshake hid loading overlay before frame');
+ window.holdComputerFrame=false;
+ await wait(()=>overlay.style.display==='none'&&!window.fixtureRFB.viewOnly,'live frame enables input');
+ q('[data-computer-close]').click();
+ if(!window.fixtureRFB.viewOnly||overlay.style.display!=='none')throw Error('Live collapse changed connection readiness');
+
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'mini preview settled');
  await new Promise(r=>setTimeout(r,250));const miniReads=window.computerStatusReads;
@@ -191,7 +204,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		}
 		if r.URL.Path == "/fixture-rfb.js" {
 			w.Header().Set("Content-Type", "text/javascript")
-			fmt.Fprint(w, `export default class RFB{constructor(el,url){if(!String(url).includes('/stream/control'))throw Error('Expected one authorized control connection');this.keys=[];this.listeners={};this.el=el;this.canvas=document.createElement('canvas');el.append(this.canvas);window.fixtureRFB=this;setTimeout(()=>this.listeners.connect?.({}),10);this.timer=setTimeout(()=>{this.canvas.getContext('2d').fillRect(0,0,300,150);this.painted=true;},350);}addEventListener(name,fn){this.listeners[name]=fn;}sendKey(...args){this.keys.push(args)}clipboardPasteFrom(text){this.pasted=text}disconnect(){this.disconnected=true;clearTimeout(this.timer);this.canvas.remove();}}`)
+			fmt.Fprint(w, `export default class RFB{constructor(el,url){if(!String(url).includes('/stream/control'))throw Error('Expected one authorized control connection');this.keys=[];this.listeners={};this.el=el;this.canvas=document.createElement('canvas');el.append(this.canvas);window.fixtureRFB=this;setTimeout(()=>{this.connected=true;this.listeners.connect?.({})},10);const paint=()=>{if(window.holdComputerFrame){this.timer=setTimeout(paint,25);return;}this.canvas.getContext('2d').fillRect(0,0,300,150);this.painted=true;};this.timer=setTimeout(paint,350);}addEventListener(name,fn){this.listeners[name]=fn;}sendKey(...args){this.keys.push(args)}clipboardPasteFrom(text){this.pasted=text}disconnect(){this.disconnected=true;clearTimeout(this.timer);this.canvas.remove();}}`)
 			return
 		}
 		mu.Lock()

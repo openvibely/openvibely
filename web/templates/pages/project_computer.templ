@@ -26,8 +26,8 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  } else {
   <section id="project-computer" data-computer-task={computerTaskID(taskIDs)} data-computer-project={ projectID } data-computer-viewer={ static.URL("vendor/novnc/core/rfb.js") } class="flex flex-col gap-4 text-sm">
    <div data-computer-preview hidden style="position:relative">
- <div data-computer-screen tabindex="-1" aria-label="Computer screen" class="rounded-lg overflow-hidden outline-none" style="aspect-ratio:16/10;width:100%;user-select:none;-webkit-user-select:none;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))"></div>
- <button type="button" data-computer-preview-open aria-label="Open larger computer preview" style="position:absolute;inset:0;width:100%;height:100%;cursor:zoom-in;background:transparent;border:0"></button>
+ <div data-computer-screen tabindex="-1" aria-label="Computer screen" class="rounded-lg overflow-hidden outline-none" style="position:relative;aspect-ratio:16/10;width:100%;user-select:none;-webkit-user-select:none;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))"></div>
+ <button type="button" data-computer-preview-open aria-label="Open larger computer preview" style="position:absolute;inset:0;width:100%;height:100%;z-index:3;cursor:zoom-in;background:transparent;border:0"></button>
  </div>
  <h3 class="text-sm font-semibold">Computer</h3>
    @TaskComputerToggle(projectID, computerTaskID(taskIDs))
@@ -114,6 +114,19 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      dialog.addEventListener('close',finishViewer);
      async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();syncViewerInput();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
      const screen=find('[data-computer-screen]');
+     const connectionOverlay=document.createElement('div');connectionOverlay.dataset.computerConnection='';
+     connectionOverlay.setAttribute('role','status');connectionOverlay.setAttribute('aria-live','polite');
+     connectionOverlay.style.cssText='position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(20,24,32,.65);color:white;text-align:center;padding:16px';
+     connectionOverlay.innerHTML='<span class="loading loading-spinner loading-sm" aria-hidden="true"></span><span data-computer-connection-text></span>';
+     screen.append(connectionOverlay);
+     let frameReady=false,everConnected=false;
+     function renderConnection(){
+      const waiting=!frameReady;connectionOverlay.style.display=waiting?'flex':'none';screen.setAttribute('aria-busy',String(waiting));
+      if(!waiting)return;
+      const seconds=Math.ceil(Math.max(0,screenRetry.nextRetryAt-Date.now())/1000);
+      const text=seconds?'Retrying in '+seconds+' seconds…':everConnected||retained?'Reconnecting to computer…':'Connecting to computer…';
+      const label=connectionOverlay.querySelector('[data-computer-connection-text]');if(label.textContent!==text)label.textContent=text;
+     }
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null;
      let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, connectTimer=null, refreshPromise=null, refreshQueued=false, pendingState=null;
@@ -122,9 +135,10 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       clearTimeout(statusTimer);statusTimer=setTimeout(()=>{statusTimer=null;refresh();},50);
      }
      const screenRetry=window.openVibelyRetry(()=>refresh());
+     const connectionTimer=setInterval(renderConnection,250);
      function retryStatus(){
       if(closed || previewDeleted || !visible() || pending || closing || !statusLive || statusFailed)return;
-      if(connected || currentState?.enabled===false){screenRetry.cancel();return;}
+      if((connected&&frameReady) || currentState?.enabled===false){screenRetry.cancel();return;}
       // A status read or screen handshake must finish before another attempt.
       if(rfb || !currentState)return;
       screenRetry.fail();
@@ -168,7 +182,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const teachNote=find('[data-teach-status]');
      let previousCapture=null;
      let connected=false, currentState=null, inViewport=true, ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[], savingDemo=false, generationAbort=null, workflowID="";
-     function inputActive(){return connected && !retained && mode==='control' && dialog.open && !document.hidden && !closing;}
+     function inputActive(){return connected && frameReady && !retained && mode==='control' && dialog.open && !document.hidden && !closing;}
 
      function visible(){const host=root;return !host.closest('[data-computer-permission-pending]') && !document.hidden && (dialog.open || host.getClientRects().length>0);}
      function chord(key,code,{ctrl=false,shift=false,alt=false}={}){
@@ -260,7 +274,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       const frame=document.createElement('canvas');frame.width=saved.width;frame.height=saved.height;
       frame.getContext('2d').drawImage(saved,0,0);showFrame(frame);
      }
-     // Keep the last painted desktop while the authorized stream changes modes.
+     // Keep the last painted desktop while the stream reconnects.
      function retainFrame(){
       if(previewDeleted || retained)return;
       const source=screen.querySelector('canvas:not([data-retained-frame])');
@@ -271,14 +285,19 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      }
      function revealFrame(epoch){
       clearTimeout(frameTimer);
-      if(closed || epoch!==generation || !retained)return;
+      if(closed || epoch!==generation || frameReady)return;
       const canvas=screen.querySelector('canvas:not([data-retained-frame])');
-      if(canvas?.width && canvas?.height){try{if([.25,.5,.75].some(v=>canvas.getContext('2d').getImageData(Math.floor(canvas.width*v),Math.floor(canvas.height*v),1,1).data[3])){retained.remove();retained=null;return;}}catch{retained.remove();retained=null;return;}}
+      if(connected&&canvas?.width&&canvas?.height){try{
+       if([.25,.5,.75].some(v=>canvas.getContext('2d').getImageData(Math.floor(canvas.width*v),Math.floor(canvas.height*v),1,1).data[3])){
+        retained?.remove();retained=null;frameReady=true;everConnected=true;clearTimeout(connectTimer);
+        screenRetry.success();renderConnection();syncViewerInput();return;
+       }
+      }catch{ /* Keep input blocked until a readable live frame arrives. */ }}
       frameTimer=setTimeout(()=>revealFrame(epoch),50);
      }
      function syncViewerInput(){
       if(!rfb)return;
-      const want=!!(connected&&dialog.open&&!closing&&!document.hidden);
+      const want=!!(connected&&frameReady&&dialog.open&&!closing&&!document.hidden);
       if(!want&&!rfb.viewOnly){
        // Release held input before viewOnly starts suppressing outgoing input.
        rfb._keyboard?.ungrab();
@@ -300,13 +319,13 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
       rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=true;
       revealFrame(epoch);
-      connectTimer=setTimeout(()=>{if(epoch===generation&&!connected){disconnect();retryStatus();}},10000);
-      rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;clearTimeout(connectTimer);screenRetry.success();retryStatus();syncViewerInput();});
+      connectTimer=setTimeout(()=>{if(epoch===generation&&!frameReady){disconnect();retryStatus();}},10000);
+      rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;revealFrame(epoch);syncViewerInput();});
       rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;if(document.hasFocus())navigator.clipboard?.writeText(event.detail.text).catch(()=>{});});
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;window.showToast('Desktop authentication failed.','error','',{toastKey:previewKey+':authentication'});}});
-      rfb.addEventListener('disconnect',event=>{if(epoch===generation){clearTimeout(connectTimer);retainFrame();connected=false;rfb=null;mode='';recording=false;renderDemo();retryStatus();}});
+      rfb.addEventListener('disconnect',event=>{if(epoch===generation){clearTimeout(connectTimer);retainFrame();connected=false;frameReady=false;rfb=null;mode='';recording=false;renderDemo();renderConnection();retryStatus();}});
      }
-     function disconnect(){++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
+     function disconnect(){++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;frameReady=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();renderConnection();}
      function refresh(){
       if(refreshPromise){refreshQueued=true;return refreshPromise;}
       refreshPromise=(async()=>{do{refreshQueued=false;await refreshStatus();}while(refreshQueued&&!closed&&!previewDeleted);})().finally(()=>{refreshPromise=null;retryStatus();});
@@ -377,7 +396,7 @@ currentState=state;if(state.handoff_kind){recording=false;renderDemo();}find('[d
  function dispose(){
   if(closed)return;
   closed=true;generationAbort?.abort();statusStream?.close();statusStream=null;
-  clearTimeout(statusTimer);screenRetry.dispose();clearInterval(autoCaptureTimer);
+  clearTimeout(statusTimer);clearInterval(connectionTimer);screenRetry.dispose();clearInterval(autoCaptureTimer);
   viewportObserver.disconnect();
   window.removeEventListener('live-transport-disconnected',statusDisconnected);
   window.removeEventListener('computer-preview-deleted',previewWasDeleted);
@@ -398,7 +417,7 @@ currentState=state;if(state.handoff_kind){recording=false;renderDemo();}find('[d
   catch(e){window.showToast(e.message,'error');taskToggle.checked=!taskToggle.checked;}
   finally{pending=false;taskToggle.disabled=false;await refresh();}
  };
- restoreFrame();screenRetry.start();
+ restoreFrame();renderConnection();screenRetry.start();
 
     })();
    </script>

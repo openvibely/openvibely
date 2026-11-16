@@ -29,6 +29,8 @@ func TestComputerPreviewCache(t *testing.T) {
  let previewKey=JSON.stringify(['project','task']),retained=null,reports=0,closed=false,generation=1,frameTimer=null;
  let live=canvas();live.painted=true;
  const screen={style:{},append(){},querySelector(){return live}};
+ let frameReady=false,connected=true,everConnected=false,connectTimer=null,rfb=null;
+ const screenRetry={success(){}};function renderConnection(){};
  function reportConnection(){reports++}
  function clearTimeout(){};function setTimeout(){return 1}
  ` + text[start:end] + `

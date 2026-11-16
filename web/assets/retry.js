@@ -4,9 +4,9 @@
     window.openVibelyRetry = function (run, options) {
         options = options || {};
         var initial = options.initialDelay || 1000, maximum = options.maxDelay || 15000;
-        var delay = initial, timer = null, active = false, disposed = false, generation = 0;
+        var delay = initial, timer = null, active = false, disposed = false, generation = 0, nextRetryAt = 0;
         function cancel() {
-            clearTimeout(timer); timer = null; active = false; generation++;
+            clearTimeout(timer); timer = null; nextRetryAt = 0; active = false; generation++;
         }
         function success() { cancel(); delay = initial; }
         function fail() {
@@ -14,7 +14,8 @@
             active = false; generation++;
             var wait = delay + (options.jitter ? Math.random() * options.jitter : 0);
             delay = Math.min(maximum, delay * 2);
-            timer = setTimeout(function () { timer = null; start(); }, wait);
+            nextRetryAt = Date.now() + wait;
+            timer = setTimeout(function () { timer = null; nextRetryAt = 0; start(); }, wait);
         }
         function start() {
             if (disposed || active || timer !== null) return false;
@@ -33,6 +34,7 @@
         }
         return {start:start, fail:fail, success:success, cancel:cancel,
             dispose:function () { cancel(); disposed = true; },
-            get active() { return active; }};
+            get active() { return active; },
+            get nextRetryAt() { return nextRetryAt; }};
     };
 })();
