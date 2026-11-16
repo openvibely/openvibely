@@ -1,0 +1,814 @@
+package layout
+
+// AccountUsageRail lives outside the scrolling navigation so account controls stay
+// next to Settings. Provider permissions remain enforced by the Analytics API.
+templ AccountUsageRail() {
+ <div id="rail-accounts" aria-label="Subscription accounts"></div>
+ <div id="rail-account-popup" class="ov-menu" popover="manual" role="dialog" aria-label="Subscription usage"></div>
+ <div id="rail-overflow" class="ov-menu ov-menu-actions" popover="manual" role="menu" aria-label="More navigation"></div>
+ <style>
+#rail-accounts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  max-height: 35vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.rail-account,
+#rail-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: auto;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.rail-account:hover,
+.rail-account[aria-expanded="true"],
+#rail-more:hover,
+#rail-more[aria-expanded="true"] {
+  background: oklch(var(--bc) / 0.06);
+}
+.rail-account:focus-visible,
+#rail-more:focus-visible {
+  outline: 2px solid var(--ov-focus, oklch(var(--p)));
+  outline-offset: 2px;
+}
+.rail-account svg {
+  width: 28px;
+  height: 28px;
+}
+.rail-account text {
+  fill: currentColor;
+  opacity: 0.75;
+  font: 600 9px system-ui;
+}
+:root {
+  --ov-usage-remaining: oklch(var(--bc) / 0.75);
+  --ov-usage-used: oklch(var(--bc) / 0.12);
+}
+[data-color-theme-kind^="high-contrast"] {
+  --ov-usage-remaining: currentColor;
+  --ov-usage-used: oklch(var(--bc) / 0.4);
+}
+@media (forced-colors: active) {
+  .rail-account {
+    --ov-usage-remaining: CanvasText;
+    --ov-usage-used: GrayText;
+    forced-color-adjust: none;
+  }
+}
+#rail-account-popup {
+  width: 330px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  margin: 0;
+  padding: 16px;
+}
+#rail-overflow {
+  width: 190px;
+  margin: 0;
+}
+#rail-overflow > li {
+  list-style: none;
+}
+#sidebar #rail-overflow a {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 7px 10px !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  opacity: 1;
+}
+#sidebar #rail-overflow .sidebar-text {
+  display: inline !important;
+  width: auto !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+#rail-overflow svg {
+  width: 20px;
+  height: 20px;
+}
+#rail-more svg {
+  width: 20px;
+  height: 20px;
+  opacity: 0.75;
+}
+.rail-usage-heading {
+  font-weight: 600;
+}
+.rail-usage-meta {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+.rail-usage-limit {
+  margin-top: 16px;
+}
+.rail-usage-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.rail-usage-track {
+  display: flex;
+  height: 5px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 7px 0;
+}
+.rail-usage-track > span {
+  background: var(--ov-usage-used);
+}
+.rail-usage-track::after {
+  content: "";
+  flex: 1;
+  background: var(--ov-usage-remaining);
+}
+.rail-usage-resets,
+.rail-usage-footer {
+  border-top: 1px solid var(--ov-border-subtle);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+.rail-usage-reset {
+  margin-top: 12px;
+}
+.rail-usage-reset button {
+  flex-shrink: 0;
+}
+html[data-shell-frame] .sidebar-aside.sidebar-collapsed .menu a,
+html[data-shell-frame] .sidebar-aside.sidebar-collapsed .menu summary {
+  width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+}
+html[data-shell-frame] .sidebar-aside .menu a svg {
+  width: 20px;
+  height: 20px;
+}
+html[data-shell-frame] .sidebar-aside .sidebar-footer {
+  padding-top: 2px;
+}
+html[data-shell-frame] #sidebar .sidebar-footer-menu {
+  transform: none;
+}
+</style>
+ <script>
+(() => {
+  if (window.openVibelyAccountRail) return;
+  const host = document.getElementById("rail-accounts"),
+    popup = document.getElementById("rail-account-popup"),
+    overflow = document.getElementById("rail-overflow");
+  if (!host || !popup || !overflow) return;
+  const state = {
+    accounts: [],
+    selected: null,
+    loading: false,
+    denied: false,
+    busy: false,
+    attempts: new Map(),
+    reads: new Map(),
+    timer: null,
+    lastRefresh: 0,
+    scope: "",
+  };
+  window.openVibelyAccountRail = state;
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  };
+  const provider = (a) => (a.provider === "openai" ? "OpenAI" : "Anthropic");
+  const identity = (a) => a.identity || provider(a) + " account";
+  const compare = (a, b) =>
+    (a.provider === "openai" ? 0 : 1) - (b.provider === "openai" ? 0 : 1) ||
+    identity(a).localeCompare(identity(b), "en", {
+      sensitivity: "base",
+      numeric: true,
+    }) ||
+    a.key.localeCompare(b.key, "en");
+  const limits = (a) =>
+    a.data?.limits?.length
+      ? a.data.limits
+      : [
+          a.data?.primary_limit,
+          a.data?.secondary_limit,
+          ...(a.data?.extra_limits || []),
+        ].filter(Boolean);
+  const mainLimit = (a, minutes) =>
+    limits(a).find(
+      (l) =>
+        l.window_minutes === minutes &&
+        !/sonnet|opus|model|review/i.test((l.limit_key || "") + " " + l.label),
+    ) ||
+    limits(a).find((l) =>
+      minutes === 300
+        ? /^(five_hour|5.hour|session)$/i.test(l.limit_key || "")
+        : /^(seven_day|weekly)$/i.test(l.limit_key || ""),
+    );
+  const percent = (l) =>
+    l &&
+    l.used_percent !== null &&
+    l.used_percent !== undefined &&
+    Number.isFinite(Number(l.used_percent))
+      ? Math.max(0, Math.min(100, Number(l.used_percent)))
+      : null;
+  const shown = () => popup.matches(":popover-open");
+  function position(surface, button) {
+    if (!button) return;
+    const r = button.getBoundingClientRect();
+    surface.style.left =
+      Math.max(
+        12,
+        Math.min(innerWidth - surface.offsetWidth - 12, r.right + 12),
+      ) + "px";
+    surface.style.top =
+      Math.max(
+        12,
+        Math.min(
+          innerHeight - surface.offsetHeight - 12,
+          r.bottom - surface.offsetHeight,
+        ),
+      ) + "px";
+  }
+  function closeUsage(focus = false) {
+    if (shown()) popup.hidePopover();
+    if (focus)
+      host
+        .querySelector('[data-key="' + CSS.escape(state.selected || "") + '"]')
+        ?.focus();
+    host
+      .querySelectorAll("button")
+      .forEach((b) => b.setAttribute("aria-expanded", "false"));
+  }
+  function closeOverflow(focus = false) {
+    if (overflow.matches(":popover-open")) overflow.hidePopover();
+    more.setAttribute("aria-expanded", "false");
+    if (focus) more.focus();
+  }
+  const nav = document.querySelector("#sidebar .sidebar-inner > .menu");
+  const more = el("button", "", "");
+  more.id = "rail-more";
+  more.type = "button";
+  more.title = "More navigation";
+  more.setAttribute("aria-label", "More navigation");
+  more.setAttribute("aria-haspopup", "true");
+  more.setAttribute("aria-expanded", "false");
+  more.setAttribute("aria-controls", "rail-overflow");
+  more.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>';
+  const moreItem = el("li");
+  moreItem.append(more);
+  const paths = ["/analytics", "/insights", "/history", "/upcoming"];
+  for (const path of paths) {
+    const link = nav?.querySelector('[data-nav-base="' + path + '"]');
+    if (!link) continue;
+    if (!moreItem.isConnected) link.closest("li").before(moreItem);
+    link.setAttribute("role", "menuitem");
+    link.closest("li").setAttribute("role", "none");
+    overflow.append(link.closest("li"));
+  }
+  nav?.querySelectorAll(".menu-title").forEach((n) => {
+    if (n.textContent.includes("Insights")) {
+      const previous = n.previousElementSibling;
+      if (previous?.classList.contains("sidebar-divider")) previous.remove();
+      n.remove();
+    }
+  });
+  more.onclick = () => {
+    const open = !overflow.matches(":popover-open");
+    closeUsage();
+    if (open) {
+      overflow.showPopover();
+      more.setAttribute("aria-expanded", "true");
+      position(overflow, more);
+      overflow.querySelector("a")?.focus();
+    } else closeOverflow(true);
+  };
+  overflow.addEventListener("click", (e) => {
+    if (e.target.closest("a")) closeOverflow();
+  });
+  overflow.addEventListener("keydown", (e) => {
+    const links = [...overflow.querySelectorAll("a")];
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const i = links.indexOf(document.activeElement);
+    links[
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? links.length - 1
+          : (i + (e.key === "ArrowDown" ? 1 : -1) + links.length) % links.length
+    ]?.focus();
+  });
+  async function read(url, options) {
+    if (!options && state.reads.has(url)) return state.reads.get(url);
+    const request = (async () => {
+      const response = await fetch(url, {
+        credentials: "same-origin",
+        ...options,
+        signal: AbortSignal.timeout(20000),
+      });
+      if (
+        response.status === 401 ||
+        response.status === 403 ||
+        response.status === 404
+      ) {
+        const error = new Error("Account usage is unavailable.");
+        error.denied = true;
+        throw error;
+      }
+      if (!response.ok) throw new Error("Unable to refresh account usage.");
+      return response.json();
+    })();
+    if (!options) state.reads.set(url, request);
+    try {
+      return await request;
+    } finally {
+      state.reads.delete(url);
+    }
+  }
+  const url = (projection, key, refresh = false) => {
+    const q = new URLSearchParams({ projection });
+    const project = document.getElementById("project-selector")?.value;
+    if (project) q.set("project_id", project);
+    if (key) q.set("account_key", key);
+    if (refresh) q.set("refresh", "true");
+    return "/api/analytics/usage?" + q;
+  };
+  function svgFor(a) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 40 40");
+    svg.setAttribute("aria-hidden", "true");
+    const add = (tag, attrs) => {
+      const n = document.createElementNS(svg.namespaceURI, tag);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+      svg.append(n);
+      return n;
+    };
+    const weekly = mainLimit(a, 10080),
+      five = mainLimit(a, 300);
+    const available = [
+      ...(weekly ? [[weekly, 17]] : []),
+      ...(five ? [[five, weekly ? 12.5 : 17]] : []),
+    ];
+    if (!available.length || a.error) {
+      add("circle", {
+        cx: 20,
+        cy: 20,
+        r: 17,
+        fill: "none",
+        stroke: "var(--ov-usage-used)",
+        "stroke-width": 1.67,
+        "vector-effect": "non-scaling-stroke",
+        "stroke-dasharray": "2 3",
+      });
+    } else
+      for (const [limit, r] of available) {
+        const p = percent(limit);
+        if (p === null) {
+          add("circle", {
+            cx: 20,
+            cy: 20,
+            r,
+            fill: "none",
+            stroke: "var(--ov-usage-used)",
+            "stroke-width": 1.67,
+            "vector-effect": "non-scaling-stroke",
+            "stroke-dasharray": "2 3",
+          });
+          continue;
+        }
+        for (const [value, offset, color] of [
+          [p, 0, "used"],
+          [100 - p, -p, "remaining"],
+        ]) {
+          if (!value) continue;
+          add("circle", {
+            cx: 20,
+            cy: 20,
+            r,
+            fill: "none",
+            pathLength: 100,
+            stroke: "var(--ov-usage-" + color + ")",
+            "stroke-width": 1.67,
+            "vector-effect": "non-scaling-stroke",
+            "stroke-dasharray": value + " 100",
+            "stroke-dashoffset": offset,
+            transform: "rotate(-90 20 20)",
+          });
+        }
+      }
+    add("text", { x: 20, y: 23.4, "text-anchor": "middle" }).textContent =
+      a.error ? "!" : a.provider === "openai" ? "O" : "A";
+    return svg;
+  }
+  function drawRail() {
+    const focused = document.activeElement?.dataset.key;
+    const nodes = state.accounts.map((a) => {
+      const button = el("button", "rail-account");
+      button.type = "button";
+      button.dataset.key = a.key;
+      button.setAttribute("aria-controls", popup.id);
+      button.setAttribute(
+        "aria-expanded",
+        String(shown() && state.selected === a.key),
+      );
+      const info = limits(a)
+        .map(
+          (l) =>
+            l.label +
+            ": " +
+            (percent(l) === null
+              ? "unknown"
+              : (100 - percent(l)).toFixed(0) + "% left"),
+        )
+        .join(", ");
+      button.title =
+        provider(a) +
+        " · " +
+        identity(a) +
+        (a.error
+          ? " · Usage unavailable"
+          : info
+            ? " · " + info
+            : " · Loading usage");
+      button.setAttribute("aria-label", button.title);
+      button.append(svgFor(a));
+      button.onclick = () => openAccount(a);
+      return button;
+    });
+    host.replaceChildren(...nodes);
+    if (focused)
+      host.querySelector('[data-key="' + CSS.escape(focused) + '"]')?.focus();
+  }
+  function resetTime(value) {
+    if (!value) return "Reset time unavailable";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "Reset time unavailable";
+    const minutes = Math.ceil((d - Date.now()) / 60000);
+    return minutes <= 0
+      ? "Reset pending refresh"
+      : "Resets " + d.toLocaleString();
+  }
+  function drawPopup() {
+    const a = state.accounts.find((a) => a.key === state.selected);
+    if (!a) {
+      closeUsage();
+      return;
+    }
+    const focus = document.activeElement?.dataset.action;
+    popup.replaceChildren();
+    popup.setAttribute(
+      "aria-label",
+      provider(a) + " " + identity(a) + " usage",
+    );
+    popup.append(
+      el(
+        "div",
+        "rail-usage-heading",
+        provider(a) + (a.data?.plan_type ? " · " + a.data.plan_type : ""),
+      ),
+      el("div", "rail-usage-meta", identity(a)),
+    );
+    if (a.error)
+      popup.append(
+        el("p", "rail-usage-meta", "Usage unavailable. Refresh to try again."),
+      );
+    else if (!a.data)
+      popup.append(el("p", "rail-usage-meta", "Loading usage…"));
+    else {
+      for (const l of limits(a)) {
+        const section = el("div", "rail-usage-limit"),
+          row = el("div", "rail-usage-row"),
+          p = percent(l);
+        row.append(
+          el("span", "", l.label),
+          el(
+            "span",
+            "",
+            p === null ? "Unknown" : (100 - p).toFixed(0) + "% left",
+          ),
+        );
+        section.append(row);
+        if (p !== null) {
+          const track = el("div", "rail-usage-track");
+          track.setAttribute("role", "meter");
+          track.setAttribute("aria-label", l.label + " remaining");
+          track.setAttribute("aria-valuemin", "0");
+          track.setAttribute("aria-valuemax", "100");
+          track.setAttribute("aria-valuenow", String(100 - p));
+          const used = el("span");
+          used.style.width = p + "%";
+          track.append(used);
+          section.append(track);
+        }
+        section.append(el("div", "rail-usage-meta", resetTime(l.resets_at)));
+        popup.append(section);
+      }
+      if (!limits(a).length)
+        popup.append(
+          el("p", "rail-usage-meta", "No live limit snapshot available."),
+        );
+    }
+    if (a.resets?.available_count > 0) {
+      const section = el("div", "rail-usage-resets");
+      section.append(el("div", "rail-usage-heading", "Usage resets"));
+      if (a.resets.unavailable_reason)
+        section.append(
+          el(
+            "p",
+            "rail-usage-meta",
+            String(a.resets.unavailable_reason).replaceAll("_", " "),
+          ),
+        );
+      if (!Array.isArray(a.resets.credits))
+        section.append(
+          el("p", "rail-usage-meta", "Reset details unavailable."),
+        );
+      for (const c of a.resets.credits || []) {
+        if (c.status !== "available") continue;
+        const row = el("div", "rail-usage-reset"),
+          head = el("div", "rail-usage-row"),
+          button = el("button", "btn btn-sm btn-outline", "Use reset");
+        button.type = "button";
+        button.dataset.action = "reset-" + c.id;
+        const raw = c.expires_at ?? c.expiresAt,
+          expiry =
+            raw == null
+              ? null
+              : new Date(typeof raw === "number" ? raw * 1000 : raw);
+        button.disabled =
+          state.busy ||
+          !c.id ||
+          c.usable === false ||
+          (expiry &&
+            (!Number.isFinite(expiry.getTime()) || expiry <= new Date()));
+        button.onclick = () => redeem(a, c);
+        head.append(el("span", "", c.title || "Usage reset"), button);
+        row.append(head);
+        if (c.description)
+          row.append(el("p", "rail-usage-meta", c.description));
+        const labels = {
+          five_hour: "5-hour limit",
+          seven_day: "Weekly limit",
+          seven_day_sonnet: "Sonnet weekly limit",
+          seven_day_opus: "Opus weekly limit",
+        };
+        const details = [
+          c.remaining_uses !== undefined
+            ? c.remaining_uses + " use(s) remaining"
+            : "",
+          Array.isArray(c.clears)
+            ? "Resets " +
+              c.clears
+                .map((k) => labels[k] || String(k).replaceAll("_", " "))
+                .join(", ")
+            : "",
+          c.gives_back_weekly ? "Returns usage to weekly allowance" : "",
+          expiry
+            ? Number.isFinite(expiry.getTime())
+              ? "Expires " + expiry.toLocaleString()
+              : "Expiration unavailable"
+            : "Does not expire",
+          c.usable === false
+            ? String(
+                c.unavailable_reason || "Currently unavailable",
+              ).replaceAll("_", " ")
+            : "",
+        ].filter(Boolean);
+        row.append(el("p", "rail-usage-meta", details.join(" · ")));
+        section.append(row);
+      }
+      popup.append(section);
+    }
+    if (a.resetError)
+      popup.append(
+        el("p", "rail-usage-meta", "Reset availability could not be loaded."),
+      );
+    const message = el("p", "rail-usage-meta", a.message);
+    message.setAttribute("role", "status");
+    popup.append(message);
+    const footer = el("div", "rail-usage-footer rail-usage-row");
+    const stamp = a.data?.updated_at;
+    footer.append(
+      el(
+        "span",
+        "rail-usage-meta",
+        stamp
+          ? "Updated " + new Date(stamp).toLocaleTimeString()
+          : "Not yet updated",
+      ),
+    );
+    const refresh = el("button", "btn btn-ghost btn-sm", "Refresh");
+    refresh.dataset.action = "refresh";
+    refresh.disabled = state.busy;
+    refresh.onclick = () => loadAccount(a, true);
+    footer.append(refresh);
+    popup.append(footer);
+    position(
+      popup,
+      host.querySelector('[data-key="' + CSS.escape(a.key) + '"]'),
+    );
+    if (focus)
+      popup.querySelector('[data-action="' + CSS.escape(focus) + '"]')?.focus();
+  }
+  async function loadResets(a) {
+    try {
+      a.resets = await read(
+        "/api/analytics/usage/resets?" +
+          new URLSearchParams({ account_key: a.key }),
+      );
+      a.resetError = false;
+    } catch (_) {
+      a.resets = null;
+      a.resetError = true;
+    }
+    if (state.selected === a.key && shown()) drawPopup();
+  }
+  async function loadAccount(a, refresh = false) {
+    // A forced refresh after redemption must start after any older read.
+    if (a.loading) {
+      await a.loading;
+      if (!refresh) return;
+    }
+    a.loading = (async () => {
+      try {
+        const data = await read(url("account_limits", a.key, refresh));
+        a.data = data.account_limits?.[0] || null;
+        a.error = a.data?.error || (!a.data ? "No snapshot" : "");
+      } catch (e) {
+        a.error = e.message;
+      } finally {
+        a.loading = null;
+        drawRail();
+        if (shown() && state.selected === a.key) {
+          drawPopup();
+          await loadResets(a);
+        }
+      }
+    })();
+    return a.loading;
+  }
+  async function openAccount(a) {
+    closeOverflow();
+    if (shown() && state.selected === a.key) {
+      closeUsage(true);
+      return;
+    }
+    state.selected = a.key;
+    a.message = "";
+    if (!shown()) popup.showPopover();
+    drawRail();
+    drawPopup();
+    popup.querySelector('[data-action="refresh"]')?.focus();
+    await loadResets(a);
+  }
+  async function redeem(a, c) {
+    if (state.busy) return;
+    state.busy = true;
+    a.message = "Resetting…";
+    drawPopup();
+    const key = a.key + ":" + c.id;
+    if (!state.attempts.has(key)) state.attempts.set(key, crypto.randomUUID());
+    try {
+      const result = await read("/api/analytics/usage/resets/consume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_key: a.key,
+          credit_id: c.id,
+          idempotency_key: state.attempts.get(key),
+        }),
+      });
+      if (!result.retry_same_request) state.attempts.delete(key);
+      const messages = {
+        reset: "Usage reset.",
+        not_needed: "Your usage does not need a reset right now.",
+        already_used: "That reset was already used.",
+        no_longer_available:
+          "That reset is no longer available. Nothing was used.",
+        cooldown: "A reset was just started. Try again in a minute.",
+        in_progress:
+          "Your earlier reset may still be processing. Try again in a minute.",
+      };
+      a.message =
+        messages[result.outcome] ||
+        "Could not confirm the reset. Retry to check the same request.";
+      await loadAccount(a, true);
+      await loadResets(a);
+    } catch (_) {
+      a.message =
+        "Could not confirm the reset. Retry to check the same request.";
+    } finally {
+      state.busy = false;
+      if (shown() && state.selected === a.key) drawPopup();
+      document.body.dispatchEvent(
+        new CustomEvent("accountUsageChanged", { detail: { source: "rail" } }),
+      );
+    }
+  }
+  async function refreshAll() {
+    const scope = document.getElementById("project-selector")?.value || "";
+    if (
+      state.loading ||
+      document.hidden ||
+      state.busy ||
+      (scope === state.scope && Date.now() - state.lastRefresh < 120000)
+    )
+      return;
+    state.scope = scope;
+    state.lastRefresh = Date.now();
+    state.loading = true;
+    try {
+      const inventory = await read(url("accounts"));
+      const old = new Map(state.accounts.map((a) => [a.key, a]));
+      state.accounts = (inventory.accounts || [])
+        .filter((a) => ["openai", "anthropic"].includes(a.provider))
+        .map((a) => Object.assign(old.get(a.key) || {}, a))
+        .sort(compare);
+      state.denied = false;
+      drawRail();
+      if (shown()) drawPopup();
+      for (let i = 0; i < state.accounts.length; i += 3)
+        await Promise.all(
+          state.accounts.slice(i, i + 3).map((a) => loadAccount(a)),
+        );
+    } catch (e) {
+      if (e.denied) {
+        state.denied = true;
+        state.accounts = [];
+        closeUsage();
+        drawRail();
+      } else {
+        state.accounts.forEach((a) => (a.error = e.message));
+        drawRail();
+        if (shown()) drawPopup();
+      }
+    } finally {
+      state.loading = false;
+      if (
+        (document.getElementById("project-selector")?.value || "") !==
+        state.scope
+      )
+        refreshAll();
+    }
+  }
+  host.addEventListener("click", (e) => e.stopPropagation());
+  popup.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", (e) => {
+    if (!popup.contains(e.target) && !host.contains(e.target)) closeUsage();
+    if (!overflow.contains(e.target) && !more.contains(e.target))
+      closeOverflow();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (shown()) {
+        e.preventDefault();
+        closeUsage(true);
+      }
+      if (overflow.matches(":popover-open")) {
+        e.preventDefault();
+        closeOverflow(true);
+      }
+    }
+  });
+  window.addEventListener("resize", () => {
+    closeUsage();
+    closeOverflow();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshAll();
+  });
+  document.body.addEventListener("htmx:afterSettle", (event) => {
+    if (event.detail?.target?.id !== "main-content") return;
+    closeUsage();
+    closeOverflow();
+    refreshAll();
+  });
+  document.body.addEventListener("accountUsageChanged", (event) => {
+    if (event.detail?.source === "rail") return;
+    state.lastRefresh = 0;
+    refreshAll();
+  });
+  state.timer = setInterval(refreshAll, 120000);
+  refreshAll();
+})();
+</script>
+}

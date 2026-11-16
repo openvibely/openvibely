@@ -314,6 +314,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                     var workspaceProjectID = dataEl.dataset.workspaceProjectId || projectID;
 						var charts = window._analyticsCharts;
 						var eventSignal = window._analyticsAbortController.signal;
+                        document.body.addEventListener('accountUsageChanged', function(event) { if(event.detail?.source === 'rail' && selectedView === 'usage') loadUsageAccounts(true); }, {signal:eventSignal});
                         const themeObserver = new MutationObserver(function() {
                             if (!dataEl.isConnected) { themeObserver.disconnect(); return; }
                             Object.values(charts).forEach(function(chart) { chart.update('none'); });
@@ -1888,6 +1889,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                             if(!attempts.has(credit.id)){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');attempts.set(credit.id,[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-'));}
                                                             const response=await fetch('/api/analytics/usage/resets/consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_key:account.key,credit_id:credit.id,idempotency_key:attempts.get(credit.id)})});
                                                             const result=await response.json();if(!response.ok)throw Error(result.message||'Unable to use reset');
+                                                            document.body.dispatchEvent(new CustomEvent('accountUsageChanged',{detail:{source:'analytics'}}));
                                                             const outcome=result.outcome;
                                                             if(!result.retry_same_request)attempts.delete(credit.id);
                                                             const [text,toastStatus]={reset:['Usage reset.','completed'],not_needed:['Your usage does not need a reset right now.','info'],already_used:['That reset was already used.','error'],no_longer_available:["This reset isn't available any more. Nothing was used.",'error'],cooldown:["Another reset was just started on your account. This one wasn't used. Try again in a minute.",'error'],in_progress:['Your earlier reset may still be going through. Try again in a minute.','warning']}[outcome]||["Couldn't reset usage. Please try again.",'warning'];
