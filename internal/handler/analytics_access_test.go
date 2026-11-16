@@ -54,7 +54,7 @@ func TestAnalyticsHTTPProjectAndAccountBoundaries(t *testing.T) {
 	// Actual provider handlers must not be reached, even with no provider configured.
 	e.GET("/api/analytics/usage/resets", h.GetUsageResetCredits)
 	e.POST("/api/analytics/usage/resets/consume", h.ConsumeUsageReset)
-	for _, path := range []string{"/api/analytics/usage?projection=accounts", "/api/analytics/usage?projection=account_limits", "/api/analytics/usage?projection=unknown", "/api/analytics/usage?"} {
+	for _, path := range []string{"/api/analytics/usage?projection=accounts", "/api/analytics/usage?projection=account_limits", "/api/analytics/usage?projection=snapshots", "/api/analytics/usage?projection=unknown", "/api/analytics/usage?"} {
 		require.Equal(t, 404, request("GET", path+"&project_id="+project.ID, user.Principal))
 	}
 	require.Equal(t, 404, request("GET", "/api/analytics/usage/resets?account_key=other", user.Principal))
@@ -65,7 +65,7 @@ func TestAnalyticsHTTPProjectAndAccountBoundaries(t *testing.T) {
 	require.NoError(t, tc.stores.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "admin", false))
 	stale := user.Principal
 	stale.Role = "admin"
-	for _, projection := range []string{"accounts", "account_limits", ""} {
+	for _, projection := range []string{"accounts", "account_limits", "snapshots", ""} {
 		require.Equal(t, 204, request("GET", "/api/analytics/usage?projection="+projection+"&project_id="+project.ID, stale))
 	}
 	require.Equal(t, 204, request("POST", "/api/analytics/usage/resets/consume", stale))

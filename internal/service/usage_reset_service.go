@@ -25,6 +25,14 @@ func (s *UsageAnalyticsService) UsageResetCredits(ctx context.Context, accountKe
 }
 
 func (s *UsageAnalyticsService) ConsumeUsageReset(ctx context.Context, accountKey, creditID, idempotencyKey string) (map[string]any, error) {
+	if s.sharedUsage != nil {
+		return s.sharedUsage.reset(ctx, accountKey, func(work context.Context) (map[string]any, error) {
+			return s.consumeUsageReset(work, accountKey, creditID, idempotencyKey)
+		})
+	}
+	return s.consumeUsageReset(ctx, accountKey, creditID, idempotencyKey)
+}
+func (s *UsageAnalyticsService) consumeUsageReset(ctx context.Context, accountKey, creditID, idempotencyKey string) (map[string]any, error) {
 	if strings.TrimSpace(creditID) == "" || strings.TrimSpace(idempotencyKey) == "" || len(creditID) > 512 || len(idempotencyKey) > 128 {
 		return nil, fmt.Errorf("credit_id and idempotency_key are required and must be bounded")
 	}

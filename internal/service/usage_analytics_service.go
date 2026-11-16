@@ -32,6 +32,7 @@ import (
 )
 
 type UsageAnalyticsService struct {
+	sharedUsage             *SharedAccountUsage
 	projectAccess           *ProjectAccessService
 	organizations           persistence.OrganizationStore
 	authOff                 bool

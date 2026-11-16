@@ -204,7 +204,7 @@ window.fetch=function(url){
  if(String(url).includes('/task-run-activity'))return Promise.resolve({ok:true,json:async function(){return {hours:[],models:[]};}});
  var params=new URL(url,location.href).searchParams;
  if(params.get('projection')==='accounts')return Promise.resolve({ok:true,json:async function(){return {accounts:[{key:'a',provider:'openai'}]};}});
- if(params.get('projection')==='account_limits')return new Promise(function(resolve,reject){rejectAccounts=reject;});
+ if(params.get('projection')==='snapshots')return new Promise(function(resolve,reject){rejectAccounts=reject;});
  if(params.get('projection')!=='local')throw new Error('usage must request local projection');
  localCalls++;return Promise.resolve({ok:true,json:function(){return Promise.resolve({totals:{total_tokens:1234},usage_rate:[],usage_rate_by_model:[],model_breakdown:[],evidence:[]});}});
 };
@@ -217,7 +217,7 @@ window.addEventListener('load',function(){
   rejectAccounts(new Error('provider unavailable'));
   setTimeout(function(){
    if(!document.getElementById('usageSummary').textContent.includes('1,234')){fail('provider failure erased local results');return;}
-   if(!document.getElementById('accountUsageCards').textContent.includes('Provider limits unavailable')||localCalls!==1){fail('provider failure was not isolated');return;}
+   if(!document.getElementById('accountUsageCards').textContent.includes('Account usage unavailable')||localCalls!==1){fail('provider failure was not isolated');return;}
    result.dataset.testResult='pass';
   },30);
  }check();
@@ -234,35 +234,33 @@ func TestBrowserFunctional_AnalyticsContent_AccountsRenderIndependently(t *testi
 	fixture := `<main id="reconnect-result"></main><script>
 history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
 window.Chart=function(){this.destroy=function(){};};
-var pending={};
+var snapshots={a:{refreshing:true},b:{refreshing:true},c:{refreshing:true}},refreshes=0;
 function response(data){return {ok:true,json:async function(){return data;}};}
 window.fetch=function(url){
  var p=new URL(url,location.href).searchParams;
  if(p.get('projection')==='accounts')return Promise.resolve(response({accounts:[{key:'a',provider:'openai'},{key:'b',provider:'openai'},{key:'c',provider:'anthropic'}]}));
- if(p.get('projection')==='account_limits')return new Promise(function(resolve,reject){pending[p.get('account_key')]={resolve:resolve,reject:reject,refresh:p.get('refresh')};});
+ if(p.get('projection')==='snapshots'){if(p.get('refresh')==='true')refreshes++;return Promise.resolve(response({snapshots:structuredClone(snapshots)}));}
  return Promise.resolve(response({totals:{total_tokens:1234},usage_rate:[],usage_rate_by_model:[],model_breakdown:[]}));
 };
 window.addEventListener('load',async function(){
  var result=document.getElementById('reconnect-result');
  function wait(){return new Promise(function(resolve){setTimeout(resolve,20);});}
  function assert(ok,message){if(!ok)throw new Error(message);}
+ async function update(key,value,text){snapshots[key]=value;document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));for(let i=0;i<100&&!document.getElementById('usage-account-'+key).textContent.includes(text);i++)await wait();}
  try {
-  for(var i=0;i<100&&!pending.c;i++)await wait();
-  assert(pending.a&&pending.b&&pending.c,'all accounts must start without waiting');
-  assert(Object.values(pending).every(request=>request.refresh==='true'),'opening Usage must fetch fresh provider limits for every card');
+  for(var i=0;i<100&&!document.getElementById('usage-account-c');i++)await wait();
+  assert(refreshes===1,'opening Usage must request one fresh shared round');
   var cards=document.querySelectorAll('#accountUsageCards > .card');
-  assert(cards.length===3&&cards[2].textContent.includes('Anthropic'),'Anthropic shell missing');
-  assert(Array.from(cards).every(c=>c.textContent.includes('Loading analytics')),'all shells must start loading');
-  pending.c.resolve(response({account_limits:[{provider:'anthropic',plan_type:'Claude Max',limits:[]}]}));await wait();
-  assert(cards[2].textContent.includes('Claude Max')&&!cards[2].hasAttribute('aria-busy'),'Anthropic must render before OpenAI');
-  assert(cards[0].textContent.includes('Loading analytics')&&cards[1].textContent.includes('Loading analytics'),'OpenAI loading state lost');
-  pending.a.resolve(response({account_limits:[{provider:'openai',plan_type:'ChatGPT Pro',limits:[]}]}));await wait();
-  assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[1].hasAttribute('aria-busy'),'OpenAI accounts must render independently');
-  pending.b.reject(new Error('unavailable'));await wait();
-  assert(cards[1].textContent.includes('Provider limits unavailable'),'failure not displayed');
+  assert(cards.length===3,'account shells missing');
+  await update('c',{account_limits:[{provider:'anthropic',plan_type:'Claude Max',limits:[]}]},'Claude Max');
+  assert(cards[2].textContent.includes('Claude Max'),'Anthropic must render before OpenAI');
+  assert(cards[0].textContent.includes('Loading usage')&&cards[1].textContent.includes('Loading usage'),'OpenAI loading state lost');
+  await update('a',{account_limits:[{provider:'openai',plan_type:'ChatGPT Pro',limits:[]}]},'ChatGPT Pro');
+  assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[1].getAttribute('aria-busy')==='true','OpenAI accounts must render independently');
+  await update('b',{error:'unavailable'},'Usage unavailable');
   assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[2].textContent.includes('Claude Max'),'failure erased sibling results');
+  assert(refreshes===1,'notifications must read snapshots without fetching providers');
   assert(document.getElementById('usageSummary').textContent.includes('1,234'),'local usage disappeared');
-  assert(!document.getElementById('accountUsageCards').hasAttribute('aria-busy'),'loading never finished');
   result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
 });
@@ -946,7 +944,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
     var payload = [];
     if (value.indexOf('/api/analytics/dashboard') >= 0) payload = {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],skill_outcomes:[{skill_handle:'project:visible-on-learning',skill_scope:'project',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],agent_skill_outcomes:[],model_categories:[],workflows:[],recent_outcomes:[],insights:[]};
     if (value.indexOf('/api/analytics/usage') >= 0) payload = {usage_rate:[],usage_rate_by_model:[],totals:{input_tokens:200,cached_input_tokens:150},model_breakdown:[],account_limits:[{provider:'openai',subscription_label:'ChatGPT Pro',limits:[]},{provider:'openai',subscription_label:'Prolite',limits:[]},{provider:'anthropic',subscription_label:'Claude Max',limits:[]}]};
-    if(value.indexOf('/api/analytics/usage')>=0){var params=new URL(value,location.href).searchParams;if(params.get('projection')==='accounts')payload={accounts:[{key:'0',provider:'openai'},{key:'1',provider:'openai'},{key:'2',provider:'anthropic'}]};else if(params.get('projection')==='account_limits')payload={account_limits:[payload.account_limits[Number(params.get('account_key'))]]};}
+    if(value.indexOf('/api/analytics/usage')>=0){var params=new URL(value,location.href).searchParams;if(params.get('projection')==='accounts')payload={accounts:[{key:'0',provider:'openai'},{key:'1',provider:'openai'},{key:'2',provider:'anthropic'}]};else if(params.get('projection')==='snapshots')payload={snapshots:Object.fromEntries(payload.account_limits.map((a,i)=>[String(i),{account_limits:[a]}]))};else if(params.get('projection')==='account_limits')payload={account_limits:[payload.account_limits[Number(params.get('account_key'))]]};}
     if (value.indexOf('/api/analytics/skills') >= 0) payload = {usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence:[]};
     return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
   };
@@ -1700,6 +1698,7 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
  if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));if(requests.length===1)return {ok:false,json:async()=>({message:'Temporary failure'})};return new Promise(resolve=>finish=()=>{redeemed=true;resolve(response({outcome:'reset',retry_same_request:false}));});}
  if(u.pathname.endsWith('/resets'))return response({available_count:redeemed?1:2,credits:redeemed?[{id:'a',status:'available',title:'Earlier reset',expires_at:'2035-01-01T00:00:00Z'}]:[{id:'a',status:'available',title:'Earlier reset',expires_at:'2035-01-01T00:00:00Z'},{id:'b',status:'available',title:'My reset',expires_at:null}]});
  if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'openai'}]});
+ if(p.get('projection')==='snapshots')return response({snapshots:{'account':{account_limits:[{provider:'openai',plan_type:'Pro',limits:[{label:'Weekly',used_percent:redeemed?0:99}]}]}}});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'openai',plan_type:'Pro',limits:[{label:'Weekly',used_percent:redeemed?0:99}]}]});
  return response({totals:{},usage_rate:[],model_breakdown:[]});
  };
@@ -1736,6 +1735,7 @@ func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
  if(u.pathname.endsWith('/resets/consume')){keys.push(JSON.parse(opts.body).idempotency_key);return response(payload);}
  if(u.pathname.endsWith('/resets'))return response({available_count:1,credits:[{id:'credit',title:'Reset',status:'available',usable:true}]});
  if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'anthropic'}]});
+ if(p.get('projection')==='snapshots')return response({snapshots:{'account':{account_limits:[{provider:'anthropic',plan_type:'Max',limits:[{label:'Weekly',used_percent:99}]}]}}});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[{label:'Weekly',used_percent:99}]}]});
  return response({totals:{},usage_rate:[],model_breakdown:[]});
  };
@@ -1791,7 +1791,8 @@ func TestBrowserFunctional_AnalyticsHidesUnavailableResets(t *testing.T) {
 	 const u=new URL(url,location.href),p=u.searchParams;
 	 if(u.pathname.endsWith('/resets')){resetsLoaded=true;return response({available_count:0,unavailable_reason:'surface',credits:[]});}
 	 if(p.get('projection')==='accounts')return response({accounts:[{key:'claude',provider:'anthropic'}]});
-	 if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]});
+	 if(p.get('projection')==='snapshots')return response({snapshots:{'claude':{account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]}}});
+ if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]});
 	 return response({totals:{},usage_rate:[],model_breakdown:[]});
 	};
 	window.addEventListener('load',async()=>{
@@ -1825,6 +1826,7 @@ func TestBrowserFunctional_AnalyticsAnthropicResets(t *testing.T) {
  if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));uses--;return response({outcome:'reset',retry_same_request:false});}
  if(u.pathname.endsWith('/resets'))return response({available_count:uses+1,credits:[{id:'weekly',title:'Weekly reset',status:'available',expires_at:'2035-01-01T00:00:00Z',remaining_uses:uses,clears:['seven_day'],usable:uses>0},{id:'paused',title:'Paused reset',status:'available',expires_at:null,remaining_uses:1,usable:false,unavailable_reason:'paused'}]});
  if(p.get('projection')==='accounts')return response({accounts:[{key:'claude',provider:'anthropic'}]});
+ if(p.get('projection')==='snapshots')return response({snapshots:{'claude':{account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]}}});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]});
  return response({totals:{},usage_rate:[],model_breakdown:[]});
  };
@@ -1859,6 +1861,7 @@ func TestBrowserFunctional_AnalyticsAccountAlerts(t *testing.T) {
  const response=data=>({ok:true,json:async()=>data});
  window.fetch=async function(url,opts){const u=new URL(url,location.href),p=u.searchParams;
  if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'openai'}]});
+ if(p.get('projection')==='snapshots')return response({snapshots:{'account':{account_limits:[{provider:'openai',limits:[]}]}}});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'openai',limits:[]}]});
  if(u.pathname.endsWith('/resets'))return response({available_count:0,credits:[]});
  return response({totals:{},usage_rate:[],model_breakdown:[]});};
@@ -1882,7 +1885,7 @@ func TestBrowserFunctional_AnalyticsMemberSkipsAccounts(t *testing.T) {
  let forbidden=0;
  window.fetch=async function(url){
   const u=new URL(url,location.href), projection=u.searchParams.get('projection');
-  if(projection==='accounts'||projection==='account_limits'||u.pathname.includes('/resets'))forbidden++;
+  if(projection==='accounts'||projection==='account_limits'||projection==='snapshots'||u.pathname.includes('/resets'))forbidden++;
   return {ok:true,json:async()=>({totals:{},models:[],configuration_breakdown:[],usage_rate:[],accounts:[]})};
  };
  window.addEventListener('load',async()=>{
@@ -1921,6 +1924,8 @@ html,body { margin:0; height:100%; overflow:hidden; }
 </style></head><body><div id="shell"><header id="titlebar">Project tabs</header><main id="main-content"><div style="height:300px">Analytics</div><div id="accountUsageCards"></div><div style="height:500px"></div></main></div><div id="reconnect-result"></div><script>
 history.replaceState({},'',location.pathname+'?account_key=anthropic');
 const dataGeneration=1;
+var accountRenderGeneration=0;
+async function loadResetCredits(){}
 function usageEvidenceParams(){return new URLSearchParams();}
 function escapeHTML(s){return s;}
 async function fetchJSON(url){return {accounts:[{key:'first',provider:'openai'},{key:'second',provider:'openai'},{key:'anthropic',provider:'anthropic'}]};}
@@ -1934,6 +1939,7 @@ function renderAccountUsageCards(){}
   const originalTop=title.getBoundingClientRect().top;
   for(let attempt=0;attempt<2;attempt++) {
    panel.scrollTop=0;
+   document.getElementById('accountUsageCards').replaceChildren();
    await loadUsageAccounts(false);
    const card=document.getElementById('usage-account-anthropic');
    if(!card.classList.contains('ring-primary'))throw Error('linked account not highlighted');

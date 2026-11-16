@@ -19,12 +19,13 @@ import (
 const accountMonitorLease = "account_usage_monitor:lease"
 
 type AccountUsageMonitor struct {
-	usage    *UsageAnalyticsService
-	settings persistence.SettingsStore
-	projects persistence.ProjectStore
-	alerts   *AlertService
-	mu       sync.Mutex
-	wg       sync.WaitGroup
+	usage      *UsageAnalyticsService
+	settings   persistence.SettingsStore
+	projects   persistence.ProjectStore
+	alerts     *AlertService
+	mu         sync.Mutex
+	evaluateMu sync.Mutex
+	wg         sync.WaitGroup
 }
 
 func NewAccountUsageMonitor(u *UsageAnalyticsService, s persistence.SettingsStore, p persistence.ProjectStore, a *AlertService) *AccountUsageMonitor {
@@ -74,6 +75,10 @@ type accountMonitorEvent struct {
 func monitorHash(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
 
 func (m *AccountUsageMonitor) RunOnce(ctx context.Context) error {
+	if m.usage.sharedUsage != nil {
+		_, err := m.usage.sharedUsage.Read(ctx, "", true)
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
 	prior, err := m.settings.Get(ctx, accountMonitorLease)
@@ -137,6 +142,54 @@ func (m *AccountUsageMonitor) RunOnce(ctx context.Context) error {
 }
 
 func (m *AccountUsageMonitor) checkAccount(ctx context.Context, group []models.LLMConfig, projects []models.Project) error {
+	key := usageAccountGroupKey(group)
+	var limits *models.AnalyticsUsageAccountLimitsViewModel
+	var resets map[string]any
+	var limitErr, resetErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		limits, limitErr = m.usage.BuildLiveAnalyticsAccountLimits(ctx, persistence.UsageFilter{AccountGroupKey: key, Refresh: true})
+	}()
+	go func() { defer wg.Done(); resets, resetErr = m.usage.UsageResetCredits(ctx, key) }()
+	wg.Wait()
+	if limitErr != nil {
+		limits = nil
+	}
+	if resetErr != nil {
+		resets = nil
+	}
+	if err := m.evaluateSnapshot(ctx, group, projects, limits, resets); err != nil {
+		return err
+	}
+	if limitErr != nil {
+		return limitErr
+	}
+	return resetErr
+}
+
+func (m *AccountUsageMonitor) EvaluateSnapshot(ctx context.Context, key string, limits *models.AnalyticsUsageAccountLimitsViewModel, resets map[string]any) error {
+	projects, err := m.projects.List(ctx)
+	if err != nil {
+		return err
+	}
+	configs, err := m.usage.llmConfigRepo.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, provider := range []string{"openai", "anthropic"} {
+		for _, group := range accountUsageGroups(configs, provider) {
+			if usageAccountGroupKey(group) == key {
+				return m.evaluateSnapshot(ctx, group, projects, limits, resets)
+			}
+		}
+	}
+	return nil
+}
+func (m *AccountUsageMonitor) evaluateSnapshot(ctx context.Context, group []models.LLMConfig, projects []models.Project, limits *models.AnalyticsUsageAccountLimitsViewModel, resets map[string]any) error {
+	m.evaluateMu.Lock()
+	defer m.evaluateMu.Unlock()
 	cfg := group[0]
 	key := usageAccountGroupKey(group)
 	identity := accountUsageKeyForConfig(cfg)
@@ -160,28 +213,14 @@ func (m *AccountUsageMonitor) checkAccount(ctx context.Context, group []models.L
 	if state.Sent == nil {
 		state.Sent = map[string]bool{}
 	}
-	var limits *models.AnalyticsUsageAccountLimitsViewModel
-	var resets map[string]any
-	var limitErr, resetErr error
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		limits, limitErr = m.usage.BuildLiveAnalyticsAccountLimits(ctx, persistence.UsageFilter{AccountGroupKey: key, Refresh: true})
-	}()
-	go func() { defer wg.Done(); resets, resetErr = m.usage.UsageResetCredits(ctx, key) }()
-	wg.Wait()
 	label := accountMonitorLabel(group, limits)
 	var rows []models.AccountLimitView
-	if limitErr == nil && limits != nil {
+	if limits != nil {
 		for _, a := range limits.AccountLimits {
 			if a.Error == "" {
 				rows = append(rows, a.Limits...)
 			}
 		}
-	}
-	if resetErr != nil {
-		resets = nil
 	}
 	events := evaluateAccountMonitor(&state, rows, resets, time.Now(), label)
 	for _, event := range events {
@@ -206,10 +245,7 @@ func (m *AccountUsageMonitor) checkAccount(ctx context.Context, group []models.L
 	if err = m.settings.Set(ctx, stateKey, string(encoded)); err != nil {
 		return err
 	}
-	if limitErr != nil {
-		return limitErr
-	}
-	return resetErr
+	return nil
 }
 
 // Use the same successful account view as Analytics, never a model alias.

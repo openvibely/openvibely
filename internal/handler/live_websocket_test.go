@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -537,4 +538,17 @@ func TestLiveWebSocketAllProjectsNotifications(t *testing.T) {
 	require.Equal(t, 1, tc.handler.chatBroadcaster.SubscriberCount())
 	tc.handler.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: models.AllProjectsID, Message: "workspace message"})
 	client.next(t, "all", "chat_new_message")
+}
+
+func TestLiveWebSocketAccountUsageInvalidation(t *testing.T) {
+	tc, server := liveTestServer(t)
+	client := dialLive(t, server.URL)
+	client.send(t, liveCommand{Op: "live", ID: "usage", ProjectID: "default"})
+	client.next(t, "usage", "subscribed")
+	tc.handler.broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated, ProjectID: "default"})
+	frame := client.next(t, "usage", "account_usage_updated")
+	encoded, err := json.Marshal(frame.Data)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "account_key")
+	require.NotContains(t, string(encoded), "account_limits")
 }

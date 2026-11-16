@@ -17,6 +17,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 	var mu sync.Mutex
 	var requests []string
 	var failed, denied bool
+	initialLoading := true
 	resetGate := make(chan struct{})
 	var releaseReset sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -33,12 +34,36 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
-			if fail && r.URL.Query().Get("projection") != "accounts" {
+			if fail && r.URL.Query().Get("projection") != "accounts" && r.URL.Query().Get("projection") != "snapshots" {
 				w.WriteHeader(http.StatusBadGateway)
 				return
 			}
 			if r.URL.Query().Get("projection") == "accounts" {
 				json.NewEncoder(w).Encode(map[string]any{"accounts": []map[string]string{{"key": "anthropic", "provider": "anthropic", "identity": "Work"}, {"key": "work", "provider": "openai", "identity": "Work"}, {"key": "personal", "provider": "openai", "identity": "Personal"}}})
+				return
+			}
+			if r.URL.Query().Get("projection") == "snapshots" {
+				mu.Lock()
+				loading := initialLoading
+				mu.Unlock()
+				snapshots := map[string]any{}
+				for _, key := range []string{"personal", "work", "anthropic"} {
+					limits := []map[string]any{{"limit_key": "seven_day", "label": "Weekly limit", "window_minutes": 10080, "used_percent": 51}}
+					if key != "personal" {
+						limits = append(limits, map[string]any{"limit_key": "five_hour", "label": "5-hour limit", "window_minutes": 300, "used_percent": 0})
+					}
+					snapshot := map[string]any{"refreshing": loading, "resets": map[string]any{"available_count": 1, "credits": []map[string]any{{"id": "grant", "title": "Provider grant", "status": "available", "usable": true}}}}
+					if !loading {
+						snapshot["account_limits"] = []map[string]any{{"limits": limits, "updated_at": "2026-11-16T10:00:00Z"}}
+					}
+					if fail {
+						snapshot["error"] = "Usage unavailable"
+						// A malformed provider grant list must not break the remaining popup.
+						snapshot["resets"] = map[string]any{"credits": map[string]any{}}
+					}
+					snapshots[key] = snapshot
+				}
+				json.NewEncoder(w).Encode(map[string]any{"snapshots": snapshots})
 				return
 			}
 			key := r.URL.Query().Get("account_key")
@@ -75,6 +100,12 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 	defer releaseReset.Do(func() { close(resetGate) })
 	runComposerFocusCDP(t, chrome, server.URL, "account-rail", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("initial inventory fetched", `String(window.openVibelyAccountRail?.accounts.length===3&&!openVibelyAccountRail.loading)`, "true")
+		b.waitFor("no meters before first result", `String(document.querySelectorAll('.rail-account').length)`, "0")
+		mu.Lock()
+		initialLoading = false
+		mu.Unlock()
+		b.evaluate(`document.body.dispatchEvent(new CustomEvent('accountUsageUpdated')); 'shared results'`)
 		b.waitFor("sorted account rings", `JSON.stringify([...document.querySelectorAll('.rail-account')].map(b=>[b.dataset.key,b.querySelectorAll('circle').length]))`, `[["personal",2],["work",3],["anthropic",3]]`)
 		b.waitFor("standard footer spacing", `String(Math.round(document.querySelector('#sidebar [data-nav-base="/themes"]').getBoundingClientRect().top-document.querySelector('.rail-account:last-child').getBoundingClientRect().bottom))`, "2")
 		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'opened'`)
@@ -144,9 +175,10 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		failed = true
 		mu.Unlock()
 		b.evaluate(`document.body.dispatchEvent(new CustomEvent('accountUsageChanged')); 'failed refresh'`)
-		b.waitFor("failed meters", `String([...document.querySelectorAll('.rail-account')].every(b=>b.getAttribute('aria-label').includes('unavailable')&&b.querySelector('text').textContent==='!'))`, "true")
+		b.waitFor("failed meters", `String([...document.querySelectorAll('.rail-account')].every(b=>b.getAttribute('aria-label').includes('stale')&&b.querySelector('text').textContent==='!'))`, "true")
 		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'error popup'`)
-		b.waitFor("failure has no stale bars", `String(document.getElementById('rail-account-popup').querySelectorAll('[role="meter"]').length)`, "0")
+		b.waitFor("failure retains marked stale bars", `String(document.getElementById('rail-account-popup').querySelectorAll('[role="meter"]').length)`, "1")
+		b.waitFor("malformed grants retain refresh control", `String(document.querySelector('#rail-account-popup [data-action="refresh"]')!==null)`, "true")
 		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'escape'`)
 		b.waitFor("Escape restores account focus", `String(document.activeElement.dataset.key==='personal'&&!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
 		mu.Lock()

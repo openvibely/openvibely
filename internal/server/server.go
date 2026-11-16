@@ -754,7 +754,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 
 	settingsRepo := stores.Settings
 	accountUsageMonitor := service.NewAccountUsageMonitor(usageAnalyticsSvc, settingsRepo, projectRepo, alertSvc)
-	oauthRefreshSvc.SetAfterRefresh(accountUsageMonitor.Trigger)
+	// Usage scheduling is independent of credential refresh.
 	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
 	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
 	automationCapabilitySvc.SetLLMConfigRepository(llmConfigRepo)
@@ -1134,6 +1134,16 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 
 	// Start background services
 	srvCtx, srvCancel := context.WithCancel(ctx)
+	sharedAccountUsage := usageAnalyticsSvc.EnableSharedAccountUsage(srvCtx, func() {
+		projects, err := projectRepo.List(srvCtx)
+		if err != nil {
+			return
+		}
+		for _, project := range projects {
+			// Invalidation only: account data remains behind the admin-only API.
+			broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated, ProjectID: project.ID})
+		}
+	}, accountUsageMonitor.EvaluateSnapshot)
 	var hostedPendingStore *auth.PendingStore
 	if cfg.AuthMode == auth.AuthModeHostedSSO {
 		hostedPendingStore = auth.NewPendingStore(srvCtx, time.Now)
@@ -1338,12 +1348,15 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	ln, listenErr := net.Listen("tcp", addr)
 	if listenErr != nil {
 		srvCancel()
+		sharedAccountUsage.Stop()
 		stopUpdateCoordinatorChecks(updateCoordinator)
 		closeDatabase()
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, listenErr)
 	}
 
 	boundAddr := ln.Addr().String()
+
+	sharedAccountUsage.Start()
 	oauthRefreshSvc.Start(srvCtx)
 	applog.Infof("starting server on %s", boundAddr)
 
@@ -1377,6 +1390,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		stopProfiling()
 		srvCancel()
 		oauthRefreshSvc.Stop()
+		sharedAccountUsage.Stop()
 		accountUsageMonitor.Stop()
 		stopUpdateCoordinatorChecks(updateCoordinator)
 		if hostedPendingStore != nil {

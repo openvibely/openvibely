@@ -90,6 +90,14 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "usage analytics service is not configured")
 	}
 	filter := parseUsageFilter(c)
+	if analyticsUsageProjection(c) == "snapshots" {
+		snapshots, err := h.usageAnalyticsSvc.SharedAccountUsage(c.Request().Context(), strings.TrimSpace(c.QueryParam("account_key")), c.QueryParam("refresh") == "true")
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+		}
+		return c.JSON(http.StatusOK, map[string]any{"snapshots": snapshots})
+	}
+
 	if analyticsUsageProjection(c) == "accounts" {
 		accounts, err := h.usageAnalyticsSvc.ListUsageAccounts(c.Request().Context())
 		if err != nil {
@@ -102,6 +110,21 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for supporting usage evidence")
 	}
 	if analyticsUsageProjection(c) == "account_limits" {
+		if h.usageAnalyticsSvc.HasSharedAccountUsage() {
+			snapshots, err := h.usageAnalyticsSvc.SharedAccountUsage(c.Request().Context(), filter.AccountGroupKey, filter.Refresh)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+			}
+			if snapshot, ok := snapshots[filter.AccountGroupKey]; ok {
+				return c.JSON(http.StatusOK, snapshot)
+			}
+			rows := []models.AccountUsageView{}
+			for _, snapshot := range snapshots {
+				rows = append(rows, snapshot.AccountLimits...)
+			}
+			return c.JSON(http.StatusOK, map[string]any{"account_limits": rows})
+		}
+
 		view, err := h.usageAnalyticsSvc.BuildLiveAnalyticsAccountLimits(c.Request().Context(), filter)
 		if err != nil {
 			applog.Infof("[handler] GetAnalyticsUsage account_limits error: %v", err)

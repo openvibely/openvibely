@@ -502,6 +502,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				(function() {
 					const projectSelector = document.getElementById('project-selector');
 					let liveSSEHasConnected = false;
+                    window.addEventListener('sse-live-connected', function(event) {
+                        if(event.detail?.reconciliation)document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));
+                    });
 
 					function handleLiveEvent(event) {
 						try {
@@ -509,7 +512,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-							if (eventType === 'plugin_pages_changed') {
+							if (eventType === 'account_usage_updated') { document.body.dispatchEvent(new CustomEvent('accountUsageUpdated')); return; }
+                            if (eventType === 'plugin_pages_changed') {
                                     if (window.htmx) htmx.trigger(document.body, 'plugin-nav-refresh');
  window.dispatchEvent(new CustomEvent('plugin-page-updated', {detail: data}));
                                     return;
@@ -590,12 +594,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 										reconnected: liveSSEHasConnected
 									});
 									liveSSEHasConnected = true;
+                                    document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));
                                     if (window.htmx) htmx.trigger('body', 'alertUpdate');
 								},
 								onerror: function(err) {
 									console.error('[SSE-Live] Connection error:', err);
 								},
 								listeners: {
+                                    'account_usage_updated': handleLiveEvent,
                                     'plugin_pages_changed': handleLiveEvent,
                                 'task_deleted': handleLiveEvent,
                                     'task_board_updated': handleLiveEvent,

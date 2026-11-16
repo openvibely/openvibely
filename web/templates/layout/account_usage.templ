@@ -379,7 +379,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       ...(weekly ? [[weekly, 17]] : []),
       ...(five ? [[five, weekly ? 12.5 : 17]] : []),
     ];
-    if (!available.length || a.error) {
+    if (!available.length) {
       add("circle", {
         cx: 20,
         cy: 20,
@@ -432,7 +432,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   }
   function drawRail() {
     const focused = document.activeElement?.dataset.key;
-    const nodes = state.accounts.map((a) => {
+    const nodes = state.accounts.filter((a) => limits(a).some((l) => percent(l) !== null)).map((a) => {
       const button = el("button", "rail-account");
       button.type = "button";
       button.dataset.key = a.key;
@@ -456,7 +456,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         " · " +
         identity(a) +
         (a.error
-          ? " · Usage unavailable"
+          ? " · Usage stale — refresh unavailable"
           : info
             ? " · " + info
             : " · Loading usage");
@@ -500,9 +500,9 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     );
     if (a.error)
       popup.append(
-        el("p", "rail-usage-meta", "Usage unavailable. Refresh to try again."),
+        el("p", "rail-usage-meta", "Usage is stale. Refresh failed; showing the last known allowance."),
       );
-    else if (!a.data)
+    if (!a.data)
       popup.append(el("p", "rail-usage-meta", "Loading usage…"));
     else {
       for (const l of limits(a)) {
@@ -553,8 +553,8 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         section.append(
           el("p", "rail-usage-meta", "Reset details unavailable."),
         );
-      for (const c of a.resets.credits || []) {
-        if (c.status !== "available") continue;
+      for (const c of Array.isArray(a.resets.credits) ? a.resets.credits : []) {
+        if (!c || typeof c !== "object" || c.status !== "available") continue;
         const row = el("div", "rail-usage-reset"),
           head = el("div", "rail-usage-row"),
           button = el("button", "btn btn-sm btn-outline", "Use reset");
@@ -622,7 +622,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       el(
         "span",
         "rail-usage-meta",
-        stamp
+        a.refreshing ? "Refreshing…" : stamp
           ? "Updated " + new Date(stamp).toLocaleTimeString()
           : "Not yet updated",
       ),
@@ -640,42 +640,28 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     if (focus)
       popup.querySelector('[data-action="' + CSS.escape(focus) + '"]')?.focus();
   }
+  function applySnapshot(a, snapshot) {
+    if (!snapshot) return;
+    a.data = snapshot.account_limits?.[0] || null;
+    a.error = snapshot.error || a.data?.error || "";
+    a.resets = snapshot.resets || null;
+    a.resetError = !!snapshot.reset_error;
+    a.refreshing = !!snapshot.refreshing;
+  }
   async function loadResets(a) {
-    try {
-      a.resets = await read(
-        "/api/analytics/usage/resets?" +
-          new URLSearchParams({ account_key: a.key }),
-      );
-      a.resetError = false;
-    } catch (_) {
-      a.resets = null;
-      a.resetError = true;
-    }
-    if (state.selected === a.key && shown()) drawPopup();
+    // Reset availability arrives with the same shared account snapshot.
+    if (shown() && state.selected === a.key) drawPopup();
   }
   async function loadAccount(a, refresh = false) {
-    // A forced refresh after redemption must start after any older read.
-    if (a.loading) {
-      await a.loading;
-      if (!refresh) return;
+    try {
+      const data = await read(url("snapshots", a.key, refresh));
+      applySnapshot(a, data.snapshots?.[a.key]);
+    } catch (e) {
+      if (e.denied) { state.accounts = []; closeUsage(); }
+      else a.error = e.message;
     }
-    a.loading = (async () => {
-      try {
-        const data = await read(url("account_limits", a.key, refresh));
-        a.data = data.account_limits?.[0] || null;
-        a.error = a.data?.error || (!a.data ? "No snapshot" : "");
-      } catch (e) {
-        a.error = e.message;
-      } finally {
-        a.loading = null;
-        drawRail();
-        if (shown() && state.selected === a.key) {
-          drawPopup();
-          await loadResets(a);
-        }
-      }
-    })();
-    return a.loading;
+    drawRail();
+    if (shown() && state.selected === a.key) drawPopup();
   }
   async function openAccount(a, hover = false) {
     cancelHoverClose();
@@ -730,7 +716,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       a.message =
         messages[result.outcome] ||
         "Could not confirm the reset. Retry to check the same request.";
-      await loadAccount(a, true);
+      await loadAccount(a, false);
       await loadResets(a);
     } catch (_) {
       a.message =
@@ -745,13 +731,8 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   }
   async function refreshAll() {
     const scope = document.getElementById("project-selector")?.value || "";
-    if (
-      state.loading ||
-      document.hidden ||
-      state.busy ||
-      (scope === state.scope && Date.now() - state.lastRefresh < 120000)
-    )
-      return;
+    if (state.loading) { state.pendingRefresh = true; return; }
+    if (document.hidden) return;
     state.scope = scope;
     state.lastRefresh = Date.now();
     state.loading = true;
@@ -765,10 +746,10 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       state.denied = false;
       drawRail();
       if (shown()) drawPopup();
-      for (let i = 0; i < state.accounts.length; i += 3)
-        await Promise.all(
-          state.accounts.slice(i, i + 3).map((a) => loadAccount(a)),
-        );
+      const data = await read(url("snapshots"));
+      state.accounts.forEach((a) => applySnapshot(a, data.snapshots?.[a.key]));
+      drawRail();
+      if (shown()) drawPopup();
     } catch (e) {
       if (e.denied) {
         state.denied = true;
@@ -782,11 +763,9 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       }
     } finally {
       state.loading = false;
-      if (
-        (document.getElementById("project-selector")?.value || "") !==
-        state.scope
-      )
-        refreshAll();
+      if (state.pendingRefresh || (document.getElementById("project-selector")?.value || "") !== state.scope) {
+        state.pendingRefresh = false; refreshAll();
+      }
     }
   }
   host.addEventListener("pointerover", (event) => {
@@ -837,7 +816,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     state.lastRefresh = 0;
     refreshAll();
   });
-  state.timer = setInterval(refreshAll, 120000);
+  document.body.addEventListener("accountUsageUpdated", refreshAll);
   refreshAll();
 })();
 </script>

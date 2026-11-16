@@ -314,7 +314,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                     var workspaceProjectID = dataEl.dataset.workspaceProjectId || projectID;
 						var charts = window._analyticsCharts;
 						var eventSignal = window._analyticsAbortController.signal;
-                        document.body.addEventListener('accountUsageChanged', function(event) { if(event.detail?.source === 'rail' && selectedView === 'usage') loadUsageAccounts(true); }, {signal:eventSignal});
+                        document.body.addEventListener('accountUsageUpdated', function() { if(selectedView === 'usage') loadUsageAccounts(false); }, {signal:eventSignal});
                         const themeObserver = new MutationObserver(function() {
                             if (!dataEl.isConnected) { themeObserver.disconnect(); return; }
                             Object.values(charts).forEach(function(chart) { chart.update('none'); });
@@ -1850,11 +1850,14 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                     async function loadResetCredits(card, account) {
                                         if(!['openai','anthropic'].includes(account.provider)) return;
                                         let section=null;
-                                        const attempts=new Map();
+                                        const snapshotVersion=card.dataset.snapshot;
+                                        window.openVibelyResetAttempts=window.openVibelyResetAttempts||new Map();
+                                        if(!window.openVibelyResetAttempts.has(account.key))window.openVibelyResetAttempts.set(account.key,new Map());
+                                        const attempts=window.openVibelyResetAttempts.get(account.key);
                                         async function refreshResets(){
                                             try {
                                                 const data=await fetchJSON('/api/analytics/usage/resets?account_key='+encodeURIComponent(account.key));
-                                                if(!card.isConnected)return;
+                                                if(!card.isConnected||card.dataset.snapshot!==snapshotVersion)return;
                                                 const availableCount=Number(data.available_count ?? data.availableCount ?? 0);
                                                 if(!(availableCount>0)){if(section)section.remove();return;}
                                                 if(!section){section=document.createElement('div');section.className='mt-4 pt-4 border-t border-base-300';card.querySelector('.card-body').appendChild(section);}
@@ -1867,7 +1870,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                     const note=document.createElement('p');note.className='text-xs opacity-60 mt-2';note.textContent='Reset details unavailable.';section.appendChild(note);return;
                                                 }
                                                 credits.forEach(credit=>{
-                                                    if(credit.status!=='available')return;
+                                                    if(!credit||typeof credit!=='object'||credit.status!=='available')return;
                                                     const row=document.createElement('div');row.className='flex items-center justify-between gap-3 mt-3';
                                                     const details=document.createElement('div');
                                                     const title=document.createElement('div');title.className='text-sm';title.textContent=credit.title||'Usage reset';details.appendChild(title);
@@ -1882,6 +1885,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                     const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline';button.textContent='Use reset';
                                                     button.disabled=!credit.id||credit.usable===false||(validDate&&date.getTime()<=Date.now());
                                                     button.addEventListener('click',async()=>{
+                                                        card.dataset.resetBusy='true';
                                                         const buttons=Array.from(section.querySelectorAll('button'));const disabledBefore=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);
                                                         button.textContent='Resetting…';
                                                         const message=document.createElement('p');message.className='text-xs mt-2';message.setAttribute('role','status');section.appendChild(message);
@@ -1894,10 +1898,10 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                             if(!result.retry_same_request)attempts.delete(credit.id);
                                                             const [text,toastStatus]={reset:['Usage reset.','completed'],not_needed:['Your usage does not need a reset right now.','info'],already_used:['That reset was already used.','error'],no_longer_available:["This reset isn't available any more. Nothing was used.",'error'],cooldown:["Another reset was just started on your account. This one wasn't used. Try again in a minute.",'error'],in_progress:['Your earlier reset may still be going through. Try again in a minute.','warning']}[outcome]||["Couldn't reset usage. Please try again.",'warning'];
                                                             if(window.showToast)window.showToast(text, toastStatus);
-                                                            const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);query.set('refresh','true');
+                                                            const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);query.set('refresh','false');
                                                             try{const limits=await fetchJSON('/api/analytics/usage?'+query.toString());const temporary=document.createElement('div');renderAccountUsageCards(limits.account_limits||[],temporary);const body=temporary.querySelector('.card-body');if(body&&card.isConnected){card.replaceChildren(body);body.appendChild(section);}}catch(e){if(e.name==='AbortError')return;}
                                                             await refreshResets();if(section.isConnected){message.textContent=text;section.appendChild(message);}
-                                                        }catch(e){message.textContent=e.message;if(window.showToast)window.showToast('Usage reset failed: '+e.message, 'error');button.textContent='Retry reset';buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}
+                                                        }catch(e){message.textContent=e.message;if(window.showToast)window.showToast('Usage reset failed: '+e.message, 'error');button.textContent='Retry reset';buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}finally{delete card.dataset.resetBusy;loadUsageAccounts(false);}
                                                     },{signal:eventSignal});
                                                     row.append(details,button);section.appendChild(row);
                                                 });
@@ -1905,55 +1909,47 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                         }
                                         await refreshResets();
                                     }
-									async function loadUsageAccounts(refreshUsage) {
-										const target=document.getElementById('accountUsageCards'), generation=dataGeneration;
-                                        if(target.dataset.accountAccess==='false'){
+                                    var accountRenderGeneration = 0;
+                                    async function loadUsageAccounts(refreshUsage) {
+                                        const target=document.getElementById('accountUsageCards');
+                                        if(!target)return;
+                                        if(target.dataset.accountAccess==='false'){target.textContent='Account limits and usage resets are available to organization admins and owners.';return;}
+                                        const generation=++accountRenderGeneration;
+                                        try {
+                                            const params=usageEvidenceParams();params.set('projection','accounts');
+                                            const inventory=await fetchJSON('/api/analytics/usage?'+params);
+                                            const query=usageEvidenceParams();query.set('projection','snapshots');
+                                            if(refreshUsage)query.set('refresh','true');
+                                            const data=await fetchJSON('/api/analytics/usage?'+query);
+                                            if(generation!==accountRenderGeneration || !target.isConnected)return;
+                                            const accounts=inventory.accounts||[];
+                                            const keys=new Set(accounts.map(a=>'usage-account-'+a.key));
+                                            [...target.children].forEach(card=>{if(!keys.has(card.id))card.remove();});
+                                            if(!accounts.length){target.textContent='No connected OAuth accounts.';return;}
+                                            for(const [index,account] of accounts.entries()){
+                                                let card=document.getElementById('usage-account-'+account.key);
+                                                if(!card){card=document.createElement('div');card.id='usage-account-'+account.key;card.className='card bg-base-100 shadow-sm border border-base-300 h-full';target.appendChild(card);
+                                                if(new URLSearchParams(location.search).get('account_key')===account.key){card.classList.add('ring-2','ring-primary');window.openVibelyScrollIntoPanel(card,{container:card.closest('#main-content'),block:'center'});}}
+                                                card.classList.toggle('lg:col-span-2', accounts.length%2===1 && index===accounts.length-1);
+                                                const snapshot=data.snapshots?.[account.key]||{};
+                                                const signature=JSON.stringify(snapshot);
+                                                if(card.dataset.snapshot===signature)continue;
+                                                // Don't replace controls while their reset request is in flight.
+                                                if(card.dataset.resetBusy==='true')continue;
+                                                card.dataset.snapshot=signature;
+                                                const temporary=document.createElement('div');
+                                                renderAccountUsageCards(snapshot.account_limits||[],temporary);
+                                                const body=temporary.querySelector('.card-body');
+                                                if(body)card.replaceChildren(body);
+                                                else{card.innerHTML='<div class="card-body"></div>';const text=document.createElement('p');text.textContent=(account.identity||account.provider)+' · '+(snapshot.error?'Usage unavailable':'Loading usage…');card.firstChild.appendChild(text);}
+                                                if(snapshot.error || snapshot.refreshing){const status=document.createElement('p');status.className='text-xs opacity-70';status.textContent=snapshot.error?'Usage is stale. Showing the last known allowance.':'Refreshing…';card.firstChild.appendChild(status);}
+                                                card.setAttribute('aria-busy',String(!!snapshot.refreshing));
+                                                loadResetCredits(card,account);
+                                            }
                                             target.removeAttribute('aria-busy');
-                                            target.textContent='Account limits and usage resets are available to organization admins and owners.';
-                                            return;
-                                        }
-										try {
-											const params=usageEvidenceParams();params.set('projection','accounts');
-											const inventory=await fetchJSON('/api/analytics/usage?'+params.toString());
-											const accounts=inventory.accounts||[];
-											target.innerHTML='';
-											if(!accounts.length){target.removeAttribute('aria-busy');target.textContent='No connected OAuth accounts.';return;}
-											const cards=accounts.map(function(account,index){
-												const card=document.createElement('div');
-												card.className='card bg-base-100 shadow-sm border border-base-300 h-full'+(accounts.length%2===1&&index===accounts.length-1?' lg:col-span-2':'');
-												card.style.minHeight='12rem';card.setAttribute('aria-busy','true');
-												card.innerHTML='\x3cdiv class="card-body">\x3cdiv class="font-semibold">'+escapeHTML(account.provider==='openai'?'OpenAI':'Anthropic')+'\x3c/div>\x3cp class="text-center opacity-50 py-12">Loading analytics…\x3c/p>\x3c/div>';
-												card.id='usage-account-'+account.key;
-                                                target.appendChild(card);
-                                                if (new URLSearchParams(window.location.search).get('account_key') === account.key) {
-                                                    card.classList.add('ring-2', 'ring-primary');
-                                                    window.openVibelyScrollIntoPanel(card, {container: card.closest('#main-content'), block: 'center'});
-                                                }
-                                                return card;
-											});
-											await Promise.allSettled(accounts.map(async function(account,index){
-												const card=cards[index];
-												try {
-													const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);
-													query.set('refresh','true');
-													const data=await fetchJSON('/api/analytics/usage?'+query.toString());
-													const temporary=document.createElement('div');
-													renderAccountUsageCards(data.account_limits||[],temporary);
-													const bodies=temporary.querySelectorAll('.card-body');
-													if(bodies.length){card.replaceChildren(...bodies);await loadResetCredits(card,account);}
-													else card.querySelector('p').textContent='Usage unavailable';
-												} catch(e) {
-													if(e.name==='AbortError'||generation!==dataGeneration)return;
-													card.querySelector('p').textContent='Provider limits unavailable';
-												}
-												card.removeAttribute('aria-busy');
-											}));
-											if(generation===dataGeneration)target.removeAttribute('aria-busy');
-										} catch(e) {
-											if(e.name==='AbortError'||generation!==dataGeneration)return;
-											target.removeAttribute('aria-busy');target.textContent='Provider limits unavailable';
-										}
-									}
+                                        } catch(e){if(e.name!=='AbortError'&&generation===accountRenderGeneration){target.replaceChildren();target.textContent='Account usage unavailable.';}}
+                                    }
+
 								// Load Success/Failure Rates
 					async function loadSuccessFailureRates() {
 						try {
@@ -2166,7 +2162,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
 							const loaders = selectedView === 'usage' ? [] : [loadDashboard];
 								if (selectedView === 'outcomes') loaders.push(loadSuccessFailureRates, loadHourlyTrends, loadAvgTimeByTask, loadMostFrequentTasks, loadFailedTaskPatterns);
 								if (selectedView === 'learning') loaders.push(loadSkillAnalytics);
-								if (selectedView === 'usage') loaders.push(function() { return loadUsageAnalytics(refreshUsage); }, function() { return loadUsageAccounts(refreshUsage); }, loadTaskRunActivity);
+								if (selectedView === 'usage') loaders.push(function() { return loadUsageAnalytics(refreshUsage); }, function() { return loadUsageAccounts(true); }, loadTaskRunActivity);
 								if(selectedView==='models')loaders.push(loadTaskRunActivity);							for (let index = 0; index < loaders.length; index += 3) {
 								if (loadGeneration !== dataGeneration) return;
 								await Promise.allSettled(loaders.slice(index, index + 3).map(function(load) { return load(); }));

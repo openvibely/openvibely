@@ -13,6 +13,7 @@ type TaskEventType string
 
 const (
 	ComputerStatusChanged         TaskEventType = "computer_status_changed"
+	AccountUsageUpdated           TaskEventType = "account_usage_updated"
 	PluginPagesChanged            TaskEventType = "plugin_pages_changed"
 	SkillDependencyApproval       TaskEventType = "skill_dependency_approval"
 	SkillDependencyProgress       TaskEventType = "skill_dependency_progress"

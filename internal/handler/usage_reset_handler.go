@@ -21,6 +21,24 @@ func (h *Handler) GetUsageResetCredits(c echo.Context) error {
 	if h.usageAnalyticsSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "usage service unavailable")
 	}
+	if h.usageAnalyticsSvc.HasSharedAccountUsage() {
+		key := c.QueryParam("account_key")
+		if key == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "account_key is required")
+		}
+		snapshots, err := h.usageAnalyticsSvc.SharedAccountUsage(c.Request().Context(), key, false)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+		}
+		snapshot := snapshots[key]
+		if snapshot.ResetError != "" {
+			return echo.NewHTTPError(http.StatusBadGateway, snapshot.ResetError)
+		}
+		if snapshot.Resets == nil {
+			return c.JSON(http.StatusOK, map[string]any{"available_count": 0, "credits": []any{}, "refreshing": snapshot.Refreshing})
+		}
+		return c.JSON(http.StatusOK, snapshot.Resets)
+	}
 	result, err := h.usageAnalyticsSvc.UsageResetCredits(c.Request().Context(), c.QueryParam("account_key"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
