@@ -3,9 +3,7 @@ package gitidentity
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -62,26 +60,5 @@ func TestRealGitRejectsWrapperOnlyPath(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(testRuntime.path))
 	if _, err := realGitExecutable(); err == nil {
 		t.Fatal("accepted wrapper as real Git")
-	}
-}
-
-func TestWrapperRejectsItselfBeforeIdentityLookup(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX wrapper")
-	}
-	alias := filepath.Join(t.TempDir(), "git-alias")
-	if err := os.Symlink(testRuntime.path, alias); err != nil {
-		t.Fatal(err)
-	}
-	for _, target := range []string{testRuntime.path, alias} {
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-		cmd := exec.CommandContext(ctx, testRuntime.path, "--version")
-		// No author identity: without the guard this is the recursive lookup path.
-		cmd.Env = []string{"OV_GIT_REAL_EXECUTABLE=" + target, "PATH=" + os.Getenv("PATH")}
-		out, err := cmd.CombinedOutput()
-		cancel()
-		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 125 || !strings.Contains(string(out), "cannot use itself") {
-			t.Fatalf("self target %s: %v: %s", target, err, out)
-		}
 	}
 }

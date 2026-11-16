@@ -55,13 +55,7 @@ export HOME
 ` + networkScopeScript + `
 exec "$real_git" "$@"
 `
-	windows := `$realGit = $env:OV_GIT_REAL_EXECUTABLE
-if (-not $realGit) { throw 'missing Git executable' }
-if ([IO.Path]::GetFullPath($realGit) -eq [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'git.cmd'))) {
- [Console]::Error.WriteLine('OV Git wrapper cannot use itself as real Git')
- exit 125
-}
-` + windowsIdentityFallbackScript + `
+	windows := windowsRecursionGuardScript + windowsIdentityFallbackScript + `
 $env:HOME = Join-Path (Split-Path $PSScriptRoot -Parent) 'home'
 ` + windowsNetworkScopeScript
 	for name, script := range map[string]string{
