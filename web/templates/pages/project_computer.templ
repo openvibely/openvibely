@@ -112,7 +112,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      find('[data-computer-preview-open]').onclick=openViewer;
      find('[data-computer-close]').onclick=()=>{dialog.close();finishViewer();};
      dialog.addEventListener('close',finishViewer);
-     async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();syncViewerInput();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
+     async function finishViewer(){if(dialog.open)return;if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();syncViewerInput();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
      const screen=find('[data-computer-screen]');
      const connectionOverlay=document.createElement('div');connectionOverlay.dataset.computerConnection='';
      connectionOverlay.setAttribute('role','status');connectionOverlay.setAttribute('aria-live','polite');
