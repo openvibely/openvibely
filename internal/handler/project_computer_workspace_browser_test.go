@@ -35,17 +35,6 @@ func TestSavedTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
  window.computerStatusReads=0;const statusFetch=window.fetch;
  window.fetch=(url,options)=>{if(String(url).includes('/computer/status'))window.computerStatusReads++;return statusFetch(url,options)};
  window.computerSubscriptions=0;window.closedComputerSubscriptions=0;
- const NativeWebSocket=window.WebSocket;
- window.WebSocket=class {
-  static OPEN=1;
-  constructor(url,protocols){
-   if(!String(url).includes('/stream/adaptive'))return new NativeWebSocket(url,protocols);
-   this.readyState=0;this.protocol='binary';setTimeout(()=>{if(this.readyState===0){this.readyState=1;this.onopen?.({});}},0);
-  }
-  send(data){setTimeout(()=>{if(this.readyState===1)this.onmessage?.({data});},0);}
-  close(){this.readyState=3;this.onclose?.({});}
- };
-
  window.openVibelyLive.computer=(project,task,options,handlers)=>{
   window.computerSubscriptions++;let closed=false;
   const push=async()=>{const state=await (await statusFetch('/fixture-snapshot?task_id='+task)).json();if(!closed)handlers.listeners.computer_status({data:JSON.stringify({...state,project_id:project,task_id:task,viewer_mode:options.viewer_mode||''})});};
@@ -91,7 +80,8 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await new Promise(r=>setTimeout(r,250));const miniReads=window.computerStatusReads;
  await new Promise(r=>setTimeout(r,5500));if(window.computerStatusReads!==miniReads)throw Error('Mini preview still polls status');
  const expandedRFB=window.fixtureRFB;q('[data-computer-preview-open]').click();
- if(document.activeElement!==q('[data-computer-screen]'))throw Error('Expanded preview must initially focus the computer screen');
+ if(expandedRFB.viewOnly)throw Error('Expansion waited for a server control acknowledgment');
+ if(!q('[data-computer-screen]').contains(document.activeElement))throw Error('Expanded preview must initially focus the computer screen');
  await wait(()=>q('[data-computer-dialog]').open);
  if(q('[data-computer-action="takeover"], [data-computer-action="release"], [data-computer-expand]'))throw Error('Unexpected viewer buttons');
  await wait(()=>window.fixtureRFB && !window.fixtureRFB.viewOnly,'takeover');if(window.fixtureRFB!==expandedRFB||expandedRFB.disconnected)throw Error('Expansion replaced screen connection');
@@ -147,7 +137,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));const hiddenRFB=window.fixtureRFB;if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming');
  Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));await wait(()=>window.fixtureRFB!==hiddenRFB&&window.fixtureRFB.painted,'visible reconnect');
  cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};q('[data-teach-note]').value='New capture';q('[data-teach-capture]').click();q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled,'second generation');
- const closingRFB=window.fixtureRFB;q('[data-computer-close]').click();if(!cancelledGeneration)throw Error('Closing viewer did not cancel generation');window.fetch=originalFetch;if(window.fixtureRFB!==closingRFB||closingRFB.disconnected||!closingRFB.canvas.isConnected)throw Error('Closing viewer replaced screen connection');if(q('[data-computer-dialog]').open)throw Error('Did not close');await wait(()=>window.fixtureRFB.viewOnly,'handback');
+ const closingRFB=window.fixtureRFB;q('[data-computer-close]').click();if(!cancelledGeneration)throw Error('Closing viewer did not cancel generation');window.fetch=originalFetch;if(window.fixtureRFB!==closingRFB||closingRFB.disconnected||!closingRFB.canvas.isConnected)throw Error('Closing viewer replaced screen connection');if(q('[data-computer-dialog]').open)throw Error('Did not close');if(!window.fixtureRFB.viewOnly)throw Error('Collapse did not disable input immediately');
 
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'preview first frame');
 
@@ -201,7 +191,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		}
 		if r.URL.Path == "/fixture-rfb.js" {
 			w.Header().Set("Content-Type", "text/javascript")
-			fmt.Fprint(w, `export default class RFB{constructor(el){this.keys=[];this.listeners={};this.el=el;this.canvas=document.createElement('canvas');el.append(this.canvas);window.fixtureRFB=this;setTimeout(()=>this.listeners.connect?.({}),10);this.timer=setTimeout(()=>{this.canvas.getContext('2d').fillRect(0,0,300,150);this.painted=true;},350);}addEventListener(name,fn){this.listeners[name]=fn;}sendKey(...args){this.keys.push(args)}clipboardPasteFrom(text){this.pasted=text}disconnect(){this.disconnected=true;clearTimeout(this.timer);this.canvas.remove();}}`)
+			fmt.Fprint(w, `export default class RFB{constructor(el,url){if(!String(url).includes('/stream/control'))throw Error('Expected one authorized control connection');this.keys=[];this.listeners={};this.el=el;this.canvas=document.createElement('canvas');el.append(this.canvas);window.fixtureRFB=this;setTimeout(()=>this.listeners.connect?.({}),10);this.timer=setTimeout(()=>{this.canvas.getContext('2d').fillRect(0,0,300,150);this.painted=true;},350);}addEventListener(name,fn){this.listeners[name]=fn;}sendKey(...args){this.keys.push(args)}clipboardPasteFrom(text){this.pasted=text}disconnect(){this.disconnected=true;clearTimeout(this.timer);this.canvas.remove();}}`)
 			return
 		}
 		mu.Lock()
@@ -250,12 +240,6 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		case strings.HasSuffix(r.URL.Path, "/ensure"):
 			starts++
 			ready = true
-			fmt.Fprint(w, `{}`)
-		case strings.HasSuffix(r.URL.Path, "/takeover"):
-			held = true
-			fmt.Fprint(w, `{}`)
-		case strings.HasSuffix(r.URL.Path, "/release"):
-			held = false
 			fmt.Fprint(w, `{}`)
 		case strings.HasSuffix(r.URL.Path, "/task-enable"):
 			enabled = true

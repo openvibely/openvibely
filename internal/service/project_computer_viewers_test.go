@@ -26,13 +26,16 @@ func TestComputerViewerReleaseProtectsOtherControllers(t *testing.T) {
 	}
 	// No backend work is necessary to test the ownership/lifecycle boundary.
 	require.NoError(t, svc.repo.Hold(ctx, project.ID, true))
-	_, leaveA, err := svc.RegisterViewer(t.Context(), project.ID, "alice", "a", true)
+	tokenA, leaveA, err := svc.RegisterViewer(t.Context(), project.ID, "alice", "a", true)
 	require.NoError(t, err)
-	_, leaveB, err := svc.RegisterViewer(t.Context(), project.ID, "bob", "b", true)
+	tokenB, leaveB, err := svc.RegisterViewer(t.Context(), project.ID, "bob", "b", true)
 	require.NoError(t, err)
 	_, _, err = svc.RegisterViewer(t.Context(), project.ID, "alice", "b", true)
 	require.Error(t, err, "another user cannot replace a viewer")
+	require.NoError(t, svc.ForwardViewerInput(project.ID, "a", tokenA, func() error { return nil }))
+	require.NoError(t, svc.ForwardViewerInput(project.ID, "b", tokenB, func() error { return nil }))
 	leaveA()
+	require.NoError(t, svc.ForwardViewerInput(project.ID, "b", tokenB, func() error { return nil }), "closing Alice's viewer must not interrupt Bob")
 	released, err := svc.ReleaseUnviewed(ctx, project.ID)
 	require.NoError(t, err)
 	require.False(t, released)
@@ -65,14 +68,23 @@ func TestComputerViewerDisconnectKeepsPrivateHandoff(t *testing.T) {
 	}
 	svc, err := root.ForTask(ctx, project.ID, task.ID)
 	require.NoError(t, err)
-	require.NoError(t, svc.repo.RequestHandoff(ctx, project.ID, "login", "https://example.com", "Sign in", ""))
-	released, err := svc.ReleaseUnviewed(ctx, project.ID)
-	require.NoError(t, err)
-	require.False(t, released)
-	state, err := svc.Get(ctx, project.ID)
-	require.NoError(t, err)
-	require.Equal(t, "login", state.HandoffKind)
-	require.True(t, state.Held)
+	require.NoError(t, svc.SetTaskEnabled(ctx, project.ID, true))
+	for _, kind := range []string{"request_browser_login", "request_computer_help"} {
+		t.Run(kind, func(t *testing.T) {
+			require.NoError(t, svc.repo.RequestHandoff(ctx, project.ID, kind, "https://example.com", "Private help", ""))
+			_, leave, err := svc.RegisterViewer(ctx, project.ID, "alice", "preview", true)
+			require.NoError(t, err)
+			leave()
+			released, err := svc.ReleaseUnviewed(ctx, project.ID)
+			require.NoError(t, err)
+			require.False(t, released)
+			state, err := svc.Get(ctx, project.ID)
+			require.NoError(t, err)
+			require.Equal(t, kind, state.HandoffKind)
+			require.True(t, state.Held)
+			require.NoError(t, svc.repo.FinishHandoff(ctx, project.ID, true))
+		})
+	}
 }
 
 // Embedding the store lets this test reject any database read after registration.
@@ -120,22 +132,18 @@ func TestComputerViewerForwardingAndRevocation(t *testing.T) {
 	require.NoError(t, svc.ForwardViewerInput(project.ID, "session", fresh, func() error { return nil }))
 }
 
-func TestComputerViewerTakeoverAndPrivateHandoffReconnect(t *testing.T) {
+func TestComputerViewerHoldAndPrivateHandoffReconnect(t *testing.T) {
 	_, svc, project, task := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{}`) })
 	token, detach, err := svc.RegisterViewer(t.Context(), project.ID, "user", "session", true)
 	require.NoError(t, err)
 	defer detach()
-	require.NoError(t, svc.Control(t.Context(), project.ID, true, func() error {
-		require.Error(t, svc.ForwardViewerInput(project.ID, "session", token, func() error { t.Fatal("takeover input forwarded"); return nil }))
-		_, _, reconnectErr := svc.RegisterViewer(t.Context(), project.ID, "user", "pending", true)
-		require.ErrorIs(t, reconnectErr, persistence.ErrComputerBusy)
-		return nil
-	}))
+	require.NoError(t, svc.Hold(t.Context(), project.ID, true))
+	require.NoError(t, svc.ForwardViewerInput(project.ID, "session", token, func() error { return nil }), "holding agent actions must not block the human viewer")
 	fresh, leave, err := svc.RegisterViewer(t.Context(), project.ID, "user", "fresh", true)
 	require.NoError(t, err)
 	defer leave()
 	require.NoError(t, svc.ForwardViewerInput(project.ID, "fresh", fresh, func() error { return nil }))
-	require.NoError(t, svc.Control(t.Context(), project.ID, false, nil))
+	require.NoError(t, svc.Hold(t.Context(), project.ID, false))
 	rt := svc.runtimeTools(t.Context(), project.ID, task.ID)
 	_, _, _, err = rt.Executor(t.Context(), "request_computer_help", json.RawMessage(`{"reason":"Approve the browser prompt"}`))
 	require.NoError(t, err)
@@ -240,40 +248,4 @@ func TestComputerDeletedTaskRevokesViewerBeforeFailedCleanup(t *testing.T) {
 	}))
 	_, _, err = svc.RegisterViewer(t.Context(), project.ID, "user", "retry", true)
 	require.Error(t, err, "deleted task must reject reconnect")
-}
-
-func TestAdaptiveViewerInputPermissionAndRevocation(t *testing.T) {
-	db := teststores.New(t)
-	ctx := t.Context()
-	project := &models.Project{Name: "adaptive viewer"}
-	require.NoError(t, db.Projects.Create(ctx, project))
-	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{})
-	require.NoError(t, svc.repo.Configure(ctx, project.ID, "local"))
-	require.NoError(t, svc.repo.SetEnabled(ctx, project.ID, true))
-	cancelled := false
-	token, detach, err := svc.RegisterAdaptiveViewer(ctx, project.ID, "alice", "session", func() { cancelled = true })
-	require.NoError(t, err)
-	defer detach()
-	wrote := false
-	write := func() error { wrote = true; return nil }
-	require.Error(t, svc.ForwardViewerInput(project.ID, "session", token, write))
-	require.False(t, wrote)
-	require.False(t, svc.hasControlViewer(project.ID))
-	require.Error(t, svc.SetViewerInput(ctx, project.ID, "session", "wrong", true))
-	require.NoError(t, svc.SetViewerInput(ctx, project.ID, "session", token, true))
-	require.NoError(t, svc.ForwardViewerInput(project.ID, "session", token, write))
-	require.True(t, wrote)
-	require.True(t, svc.hasControlViewer(project.ID))
-	require.NoError(t, svc.SetViewerInput(ctx, project.ID, "session", token, false))
-	wrote = false
-	require.Error(t, svc.ForwardViewerInput(project.ID, "session", token, write))
-	require.False(t, wrote)
-	require.False(t, svc.hasControlViewer(project.ID))
-	require.NoError(t, svc.repo.SetTakeoverPending(ctx, project.ID, true))
-	require.Error(t, svc.SetViewerInput(ctx, project.ID, "session", token, true))
-	require.NoError(t, svc.repo.SetTakeoverPending(ctx, project.ID, false))
-	// Revocation also closes an adaptive stream that is currently view-only.
-	require.NoError(t, svc.SetEnabled(ctx, project.ID, false))
-	require.True(t, cancelled)
-	require.Error(t, svc.SetViewerInput(ctx, project.ID, "session", token, true))
 }

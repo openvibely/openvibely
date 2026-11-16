@@ -6,19 +6,16 @@ import (
 	"errors"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type computerViewer struct {
-	User, Token  string
-	Control      bool
-	Adaptive     bool
-	inputEnabled atomic.Bool
-	Cancel       context.CancelFunc
-	input        sync.RWMutex
-	revoked      bool
+	User, Token string
+	Control     bool
+	Cancel      context.CancelFunc
+	input       sync.RWMutex
+	revoked     bool
 }
 
 func (s *ProjectComputerService) viewerPrefix(id string) string {
@@ -29,18 +26,8 @@ func (s *ProjectComputerService) viewerLock(id string) *sync.Mutex {
 	return value.(*sync.Mutex)
 }
 func (s *ProjectComputerService) RegisterViewer(ctx context.Context, id, user, session string, control bool, replacements ...context.CancelFunc) (string, func(), error) {
-	return s.registerViewer(ctx, id, user, session, control, false, replacements...)
-}
-
-// RegisterAdaptiveViewer keeps its display connection while input is toggled.
-// It starts with input disabled and is revoked like any control-capable viewer.
-func (s *ProjectComputerService) RegisterAdaptiveViewer(ctx context.Context, id, user, session string, cancel context.CancelFunc) (string, func(), error) {
-	return s.registerViewer(ctx, id, user, session, true, true, cancel)
-}
-
-func (s *ProjectComputerService) registerViewer(ctx context.Context, id, user, session string, control, adaptive bool, replacements ...context.CancelFunc) (string, func(), error) {
 	lock := s.viewerLock(id)
-	// Takeover may wait for agent cleanup. Reject reconnects during that
+	// Handback may wait for cleanup. Reject reconnects during that
 	// transition instead of waiting behind it with an open HTTP request.
 	if !lock.TryLock() {
 		return "", nil, persistence.ErrComputerBusy
@@ -49,13 +36,13 @@ func (s *ProjectComputerService) registerViewer(ctx context.Context, id, user, s
 	gate := s.viewerGate(id)
 	gate.Lock()
 	defer gate.Unlock()
-	if control && !adaptive {
+	if control {
 		if err := s.checkViewerPermission(ctx, id); err != nil {
 			return "", nil, err
 		}
 	}
 	key := s.viewerPrefix(id) + session
-	viewer := &computerViewer{User: user, Token: rand.Text(), Control: control, Adaptive: adaptive}
+	viewer := &computerViewer{User: user, Token: rand.Text(), Control: control}
 	if len(replacements) > 0 {
 		viewer.Cancel = replacements[0]
 	}
@@ -72,7 +59,7 @@ func (s *ProjectComputerService) registerViewer(ctx context.Context, id, user, s
 func (s *ProjectComputerService) hasControlViewer(id string) bool {
 	found := false
 	s.active.Range(func(key, value any) bool {
-		if strings.HasPrefix(key.(string), s.viewerPrefix(id)) && value.(*computerViewer).controlling() {
+		if strings.HasPrefix(key.(string), s.viewerPrefix(id)) && value.(*computerViewer).Control {
 			found = true
 			return false
 		}
@@ -81,9 +68,9 @@ func (s *ProjectComputerService) hasControlViewer(id string) bool {
 	return found
 }
 
-// Serialized with takeover and viewer registration, so an old connection cannot
-// release a replacement viewer's control. Private handoffs always stay paused.
-func (s *ProjectComputerService) ReleaseUnviewed(ctx context.Context, id string, explicit ...bool) (bool, error) {
+// Serialized with viewer registration, so an old connection cannot release a
+// replacement viewer's control. Private handoffs always stay paused.
+func (s *ProjectComputerService) ReleaseUnviewed(ctx context.Context, id string) (bool, error) {
 	lock := s.viewerLock(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -94,8 +81,7 @@ func (s *ProjectComputerService) ReleaseUnviewed(ctx context.Context, id string,
 	if err != nil {
 		return false, err
 	}
-	allowPending := len(explicit) > 0 && explicit[0]
-	if (!state.Held && !state.TakeoverPending) || (state.TakeoverPending && !allowPending) || state.HandoffKind != "" {
+	if !state.Held || state.TakeoverPending || state.HandoffKind != "" {
 		return false, nil
 	}
 	if err = s.Hold(ctx, id, false); err != nil {
@@ -147,7 +133,7 @@ func (s *ProjectComputerService) ForwardViewerInput(id, session, token string, w
 	viewer := value.(*computerViewer)
 	viewer.input.RLock()
 	defer viewer.input.RUnlock()
-	if viewer.revoked || !viewer.controlling() || viewer.Token != token {
+	if viewer.revoked || !viewer.Control || viewer.Token != token {
 		return errors.New("computer control connection revoked")
 	}
 	return write()
@@ -162,38 +148,4 @@ func (v *computerViewer) revoke() {
 	v.input.Lock()
 	defer v.input.Unlock()
 	v.revoked = true
-}
-
-func (v *computerViewer) controlling() bool {
-	return v.Control && (!v.Adaptive || v.inputEnabled.Load())
-}
-
-// SetViewerInput is called only by the owning stream. The token also protects
-// a replacement connection using the same viewer session from stale requests.
-func (s *ProjectComputerService) SetViewerInput(ctx context.Context, id, session, token string, enabled bool) error {
-	lock := s.viewerLock(id)
-	if !lock.TryLock() {
-		return persistence.ErrComputerBusy
-	}
-	defer lock.Unlock()
-	gate := s.viewerGate(id)
-	gate.RLock()
-	defer gate.RUnlock()
-	value, ok := s.active.Load(s.viewerPrefix(id) + session)
-	if !ok {
-		return errors.New("viewer disconnected")
-	}
-	v := value.(*computerViewer)
-	v.input.Lock()
-	defer v.input.Unlock()
-	if v.revoked || !v.Adaptive || v.Token != token {
-		return errors.New("viewer unavailable")
-	}
-	if enabled {
-		if err := s.checkViewerPermission(ctx, id); err != nil {
-			return err
-		}
-	}
-	v.inputEnabled.Store(enabled)
-	return nil
 }

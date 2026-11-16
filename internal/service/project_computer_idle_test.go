@@ -277,12 +277,12 @@ func TestComputerCleanupDoesNotLockOtherCandidates(t *testing.T) {
 			continue
 		}
 		taken := make(chan error, 1)
-		go func() { taken <- scoped.Control(ctx, project.ID, true, func() error { return nil }) }()
+		go func() { taken <- scoped.Hold(ctx, project.ID, true) }()
 		select {
 		case err := <-taken:
 			require.NoError(t, err)
 		case <-time.After(2 * time.Second):
-			t.Fatal("takeover waited for unrelated shutdown")
+			t.Fatal("hold waited for unrelated shutdown")
 		}
 	}
 	cancel()

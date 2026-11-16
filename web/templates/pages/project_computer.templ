@@ -115,7 +115,6 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();syncViewerInput();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
      const screen=find('[data-computer-screen]');
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
-     let viewerChannel=null;
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null;
      let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, connectTimer=null, refreshPromise=null, refreshQueued=false, pendingState=null;
      function queueStatus(){
@@ -139,7 +138,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      function subscribeStatus(force=false){
       if((statusStream&&!force) || !window.openVibelyLive)return;
       statusStream?.close();statusLive=false;statusFailed=true;
-      statusStream=window.openVibelyLive.computer(root.dataset.computerProject,root.dataset.computerTask,{viewer_id:viewerID,viewer_mode:'adaptive'},{
+      statusStream=window.openVibelyLive.computer(root.dataset.computerProject,root.dataset.computerTask,{viewer_id:viewerID,viewer_mode:'control'},{
        onopen:()=>{statusLive=true;},
        listeners:{computer_status:statusChanged,
         task_deleted:event=>{let data;try{data=JSON.parse(event.data);}catch{return;}previewWasDeleted({detail:data});},
@@ -280,31 +279,14 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      function syncViewerInput(){
       if(!rfb)return;
       const want=!!(connected&&dialog.open&&!closing&&!document.hidden&&!currentState?.takeover_pending);
-      // Disable locally immediately; enabling waits for the server's reply.
-      if(!want){rfb.viewOnly=true;mode='view';rfb._mouseButtonMask=0;ime?.remove();ime=null;composing=false;}
-      viewerChannel?.setInput(want);
-     }
-     function createViewerChannel(url,protocols,epoch){
-      const socket=new WebSocket(url,protocols);socket.binaryType='arraybuffer';
-      let sequence=0,requested=null;
-      const channel={
-       onopen:null,onclose:null,onerror:null,onmessage:null,binaryType:'arraybuffer',
-       get readyState(){return socket.readyState;},get protocol(){return socket.protocol;},
-       send(data){socket.send(data);},close(){socket.close();},
-       setInput(want){if(socket.readyState!==WebSocket.OPEN||requested===want)return;requested=want;socket.send(JSON.stringify({input:want,sequence:++sequence}));}
-      };
-      socket.onopen=e=>{channel.onopen?.(e);if(epoch===generation)syncViewerInput();};
-      socket.onclose=e=>channel.onclose?.(e);socket.onerror=e=>channel.onerror?.(e);
-      socket.onmessage=e=>{
-       if(typeof e.data!=='string'){channel.onmessage?.(e);return;}
-       if(epoch!==generation||!rfb)return;
-       let reply;try{reply=JSON.parse(e.data);}catch{socket.close();return;}
-       if(reply.sequence!==sequence)return;
-       const allowed=reply.input===true&&requested&&dialog.open&&!closing&&!document.hidden;
-       rfb.viewOnly=!allowed;mode=allowed?'control':'view';
-       if(allowed){if(!ime)installKeyboard();}else{ime?.remove();ime=null;composing=false;}
-      };
-      return channel;
+      if(!want&&!rfb.viewOnly){
+       // Release held input before viewOnly starts suppressing outgoing input.
+       rfb._keyboard?.ungrab();
+       if(rfb._mouseButtonMask)rfb._sendMouse(rfb._mousePos.x,rfb._mousePos.y,0);
+       rfb._mouseButtonMask=0;
+      }
+      rfb.viewOnly=!want;mode=want?'control':'view';
+      if(want){if(!ime)installKeyboard();}else{ime?.remove();ime=null;composing=false;}
      }
      async function viewer(state){
       if(rfb){syncViewerInput();return;}
@@ -312,9 +294,8 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       const epoch=++generation;
       const {default:RFB}=await import(root.dataset.computerViewer);
       if(closed || previewDeleted || epoch!==generation)return;
-      const ws=new URL(state.stream_url || scoped('/stream/adaptive'),location.href);ws.protocol=ws.protocol==='https:'?'wss:':'ws:';
-      viewerChannel=createViewerChannel(ws.href,state.ticket?['binary',state.ticket]:['binary'],epoch);
-      rfb=new RFB(screen,viewerChannel,{wsProtocols:['binary']});
+      const ws=new URL(state.stream_url || scoped('/stream/control'),location.href);ws.protocol=ws.protocol==='https:'?'wss:':'ws:';
+      rfb=new RFB(screen,ws.href,{wsProtocols:state.ticket?['binary',state.ticket]:['binary']});
       if(retained)screen.append(retained);
       rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
       rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=true;
@@ -325,7 +306,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;window.showToast('Desktop authentication failed.','error','',{toastKey:previewKey+':authentication'});}});
       rfb.addEventListener('disconnect',event=>{if(epoch===generation){clearTimeout(connectTimer);retainFrame();connected=false;rfb=null;mode='';recording=false;renderDemo();retryStatus();}});
      }
-     function disconnect(){++generation;viewerChannel?.close();viewerChannel=null;clearTimeout(connectTimer);screenRetry.cancel();connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
+     function disconnect(){++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
      function refresh(){
       if(refreshPromise){refreshQueued=true;return refreshPromise;}
       refreshPromise=(async()=>{do{refreshQueued=false;await refreshStatus();}while(refreshQueued&&!closed&&!previewDeleted);})().finally(()=>{refreshPromise=null;retryStatus();});
@@ -340,7 +321,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       try{
        const requestedControl=dialog.open;
        const state=pendingState;pendingState=null;statusFailed=false;
-       if(state.viewer_mode!=='adaptive'){return;}
+       if(state.viewer_mode!=='control'){return;}
        if(closed || previewDeleted || pending || closing || !visible() || version!==refreshVersion)return;
        const taskToggle=find('[data-task-computer-toggle]');if(taskToggle){taskToggle.checked=!!state.task_enabled;taskToggle.disabled=!state.project_enabled;}
        preview.hidden=!state.enabled;
@@ -350,7 +331,7 @@ if(requestedControl!==dialog.open){refreshQueued=true;return;}currentState=state
  find('[data-computer-login-site]').textContent=state.handoff_kind?(state.handoff_reason||'Computer help requested')+(state.handoff_url?' — '+state.handoff_url:''):'';
  const target=find('[data-computer-target]');if(target&&!target.disabled){target.dataset.value=state.tool_target||'worktree';target.querySelector('[data-property-label]').textContent=target.dataset.value==='computer'?'Task computer':'Task worktree';}
  find('[data-computer-chrome]').hidden=state.handoff_kind!=='request_chrome_login'||!state.chrome_available;
- buttons.forEach(b=>{const a=b.dataset.computerAction;if(a==='ensure')b.hidden=state.ready||state.enabled===false;b.disabled=a==='ensure'?state.enabled===false:a.startsWith('login-')?!state.handoff_kind:a==='release'?!state.held||!!state.handoff_kind:a==='takeover'?!state.ready||state.held:!state.ready||state.held||state.busy;});
+ buttons.forEach(b=>{const a=b.dataset.computerAction;if(a==='ensure')b.hidden=state.ready||state.enabled===false;b.disabled=a==='ensure'?state.enabled===false:a.startsWith('login-')?!state.handoff_kind:!state.ready||state.held||state.busy;});
        if(state.ready){await viewer(state);}else disconnect();
       }catch(e){window.showToast(e.message,'error');if(visible())screenRetry.fail();}
      }

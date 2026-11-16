@@ -1587,18 +1587,6 @@ func (w *WorkerService) finishCancelRegistration(id uint64) {
 	}
 }
 
-// CancelForComputer preserves registration until cleanup acknowledges completion.
-func (w *WorkerService) CancelForComputer(taskID string) <-chan struct{} {
-	w.cancelMu.Lock()
-	cancel := w.cancelFuncs[taskID]
-	done := w.cancelCompletion[w.cancelRegistrationIDs[taskID]]
-	w.cancelMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	return done
-}
-
 func (w *WorkerService) cancelQueuedOrdinaryAndPublish(ctx context.Context, taskID, message string) error {
 	ids, err := w.execRepo.CancelQueuedOrdinaryByTaskReturningIDs(ctx, taskID, message)
 	if err != nil {

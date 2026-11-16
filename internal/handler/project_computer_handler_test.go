@@ -24,7 +24,7 @@ func (handlerComputerProvisioner) Start(context.Context, string) (service.Comput
 }
 func (handlerComputerProvisioner) Stop(context.Context, string) error { return nil }
 
-func TestProjectComputerHandlersScopeAndTakeover(t *testing.T) {
+func TestProjectComputerHandlersScopeAndRemovedTakeover(t *testing.T) {
 	db := teststores.New(t)
 	repo := db.Projects
 	project := &models.Project{Name: "Viewer"}
@@ -46,8 +46,8 @@ func TestProjectComputerHandlersScopeAndTakeover(t *testing.T) {
 		{"GET", "/projects/missing/computer", "", 404},
 		{"GET", "/projects/" + project.ID + "/computer", "", 200},
 		{"POST", "/projects/" + project.ID + "/computer/takeover", "https://evil.example", 403},
-		{"POST", "/projects/" + project.ID + "/computer/takeover", "", 200},
-		{"POST", "/projects/" + project.ID + "/computer/release", "", 200},
+		{"POST", "/projects/" + project.ID + "/computer/takeover", "", 404},
+		{"POST", "/projects/" + project.ID + "/computer/release", "", 404},
 		// This fixture configures the computer but never enables it.
 		{"GET", "/projects/" + project.ID + "/computer/stream/control", "", 503},
 		{"GET", "/projects/" + project.ID + "/computer/vnc/other/file", "", 405},

@@ -844,29 +844,6 @@ func (s *ProjectComputerService) SetEnabled(ctx context.Context, id string, enab
 	})
 }
 
-// Control serializes takeover/interruption with handback for the same desktop.
-func (s *ProjectComputerService) Control(ctx context.Context, id string, held bool, interrupt func() error) error {
-	defer s.publishStatus(id, false)
-	value, _ := s.locks.LoadOrStore("control:"+id+":"+s.taskID, &sync.Mutex{})
-	lock := value.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
-	if held {
-		if err := s.changeViewerPermission(id, false, func() error { return s.repo.SetTakeoverPending(ctx, id, true) }); err != nil {
-			return err
-		}
-	}
-	if err := s.Hold(ctx, id, held); err != nil {
-		return err
-	}
-	if held && s.taskID != "" && interrupt != nil {
-		if err := interrupt(); err != nil {
-			return err
-		}
-	}
-	return s.repo.SetTakeoverPending(ctx, id, false)
-}
-
 func validateComputerTimeZone(zone string) error {
 	if zone == "" || zone == "Local" {
 		return errors.New("choose a named time zone, such as America/New_York or UTC")

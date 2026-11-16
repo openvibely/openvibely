@@ -31,7 +31,6 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 		name, requested, want string
 		held                  bool
 	}{
-		{"adaptive preview", "adaptive", "adaptive", false},
 		{"preview while held", "view", "view", true},
 		{"legacy unspecified preview", "", "view", true},
 		{"controller while held", "control", "control", true},
@@ -66,4 +65,13 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 			require.Equal(t, tc.held && tc.want == "view", released, "only actual controllers should prevent handback")
 		})
 	}
+	// Temporary unavailability must not downgrade the persistent stream to view-only.
+	require.NoError(t, repo.SetTakeoverPending(t.Context(), project.ID, true))
+	pushed, err := h.computerStatus(t.Context(), h.computerSvc, project.ID, "", "pending-viewer", "control", true)
+	require.NoError(t, err)
+	ticket := h.computerTickets[strings.TrimPrefix(pushed["ticket"].(string), "computer-ticket.")]
+	require.Equal(t, "control", ticket.Mode)
+	_, _, err = h.computerSvc.RegisterViewer(t.Context(), project.ID, "owner", "pending-window", true)
+	require.Error(t, err, "a ticket must not bypass the stream's permission check")
+
 }

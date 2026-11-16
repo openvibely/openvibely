@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -112,10 +111,9 @@ func (h *Handler) computerStatus(ctx context.Context, svc *service.ProjectComput
 	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": svc.Ready(ctx, projectID), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": svc.ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
 	if h.desktopMode && h.computerDesktopURL != "" && native && status["ready"] == true {
 		mode := "view"
-		if viewerMode == "adaptive" {
-			mode = "adaptive"
-		}
-		if viewerMode == "control" && state.Enabled && !state.TakeoverPending {
+		// Permission is checked when the stream connects; never silently issue
+		// a view-only connection that cannot later accept input on expansion.
+		if viewerMode == "control" {
 			mode = "control"
 		}
 		ticket, err := h.issueComputerTicket(ctx, projectID, mode, taskID, viewerID)
@@ -172,15 +170,6 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 		err = h.computerService(c).Start(ctx, c.Param("id"))
 	case "stop":
 		err = h.computerService(c).Stop(ctx, c.Param("id"))
-	case "takeover":
-		err = h.computerService(c).Control(ctx, c.Param("id"), true, func() error {
-			if h.taskSvc == nil {
-				return nil
-			}
-			return h.taskSvc.InterruptForComputer(ctx, c.QueryParam("task_id"))
-		})
-	case "release":
-		_, err = h.computerService(c).ReleaseUnviewed(ctx, c.Param("id"), true)
 	default:
 		return echo.NewHTTPError(404)
 	}
@@ -190,7 +179,7 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(400, err.Error())
 	}
-	if c.Param("action") == "login-done" || c.Param("action") == "login-cancel" || c.Param("action") == "release" {
+	if c.Param("action") == "login-done" || c.Param("action") == "login-cancel" {
 		h.PromoteQueuedTaskThreadInput(c.QueryParam("task_id"))
 	}
 	return c.JSON(200, map[string]bool{"ok": true})
@@ -210,7 +199,7 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 		return echo.NewHTTPError(403)
 	}
 	mode := c.Param("mode")
-	if mode != "view" && mode != "control" && mode != "adaptive" {
+	if mode != "view" && mode != "control" {
 		return echo.NewHTTPError(404)
 	}
 	id := c.Param("id")
@@ -237,45 +226,28 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	}
 	principal, _ := models.PrincipalFromContext(ctx)
 	svc := h.computerService(c)
-	var token string
-	var detach func()
-	if mode == "adaptive" {
-		token, detach, err = svc.RegisterAdaptiveViewer(ctx, id, principal.UserID, session, cancel)
-	} else {
-		token, detach, err = svc.RegisterViewer(ctx, id, principal.UserID, session, mode == "control", cancel)
-	}
+	token, detach, err := svc.RegisterViewer(ctx, id, principal.UserID, session, mode == "control", cancel)
 	if err != nil {
 		return echo.NewHTTPError(409, err.Error())
 	}
 	taskID := c.QueryParam("task_id")
-	// Coalesce handback after control is disabled or its stream disconnects.
-	var handbackTimer *time.Timer
-	var handbackMu sync.Mutex
-	handback := func() {
-		handbackMu.Lock()
-		defer handbackMu.Unlock()
-		if handbackTimer != nil {
-			handbackTimer.Stop()
-		}
-		handbackTimer = time.AfterFunc(2*time.Second, func() {
-			cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
-			defer stop()
-			if released, err := svc.ReleaseUnviewed(cleanup, id); err == nil && released {
-				h.PromoteQueuedTaskThreadInput(taskID)
-			}
-		})
-	}
 	defer func() {
 		detach()
-		if mode == "control" || mode == "adaptive" {
-			handback()
+		if mode == "control" {
+			go func() {
+				// Allow a transient reconnect to settle first.
+				timer := time.NewTimer(2 * time.Second)
+				defer timer.Stop()
+				<-timer.C
+				cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+				defer stop()
+				if released, err := svc.ReleaseUnviewed(cleanup, id); err == nil && released {
+					h.PromoteQueuedTaskThreadInput(taskID)
+				}
+			}()
 		}
 	}()
-	upstreamMode := mode
-	if mode == "adaptive" {
-		upstreamMode = "control"
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/rfb-" + upstreamMode
+	u.Path = strings.TrimRight(u.Path, "/") + "/rfb-" + mode
 	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}, "X-OV-Viewer-ID": {token}}, Subprotocols: []string{"binary"}})
 	if err != nil {
 		applog.Infof("computer viewer upstream failed project=%s task=%s mode=%s: %v", id, taskID, mode, err)
@@ -294,10 +266,6 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 		done <- forwardComputerScreen(ctx, downstream, upstream)
 	}()
 	go func() {
-		if mode == "adaptive" {
-			done <- forwardAdaptiveComputerInput(ctx, upstream, downstream, svc, id, session, token, handback)
-			return
-		}
 		for {
 			kind, data, err := downstream.Read(ctx)
 			if err == nil {
