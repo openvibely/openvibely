@@ -31,6 +31,7 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 		name, requested, want string
 		held                  bool
 	}{
+		{"adaptive preview", "adaptive", "adaptive", false},
 		{"preview while held", "view", "view", true},
 		{"legacy unspecified preview", "", "view", true},
 		{"controller while held", "control", "control", true},

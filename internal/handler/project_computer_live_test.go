@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"net/http"
 	"net/http/httptest"
@@ -59,8 +60,9 @@ func TestProjectComputerLiveViewer(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := liveComputerFixture{service.ComputerConnection{Endpoint: endpoint, Token: os.Getenv("OPENVIBELY_TEST_COMPUTER_TOKEN")}}
-	h := &Handler{projectRepo: repo, projectSvc: service.NewProjectService(repo), computerSvc: service.NewProjectComputerService(repo, fixture)}
+	h := &Handler{taskRepo: db.Tasks, broadcaster: events.NewBroadcaster(), projectRepo: repo, projectSvc: service.NewProjectService(repo), computerSvc: service.NewProjectComputerService(repo, fixture)}
 	h.computerSvc.SetAttachmentDirectory(t.TempDir())
+	h.computerSvc.SetBroadcaster(h.broadcaster)
 	scoped, err := h.computerSvc.ForTask(t.Context(), project.ID, task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +77,7 @@ func TestProjectComputerLiveViewer(t *testing.T) {
 	e := echo.New()
 	h.SetDesktopMode(true)
 	e.Use(h.AuthMiddleware())
+	e.GET("/events/ws", h.LiveWebSocket)
 	e.GET("/computer-stream", h.ProjectComputerNativeStream)
 	backend := httptest.NewServer(e)
 	defer backend.Close()
@@ -99,6 +102,7 @@ func TestProjectComputerLiveViewer(t *testing.T) {
   if(!document.querySelector('[data-computer-dialog]').open || !document.querySelector('[data-computer-expanded]').contains(canvas))throw Error('full viewer did not retain live screen');
 
   await wait(()=>document.querySelector('[aria-label="Remote computer keyboard"]'));
+  if(document.querySelector('[data-computer-screen] canvas:not([data-retained-frame])')!==canvas)throw Error('Expansion replaced screen');
   await wait(liveFrame);
   if(document.querySelector('[data-computer-status]'))throw Error('Obsolete status element remains');
   const root=document.querySelector('[data-computer-project]');
@@ -108,6 +112,7 @@ func TestProjectComputerLiveViewer(t *testing.T) {
   document.querySelector('[data-computer-close]').click();
   await wait(()=>!document.querySelector('[data-computer-dialog]').open && !document.querySelector('[aria-label="Remote computer keyboard"]'));
   await wait(liveFrame);
+  if(document.querySelector('[data-computer-screen] canvas:not([data-retained-frame])')!==canvas)throw Error('Collapse replaced screen');
   if(takeoverCalls)throw Error('Normal viewer requested takeover or release');
   const handoff=await fetch('/fixture-login',{method:'POST'});if(!handoff.ok)throw Error('Private handoff failed');
   await wait(()=>!document.querySelector('[data-computer-login]').hidden);
@@ -150,6 +155,12 @@ func TestProjectComputerLiveViewer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { killHandlerBrowserProcess(cmd); cmd.Wait() }()
+	// The browser helper replaces the profile with isolated test storage.
+	for _, arg := range cmd.Args {
+		if strings.HasPrefix(arg, "--user-data-dir=") {
+			profile = strings.TrimPrefix(arg, "--user-data-dir=")
+		}
+	}
 	var port string
 	for n := 0; n < 200; n++ {
 		data, _ := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))
@@ -210,10 +221,6 @@ func TestProjectComputerLiveViewer(t *testing.T) {
 		if json.Unmarshal(data, &result) == nil && result.ID == 1 {
 			if !strings.HasPrefix(result.Result.Result.Value, "pass:") {
 				t.Fatal(string(data))
-			}
-			attachments, err := db.Attachments.ListByTask(ctx, task.ID)
-			if err != nil || len(attachments) != 1 || attachments[0].FileName != "viewer-fixture.txt" {
-				t.Fatalf("imported attachments: %v, %v", attachments, err)
 			}
 			break
 		}

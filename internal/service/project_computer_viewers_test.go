@@ -241,3 +241,39 @@ func TestComputerDeletedTaskRevokesViewerBeforeFailedCleanup(t *testing.T) {
 	_, _, err = svc.RegisterViewer(t.Context(), project.ID, "user", "retry", true)
 	require.Error(t, err, "deleted task must reject reconnect")
 }
+
+func TestAdaptiveViewerInputPermissionAndRevocation(t *testing.T) {
+	db := teststores.New(t)
+	ctx := t.Context()
+	project := &models.Project{Name: "adaptive viewer"}
+	require.NoError(t, db.Projects.Create(ctx, project))
+	svc := NewProjectComputerService(db.Projects, &fakeComputerProvisioner{})
+	require.NoError(t, svc.repo.Configure(ctx, project.ID, "local"))
+	require.NoError(t, svc.repo.SetEnabled(ctx, project.ID, true))
+	cancelled := false
+	token, detach, err := svc.RegisterAdaptiveViewer(ctx, project.ID, "alice", "session", func() { cancelled = true })
+	require.NoError(t, err)
+	defer detach()
+	wrote := false
+	write := func() error { wrote = true; return nil }
+	require.Error(t, svc.ForwardViewerInput(project.ID, "session", token, write))
+	require.False(t, wrote)
+	require.False(t, svc.hasControlViewer(project.ID))
+	require.Error(t, svc.SetViewerInput(ctx, project.ID, "session", "wrong", true))
+	require.NoError(t, svc.SetViewerInput(ctx, project.ID, "session", token, true))
+	require.NoError(t, svc.ForwardViewerInput(project.ID, "session", token, write))
+	require.True(t, wrote)
+	require.True(t, svc.hasControlViewer(project.ID))
+	require.NoError(t, svc.SetViewerInput(ctx, project.ID, "session", token, false))
+	wrote = false
+	require.Error(t, svc.ForwardViewerInput(project.ID, "session", token, write))
+	require.False(t, wrote)
+	require.False(t, svc.hasControlViewer(project.ID))
+	require.NoError(t, svc.repo.SetTakeoverPending(ctx, project.ID, true))
+	require.Error(t, svc.SetViewerInput(ctx, project.ID, "session", token, true))
+	require.NoError(t, svc.repo.SetTakeoverPending(ctx, project.ID, false))
+	// Revocation also closes an adaptive stream that is currently view-only.
+	require.NoError(t, svc.SetEnabled(ctx, project.ID, false))
+	require.True(t, cancelled)
+	require.Error(t, svc.SetViewerInput(ctx, project.ID, "session", token, true))
+}

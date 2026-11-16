@@ -76,7 +76,7 @@ func TestComputerStreamAccessRevocation(t *testing.T) {
 			token, err := tc.handler.issueComputerTicket(bobCtx, project.ID, "view")
 			require.NoError(t, err)
 			sockets := []*websocket.Conn{}
-			for _, mode := range []string{"view", "control", "native"} {
+			for _, mode := range []string{"view", "control", "adaptive", "native"} {
 				url := strings.Replace(server.URL, "http", "ws", 1) + "/projects/" + project.ID + "/stream/" + mode
 				protocols := []string{"binary"}
 				if mode == "native" {
@@ -86,10 +86,14 @@ func TestComputerStreamAccessRevocation(t *testing.T) {
 				conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{Subprotocols: protocols})
 				require.NoError(t, err)
 				defer conn.CloseNow()
-				require.NoError(t, conn.Write(ctx, websocket.MessageBinary, []byte("frame")))
+				payload := "frame"
+				if mode == "adaptive" {
+					payload = "RFB 003.008\n"
+				}
+				require.NoError(t, conn.Write(ctx, websocket.MessageBinary, []byte(payload)))
 				_, frame, err := conn.Read(ctx)
 				require.NoError(t, err)
-				require.Equal(t, "frame", string(frame))
+				require.Equal(t, payload, string(frame))
 				sockets = append(sockets, conn)
 			}
 			stream, cancel, err := tc.handler.computerStreamAccess(bobCtx, project.ID)

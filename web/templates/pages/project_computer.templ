@@ -112,9 +112,10 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      find('[data-computer-preview-open]').onclick=openViewer;
      find('[data-computer-close]').onclick=()=>{dialog.close();finishViewer();};
      dialog.addEventListener('close',finishViewer);
-     async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();disconnect();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
+     async function finishViewer(){if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();syncViewerInput();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
      const screen=find('[data-computer-screen]');
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
+     let viewerChannel=null;
      let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null;
      let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, connectTimer=null, refreshPromise=null, refreshQueued=false, pendingState=null;
      function queueStatus(){
@@ -138,7 +139,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      function subscribeStatus(force=false){
       if((statusStream&&!force) || !window.openVibelyLive)return;
       statusStream?.close();statusLive=false;statusFailed=true;
-      statusStream=window.openVibelyLive.computer(root.dataset.computerProject,root.dataset.computerTask,{viewer_id:viewerID,viewer_mode:dialog.open?'control':'view'},{
+      statusStream=window.openVibelyLive.computer(root.dataset.computerProject,root.dataset.computerTask,{viewer_id:viewerID,viewer_mode:'adaptive'},{
        onopen:()=>{statusLive=true;},
        listeners:{computer_status:statusChanged,
         task_deleted:event=>{let data;try{data=JSON.parse(event.data);}catch{return;}previewWasDeleted({detail:data});},
@@ -276,27 +277,55 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       if(canvas?.width && canvas?.height){try{if([.25,.5,.75].some(v=>canvas.getContext('2d').getImageData(Math.floor(canvas.width*v),Math.floor(canvas.height*v),1,1).data[3])){retained.remove();retained=null;return;}}catch{retained.remove();retained=null;return;}}
       frameTimer=setTimeout(()=>revealFrame(epoch),50);
      }
+     function syncViewerInput(){
+      if(!rfb)return;
+      const want=!!(connected&&dialog.open&&!closing&&!document.hidden&&!currentState?.takeover_pending);
+      // Disable locally immediately; enabling waits for the server's reply.
+      if(!want){rfb.viewOnly=true;mode='view';rfb._mouseButtonMask=0;ime?.remove();ime=null;composing=false;}
+      viewerChannel?.setInput(want);
+     }
+     function createViewerChannel(url,protocols,epoch){
+      const socket=new WebSocket(url,protocols);socket.binaryType='arraybuffer';
+      let sequence=0,requested=null;
+      const channel={
+       onopen:null,onclose:null,onerror:null,onmessage:null,binaryType:'arraybuffer',
+       get readyState(){return socket.readyState;},get protocol(){return socket.protocol;},
+       send(data){socket.send(data);},close(){socket.close();},
+       setInput(want){if(socket.readyState!==WebSocket.OPEN||requested===want)return;requested=want;socket.send(JSON.stringify({input:want,sequence:++sequence}));}
+      };
+      socket.onopen=e=>{channel.onopen?.(e);if(epoch===generation)syncViewerInput();};
+      socket.onclose=e=>channel.onclose?.(e);socket.onerror=e=>channel.onerror?.(e);
+      socket.onmessage=e=>{
+       if(typeof e.data!=='string'){channel.onmessage?.(e);return;}
+       if(epoch!==generation||!rfb)return;
+       let reply;try{reply=JSON.parse(e.data);}catch{socket.close();return;}
+       if(reply.sequence!==sequence)return;
+       const allowed=reply.input===true&&requested&&dialog.open&&!closing&&!document.hidden;
+       rfb.viewOnly=!allowed;mode=allowed?'control':'view';
+       if(allowed){if(!ime)installKeyboard();}else{ime?.remove();ime=null;composing=false;}
+      };
+      return channel;
+     }
      async function viewer(state){
-      const held=dialog.open && !state.takeover_pending;
-      const next=held?'control':'view';
-      if(rfb && mode===next)return;
-      disconnect();mode=next;
+      if(rfb){syncViewerInput();return;}
+      disconnect();mode='view';
       const epoch=++generation;
       const {default:RFB}=await import(root.dataset.computerViewer);
       if(closed || previewDeleted || epoch!==generation)return;
-      const ws=new URL(state.stream_url || scoped('/stream/'+next),location.href);ws.protocol=ws.protocol==='https:'?'wss:':'ws:';
-      rfb=new RFB(screen,ws.href,{wsProtocols:state.ticket?['binary',state.ticket]:['binary']});
+      const ws=new URL(state.stream_url || scoped('/stream/adaptive'),location.href);ws.protocol=ws.protocol==='https:'?'wss:':'ws:';
+      viewerChannel=createViewerChannel(ws.href,state.ticket?['binary',state.ticket]:['binary'],epoch);
+      rfb=new RFB(screen,viewerChannel,{wsProtocols:['binary']});
       if(retained)screen.append(retained);
       rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
-      rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=!held;
+      rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=true;
       revealFrame(epoch);
       connectTimer=setTimeout(()=>{if(epoch===generation&&!connected){disconnect();retryStatus();}},10000);
-      rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;clearTimeout(connectTimer);screenRetry.success();retryStatus();if(held)installKeyboard();});
+      rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;clearTimeout(connectTimer);screenRetry.success();retryStatus();syncViewerInput();});
       rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;if(document.hasFocus())navigator.clipboard?.writeText(event.detail.text).catch(()=>{});});
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;window.showToast('Desktop authentication failed.','error','',{toastKey:previewKey+':authentication'});}});
       rfb.addEventListener('disconnect',event=>{if(epoch===generation){clearTimeout(connectTimer);retainFrame();connected=false;rfb=null;mode='';recording=false;renderDemo();retryStatus();}});
      }
-     function disconnect(){++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
+     function disconnect(){++generation;viewerChannel?.close();viewerChannel=null;clearTimeout(connectTimer);screenRetry.cancel();connected=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();}
      function refresh(){
       if(refreshPromise){refreshQueued=true;return refreshPromise;}
       refreshPromise=(async()=>{do{refreshQueued=false;await refreshStatus();}while(refreshQueued&&!closed&&!previewDeleted);})().finally(()=>{refreshPromise=null;retryStatus();});
@@ -305,13 +334,13 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      async function refreshStatus(){
       if(closed || previewDeleted || pending || closing)return;
  if(!visible()){disconnect();return;}
-      if(!pendingState){subscribeStatus(true);return;}
+      if(!pendingState){if(rfb&&connected&&currentState){syncViewerInput();return;}subscribeStatus(true);return;}
       screenRetry.cancel();
       const version=++refreshVersion;
       try{
        const requestedControl=dialog.open;
        const state=pendingState;pendingState=null;statusFailed=false;
-       if(state.viewer_mode!==(requestedControl?'control':'view')){refreshQueued=true;return;}
+       if(state.viewer_mode!=='adaptive'){return;}
        if(closed || previewDeleted || pending || closing || !visible() || version!==refreshVersion)return;
        const taskToggle=find('[data-task-computer-toggle]');if(taskToggle){taskToggle.checked=!!state.task_enabled;taskToggle.disabled=!state.project_enabled;}
        preview.hidden=!state.enabled;
