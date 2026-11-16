@@ -76,6 +76,8 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'opened'`)
 		b.waitFor("provider reset", `String(document.querySelector('#rail-account-popup button[data-action="reset-grant"]')!==null)`, "true")
 		b.waitFor("weekly-only popup", `String(document.getElementById('rail-account-popup').querySelectorAll('[role="meter"]').length)`, "1")
+		// HTTP LAN origins do not expose randomUUID, but getRandomValues remains available.
+		b.evaluate(`Object.defineProperty(crypto, 'randomUUID', {value: undefined, configurable: true}); 'HTTP crypto capabilities'`)
 		b.evaluate(`document.querySelector('[data-action="reset-grant"]').click(); 'reset'`)
 		b.waitFor("retryable reset", `String(document.getElementById('rail-account-popup').textContent.includes('earlier reset'))`, "true")
 		b.waitFor("reset enabled", `String(!document.querySelector('[data-action="reset-grant"]').disabled)`, "true")
@@ -84,6 +86,16 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		mu.Lock()
 		if len(requests) != 2 || requests[0] == "" || requests[0] != requests[1] {
 			t.Errorf("retry did not preserve idempotency key: %v", requests)
+		}
+		mu.Unlock()
+		// Even failure before the request is sent must release the busy state.
+		b.waitFor("successful reset finished", `String(!openVibelyAccountRail.busy)`, "true")
+		b.evaluate(`window.savedGetRandomValues=crypto.getRandomValues; crypto.getRandomValues=()=>{throw new Error('random source unavailable')}; document.querySelector('[data-action="reset-grant"]').click(); 'generation failure'`)
+		b.waitFor("generation failure releases controls", `String(!openVibelyAccountRail.busy&&!document.querySelector('[data-action="reset-grant"]').disabled&&!document.querySelector('[data-action="refresh"]').disabled)`, "true")
+		b.evaluate(`crypto.getRandomValues=window.savedGetRandomValues; delete window.savedGetRandomValues; 'restored'`)
+		mu.Lock()
+		if len(requests) != 2 {
+			t.Errorf("generation failure unexpectedly sent a reset request: %v", requests)
 		}
 		mu.Unlock()
 		b.evaluate(`document.getElementById('rail-more').click(); 'overflow'`)
