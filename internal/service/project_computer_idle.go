@@ -73,7 +73,7 @@ func (s *ProjectComputerService) reapIdleDesktops(ctx context.Context, id string
 	if err != nil {
 		return err
 	}
-	if !state.Enabled || state.IdleMinutes == 0 || state.Held || state.HandoffKind != "" {
+	if !state.Enabled || state.IdleMinutes == 0 {
 		return nil
 	}
 	ids, err := root.repo.IdleDesktopCandidates(ctx, id)

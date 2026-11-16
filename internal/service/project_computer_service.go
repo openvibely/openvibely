@@ -211,7 +211,7 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 	if c.Provider != s.provisioner.Provider() {
 		return errors.New("computer provider differs from this installation")
 	}
-	if !automatic && (c.Held || (c.Owner != "" && c.LeaseUntil >= time.Now().Unix())) {
+	if !automatic && c.Owner != "" && c.LeaseUntil >= time.Now().Unix() {
 		return persistence.ErrComputerBusy
 	}
 	if checker, ok := s.provisioner.(interface{ CheckAvailable(context.Context) error }); ok {
@@ -283,9 +283,6 @@ func (s *ProjectComputerService) stopLocked(ctx context.Context, id string) erro
 	}
 	if c.Owner != "" && c.LeaseUntil >= time.Now().Unix() {
 		return persistence.ErrComputerBusy
-	}
-	if c.Held {
-		return errors.New("release user control before stopping the computer")
 	}
 	if c.Provider != s.provisioner.Provider() {
 		return errors.New("computer provider differs from this installation")
@@ -798,7 +795,7 @@ func (s *ProjectComputerService) SetEnabled(ctx context.Context, id string, enab
 	if err != nil {
 		return err
 	}
-	if state.Held || state.Owner != "" && state.LeaseUntil >= time.Now().Unix() {
+	if state.Owner != "" && state.LeaseUntil >= time.Now().Unix() {
 		return persistence.ErrComputerBusy
 	}
 	return s.changeViewerPermission(id, true, func() error {

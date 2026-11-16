@@ -21,7 +21,7 @@ func (r *ProjectComputerRepo) Get(ctx context.Context, id string) (*models.Proje
 		return r.getSession(ctx, id)
 	}
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,held,owner,lease_until,enabled,time_zone,idle_minutes,cleanup_required FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.IdleMinutes, &c.CleanupRequired)
+	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,owner,lease_until,enabled,time_zone,idle_minutes,cleanup_required FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.IdleMinutes, &c.CleanupRequired)
 	return c, err
 }
 func (r *ProjectComputerRepo) Configure(ctx context.Context, id, provider string) error {
@@ -36,7 +36,7 @@ func (r *ProjectComputerRepo) Reserve(ctx context.Context, id, owner string) err
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		now := time.Now().Unix()
-		res, err := tx.ExecContext(ctx, `UPDATE project_computers SET owner=?,lease_until=? WHERE project_id=? AND held=0 AND (owner='' OR owner=? OR lease_until<?)`, owner, now+300, id, owner, now)
+		res, err := tx.ExecContext(ctx, `UPDATE project_computers SET owner=?,lease_until=? WHERE project_id=? AND (owner='' OR owner=? OR lease_until<?)`, owner, now+300, id, owner, now)
 		if err != nil {
 			return err
 		}
@@ -63,7 +63,7 @@ func (r *ProjectComputerRepo) Renew(ctx context.Context, id, owner string) error
 		return r.sessionRenew(ctx, id, owner)
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		_, err := tx.ExecContext(ctx, `UPDATE project_computers SET lease_until=? WHERE project_id=? AND owner=? AND held=0`, time.Now().Unix()+300, id, owner)
+		_, err := tx.ExecContext(ctx, `UPDATE project_computers SET lease_until=? WHERE project_id=? AND owner=?`, time.Now().Unix()+300, id, owner)
 		return err
 	})
 }
