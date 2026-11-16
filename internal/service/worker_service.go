@@ -51,7 +51,6 @@ type WorkerService struct {
 	cancelMu               sync.Mutex
 	cancelFuncs            map[string]context.CancelFunc // taskID -> cancel func for running tasks
 	cancelRegistrationIDs  map[string]uint64
-	cancelCompletion       map[uint64]chan struct{}
 	nextCancelRegistration uint64
 	cancellationRequested  map[string]bool // taskID -> user stop/cancel requested before durable status is visible
 
@@ -1159,10 +1158,6 @@ func (w *WorkerService) RegisterCancelOwned(taskID string, cancel context.Cancel
 	if w.cancelRegistrationIDs == nil {
 		w.cancelRegistrationIDs = make(map[string]uint64)
 	}
-	if w.cancelCompletion == nil {
-		w.cancelCompletion = make(map[uint64]chan struct{})
-	}
-	w.cancelCompletion[id] = make(chan struct{})
 	w.cancelFuncs[taskID] = cancel
 	w.cancelRegistrationIDs[taskID] = id
 	w.cancelMu.Unlock()
@@ -1171,7 +1166,6 @@ func (w *WorkerService) RegisterCancelOwned(taskID string, cancel context.Cancel
 
 func (w *WorkerService) DeregisterCancelOwned(taskID string, registrationID uint64) {
 	w.cancelMu.Lock()
-	w.finishCancelRegistration(registrationID)
 	if currentID, ok := w.cancelRegistrationIDs[taskID]; ok && currentID == registrationID {
 		delete(w.cancelFuncs, taskID)
 		delete(w.cancelRegistrationIDs, taskID)
@@ -1186,7 +1180,7 @@ func (w *WorkerService) CancelRunningTask(taskID string) bool {
 	cancel, ok := w.cancelFuncs[taskID]
 	if ok {
 		delete(w.cancelFuncs, taskID)
-		// Keep completion identity until the run deregisters after cleanup.
+		// Keep registration ownership until the run deregisters after cleanup.
 	}
 	w.cancelMu.Unlock()
 
@@ -1577,14 +1571,6 @@ func (w *WorkerService) ModelRunning(agentConfigID string) int {
 		return int(atomic.LoadInt32(counter))
 	}
 	return 0
-}
-
-// Called with cancelMu held, only once execution cleanup has finished.
-func (w *WorkerService) finishCancelRegistration(id uint64) {
-	if done := w.cancelCompletion[id]; done != nil {
-		close(done)
-		delete(w.cancelCompletion, id)
-	}
 }
 
 func (w *WorkerService) cancelQueuedOrdinaryAndPublish(ctx context.Context, taskID, message string) error {
