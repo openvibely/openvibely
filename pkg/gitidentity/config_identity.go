@@ -22,7 +22,11 @@ func environmentIdentityConfig(ctx context.Context, base []string, executable st
 	if !present {
 		return "", nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "config", "--no-includes", "--null", "--get-regexp", `^((user|author|committer)\.(name|email)|include\.path|includeif\..*\.path)$`)
+	realGit, err := realGitExecutable()
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, realGit, "config", "--no-includes", "--null", "--get-regexp", `^((user|author|committer)\.(name|email)|include\.path|includeif\..*\.path)$`)
 	// Read only the environment entries here, without resolving their includes.
 	cmd.Dir = filepath.Dir(executable)
 	for _, entry := range base {

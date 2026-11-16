@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -75,7 +74,7 @@ func CommandEnvironment(ctx context.Context, base []string, args []string) ([]st
 		}
 		out = append(out, entry)
 	}
-	realGit, err := exec.LookPath("git")
+	realGit, err := realGitExecutable()
 	if err != nil {
 		return nil, err
 	}
