@@ -292,39 +292,6 @@ func (s *ProjectComputerService) stopLocked(ctx context.Context, id string) erro
 	}
 	return s.changeViewerPermission(id, true, func() error { return s.provisioner.Stop(ctx, id) })
 }
-func (s *ProjectComputerService) Hold(ctx context.Context, id string, held bool) error {
-	defer s.publishStatus(id, false)
-	if held {
-		// Block new actions before cancelling the in-flight action. Only return control
-		// after it has stopped, so no agent screenshot overlaps a private user session.
-		if err := s.repo.Hold(ctx, id, true); err != nil {
-			return err
-		}
-		if cancel, ok := s.active.Load(id + ":" + s.taskID); ok {
-			cancel.(context.CancelFunc)()
-		}
-	}
-	gate := s.lifecycle(id)
-	gate.RLock()
-	defer gate.RUnlock()
-	lock := s.lock(id)
-	lock.Lock()
-	defer lock.Unlock()
-	if held {
-		if s.taskID != "" {
-			return s.cancelJobs(ctx, id, "")
-		}
-		return nil
-	}
-	state, err := s.repo.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	if state.HandoffKind != "" {
-		return errors.New("complete or cancel the private login request first")
-	}
-	return s.changeViewerPermission(id, false, func() error { return s.repo.Hold(ctx, id, false) })
-}
 
 // checkViewerPermission is called once when registering a control connection.
 func (s *ProjectComputerService) checkViewerPermission(ctx context.Context, id string) error {
@@ -335,14 +302,14 @@ func (s *ProjectComputerService) checkViewerPermission(ctx context.Context, id s
 	if !state.Enabled {
 		return errors.New("computer use is disabled")
 	}
-	if state.TakeoverPending || (state.HandoffKind != "" && !state.Held) {
+	if state.HandoffKind != "" && !state.Held {
 		return persistence.ErrComputerBusy
 	}
 	return nil
 }
 
-// WithHumanInput serializes human file/workflow operations with agent actions
-// without requiring an exclusive takeover. Private transitions remain blocked.
+// WithHumanInput serializes human file/workflow operations with agent actions.
+// Private handoff verification remains blocked.
 func (s *ProjectComputerService) WithHumanInput(ctx context.Context, id string, fn func() error) error {
 	lock := s.lock(id)
 	lock.Lock()
@@ -354,7 +321,7 @@ func (s *ProjectComputerService) WithHumanInput(ctx context.Context, id string, 
 	if !c.Enabled {
 		return errors.New("computer use is disabled")
 	}
-	if c.TakeoverPending || (c.HandoffKind != "" && !c.Held) {
+	if c.HandoffKind != "" && !c.Held {
 		return persistence.ErrComputerBusy
 	}
 	return fn()

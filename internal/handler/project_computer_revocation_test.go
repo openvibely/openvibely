@@ -56,7 +56,6 @@ func TestComputerStreamAccessRevocation(t *testing.T) {
 			if err := tc.stores.Projects.Computers().SetEnabled(ctx, project.ID, true); err != nil {
 				t.Fatal(err)
 			}
-			require.NoError(t, tc.stores.Projects.Computers().Hold(ctx, project.ID, true))
 			bobCtx := models.WithPrincipal(ctx, bob.Principal)
 			e := echo.New()
 			e.GET("/projects/:id/stream/:mode", func(c echo.Context) error {

@@ -29,15 +29,12 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 	e.GET("/projects/:id/computer/status", h.ProjectComputerStatus)
 	for _, tc := range []struct {
 		name, requested, want string
-		held                  bool
 	}{
-		{"preview while held", "view", "view", true},
-		{"legacy unspecified preview", "", "view", true},
-		{"controller while held", "control", "control", true},
-		{"control without takeover", "control", "control", false},
+		{"preview", "view", "view"},
+		{"legacy unspecified preview", "", "view"},
+		{"controller", "control", "control"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, repo.Hold(t.Context(), project.ID, tc.held))
 			req := httptest.NewRequest("GET", "/projects/"+project.ID+"/computer/status?viewer_mode="+tc.requested, nil)
 			req.Header.Set("X-OpenVibely-Native-Window", "1")
 			rec := httptest.NewRecorder()
@@ -60,18 +57,10 @@ func TestComputerNativeStatusTicketRespectsViewerMode(t *testing.T) {
 			_, detach, err := h.computerSvc.RegisterViewer(t.Context(), project.ID, "owner", "native-window", ticket.Mode == "control")
 			require.NoError(t, err)
 			defer detach()
-			released, err := h.computerSvc.ReleaseUnviewed(t.Context(), project.ID)
-			require.NoError(t, err)
-			require.Equal(t, tc.held && tc.want == "view", released, "only actual controllers should prevent handback")
 		})
 	}
-	// Temporary unavailability must not downgrade the persistent stream to view-only.
-	require.NoError(t, repo.SetTakeoverPending(t.Context(), project.ID, true))
-	pushed, err := h.computerStatus(t.Context(), h.computerSvc, project.ID, "", "pending-viewer", "control", true)
-	require.NoError(t, err)
-	ticket := h.computerTickets[strings.TrimPrefix(pushed["ticket"].(string), "computer-ticket.")]
-	require.Equal(t, "control", ticket.Mode)
-	_, _, err = h.computerSvc.RegisterViewer(t.Context(), project.ID, "owner", "pending-window", true)
-	require.Error(t, err, "a ticket must not bypass the stream's permission check")
-
+	// Disabled computers must reject new control connections.
+	require.NoError(t, repo.SetEnabled(t.Context(), project.ID, false))
+	_, _, err := h.computerSvc.RegisterViewer(t.Context(), project.ID, "owner", "disabled-window", true)
+	require.Error(t, err, "disabled computer accepted a control connection")
 }

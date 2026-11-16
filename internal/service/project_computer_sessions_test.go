@@ -112,9 +112,6 @@ func TestProjectComputerTaskSessionsAndLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := scoped.Hold(t.Context(), project.ID, false); err == nil {
-		t.Fatal("normal release bypassed login")
-	}
 	if err := svc.Stop(t.Context(), project.ID); !errors.Is(err, persistence.ErrComputerBusy) {
 		t.Fatal("stopped active sessions", err)
 	}

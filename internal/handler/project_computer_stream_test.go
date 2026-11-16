@@ -43,7 +43,6 @@ func TestComputerWorkflowStreamsAndCancelsProvider(t *testing.T) {
 	if err := db.Projects.Computers().SetEnabled(t.Context(), p.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	require.NoError(t, db.Projects.Computers().Hold(t.Context(), p.ID, true))
 	llm := service.NewLLMService(db.LLMConfigs, db.Executions, db.Tasks, db.Projects, db.Schedules, db.Attachments)
 	h := &Handler{projectRepo: db.Projects, computerSvc: svc, llmSvc: llm}
 	e := echo.New()

@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func TestComputerViewerReleaseProtectsOtherControllers(t *testing.T) {
+func TestComputerViewerDisconnectProtectsOtherControllers(t *testing.T) {
 	db := teststores.New(t)
 	ctx := t.Context()
 	project := &models.Project{Name: "viewers"}
@@ -24,8 +24,6 @@ func TestComputerViewerReleaseProtectsOtherControllers(t *testing.T) {
 	if err := svc.repo.SetEnabled(ctx, project.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	// No backend work is necessary to test the ownership/lifecycle boundary.
-	require.NoError(t, svc.repo.Hold(ctx, project.ID, true))
 	tokenA, leaveA, err := svc.RegisterViewer(t.Context(), project.ID, "alice", "a", true)
 	require.NoError(t, err)
 	tokenB, leaveB, err := svc.RegisterViewer(t.Context(), project.ID, "bob", "b", true)
@@ -36,22 +34,9 @@ func TestComputerViewerReleaseProtectsOtherControllers(t *testing.T) {
 	require.NoError(t, svc.ForwardViewerInput(project.ID, "b", tokenB, func() error { return nil }))
 	leaveA()
 	require.NoError(t, svc.ForwardViewerInput(project.ID, "b", tokenB, func() error { return nil }), "closing Alice's viewer must not interrupt Bob")
-	released, err := svc.ReleaseUnviewed(ctx, project.ID)
-	require.NoError(t, err)
-	require.False(t, released)
-	state, err := svc.Get(ctx, project.ID)
-	require.NoError(t, err)
-	require.True(t, state.Held)
+
 	leaveB()
-	// A failed/pending takeover must not be silently cleared by disconnection.
-	require.NoError(t, svc.repo.SetTakeoverPending(ctx, project.ID, true))
-	released, err = svc.ReleaseUnviewed(ctx, project.ID)
-	require.NoError(t, err)
-	require.False(t, released)
-	require.NoError(t, svc.repo.SetTakeoverPending(ctx, project.ID, false))
-	released, err = svc.ReleaseUnviewed(ctx, project.ID)
-	require.NoError(t, err)
-	require.True(t, released)
+	require.Error(t, svc.ForwardViewerInput(project.ID, "b", tokenB, func() error { t.Fatal("detached viewer forwarded input"); return nil }))
 }
 
 func TestComputerViewerDisconnectKeepsPrivateHandoff(t *testing.T) {
@@ -75,9 +60,6 @@ func TestComputerViewerDisconnectKeepsPrivateHandoff(t *testing.T) {
 			_, leave, err := svc.RegisterViewer(ctx, project.ID, "alice", "preview", true)
 			require.NoError(t, err)
 			leave()
-			released, err := svc.ReleaseUnviewed(ctx, project.ID)
-			require.NoError(t, err)
-			require.False(t, released)
 			state, err := svc.Get(ctx, project.ID)
 			require.NoError(t, err)
 			require.Equal(t, kind, state.HandoffKind)
@@ -132,21 +114,15 @@ func TestComputerViewerForwardingAndRevocation(t *testing.T) {
 	require.NoError(t, svc.ForwardViewerInput(project.ID, "session", fresh, func() error { return nil }))
 }
 
-func TestComputerViewerHoldAndPrivateHandoffReconnect(t *testing.T) {
+func TestComputerViewerPrivateHandoffReconnect(t *testing.T) {
 	_, svc, project, task := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{}`) })
 	token, detach, err := svc.RegisterViewer(t.Context(), project.ID, "user", "session", true)
 	require.NoError(t, err)
 	defer detach()
-	require.NoError(t, svc.Hold(t.Context(), project.ID, true))
-	require.NoError(t, svc.ForwardViewerInput(project.ID, "session", token, func() error { return nil }), "holding agent actions must not block the human viewer")
-	fresh, leave, err := svc.RegisterViewer(t.Context(), project.ID, "user", "fresh", true)
-	require.NoError(t, err)
-	defer leave()
-	require.NoError(t, svc.ForwardViewerInput(project.ID, "fresh", fresh, func() error { return nil }))
-	require.NoError(t, svc.Hold(t.Context(), project.ID, false))
 	rt := svc.runtimeTools(t.Context(), project.ID, task.ID)
 	_, _, _, err = rt.Executor(t.Context(), "request_computer_help", json.RawMessage(`{"reason":"Approve the browser prompt"}`))
 	require.NoError(t, err)
+	require.Error(t, svc.ForwardViewerInput(project.ID, "session", token, func() error { t.Fatal("old viewer forwarded input"); return nil }))
 	// Handoffs pause the agent, not the human using the desktop.
 	handoff, end, err := svc.RegisterViewer(t.Context(), project.ID, "user", "handoff", true)
 	require.NoError(t, err)

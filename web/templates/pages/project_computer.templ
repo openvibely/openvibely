@@ -278,7 +278,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      }
      function syncViewerInput(){
       if(!rfb)return;
-      const want=!!(connected&&dialog.open&&!closing&&!document.hidden&&!currentState?.takeover_pending);
+      const want=!!(connected&&dialog.open&&!closing&&!document.hidden);
       if(!want&&!rfb.viewOnly){
        // Release held input before viewOnly starts suppressing outgoing input.
        rfb._keyboard?.ungrab();

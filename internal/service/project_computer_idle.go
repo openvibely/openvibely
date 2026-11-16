@@ -73,7 +73,7 @@ func (s *ProjectComputerService) reapIdleDesktops(ctx context.Context, id string
 	if err != nil {
 		return err
 	}
-	if !state.Enabled || state.IdleMinutes == 0 || state.Held || state.TakeoverPending || state.HandoffKind != "" {
+	if !state.Enabled || state.IdleMinutes == 0 || state.Held || state.HandoffKind != "" {
 		return nil
 	}
 	ids, err := root.repo.IdleDesktopCandidates(ctx, id)
@@ -121,7 +121,7 @@ func (s *ProjectComputerService) reapIdleTask(ctx context.Context, id, task stri
 	}
 	defer lock.Unlock()
 	// Re-read eligibility after acquiring this task's locks: it may have
-	// started work or entered takeover while another desktop was stopping.
+	// started work or requested a private handoff while another desktop was stopping.
 	ids, err := s.repo.IdleDesktopCandidates(ctx, id)
 	if err != nil {
 		return err

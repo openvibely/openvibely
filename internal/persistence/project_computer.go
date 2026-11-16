@@ -12,7 +12,6 @@ type ProjectComputerStore interface {
 	TaskIDsForDesktopCleanup(context.Context, string) ([]string, error)
 	SetIdleMinutes(context.Context, string, int) error
 	IdleDesktopCandidates(context.Context, string) ([]string, error)
-	SetTakeoverPending(context.Context, string, bool) error
 	SetTimeZone(context.Context, string, string) error
 	ChromeImportProgress(context.Context, string, string) (map[string]int, error)
 	RecordChromeProfile(context.Context, string, string, string, int) error
@@ -31,7 +30,6 @@ type ProjectComputerStore interface {
 	Get(ctx context.Context, id string) (*models.ProjectComputer, error)
 	Configure(ctx context.Context, id, provider string) error
 	MarkCleanupRequired(ctx context.Context, id string) error
-	Hold(ctx context.Context, id string, held bool) error
 	Reserve(ctx context.Context, id, owner string) error
 	Release(ctx context.Context, id, owner string) error
 	Renew(ctx context.Context, id, owner string) error

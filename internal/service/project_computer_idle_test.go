@@ -47,7 +47,7 @@ func TestComputerIdlePolicyProtectsWorkAndHandoffs(t *testing.T) {
 	require.Equal(t, 30, state.IdleMinutes)
 	eligible := []string{}
 	var unlocks []func()
-	for _, kind := range []string{"completed", "pending", "running", "queued", "held", "handoff", "takeover", "lease", "operation", "control"} {
+	for _, kind := range []string{"completed", "pending", "running", "queued", "handoff", "lease", "operation", "control"} {
 		status := models.StatusPending
 		if kind == "running" {
 			status = models.StatusRunning
@@ -78,12 +78,8 @@ func TestComputerIdlePolicyProtectsWorkAndHandoffs(t *testing.T) {
 			unlocks = append(unlocks, lock.Unlock)
 		case "completed", "pending":
 			eligible = append(eligible, ComputerDesktopID(task.ID))
-		case "held":
-			require.NoError(t, scoped.repo.Hold(t.Context(), project.ID, true))
 		case "handoff":
 			require.NoError(t, scoped.repo.RequestHandoff(t.Context(), project.ID, "request_computer_help", "", "help", ""))
-		case "takeover":
-			require.NoError(t, scoped.repo.SetTakeoverPending(t.Context(), project.ID, true))
 		case "lease":
 			require.NoError(t, scoped.repo.Reserve(t.Context(), project.ID, "agent"))
 		}
@@ -277,12 +273,16 @@ func TestComputerCleanupDoesNotLockOtherCandidates(t *testing.T) {
 			continue
 		}
 		taken := make(chan error, 1)
-		go func() { taken <- scoped.Hold(ctx, project.ID, true) }()
+		go func() {
+			tools := scoped.runtimeTools(ctx, project.ID, scoped.taskID)
+			_, _, _, err := tools.Executor(ctx, "request_computer_help", json.RawMessage(`{"reason":"Help with this desktop"}`))
+			taken <- err
+		}()
 		select {
 		case err := <-taken:
 			require.NoError(t, err)
 		case <-time.After(2 * time.Second):
-			t.Fatal("hold waited for unrelated shutdown")
+			t.Fatal("private handoff waited for unrelated shutdown")
 		}
 	}
 	cancel()

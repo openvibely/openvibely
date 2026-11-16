@@ -34,7 +34,7 @@ func (p *fakeComputerProvisioner) Start(context.Context, string) (ComputerConnec
 }
 func (p *fakeComputerProvisioner) Stop(context.Context, string) error { p.stopped = true; return nil }
 
-func TestProjectComputerOwnershipTakeoverAndImages(t *testing.T) {
+func TestProjectComputerOwnershipAndImages(t *testing.T) {
 	calls := 0
 	png := append([]byte{137, 80, 78, 71, 13, 10, 26, 10}, make([]byte, 32)...)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,23 +83,11 @@ func TestProjectComputerOwnershipTakeoverAndImages(t *testing.T) {
 	if err = svc.Stop(t.Context(), project.ID); !errors.Is(err, persistence.ErrComputerBusy) {
 		t.Fatalf("stop while busy: %v", err)
 	}
-	if err = svc.Hold(t.Context(), project.ID, true); err != nil {
+	if _, _, _, err = one.Executor(t.Context(), "release_computer", json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
-	}
-	if _, _, _, err = one.Executor(t.Context(), "computer", json.RawMessage(`{}`)); !errors.Is(err, persistence.ErrComputerBusy) {
-		t.Fatalf("private takeover: %v", err)
 	}
 	if calls != 1 {
 		t.Fatalf("blocked actions reached desktop: %d", calls)
-	}
-	if err = svc.WithHumanInput(t.Context(), project.ID, func() error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if err = svc.Hold(t.Context(), project.ID, false); err != nil {
-		t.Fatal(err)
-	}
-	if err = svc.WithHumanInput(t.Context(), project.ID, func() error { return nil }); err != nil {
-		t.Fatal(err)
 	}
 	if _, _, _, err = two.Executor(t.Context(), "computer", json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
@@ -162,7 +150,7 @@ func TestHostedComputerProvisionerContract(t *testing.T) {
 	}
 }
 
-func TestProjectComputerTakeoverCancelsAgentAction(t *testing.T) {
+func TestProjectComputerCancellationStopsOnlyItsAgentAction(t *testing.T) {
 	started := make(chan struct{})
 	otherDesktop := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +169,7 @@ func TestProjectComputerTakeoverCancelsAgentAction(t *testing.T) {
 	defer server.Close()
 	db := teststores.New(t)
 	projects := db.Projects
-	project := &models.Project{Name: "Private takeover"}
+	project := &models.Project{Name: "Action cancellation"}
 	if err := projects.Create(t.Context(), project); err != nil {
 		t.Fatal(err)
 	}
@@ -208,9 +196,11 @@ func TestProjectComputerTakeoverCancelsAgentAction(t *testing.T) {
 	if tools == nil || !tools.HasDefinition("computer") {
 		t.Fatal("task runner did not expose the configured computer")
 	}
+	actionCtx, cancelAction := context.WithCancel(t.Context())
+	defer cancelAction()
 	finished := make(chan error, 1)
 	go func() {
-		_, _, _, err := tools.Executor(t.Context(), "computer", json.RawMessage(`{"action":"get_desktop_state"}`))
+		_, _, _, err := tools.Executor(actionCtx, "computer", json.RawMessage(`{"action":"get_desktop_state"}`))
 		finished <- err
 	}()
 	select {
@@ -232,20 +222,14 @@ func TestProjectComputerTakeoverCancelsAgentAction(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("one task blocked another task desktop")
 	}
-	scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := scoped.Hold(t.Context(), project.ID, true); err != nil {
-		t.Fatal(err)
-	}
+	cancelAction()
 	select {
 	case err := <-finished:
 		if err == nil {
-			t.Fatal("private takeover returned an agent screenshot")
+			t.Fatal("cancelled action returned an agent screenshot")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("takeover did not cancel action")
+		t.Fatal("cancellation did not stop action")
 	}
 }
 

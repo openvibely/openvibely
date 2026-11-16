@@ -6,7 +6,6 @@ type ProjectComputer struct {
 	ProjectEnabled      bool   `json:"project_enabled"`
 	CleanupRequired     bool   `json:"-"`
 	IdleMinutes         int    `json:"idle_minutes"`
-	TakeoverPending     bool   `json:"takeover_pending"`
 	TimeZone            string `json:"time_zone"`
 	Enabled             bool   `json:"enabled"`
 	HandoffReason       string `json:"handoff_reason,omitempty"`

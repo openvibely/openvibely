@@ -46,6 +46,4 @@ func TestComputerViewerInputDoesNotHoldAgentTools(t *testing.T) {
 	require.NoError(t, s.checkViewerPermission(t.Context(), p.ID))
 	_, _, _, err = rt.Executor(t.Context(), "computer", json.RawMessage(`{"action":"get_desktop_state"}`))
 	require.ErrorIs(t, err, persistence.ErrComputerBusy)
-	require.NoError(t, s.repo.SetTakeoverPending(t.Context(), p.ID, true))
-	require.ErrorIs(t, s.checkViewerPermission(t.Context(), p.ID), persistence.ErrComputerBusy)
 }

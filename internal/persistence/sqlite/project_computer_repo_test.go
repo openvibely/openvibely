@@ -41,12 +41,6 @@ func TestComputerReservationSurvivesServiceRestartAndExpires(t *testing.T) {
 	if err := restarted.Reserve(t.Context(), p.ID, "second"); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Hold(t.Context(), p.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := restarted.Reserve(t.Context(), p.ID, "second"); !errors.Is(err, persistence.ErrComputerBusy) {
-		t.Fatal(err)
-	}
 	if err := repo.Configure(t.Context(), "nonexistent", "local"); err == nil {
 		t.Fatal("accepted missing project")
 	}

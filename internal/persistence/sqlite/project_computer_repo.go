@@ -21,28 +21,12 @@ func (r *ProjectComputerRepo) Get(ctx context.Context, id string) (*models.Proje
 		return r.getSession(ctx, id)
 	}
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,held,owner,lease_until,enabled,time_zone,takeover_pending,idle_minutes,cleanup_required FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.TakeoverPending, &c.IdleMinutes, &c.CleanupRequired)
+	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,held,owner,lease_until,enabled,time_zone,idle_minutes,cleanup_required FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.IdleMinutes, &c.CleanupRequired)
 	return c, err
 }
 func (r *ProjectComputerRepo) Configure(ctx context.Context, id, provider string) error {
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO project_computers(project_id,provider,enabled) VALUES (?,?,0) ON CONFLICT(project_id) DO NOTHING`, id, provider)
-		return err
-	})
-}
-func (r *ProjectComputerRepo) Hold(ctx context.Context, id string, held bool) error {
-	if r.taskID != "" {
-		return r.sessionHold(ctx, id, held)
-	}
-	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		res, err := tx.ExecContext(ctx, `UPDATE project_computers SET held=?,owner='',lease_until=0 WHERE project_id=?`, held, id)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err == nil && n == 0 {
-			return sql.ErrNoRows
-		}
 		return err
 	})
 }
@@ -80,31 +64,6 @@ func (r *ProjectComputerRepo) Renew(ctx context.Context, id, owner string) error
 	}
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		_, err := tx.ExecContext(ctx, `UPDATE project_computers SET lease_until=? WHERE project_id=? AND owner=? AND held=0`, time.Now().Unix()+300, id, owner)
-		return err
-	})
-}
-
-func (r *ProjectComputerRepo) sessionHold(ctx context.Context, id string, held bool) error {
-	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		if !held {
-			var resume bool
-			if err := tx.QueryRowContext(ctx, `SELECT resume_after_takeover=1 AND held=1 AND handoff_kind='' FROM task_computer_sessions WHERE project_id=? AND task_id=?`, id, r.taskID).Scan(&resume); err != nil {
-				return err
-			}
-			if resume {
-				if err := NewThreadInputRepo(r.db).createQueuedWithExecutor(ctx, tx, &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: id, TaskID: r.taskID, Content: "The user returned control of your computer. Continue the original task. Inspect the current screen before acting.", Source: "project_computer", ChatMode: models.ChatModeOrchestrate}); err != nil {
-					return err
-				}
-			}
-		}
-		res, err := tx.ExecContext(ctx, `UPDATE task_computer_sessions SET resume_after_takeover=CASE WHEN ?=0 THEN 0 WHEN held=0 AND handoff_kind='' AND EXISTS(SELECT 1 FROM tasks WHERE id=? AND status IN ('running','queued')) THEN 1 ELSE resume_after_takeover END,held=?,owner='',lease_until=0 WHERE project_id=? AND task_id=?`, held, r.taskID, held, id, r.taskID)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err == nil && n == 0 {
-			return sql.ErrNoRows
-		}
 		return err
 	})
 }
@@ -155,7 +114,7 @@ func (r *ProjectComputerRepo) ForTask(ctx context.Context, projectID, taskID str
 }
 func (r *ProjectComputerRepo) getSession(ctx context.Context, id string) (*models.ProjectComputer, error) {
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT s.project_id,p.provider,s.held,s.owner,s.lease_until,s.handoff_kind,s.handoff_url,s.handoff_reason,s.handoff_expected_text,s.handoff_alert_id,s.tool_target,(p.enabled AND s.enabled),p.time_zone,s.takeover_pending,p.idle_minutes,s.enabled,p.enabled FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.HandoffKind, &c.HandoffURL, &c.HandoffReason, &c.HandoffExpectedText, &c.HandoffAlertID, &c.ToolTarget, &c.Enabled, &c.TimeZone, &c.TakeoverPending, &c.IdleMinutes, &c.TaskEnabled, &c.ProjectEnabled)
+	err := r.db.QueryRowContext(ctx, `SELECT s.project_id,p.provider,s.held,s.owner,s.lease_until,s.handoff_kind,s.handoff_url,s.handoff_reason,s.handoff_expected_text,s.handoff_alert_id,s.tool_target,(p.enabled AND s.enabled),p.time_zone,p.idle_minutes,s.enabled,p.enabled FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.HandoffKind, &c.HandoffURL, &c.HandoffReason, &c.HandoffExpectedText, &c.HandoffAlertID, &c.ToolTarget, &c.Enabled, &c.TimeZone, &c.IdleMinutes, &c.TaskEnabled, &c.ProjectEnabled)
 	return c, err
 }
 func (r *ProjectComputerRepo) SessionsBusy(ctx context.Context, id string) (bool, error) {
@@ -196,26 +155,6 @@ func (r *ProjectComputerRepo) SetTimeZone(ctx context.Context, id, zone string) 
 	})
 }
 
-func (r *ProjectComputerRepo) SetTakeoverPending(ctx context.Context, id string, pending bool) error {
-	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		query := `UPDATE project_computers SET takeover_pending=? WHERE project_id=?`
-		args := []any{pending, id}
-		if r.taskID != "" {
-			query = `UPDATE task_computer_sessions SET takeover_pending=? WHERE project_id=? AND task_id=?`
-			args = append(args, r.taskID)
-		}
-		result, err := tx.ExecContext(ctx, query, args...)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err == nil && n == 0 {
-			return sql.ErrNoRows
-		}
-		return err
-	})
-}
-
 func (r *ProjectComputerRepo) SetIdleMinutes(ctx context.Context, id string, minutes int) error {
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		_, err := tx.ExecContext(ctx, `UPDATE project_computers SET idle_minutes=? WHERE project_id=?`, minutes, id)
@@ -223,7 +162,7 @@ func (r *ProjectComputerRepo) SetIdleMinutes(ctx context.Context, id string, min
 	})
 }
 func (r *ProjectComputerRepo) IdleDesktopCandidates(ctx context.Context, id string) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT s.task_id FROM task_computer_sessions s JOIN tasks t ON t.id=s.task_id AND t.project_id=s.project_id WHERE s.project_id=? AND s.held=0 AND s.takeover_pending=0 AND s.handoff_kind='' AND (s.owner='' OR s.lease_until<?) AND t.status NOT IN ('running','queued')`, id, time.Now().Unix())
+	rows, err := r.db.QueryContext(ctx, `SELECT s.task_id FROM task_computer_sessions s JOIN tasks t ON t.id=s.task_id AND t.project_id=s.project_id WHERE s.project_id=? AND s.held=0 AND s.handoff_kind='' AND (s.owner='' OR s.lease_until<?) AND t.status NOT IN ('running','queued')`, id, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}

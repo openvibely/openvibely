@@ -108,7 +108,7 @@ func (h *Handler) computerStatus(ctx context.Context, svc *service.ProjectComput
 	if err != nil {
 		return nil, err
 	}
-	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": svc.Ready(ctx, projectID), "held": state.Held && !state.TakeoverPending, "takeover_pending": state.TakeoverPending, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": svc.ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
+	status := map[string]any{"idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": svc.Ready(ctx, projectID), "held": state.Held, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": svc.ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
 	if h.desktopMode && h.computerDesktopURL != "" && native && status["ready"] == true {
 		mode := "view"
 		// Permission is checked when the stream connects; never silently issue
@@ -230,23 +230,8 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(409, err.Error())
 	}
+	defer detach()
 	taskID := c.QueryParam("task_id")
-	defer func() {
-		detach()
-		if mode == "control" {
-			go func() {
-				// Allow a transient reconnect to settle first.
-				timer := time.NewTimer(2 * time.Second)
-				defer timer.Stop()
-				<-timer.C
-				cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
-				defer stop()
-				if released, err := svc.ReleaseUnviewed(cleanup, id); err == nil && released {
-					h.PromoteQueuedTaskThreadInput(taskID)
-				}
-			}()
-		}
-	}()
 	u.Path = strings.TrimRight(u.Path, "/") + "/rfb-" + mode
 	upstream, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + conn.Token}, "X-OV-Viewer-ID": {token}}, Subprotocols: []string{"binary"}})
 	if err != nil {

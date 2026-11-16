@@ -27,7 +27,7 @@ func (s *ProjectComputerService) viewerLock(id string) *sync.Mutex {
 }
 func (s *ProjectComputerService) RegisterViewer(ctx context.Context, id, user, session string, control bool, replacements ...context.CancelFunc) (string, func(), error) {
 	lock := s.viewerLock(id)
-	// Handback may wait for cleanup. Reject reconnects during that
+	// Idle shutdown may be in progress. Reject reconnects during that
 	// transition instead of waiting behind it with an open HTTP request.
 	if !lock.TryLock() {
 		return "", nil, persistence.ErrComputerBusy
@@ -55,40 +55,6 @@ func (s *ProjectComputerService) RegisterViewer(ctx context.Context, id, user, s
 	}
 	s.active.Store(key, viewer)
 	return viewer.Token, func() { s.active.CompareAndDelete(key, viewer) }, nil
-}
-func (s *ProjectComputerService) hasControlViewer(id string) bool {
-	found := false
-	s.active.Range(func(key, value any) bool {
-		if strings.HasPrefix(key.(string), s.viewerPrefix(id)) && value.(*computerViewer).Control {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
-}
-
-// Serialized with viewer registration, so an old connection cannot release a
-// replacement viewer's control. Private handoffs always stay paused.
-func (s *ProjectComputerService) ReleaseUnviewed(ctx context.Context, id string) (bool, error) {
-	lock := s.viewerLock(id)
-	lock.Lock()
-	defer lock.Unlock()
-	if s.hasControlViewer(id) {
-		return false, nil
-	}
-	state, err := s.repo.Get(ctx, id)
-	if err != nil {
-		return false, err
-	}
-	if !state.Held || state.TakeoverPending || state.HandoffKind != "" {
-		return false, nil
-	}
-	if err = s.Hold(ctx, id, false); err != nil {
-		return false, err
-	}
-	defer s.publishStatus(id, false)
-	return true, s.repo.SetTakeoverPending(ctx, id, false)
 }
 
 // viewerGate serializes registration with permission changes.

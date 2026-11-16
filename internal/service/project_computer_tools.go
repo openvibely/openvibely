@@ -10,7 +10,7 @@ import (
 func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 	return []llmcontracts.RuntimeToolDefinition{
 		{Name: "computer",
-			Description: "Use this task's persistent Linux desktop. Actions: get_desktop_state, click, double_click, right_click, drag, scroll, press_key, hotkey, type_text, wait. Inspect the returned screenshot after each action. Input does not prove the intended operation completed. User takeover blocks agent access. This desktop is separate from your coding worktree.",
+			Description: "Use this task's persistent Linux desktop. Actions: get_desktop_state, click, double_click, right_click, drag, scroll, press_key, hotkey, type_text, wait. Inspect the returned screenshot after each action. Input does not prove the intended operation completed. Private sign-in and help requests block agent access until resolved. This desktop is separate from your coding worktree.",
 			Access:      llmcontracts.RuntimeToolAccessWrite,
 			Schema: &toolschema.Schema{
 				Type: "object",
