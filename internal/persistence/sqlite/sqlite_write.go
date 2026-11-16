@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
@@ -136,6 +137,11 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 			err = ctx.Err()
 		}
 		restoreBusyTimeout()
+		// BEGIN may have succeeded before the driver reports cancellation.
+		// No transaction cleanup has been installed yet, so returning this
+		// connection to the pool can break every subsequent writer. Discard
+		// it rather than assuming an error means no transaction was opened.
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		closeConn()
 		return nil, nil, err
 	}
