@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
+	"strings"
 	"sync"
+
+	modernsqlite "modernc.org/sqlite"
 
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 )
@@ -136,12 +140,20 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 		if ctx.Err() != nil && database.IsSQLiteBusy(err) {
 			err = ctx.Err()
 		}
-		restoreBusyTimeout()
 		// BEGIN may have succeeded before the driver reports cancellation.
-		// No transaction cleanup has been installed yet, so returning this
-		// connection to the pool can break every subsequent writer. Discard
-		// it rather than assuming an error means no transaction was opened.
-		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		// Clean up independently of the request before releasing the writer.
+		rollbackCtx, cancel := database.NewSQLiteBusyTimeoutRestoreContext(context.WithoutCancel(ctx))
+		_, rollbackErr := conn.ExecContext(rollbackCtx, `ROLLBACK`)
+		cancel()
+		restoreBusyTimeout()
+		var sqliteErr *modernsqlite.Error
+		noTransaction := errors.As(rollbackErr, &sqliteErr) && sqliteErr.Code() == 1 &&
+			strings.Contains(sqliteErr.Error(), "cannot rollback - no transaction is active")
+		if rollbackErr != nil && !noTransaction {
+			// Cleanup could not confirm a clean connection. Closing it rolls
+			// back any remaining transaction instead of poisoning later writes.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
 		closeConn()
 		return nil, nil, err
 	}
