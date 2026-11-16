@@ -27,7 +27,7 @@ func TestComputerPreviewCache(t *testing.T) {
  const document={createElement:canvas},previewCache=new Map();
  let previewDeleted=false;
  let previewKey=JSON.stringify(['project','task']),retained=null,reports=0,closed=false,generation=1,frameTimer=null;
- let live=canvas();live.painted=true;
+ let live=canvas();live.painted=true;let liveCanvas=live;
  const screen={style:{},append(){},querySelector(){return live}};
  let frameReady=false,connected=true,everConnected=false,connectTimer=null,rfb=null;
  const screenRetry={success(){}};function renderConnection(){};
@@ -41,6 +41,8 @@ func TestComputerPreviewCache(t *testing.T) {
  previewKey=oldKey;restoreFrame();assert.ok(retained.painted);
  live=canvas();revealFrame(1);assert.ok(retained,'blank live canvas must not replace cached frame');
  live.painted=true;revealFrame(1);assert.equal(retained,null);
+ liveCanvas=live;live=null;retainFrame();assert.ok(retained?.painted,'detached live canvas must survive an unexpected disconnect');
+ live=liveCanvas;
  for(let i=0;i<20;i++){previewKey=JSON.stringify(['project',i]);rememberFrame(live)}
  assert.equal(previewCache.size,12);assert.equal(previewCache.has(oldKey),false);
  previewDeleted=true;previewCache.clear();rememberFrame(live);assert.equal(previewCache.size,0);

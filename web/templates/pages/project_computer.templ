@@ -128,7 +128,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       const label=connectionOverlay.querySelector('[data-computer-connection-text]');if(label.textContent!==text)label.textContent=text;
      }
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
-     let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null;
+     let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null, liveCanvas=null;
      let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, connectTimer=null, refreshPromise=null, refreshQueued=false, pendingState=null;
      function queueStatus(){
       if(closed || previewDeleted)return;
@@ -277,7 +277,8 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      // Keep the last painted desktop while the stream reconnects.
      function retainFrame(){
       if(previewDeleted || retained)return;
-      const source=screen.querySelector('canvas:not([data-retained-frame])');
+      // noVNC detaches its screen before emitting an unexpected disconnect.
+      const source=screen.querySelector('canvas:not([data-retained-frame])')||liveCanvas;
       if(!source || !source.width || !source.height)return;
       const frame=document.createElement('canvas');frame.width=source.width;frame.height=source.height;
       try{const ctx=source.getContext('2d');if(![.25,.5,.75].some(v=>ctx.getImageData(Math.floor(source.width*v),Math.floor(source.height*v),1,1).data[3]))return;frame.getContext('2d').drawImage(source,0,0);}catch{return;}
@@ -315,6 +316,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       if(closed || previewDeleted || epoch!==generation)return;
       const ws=new URL(state.stream_url || scoped('/stream/control'),location.href);ws.protocol=ws.protocol==='https:'?'wss:':'ws:';
       rfb=new RFB(screen,ws.href,{wsProtocols:state.ticket?['binary',state.ticket]:['binary']});
+      liveCanvas=screen.querySelector('canvas:not([data-retained-frame])');
       if(retained)screen.append(retained);
       rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
       rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=true;
@@ -323,9 +325,9 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;revealFrame(epoch);syncViewerInput();});
       rfb.addEventListener('clipboard',event=>{if(epoch!==generation||!inputActive())return;if(document.hasFocus())navigator.clipboard?.writeText(event.detail.text).catch(()=>{});});
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;window.showToast('Desktop authentication failed.','error','',{toastKey:previewKey+':authentication'});}});
-      rfb.addEventListener('disconnect',event=>{if(epoch===generation){clearTimeout(connectTimer);retainFrame();connected=false;frameReady=false;rfb=null;mode='';recording=false;renderDemo();renderConnection();retryStatus();}});
+      rfb.addEventListener('disconnect',event=>{if(epoch===generation){clearTimeout(connectTimer);retainFrame();liveCanvas=null;connected=false;frameReady=false;rfb=null;mode='';recording=false;renderDemo();renderConnection();retryStatus();}});
      }
-     function disconnect(){++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;frameReady=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();renderConnection();}
+     function disconnect(){++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;frameReady=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;liveCanvas=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();renderConnection();}
      function refresh(){
       if(refreshPromise){refreshQueued=true;return refreshPromise;}
       refreshPromise=(async()=>{do{refreshQueued=false;await refreshStatus();}while(refreshQueued&&!closed&&!previewDeleted);})().finally(()=>{refreshPromise=null;retryStatus();});

@@ -158,6 +158,8 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled);q('[data-teach-discard]').click();await wait(()=>cancelledGeneration&&!q('[data-teach-save]').disabled,'discard cancellation');window.fetch=originalFetch;
  const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});
  if(overlay.style.display==='none')throw Error('Disconnect did not show overlay immediately');
+ const disconnectedFrame=q('[data-retained-frame]');
+ if(!disconnectedFrame||!disconnectedFrame.getContext('2d').getImageData(1,1,1,1).data[3])throw Error('Unexpected disconnect lost the last painted frame');
  await wait(()=>overlay.textContent.includes('Retrying in 1 second'),'retry countdown');
  await wait(()=>window.fixtureRFB!==dropped&&window.fixtureRFB.painted,'reconnected');
  Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));const hiddenRFB=window.fixtureRFB;if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming');
