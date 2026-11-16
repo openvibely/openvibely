@@ -15,6 +15,7 @@ import (
 var testRuntime *Runtime
 
 func TestMain(m *testing.M) {
+	runRecursionSandboxHelper()
 	root, err := os.MkdirTemp("", "gitidentity-tests-")
 	if err != nil {
 		panic(err)

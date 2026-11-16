@@ -44,15 +44,18 @@ func install(destination string) error {
 	}
 	posix := `#!/bin/sh
 real_git=${OV_GIT_REAL_EXECUTABLE:?missing Git executable}
+# A misconfigured target must fail before identity lookup forks any shells.
+if [ "$real_git" -ef "$0" ]; then
+ echo 'OV Git wrapper cannot use itself as real Git' >&2
+ exit 125
+fi
 ` + identityFallbackScript + `
 HOME=$(CDPATH= cd -- "${0%/*}/../home" && pwd) || exit 1
 export HOME
 ` + networkScopeScript + `
 exec "$real_git" "$@"
 `
-	windows := `$realGit = $env:OV_GIT_REAL_EXECUTABLE
-if (-not $realGit) { throw 'missing Git executable' }
-` + windowsIdentityFallbackScript + `
+	windows := windowsRecursionGuardScript + windowsIdentityFallbackScript + `
 $env:HOME = Join-Path (Split-Path $PSScriptRoot -Parent) 'home'
 ` + windowsNetworkScopeScript
 	for name, script := range map[string]string{
