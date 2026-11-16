@@ -17,6 +17,8 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 	var mu sync.Mutex
 	var requests []string
 	var failed, denied bool
+	resetGate := make(chan struct{})
+	var releaseReset sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -55,6 +57,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 			count := len(requests)
 			mu.Unlock()
 			if count == 1 {
+				<-resetGate
 				json.NewEncoder(w).Encode(map[string]any{"outcome": "in_progress", "retry_same_request": true})
 			} else {
 				json.NewEncoder(w).Encode(map[string]any{"outcome": "reset", "retry_same_request": false})
@@ -69,6 +72,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	defer releaseReset.Do(func() { close(resetGate) })
 	runComposerFocusCDP(t, chrome, server.URL, "account-rail", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("sorted account rings", `JSON.stringify([...document.querySelectorAll('.rail-account')].map(b=>[b.dataset.key,b.querySelectorAll('circle').length]))`, `[["personal",2],["work",3],["anthropic",3]]`)
@@ -79,7 +83,14 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		// HTTP LAN origins do not expose randomUUID, but getRandomValues remains available.
 		b.evaluate(`Object.defineProperty(crypto, 'randomUUID', {value: undefined, configurable: true}); 'HTTP crypto capabilities'`)
 		b.evaluate(`document.querySelector('[data-action="reset-grant"]').click(); 'reset'`)
-		b.waitFor("retryable reset", `String(document.getElementById('rail-account-popup').textContent.includes('earlier reset'))`, "true")
+		b.waitFor("reset in flight", `String(openVibelyAccountRail.busy)`, "true")
+		b.evaluate(`document.querySelector('[data-key="work"]').dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'})); 'hover another account'`)
+		b.waitFor("hover opens account", `String(openVibelyAccountRail.selected==='work'&&document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
+		b.waitFor("other account disabled during reset", `String(document.querySelector('[data-action="refresh"]').disabled)`, "true")
+		releaseReset.Do(func() { close(resetGate) })
+		b.waitFor("other account enabled after reset", `String(!openVibelyAccountRail.busy&&!document.querySelector('[data-action="refresh"]').disabled&&!document.querySelector('[data-action="reset-grant"]').disabled)`, "true")
+		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'return to reset account'`)
+		b.waitFor("retry retained", `String(openVibelyAccountRail.attempts.size===1)`, "true")
 		b.waitFor("reset enabled", `String(!document.querySelector('[data-action="reset-grant"]').disabled)`, "true")
 		b.evaluate(`document.querySelector('[data-action="reset-grant"]').click(); 'retry'`)
 		b.waitFor("reset success", `String(document.getElementById('rail-account-popup').textContent.includes('Usage reset.'))`, "true")
@@ -121,6 +132,13 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
     probe.remove();return 'ok';
    })()`, "ok")
 		}
+		// Hover must not steal focus and must allow crossing the gap into the popup.
+		b.evaluate(`document.activeElement.blur(); window.hoverFocus=document.activeElement; document.querySelector('[data-key="personal"]').dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'})); 'hover'`)
+		b.waitFor("hover preserves focus", `String(document.activeElement===window.hoverFocus&&document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
+		b.evaluate(`document.getElementById('rail-accounts').dispatchEvent(new PointerEvent('pointerleave')); document.getElementById('rail-account-popup').dispatchEvent(new PointerEvent('pointerenter')); window.hoverChecked=false; setTimeout(()=>window.hoverChecked=true,350); 'cross gap'`)
+		b.waitFor("popup stays open on entry", `String(window.hoverChecked&&document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
+		b.evaluate(`document.getElementById('rail-account-popup').dispatchEvent(new PointerEvent('pointerleave')); 'leave'`)
+		b.waitFor("hover popup dismisses on leave", `String(!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
 		// Provider failure must not leave stale rings looking like live allowance.
 		mu.Lock()
 		failed = true

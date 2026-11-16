@@ -247,7 +247,18 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         ),
       ) + "px";
   }
+  let hoverCloseTimer;
+  function cancelHoverClose() {
+    clearTimeout(hoverCloseTimer);
+  }
+  function scheduleHoverClose() {
+    cancelHoverClose();
+    hoverCloseTimer = setTimeout(() => {
+      if (!popup.contains(document.activeElement)) closeUsage();
+    }, 250);
+  }
   function closeUsage(focus = false) {
+    cancelHoverClose();
     if (shown()) popup.hidePopover();
     if (focus)
       host
@@ -666,10 +677,11 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     })();
     return a.loading;
   }
-  async function openAccount(a) {
+  async function openAccount(a, hover = false) {
+    cancelHoverClose();
     closeOverflow();
     if (shown() && state.selected === a.key) {
-      closeUsage(true);
+      if (!hover) popup.querySelector('[data-action="refresh"]')?.focus();
       return;
     }
     state.selected = a.key;
@@ -677,7 +689,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     if (!shown()) popup.showPopover();
     drawRail();
     drawPopup();
-    popup.querySelector('[data-action="refresh"]')?.focus();
+    if (!hover) popup.querySelector('[data-action="refresh"]')?.focus();
     await loadResets(a);
   }
   async function redeem(a, c) {
@@ -725,7 +737,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         "Could not confirm the reset. Retry to check the same request.";
     } finally {
       state.busy = false;
-      if (shown() && state.selected === a.key) drawPopup();
+      if (shown()) drawPopup();
       document.body.dispatchEvent(
         new CustomEvent("accountUsageChanged", { detail: { source: "rail" } }),
       );
@@ -777,6 +789,17 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         refreshAll();
     }
   }
+  host.addEventListener("pointerover", (event) => {
+    if (event.pointerType === "touch") return;
+    const button = event.target.closest(".rail-account");
+    if (!button) return;
+    const account = state.accounts.find((a) => a.key === button.dataset.key);
+    if (account) openAccount(account, true);
+  });
+  host.addEventListener("pointerenter", cancelHoverClose);
+  host.addEventListener("pointerleave", scheduleHoverClose);
+  popup.addEventListener("pointerenter", cancelHoverClose);
+  popup.addEventListener("pointerleave", scheduleHoverClose);
   host.addEventListener("click", (e) => e.stopPropagation());
   popup.addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", (e) => {
