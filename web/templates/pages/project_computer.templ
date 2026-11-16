@@ -124,7 +124,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       const waiting=!frameReady;connectionOverlay.style.display=waiting?'flex':'none';screen.setAttribute('aria-busy',String(waiting));
       if(!waiting)return;
       const seconds=Math.ceil(Math.max(0,screenRetry.nextRetryAt-Date.now())/1000);
-      const text=seconds?'Retrying in '+seconds+' seconds…':everConnected||retained?'Reconnecting to computer…':'Connecting to computer…';
+      const text=seconds?'Retrying in '+seconds+(seconds===1?' second…':' seconds…'):everConnected||retained?'Reconnecting to computer…':'Connecting to computer…';
       const label=connectionOverlay.querySelector('[data-computer-connection-text]');if(label.textContent!==text)label.textContent=text;
      }
      const buttons=[...root.querySelectorAll('[data-computer-action]')];

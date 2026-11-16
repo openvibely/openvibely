@@ -70,6 +70,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  q('[data-computer-action="ensure"]').click();await wait(()=>startupErrors.length===2,'retry error toast');
  window.fetch=startupFetch;window.showToast=startupToast;
  q('[data-computer-action="ensure"]').click();
+ await wait(()=>window.fixtureRFB?.connected);
+ if(q('[data-computer-connection]').style.display==='none'||q('[data-retained-frame]'))throw Error('Initial connection must show loading on plain background');
+ if(!q('[data-computer-connection]').textContent.includes('Connecting to computer'))throw Error('Missing initial connection status');
  await wait(()=>window.fixtureRFB?.painted);
  if(!q('#tab-computer').contains(q('[data-computer-preview]')))throw Error('Preview not in Computer tab');
  if(q('[data-computer-files]'))throw Error('Obsolete Files section remains');
@@ -83,6 +86,11 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(!q('[data-computer-dialog]').open||!q('[data-computer-expanded]').contains(overlay))throw Error('Overlay did not follow expansion');
  if(!window.fixtureRFB.viewOnly||q('[aria-label="Remote computer keyboard"]'))throw Error('Input enabled before live frame');
  await new Promise(r=>setTimeout(r,150));if(overlay.style.display==='none')throw Error('Handshake hid loading overlay before frame');
+ q('[data-computer-close]').click();
+ if(q('[data-computer-dialog]').open||!q('[data-computer-preview]').contains(overlay)||overlay.style.display==='none')throw Error('Collapse while reconnecting lost loading overlay');
+ if(!q('[data-retained-frame]')||!window.fixtureRFB.viewOnly)throw Error('Collapse while reconnecting lost retained frame or enabled input');
+ q('[data-computer-preview-open]').click();
+ if(!q('[data-computer-dialog]').open||!q('[data-computer-expanded]').contains(overlay)||!window.fixtureRFB.viewOnly)throw Error('Reopening while reconnecting must preserve overlay and block input');
  window.holdComputerFrame=false;
  await wait(()=>overlay.style.display==='none'&&!window.fixtureRFB.viewOnly,'live frame enables input');
  q('[data-computer-close]').click();
@@ -93,6 +101,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await new Promise(r=>setTimeout(r,250));const miniReads=window.computerStatusReads;
  await new Promise(r=>setTimeout(r,5500));if(window.computerStatusReads!==miniReads)throw Error('Mini preview still polls status');
  const expandedRFB=window.fixtureRFB;q('[data-computer-preview-open]').click();
+ q('[data-computer-dialog]').dispatchEvent(new Event('close'));
+ if(!q('[data-computer-expanded]').contains(q('[data-computer-screen]')))throw Error('Stale close event moved reopened viewer');
+ if(overlay.style.display!=='none')throw Error('Live expansion showed loading overlay');
  if(expandedRFB.viewOnly)throw Error('Expansion waited for a server control acknowledgment');
  if(!q('[data-computer-screen]').contains(document.activeElement))throw Error('Expanded preview must initially focus the computer screen');
  await wait(()=>q('[data-computer-dialog]').open);
@@ -146,6 +157,8 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  const originalFetch=window.fetch;let cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};
  q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled);q('[data-teach-discard]').click();await wait(()=>cancelledGeneration&&!q('[data-teach-save]').disabled,'discard cancellation');window.fetch=originalFetch;
  const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});
+ if(overlay.style.display==='none')throw Error('Disconnect did not show overlay immediately');
+ await wait(()=>overlay.textContent.includes('Retrying in 1 second'),'retry countdown');
  await wait(()=>window.fixtureRFB!==dropped&&window.fixtureRFB.painted,'reconnected');
  Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));const hiddenRFB=window.fixtureRFB;if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming');
  Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));await wait(()=>window.fixtureRFB!==hiddenRFB&&window.fixtureRFB.painted,'visible reconnect');
