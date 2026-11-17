@@ -43,7 +43,7 @@ const (
 	openAIOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	// ChatGPT Codex backend requires this query parameter.
 	openAIOAuthClientVersion = "0.144.0"
-	// Matches Codex CLI originator for ChatGPT OAuth-backed calls.
+	// Originator sent for ChatGPT OAuth-backed calls.
 	openAIOAuthOriginator = "codex_cli_rs"
 )
 

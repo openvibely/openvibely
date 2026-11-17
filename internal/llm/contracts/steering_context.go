@@ -61,14 +61,14 @@ func InitialSteeringCommitFromContext(ctx context.Context) InitialSteeringCommit
 // SteeringCallback returns raw steering text to inject before the next provider/tool-loop model request.
 type SteeringCallback func(context.Context) (string, error)
 
-// LocalSteeringMessage preserves one queued Codex-style user input and its
+// LocalSteeringMessage preserves one queued user input and its
 // attachment boundary.
 type LocalSteeringMessage struct {
 	Text        string
 	Attachments []models.Attachment
 }
 
-// LocalSteeringInput mirrors Codex's ordered pending-input drain. Messages is
+// LocalSteeringInput contains an ordered drain of pending input. Messages is
 // preferred; Text and Attachments retain compatibility with single-input callers.
 type LocalSteeringInput struct {
 	// Commit records consumed input and request history before sampling.

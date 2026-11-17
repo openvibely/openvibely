@@ -1863,7 +1863,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	} else {
 		completedExecution = true
 		// Closing the execution first makes steering admission and recovery
-		// ordered like Codex turn/steer: input accepted before the terminal
+		// ordered so input accepted before the terminal
 		// boundary is queued for the next turn; input after it is rejected.
 		s.requeuePendingTaskSteeringForExecution(finalizeCtx, exec.ID)
 	}

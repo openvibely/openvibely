@@ -81,7 +81,7 @@ func restoreCompactedApplicationContext(req llmcontracts.AgentRequest, history [
 		}
 	}
 
-	// Match Codex placement: before the last real user message, or the summary
+	// Place before the last real user message, or the summary
 	// when there is no retained user message.
 	at := len(out)
 	for i := len(out) - 1; i >= 0; i-- {

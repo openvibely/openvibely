@@ -134,8 +134,8 @@ func TestOllamaBudgetsAreNotDetectedCapacity(t *testing.T) {
 	}
 }
 
-func TestGPT61CatalogContextBudget(t *testing.T) {
-	for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-sol"} {
+func TestGPTSolTerraCatalogContextBudget(t *testing.T) {
+	for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-sol", "gpt-6.2-sol"} {
 		t.Run(model, func(t *testing.T) {
 			for _, cap := range []int{0, 200000, 872000} {
 				agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: model, ProviderContextWindow: 272000, ContextWindow: cap}

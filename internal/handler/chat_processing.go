@@ -759,7 +759,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	firstModelCall := true
 modelLoop:
 	for {
-		// Codex samples fresh input before draining an early steer.
+		// Sample fresh input before draining an early steer.
 		if pendingSteering.count() == 0 && !(firstModelCall && params.Agent.Provider == models.ProviderOpenAI) {
 			preparedBefore, steeringErr := h.preparePendingSteeringInputs(ctx, &params, "")
 			if steeringErr != nil {
@@ -836,7 +836,7 @@ modelLoop:
 		if params.lifecycleUserMessage != "" {
 			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
 		}
-		// Codex-style steering is owned by the active agentic turn. Active model
+		// Steering is owned by the active agentic turn. Active model
 		// sampling and its completed tools finish before pending input is drained.
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
 			requestCtx, params.Message, requestImageAttachments, params.Agent,

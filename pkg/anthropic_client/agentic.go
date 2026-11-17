@@ -38,7 +38,7 @@ const (
 	compactionBlockingBuffer      = 3000
 )
 
-// DefaultCompactionThreshold mirrors Claude Code's trigger for a normal
+// DefaultCompactionThreshold is the compaction trigger for a normal
 // 200,000-token context window.
 const DefaultCompactionThreshold = defaultAnthropicContextWindow - compactionOutputReserveCap - compactionSummaryBuffer
 
@@ -117,7 +117,7 @@ type AgenticOptions struct {
 	ForceNativeCompaction bool
 	compactOnly           bool
 	// CompactionTokenThreshold is the input token count that triggers compaction.
-	// Defaults to a Claude Code-compatible value derived from ContextWindow
+	// Defaults to a value derived from ContextWindow
 	// (167,000 for the normal 200,000-token window) when zero.
 	CompactionTokenThreshold int
 	// CompactionInstructions provides additional instructions for the summarization.
@@ -275,7 +275,7 @@ type compactionBlockJSON struct {
 	EncryptedContent *string `json:"encrypted_content,omitempty"`
 }
 
-// CompactionTriggerLimit returns the Claude Code-compatible automatic
+// CompactionTriggerLimit returns the automatic
 // compaction trigger for an Anthropic context window.
 func CompactionTriggerLimit(contextWindow int) int {
 	if contextWindow <= 0 {
@@ -284,7 +284,7 @@ func CompactionTriggerLimit(contextWindow int) int {
 	return max(MinCompactionThreshold, contextWindow-compactionOutputReserveCap-compactionSummaryBuffer)
 }
 
-// CompactionOutputReserve returns the output headroom Claude Code uses when
+// CompactionOutputReserve returns the output headroom reserved when
 // calculating compaction limits. Large model output limits are capped at 20k.
 func CompactionOutputReserve(maxOutputTokens int) int {
 	if maxOutputTokens <= 0 {
@@ -547,7 +547,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if opts.MaxTokens == 0 {
 		opts.MaxTokens = 8192
 	}
-	// MaxTurns=0 means no limit (matches Claude Code CLI default).
+	// MaxTurns=0 means no limit.
 	// The loop runs until the model finishes or context/budget is exhausted.
 	if opts.MaxTurns == 0 {
 		opts.MaxTurns = math.MaxInt32
@@ -1665,9 +1665,8 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Build beta headers matching what Claude Code sends.
-	// OAuth requires: claude-code beta + oauth beta + thinking beta.
-	// The claude-code beta is required for OAuth subscription access.
+	// Build beta headers for the enabled API features.
+	// OAuth subscription access requires additional authentication beta headers.
 	betaHeaders := []string{
 		"interleaved-thinking-2025-05-14",
 	}

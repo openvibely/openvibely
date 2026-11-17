@@ -5251,7 +5251,7 @@ templ ChatAutoScrollScript() {
 		}
 
 		// Shared streaming content renderer — parses [Thinking] and [Using tool:] markers
-		// into styled DOM elements matching Claude Code VSCode extension style.
+		// into styled DOM elements.
 		// Tools: flat row with bold name + checkmark (completed) or spinner (active).
 		// Thinking: collapsible <details> with italic label and markdown content.
 
@@ -5517,7 +5517,7 @@ templ ChatAutoScrollScript() {
                 var extendOpenResult = openResult && !/\[\/Tool\][\t ]*(?=\r?$)/m.test(sourceText.slice(openResult.scanFrom));
                 delete container._chatOpenResult;
 				var shouldYieldPreparation = !options?.thinkingShell && yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024 || (options?.preparedSegments?.reduce(function(size, seg) { return size + (seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length; }, 0) || 0) >= 64 * 1024);
-				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
+				// Display name mapping: raw tool names → friendly names
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
 				'bash': 'Bash', 'shell': 'Shell', 'process': 'Process', 'grep_search': 'Grep', 'list_files': 'List Files',
@@ -7385,8 +7385,8 @@ func CleanDisplayContent(text string) string {
 // extractThinkingContent pulls the text from inside [Thinking]...[/Thinking]
 // blocks (or unclosed [Thinking]... to end of string). Used as a fallback when
 // the model's entire response is inside thinking blocks.
-// When thinking blocks are unclosed (no [/Thinking] marker — common with Claude CLI
-// extended thinking), the first [Thinking] captures everything to end-of-string,
+// When thinking blocks are unclosed (no [/Thinking] marker), the first
+// [Thinking] captures everything to end-of-string,
 // which may include subsequent [Thinking] markers as raw text. We strip these
 // embedded markers so the extracted content is clean for display.
 func extractThinkingContent(text string) string {

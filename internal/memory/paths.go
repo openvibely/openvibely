@@ -119,7 +119,7 @@ func (r *PathResolver) ProjectDir(projectID string) (string, error) {
 }
 
 // EnsureProjectDir creates the per-project memory directory. The layout is
-// intentionally Claude-style and flat: topic markdown files live beside
+// flat: topic markdown files live beside
 // MEMORIES.md in the per-project directory.
 func (r *PathResolver) EnsureProjectDir(projectID string) (string, error) {
 	dir, err := r.ProjectDir(projectID)

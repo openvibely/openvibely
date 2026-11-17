@@ -58,10 +58,8 @@ func (r WebSearchResult) StructuredOutput() string {
 	return standaloneWebSearchStructuredOutputPrefix + base64.RawURLEncoding.EncodeToString(encoded)
 }
 
-// standaloneWebSearchTool uses Codex's reserved web.run schema. Preserve field
-// descriptions and permissiveness: the provider validates this definition.
-// Parameters follow codex-api/src/search.rs through the non-compacting schema
-// conversion in ext/web-search/src/schema.rs and tools/src/json_schema/types.rs.
+// standaloneWebSearchTool defines the provider's reserved web.run schema.
+// Preserve field descriptions and permissiveness: the provider validates this definition.
 func standaloneWebSearchTool() ToolDefinition {
 	strict := false
 	return ToolDefinition{
@@ -151,7 +149,7 @@ func (c *Client) runStandaloneWebSearch(ctx context.Context, model string, input
 
 const standaloneWebSearchAssistantTokenLimit = 1000
 
-// standaloneWebSearchRecentInput mirrors Codex's narrow search context: the
+// standaloneWebSearchRecentInput selects a narrow search context: the
 // two most recent visible user messages and assistant text between them.
 func standaloneWebSearchRecentInput(inputItems []any) []any {
 	visible := make([]map[string]any, 0, len(inputItems))

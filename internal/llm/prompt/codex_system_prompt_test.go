@@ -12,6 +12,8 @@ import (
 func TestCodexPromptMatchesSnapshot(t *testing.T) {
 	// Hashes of the actual cached templates, excluding surrounding whitespace.
 	for model, want := range map[string]string{
+		"gpt-6.2-astra":     "352874c1758867ea0bdc2dabd3362df33342ba24d46bac360b4ad7bc9f1a42f8",
+		"gpt-6.2-sol":       "fe5b2de478b7122e403f936d5994a8bb08e104281c9604ac5cd3391f4886cea5",
 		"gpt-6-astra":       "44f0750eeca334d50226166d28657e7013e00480a038fb03d0106023161c4dea",
 		"gpt-6-sol":         "6e61d417b2c660f88f59b8be32933df8ed5e21240058ded907e8e3ecfbf2ea5a",
 		"gpt-6-luna":        "49c4958e931333ee6a703ecb258a44ffb46f07f40e0a167a663de04dfdfa6ef1",
@@ -69,7 +71,7 @@ func TestCodexPromptContextAndModes(t *testing.T) {
 }
 
 func TestCodexPromptUsesOpenVibelyTools(t *testing.T) {
-	for _, model := range []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5", "gpt-5.6-sol"} {
+	for _, model := range []string{"gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5", "gpt-5.6-sol"} {
 		prompt := CodexSystemPrompt(model)
 		for _, unavailable := range []string{"apply_patch", "functions.exec", "exec_command", "request_user_input_async", "send_user_message_async", "multi_tool_use.parallel", "ALL_TOOLS"} {
 			if strings.Contains(prompt, unavailable) {

@@ -442,7 +442,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			CompressionMode: websocket.CompressionContextTakeover,
 		})
 		if err == nil {
-			// Match Codex's maximum complete WebSocket message size. The
+			// Limit the maximum complete WebSocket message size. The
 			// coder/websocket default is only 32 KiB, which is too small for
 			// Responses events containing large tool output or completion data.
 			conn.SetReadLimit(responsesWebsocketReadLimit)

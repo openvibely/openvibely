@@ -59,9 +59,8 @@ func TestFollowupAfterInflightSummaryRetainsRetryWork(t *testing.T) {
 	require.Contains(t, summaryHistoryText(t, req.Agent.Provider, restored.ChatHistory), "B completed after summary")
 }
 
-// Codex local text compaction rebuilds media-bearing messages as text only
-// (compact.rs, build_compacted_history_with_limit). Old images must not pin
-// context above the request limit after a successful summary.
+// Text compaction rebuilds media-bearing messages as text only. Old images
+// must not pin context above the request limit after a successful summary.
 func TestTextCompactionFreesImageHistoryBudget(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
 		t.Run(string(provider), func(t *testing.T) {

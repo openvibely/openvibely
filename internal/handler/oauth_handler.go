@@ -39,9 +39,9 @@ const (
 
 	openAIOAuthAuthorizeURL = "https://auth.openai.com/oauth/authorize"
 	openAIOAuthTokenURL     = "https://auth.openai.com/oauth/token"
-	// Matches Codex CLI's built-in OAuth client id.
+	// Built-in OAuth client ID for OpenAI subscription access.
 	openAIOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
-	// Scopes supported by the Codex CLI OAuth client.
+	// Scopes supported by the OpenAI subscription OAuth client.
 	openAIOAuthScope = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 	openAIOriginator = "codex_cli_rs"
 	openAIOAuthPort  = 1455
@@ -209,14 +209,14 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 	} else if agent.Provider == models.ProviderOpenAI {
 		if usePublicCallback {
 			// Hosted mode prefers explicit hosted OAuth settings, but falls back to
-			// built-in Codex CLI defaults to avoid hard-failing configured deployments.
+			// built-in OAuth defaults to avoid hard-failing configured deployments.
 			authURL = firstNonEmpty(strings.TrimSpace(agent.OAuthAuthorizeURL), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_AUTHORIZE_URL")), openAIOAuthAuthorizeURL)
 			tokenEndpoint = firstNonEmpty(strings.TrimSpace(agent.OAuthTokenURL), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_TOKEN_URL")), openAIOAuthTokenURL)
 			clientID = firstNonEmpty(strings.TrimSpace(agent.OAuthClientID), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_ID")), openAIOAuthClientID)
 			clientSecret = firstNonEmpty(strings.TrimSpace(agent.OAuthClientSecret), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_SECRET")))
 			scope = firstNonEmpty(strings.TrimSpace(agent.OAuthScopes), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_SCOPES")), openAIOAuthScope)
 		} else {
-			// Local/localhost-manual mode mirrors Codex CLI defaults (localhost:1455/auth/callback).
+			// Local/localhost-manual mode uses localhost:1455/auth/callback.
 			authURL = openAIOAuthAuthorizeURL
 			clientID = openAIOAuthClientID
 			clientSecret = ""
@@ -281,7 +281,7 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 	// Redirect paths must match what the OAuth providers accept for their
 	// registered client IDs:
 	//   Anthropic: /callback   (matches http://localhost:<port>/callback pattern)
-	//   OpenAI:    /auth/callback (matches Codex CLI's http://localhost:1455/auth/callback)
+	//   OpenAI:    /auth/callback (http://localhost:1455/auth/callback)
 	redirectPath := "/callback"
 	if agent.Provider == models.ProviderOpenAI {
 		redirectPath = "/auth/callback"
@@ -492,7 +492,7 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 			mux.HandleFunc(callbackPath, handleCallback)
 		}
 	}
-	// Allow replacing an existing pending flow on localhost:1455 (Codex-style reauth).
+	// Allow replacing an existing pending flow on localhost:1455.
 	mux.HandleFunc("/cancel", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "cancelled")

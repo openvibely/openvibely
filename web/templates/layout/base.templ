@@ -2428,7 +2428,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					font-weight: 600;
 				}
 
-				/* --- Thinking (copied from Claude Code VSCode: thinkingV2 variant) --- */
+				/* --- Thinking --- */
 				/* Padding, not margin: virtualized rows sit in flow-root wrappers that stop margin collapsing, so margins would shift rows when a live thread re-renders. */
 				.stream-thinking { padding: 0.25rem 0; }
 				.stream-thinking summary {
@@ -2472,7 +2472,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 .tool-disclosure-caret svg { width: 16px; height: 16px; }
                 .stream-activity-summary[aria-expanded="true"] .tool-disclosure-caret { transform: rotate(90deg); }
                 .stream-activity-summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-                /* --- Tool use (copied from Claude Code VSCode: root/toolSummary/toolBody) --- */
+                /* --- Tool use --- */
 				/* Live responses use text-sm while saved responses inherit the page font.
 				   Keep tool geometry identical when the same output moves between them. */
 				.stream-tool { position: relative; padding: 2px 0; font-size: 1rem; line-height: 1.5; }

@@ -33,7 +33,7 @@ import (
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
-// triggers Codex-style history compaction for OpenAI agentic turns.
+// triggers history compaction for OpenAI agentic turns.
 const DefaultCompactionThreshold = 200000
 
 const (
@@ -48,7 +48,7 @@ Return only the summary text.`
 	openAIResizedImageBytesEstimate                    = 7373
 	openAIOriginalImagePatchSize                       = 32
 	openAIOriginalImageMaxPatches                      = 10000
-	// Mirrors Codex truncation policy defaults in models_cache.json.
+	// Default token limit for tool output truncation.
 	openAIToolOutputTokenLimitDefault = tokenestimate.DefaultToolOutputTokenLimit
 	// OpenAI native web search tool type for the Responses API.
 	openAIWebSearchToolType = "web_search"
@@ -67,7 +67,7 @@ type AgenticOptions struct {
 	ContextWindow   int
 	System          string
 	// CompactionPrompt overrides the instruction text used by standalone
-	// /responses/compact. When empty, supported providers/models follow Codex
+	// /responses/compact. When empty, supported providers/models use
 	// remote V2 compaction through a compaction_trigger.
 	CompactionPrompt         string
 	WorkDir                  string // working directory for tool execution
@@ -80,7 +80,7 @@ type AgenticOptions struct {
 	ReasoningEffort  string
 	ServiceTier      string
 	ReasoningSummary string // reasoning summary mode (e.g. auto, concise, detailed, none)
-	// AutoCompaction enables client-side Codex-style history compaction for
+	// AutoCompaction enables client-side history compaction for
 	// OpenAI Responses API turns.
 	AutoCompaction bool
 	// CompactionTokenThreshold is the approximate token count that triggers
@@ -90,7 +90,7 @@ type AgenticOptions struct {
 	// to round-trip back to the model in function_call_output items.
 	// When zero, openAIToolOutputTokenLimitDefault is used.
 	ToolOutputTokenLimit int
-	// ForceCompactionBeforeTurn forces the existing Codex-style native
+	// ForceCompactionBeforeTurn forces the existing native
 	// compaction pass over prior history before appending the current prompt.
 	// Use this when a caller has already estimated that the full model-visible
 	// request, including the pending prompt/attachments/system/tools, crosses
@@ -106,7 +106,7 @@ type AgenticOptions struct {
 	// ExtraTools are appended to the default local tools (for example MCP tools).
 	ExtraTools []ToolDefinition
 	// OnSteeringToolRefresh rebuilds the request's advertised tool view after
-	// pending user input is accepted, matching Codex's step-context refresh.
+	// pending user input is accepted.
 	OnSteeringToolRefresh func(ctx context.Context) (AgenticToolSnapshot, error)
 	// ToolExecutor overrides tool execution. It should return (output, isError, err).
 	// If nil, built-in local tool execution is used.
@@ -147,14 +147,13 @@ type AgenticOptions struct {
 	OnToolResult func(name string, output string, isError bool) // called when a tool completes
 	// OnToolBoundarySteering is called after local tool results are appended and before the next model request.
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
-	// OnLocalSteering claims Codex-style structured input for an active turn.
+	// OnLocalSteering claims structured input for an active turn.
 	// It is preferred over OnToolBoundarySteering after sampling and tools finish.
-	// Codex rust-v0.155.0-alpha.16.3 queues turn/steer in core/session/turn_input.rs
-	// and drains it in core/session/turn.rs before the next model request.
+	// Pending input is drained before the next model request.
 	// This boundary is shared by HTTP, standard WebSocket, and Responses Lite.
 	OnLocalSteering func(ctx context.Context) (LocalSteeringInput, error)
 	// HasPendingSteering peeks without claiming input so compaction can finish
-	// before the pending queue is drained, as in Codex.
+	// before the pending queue is drained.
 	HasPendingSteering func(context.Context) (bool, error)
 	// InitialInputCommit persists a prepared late steer before sampling and
 	// continues recording its tool/results history throughout this invocation.
@@ -180,7 +179,7 @@ type AgenticOptions struct {
 	onCompactionUsage func(*agenticTurnResult)
 }
 
-// AgenticToolSnapshot is the tool-definition portion of a refreshed Codex
+// AgenticToolSnapshot is the tool-definition portion of a refreshed
 // step context. Executors and filters remain live callbacks on AgenticOptions.
 type AgenticToolSnapshot struct {
 	ExtraTools       []ToolDefinition
@@ -243,7 +242,7 @@ type LocalSteeringMessage struct {
 	Attachments []*FileAttachment
 }
 
-// LocalSteeringInput is the ordered input drained at a Codex-style local turn
+// LocalSteeringInput is the ordered input drained at a local turn
 // boundary. Messages is preferred; the other fields support single-input callers.
 type LocalSteeringInput struct {
 	Commit      func(context.Context, []any) error
@@ -469,7 +468,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		finishCompaction(err == nil)
 		if err != nil {
 			if completedSampling {
-				// Codex ends the turn on mid-turn compaction failure. Retrying the
+				// End the turn on mid-turn compaction failure. Retrying the
 				// original request can repeat tools whose results exist only here.
 				return items, llmcontracts.NewCategorizedError(llmcontracts.ErrorMidTurnCompactionFailed, "OpenAI mid-turn compaction", err)
 			}
@@ -888,7 +887,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 		inputItems = compactedItems
 		if compactionGeneration != generationBeforeCompaction {
-			// Codex resumes the required model/tool continuation after compaction
+			// Resume the required model/tool continuation after compaction
 			// before draining pending user input.
 			pendingAsyncDeliveries = append(pendingAsyncDeliveries, deliveryRecords...)
 			// A mandatory post-compaction model/tool continuation is not a new
@@ -1141,8 +1140,8 @@ func exclusiveRequestUserInputTask(tasks []openAIToolExecutionTask) int {
 func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool, *WebSearchResult) {
 	applog.Debugf("[openai-client] executing tool %s", name)
 	if opts != nil && opts.LocalSteeringWakeup != nil {
-		// Wait-style runtime tools can observe the same turn-local notification
-		// Codex uses to stop waiting when new user input arrives. Ordinary tools
+		// Wait-style runtime tools can observe a turn-local notification
+		// to stop waiting when new user input arrives. Ordinary tools
 		// are not cancelled and remain responsible for their normal completion.
 		ctx = llmcontracts.WithMidTurnSteeringWakeup(ctx, opts.LocalSteeringWakeup)
 	}
@@ -3266,8 +3265,7 @@ func providerNativeOutputItemKey(item map[string]any, outputIndex int) string {
 }
 
 // openAIModelSupportsWebSearch returns true if the model supports the native
-// web_search tool. Based on models_cache.json supports_search_tool
-// field; gpt-5.2+ families support it.
+// web_search tool according to the model catalog.
 func openAIModelSupportsWebSearch(model string) bool {
 	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
 	return ok && spec.SupportsWebSearch

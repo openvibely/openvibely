@@ -6,13 +6,8 @@ import (
 	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
-// AgentSystemPrompt is the shared system prompt for all agentic code execution,
-// modeled after the Claude CLI's built-in system prompt. Used by both the CLI
-// code path (via custom system prompt injection) and the OAuth anthropicclient path.
-//
-// Sections mirror the Claude CLI binary's internal prompt:
-//   - Doing tasks, Executing actions with care, Using your tools,
-//     Tone and style, Output efficiency
+// AgentSystemPrompt is the shared system prompt for agentic code execution.
+// It covers task execution, action safety, tool use, tone, and output efficiency.
 const AgentSystemPrompt = `You are an expert software engineer acting as a coding agent. You have tools to read files, write files, edit files, run shell commands, list directories, and search code.
 
 # Doing tasks

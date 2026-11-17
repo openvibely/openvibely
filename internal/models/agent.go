@@ -143,7 +143,7 @@ type Agent struct {
 	UpdatedAt           time.Time               `json:"updated_at"`
 }
 
-// PluginMarketplace mirrors Claude plugin marketplace list metadata.
+// PluginMarketplace describes a configured plugin marketplace.
 type PluginMarketplace struct {
 	Name            string `json:"name"`
 	Source          string `json:"source"`
@@ -152,7 +152,7 @@ type PluginMarketplace struct {
 	InstallLocation string `json:"installLocation,omitempty"`
 }
 
-// InstalledPlugin mirrors `claude plugin list --json` entries.
+// InstalledPlugin describes an installed plugin and its status.
 type InstalledPlugin struct {
 	ID          string   `json:"id"`
 	Version     string   `json:"version,omitempty"`
@@ -164,7 +164,7 @@ type InstalledPlugin struct {
 	Errors      []string `json:"errors,omitempty"`
 }
 
-// AvailablePlugin mirrors `claude plugin list --json --available` entries.
+// AvailablePlugin describes a plugin available for installation.
 type AvailablePlugin struct {
 	PluginID        string `json:"pluginId"`
 	Name            string `json:"name"`

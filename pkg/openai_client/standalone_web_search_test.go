@@ -16,8 +16,8 @@ import (
 )
 
 func TestStandaloneWebSearchReservedSchema(t *testing.T) {
-	// Pin the normalized schema derived from Codex SearchCommands and accepted
-	// by the live provider for all six Lite models on 2026-09-24. web.run is a
+	// Pin the normalized schema accepted by the live provider for all six
+	// Lite models on 2026-09-24. web.run is a
 	// reserved name: even seemingly harmless schema edits can reject the turn.
 	tool := standaloneWebSearchTool()
 	if tool.Type != "namespace" || tool.Name != "web" || len(tool.Tools) != 1 {

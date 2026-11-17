@@ -50,8 +50,8 @@ var OAuthTokenURL = "https://platform.claude.com/v1/oauth/token"
 const (
 	AnthropicAPIVersion = "2023-06-01"
 	OAuthBetaHeader     = "oauth-2025-04-20"
-	// ClaudeCodeVersion identifies the compatible Claude Code request shape used
-	// for Anthropic subscription OAuth billing attribution.
+	// Client version sent in the user agent and billing metadata for
+	// Anthropic subscription OAuth requests.
 	ClaudeCodeVersion   = "2.1.314"
 	claudeCodeUserAgent = "claude-cli/" + ClaudeCodeVersion + " (external, cli)"
 

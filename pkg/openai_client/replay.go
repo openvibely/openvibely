@@ -7,7 +7,7 @@ func EstimateResponsesInputTokens(items []any) int {
 	return estimateInputItemsTokens(items)
 }
 
-// repairInterruptedToolCalls follows Codex's history normalization: an
+// repairInterruptedToolCalls normalizes history: an
 // interrupted call receives an "aborted" result, never another tool execution.
 // Run only on restored history, not while a live call is awaiting its result.
 func repairInterruptedToolCalls(items []any) []any {
