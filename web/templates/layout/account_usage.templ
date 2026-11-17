@@ -637,8 +637,11 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         if (!c || typeof c !== "object" || c.status !== "available") continue;
         const row = el("div", "rail-usage-reset"),
           head = el("div", "rail-usage-row"),
-          button = el("button", "btn btn-sm btn-outline", "Use reset");
+          button = el("button", "btn btn-ghost btn-sm btn-square");
         button.type = "button";
+        button.title = "Use reset";
+        button.setAttribute("aria-label", "Use reset: " + (c.title || "Usage reset"));
+        button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 11a9 9 0 1 1 2.7 7.3"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v8h8"></path></svg>';
         button.dataset.action = "reset-" + c.id;
         const raw = c.expires_at ?? c.expiresAt,
           expiry =
