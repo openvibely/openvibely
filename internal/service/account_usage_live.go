@@ -119,7 +119,12 @@ func (s *UsageAnalyticsService) BuildLiveAnalyticsUsage(ctx context.Context, fil
 		return nil, err
 	}
 	view.LastUpdatedAt = latest
-	accounts, err := s.BuildLiveAnalyticsAccountLimits(ctx, filter)
+	var accounts *models.AnalyticsUsageAccountLimitsViewModel
+	if s.sharedUsage != nil {
+		accounts, err = s.sharedUsage.freshLimits(ctx, filter)
+	} else {
+		accounts, err = s.BuildLiveAnalyticsAccountLimits(ctx, filter)
+	}
 	if err != nil {
 		return nil, err
 	}

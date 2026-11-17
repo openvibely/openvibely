@@ -87,6 +87,10 @@ func (c *SharedAccountUsage) refreshAll() {
 // Read validates inventory on every call, evicts disconnected accounts and starts
 // missing reads. Refresh replaces existing work; ordinary reads only read memory.
 func (c *SharedAccountUsage) Read(ctx context.Context, key string, refresh bool) (map[string]AccountUsageSnapshot, error) {
+	return c.read(ctx, key, "", refresh)
+}
+
+func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, refresh bool) (map[string]AccountUsageSnapshot, error) {
 	accounts, err := c.usage.ListUsageAccounts(ctx)
 	if err != nil {
 		return nil, err
@@ -130,7 +134,7 @@ func (c *SharedAccountUsage) Read(ctx context.Context, key string, refresh bool)
 	}
 	result := map[string]AccountUsageSnapshot{}
 	for _, a := range accounts {
-		if key != "" && a.Key != key {
+		if (key != "" && a.Key != key) || (provider != "" && a.Provider != provider) {
 			continue
 		}
 		e := c.entries[a.Key]
@@ -314,3 +318,69 @@ func (s *UsageAnalyticsService) SharedAccountUsage(ctx context.Context, key stri
 }
 
 func (s *UsageAnalyticsService) HasSharedAccountUsage() bool { return s.sharedUsage != nil }
+
+// freshLimits serves synchronous reporting callers through the same scheduler.
+// If another refresh replaces our generation, wait for its result instead.
+func (c *SharedAccountUsage) freshLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
+	requested, err := c.read(ctx, filter.AccountGroupKey, filter.Provider, true)
+	if err != nil {
+		return nil, err
+	}
+	accounts, err := c.usage.ListUsageAccounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	view := &models.AnalyticsUsageAccountLimitsViewModel{AccountLimits: []models.AccountUsageView{}}
+	for _, account := range accounts {
+		if _, ok := requested[account.Key]; !ok {
+			continue
+		}
+		for {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			c.mu.Lock()
+			e := c.entries[account.Key]
+			if e == nil || c.stopped {
+				c.mu.Unlock()
+				return nil, fmt.Errorf("account configuration changed or usage service stopped")
+			}
+			done := e.done
+			resetDone := e.resetDone
+			c.mu.Unlock()
+			if resetDone != nil {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-resetDone:
+				}
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-done:
+			}
+			c.mu.Lock()
+			if c.entries[account.Key] != e || e.done != done || e.snapshot.Refreshing {
+				c.mu.Unlock()
+				continue
+			}
+			snapshot := e.snapshot
+			c.mu.Unlock()
+			if snapshot.Error != "" {
+				// Reporting must not present a retained stale allowance as a fresh result.
+				view.AccountLimits = append(view.AccountLimits, models.AccountUsageView{Provider: account.Provider, AccountIdentity: account.Identity, Error: snapshot.Error})
+				view.Errors = append(view.Errors, snapshot.Error)
+			} else {
+				view.AccountLimits = append(view.AccountLimits, snapshot.AccountLimits...)
+				if view.LastUpdatedAt == nil || snapshot.UpdatedAt.After(*view.LastUpdatedAt) {
+					updated := snapshot.UpdatedAt
+					view.LastUpdatedAt = &updated
+				}
+			}
+			break
+		}
+	}
+	return view, nil
+}

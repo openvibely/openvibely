@@ -12,6 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -306,5 +307,67 @@ func TestSharedUsageManualRefreshEvaluatesAndDeduplicatesAlerts(t *testing.T) {
 	case ev := <-sub:
 		t.Fatalf("duplicate alert: %+v", ev)
 	default:
+	}
+}
+
+func TestSharedUsageLegacyReportingReplacesRead(t *testing.T) {
+	svc, accounts := sharedUsageFixture(t, 1)
+	started := make(chan struct{}, 4)
+	var calls, active, overlap, evaluated, published atomic.Int32
+	release := make(chan struct{})
+	svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
+		if active.Add(1) > 1 {
+			overlap.Add(1)
+		}
+		defer active.Add(-1)
+		n := calls.Add(1)
+		started <- struct{}{}
+		if n == 1 {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-release:
+		}
+		p := 31.0
+		return &models.AccountUsageResult{PrimaryUsedPercent: &p}, nil
+	})
+	c := svc.EnableSharedAccountUsage(context.Background(), func() { published.Add(1) }, func(context.Context, string, *models.AnalyticsUsageAccountLimitsViewModel, map[string]any) error {
+		evaluated.Add(1)
+		return nil
+	})
+	defer c.Stop()
+	c.Read(context.Background(), "", true)
+	<-started
+	result := make(chan error, 1)
+	go func() {
+		view, err := svc.BuildLiveAnalyticsUsage(context.Background(), persistence.UsageFilter{AccountGroupKey: accounts[0].Key})
+		if err == nil && (len(view.AccountLimits) != 1 || view.AccountLimits[0].Error != "") {
+			err = fmt.Errorf("unexpected view: %+v", view)
+		}
+		result <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reporting did not replace old read")
+	}
+	close(release)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reporting did not complete")
+	}
+	if overlap.Load() != 0 || evaluated.Load() != 1 || published.Load() != 1 {
+		t.Fatalf("overlap=%d evaluated=%d published=%d", overlap.Load(), evaluated.Load(), published.Load())
+	}
+	snapshots, err := c.Read(context.Background(), "", false)
+	if err != nil || len(snapshots[accounts[0].Key].AccountLimits) != 1 {
+		t.Fatal("missing shared result", err)
 	}
 }
