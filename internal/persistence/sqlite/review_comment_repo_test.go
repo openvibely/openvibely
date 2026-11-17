@@ -208,3 +208,59 @@ func TestReviewCommentRepo_MultipleLineSameFile(t *testing.T) {
 		t.Errorf("expected first comment first (by created_at), got %q", comments[0].CommentText)
 	}
 }
+
+func TestReviewCommentRepo_DeleteSubmittedKeepsCommentsSavedAfterSnapshot(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewReviewCommentRepo(db)
+	taskRepo := NewTaskRepo(db, events.NewBroadcaster())
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Review Snapshot Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusCompleted,
+		Prompt:    "test",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+
+	a := &models.ReviewComment{TaskID: task.ID, FilePath: "a.go", LineNumber: 1, LineType: "new", CommentText: "comment A", ReviewedBy: "user"}
+	if err := repo.Create(ctx, a); err != nil {
+		t.Fatalf("Create A: %v", err)
+	}
+
+	// Submission snapshot taken before the concurrent save/edit below.
+	snapshot, err := repo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListByTask snapshot: %v", err)
+	}
+
+	b := &models.ReviewComment{TaskID: task.ID, FilePath: "b.go", LineNumber: 2, LineType: "new", CommentText: "comment B", ReviewedBy: "user"}
+	if err := repo.Create(ctx, b); err != nil {
+		t.Fatalf("Create B: %v", err)
+	}
+	if err := repo.UpdateText(ctx, a.ID, "comment A edited"); err != nil {
+		t.Fatalf("UpdateText A: %v", err)
+	}
+
+	if err := repo.DeleteSubmitted(ctx, task.ID, snapshot); err != nil {
+		t.Fatalf("DeleteSubmitted: %v", err)
+	}
+
+	remaining, err := repo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListByTask after DeleteSubmitted: %v", err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("expected 2 remaining drafts, got %d: %+v", len(remaining), remaining)
+	}
+	texts := map[string]bool{}
+	for _, c := range remaining {
+		texts[c.CommentText] = true
+	}
+	if !texts["comment A edited"] || !texts["comment B"] {
+		t.Errorf("expected edited A and new B to remain as drafts, got %+v", remaining)
+	}
+}

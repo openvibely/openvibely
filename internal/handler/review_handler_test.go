@@ -575,6 +575,97 @@ func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {
 	}
 }
 
+// interleavingReviewStore runs onSnapshot once, right after SubmitReview reads its
+// comment snapshot, to simulate another save/edit landing during submission.
+type interleavingReviewStore struct {
+	persistence.ReviewCommentStore
+	onSnapshot func()
+	ran        bool
+}
+
+func (s *interleavingReviewStore) ListByTask(ctx context.Context, taskID string) ([]models.ReviewComment, error) {
+	comments, err := s.ReviewCommentStore.ListByTask(ctx, taskID)
+	if !s.ran {
+		s.ran = true
+		s.onSnapshot()
+	}
+	return comments, err
+}
+
+func TestSubmitReview_ConcurrentSaveAndEditSurviveSubmission(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		queued bool
+	}{
+		{name: "direct execution", queued: false},
+		{name: "queued admission", queued: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, reviewRepo, execRepo, _, taskID := setupReviewHandler(t)
+			ctx := context.Background()
+
+			if tc.queued {
+				task, err := h.taskRepo.GetByID(ctx, taskID)
+				require.NoError(t, err)
+				task.Category = models.CategoryActive
+				task.Status = models.StatusRunning
+				require.NoError(t, h.taskRepo.Update(ctx, task))
+				require.NoError(t, execRepo.Create(ctx, &models.Execution{
+					TaskID: taskID, AgentConfigID: *task.AgentID, Status: models.ExecRunning, PromptSent: "active",
+				}))
+			}
+
+			a := &models.ReviewComment{TaskID: taskID, FilePath: "main.go", LineNumber: 10, LineType: "new", CommentText: "comment A", ReviewedBy: "user"}
+			require.NoError(t, reviewRepo.Create(ctx, a))
+
+			store := &interleavingReviewStore{ReviewCommentStore: reviewRepo}
+			store.onSnapshot = func() {
+				b := &models.ReviewComment{TaskID: taskID, FilePath: "b.go", LineNumber: 20, LineType: "new", CommentText: "comment B", ReviewedBy: "user"}
+				if err := reviewRepo.Create(ctx, b); err != nil {
+					t.Errorf("create concurrent comment B: %v", err)
+				}
+				if err := reviewRepo.UpdateText(ctx, a.ID, "comment A edited"); err != nil {
+					t.Errorf("edit comment A: %v", err)
+				}
+			}
+			h.SetReviewCommentRepo(store)
+
+			req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/reviews/submit", nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.True(t, store.ran, "expected SubmitReview to read its comment snapshot")
+
+			var submitted string
+			if tc.queued {
+				pending, err := h.threadInputRepo.ListPendingForTask(ctx, taskID)
+				require.NoError(t, err)
+				require.Len(t, pending, 1, "expected the review follow-up to be queued")
+				submitted = pending[0].Content
+			} else {
+				execs, err := execRepo.ListByTaskChronological(ctx, taskID)
+				require.NoError(t, err)
+				require.Len(t, execs, 1, "expected one review follow-up execution")
+				submitted = execs[0].PromptSent
+			}
+			require.Contains(t, submitted, "line 10**: comment A\n", "submitted message must keep the snapshot text of A")
+			require.NotContains(t, submitted, "comment A edited", "submitted message must not include the concurrent edit")
+			require.NotContains(t, submitted, "comment B", "submitted message must not include the concurrent comment")
+
+			remaining, err := reviewRepo.ListByTask(ctx, taskID)
+			require.NoError(t, err)
+			texts := map[string]bool{}
+			for _, c := range remaining {
+				texts[c.CommentText] = true
+			}
+			require.Len(t, remaining, 2, "expected edited A and new B to remain as drafts, got %+v", remaining)
+			require.True(t, texts["comment A edited"], "edited A must remain a draft")
+			require.True(t, texts["comment B"], "concurrent B must remain a draft")
+		})
+	}
+}
+
 func TestReviewCommentsWithAllProjectsSelected(t *testing.T) {
 	h, app, repo, _, _, taskID := setupReviewHandler(t)
 	ctx := t.Context()
