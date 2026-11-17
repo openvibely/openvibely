@@ -178,13 +178,16 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 					"url": &toolschema.Schema{
 						Type: "string",
 					},
-					"tab_id":   &toolschema.Schema{Type: "string"},
-					"locator":  projectBrowserLocatorSchema(0),
-					"frames":   &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "string"}, Description: "Outer-to-inner iframe selectors."},
-					"offset":   &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")},
-					"limit":    &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("500")},
-					"snapshot": &toolschema.Schema{Type: "string"},
-					"ref":      &toolschema.Schema{Type: "string"},
+					"tab_id":      &toolschema.Schema{Type: "string"},
+					"locator":     projectBrowserLocatorSchema(0),
+					"frames":      &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "string"}, Description: "Outer-to-inner iframe selectors."},
+					"offset":      &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")},
+					"limit":       &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("500")},
+					"property":    &toolschema.Schema{Type: "string", Enum: []any{"count", "text", "attribute", "visible", "enabled"}},
+					"attribute":   &toolschema.Schema{Type: "string", Description: "Public DOM attribute; value, style, event handlers and arbitrary data attributes are not readable."},
+					"text_offset": &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")},
+					"snapshot":    &toolschema.Schema{Type: "string"},
+					"ref":         &toolschema.Schema{Type: "string"},
 					"text": &toolschema.Schema{
 						Type: "string",
 					},
@@ -238,7 +241,7 @@ func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDe
 }
 
 func projectBrowserActions() []any {
-	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find"}
+	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect"}
 }
 
 func validProjectBrowserAction(action string) bool {

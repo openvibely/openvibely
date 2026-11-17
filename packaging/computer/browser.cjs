@@ -54,8 +54,8 @@ async function findElements(page,args){
  }
  return {count,offset,elements,next_offset:offset+elements.length<count?offset+elements.length:null};
 }
-async function snapshot(page) {
- const view=await page.evaluate(()=>{
+async function snapshot(page,range={offset:0,limit:100},textOffset=0) {
+ const view=await page.evaluate(({range,textOffset})=>{
 function computerUUID() {
  const cryptoAPI = globalThis.crypto;
  if (typeof cryptoAPI.randomUUID === 'function') return cryptoAPI.randomUUID();
@@ -68,13 +68,16 @@ function computerUUID() {
   const state=window.__ovBrowserRefs ||= {nodes:new Map(),ids:new WeakMap(),document:computerUUID()};
   const secret=n=>/password|one[- ]?time|verification[ -]?code|security[ -]?code|passcode|\bpin\b|\btotp\b|\botp\b|\b2fa\b/i.test([n.type,n.autocomplete,n.name,n.id,n.getAttribute('aria-label'),n.getAttribute('placeholder'),...[...(n.labels||[])].map(l=>l.innerText)].join(' '));
   const active=new Map();
-  const controls=[...document.querySelectorAll('a,button,input,select,textarea,[role="button"],[contenteditable="true"]')].filter(n=>n.getClientRects().length).slice(0,100).map(n=>{
+  const controls=[...document.querySelectorAll('a,button,input,select,textarea,[role="button"],[contenteditable="true"]')].filter(n=>n.getClientRects().length);
+  const total=controls.length;
+  const items=controls.slice(range.offset,range.offset+range.limit).map(n=>{
    let ref=state.ids.get(n);if(!ref){ref=computerUUID();state.ids.set(n,ref);}active.set(ref,n);
    return {ref,tag:n.tagName.toLowerCase(),text:(n.innerText||n.getAttribute('aria-label')||'').slice(0,200),id:n.id,name:n.getAttribute('name'),type:n.getAttribute('type'),href:n.getAttribute('href'),disabled:!!n.disabled,sensitive:secret(n)};
   });
   state.nodes=active;
-  return {document:state.document,url:location.href,title:document.title,text:(document.body?.innerText||'').slice(0,20000),controls,focused_sensitive:!!document.activeElement&&secret(document.activeElement)};
- });
+  const text=document.body?.innerText||'';
+  return {document:state.document,url:location.href,title:document.title,text:text.slice(textOffset,textOffset+20000),text_offset:textOffset,next_text_offset:textOffset+20000<text.length?textOffset+20000:null,controls:items,total_controls:total,offset:range.offset,next_offset:range.offset+items.length<total?range.offset+items.length:null,focused_sensitive:!!document.activeElement&&secret(document.activeElement)};
+ },{range,textOffset});
  return {...view,snapshot:createHash('sha256').update(JSON.stringify(view)).digest('hex')};
 }
 async function run(args) {
@@ -95,6 +98,21 @@ async function run(args) {
   if(args.action==='select_tab'){await fs.writeFile(tabStatePath(),id,{mode:0o600});await page.bringToFront();}
 
   page.setDefaultTimeout(10000);
+  if(args.action==='read'){const textOffset=args.text_offset??0;if(!Number.isInteger(textOffset)||textOffset<0)throw Error('Invalid text_offset');return {...await snapshot(page,pageRange(args),textOffset),tab_id:id};}
+  if(args.action==='inspect'){
+   const item=buildLocator(locatorRoot(page,args.frames),args.locator);
+   const count=await item.count();
+   if(args.property==='count')return {tab_id:id,value:count};
+   if(count!==1)throw Error('Inspection requires exactly one matching element');
+   if(args.property==='visible')return {tab_id:id,value:await item.isVisible()};
+   if(args.property==='enabled')return {tab_id:id,value:await item.isEnabled()};
+   if(args.property==='text')return {tab_id:id,value:(await item.innerText()).slice(0,20000)};
+   if(args.property==='attribute'){
+    if(!/^(id|class|role|title|alt|href|src|name|type|placeholder|disabled|checked|aria-[a-z-]+|data-testid)$/.test(args.attribute||''))throw Error('Attribute is not available for inspection');
+    return {tab_id:id,value:(await item.getAttribute(args.attribute))?.slice(0,20000)??null};
+   }
+   throw Error('Unknown inspection property');
+  }
   if(args.action==='find')return {tab_id:id,...await findElements(page,args)};
   let target;
   if(['click','type','select','press_key'].includes(args.action)) {

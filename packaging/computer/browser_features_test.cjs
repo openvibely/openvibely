@@ -44,5 +44,15 @@ test('project browser features in isolated Chromium',async t=>{
    await page.locator('button').first().evaluate(n=>n.outerHTML='<button>Save</button>');
    assert.equal((await run({action:'find',tab_id,locator:{role:'button',name:'Save',exact:true}})).count,1);
   });
+  await t.test('element inspection and paginated reads',async()=>{
+   const page=client.contexts()[0].pages()[0];
+   await page.setContent('<input type="password" value="secret"><button disabled title="Public">Disabled</button>'+Array.from({length:130},(_,i)=>`<button>${i}</button>`).join('')+'<p>'+ 'x'.repeat(21000)+'</p>');
+   assert.equal((await run({action:'inspect',locator:{role:'button',name:'Disabled'},property:'enabled'})).value,false);
+   assert.equal((await run({action:'inspect',locator:{role:'button',name:'Disabled'},property:'attribute',attribute:'title'})).value,'Public');
+   await assert.rejects(run({action:'inspect',locator:{selector:'input'},property:'attribute',attribute:'value'}),/not available/);
+   assert.equal((await run({action:'inspect',locator:{role:'button'},property:'count'})).value,131);
+   assert.ok((await run({action:'read',offset:100})).controls.length>0);
+   assert.ok((await run({action:'read',text_offset:20000})).text.length>1000);
+  });
  }finally{await client.close();await browser.close();await new Promise(resolve=>server.close(resolve));process.env.HOME=previousHome;await fs.rm(home,{recursive:true,force:true});}
 });
