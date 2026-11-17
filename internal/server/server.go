@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
@@ -1136,15 +1135,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	// Start background services
 	srvCtx, srvCancel := context.WithCancel(ctx)
 	sharedAccountUsage := usageAnalyticsSvc.EnableSharedAccountUsage(srvCtx, func() {
-		projects, err := projectRepo.List(srvCtx)
-		if err != nil {
-			return
-		}
-		updateID := uuid.NewString()
-		for _, project := range projects {
-			// Invalidation only: account data remains behind the admin-only API.
-			broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated, ProjectID: project.ID, UsageUpdateID: updateID})
-		}
+		// Global invalidation only; snapshots remain behind the admin-only API.
+		broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated})
 	}, accountUsageMonitor.EvaluateSnapshot)
 	var hostedPendingStore *auth.PendingStore
 	if cfg.AuthMode == auth.AuthModeHostedSSO {

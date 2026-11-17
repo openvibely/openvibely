@@ -103,7 +103,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 			if err := Chat([]models.Project{{ID: "project", Name: "Project"}}, "project", nil, nil, nil, nil, nil, false, false, 50).Render(r.Context(), &rendered); err != nil {
 				t.Error(err)
 			}
-			w.Write([]byte(strings.Replace(rendered.String(), "function handleLiveEvent(event) {", "window.testUsageLiveHandler = handleLiveEvent; function handleLiveEvent(event) {", 1)))
+			w.Write([]byte(strings.Replace(rendered.String(), "  // Independent of project navigation;", "  window.openVibelyLive.accountUsage = handlers => { window.testUsageHandlers = handlers; return {close(){}} };\n  // Independent of project navigation;", 1)))
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -155,10 +155,9 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.evaluate(`document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));'restore fixture'`)
 		b.waitFor("restored inventory", `String(!!document.querySelector('[data-key="personal"]'))`, "true")
 		b.evaluate(`document.querySelector('[data-key="personal"]').click();'reopen'`)
-		b.evaluate(`window.usageNotifications=0;document.body.addEventListener('accountUsageUpdated',()=>window.usageNotifications++);for(let i=0;i<8;i++)window.testUsageLiveHandler({data:JSON.stringify({type:'account_usage_updated',usage_update_id:'shared-update',project_id:'p'+i})});'duplicate notifications'`)
-		b.waitFor("project copies deduplicated", `String(window.usageNotifications)`, "1")
-		b.evaluate(`window.testUsageLiveHandler({data:JSON.stringify({type:'account_usage_updated',usage_update_id:'next-update'})});window.testUsageLiveHandler({data:JSON.stringify({type:'account_usage_updated',usage_update_id:'shared-update'})});'next and old updates'`)
-		b.waitFor("distinct updates preserved", `String(window.usageNotifications)`, "2")
+
+		b.evaluate(`window.usageNotifications=0;document.body.addEventListener('accountUsageUpdated',()=>window.usageNotifications++);window.testUsageHandlers.listeners.account_usage_updated();'global notification'`)
+		b.waitFor("global usage notification", `String(window.usageNotifications)`, "1")
 
 		// Even failure before the request is sent must release the busy state.
 		b.waitFor("successful reset finished", `String(!openVibelyAccountRail.busy)`, "true")

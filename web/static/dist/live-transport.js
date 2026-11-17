@@ -173,6 +173,9 @@
         computer: function (projectID, taskID, options, handlers) {
             return subscribe(Object.assign({op:'computer', project_id:projectID, task_id:taskID || '', native:!!options?.viewer_id && document.documentElement.dataset.runtime === 'desktop'}, options || {}), handlers);
         },
+        accountUsage: function (handlers) {
+            return subscribe({op: 'account_usage'}, handlers);
+        },
         live: function (projectID, taskID, handlers) {
             // Notification scope is independent of execution subscriptions, which
             // may stay live in the thread snapshot owner after navigation.

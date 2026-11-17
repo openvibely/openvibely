@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -32,6 +33,7 @@ func TestLiveWebSocketBrowserSharedConnection(t *testing.T) {
 		t.Skip("Chrome not installed")
 	}
 	tc := NewStoreTestContext(t)
+	tc.handler.SetOrganizationService(service.NewOrganizationService(tc.stores.Organizations, "secret"))
 	tc.handler.SetExecutionStreamHub(events.NewExecutionStreamHub())
 	tc.handler.broadcaster = events.NewBroadcaster()
 	tc.handler.chatBroadcaster = events.NewChatBroadcaster()
@@ -64,6 +66,10 @@ func TestLiveWebSocketBrowserSharedConnection(t *testing.T) {
  try {
   await wait(()=>window.testSockets.length===1&&window.testSockets[0].readyState===1);
   await action('start');await wait(()=>raw(first)==='héllo'&&raw(second)==='parallel');
+  let usageUpdates=0, usageOpens=0;
+  const usage=window.openVibelyLive.accountUsage({onopen:()=>usageOpens++,listeners:{account_usage_updated:()=>usageUpdates++}});
+  await wait(()=>usageOpens===1);
+  await action('usage');await wait(()=>usageUpdates===1);
   const socket=window.testSockets[0];
   // Project selection retargets notifications before navigation commits. A
   // failed navigation must leave the current view's output subscription alive.
@@ -88,6 +94,9 @@ func TestLiveWebSocketBrowserSharedConnection(t *testing.T) {
   await wait(()=>window.testSockets.length===2&&raw(second)==='parallel recovered 日本語'&&raw(followup)==='next run done');
   await wait(()=>document.getElementById('streaming-dots-'+second)?.classList.contains('hidden'));
   if(document.getElementById('test-draft').value!=='keep this draft')throw Error('draft lost');
+  await wait(()=>usageOpens===2);
+  await action('usage');await wait(()=>usageUpdates===2);
+  usage.close();
   if(window.testSSE!==0)throw Error('SSE used');
   if(window.testSockets.filter(s=>s.readyState===1).length!==1)throw Error('multiple live sockets');
   const denied=window.openVibelyLive.execution(first,0,'missing-project');
@@ -98,6 +107,7 @@ func TestLiveWebSocketBrowserSharedConnection(t *testing.T) {
 	page := strings.Replace(base, "</body>", view+runner+"</body>", 1)
 	result := make(chan string, 1)
 	e := echo.New()
+	e.Use(tc.handler.AuthMiddleware())
 	e.GET("/events/ws", tc.handler.LiveWebSocket)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -125,6 +135,8 @@ func TestLiveWebSocketBrowserSharedConnection(t *testing.T) {
 				tc.handler.executionStreamHub.CloseTerminal(id, status, "")
 			}
 			switch r.URL.Query().Get("phase") {
+			case "usage":
+				tc.handler.broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated})
 			case "start":
 				appendOutput(first.ID, "héllo")
 				appendOutput(second.ID, "parallel")

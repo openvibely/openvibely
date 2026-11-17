@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/livelimits"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/stretchr/testify/require"
 )
@@ -542,14 +543,73 @@ func TestLiveWebSocketAllProjectsNotifications(t *testing.T) {
 
 func TestLiveWebSocketAccountUsageInvalidation(t *testing.T) {
 	tc, server := liveTestServer(t)
+	tc.handler.SetOrganizationService(service.NewOrganizationService(tc.stores.Organizations, "secret"))
 	client := dialLive(t, server.URL)
-	client.send(t, liveCommand{Op: "live", ID: "usage", ProjectID: "default"})
+	client.send(t, liveCommand{Op: "live", ID: "projects", ProjectID: models.AllProjectsID})
+	client.next(t, "projects", "subscribed")
+	client.send(t, liveCommand{Op: "account_usage", ID: "usage"})
 	client.next(t, "usage", "subscribed")
-	tc.handler.broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated, ProjectID: "default", UsageUpdateID: "shared-update"})
+	tc.handler.broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated})
 	frame := client.next(t, "usage", "account_usage_updated")
 	encoded, err := json.Marshal(frame.Data)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "account_key")
-	require.NotContains(t, string(encoded), "account_limits")
-	require.Contains(t, string(encoded), `"usage_update_id":"shared-update"`)
+	require.NotContains(t, string(encoded), "project_id")
+	// A subsequent task event is a barrier: the project stream must skip usage.
+	tc.handler.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, ProjectID: "default"})
+	for {
+		select {
+		case frame := <-client.frames:
+			require.NotEqual(t, "account_usage_updated", frame.Event, "usage must not reach project subscriptions")
+			if frame.ID == "projects" && frame.Event == "task_status_changed" {
+				return
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("missing task event")
+		}
+	}
+}
+
+func TestAccountUsageSubscriptionRequiresCurrentAdmin(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	tc.handler.SetOrganizationService(org)
+	cmd := liveCommand{Op: "account_usage"}
+	require.False(t, tc.handler.liveSubscriptionAllowed(t.Context(), cmd))
+	token, err := org.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	user, err := org.Accept(t.Context(), token, "usage-viewer", "long-password-value", "")
+	require.NoError(t, err)
+	ctx := models.WithPrincipal(t.Context(), user.Principal)
+	require.False(t, tc.handler.liveSubscriptionAllowed(ctx, cmd))
+	require.NoError(t, tc.stores.Organizations.ChangeMember(t.Context(), models.BootstrapUserID, user.UserID, "admin", false))
+	require.True(t, tc.handler.liveSubscriptionAllowed(ctx, cmd))
+	require.NoError(t, tc.stores.Organizations.ChangeMember(t.Context(), models.BootstrapUserID, user.UserID, "member", false))
+	require.False(t, tc.handler.liveSubscriptionAllowed(ctx, cmd))
+}
+
+func TestLiveWebSocketAccountUsageRevocation(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	tc.handler.SetOrganizationService(org)
+	tc.handler.broadcaster = events.NewBroadcaster()
+	token, err := org.Invite(t.Context(), models.BootstrapUserID, "admin")
+	require.NoError(t, err)
+	user, err := org.Accept(t.Context(), token, "usage-admin", "long-password-value", "")
+	require.NoError(t, err)
+	e := echo.New()
+	e.GET("/events/ws", func(c echo.Context) error {
+		c.SetRequest(c.Request().WithContext(models.WithPrincipal(c.Request().Context(), user.Principal)))
+		return tc.handler.LiveWebSocket(c)
+	})
+	server := httptest.NewServer(e)
+	defer server.Close()
+	client := dialLive(t, server.URL)
+	client.send(t, liveCommand{Op: "account_usage", ID: "usage"})
+	client.next(t, "usage", "subscribed")
+	require.NoError(t, tc.stores.Organizations.ChangeMember(t.Context(), models.BootstrapUserID, user.UserID, "member", false))
+	org.NotifyUser(user.UserID)
+	client.next(t, "usage", "error")
+	client.send(t, liveCommand{Op: "account_usage", ID: "denied"})
+	client.next(t, "denied", "error")
 }

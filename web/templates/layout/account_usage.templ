@@ -738,6 +738,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     state.loading = true;
     try {
       const inventory = await read(url("accounts"));
+      ensureUsageSubscription();
       const old = new Map(state.accounts.map((a) => [a.key, a]));
       state.accounts = (inventory.accounts || [])
         .filter((a) => ["openai", "anthropic"].includes(a.provider))
@@ -752,6 +753,8 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       if (shown()) drawPopup();
     } catch (e) {
       if (e.denied) {
+        state.subscription?.close();
+        state.subscription = null;
         state.denied = true;
         state.accounts = [];
         closeUsage();
@@ -817,6 +820,17 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     refreshAll();
   });
   document.body.addEventListener("accountUsageUpdated", refreshAll);
+  // Independent of project navigation; the transport restores this on reconnect.
+  function ensureUsageSubscription() {
+    if (state.subscription || !window.openVibelyLive?.accountUsage) return;
+    state.subscription = window.openVibelyLive.accountUsage({
+      onopen: () => document.body.dispatchEvent(new CustomEvent("accountUsageUpdated")),
+      listeners: {
+        account_usage_updated: () => document.body.dispatchEvent(new CustomEvent("accountUsageUpdated")),
+        error: () => document.body.dispatchEvent(new CustomEvent("accountUsageUpdated")),
+      },
+    });
+  }
   refreshAll();
 })();
 </script>

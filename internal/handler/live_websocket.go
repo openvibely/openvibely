@@ -80,6 +80,10 @@ func (h *Handler) liveEventVisible(ctx context.Context, cache liveProjectVisibil
 	var projectID string
 	switch event := frame.Data.(type) {
 	case events.TaskEvent:
+		if event.Type == events.AccountUsageUpdated {
+			// Global delivery is authorized by subscription admission and revocation.
+			return frame.subscription != nil && frame.subscription.command.Op == "account_usage"
+		}
 		projectID = event.ProjectID
 	case events.ChatEvent:
 		if event.ProjectID == models.AllProjectsID {
@@ -250,6 +254,9 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		projects := map[string]bool{}
 		all := false
 		for _, sub := range subscriptions {
+			if sub.command.Op == "account_usage" {
+				continue
+			}
 			projects[sub.command.ProjectID] = true
 			all = all || sub.command.ProjectID == models.AllProjectsID
 		}
@@ -334,7 +341,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription limit reached"})
 				continue
 			}
-			if cmd.Op != "execution" && cmd.Op != "live" && cmd.Op != "computer" {
+			if cmd.Op != "execution" && cmd.Op != "live" && cmd.Op != "computer" && cmd.Op != "account_usage" {
 				return nil
 			}
 			if !authorized() {
@@ -343,9 +350,15 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 			// Register interest before admission so a concurrent revocation is queued.
 			// Existing subscriptions remain registered throughout this check.
 			if projectWatch != nil {
-				projects := map[string]bool{cmd.ProjectID: true}
+				projects := map[string]bool{}
+				if cmd.Op != "account_usage" {
+					projects[cmd.ProjectID] = true
+				}
 				all := cmd.ProjectID == models.AllProjectsID
 				for _, sub := range subscriptions {
+					if sub.command.Op == "account_usage" {
+						continue
+					}
 					projects[sub.command.ProjectID] = true
 					all = all || sub.command.ProjectID == models.AllProjectsID
 				}
@@ -362,7 +375,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 					writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription denied"})
 					continue
 				}
-			} else {
+			} else if cmd.Op != "account_usage" {
 				visible[cmd.ProjectID] = true
 			}
 			subctx, stop := context.WithCancel(ctx)
@@ -439,6 +452,18 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 
 // Check project access and ownership at subscription admission and access changes.
 func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) bool {
+	if cmd.Op == "account_usage" {
+		if h.organizationSvc == nil {
+			return false
+		}
+		principal, ok := models.PrincipalFromContext(ctx)
+		if !ok {
+			return false
+		}
+		user, err := h.organizationSvc.Store.UserByID(ctx, principal.UserID)
+		return err == nil && user != nil && !user.Disabled && user.IsOrgAdmin()
+	}
+
 	if cmd.ProjectID == "" || h.projectRepo == nil {
 		return false
 	}
@@ -504,7 +529,9 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 	var taskMissed, chatMissed, fileMissed <-chan struct{}
 	var err error
 	if h.broadcaster != nil {
-		if cmd.ProjectID == models.AllProjectsID {
+		if cmd.Op == "account_usage" {
+			tasks, err = h.broadcaster.SubscribeAccountUsage()
+		} else if cmd.ProjectID == models.AllProjectsID {
 			tasks, err = h.broadcaster.Subscribe()
 		} else {
 			tasks, err = h.broadcaster.SubscribeProject(cmd.ProjectID)
@@ -516,7 +543,7 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 		defer h.broadcaster.Unsubscribe(tasks)
 		taskMissed = h.broadcaster.Missed(tasks)
 	}
-	if h.chatBroadcaster != nil {
+	if h.chatBroadcaster != nil && cmd.Op != "account_usage" {
 		chats, err = h.chatBroadcaster.SubscribeProject(cmd.ProjectID)
 		if err != nil {
 			send(liveFrame{Event: "retry", Data: "live subscription unavailable"})
@@ -525,7 +552,7 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 		defer h.chatBroadcaster.Unsubscribe(chats)
 		chatMissed = h.chatBroadcaster.Missed(chats)
 	}
-	if h.fileChangeBroadcaster != nil && cmd.TaskID != "" {
+	if h.fileChangeBroadcaster != nil && cmd.TaskID != "" && cmd.Op != "account_usage" {
 		files, err = h.fileChangeBroadcaster.SubscribeTask(cmd.TaskID)
 		if err != nil {
 			send(liveFrame{Event: "retry", Data: "live subscription unavailable"})
@@ -559,6 +586,9 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 		case ev, ok := <-tasks:
 			if !ok {
 				return
+			}
+			if ev.Type == events.AccountUsageUpdated && cmd.Op != "account_usage" {
+				continue
 			}
 			if !send(liveFrame{Event: string(ev.Type), Data: ev}) {
 				return

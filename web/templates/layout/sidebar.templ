@@ -502,7 +502,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				(function() {
 					const projectSelector = document.getElementById('project-selector');
 					let liveSSEHasConnected = false;
-                    const seenUsageUpdates = new Set();
                     window.addEventListener('sse-live-connected', function(event) {
                         if(event.detail?.reconciliation)document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));
                     });
@@ -513,17 +512,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-							if (eventType === 'account_usage_updated') {
-                                // All Projects receives a copy for each visible project. Apply once.
-                                const updateID = data.usage_update_id;
-                                if (updateID) {
-                                    if (seenUsageUpdates.has(updateID)) return;
-                                    seenUsageUpdates.add(updateID);
-                                    if (seenUsageUpdates.size > 256) seenUsageUpdates.delete(seenUsageUpdates.values().next().value);
-                                }
-                                document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));
-                                return;
-                            }
                             if (eventType === 'plugin_pages_changed') {
                                     if (window.htmx) htmx.trigger(document.body, 'plugin-nav-refresh');
  window.dispatchEvent(new CustomEvent('plugin-page-updated', {detail: data}));
@@ -612,7 +600,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									console.error('[SSE-Live] Connection error:', err);
 								},
 								listeners: {
-                                    'account_usage_updated': handleLiveEvent,
                                     'plugin_pages_changed': handleLiveEvent,
                                 'task_deleted': handleLiveEvent,
                                     'task_board_updated': handleLiveEvent,

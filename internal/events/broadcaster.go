@@ -46,7 +46,6 @@ const (
 
 // TaskEvent represents a task state change event
 type TaskEvent struct {
-	UsageUpdateID       string        `json:"usage_update_id,omitempty"`
 	AlertSource         string        `json:"alert_source,omitempty"`
 	AlertTitle          string        `json:"alert_title,omitempty"`
 	AlertSeverity       string        `json:"alert_severity,omitempty"`
@@ -161,3 +160,10 @@ func (e TaskEvent) ToSSE() string {
 
 // Missed signals that this subscriber lost one or more events.
 func (b *Broadcaster) Missed(sub Subscriber) <-chan struct{} { return b.core.Missed(sub) }
+
+// SubscribeAccountUsage receives only global account-usage invalidations.
+func (b *Broadcaster) SubscribeAccountUsage() (Subscriber, error) {
+	return b.core.subscribeFiltered("", func(event TaskEvent) bool {
+		return event.Type == AccountUsageUpdated && event.ProjectID == ""
+	})
+}
