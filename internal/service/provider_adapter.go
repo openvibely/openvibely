@@ -693,7 +693,12 @@ func (s *LLMService) preparePendingInputWithBudget(req llmcontracts.AgentRequest
 		}
 		root = filepath.Join(home, ".openvibely")
 	}
-	id := strings.TrimSpace(req.ExecID)
+	// Artifact identities may refer to lifecycle_executions, not executions.
+	// Keep them separate from ExecID, which also owns persisted conversations.
+	id := strings.TrimSpace(llmcontracts.ArtifactExecutionIDFromContext(req.Ctx))
+	if id == "" {
+		id = strings.TrimSpace(req.ExecID)
+	}
 	if id == "" || filepath.Base(id) != id || id == "." || id == ".." {
 		return req, false, func() {}, llmcontracts.NewCategorizedError(llmcontracts.ErrorPendingInputInfeasible, "artifact identity", fmt.Errorf("execution id is unavailable or unsafe"))
 	}

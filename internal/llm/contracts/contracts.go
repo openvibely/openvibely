@@ -82,7 +82,7 @@ type AgentRequest struct {
 	Message                string
 	Attachments            []models.Attachment
 	Agent                  models.LLMConfig
-	ExecID                 string
+	ExecID                 string // Persisted executions row owning the conversation; never a lifecycle execution ID.
 	RetrySourceExecutionID string // Failed execution retried by this request, for history/decision observability.
 	ProjectID              string // Authoritative project scope for provider-side live events and attribution
 	TransportScope         string // Stable provider transport identity (for example task:<id> or chat:project:<id>)
@@ -246,7 +246,8 @@ func RetrySourceExecutionIDFromContext(ctx context.Context) string {
 }
 
 // WithArtifactExecutionID carries the persisted execution identity used to
-// scope temporary oversized-input artifacts for direct LLM calls.
+// scope temporary oversized-input artifacts for direct LLM calls. It may be a
+// lifecycle_executions ID and must not be used as a conversation's ExecID.
 func WithArtifactExecutionID(ctx context.Context, executionID string) context.Context {
 	if ctx == nil || executionID == "" {
 		return ctx

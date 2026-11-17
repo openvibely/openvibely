@@ -1037,9 +1037,8 @@ func TestLLMService_CallAgentDirectWithDefinition_PropagatesAgentDefinitionAndSc
 	if capture.lastReq.AgentDefinition == nil || capture.lastReq.AgentDefinition.ID != agentDef.ID {
 		t.Fatalf("expected agent definition propagated, got %#v", capture.lastReq.AgentDefinition)
 	}
-	if capture.lastReq.ExecID != "lifecycle-exec-1" {
-		t.Fatalf("artifact execution ID = %q, want lifecycle-exec-1", capture.lastReq.ExecID)
-	}
+	require.Empty(t, capture.lastReq.ExecID, "direct hooks must not persist a task conversation")
+	require.Equal(t, "lifecycle-exec-1", llmcontracts.ArtifactExecutionIDFromContext(capture.lastReq.Ctx))
 	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
 	if rt == nil || !rt.HasDefinition("write_file") {
 		t.Fatalf("expected scoped file runtime tools, got %#v", rt)
@@ -1060,6 +1059,27 @@ func TestLLMService_CallAgentDirectWithDefinition_PropagatesAgentDefinitionAndSc
 	}
 }
 
+// Exercise the real conversation-writing adapter with foreign keys enabled.
+// A lifecycle artifact ID has no corresponding row in the executions table.
+func TestLLMService_LifecycleDirectCallDoesNotPersistTaskConversation(t *testing.T) {
+	env := teststores.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"hook completed"},"finish_reason":"stop"}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+	svc := NewLLMService(env.LLMConfigs, env.Executions, env.Tasks, env.Projects, env.Schedules, env.Attachments)
+	ctx := llmcontracts.WithLifecycleHookCall(llmcontracts.WithArtifactExecutionID(context.Background(), "lifecycle-only-execution"))
+	agent := models.LLMConfig{Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: server.URL, ContextWindow: 65536}
+	output, _, err := svc.CallAgentDirect(ctx, "review skill learning", nil, agent, t.TempDir())
+	require.NoError(t, err)
+	require.Equal(t, "hook completed", output)
+	heads, err := env.Executions.ReadConversationHeads(ctx, models.ConversationOwner{ExecutionID: "lifecycle-only-execution"}, "", 0)
+	require.NoError(t, err)
+	require.Empty(t, heads)
+}
+
 func TestLLMService_LifecycleDirectCallExternalizesOversizedInput(t *testing.T) {
 	root := t.TempDir()
 	capture := &captureProviderAdapter{}
@@ -1074,9 +1094,9 @@ func TestLLMService_LifecycleDirectCallExternalizesOversizedInput(t *testing.T) 
 	if _, _, err := svc.CallAgentDirect(ctx, original, nil, agent, t.TempDir()); err != nil {
 		t.Fatalf("CallAgentDirect: %v", err)
 	}
-	if capture.lastReq.ExecID != "lifecycle-exec-oversized" {
-		t.Fatalf("artifact execution ID = %q", capture.lastReq.ExecID)
-	}
+	require.Empty(t, capture.lastReq.ExecID, "artifact identity must not become a conversation owner")
+	require.Equal(t, "lifecycle-exec-oversized", llmcontracts.ArtifactExecutionIDFromContext(capture.lastReq.Ctx))
+	require.Contains(t, capture.lastReq.Message, filepath.Join(root, "task-inputs", "lifecycle-exec-oversized", "prompt.txt"))
 	if capture.lastReq.Message == original || !strings.Contains(capture.lastReq.Message, "Full input:") {
 		t.Fatal("oversized lifecycle input was not externalized")
 	}
