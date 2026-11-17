@@ -40,6 +40,10 @@ function locatorRoot(page,frames=[]) {
  if(!Array.isArray(frames)||frames.length>8||frames.some(f=>typeof f!=='string'||!f))throw Error('Invalid frame selectors');
  return frames.reduce((root,selector)=>root.frameLocator(selector),page);
 }
+async function assertPublicTarget(target) {
+ const sensitive=await target.evaluate(n=>/password|one[- ]?time|verification[ -]?code|security[ -]?code|passcode|\bpin\b|\btotp\b|\botp\b|\b2fa\b/i.test([n.type,n.autocomplete,n.name,n.id,n.getAttribute('aria-label'),n.getAttribute('placeholder'),...[...(n.labels||[])].map(l=>l.innerText)].join(' ')));
+ if(sensitive)throw Error('Use a private login handoff for passwords or verification codes.');
+}
 function pageRange(args){
  const offset=args.offset??0,limit=args.limit??100;
  if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>500)throw Error('Use offset >= 0 and limit between 1 and 500');
@@ -115,7 +119,12 @@ async function run(args) {
   }
   if(args.action==='find')return {tab_id:id,...await findElements(page,args)};
   let target;
-  if(['click','type','select','press_key'].includes(args.action)) {
+  const targetActions=['click','double_click','type','append','type_sequential','select','press_key','set_checked'];
+  if(targetActions.includes(args.action)&&args.locator){
+   const locator=buildLocator(locatorRoot(page,args.frames),args.locator);
+   target=await locator.elementHandle();if(!target)throw Error('Element not found');
+   await assertPublicTarget(target);
+  } else if(targetActions.includes(args.action)) {
    const current=await snapshot(page);
    if(!args.snapshot||args.snapshot!==current.snapshot)throw Error('Page changed. Read the page again before acting.');
    if(args.action==='press_key') {
@@ -123,7 +132,7 @@ async function run(args) {
    } else {
     const control=current.controls.find(c=>c.ref===args.ref);
     if(!control)throw Error('Read the page and use a current control reference.');
-    if(['type','select'].includes(args.action)&&control.sensitive)throw Error('Use a private login handoff for passwords or verification codes.');
+    if(['type','append','type_sequential','select','set_checked'].includes(args.action)&&control.sensitive)throw Error('Use a private login handoff for passwords or verification codes.');
     const handle=await page.evaluateHandle(ref=>window.__ovBrowserRefs.nodes.get(ref),args.ref);
     target=handle.asElement();if(!target)throw Error('Control changed. Read the page again.');
    }
@@ -136,10 +145,14 @@ async function run(args) {
    case 'reload':await page.reload({waitUntil:'domcontentloaded'});break;
    case 'back':await page.goBack({waitUntil:'domcontentloaded'});break;
    case 'forward':await page.goForward({waitUntil:'domcontentloaded'});break;
-   case 'click':await target.click();break;
+   case 'click':await target.click({button:args.button,modifiers:args.modifiers,force:args.force});break;
+   case 'double_click':await target.dblclick({button:args.button,modifiers:args.modifiers,force:args.force});break;
+   case 'append':
+   case 'type_sequential':await target.type(args.text);break;
+   case 'set_checked':if(typeof args.checked!=='boolean')throw Error('checked must be a boolean');await target.setChecked(args.checked,{force:args.force});break;
    case 'type':await target.fill(args.text);break;
-   case 'select':await target.selectOption(args.value);break;
-   case 'press_key':await page.keyboard.press(args.key);break;
+   case 'select':await target.selectOption(args.options??args.value);break;
+   case 'press_key':if(target)await target.press(args.key);else await page.keyboard.press(args.key);break;
    case 'scroll':await page.mouse.wheel(0,Math.max(-2000,Math.min(2000,Number(args.amount)||600)));break;
    default:throw Error('Unsupported browser action');
   }

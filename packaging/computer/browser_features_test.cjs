@@ -54,5 +54,22 @@ test('project browser features in isolated Chromium',async t=>{
    assert.ok((await run({action:'read',offset:100})).controls.length>0);
    assert.ok((await run({action:'read',text_offset:20000})).text.length>1000);
   });
+  await t.test('element actions and credential restrictions',async()=>{
+   const page=client.contexts()[0].pages()[0];
+   await page.setContent('<input id="normal"><input id="password" type="password"><input type="checkbox"><select multiple><option value="a">Alpha</option><option value="b">Beta</option></select><button ondblclick="this.textContent=\'Twice\'">Double</button>');
+   await run({action:'type',locator:{selector:'#normal'},text:'a'});
+   await run({action:'append',locator:{selector:'#normal'},text:'b'});
+   await run({action:'type_sequential',locator:{selector:'#normal'},text:'c'});
+   assert.equal(await page.locator('#normal').inputValue(),'abc');
+   await run({action:'press_key',locator:{selector:'#normal'},key:'Backspace'});
+   assert.equal(await page.locator('#normal').inputValue(),'ab');
+   await run({action:'set_checked',locator:{role:'checkbox'},checked:true});assert.equal(await page.getByRole('checkbox').isChecked(),true);
+   await run({action:'select',locator:{selector:'select'},options:[{label:'Alpha'},{index:1}]});assert.deepEqual(await page.locator('select').evaluate(n=>[...n.selectedOptions].map(o=>o.value)),['a','b']);
+   await run({action:'double_click',locator:{role:'button'}});assert.equal(await page.getByRole('button').innerText(),'Twice');
+   for(const action of ['type','append','type_sequential','press_key'])await assert.rejects(run({action,locator:{selector:'#password'},text:'secret',key:'a'}),/private login/);
+   const old=await run({action:'read'});await page.locator('#normal').evaluate(n=>n.outerHTML='<input id="normal">');
+   await assert.rejects(run({action:'type',snapshot:old.snapshot,ref:old.controls.find(c=>c.id==='normal').ref,text:'stale'}),/changed/);
+   await run({action:'type',locator:{selector:'#normal'},text:'fresh'});assert.equal(await page.locator('#normal').inputValue(),'fresh');
+  });
  }finally{await client.close();await browser.close();await new Promise(resolve=>server.close(resolve));process.env.HOME=previousHome;await fs.rm(home,{recursive:true,force:true});}
 });
