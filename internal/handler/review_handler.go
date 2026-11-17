@@ -215,7 +215,7 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
 	}
 	if admission.Queued != nil {
-		if err := h.reviewCommentRepo.DeleteByTask(c.Request().Context(), taskID); err != nil {
+		if err := h.reviewCommentRepo.DeleteSubmitted(c.Request().Context(), taskID, comments); err != nil {
 			applog.Infof("[handler] SubmitReview error clearing comments: %v", err)
 		}
 		c.Response().Header().Set("HX-Redirect", fmt.Sprintf("/tasks/%s?tab=chat", taskID))
@@ -260,8 +260,8 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
 
-	// Clear the review comments after submission
-	if err := h.reviewCommentRepo.DeleteByTask(c.Request().Context(), taskID); err != nil {
+	// Clear only the submitted comment versions; comments saved or edited while submission was in progress stay as drafts
+	if err := h.reviewCommentRepo.DeleteSubmitted(c.Request().Context(), taskID, comments); err != nil {
 		applog.Infof("[handler] SubmitReview error clearing comments: %v", err)
 	}
 

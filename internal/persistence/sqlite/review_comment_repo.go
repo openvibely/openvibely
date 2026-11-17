@@ -103,6 +103,19 @@ func (r *ReviewCommentRepo) DeleteByTask(ctx context.Context, taskID string) err
 	})
 }
 
+// DeleteSubmitted removes only the submitted comment versions (matched by ID and
+// text). Comments added or edited after the submission snapshot was read are kept.
+func (r *ReviewCommentRepo) DeleteSubmitted(ctx context.Context, taskID string, submitted []models.ReviewComment) error {
+	return r.mutateTaskComments(ctx, taskID, "review.comments.submitted", func(tx sqlExecutor) (string, error) {
+		for _, c := range submitted {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM review_comments WHERE task_id=? AND id=? AND comment_text=?`, taskID, c.ID, c.CommentText); err != nil {
+				return taskID, err
+			}
+		}
+		return taskID, nil
+	})
+}
+
 // UpdateTextForProject updates only comments owned by the request project.
 func (r *ReviewCommentRepo) UpdateTextForProject(ctx context.Context, projectID, id, text string) error {
 	return r.mutateProjectComment(ctx, projectID, id, "review.comment.updated", func(tx sqlExecutor) error {

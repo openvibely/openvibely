@@ -551,6 +551,7 @@ type ReviewCommentStore interface {
 	Create(ctx context.Context, c *models.ReviewComment) error
 	Delete(ctx context.Context, id string) error
 	DeleteByTask(ctx context.Context, taskID string) error
+	DeleteSubmitted(ctx context.Context, taskID string, submitted []models.ReviewComment) error
 	ListByTask(ctx context.Context, taskID string) ([]models.ReviewComment, error)
 	UpdateText(ctx context.Context, id string, commentText string) error
 }
