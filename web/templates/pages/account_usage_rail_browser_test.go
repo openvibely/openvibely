@@ -203,12 +203,12 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.waitFor("pointer click does not focus popup", `String(document.getElementById('rail-account-popup').matches(':popover-open')&&!document.getElementById('rail-account-popup').contains(document.activeElement))`, "true")
 		b.evaluate(`document.getElementById('rail-accounts').dispatchEvent(new PointerEvent('pointerleave')); 'leave clicked meter'`)
 		b.waitFor("clicked hover popup dismisses on leave", `String(!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
-		// Provider failure must not leave stale rings looking like live allowance.
+		// Provider failure marks usage stale without replacing the provider identity.
 		mu.Lock()
 		failed = true
 		mu.Unlock()
 		b.evaluate(`document.body.dispatchEvent(new CustomEvent('accountUsageChanged')); 'failed refresh'`)
-		b.waitFor("failed meters", `String([...document.querySelectorAll('.rail-account')].every(b=>b.getAttribute('aria-label').includes('stale')&&b.querySelector('text').textContent==='!'))`, "true")
+		b.waitFor("failed meters", `String([...document.querySelectorAll('.rail-account')].every(b=>b.getAttribute('aria-label').includes('stale')&&b.querySelector('text').textContent===(b.dataset.key==='anthropic'?'A':'O')))`, "true")
 		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'error popup'`)
 		b.waitFor("failure retains marked stale bars", `String(document.getElementById('rail-account-popup').querySelectorAll('[role="meter"]').length)`, "1")
 		b.waitFor("malformed grants retain refresh control", `String(document.querySelector('#rail-account-popup [data-action="refresh"]')!==null)`, "true")
