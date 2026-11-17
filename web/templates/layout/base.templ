@@ -135,11 +135,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
 						var prefs = {};
-						try { prefs = { output: localStorage.getItem('openvibely.outputDetail'), surfaces: localStorage.getItem('openvibely.surfaceStyle'), layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle') }; } catch (_) {}
+						try { prefs = { output: localStorage.getItem('openvibely.outputDetail'), surfaces: localStorage.getItem('openvibely.surfaceStyle'), layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle'), meters: localStorage.getItem('openvibely.usageMeterStyle') }; } catch (_) {}
 						root.setAttribute('data-output-detail', prefs.output === 'full' ? 'full' : 'compact');
 						root.setAttribute('data-surface-style', prefs.surfaces === 'layered' ? 'layered' : 'default');
 						root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
 						root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
+						root.setAttribute('data-usage-meter-style', ['logos', 'fill', 'bars'].includes(prefs.meters) ? prefs.meters : 'letters');
 						root.setAttribute('data-tab-style', prefs.tabs === 'attached' ? 'attached' : 'detached');
 						root.setAttribute('data-thread-width', prefs.thread === 'full' ? 'full' : 'focused');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'on' ? 'on' : 'off');
@@ -156,6 +157,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['focused', 'full'] },
 						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['off', 'on'] },
+						meters: { key: 'openvibely.usageMeterStyle', attr: 'data-usage-meter-style', values: ['letters', 'logos', 'fill', 'bars'] },
 						tabs: { key: 'openvibely.tabStyle', attr: 'data-tab-style', values: ['detached', 'attached'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['off', 'on'] },
 						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['tint', 'filled', 'inset', 'tintstrip'] }

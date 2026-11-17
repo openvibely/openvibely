@@ -79,6 +79,14 @@ templ ThemesContent(catalog []themes.Theme) {
 				@displayToggle("layout", "Task list", "Float the task list beside the page with a gap, or join them into one surface.", "floating", "Floating", "unified", "Unified", "Keep a gap between the task list and the main page.", "Join the task list and main page into one continuous surface.")
 				@displayToggle("tabs", "Project tabs", "Keep project tabs separate from the page, or connect the active tab to it.", "detached", "Detached", "attached", "Attached", "Keep project tabs separate from the page below.", "Connect the active project tab to the page below.")
 			</div>
+            <h3 class="text-sm font-medium mt-6 mb-2">Account usage meters</h3>
+            <p class="text-xs opacity-60 mb-3">Choose how subscription allowance appears in the rail. Stronger color shows what’s left; faded color shows what’s used.</p>
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl mb-6">
+                @usageMeterStyleCard("letters", "Letters + rings", "Weekly outer ring; 5-hour inner ring when available.")
+                @usageMeterStyleCard("logos", "Logos + rings", "Provider logo inside the same allowance rings.")
+                @usageMeterStyleCard("fill", "Logo fill", "Weekly remaining fills the logo; 5-hour allowance appears below.")
+                @usageMeterStyleCard("bars", "Logos + bars", "Weekly bar above the optional 5-hour bar.")
+            </div>
 			<h3 class="text-sm font-medium mt-6 mb-2">Task board columns</h3>
 			<p class="text-xs opacity-60 mb-2">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
 			<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl">
@@ -122,6 +130,13 @@ templ ThemesContent(catalog []themes.Theme) {
 						card.classList.toggle('border-primary', active);
 						card.querySelectorAll('[data-board-columns-active-badge]').forEach(function(badge) { badge.classList.toggle('hidden', !active); });
 					});
+                    document.querySelectorAll('[data-meter-preview]').forEach(function(preview) {
+                        if (!window.openVibelyUsageMeterPreview) return;
+                        preview.replaceChildren(...['openai','anthropic'].map(function(provider) {
+                            const svg = window.openVibelyUsageMeterPreview(provider, preview.dataset.meterPreview);
+                            svg.style.width='28px';svg.style.height='28px';return svg;
+                        }));
+                    });
 					document.querySelectorAll('[data-display-option]').forEach(function(btn) {
 						var active = display.get(btn.getAttribute('data-display-pref')) === btn.getAttribute('data-display-option');
 						btn.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -134,6 +149,7 @@ templ ThemesContent(catalog []themes.Theme) {
 					refreshDisplayPrefs();
 				};
 				refreshDisplayPrefs();
+                if (!window.openVibelyUsageMeterPreview) document.addEventListener('openvibely:usage-meter-ready', refreshDisplayPrefs, {once:true});
 				function refreshThemeCards() {
 					var root = document.getElementById('themes-container');
 					if (!root) return;
@@ -378,4 +394,13 @@ templ boardColumnsCard(id, name, description string) {
 			<p class="text-xs opacity-70">{ description }</p>
 		</div>
 	</button>
+}
+
+// Previews use the rail renderer so sizing and theme colors stay identical.
+templ usageMeterStyleCard(value, title, description string) {
+    <button type="button" class="card bg-base-100 border border-base-300 p-4 text-left gap-3" data-display-pref="meters" data-display-option={ value } aria-pressed="false" onclick="window.selectOpenVibelyDisplay('meters', this.getAttribute('data-display-option'))">
+        <span class="flex items-center justify-between gap-2"><span class="font-medium">{ title }</span><span data-display-active class="badge badge-primary badge-sm hidden">Active</span></span>
+        <span class="flex gap-3" data-meter-preview={ value } aria-hidden="true"></span>
+        <span class="text-xs opacity-60">{ description }</span>
+    </button>
 }

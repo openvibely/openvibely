@@ -283,3 +283,44 @@ func TestBrowserFunctional_ToolOutputPreference(t *testing.T) {
 		b.waitFor("saved full overrides compact default", `String(location.search.includes('reload=2') && document.readyState==='complete' && !!window.selectOpenVibelyDisplay && openVibelyDisplay.get('output')==='full')`, "true")
 	})
 }
+
+func TestBrowserFunctional_UsageMeterAppearance(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/api/analytics/usage" {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Query().Get("projection") == "accounts" {
+				w.Write([]byte(`{"accounts":[{"key":"a","provider":"anthropic","identity":"Work"}]}`))
+			} else {
+				w.Write([]byte(`{"snapshots":{"a":{"account_limits":[{"limits":[{"window_minutes":10080,"used_percent":55},{"window_minutes":300,"used_percent":25}]}]}}}`))
+			}
+			return
+		}
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := Themes([]models.Project{{ID: "project", Name: "Project"}}, "project", themes.Catalog()).Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "usage-meter-appearance", func(b *composerFocusCDP) {
+		b.waitFor("meter and previews ready", `String(document.querySelectorAll('[data-meter-preview] svg').length===8&&document.querySelectorAll('.rail-account').length===1)`, "true")
+		for _, style := range []string{"letters", "logos", "fill", "bars"} {
+			b.evaluate(`selectOpenVibelyDisplay('meters','` + style + `'); 'selected'`)
+			b.waitFor("saved and rendered meter style", `(()=>{const style='`+style+`';if(localStorage.getItem('openvibely.usageMeterStyle')!==style||document.documentElement.dataset.usageMeterStyle!==style)return 'preference';const svg=document.querySelector('.rail-account svg');if(svg.getBoundingClientRect().width!==28)return 'size';if(style==='letters'&&!svg.querySelector('text'))return 'letter';if(style!=='letters'&&!svg.querySelector('path'))return 'logo';if(style==='fill'&&!svg.querySelector('clipPath'))return 'fill';if(style==='bars'&&svg.querySelectorAll('rect').length!==4)return 'bars';return 'ok'})()`, "ok")
+		}
+		b.evaluate(`window.meterReloadMarker=true; 'before reload'`)
+		b.call("Page.reload", map[string]any{}, nil)
+		b.waitFor("style survives reload", `String(!window.meterReloadMarker&&!!window.openVibelyThemes&&window.openVibelyDisplay?.get('meters')==='bars'&&document.querySelector('.rail-account svg')?.querySelectorAll('rect').length===4)`, "true")
+		for _, theme := range themes.Catalog() {
+			b.evaluate(`openVibelyThemes.apply('` + theme.ID + `'); 'theme'`)
+			b.waitFor("theme remaining allowance prominence", `(()=>{const light=document.documentElement.dataset.theme==='light';const svg=document.querySelector('.rail-account svg');const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');function brightness(token){const rect=document.createElementNS(svg.namespaceURI,'rect');rect.setAttribute('fill','var('+token+')');svg.append(rect);const color=getComputedStyle(rect).fill;rect.remove();ctx.fillStyle=light?'white':'black';ctx.fillRect(0,0,1,1);ctx.fillStyle=color;ctx.fillRect(0,0,1,1);const p=ctx.getImageData(0,0,1,1).data;return p[0]+p[1]+p[2]};const left=brightness('--ov-usage-remaining'),used=brightness('--ov-usage-used');return String(light?left<used:left>used)})()`, "true")
+		}
+		b.evaluate(`selectOpenVibelyDisplay('meters','letters');'reset'`)
+	})
+}
