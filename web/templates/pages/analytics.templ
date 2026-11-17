@@ -1924,7 +1924,8 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                             if(generation!==accountRenderGeneration || !target.isConnected)return;
                                             const accounts=inventory.accounts||[];
                                             const keys=new Set(accounts.map(a=>'usage-account-'+a.key));
-                                            [...target.children].forEach(card=>{if(!keys.has(card.id))card.remove();});
+                                            // Also remove text-only error/empty states when account cards return.
+                                            [...target.childNodes].forEach(node=>{if(node.nodeType!==Node.ELEMENT_NODE||!keys.has(node.id))node.remove();});
                                             if(!accounts.length){target.textContent='No connected OAuth accounts.';return;}
                                             for(const [index,account] of accounts.entries()){
                                                 let card=document.getElementById('usage-account-'+account.key);

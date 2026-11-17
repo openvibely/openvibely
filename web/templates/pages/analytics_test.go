@@ -1985,3 +1985,32 @@ func TestBrowserFunctional_AnalyticsSharedResetAttempt(t *testing.T) {
  </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_AnalyticsUsageRecoveryClearsError(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+ window.Chart=function(){this.destroy=function(){}};
+ let failing=true;
+ const response=data=>({ok:true,json:async()=>data});
+ window.fetch=async(url)=>{const p=new URL(url,location.href).searchParams;
+ if(p.get('projection')==='accounts'){if(failing)throw Error('temporary network error');return response({accounts:[{key:'a',provider:'openai'}]});}
+ if(p.get('projection')==='snapshots')return response({snapshots:{a:{account_limits:[{provider:'openai',plan_type:'ChatGPT Pro',limits:[]}]}}});
+ return response({totals:{},usage_rate:[],model_breakdown:[]});};
+ window.addEventListener('load',async()=>{
+ const result=document.getElementById('reconnect-result'),wait=()=>new Promise(r=>setTimeout(r,20));
+ try {
+ for(let i=0;i<100&&!document.getElementById('accountUsageCards').textContent.includes('Account usage unavailable');i++)await wait();
+ if(!document.getElementById('accountUsageCards').textContent.includes('Account usage unavailable'))throw Error('failure not shown');
+ failing=false;document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));
+ for(let i=0;i<100&&!document.getElementById('usage-account-a')?.textContent.includes('ChatGPT Pro');i++)await wait();
+ if(!document.getElementById('usage-account-a')?.textContent.includes('ChatGPT Pro'))throw Error('recovery card not rendered');
+ if(document.getElementById('accountUsageCards').textContent.includes('Account usage unavailable'))throw Error('Recovered account still displays Account usage unavailable beside valid card');
+ result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+ });</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
