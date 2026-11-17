@@ -230,7 +230,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       ? Math.max(0, Math.min(100, Number(l.used_percent)))
       : null;
   const shown = () => popup.matches(":popover-open");
-  function position(surface, button) {
+  function position(surface, button, alignTop = false) {
     if (!button) return;
     const r = button.getBoundingClientRect();
     surface.style.left =
@@ -243,7 +243,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         12,
         Math.min(
           innerHeight - surface.offsetHeight - 12,
-          r.bottom - surface.offsetHeight,
+          alignTop ? r.top : r.bottom - surface.offsetHeight,
         ),
       ) + "px";
   }
@@ -308,7 +308,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     if (open) {
       overflow.showPopover();
       more.setAttribute("aria-expanded", "true");
-      position(overflow, more);
+      position(overflow, more, true);
       overflow.querySelector("a")?.focus();
     } else closeOverflow(true);
   };
