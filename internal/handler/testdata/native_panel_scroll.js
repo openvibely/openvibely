@@ -36,7 +36,10 @@
     const toast = document.querySelector('[data-toast-key="native-usage"]');
     assert(toast, 'usage toast missing');
     toast.click();
-    await until(() => document.getElementById('usage-account-anthropic')?.getAttribute('aria-busy') === null && !!document.getElementById('usage-account-anthropic'), 'loaded account card');
+    await until(() => {
+      const card = document.getElementById('usage-account-anthropic');
+      return card?.getAttribute('aria-busy') === 'false' && card.textContent.includes('Claude Max');
+    }, 'loaded account card');
     const main = document.getElementById('main-content');
     assert(main.scrollTop > 0, 'Analytics did not reveal account');
     assert(visible(document.getElementById('usage-account-anthropic'), main), 'account is outside panel');

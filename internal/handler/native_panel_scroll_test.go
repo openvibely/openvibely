@@ -69,9 +69,12 @@ func TestNativePanelScrollIsolationInWails(t *testing.T) {
 			_ = pages.AnalyticsContent(&projects[0]).Render(ctx, w)
 		case "/api/analytics/usage":
 			w.Header().Set("Content-Type", "application/json")
-			if r.URL.Query().Get("projection") == "accounts" {
+			switch r.URL.Query().Get("projection") {
+			case "accounts":
 				fmt.Fprint(w, `{"accounts":[{"key":"first","provider":"openai"},{"key":"second","provider":"openai"},{"key":"anthropic","provider":"anthropic"}]}`)
-			} else {
+			case "snapshots":
+				fmt.Fprint(w, `{"snapshots":{"first":{"account_limits":[{"provider":"openai","plan_type":"ChatGPT Pro","limits":[]}]},"second":{"account_limits":[{"provider":"openai","plan_type":"ChatGPT Plus","limits":[]}]},"anthropic":{"account_limits":[{"provider":"anthropic","plan_type":"Claude Max","limits":[{"label":"Weekly","used_percent":95}]}]}}}`)
+			default:
 				fmt.Fprint(w, `{"account_limits":[],"totals":{},"usage_rate":[],"usage_rate_by_model":[],"model_breakdown":[]}`)
 			}
 		case "/api/analytics/dashboard":
