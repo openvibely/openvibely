@@ -4,9 +4,11 @@ const {createHash}=require('node:crypto');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const tabStatePath=()=>path.join(process.env.HOME,'.ov-browser-selected-tab');
+const tabIds=new WeakMap();
 async function tabId(page) {
+ if(tabIds.has(page))return tabIds.get(page);
  const session=await page.context().newCDPSession(page);
- try{return (await session.send('Target.getTargetInfo')).targetInfo.targetId;}finally{await session.detach();}
+ try{const id=(await session.send('Target.getTargetInfo')).targetInfo.targetId;tabIds.set(page,id);return id;}finally{await session.detach();}
 }
 async function tabs(context) {
  return Promise.all(context.pages().filter(p=>!p.url().startsWith('devtools:')).map(async page=>({page,id:await tabId(page)})));
@@ -84,14 +86,14 @@ function computerUUID() {
  },{range,textOffset});
  return {...view,snapshot:createHash('sha256').update(JSON.stringify(view)).digest('hex')};
 }
-async function run(args) {
- const browser=await chromium.connectOverCDP('http://127.0.0.1:'+process.env.OPENVIBELY_CDP_PORT);
+async function run(args,session) {
+ const browser=session?.browser||await chromium.connectOverCDP('http://127.0.0.1:'+process.env.OPENVIBELY_CDP_PORT);
  try {
   const context=browser.contexts()[0];
   if(args.action==='clear_cookies'){for(const c of args.cookies)await context.clearCookies({domain:c.domain,name:c.name,path:c.path});return {cleared:true};}
   if(args.action==='import_cookies'){await context.addCookies(args.cookies);return {imported:args.cookies.length};}
   let available=await tabs(context);
-  if(args.action==='tabs')return {tabs:await Promise.all(available.map(async t=>({tab_id:t.id,url:t.page.url(),title:await t.page.title()})))};
+  if(args.action==='tabs')return {tabs:await Promise.all(available.map(async t=>({tab_id:t.id,url:t.page.url(),title:session?.dialogs.has(t.page)?null:await t.page.title()})))};
   if(args.action==='open_tab'){const page=await context.newPage();const id=await tabId(page);await fs.writeFile(tabStatePath(),id,{mode:0o600});return {...await snapshot(page),tab_id:id};}
   let selected;try{selected=await fs.readFile(tabStatePath(),'utf8');}catch(e){if(e.code!=='ENOENT')throw e;}
   let entry=args.tab_id?available.find(t=>t.id===args.tab_id):available.find(t=>t.id===selected)||available[0];
@@ -104,6 +106,19 @@ async function run(args) {
   const timeout=args.timeout_ms??10000;
   if(!Number.isInteger(timeout)||timeout<1||timeout>20000)throw Error('timeout_ms must be between 1 and 20000');
   page.setDefaultTimeout(timeout);page.setDefaultNavigationTimeout(timeout);
+  if(args.action==='dialog'){
+   if(!session)throw Error('Dialog actions require the persistent browser session');
+   const pending=session.dialogs.get(page);
+   if(!pending)return {tab_id:id,dialog:null};
+   const info={type:pending.dialog.type(),message:pending.dialog.message().slice(0,2000),default_value:pending.dialog.defaultValue().slice(0,2000)};
+   if(args.dialog_action==='accept'||args.dialog_action==='dismiss'){
+    if(args.dialog_action==='accept')await pending.dialog.accept(args.text);else await pending.dialog.dismiss();
+    session.dialogs.delete(page);await pending.action?.catch(()=>{});
+   }else if(args.dialog_action&&args.dialog_action!=='inspect')throw Error('Invalid dialog action');
+   return {tab_id:id,dialog:info,handled:args.dialog_action==='accept'||args.dialog_action==='dismiss'};
+  }
+  if(session?.dialogs.has(page))return {tab_id:id,dialog_pending:true,next:'Use dialog to inspect, accept or dismiss the pending dialog.'};
+
   if(args.action==='screenshot'){
    if(args.full_page&&args.clip)throw Error('Choose full_page or clip');
    if(args.clip&&(!['x','y','width','height'].every(k=>Number.isFinite(args.clip[k]))||args.clip.x<0||args.clip.y<0||args.clip.width<=0||args.clip.height<=0))throw Error('Invalid screenshot clip');
@@ -186,7 +201,7 @@ async function run(args) {
    return {verified:false,url:page.url(),screenshot:(await page.screenshot({type:'png'})).toString('base64')};
   }
   return {...result,tab_id:id};
- } finally {await browser.close();}
+ } finally {if(!session)await browser.close();}
 }
 function browserError(error){
  const text=String(error?.message??'');
@@ -195,5 +210,25 @@ function browserError(error){
  const messages={multiple_matches:'More than one element matched. Narrow the locator.',timeout:'The action timed out. Check whether the element exists, is visible, enabled, and unobstructed.',private_login_required:'Use a private login handoff for credential fields.',page_changed:'The page or element changed. Read again or use a locator.',not_found:'The tab or element was not found. Refresh the tab list or locator.',invalid_request:'Invalid browser request. Check the action and arguments.'};
  return {code,message:messages[code]};
 }
-module.exports={run,browserError};
-if(require.main===module)(async()=>{let raw='';for await(const chunk of process.stdin)raw+=chunk;process.stdout.write(JSON.stringify(await run(JSON.parse(raw))));})().catch(error=>{process.stdout.write(JSON.stringify({error:browserError(error)}));});
+function createRunner(browser){
+ const dialogs=new Map();let notify;
+ const session={browser,dialogs};
+ const register=page=>{page.on('dialog',dialog=>{const pending={dialog};dialogs.set(page,pending);notify?.(page,pending);});page.on('close',()=>dialogs.delete(page));};
+ for(const context of browser.contexts()){for(const page of context.pages())register(page);context.on('page',register);}
+ return async args=>{
+  let resolve;const notified=new Promise(r=>resolve=r);
+  const action=run(args,session);action.catch(()=>{});
+  notify=(page,pending)=>{pending.action=action;resolve({tab_id:tabIds.get(page),dialog_pending:true,next:'Use dialog to inspect, accept or dismiss.'});};
+  try{return await Promise.race([action,notified]);}finally{notify=undefined;}
+ };
+}
+module.exports={run,browserError,createRunner};
+if(require.main===module)(async()=>{
+ if(process.argv.includes('--serve')){
+  const browser=await chromium.connectOverCDP('http://127.0.0.1:'+process.env.OPENVIBELY_CDP_PORT);
+  const execute=createRunner(browser);
+  try{for await(const line of require('node:readline').createInterface({input:process.stdin,crlfDelay:Infinity})){
+   try{process.stdout.write(JSON.stringify(await execute(JSON.parse(line)))+'\n');}catch(error){process.stdout.write(JSON.stringify({error:browserError(error)})+'\n');}
+  }}finally{await browser.close();}
+ }else{let raw='';for await(const chunk of process.stdin)raw+=chunk;process.stdout.write(JSON.stringify(await run(JSON.parse(raw))));}
+})().catch(error=>{process.stdout.write(JSON.stringify({error:browserError(error)}));});

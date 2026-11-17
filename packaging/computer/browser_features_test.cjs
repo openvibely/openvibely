@@ -7,8 +7,8 @@ const fs=require('node:fs/promises');
 const os=require('node:os');
 const path=require('node:path');
 const {chromium}=require('/opt/browser/node_modules/playwright');
-const {run,browserError}=require('./browser.cjs');
-test('project browser features in isolated Chromium',async t=>{
+const {run,browserError,createRunner}=require('./browser.cjs');
+test('project browser features in isolated Chromium',{timeout:30000},async t=>{
  const home=await fs.mkdtemp(path.join(os.tmpdir(),'ov-browser-test-'));
  const previousHome=process.env.HOME;process.env.HOME=home;process.env.OPENVIBELY_CDP_PORT='19222';
  const browser=await chromium.launch({headless:true,executablePath:chromium.executablePath(),args:['--no-sandbox','--remote-debugging-port=19222']});
@@ -87,6 +87,14 @@ test('project browser features in isolated Chromium',async t=>{
    const viewport=await image({}),full=await image({full_page:true}),clip=await image({clip:{x:0,y:0,width:80,height:80}});
    assert.equal(viewport[0],255);assert.equal(viewport[1],216);assert.ok(full.length>viewport.length);assert.ok(clip.length<viewport.length);
    await assert.rejects(run({action:'screenshot',clip:{x:0,y:0,width:-1,height:2}}),/Invalid/);
+  });
+  await t.test('dialogs survive calls and can be inspected and resolved',async()=>{
+   const page=client.contexts()[0].pages()[0];await page.setContent('<button onclick="document.querySelector(\'p\').textContent=prompt(\'Name?\',\'Default\')">Ask</button><p></p>');
+   const execute=createRunner(client);
+   const clicked=await execute({action:'click',locator:{role:'button'}});assert.equal(clicked.dialog_pending,true);
+   const inspected=await execute({action:'dialog',dialog_action:'inspect'});assert.equal(inspected.dialog.type,'prompt');assert.equal(inspected.dialog.message,'Name?');
+   await execute({action:'dialog',dialog_action:'accept',text:'Ada'});assert.equal(await page.locator('p').innerText(),'Ada');
+   await execute({action:'click',locator:{role:'button'}});await execute({action:'dialog',dialog_action:'dismiss'});assert.equal((await execute({action:'dialog'})).dialog,null);
   });
  }finally{await client.close();await browser.close();await new Promise(resolve=>server.close(resolve));process.env.HOME=previousHome;await fs.rm(home,{recursive:true,force:true});}
 });

@@ -178,25 +178,26 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 					"url": &toolschema.Schema{
 						Type: "string",
 					},
-					"tab_id":      &toolschema.Schema{Type: "string"},
-					"locator":     projectBrowserLocatorSchema(0),
-					"frames":      &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "string"}, Description: "Outer-to-inner iframe selectors."},
-					"offset":      &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")},
-					"limit":       &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("500")},
-					"property":    &toolschema.Schema{Type: "string", Enum: []any{"count", "text", "attribute", "visible", "enabled"}},
-					"attribute":   &toolschema.Schema{Type: "string", Description: "Public DOM attribute; value, style, event handlers and arbitrary data attributes are not readable."},
-					"text_offset": &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")},
-					"button":      &toolschema.Schema{Type: "string", Enum: []any{"left", "middle", "right"}},
-					"modifiers":   &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "string", Enum: []any{"Alt", "Control", "ControlOrMeta", "Meta", "Shift"}}},
-					"force":       &toolschema.Schema{Type: "boolean"},
-					"checked":     &toolschema.Schema{Type: "boolean"},
-					"options":     &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"value": {Type: "string"}, "label": {Type: "string"}, "index": {Type: "integer", Minimum: toolschema.Number("0")}}, AdditionalProperties: toolschema.Pointer(false)}},
-					"timeout_ms":  &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("20000")},
-					"state":       &toolschema.Schema{Type: "string", Enum: []any{"visible", "hidden", "attached", "detached", "load", "domcontentloaded", "networkidle"}},
-					"full_page":   &toolschema.Schema{Type: "boolean"},
-					"clip":        &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"x": {Type: "number", Minimum: toolschema.Number("0")}, "y": {Type: "number", Minimum: toolschema.Number("0")}, "width": {Type: "number"}, "height": {Type: "number"}}, Required: []string{"x", "y", "width", "height"}, AdditionalProperties: toolschema.Pointer(false)},
-					"snapshot":    &toolschema.Schema{Type: "string"},
-					"ref":         &toolschema.Schema{Type: "string"},
+					"tab_id":        &toolschema.Schema{Type: "string"},
+					"locator":       projectBrowserLocatorSchema(0),
+					"frames":        &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "string"}, Description: "Outer-to-inner iframe selectors."},
+					"offset":        &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")},
+					"limit":         &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("500")},
+					"property":      &toolschema.Schema{Type: "string", Enum: []any{"count", "text", "attribute", "visible", "enabled"}},
+					"attribute":     &toolschema.Schema{Type: "string", Description: "Public DOM attribute; value, style, event handlers and arbitrary data attributes are not readable."},
+					"text_offset":   &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")},
+					"button":        &toolschema.Schema{Type: "string", Enum: []any{"left", "middle", "right"}},
+					"modifiers":     &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "string", Enum: []any{"Alt", "Control", "ControlOrMeta", "Meta", "Shift"}}},
+					"force":         &toolschema.Schema{Type: "boolean"},
+					"checked":       &toolschema.Schema{Type: "boolean"},
+					"options":       &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"value": {Type: "string"}, "label": {Type: "string"}, "index": {Type: "integer", Minimum: toolschema.Number("0")}}, AdditionalProperties: toolschema.Pointer(false)}},
+					"timeout_ms":    &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("20000")},
+					"state":         &toolschema.Schema{Type: "string", Enum: []any{"visible", "hidden", "attached", "detached", "load", "domcontentloaded", "networkidle"}},
+					"full_page":     &toolschema.Schema{Type: "boolean"},
+					"clip":          &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"x": {Type: "number", Minimum: toolschema.Number("0")}, "y": {Type: "number", Minimum: toolschema.Number("0")}, "width": {Type: "number"}, "height": {Type: "number"}}, Required: []string{"x", "y", "width", "height"}, AdditionalProperties: toolschema.Pointer(false)},
+					"dialog_action": &toolschema.Schema{Type: "string", Enum: []any{"inspect", "accept", "dismiss"}},
+					"snapshot":      &toolschema.Schema{Type: "string"},
+					"ref":           &toolschema.Schema{Type: "string"},
 					"text": &toolschema.Schema{
 						Type: "string",
 					},
@@ -250,7 +251,7 @@ func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDe
 }
 
 func projectBrowserActions() []any {
-	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation", "screenshot"}
+	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation", "screenshot", "dialog"}
 }
 
 func validProjectBrowserAction(action string) bool {
