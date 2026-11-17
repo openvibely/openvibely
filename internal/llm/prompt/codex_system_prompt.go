@@ -16,17 +16,15 @@ var codexPrompts embed.FS
 // Keys come only from the bundled model registry (unknown names use reserve),
 // so this cache cannot grow with arbitrary user-provided model names.
 var adaptedCodexPrompts profileCache
-var codexToolNames = strings.NewReplacer("`apply_patch`", "`edit_file` or `write_file`", "exec_command", "shell")
+var codexToolNames = strings.NewReplacer("`apply_patch`", "`edit_file` or `write_file`", "exec_command", "shell",
+	"the `cmd` argument", "the `command` argument",
+	"ImageGen or image search", "`generate_image` or image search when available",
+)
 
 func CodexSystemPrompt(model string) string {
 	profile := codexProfile(model)
 	return adaptedCodexPrompts.get(profile, func() string {
-		base := codexSnapshot(model)
-		switch models.PromptProfile(profile) {
-		case models.PromptProfileCodexGPT62Astra, models.PromptProfileCodexGPT62Sol:
-			base = adaptGPT62ToolSections(base)
-		}
-		return adaptCodexTools(base)
+		return adaptCodexTools(codexSnapshot(model))
 	})
 }
 
@@ -47,7 +45,7 @@ func codexSnapshot(model string) string {
 }
 
 // Replace the skill and connector instructions with guidance for the tools attached to the turn.
-func adaptGPT62ToolSections(base string) string {
+func adaptCodexToolSections(base string) string {
 	sections := strings.Split(base, "\n# ")
 	adapted := make([]string, 0, len(sections))
 	for _, section := range sections {
@@ -67,15 +65,17 @@ func adaptGPT62ToolSections(base string) string {
 		}
 		adapted = append(adapted, section)
 	}
-	return strings.ReplaceAll(strings.Join(adapted, "\n# "), "the `cmd` argument", "the `command` argument")
+	return strings.Join(adapted, "\n# ")
 }
 
 func adaptCodexTools(base string) string {
-	lines := strings.Split(base, "\n")
+	lines := strings.Split(adaptCodexToolSections(base), "\n")
 	for i, line := range lines {
 		switch {
 		case strings.Contains(line, "multi_tool_use.parallel"):
 			lines[i] = strings.ReplaceAll(line, "You use `multi_tool_use.parallel` for that parallelism, and only that.", "Call the tools supplied with this request directly; run independent calls in parallel when supported.")
+		case strings.Contains(line, "approval auto-review block"):
+			lines[i] = "When approval is needed, explain which action requires it and why. If a tool denies an action, report the reason it gives."
 		case strings.Contains(line, "ALL_TOOLS"):
 			lines[i] = "Use the tools supplied with this request to find relevant capabilities. Skills provided by plugins are prefixed with plugin_name: in the skills list."
 		case strings.Contains(line, "functions.exec"):

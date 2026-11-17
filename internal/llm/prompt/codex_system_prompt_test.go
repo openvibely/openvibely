@@ -71,9 +71,10 @@ func TestCodexPromptContextAndModes(t *testing.T) {
 }
 
 func TestCodexPromptUsesOpenVibelyTools(t *testing.T) {
-	for _, model := range []string{"gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5", "gpt-5.6-sol"} {
+	for _, spec := range models.ProviderModels(models.ProviderOpenAI) {
+		model := spec.ID
 		prompt := CodexSystemPrompt(model)
-		for _, unavailable := range []string{"apply_patch", "functions.exec", "exec_command", "request_user_input_async", "send_user_message_async", "multi_tool_use.parallel", "ALL_TOOLS"} {
+		for _, unavailable := range []string{"apply_patch", "functions.exec", "exec_command", "request_user_input_async", "send_user_message_async", "multi_tool_use.parallel", "ALL_TOOLS", "skills.list", "skills.read", "skill://", "`cmd`", "codex_apps", "tool_search", "list_mcp_resources", "list_mcp_resource_templates", "ImageGen", "auto-review rejection"} {
 			if strings.Contains(prompt, unavailable) {
 				t.Errorf("%s references unavailable %s", model, unavailable)
 			}
@@ -84,12 +85,7 @@ func TestCodexPromptUsesOpenVibelyTools(t *testing.T) {
 func TestGPT62RuntimeToolInstructions(t *testing.T) {
 	for _, model := range []string{"gpt-6.2-astra", "gpt-6.2-sol"} {
 		prompt := BuildCodexAgentSystemPrompt(model, "")
-		for _, stale := range []string{"skills.list", "skills.read", "skill://", "`cmd`", "codex_apps", "tool_search", "list_mcp_resources", "list_mcp_resource_templates"} {
-			if strings.Contains(prompt, stale) {
-				t.Errorf("%s retained %q", model, stale)
-			}
-		}
-		for _, want := range []string{"skills_list", "skill_view", "view_handle as handle", "file_path", "the `command` argument", "tools attached to this request"} {
+		for _, want := range []string{"skills_list", "skill_view", "view_handle as handle", "file_path", "the `command` argument", "tools attached to this request", "`generate_image`", "report the reason it gives"} {
 			if !strings.Contains(prompt, want) {
 				t.Errorf("%s missing %q", model, want)
 			}
