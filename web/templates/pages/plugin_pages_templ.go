@@ -459,7 +459,7 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 			}
 		}
 		if len(entries) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<li data-plugin-nav-overflow hidden><button type=\"button\" aria-label=\"More pages\" aria-haspopup=\"menu\" aria-expanded=\"false\" aria-controls=\"plugin-pages-overflow-menu\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"12\" r=\"2\"></circle><circle cx=\"12\" cy=\"12\" r=\"2\"></circle><circle cx=\"19\" cy=\"12\" r=\"2\"></circle></svg> <span class=\"sidebar-text\">More pages</span></button></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<li data-plugin-nav-overflow hidden><button type=\"button\" aria-label=\"More pages\" aria-haspopup=\"menu\" aria-expanded=\"false\" aria-controls=\"plugin-pages-overflow-menu\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"shrink-0\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"12\" r=\"1.6\"></circle><circle cx=\"12\" cy=\"12\" r=\"1.6\"></circle><circle cx=\"19\" cy=\"12\" r=\"1.6\"></circle></svg> <span class=\"sidebar-text\">More pages</span></button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

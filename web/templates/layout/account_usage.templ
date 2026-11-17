@@ -18,7 +18,7 @@ templ AccountUsageRail() {
   scrollbar-width: thin;
 }
 .rail-account,
-#rail-more {
+:is(#rail-more, #sidebar [data-plugin-nav-overflow] > button) {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -35,17 +35,17 @@ templ AccountUsageRail() {
 }
 .rail-account:hover,
 .rail-account[aria-expanded="true"],
-#rail-more:hover,
-#rail-more[aria-expanded="true"] {
+:is(#rail-more, #sidebar [data-plugin-nav-overflow] > button):hover,
+:is(#rail-more, #sidebar [data-plugin-nav-overflow] > button)[aria-expanded="true"] {
   background: oklch(var(--bc) / 0.06);
 }
 .rail-account:is(:hover, :active, :focus-visible, [aria-expanded="true"]),
-#rail-more:is(:hover, :active, :focus-visible, [aria-expanded="true"]) {
+:is(#rail-more, #sidebar [data-plugin-nav-overflow] > button):is(:hover, :active, :focus-visible, [aria-expanded="true"]) {
   color: oklch(var(--bc));
   --ov-usage-remaining: currentColor;
 }
 .rail-account:focus-visible,
-#rail-more:focus-visible {
+:is(#rail-more, #sidebar [data-plugin-nav-overflow] > button):focus-visible {
   outline: 2px solid var(--ov-focus, oklch(var(--p)));
   outline-offset: 2px;
 }
@@ -108,10 +108,13 @@ templ AccountUsageRail() {
   width: 20px;
   height: 20px;
 }
-#rail-more svg {
+:is(#rail-more, #sidebar [data-plugin-nav-overflow] > button) svg {
   width: 20px;
   height: 20px;
   opacity: 0.75;
+}
+:is(#rail-more, #sidebar [data-plugin-nav-overflow] > button):is(:hover, :active, :focus-visible, [aria-expanded="true"]) svg {
+  opacity: 1;
 }
 .rail-usage-heading {
   font-weight: 600;

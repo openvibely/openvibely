@@ -190,9 +190,10 @@ func TestBrowserFunctional_CustomPageOverflowSelection(t *testing.T) {
 		resize := func(height int) {
 			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1200, "height": height, "deviceScaleFactor": 1, "mobile": false}, nil)
 		}
-		resize(650)
+		resize(500)
 		b.waitFor("page in overflow", `String(document.querySelector('[data-plugin-nav-entry="page-7"]')?.hidden)`, "true")
 		b.waitFor("overflow button ready", `String(!!document.querySelector('[data-plugin-nav-overflow]:not([hidden]) button'))`, "true")
+		b.waitFor("overflow icons match rail sizing", `String([document.querySelector('#rail-more'), document.querySelector('[data-plugin-nav-overflow] button')].every(button => { const rect=button.getBoundingClientRect(), svg=button.querySelector('svg'); return rect.width===36&&rect.height===36&&svg.getBoundingClientRect().width===20&&[...svg.querySelectorAll('circle')].every(dot=>dot.getAttribute('r')==='1.6'); }))`, "true")
 		b.click(`[data-plugin-nav-overflow] button`)
 		b.click(`#plugin-pages-overflow-menu [data-sidebar-path="/p/page-7"]`)
 		b.waitFor("overflow page opened", `location.pathname`, "/p/page-7")
@@ -207,7 +208,7 @@ func TestBrowserFunctional_CustomPageOverflowSelection(t *testing.T) {
 		resize(1800)
 		b.waitFor("page returns to rail", `String(document.querySelector('[data-plugin-nav-entry="page-7"]').hidden)`, "false")
 		b.waitFor("overflow highlight cleared when page fits", `String(document.querySelector('[data-plugin-nav-overflow] button').hasAttribute('data-active-page'))`, "false")
-		resize(650)
+		resize(500)
 		b.waitFor("overflow selection restored after resize", `String(document.querySelector('[data-plugin-nav-overflow] button').hasAttribute('data-active-page'))`, "true")
 		b.click(`#sidebar [data-nav-base="/tasks"]`)
 		b.waitFor("leaving page clears overflow selection", `String(location.pathname === '/tasks' && !document.querySelector('[data-plugin-nav-overflow] button').hasAttribute('data-active-page'))`, "true")
