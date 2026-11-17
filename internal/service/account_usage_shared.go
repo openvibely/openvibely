@@ -24,6 +24,8 @@ type AccountUsageSnapshot struct {
 	UpdatedAt     time.Time                 `json:"updated_at,omitempty"`
 }
 type accountUsageEntry struct {
+	identity    string
+	key         string
 	fingerprint string
 	snapshot    AccountUsageSnapshot
 	cancel      context.CancelFunc
@@ -36,21 +38,22 @@ type accountUsageEntry struct {
 // SharedAccountUsage owns the scheduler and all account read generations. A
 // replacement waits for its predecessor to exit before taking a concurrency slot.
 type SharedAccountUsage struct {
-	usage    *UsageAnalyticsService
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.Mutex
-	entries  map[string]*accountUsageEntry
-	slots    chan struct{}
-	wg       sync.WaitGroup
-	stopped  bool
-	updated  func()
-	evaluate func(context.Context, string, *models.AnalyticsUsageAccountLimitsViewModel, map[string]any) error
+	usage       *UsageAnalyticsService
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	entries     map[string]*accountUsageEntry
+	accountKeys map[string]string
+	slots       chan struct{}
+	wg          sync.WaitGroup
+	stopped     bool
+	updated     func()
+	evaluate    func(context.Context, string, *models.AnalyticsUsageAccountLimitsViewModel, map[string]any) error
 }
 
 func (s *UsageAnalyticsService) EnableSharedAccountUsage(ctx context.Context, updated func(), evaluate func(context.Context, string, *models.AnalyticsUsageAccountLimitsViewModel, map[string]any) error) *SharedAccountUsage {
 	ctx, cancel := context.WithCancel(ctx)
-	c := &SharedAccountUsage{usage: s, ctx: ctx, cancel: cancel, entries: map[string]*accountUsageEntry{}, slots: make(chan struct{}, 4), updated: updated, evaluate: evaluate}
+	c := &SharedAccountUsage{usage: s, ctx: ctx, cancel: cancel, entries: map[string]*accountUsageEntry{}, accountKeys: map[string]string{}, slots: make(chan struct{}, 4), updated: updated, evaluate: evaluate}
 	s.sharedUsage = c
 	return c
 }
@@ -100,12 +103,30 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 		return nil, err
 	}
 	fingerprints := map[string]string{}
+	identities := map[string]string{}
 	for _, provider := range []string{"openai", "anthropic"} {
 		for _, group := range accountUsageGroups(configs, provider) {
 			parts := []string{}
+			owners := map[string]bool{}
+			knownAccounts := map[string]bool{}
 			for _, cfg := range group {
+				owners[accountUsageKeyForConfig(cfg)] = true
+				if strings.TrimSpace(cfg.OAuthAccountID) != "" {
+					knownAccounts[accountUsageKeyForConfig(cfg)] = true
+				}
 				parts = append(parts, fmt.Sprintf("%s:%s:%s:%d", cfg.ID, cfg.OAuthConnectionID, cfg.OAuthAccountID, cfg.OAuthConfigRevision))
 			}
+			// A sibling may not have learned its provider identity yet. Prefer
+			// the known account over connection/config fallbacks in that group.
+			if len(knownAccounts) > 0 {
+				owners = knownAccounts
+			}
+			stable := make([]string, 0, len(owners))
+			for owner := range owners {
+				stable = append(stable, owner)
+			}
+			sort.Strings(stable)
+			identities[usageAccountGroupKey(group)] = strings.Join(stable, "\x01")
 			sort.Strings(parts)
 			fingerprints[usageAccountGroupKey(group)] = strings.Join(parts, "|")
 		}
@@ -123,8 +144,13 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 		return nil, context.Canceled
 	}
 	changed := false
+	validIdentities := map[string]bool{}
+	for _, a := range accounts {
+		validIdentities[identities[a.Key]] = true
+	}
+	c.accountKeys = identities
 	for k, e := range c.entries {
-		if !valid[k] {
+		if !validIdentities[k] {
 			if e.cancel != nil {
 				e.cancel()
 			}
@@ -137,19 +163,21 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 		if (key != "" && a.Key != key) || (provider != "" && a.Provider != provider) {
 			continue
 		}
-		e := c.entries[a.Key]
-		if e != nil && e.fingerprint != fingerprints[a.Key] {
-			changed = true
-			if e.cancel != nil {
-				e.cancel()
-			}
-			previous := e.done
-			e = &accountUsageEntry{done: previous, fingerprint: fingerprints[a.Key]}
-			c.entries[a.Key] = e
+		identity := identities[a.Key]
+		e := c.entries[identity]
+		if e == nil {
+			e = &accountUsageEntry{identity: identity, key: a.Key, fingerprint: fingerprints[a.Key]}
+			c.entries[identity] = e
 			c.startLocked(a.Key, e)
-		} else if e == nil {
-			e = &accountUsageEntry{fingerprint: fingerprints[a.Key]}
-			c.entries[a.Key] = e
+		} else if e.key != a.Key || e.fingerprint != fingerprints[a.Key] {
+			changed = true
+			// Preserve the predecessor and reset lock across model-list changes.
+			// Credential revisions invalidate cached results, but never coordination.
+			if e.key == a.Key {
+				e.snapshot = AccountUsageSnapshot{}
+			}
+			e.key = a.Key
+			e.fingerprint = fingerprints[a.Key]
 			c.startLocked(a.Key, e)
 		} else if refresh {
 			c.startLocked(a.Key, e)
@@ -218,7 +246,7 @@ func (c *SharedAccountUsage) startLocked(key string, e *accountUsageEntry) {
 			return
 		}
 		c.mu.Lock()
-		if c.entries[key] != e || e.generation != generation {
+		if c.entries[e.identity] != e || e.generation != generation {
 			c.mu.Unlock()
 			return
 		}
@@ -275,7 +303,7 @@ func (c *SharedAccountUsage) reset(ctx context.Context, key string, fn func(cont
 		return nil, err
 	}
 	c.mu.Lock()
-	e := c.entries[key]
+	e := c.entries[c.accountKeys[key]]
 	c.mu.Unlock()
 	if e == nil {
 		return nil, fmt.Errorf("account disconnected")
@@ -286,7 +314,7 @@ func (c *SharedAccountUsage) reset(ctx context.Context, key string, fn func(cont
 		return nil, err
 	}
 	c.mu.Lock()
-	if c.stopped || c.entries[key] != e {
+	if c.stopped || c.entries[e.identity] != e {
 		c.mu.Unlock()
 		return nil, fmt.Errorf("account configuration changed")
 	}
@@ -304,8 +332,8 @@ func (c *SharedAccountUsage) reset(ctx context.Context, key string, fn func(cont
 	c.mu.Lock()
 	close(e.resetDone)
 	e.resetDone = nil
-	if !c.stopped && c.entries[key] == e {
-		c.startLocked(key, e)
+	if !c.stopped && c.entries[e.identity] == e {
+		c.startLocked(e.key, e)
 	}
 	c.mu.Unlock()
 	return result, err
@@ -340,7 +368,7 @@ func (c *SharedAccountUsage) freshLimits(ctx context.Context, filter persistence
 				return nil, err
 			}
 			c.mu.Lock()
-			e := c.entries[account.Key]
+			e := c.entries[c.accountKeys[account.Key]]
 			if e == nil || c.stopped {
 				c.mu.Unlock()
 				return nil, fmt.Errorf("account configuration changed or usage service stopped")
@@ -362,7 +390,7 @@ func (c *SharedAccountUsage) freshLimits(ctx context.Context, filter persistence
 			case <-done:
 			}
 			c.mu.Lock()
-			if c.entries[account.Key] != e || e.done != done || e.snapshot.Refreshing {
+			if c.entries[e.identity] != e || e.done != done || e.snapshot.Refreshing {
 				c.mu.Unlock()
 				continue
 			}

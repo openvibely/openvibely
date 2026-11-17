@@ -371,3 +371,103 @@ func TestSharedUsageLegacyReportingReplacesRead(t *testing.T) {
 		t.Fatal("missing shared result", err)
 	}
 }
+
+func TestSharedUsageModelChangesPreserveCoordination(t *testing.T) {
+	for _, duringReset := range []bool{false, true} {
+		for _, remove := range []bool{false, true} {
+			t.Run(fmt.Sprintf("reset=%t/remove=%t", duringReset, remove), func(t *testing.T) {
+				svc, accounts := sharedUsageFixture(t, 1)
+				alias := models.LLMConfig{Name: "alias", Provider: models.ProviderOpenAI, Model: "other", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "fixture", OAuthAccountID: "0", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+				if remove {
+					if err := svc.llmConfigRepo.Create(context.Background(), &alias); err != nil {
+						t.Fatal(err)
+					}
+					accounts, _ = svc.ListUsageAccounts(context.Background())
+				}
+				gate := make(chan struct{})
+				started := make(chan struct{}, 10)
+				var calls atomic.Int32
+				svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
+					n := calls.Add(1)
+					started <- struct{}{}
+					if !duringReset && n == 1 {
+						<-gate
+					} // Simulate a provider that takes time to honour cancellation.
+					p := 40.0
+					return &models.AccountUsageResult{PrimaryUsedPercent: &p}, nil
+				})
+				c := svc.EnableSharedAccountUsage(context.Background(), nil, nil)
+				defer c.Stop()
+				var release sync.Once
+				defer release.Do(func() { close(gate) })
+				c.Read(context.Background(), "", true)
+				<-started
+				if duringReset {
+					waitShared(t, func() bool {
+						c.mu.Lock()
+						defer c.mu.Unlock()
+						return !c.entries[c.accountKeys[accounts[0].Key]].snapshot.Refreshing
+					})
+				}
+				c.mu.Lock()
+				entry := c.entries[c.accountKeys[accounts[0].Key]]
+				c.mu.Unlock()
+				resetStarted := make(chan struct{})
+				resetFinished := make(chan error, 1)
+				if duringReset {
+					go func() {
+						_, err := c.reset(context.Background(), accounts[0].Key, func(ctx context.Context) (map[string]any, error) { close(resetStarted); <-gate; return nil, nil })
+						resetFinished <- err
+					}()
+					<-resetStarted
+				}
+				if remove {
+					if err := svc.llmConfigRepo.Delete(context.Background(), alias.ID); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if err := svc.llmConfigRepo.Create(context.Background(), &alias); err != nil {
+						t.Fatal(err)
+					}
+				}
+				current, err := svc.ListUsageAccounts(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if current[0].Key == accounts[0].Key {
+					t.Fatal("fixture did not change inventory key")
+				}
+				snapshots, err := c.Read(context.Background(), "", true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				c.mu.Lock()
+				same := c.entries[c.accountKeys[current[0].Key]] == entry
+				c.mu.Unlock()
+				if !same {
+					t.Fatal("scheduler replaced account entry")
+				}
+				if duringReset && len(snapshots[current[0].Key].AccountLimits) == 0 {
+					t.Fatal("model change lost cached usage")
+				}
+				select {
+				case <-started:
+					t.Fatal("replacement overlapped old fetch or reset")
+				case <-time.After(50 * time.Millisecond):
+				}
+				release.Do(func() { close(gate) })
+				if duringReset {
+					if err := <-resetFinished; err != nil {
+						t.Fatal(err)
+					}
+				}
+				waitShared(t, func() bool {
+					c.mu.Lock()
+					defer c.mu.Unlock()
+					e := c.entries[c.accountKeys[current[0].Key]]
+					return !e.snapshot.Refreshing && len(e.snapshot.AccountLimits) > 0
+				})
+			})
+		}
+	}
+}
