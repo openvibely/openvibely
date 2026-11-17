@@ -88,7 +88,7 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/fixture/") {
 			name := strings.TrimPrefix(r.URL.Path, "/fixture/")
 			kind := components.FilePreviewKind(name)
-			text := map[string]string{"data.json": `{"amount":12345678901234567890,"nested":{"ok":true}}`, "table.csv": "Name,Value\nAlpha,42\n,\nBeta,84", "wide.csv": strings.Repeat("value,", 100) + "outside preview", "demo.html": "<button id='demo' onclick='this.textContent=\"Clicked\"'>Click</button>", "math.md": "# Report\n\nMath: $x^2$\n\nA readable paragraph."}[name]
+			text := map[string]string{"data.json": `{"amount":12345678901234567890,"nested":{"ok":true}}`, "table.csv": "Name,Value\nAlpha,42\n,\nBeta,84", "wide.csv": strings.Repeat("value,", 100) + "outside preview", "unicode.csv": "Name,City\nJosé,Zürich\n李雷,東京\n","demo.html": "<button id='demo' onclick='this.textContent=\"Clicked\"'>Click</button>", "math.md": "# Report\n\nMath: $x^2$\n\nA readable paragraph."}[name]
 			if r.URL.Query().Get("view") == "1" {
 				w.Header().Set("Content-Type", "text/html")
 				if name == "document.docx" {
@@ -123,7 +123,7 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 			return
 		}
 		child := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			_, err := io.WriteString(w, `<div id="mixed-files" data-image-gallery-group><a id="mixed-image" href="/fixture/robot.svg" data-image-gallery-item data-image-name="robot.svg">Robot</a><a id="mixed-pdf" href="/fixture/mixed.pdf" data-file-preview>mixed.pdf</a><a id="mixed-docx" href="/fixture/document.docx" data-file-preview>document.docx</a></div><a id="generated" href="/files/abcdef">Generated artifact</a> <a id="json" data-file-preview href="/fixture/data.json">JSON</a> <a id="sheet" data-file-preview href="/fixture/table.csv">Sheet</a> <a id="wide-sheet" data-file-preview href="/fixture/wide.csv">Wide sheet</a> <a id="pdf" data-file-preview href="/fixture/sample.pdf">PDF</a> <a id="html" data-file-preview href="/fixture/demo.html">HTML</a> <a id="math" data-file-preview href="/fixture/math.md">Math</a>`)
+			_, err := io.WriteString(w, `<div id="mixed-files" data-image-gallery-group><a id="mixed-image" href="/fixture/robot.svg" data-image-gallery-item data-image-name="robot.svg">Robot</a><a id="mixed-pdf" href="/fixture/mixed.pdf" data-file-preview>mixed.pdf</a><a id="mixed-docx" href="/fixture/document.docx" data-file-preview>document.docx</a></div><a id="generated" href="/files/abcdef">Generated artifact</a> <a id="json" data-file-preview href="/fixture/data.json">JSON</a> <a id="sheet" data-file-preview href="/fixture/table.csv">Sheet</a> <a id="wide-sheet" data-file-preview href="/fixture/wide.csv">Wide sheet</a> <a id="unicode-sheet" data-file-preview href="/fixture/unicode.csv">Unicode sheet</a><a id="pdf" data-file-preview href="/fixture/sample.pdf">PDF</a> <a id="html" data-file-preview href="/fixture/demo.html">HTML</a> <a id="math" data-file-preview href="/fixture/math.md">Math</a>`)
 			return err
 		})
 		_ = layout.Base("Viewers", []models.Project{{ID: "p", Name: "P"}}, "p").Render(templ.WithChildren(r.Context(), child), w)
@@ -305,6 +305,19 @@ window.renderChatMarkdownAsync=function(text){
 		b.click("[data-sheet-grid] [data-row='3'][data-col='1']")
 		b.waitFor("original sparse cell address", `document.querySelector('[data-sheet-address]')?.textContent||''`, "B4")
 		b.waitFor("original sparse cell value", `document.querySelector('[data-sheet-value]')?.textContent||''`, "84")
+		b.click("[data-file-close]")
+		b.click("#unicode-sheet")
+		b.waitFor("BOM-less UTF-8 spreadsheet cells", `String(document.querySelector('[data-sheet-grid]')?.textContent.includes('Zürich') && document.querySelector('[data-sheet-grid]').textContent.includes('李雷'))`, "true")
+		b.evaluate(`window.__copiedText=''; navigator.clipboard.writeText=t=>{window.__copiedText=t;return Promise.resolve()}; 'ok'`)
+		b.click("[data-sheet-grid] [data-row='1'][data-col='1']")
+		b.waitFor("UTF-8 cell address", `document.querySelector('[data-sheet-address]')?.textContent||''`, "B2")
+		b.waitFor("UTF-8 displayed cell value", `document.querySelector('[data-sheet-value]')?.textContent||''`, "Zürich")
+		b.click("[data-sheet-copy]")
+		b.waitFor("UTF-8 copied cell value", `window.__copiedText`, "Zürich")
+		b.click("[data-sheet-grid] [data-row='2'][data-col='0']")
+		b.waitFor("CJK displayed cell value", `document.querySelector('[data-sheet-value]')?.textContent||''`, "李雷")
+		b.click("[data-sheet-copy]")
+		b.waitFor("CJK copied cell value", `window.__copiedText`, "李雷")
 		b.click("[data-file-close]")
 		b.click("#wide-sheet")
 		b.waitFor("visible spreadsheet truncation notice", `String(Array.from(document.querySelectorAll('[data-sheet-status]')).some(node=>!node.hidden && node.textContent.includes('Preview limited:') && node.textContent.includes('100 of 101 columns') && node.textContent.includes('Download the original')))`, "true")
