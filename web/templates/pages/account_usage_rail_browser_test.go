@@ -199,6 +199,10 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.waitFor("popup stays open on entry", `String(window.hoverChecked&&document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
 		b.evaluate(`document.getElementById('rail-account-popup').dispatchEvent(new PointerEvent('pointerleave')); 'leave'`)
 		b.waitFor("hover popup dismisses on leave", `String(!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
+		b.evaluate(`document.querySelector('[data-key="personal"]').dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'})); document.querySelector('[data-key="personal"]').dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1})); 'click hovered meter'`)
+		b.waitFor("pointer click does not focus popup", `String(document.getElementById('rail-account-popup').matches(':popover-open')&&!document.getElementById('rail-account-popup').contains(document.activeElement))`, "true")
+		b.evaluate(`document.getElementById('rail-accounts').dispatchEvent(new PointerEvent('pointerleave')); 'leave clicked meter'`)
+		b.waitFor("clicked hover popup dismisses on leave", `String(!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
 		// Provider failure must not leave stale rings looking like live allowance.
 		mu.Lock()
 		failed = true

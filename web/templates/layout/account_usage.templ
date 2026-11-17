@@ -462,7 +462,9 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
             : " · Loading usage");
       button.setAttribute("aria-label", button.title);
       button.append(svgFor(a));
-      button.onclick = () => openAccount(a);
+      // Only keyboard activation moves focus into the popup. A pointer click
+      // must not pin a hover-opened popup by focusing its refresh control.
+      button.onclick = (event) => openAccount(a, event.detail !== 0);
       return button;
     });
     host.replaceChildren(...nodes);
