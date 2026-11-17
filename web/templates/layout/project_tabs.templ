@@ -127,7 +127,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab:not([data-selected="true"]) { isolation: isolate; }
   .desktop-project-tab:not([data-selected="true"])::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; right: -4px; z-index: -1; --wails-draggable: no-drag; }
   html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab:not([data-selected="true"])::before { right: -6px; }
-  .desktop-project-tab:not([data-selected="true"])::after { content: ""; position: absolute; right: -3px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: none; }
+  .desktop-project-tab:not([data-selected="true"])::after { content: ""; position: absolute; right: -3px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: currentColor; opacity: .1; pointer-events: none; transition: none; }
   .desktop-project-tab:not([data-selected="true"]):is(:hover, :has(+ .desktop-project-tab:hover), :has(+ .desktop-project-tab [aria-selected="true"]))::after { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { .desktop-project-tab::before, .desktop-project-tab::after { transition: none; } }
   .desktop-project-tab [role="tab"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 6px 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; line-height: 1.25rem; font-weight: 400; }
@@ -142,8 +142,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab [data-close-project]:enabled:hover { background: oklch(var(--bc) / .18); }
   [data-theme="light"] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { background-color: rgba(38, 38, 39, .08); }
   [data-theme="light"] .desktop-project-tab [data-close-project]:enabled:hover { background-color: rgba(38, 38, 39, .18); }
-  [data-theme="light"] .desktop-project-tab:not([data-selected="true"])::after { background-color: rgba(38, 38, 39, .25); }
   .desktop-project-tab [data-close-project]:disabled { opacity: .35; cursor: default; }
+  /* Preserve close-button space and reveal it alongside the tab hover highlight. */
+  .desktop-project-tab:not([data-selected="true"]):not(:hover):not(:focus-within) [data-close-project] { opacity: 0; pointer-events: none; }
   #desktop-project-titlebar #project-selector-trigger { display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; flex-shrink: 0; width: 30px; height: 30px; align-self: center; transform: translateY(-3px); border-radius: 50%; }
  #desktop-project-titlebar #project-selector-trigger:is(:hover, [data-pointer-over], [aria-expanded="true"]) { background: oklch(var(--bc) / .12); }
  [data-theme="light"] #desktop-project-titlebar #project-selector-trigger:hover,
