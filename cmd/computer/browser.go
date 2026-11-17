@@ -23,6 +23,34 @@ type browserWorker struct {
 
 var currentBrowserWorker *browserWorker
 var newBrowserCommand = desktopCommand
+var awaitBrowserReady = waitForBrowser
+
+// Only browser tools wait for CDP. Desktop viewing and input do not need it.
+func waitForBrowser(ctx context.Context, endpoint string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	client := http.Client{Timeout: time.Second}
+	for {
+		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+		if err != nil {
+			return err
+		}
+		res, err := client.Do(req)
+		if err == nil {
+			res.Body.Close()
+			if res.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		timer := time.NewTimer(150 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
 
 func stopBrowserWorker() {
 	if currentBrowserWorker != nil {
@@ -34,8 +62,6 @@ func stopBrowserWorker() {
 }
 func browserRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /browser", func(w http.ResponseWriter, r *http.Request) {
-		inputMu.Lock()
-		defer inputMu.Unlock()
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 		if err != nil || !json.Valid(body) {
 			http.Error(w, "Invalid browser request", 400)
@@ -47,6 +73,12 @@ func browserRoutes(mux *http.ServeMux) {
 			http.Error(w, "Invalid browser request", 400)
 			return
 		}
+		if err := awaitBrowserReady(r.Context(), "http://127.0.0.1:"+computerPort(1)+"/json/version"); err != nil {
+			http.Error(w, "Browser unavailable", http.StatusBadGateway)
+			return
+		}
+		inputMu.Lock()
+		defer inputMu.Unlock()
 		if currentBrowserWorker == nil {
 			cmd := newBrowserCommand(context.Background(), "node", "/usr/local/lib/openvibely-browser.cjs", "--serve")
 			cmd.Env = append(cmd.Environ(), "OPENVIBELY_CDP_PORT="+computerPort(1))

@@ -29,6 +29,9 @@ func TestBrowserWorkerChild(t *testing.T) {
 	os.Exit(0)
 }
 func TestBrowserWorkerRequestsAndCancellation(t *testing.T) {
+	previousReady := awaitBrowserReady
+	awaitBrowserReady = func(context.Context, string) error { return nil }
+	t.Cleanup(func() { awaitBrowserReady = previousReady })
 	previous := newBrowserCommand
 	newBrowserCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestBrowserWorkerChild$")

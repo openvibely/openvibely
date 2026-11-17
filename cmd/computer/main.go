@@ -254,17 +254,6 @@ func desktopServer() http.Handler {
 		})
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		client := http.Client{Timeout: 3 * time.Second}
-		b, e := client.Get("http://127.0.0.1:" + computerPort(1) + "/json/version")
-		if e != nil {
-			http.Error(w, "Browser is starting", 503)
-			return
-		}
-		defer b.Body.Close()
-		if b.StatusCode != 200 {
-			http.Error(w, "Browser is starting", 503)
-			return
-		}
 		for _, port := range []string{computerPort(2), computerPort(3), computerPort(4), computerPort(5)} {
 			conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 300*time.Millisecond)
 			if err != nil {
