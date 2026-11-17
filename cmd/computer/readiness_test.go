@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -108,7 +109,13 @@ func TestBrowserUnavailableDoesNotStartWorker(t *testing.T) {
 	browserRoutes(mux)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest("POST", "/browser", strings.NewReader(`{"action":"read"}`)))
-	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "Browser unavailable") || currentBrowserWorker != nil {
+	var response struct {
+		Error struct{ Code, Message string }
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusBadGateway || response.Error.Code != "browser_unavailable" || !strings.Contains(response.Error.Message, "10 seconds") || currentBrowserWorker != nil {
 		t.Fatalf("unexpected response: %d %s", w.Code, w.Body.String())
 	}
 }

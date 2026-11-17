@@ -343,6 +343,17 @@ func (s *ProjectComputerService) request(ctx context.Context, conn ComputerConne
 		return nil, errors.New("computer response too large")
 	}
 	if res.StatusCode != http.StatusOK {
+		// Recognize this browser failure without exposing arbitrary bridge error bodies.
+		if path == "/browser" && res.StatusCode == http.StatusBadGateway {
+			var result struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(b, &result) == nil && result.Error.Code == "browser_unavailable" {
+				return nil, errors.New("Browser unavailable. Could not connect to Chromium within 10 seconds.")
+			}
+		}
 		return nil, fmt.Errorf("computer operation failed (%d)", res.StatusCode)
 	}
 	return b, nil

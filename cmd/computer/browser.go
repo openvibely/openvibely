@@ -74,7 +74,12 @@ func browserRoutes(mux *http.ServeMux) {
 			return
 		}
 		if err := awaitBrowserReady(r.Context(), "http://127.0.0.1:"+computerPort(1)+"/json/version"); err != nil {
-			http.Error(w, "Browser unavailable", http.StatusBadGateway)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
+				"code":    "browser_unavailable",
+				"message": "Browser unavailable. Could not connect to Chromium within 10 seconds.",
+			}})
 			return
 		}
 		inputMu.Lock()
