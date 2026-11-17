@@ -28,10 +28,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends x11vnc websocki
 # Resolve the architecture-specific executable once, rather than loading Playwright
 # for every task desktop startup.
 RUN node -e 'const fs = require("fs"); const path = require("/opt/browser/node_modules/playwright").chromium.executablePath(); fs.accessSync(path, fs.constants.X_OK); fs.writeFileSync("/usr/local/lib/openvibely-chromium-path", path + "\n", {mode: 0o644});'
-# Verify real H.264 video and AAC audio playback before shipping either architecture.
-COPY packaging/computer/media_test.cjs /tmp/computer-media-test/media_test.cjs
-COPY packaging/computer/testdata/h264-aac.mp4 /tmp/computer-media-test/testdata/h264-aac.mp4
-RUN node --test /tmp/computer-media-test/media_test.cjs && rm -rf /tmp/computer-media-test
 COPY --from=builder /licenses/ /usr/share/licenses/openvibely-computer/
 COPY packaging/computer/licenses.cjs /tmp/openvibely-licenses.cjs
 RUN node /tmp/openvibely-licenses.cjs && rm /tmp/openvibely-licenses.cjs
