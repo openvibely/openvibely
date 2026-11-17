@@ -8,7 +8,7 @@
 
 Coding agents do the work. OpenVibely runs the operation.
 
-OpenVibely is a BYOK development environment with its own agent harness, connected directly to your model provider. It coordinates parallel work across projects, keeps long-running efforts moving, and gives you one place to review the results.
+OpenVibely is a BYOK agentic development environment with its own harness that connects directly to your model provider. It coordinates parallel work across projects, keeps long-running efforts moving, and gives you one place to review the results.
 
 Built-in Native and GitHub SDLC automations inspect each project for product gaps, bugs, performance opportunities, and redundant code. They propose what to build or improve, wait for approval, and send approved work to coding agents.
 
