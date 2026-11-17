@@ -257,6 +257,14 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.reload()
 					browser.waitFor("independent web tab", `document.readyState === 'complete' ? document.getElementById('project-selector').value : ''`, "p00")
 					browser.call("Target.closeTarget", map[string]any{"targetId": target.ID}, nil)
+					// Reveal the inactive close control through a real pointer hover.
+					browser.evaluateAwait(`(function(){document.querySelector('[data-close-project="p02"]').scrollIntoView({block:"center",inline:"center"});return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve("ready"))));})()`)
+					var closePoint struct{ X, Y float64 }
+					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-close-project="p02"]').getBoundingClientRect();return {X:r.x+r.width/2,Y:r.y+r.height/2};})())`)), &closePoint); err != nil {
+						t.Fatal(err)
+					}
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": closePoint.X, "y": closePoint.Y}, nil)
+					browser.waitFor("inactive close revealed on hover", `getComputedStyle(document.querySelector('[data-close-project="p02"]')).opacity`, "1")
 					// Give the shared close scenarios the same appended active tab
 					// as the desktop flow, using the real project picker.
 					browser.click(`[data-close-project="p02"]`)
