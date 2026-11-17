@@ -545,10 +545,11 @@ func TestLiveWebSocketAccountUsageInvalidation(t *testing.T) {
 	client := dialLive(t, server.URL)
 	client.send(t, liveCommand{Op: "live", ID: "usage", ProjectID: "default"})
 	client.next(t, "usage", "subscribed")
-	tc.handler.broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated, ProjectID: "default"})
+	tc.handler.broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated, ProjectID: "default", UsageUpdateID: "shared-update"})
 	frame := client.next(t, "usage", "account_usage_updated")
 	encoded, err := json.Marshal(frame.Data)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "account_key")
 	require.NotContains(t, string(encoded), "account_limits")
+	require.Contains(t, string(encoded), `"usage_update_id":"shared-update"`)
 }

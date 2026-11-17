@@ -107,26 +107,10 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 	for _, provider := range []string{"openai", "anthropic"} {
 		for _, group := range accountUsageGroups(configs, provider) {
 			parts := []string{}
-			owners := map[string]bool{}
-			knownAccounts := map[string]bool{}
 			for _, cfg := range group {
-				owners[accountUsageKeyForConfig(cfg)] = true
-				if strings.TrimSpace(cfg.OAuthAccountID) != "" {
-					knownAccounts[accountUsageKeyForConfig(cfg)] = true
-				}
 				parts = append(parts, fmt.Sprintf("%s:%s:%s:%d", cfg.ID, cfg.OAuthConnectionID, cfg.OAuthAccountID, cfg.OAuthConfigRevision))
 			}
-			// A sibling may not have learned its provider identity yet. Prefer
-			// the known account over connection/config fallbacks in that group.
-			if len(knownAccounts) > 0 {
-				owners = knownAccounts
-			}
-			stable := make([]string, 0, len(owners))
-			for owner := range owners {
-				stable = append(stable, owner)
-			}
-			sort.Strings(stable)
-			identities[usageAccountGroupKey(group)] = strings.Join(stable, "\x01")
+			identities[usageAccountGroupKey(group)] = usageAccountStableKey(group)
 			sort.Strings(parts)
 			fingerprints[usageAccountGroupKey(group)] = strings.Join(parts, "|")
 		}

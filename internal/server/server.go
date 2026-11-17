@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
@@ -1139,9 +1140,10 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		if err != nil {
 			return
 		}
+		updateID := uuid.NewString()
 		for _, project := range projects {
 			// Invalidation only: account data remains behind the admin-only API.
-			broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated, ProjectID: project.ID})
+			broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated, ProjectID: project.ID, UsageUpdateID: updateID})
 		}
 	}, accountUsageMonitor.EvaluateSnapshot)
 	var hostedPendingStore *auth.PendingStore

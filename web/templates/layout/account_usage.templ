@@ -181,7 +181,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     loading: false,
     denied: false,
     busy: false,
-    attempts: new Map(),
+    attempts: (window.openVibelyResetAttempts ||= new Map()),
     reads: new Map(),
     timer: null,
     lastRefresh: 0,
@@ -683,7 +683,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     state.busy = true;
     a.message = "Resetting…";
     drawPopup();
-    const key = a.key + ":" + c.id;
+    const key = JSON.stringify([a.stable_key || a.key, c.id]);
     try {
       if (!state.attempts.has(key)) {
         const bytes = new Uint8Array(16);

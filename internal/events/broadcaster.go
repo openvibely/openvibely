@@ -46,6 +46,7 @@ const (
 
 // TaskEvent represents a task state change event
 type TaskEvent struct {
+	UsageUpdateID       string        `json:"usage_update_id,omitempty"`
 	AlertSource         string        `json:"alert_source,omitempty"`
 	AlertTitle          string        `json:"alert_title,omitempty"`
 	AlertSeverity       string        `json:"alert_severity,omitempty"`

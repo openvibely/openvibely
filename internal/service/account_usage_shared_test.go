@@ -434,6 +434,9 @@ func TestSharedUsageModelChangesPreserveCoordination(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if current[0].StableKey == "" || current[0].StableKey != accounts[0].StableKey {
+					t.Fatal("model change altered stable account key")
+				}
 				if current[0].Key == accounts[0].Key {
 					t.Fatal("fixture did not change inventory key")
 				}

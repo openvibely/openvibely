@@ -1852,8 +1852,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                         let section=null;
                                         const snapshotVersion=card.dataset.snapshot;
                                         window.openVibelyResetAttempts=window.openVibelyResetAttempts||new Map();
-                                        if(!window.openVibelyResetAttempts.has(account.key))window.openVibelyResetAttempts.set(account.key,new Map());
-                                        const attempts=window.openVibelyResetAttempts.get(account.key);
+                                        const attempts=window.openVibelyResetAttempts;
                                         async function refreshResets(){
                                             try {
                                                 const data=await fetchJSON('/api/analytics/usage/resets?account_key='+encodeURIComponent(account.key));
@@ -1885,17 +1884,18 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                     const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline';button.textContent='Use reset';
                                                     button.disabled=!credit.id||credit.usable===false||(validDate&&date.getTime()<=Date.now());
                                                     button.addEventListener('click',async()=>{
+                                                        const attemptKey=JSON.stringify([account.stable_key||account.key,credit.id]);
                                                         card.dataset.resetBusy='true';
                                                         const buttons=Array.from(section.querySelectorAll('button'));const disabledBefore=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);
                                                         button.textContent='Resetting…';
                                                         const message=document.createElement('p');message.className='text-xs mt-2';message.setAttribute('role','status');section.appendChild(message);
                                                         try{
-                                                            if(!attempts.has(credit.id)){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');attempts.set(credit.id,[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-'));}
-                                                            const response=await fetch('/api/analytics/usage/resets/consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_key:account.key,credit_id:credit.id,idempotency_key:attempts.get(credit.id)})});
+                                                            if(!attempts.has(attemptKey)){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');attempts.set(attemptKey,[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-'));}
+                                                            const response=await fetch('/api/analytics/usage/resets/consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_key:account.key,credit_id:credit.id,idempotency_key:attempts.get(attemptKey)})});
                                                             const result=await response.json();if(!response.ok)throw Error(result.message||'Unable to use reset');
                                                             document.body.dispatchEvent(new CustomEvent('accountUsageChanged',{detail:{source:'analytics'}}));
                                                             const outcome=result.outcome;
-                                                            if(!result.retry_same_request)attempts.delete(credit.id);
+                                                            if(!result.retry_same_request)attempts.delete(attemptKey);
                                                             const [text,toastStatus]={reset:['Usage reset.','completed'],not_needed:['Your usage does not need a reset right now.','info'],already_used:['That reset was already used.','error'],no_longer_available:["This reset isn't available any more. Nothing was used.",'error'],cooldown:["Another reset was just started on your account. This one wasn't used. Try again in a minute.",'error'],in_progress:['Your earlier reset may still be going through. Try again in a minute.','warning']}[outcome]||["Couldn't reset usage. Please try again.",'warning'];
                                                             if(window.showToast)window.showToast(text, toastStatus);
                                                             const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);query.set('refresh','false');

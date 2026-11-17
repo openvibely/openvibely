@@ -113,9 +113,10 @@ func (s *UsageAnalyticsService) SetOAuthRefreshers(anthropicRefresh, openAIRefre
 }
 
 type UsageAccountDescriptor struct {
-	Key      string `json:"key"`
-	Provider string `json:"provider"`
-	Identity string `json:"identity,omitempty"`
+	Key       string `json:"key"`
+	StableKey string `json:"stable_key"`
+	Provider  string `json:"provider"`
+	Identity  string `json:"identity,omitempty"`
 }
 
 func accountUsageProviderFallbackIdentity(provider models.LLMProvider) string {
@@ -188,6 +189,28 @@ func usageAccountGroupKey(configs []models.LLMConfig) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(ids, "\x00"))))
 }
 
+// usageAccountStableKey identifies an account independently of its model aliases.
+// Hash it before exposing it to the browser; provider identifiers stay private.
+func usageAccountStableKey(group []models.LLMConfig) string {
+	owners, known := map[string]bool{}, map[string]bool{}
+	for _, cfg := range group {
+		identity := accountUsageKeyForConfig(cfg)
+		owners[identity] = true
+		if strings.TrimSpace(cfg.OAuthAccountID) != "" {
+			known[identity] = true
+		}
+	}
+	if len(known) > 0 {
+		owners = known
+	}
+	keys := make([]string, 0, len(owners))
+	for key := range owners {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(keys, "\x01"))))
+}
+
 // ListUsageAccounts discovers cards from local configuration, without network calls.
 func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageAccountDescriptor, error) {
 	result := []UsageAccountDescriptor{}
@@ -209,9 +232,10 @@ func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageA
 	for _, provider := range []string{"openai", "anthropic"} {
 		for _, group := range accountUsageGroups(configs, provider) {
 			result = append(result, UsageAccountDescriptor{
-				Key:      usageAccountGroupKey(group),
-				Provider: provider,
-				Identity: accountUsageGroupDisplayIdentity(group, labelsByConnectionID),
+				Key:       usageAccountGroupKey(group),
+				StableKey: usageAccountStableKey(group),
+				Provider:  provider,
+				Identity:  accountUsageGroupDisplayIdentity(group, labelsByConnectionID),
 			})
 		}
 	}

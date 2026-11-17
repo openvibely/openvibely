@@ -1954,3 +1954,34 @@ function renderAccountUsageCards(){}
 })();</script></body></html>`
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_AnalyticsSharedResetAttempt(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');window.Chart=function(){this.destroy=function(){}};
+ let key='old-model-group',requests=[],redeemed=false;
+ // This is the same shared map populated by the rail after an uncertain result.
+ window.openVibelyResetAttempts=new Map([[JSON.stringify(['stable-account','grant']),'original-rail-attempt']]);
+ const response=data=>({ok:true,json:async()=>data});
+ window.fetch=async(url,opts)=>{const u=new URL(url,location.href),p=u.searchParams;
+ if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));if(requests.length===1)return response({outcome:'in_progress',retry_same_request:true});redeemed=true;return response({outcome:'reset',retry_same_request:false});}
+ if(u.pathname.endsWith('/resets'))return response({available_count:redeemed?0:1,credits:[{id:'grant',status:'available',title:'Reset'}]});
+ if(p.get('projection')==='accounts')return response({accounts:[{key,stable_key:'stable-account',provider:'openai'}]});
+ const limits=[{provider:'openai',limits:[{label:'Weekly',used_percent:70}]}];
+ if(p.get('projection')==='snapshots')return response({snapshots:{[key]:{account_limits:limits}}});
+ if(p.get('projection')==='account_limits')return response({account_limits:limits});
+ return response({totals:{},usage_rate:[],model_breakdown:[]});};
+ window.addEventListener('load',async()=>{const result=document.getElementById('reconnect-result');const wait=()=>new Promise(r=>setTimeout(r,20));const assert=(x,m)=>{if(!x)throw Error(m)};
+ try{for(let i=0;i<150&&!document.querySelector('#accountUsageCards button');i++)await wait();document.querySelector('#accountUsageCards button').click();for(let i=0;i<150&&requests.length<1;i++)await wait();await wait();
+ assert(requests[0].idempotency_key==='original-rail-attempt','Analytics lost rail attempt');
+ key='new-model-group';document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));
+ for(let i=0;i<150&&!document.querySelector('#usage-account-new-model-group button');i++)await wait();document.querySelector('#usage-account-new-model-group button').click();
+ for(let i=0;i<150&&window.openVibelyResetAttempts.size;i++)await wait();
+ assert(requests.length===2&&requests[1].account_key===key&&requests[1].idempotency_key===requests[0].idempotency_key,'model change lost attempt');assert(window.openVibelyResetAttempts.size===0,'definite result retained attempt');result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}});
+ </script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}

@@ -1,9 +1,11 @@
 package pages
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -16,7 +18,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	var mu sync.Mutex
 	var requests []string
-	var failed, denied bool
+	var failed, denied, renamed bool
 	initialLoading := true
 	resetGate := make(chan struct{})
 	var releaseReset sync.Once
@@ -29,6 +31,10 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		case "/api/analytics/usage":
 			mu.Lock()
 			fail, deny := failed, denied
+			personalKey := "personal"
+			if renamed {
+				personalKey = "personal-renamed"
+			}
 			mu.Unlock()
 			if deny {
 				w.WriteHeader(http.StatusForbidden)
@@ -39,7 +45,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 				return
 			}
 			if r.URL.Query().Get("projection") == "accounts" {
-				json.NewEncoder(w).Encode(map[string]any{"accounts": []map[string]string{{"key": "anthropic", "provider": "anthropic", "identity": "Work"}, {"key": "work", "provider": "openai", "identity": "Work"}, {"key": "personal", "provider": "openai", "identity": "Personal"}}})
+				json.NewEncoder(w).Encode(map[string]any{"accounts": []map[string]string{{"key": "anthropic", "provider": "anthropic", "identity": "Work"}, {"key": "work", "provider": "openai", "identity": "Work"}, {"key": personalKey, "stable_key": "personal-stable", "provider": "openai", "identity": "Personal"}}})
 				return
 			}
 			if r.URL.Query().Get("projection") == "snapshots" {
@@ -61,7 +67,11 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 						// A malformed provider grant list must not break the remaining popup.
 						snapshot["resets"] = map[string]any{"credits": map[string]any{}}
 					}
-					snapshots[key] = snapshot
+					if key == "personal" {
+						snapshots[personalKey] = snapshot
+					} else {
+						snapshots[key] = snapshot
+					}
 				}
 				json.NewEncoder(w).Encode(map[string]any{"snapshots": snapshots})
 				return
@@ -89,9 +99,11 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 			}
 		case "/":
 			w.Header().Set("Content-Type", "text/html")
-			if err := Chat([]models.Project{{ID: "project", Name: "Project"}}, "project", nil, nil, nil, nil, nil, false, false, 50).Render(r.Context(), w); err != nil {
+			var rendered bytes.Buffer
+			if err := Chat([]models.Project{{ID: "project", Name: "Project"}}, "project", nil, nil, nil, nil, nil, false, false, 50).Render(r.Context(), &rendered); err != nil {
 				t.Error(err)
 			}
+			w.Write([]byte(strings.Replace(rendered.String(), "function handleLiveEvent(event) {", "window.testUsageLiveHandler = handleLiveEvent; function handleLiveEvent(event) {", 1)))
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -120,7 +132,13 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.waitFor("other account disabled during reset", `String(document.querySelector('[data-action="refresh"]').disabled)`, "true")
 		releaseReset.Do(func() { close(resetGate) })
 		b.waitFor("other account enabled after reset", `String(!openVibelyAccountRail.busy&&!document.querySelector('[data-action="refresh"]').disabled&&!document.querySelector('[data-action="reset-grant"]').disabled)`, "true")
-		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'return to reset account'`)
+		mu.Lock()
+		renamed = true
+		mu.Unlock()
+		b.evaluate(`document.body.dispatchEvent(new CustomEvent('accountUsageUpdated')); 'model changed'`)
+		b.waitFor("renamed account", `String(!!document.querySelector('[data-key="personal-renamed"]'))`, "true")
+		b.waitFor("one shared attempts map", `String(openVibelyAccountRail.attempts===window.openVibelyResetAttempts)`, "true")
+		b.evaluate(`document.querySelector('[data-key="personal-renamed"]').click(); 'return to reset account'`)
 		b.waitFor("retry retained", `String(openVibelyAccountRail.attempts.size===1)`, "true")
 		b.waitFor("reset enabled", `String(!document.querySelector('[data-action="reset-grant"]').disabled)`, "true")
 		b.evaluate(`document.querySelector('[data-action="reset-grant"]').click(); 'retry'`)
@@ -130,6 +148,18 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 			t.Errorf("retry did not preserve idempotency key: %v", requests)
 		}
 		mu.Unlock()
+		b.waitFor("definite result clears attempt", `String(window.openVibelyResetAttempts.size)`, "0")
+		mu.Lock()
+		renamed = false
+		mu.Unlock()
+		b.evaluate(`document.body.dispatchEvent(new CustomEvent('accountUsageUpdated'));'restore fixture'`)
+		b.waitFor("restored inventory", `String(!!document.querySelector('[data-key="personal"]'))`, "true")
+		b.evaluate(`document.querySelector('[data-key="personal"]').click();'reopen'`)
+		b.evaluate(`window.usageNotifications=0;document.body.addEventListener('accountUsageUpdated',()=>window.usageNotifications++);for(let i=0;i<8;i++)window.testUsageLiveHandler({data:JSON.stringify({type:'account_usage_updated',usage_update_id:'shared-update',project_id:'p'+i})});'duplicate notifications'`)
+		b.waitFor("project copies deduplicated", `String(window.usageNotifications)`, "1")
+		b.evaluate(`window.testUsageLiveHandler({data:JSON.stringify({type:'account_usage_updated',usage_update_id:'next-update'})});window.testUsageLiveHandler({data:JSON.stringify({type:'account_usage_updated',usage_update_id:'shared-update'})});'next and old updates'`)
+		b.waitFor("distinct updates preserved", `String(window.usageNotifications)`, "2")
+
 		// Even failure before the request is sent must release the busy state.
 		b.waitFor("successful reset finished", `String(!openVibelyAccountRail.busy)`, "true")
 		b.evaluate(`window.savedGetRandomValues=crypto.getRandomValues; crypto.getRandomValues=()=>{throw new Error('random source unavailable')}; document.querySelector('[data-action="reset-grant"]').click(); 'generation failure'`)
