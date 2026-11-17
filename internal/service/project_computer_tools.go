@@ -252,7 +252,7 @@ func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDe
 }
 
 func projectBrowserActions() []any {
-	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation", "screenshot", "dialog", "upload", "download", "download_media"}
+	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation", "screenshot", "dialog", "upload", "download", "download_media", "logs"}
 }
 
 func validProjectBrowserAction(action string) bool {

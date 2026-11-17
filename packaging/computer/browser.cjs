@@ -139,6 +139,8 @@ async function run(args,session) {
   if(args.tab_id&&!entry)throw Error('Tab not found. List tabs again.');
   const page=entry?.page||await context.newPage();
   const id=entry?.id||await tabId(page);
+  if(session)session.currentPage=page;
+  if(args.action==='logs')return {tab_id:id,entries:session?.logs.get(page)||[],scope:'Console output captured during agent browser actions only.'};
   if(args.action==='close_tab'){if(!args.tab_id)throw Error('close_tab requires tab_id');await page.close();return {closed:true,tab_id:id};}
   if(args.action==='select_tab'){await fs.writeFile(tabStatePath(),id,{mode:0o600});await page.bringToFront();}
 
@@ -266,15 +268,19 @@ function browserError(error){
  return {code,message:messages[code]};
 }
 function createRunner(browser){
- const dialogs=new Map();let notify;
- const session={browser,dialogs};
- const register=page=>{page.on('dialog',dialog=>{const pending={dialog};dialogs.set(page,pending);notify?.(page,pending);});page.on('close',()=>dialogs.delete(page));};
+ const dialogs=new Map(),logs=new WeakMap();let notify;
+ const session={browser,dialogs,logs,active:false,currentPage:null};
+ const register=page=>{
+  const record=(type,text)=>{if(!session.active||session.currentPage!==page)return;const entries=logs.get(page)||[];entries.push({type,text:String(text).slice(0,2000)});if(entries.length>100)entries.shift();logs.set(page,entries);};
+  page.on('console',message=>record(message.type(),message.text()));page.on('pageerror',error=>record('error',error.message));
+  page.on('dialog',dialog=>{const pending={dialog};dialogs.set(page,pending);notify?.(page,pending);});page.on('close',()=>dialogs.delete(page));};
  for(const context of browser.contexts()){for(const page of context.pages())register(page);context.on('page',register);}
  return async args=>{
+  session.active=args.action!=='logs';session.currentPage=null;
   let resolve;const notified=new Promise(r=>resolve=r);
   const action=run(args,session);action.catch(()=>{});
   notify=(page,pending)=>{pending.action=action;resolve({tab_id:tabIds.get(page),dialog_pending:true,next:'Use dialog to inspect, accept or dismiss.'});};
-  try{return await Promise.race([action,notified]);}finally{notify=undefined;}
+  try{return await Promise.race([action,notified]);}finally{notify=undefined;session.active=false;session.currentPage=null;}
  };
 }
 module.exports={run,browserError,createRunner};

@@ -100,6 +100,13 @@ test('project browser features in isolated Chromium',{timeout:30000},async t=>{
    const media=await run({action:'download_media',locator:{text:'Media',exact:true}});assert.equal(await fs.readFile(path.join(home,'Files',media.computer_path),'utf8'),'media bytes');
    const again=await run({action:'download',locator:{text:'Download',exact:true}});assert.notEqual(saved.computer_path,again.computer_path);
   });
+  await t.test('console diagnostics do not collect idle human browsing',async()=>{
+   server.removeAllListeners('request');server.on('request',(req,res)=>{res.setHeader('Content-Type','text/html');res.end('<script>console.log("agent navigation");console.error("fixture error")</script><h1>Logs</h1>');});
+   const execute=createRunner(client);
+   await execute({action:'navigate',url});
+   await client.contexts()[0].pages()[0].evaluate(()=>console.log('idle human secret'));
+   const result=await execute({action:'logs'});assert.ok(result.entries.some(x=>x.text==='agent navigation'));assert.ok(result.entries.some(x=>x.type==='error'));assert.ok(!JSON.stringify(result).includes('idle human secret'));
+  });
   await t.test('dialogs survive calls and can be inspected and resolved',async()=>{
    const page=client.contexts()[0].pages()[0];await page.setContent('<button onclick="document.querySelector(\'p\').textContent=prompt(\'Name?\',\'Default\')">Ask</button><p></p>');
    const execute=createRunner(client);
