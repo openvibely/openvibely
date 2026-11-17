@@ -620,7 +620,7 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 				return string(data), true, true, nil
 			}
 		}
-		if name == "computer" && bytes.Contains(data, []byte(`"content"`)) {
+		if (name == "computer" || name == "project_browser") && bytes.Contains(data, []byte(`"content"`)) {
 			output, err := agenttools.EncodeImageResult(data)
 			return output, true, err != nil, err
 		}

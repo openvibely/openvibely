@@ -81,5 +81,12 @@ test('project browser features in isolated Chromium',async t=>{
    await run({action:'click_navigation',locator:{role:'link',name:'Go'},url:url+'/',timeout_ms:2000});
    await run({action:'wait_url',url:url+'/'});await run({action:'wait_load',state:'load'});
   });
+  await t.test('browser viewport, full-page and cropped screenshots',async()=>{
+   const page=client.contexts()[0].pages()[0];await page.setContent('<div style="height:1800px;background:linear-gradient(red,blue)">Tall</div>');
+   const image=async args=>Buffer.from((await run({action:'screenshot',...args})).content[0].data,'base64');
+   const viewport=await image({}),full=await image({full_page:true}),clip=await image({clip:{x:0,y:0,width:80,height:80}});
+   assert.equal(viewport[0],255);assert.equal(viewport[1],216);assert.ok(full.length>viewport.length);assert.ok(clip.length<viewport.length);
+   await assert.rejects(run({action:'screenshot',clip:{x:0,y:0,width:-1,height:2}}),/Invalid/);
+  });
  }finally{await client.close();await browser.close();await new Promise(resolve=>server.close(resolve));process.env.HOME=previousHome;await fs.rm(home,{recursive:true,force:true});}
 });

@@ -104,6 +104,15 @@ async function run(args) {
   const timeout=args.timeout_ms??10000;
   if(!Number.isInteger(timeout)||timeout<1||timeout>20000)throw Error('timeout_ms must be between 1 and 20000');
   page.setDefaultTimeout(timeout);page.setDefaultNavigationTimeout(timeout);
+  if(args.action==='screenshot'){
+   if(args.full_page&&args.clip)throw Error('Choose full_page or clip');
+   if(args.clip&&(!['x','y','width','height'].every(k=>Number.isFinite(args.clip[k]))||args.clip.x<0||args.clip.y<0||args.clip.width<=0||args.clip.height<=0))throw Error('Invalid screenshot clip');
+   const size=args.clip||await page.evaluate(full=>({width:innerWidth,height:full?Math.max(document.documentElement.scrollHeight,innerHeight):innerHeight}),!!args.full_page);
+   if(size.width*size.height>32000000)throw Error('Screenshot is too large; use a smaller clip');
+   const image=await page.screenshot({type:'jpeg',quality:80,fullPage:!!args.full_page,clip:args.clip,scale:'css',timeout});
+   if(image.length>8000000)throw Error('Screenshot is too large; use a smaller clip');
+   return {content:[{type:'image',mimeType:'image/jpeg',data:image.toString('base64')}]};
+  }
   if(args.action==='wait_element'){
    const locator=buildLocator(locatorRoot(page,args.frames),args.locator);
    const state=args.state??'visible';

@@ -193,6 +193,8 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 					"options":     &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"value": {Type: "string"}, "label": {Type: "string"}, "index": {Type: "integer", Minimum: toolschema.Number("0")}}, AdditionalProperties: toolschema.Pointer(false)}},
 					"timeout_ms":  &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("20000")},
 					"state":       &toolschema.Schema{Type: "string", Enum: []any{"visible", "hidden", "attached", "detached", "load", "domcontentloaded", "networkidle"}},
+					"full_page":   &toolschema.Schema{Type: "boolean"},
+					"clip":        &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"x": {Type: "number", Minimum: toolschema.Number("0")}, "y": {Type: "number", Minimum: toolschema.Number("0")}, "width": {Type: "number"}, "height": {Type: "number"}}, Required: []string{"x", "y", "width", "height"}, AdditionalProperties: toolschema.Pointer(false)},
 					"snapshot":    &toolschema.Schema{Type: "string"},
 					"ref":         &toolschema.Schema{Type: "string"},
 					"text": &toolschema.Schema{
@@ -248,7 +250,7 @@ func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDe
 }
 
 func projectBrowserActions() []any {
-	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation"}
+	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation", "screenshot"}
 }
 
 func validProjectBrowserAction(action string) bool {
