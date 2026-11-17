@@ -20,7 +20,14 @@ var codexToolNames = strings.NewReplacer("`apply_patch`", "`edit_file` or `write
 
 func CodexSystemPrompt(model string) string {
 	profile := codexProfile(model)
-	return adaptedCodexPrompts.get(profile, func() string { return adaptCodexTools(codexSnapshot(model)) })
+	return adaptedCodexPrompts.get(profile, func() string {
+		base := codexSnapshot(model)
+		switch models.PromptProfile(profile) {
+		case models.PromptProfileCodexGPT62Astra, models.PromptProfileCodexGPT62Sol:
+			base = adaptGPT62ToolSections(base)
+		}
+		return adaptCodexTools(base)
+	})
 }
 
 func codexProfile(model string) string {
@@ -37,6 +44,30 @@ func codexSnapshot(model string) string {
 		panic(err)
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// Replace the skill and connector instructions with guidance for the tools attached to the turn.
+func adaptGPT62ToolSections(base string) string {
+	sections := strings.Split(base, "\n# ")
+	adapted := make([]string, 0, len(sections))
+	for _, section := range sections {
+		heading, _, _ := strings.Cut(section, "\n")
+		switch heading {
+		case "Using skills":
+			section = "Using skills\n\nUse a relevant skill when requested or when it helps with the task. " +
+				"Use the permitted skill index, or call skills_list if it is available. " +
+				"When skill_view is available, pass the selected view_handle as handle. " +
+				"For a supporting file, use the same handle and its relative file_path. " +
+				"Follow the user's instructions when applying a skill.\n"
+		case "Apps (Connectors)", "Plugins and Apps":
+			section = "Plugins and apps\n\nUse the relevant connector or plugin tools attached to this request. " +
+				"Use their advertised names and argument schemas."
+		case "Plugins":
+			continue // Connector and plugin instructions are combined above.
+		}
+		adapted = append(adapted, section)
+	}
+	return strings.ReplaceAll(strings.Join(adapted, "\n# "), "the `cmd` argument", "the `command` argument")
 }
 
 func adaptCodexTools(base string) string {

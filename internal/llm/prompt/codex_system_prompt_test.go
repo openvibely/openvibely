@@ -81,6 +81,22 @@ func TestCodexPromptUsesOpenVibelyTools(t *testing.T) {
 	}
 }
 
+func TestGPT62RuntimeToolInstructions(t *testing.T) {
+	for _, model := range []string{"gpt-6.2-astra", "gpt-6.2-sol"} {
+		prompt := BuildCodexAgentSystemPrompt(model, "")
+		for _, stale := range []string{"skills.list", "skills.read", "skill://", "`cmd`", "codex_apps", "tool_search", "list_mcp_resources", "list_mcp_resource_templates"} {
+			if strings.Contains(prompt, stale) {
+				t.Errorf("%s retained %q", model, stale)
+			}
+		}
+		for _, want := range []string{"skills_list", "skill_view", "view_handle as handle", "file_path", "the `command` argument", "tools attached to this request"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s missing %q", model, want)
+			}
+		}
+	}
+}
+
 func TestCodexPromptConcurrentCachePreservesContent(t *testing.T) {
 	models := []string{"gpt-6-astra", "gpt-6.1-sol", "gpt-5.3-codex", "unknown-one", "unknown-two"}
 	var wg sync.WaitGroup
