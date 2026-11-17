@@ -4,8 +4,8 @@ package layout
 // next to Settings. Provider permissions remain enforced by the Analytics API.
 templ AccountUsageRail() {
  <div id="rail-accounts" aria-label="Subscription accounts"></div>
- <div id="rail-account-popup" class="ov-menu" popover="manual" role="dialog" aria-label="Subscription usage"></div>
- <div id="rail-overflow" class="ov-menu ov-menu-actions" popover="manual" role="menu" aria-label="More navigation"></div>
+ <div id="rail-account-popup" class="ov-menu" popover="manual" role="dialog" aria-label="Subscription usage" hidden></div>
+ <div id="rail-overflow" class="ov-menu ov-menu-actions" popover="manual" role="menu" aria-label="More navigation" hidden></div>
  <style>
 #rail-accounts {
   display: flex;
@@ -74,6 +74,8 @@ templ AccountUsageRail() {
     forced-color-adjust: none;
   }
 }
+#rail-account-popup[hidden], #rail-overflow[hidden] { display: none !important; }
+#rail-account-popup[data-menu-open], #rail-overflow[data-menu-open] { display: block; position: fixed; z-index: 1000; }
 #rail-account-popup {
   width: 330px;
   max-width: calc(100vw - 24px);
@@ -238,7 +240,24 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     Number.isFinite(Number(l.used_percent))
       ? Math.max(0, Math.min(100, Number(l.used_percent)))
       : null;
-  const shown = () => popup.matches(":popover-open");
+  const nativePopover = typeof popup.showPopover === "function";
+  function surfaceShown(surface) {
+    return nativePopover ? surface.matches(":popover-open") : !surface.hidden;
+  }
+  function showSurface(surface) {
+    surface.hidden = false;
+    if (nativePopover) surface.showPopover();
+    else {
+      surface.removeAttribute("popover");
+      surface.setAttribute("data-menu-open", "");
+    }
+  }
+  function hideSurface(surface) {
+    if (nativePopover && surfaceShown(surface)) surface.hidePopover();
+    surface.hidden = true;
+    surface.removeAttribute("data-menu-open");
+  }
+  const shown = () => surfaceShown(popup);
   function position(surface, button, alignTop = false) {
     if (!button) return;
     const r = button.getBoundingClientRect();
@@ -268,7 +287,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   }
   function closeUsage(focus = false) {
     cancelHoverClose();
-    if (shown()) popup.hidePopover();
+    hideSurface(popup);
     if (focus)
       host
         .querySelector('[data-key="' + CSS.escape(state.selected || "") + '"]')
@@ -278,7 +297,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       .forEach((b) => b.setAttribute("aria-expanded", "false"));
   }
   function closeOverflow(focus = false) {
-    if (overflow.matches(":popover-open")) overflow.hidePopover();
+    hideSurface(overflow);
     more.setAttribute("aria-expanded", "false");
     if (focus) more.focus();
   }
@@ -312,10 +331,10 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     }
   });
   more.onclick = () => {
-    const open = !overflow.matches(":popover-open");
+    const open = !surfaceShown(overflow);
     closeUsage();
     if (open) {
-      overflow.showPopover();
+      showSurface(overflow);
       more.setAttribute("aria-expanded", "true");
       position(overflow, more, true);
       overflow.querySelector("a")?.focus();
@@ -737,7 +756,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     }
     state.selected = a.key;
     a.message = "";
-    if (!shown()) popup.showPopover();
+    if (!shown()) showSurface(popup);
     drawRail();
     drawPopup();
     if (!hover) popup.querySelector('[data-action="refresh"]')?.focus();
@@ -860,7 +879,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         e.preventDefault();
         closeUsage(true);
       }
-      if (overflow.matches(":popover-open")) {
+      if (surfaceShown(overflow)) {
         e.preventDefault();
         closeOverflow(true);
       }

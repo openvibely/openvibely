@@ -661,6 +661,13 @@ func TestBrowserFunctional_AllProjectsTabCanCloseAndReopen(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id=a", "all-projects-pin", func(b *composerFocusCDP) {
 				b.waitFor("default tabs", `Array.from(document.querySelectorAll('[data-project-tab]')).map(t=>t.dataset.projectTab).join(',')`, "__all_projects__,a")
+				// Inactive tabs reveal their close button only on hover or focus.
+				var closePoint struct{ X, Y float64 }
+				if err := json.Unmarshal([]byte(b.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-close-project="__all_projects__"]').getBoundingClientRect();return {X:r.x+r.width/2,Y:r.y+r.height/2};})())`)), &closePoint); err != nil {
+					t.Fatal(err)
+				}
+				b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": closePoint.X, "y": closePoint.Y}, nil)
+				b.waitFor("inactive All Projects close revealed", `getComputedStyle(document.querySelector('[data-close-project="__all_projects__"]')).opacity`, "1")
 				b.click(`[data-close-project="__all_projects__"]`)
 				b.waitFor("closed", `String(!document.querySelector('[data-project-tab="__all_projects__"]'))`, "true")
 				waitSaved := func(want string) {
