@@ -1,6 +1,16 @@
 // Runs inside the computer. Browser credentials never appear in tool results.
 const {chromium}=require('/opt/browser/node_modules/playwright');
 const {createHash}=require('node:crypto');
+const fs=require('node:fs/promises');
+const path=require('node:path');
+const tabStatePath=()=>path.join(process.env.HOME,'.ov-browser-selected-tab');
+async function tabId(page) {
+ const session=await page.context().newCDPSession(page);
+ try{return (await session.send('Target.getTargetInfo')).targetInfo.targetId;}finally{await session.detach();}
+}
+async function tabs(context) {
+ return Promise.all(context.pages().filter(p=>!p.url().startsWith('devtools:')).map(async page=>({page,id:await tabId(page)})));
+}
 async function snapshot(page) {
  const view=await page.evaluate(()=>{
 function computerUUID() {
@@ -30,7 +40,17 @@ async function run(args) {
   const context=browser.contexts()[0];
   if(args.action==='clear_cookies'){for(const c of args.cookies)await context.clearCookies({domain:c.domain,name:c.name,path:c.path});return {cleared:true};}
   if(args.action==='import_cookies'){await context.addCookies(args.cookies);return {imported:args.cookies.length};}
-  const page=context.pages().find(p=>!p.url().startsWith('devtools:'))||await context.newPage();
+  let available=await tabs(context);
+  if(args.action==='tabs')return {tabs:await Promise.all(available.map(async t=>({tab_id:t.id,url:t.page.url(),title:await t.page.title()})))};
+  if(args.action==='open_tab'){const page=await context.newPage();const id=await tabId(page);await fs.writeFile(tabStatePath(),id,{mode:0o600});return {...await snapshot(page),tab_id:id};}
+  let selected;try{selected=await fs.readFile(tabStatePath(),'utf8');}catch(e){if(e.code!=='ENOENT')throw e;}
+  let entry=args.tab_id?available.find(t=>t.id===args.tab_id):available.find(t=>t.id===selected)||available[0];
+  if(args.tab_id&&!entry)throw Error('Tab not found. List tabs again.');
+  const page=entry?.page||await context.newPage();
+  const id=entry?.id||await tabId(page);
+  if(args.action==='close_tab'){if(!args.tab_id)throw Error('close_tab requires tab_id');await page.close();return {closed:true,tab_id:id};}
+  if(args.action==='select_tab'){await fs.writeFile(tabStatePath(),id,{mode:0o600});await page.bringToFront();}
+
   page.setDefaultTimeout(10000);
   let target;
   if(['click','type','select','press_key'].includes(args.action)) {
@@ -49,7 +69,9 @@ async function run(args) {
   switch(args.action){
    case 'verify_access':
    case 'navigate': {const url=new URL(args.url);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('HTTP URL required');const response=await page.goto(url.href,{waitUntil:'domcontentloaded',timeout:20000});if(args.action==='verify_access'&&(!response||!response.ok()))throw Error('Page inaccessible');break;}
+   case 'select_tab':
    case 'read':break;
+   case 'reload':await page.reload({waitUntil:'domcontentloaded'});break;
    case 'back':await page.goBack({waitUntil:'domcontentloaded'});break;
    case 'forward':await page.goForward({waitUntil:'domcontentloaded'});break;
    case 'click':await target.click();break;
@@ -65,7 +87,7 @@ async function run(args) {
    if(typeof args.expected_text==='string'&&args.expected_text.trim()&&result.text.includes(args.expected_text))return {verified:true};
    return {verified:false,url:page.url(),screenshot:(await page.screenshot({type:'png'})).toString('base64')};
   }
-  return result;
+  return {...result,tab_id:id};
  } finally {await browser.close();}
 }
 module.exports={run};

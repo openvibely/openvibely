@@ -166,18 +166,19 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 				AdditionalProperties: toolschema.Pointer(false),
 			}},
 		{Name: "project_browser",
-			Description: "Use this task's signed-in browser: navigate, read, click, type, select, press_key, scroll, back, forward. Read first. For click, type, select and press_key, send the snapshot token from the latest result; targeted actions also require its control ref. Re-read after changes. Password and verification-code entry require a private login handoff. Never read cookie values or browser storage.",
+			Description: "Use this task's signed-in browser. List/open/select/close tabs or navigate/read/interact with a tab. Supply tab_id to target a tab; otherwise the selected tab is used. Read first. For click, type, select and press_key, send the snapshot token from the latest result; targeted actions also require its control ref. Re-read after changes. Password and verification-code entry require a private login handoff. Never read cookie values or browser storage.",
 			Access:      llmcontracts.RuntimeToolAccessWrite,
 			Schema: &toolschema.Schema{
 				Type: "object",
 				Properties: map[string]*toolschema.Schema{
 					"action": &toolschema.Schema{
 						Type: "string",
-						Enum: []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward"},
+						Enum: projectBrowserActions(),
 					},
 					"url": &toolschema.Schema{
 						Type: "string",
 					},
+					"tab_id":   &toolschema.Schema{Type: "string"},
 					"snapshot": &toolschema.Schema{Type: "string"},
 					"ref":      &toolschema.Schema{Type: "string"},
 					"text": &toolschema.Schema{
@@ -230,4 +231,17 @@ func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDe
 		}
 	}
 	panic("unknown standard process tool: " + standard)
+}
+
+func projectBrowserActions() []any {
+	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload"}
+}
+
+func validProjectBrowserAction(action string) bool {
+	for _, allowed := range projectBrowserActions() {
+		if action == allowed {
+			return true
+		}
+	}
+	return false
 }

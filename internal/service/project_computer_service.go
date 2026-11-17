@@ -597,9 +597,7 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 				Action string `json:"action"`
 			}
 			json.Unmarshal(input, &args)
-			switch args.Action {
-			case "navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward":
-			default:
+			if !validProjectBrowserAction(args.Action) {
 				return "", true, true, errors.New("unsupported browser action")
 			}
 			path = "/browser"
