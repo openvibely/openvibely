@@ -31,7 +31,7 @@ the upstream project's latest source alone may not match the installed binary.
 ubuntu-packages.tsv maps installed binary packages to those source versions.
 
 These links cover packages installed through Ubuntu, not the separately
-installed Playwright, Chromium, or Go dependencies. Their notices and version
+installed Node.js, npm, Playwright, browser, or Go dependencies. Their notices and version
 information are also recorded in this directory.
 
 If matching source cannot be obtained, contact admin@openvibely.ai and identify
@@ -57,6 +57,8 @@ the image and package version. See SOURCE-OFFER.txt for our source offer.
     }
   }
   collect('/opt/browser/node_modules');
+  collect('/usr/local/lib/node_modules', 'node-runtime');
+  fs.writeFileSync(`${root}/node/version.txt`, process.version + '\n');
   const browser = await chromium.launch({executablePath: chromium.executablePath(), args: ['--no-sandbox']});
   try {
     const page = await browser.newPage();
