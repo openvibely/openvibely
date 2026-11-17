@@ -1870,10 +1870,9 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                 }
                                                 credits.forEach(credit=>{
                                                     if(!credit||typeof credit!=='object'||credit.status!=='available')return;
-                                                    const row=document.createElement('div');row.className='flex items-center justify-between gap-3 mt-3';
+                                                    const row=document.createElement('div');row.className='mt-3';const head=document.createElement('div');head.className='flex items-center justify-between gap-3';
                                                     const details=document.createElement('div');
-                                                    const title=document.createElement('div');title.className='text-sm';title.textContent=credit.title||'Usage reset';details.appendChild(title);
-                                                    if(credit.description){const description=document.createElement('div');description.className='text-xs opacity-70';description.textContent=credit.description;details.appendChild(description);}
+                                                    const title=document.createElement('div');title.className='text-sm';title.textContent=credit.title||'Usage reset';head.appendChild(title);
                                                     if(credit.remaining_uses!==undefined){const info=document.createElement('div');info.className='text-xs opacity-70';const labels={five_hour:'5-hour limit',seven_day:'Weekly limit',seven_day_opus:'Opus weekly limit',seven_day_sonnet:'Sonnet weekly limit'};const limits=Array.isArray(credit.clears)?credit.clears.map(x=>labels[x]||String(x).replaceAll('_',' ')).join(', '):'';info.textContent=credit.remaining_uses+' use(s) remaining'+(limits?' · Resets '+limits:'')+(credit.gives_back_weekly?' · Returns usage to weekly allowance':'');details.appendChild(info);}
                                                     if(credit.usable===false){const reason=document.createElement('div');reason.className='text-xs opacity-60';reason.textContent=String(credit.unavailable_reason||'Currently unavailable').replaceAll('_',' ');details.appendChild(reason);}
                                                     const expiry=document.createElement('div');expiry.className='text-xs opacity-60';
@@ -1903,7 +1902,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                             await refreshResets();if(section.isConnected){message.textContent=text;section.appendChild(message);}
                                                         }catch(e){message.textContent=e.message;if(window.showToast)window.showToast('Usage reset failed: '+e.message, 'error');button.removeAttribute('aria-busy');button.title='Retry reset';button.setAttribute('aria-label','Retry reset: '+(credit.title||'Usage reset'));buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}finally{delete card.dataset.resetBusy;loadUsageAccounts(false);}
                                                     },{signal:eventSignal});
-                                                    row.append(details,button);section.appendChild(row);
+                                                    head.appendChild(button);row.append(head,details);section.appendChild(row);
                                                 });
                                             }catch(e){if(e.name!=='AbortError'&&card.isConnected){if(!section){section=document.createElement('div');section.className='mt-4 pt-4 border-t border-base-300';card.querySelector('.card-body').appendChild(section);}section.textContent='Usage resets unavailable.';}}
                                         }

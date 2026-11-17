@@ -651,8 +651,6 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         button.onclick = () => redeem(a, c);
         head.append(el("span", "", c.title || "Usage reset"), button);
         row.append(head);
-        if (c.description)
-          row.append(el("p", "rail-usage-meta", c.description));
         const labels = {
           five_hour: "5-hour limit",
           seven_day: "Weekly limit",
