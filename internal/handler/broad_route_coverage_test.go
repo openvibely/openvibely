@@ -267,7 +267,6 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 		{"/alerts/" + alert.ID + "/dismiss" + projectQuery, nil},
 		{"/alerts/read-all" + projectQuery, nil},
 		{"/insights/analyze" + projectQuery, nil},
-		{"/insights/extract-knowledge" + projectQuery, nil},
 		{"/insights/health-check" + projectQuery, nil},
 		{"/history/grade-ideas" + projectQuery, nil},
 	}
@@ -299,7 +298,6 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 		"/tasks/completed" + projectQuery,
 		"/tasks/" + completed.ID + projectQuery,
 		"/insights/nonexistent" + projectQuery,
-		"/insights/knowledge/nonexistent" + projectQuery,
 	}
 	for _, path := range deletePaths {
 		rec := tc.HTMX().Delete(path).Execute()

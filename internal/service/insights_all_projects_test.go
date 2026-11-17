@@ -46,14 +46,6 @@ func TestInsightsAllProjectsCombinedReports(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, grade.TasksEvaluated)
 	require.Len(t, mock.Calls, 2)
-	mock.Response = `[{"topic":"Combined learning","content":"A shared lesson","tags":["dependencies"]}]`
-	knowledge, err := svc.ExtractKnowledge(ctx, models.AllProjectsID)
-	require.NoError(t, err)
-	require.Len(t, knowledge, 1)
-	require.Equal(t, models.AllProjectsID, knowledge[0].ProjectID)
-	require.Len(t, mock.Calls, 3)
-	require.Contains(t, mock.Calls[2].Prompt, "Fix default")
-	require.Contains(t, mock.Calls[2].Prompt, "Fix "+second.ID)
 	// A newer individual report must not replace the saved combined report.
 	require.NoError(t, env.Insights.CreateHealthCheck(ctx, &models.HealthCheck{ProjectID: second.ID, Grade: "F", TasksTotal: 1000}))
 	dashboard, err = svc.GetDashboard(ctx, models.AllProjectsID)

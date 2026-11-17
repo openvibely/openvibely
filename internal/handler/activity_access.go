@@ -14,7 +14,7 @@ func (h *Handler) authorizeActivityResource(c echo.Context) error {
 	case "/upcoming", "/history", "/schedule", "/schedule/calendar-state", "/insights", "/insights/by-type", "/insights/reports":
 	case "/reviews/:id", "/schedule/calendar-action":
 		permission = authz.Edit
-	case "/upcoming/summary", "/history/summary", "/insights/analyze", "/insights/extract-knowledge", "/insights/health-check", "/history/grade-ideas", "/insights/:id/status", "/insights/:id", "/insights/knowledge/:id":
+	case "/upcoming/summary", "/history/summary", "/insights/analyze", "/insights/health-check", "/history/grade-ideas", "/insights/:id/status", "/insights/:id":
 		permission = authz.Edit // Mutations and model-backed analysis require editor access.
 		if strings.TrimSpace(c.QueryParam("project_id")) == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "missing project_id")

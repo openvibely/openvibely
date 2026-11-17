@@ -109,7 +109,7 @@ I derived this by migrating a scratch DB and listing columns. **55 tables carry 
 | Channel → project selection | `slack_user_projects`, `discord_user_projects`, `telegram_user_projects`, `x_user_projects`, `email_sender_projects` | per external identity | `SlackUserProjectRepo.SetUserProject` lets a channel identity switch to **any** project |
 | Webhooks | `webhook_endpoints` | project | Path token + secret. Public route |
 | Outbound targets | `channel_targets`, `channel_message_sends` | project | |
-| Memory | Files in `<repo>/.openvibely/memories/` plus `knowledge_entries`, `project_memory_settings` | project (filesystem) | Memory is **in the repo**, so anyone with repo access can read it |
+| Memory | Files in `<repo>/.openvibely/memories/` plus `project_memory_settings` | project (filesystem) | Memory is **in the repo**, so anyone with repo access can read it |
 | Skills | Built-in, global agent skills, and project skills under the repo | mixed | `handler/agent_skills_handler.go:339 currentProjectSkillRoot` |
 | Chat context | `chat_compaction_checkpoints`, `chat_context_usage` | `(scope_type, scope_id)` | scope_id = project or task |
 | Worktrees | `<repo_path>/.worktrees/task_<id>` | project filesystem | `service/worktree_service.go:249`. Managed clones under `PROJECT_REPO_ROOT` |

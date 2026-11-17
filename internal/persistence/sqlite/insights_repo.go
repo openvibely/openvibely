@@ -271,78 +271,6 @@ func (r *InsightsRepo) ListReports(ctx context.Context, projectID string, limit 
 	return reports, rows.Err()
 }
 
-// --- Knowledge Entries ---
-
-func (r *InsightsRepo) CreateKnowledge(ctx context.Context, k *models.KnowledgeEntry) error {
-	return r.authorizedInsightWrite(ctx, k.ProjectID, "knowledge.created", func(tx sqlExecutor) (string, error) {
-		err := tx.QueryRowContext(ctx, `
-		INSERT INTO knowledge_entries (project_id, topic, content, source, source_ref, tags)
-		VALUES (?, ?, ?, ?, ?, ?)
-		RETURNING id, created_at, updated_at`,
-			k.ProjectID, k.Topic, k.Content, k.Source, k.SourceRef, k.Tags,
-		).Scan(&k.ID, &k.CreatedAt, &k.UpdatedAt)
-		return k.ID, err
-	})
-}
-
-func (r *InsightsRepo) GetKnowledge(ctx context.Context, projectID, id string) (*models.KnowledgeEntry, error) {
-	var k models.KnowledgeEntry
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, project_id, topic, content, source, source_ref, tags, created_at, updated_at
-		FROM knowledge_entries WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND id = ?`, projectID, id,
-	).Scan(&k.ID, &k.ProjectID, &k.Topic, &k.Content, &k.Source, &k.SourceRef, &k.Tags, &k.CreatedAt, &k.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &k, nil
-}
-
-func (r *InsightsRepo) ListKnowledge(ctx context.Context, projectID string, limit int) ([]models.KnowledgeEntry, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, topic, content, source, source_ref, tags, created_at, updated_at
-		FROM knowledge_entries WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+`
-		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var entries []models.KnowledgeEntry
-	for rows.Next() {
-		var k models.KnowledgeEntry
-		if err := rows.Scan(&k.ID, &k.ProjectID, &k.Topic, &k.Content, &k.Source, &k.SourceRef, &k.Tags, &k.CreatedAt, &k.UpdatedAt); err != nil {
-			return nil, err
-		}
-		entries = append(entries, k)
-	}
-	return entries, rows.Err()
-}
-
-func (r *InsightsRepo) DeleteKnowledge(ctx context.Context, projectID, id string) error {
-	projectID, err := r.insightRowProject(ctx, "knowledge_entries", projectID, id)
-	if err != nil {
-		return err
-	}
-	return r.authorizedInsightWrite(ctx, projectID, "knowledge.deleted", func(tx sqlExecutor) (string, error) {
-		result, err := tx.ExecContext(ctx, `DELETE FROM knowledge_entries WHERE project_id = ? AND id = ?`, projectID, id)
-		if err != nil {
-			return "", err
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return "", err
-		}
-		if rows == 0 {
-			return "", persistence.ErrKnowledgeNotFound
-		}
-		return id, nil
-	})
-}
-
 // --- Aggregate queries for analysis ---
 
 func (r *InsightsRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, minFailures int) ([]persistence.InsightFailedTaskPattern, error) {
@@ -712,9 +640,6 @@ func (r *InsightsRepo) insightRowProject(ctx context.Context, table, projectID, 
 	var owner string
 	err := r.db.QueryRowContext(ctx, `SELECT project_id FROM `+table+` WHERE id = ?`, id).Scan(&owner)
 	if err == sql.ErrNoRows {
-		if table == "knowledge_entries" {
-			return "", persistence.ErrKnowledgeNotFound
-		}
 		return "", persistence.ErrInsightNotFound
 	}
 	return owner, err

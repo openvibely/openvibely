@@ -289,7 +289,6 @@ type Fixtures interface {
 	SetVerifiedOAuthPrincipal(context.Context, string, string) error
 	SetTaskCreatedAt(context.Context, string, time.Time) error
 	SetExecutionCompletedAt(context.Context, string, time.Time) error
-	KnowledgeEntry(context.Context, string, string) (*models.KnowledgeEntry, error)
 	// PromoteQueuedTaskInput atomically reserves an input and execution without model-selection validation.
 	PromoteQueuedTaskInput(context.Context, string, *models.Execution) error
 	// SetModelOAuthTokens simulates credential replacement by a competing refresher.

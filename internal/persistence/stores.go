@@ -397,10 +397,8 @@ type InsightsStore interface {
 	CreateHealthCheck(ctx context.Context, hc *models.HealthCheck) error
 	CreateIdeaGrade(ctx context.Context, ig *models.IdeaGrade) error
 	CreateInsight(ctx context.Context, i *models.Insight) error
-	CreateKnowledge(ctx context.Context, k *models.KnowledgeEntry) error
 	CreateReport(ctx context.Context, rpt *models.InsightReport) error
 	DeleteInsight(ctx context.Context, projectID string, id string) error
-	DeleteKnowledge(ctx context.Context, projectID string, id string) error
 	ExistingInsight(ctx context.Context, projectID string, title string, insightType models.InsightType) (bool, error)
 	GetCompletedBugFixes(ctx context.Context, projectID string, limit int) ([]models.Task, error)
 	GetFailedTaskPatterns(ctx context.Context, projectID string, minFailures int) ([]InsightFailedTaskPattern, error)
@@ -427,7 +425,6 @@ type InsightsStore interface {
 	ListByType(ctx context.Context, projectID string, insightType models.InsightType, limit int) ([]models.Insight, error)
 	ListHealthChecks(ctx context.Context, projectID string, limit int) ([]models.HealthCheck, error)
 	ListIdeaGrades(ctx context.Context, projectID string, limit int) ([]models.IdeaGrade, error)
-	ListKnowledge(ctx context.Context, projectID string, limit int) ([]models.KnowledgeEntry, error)
 	ListReports(ctx context.Context, projectID string, limit int) ([]models.InsightReport, error)
 	UpdateStatus(ctx context.Context, projectID string, id string, status models.InsightStatus) error
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func newInsightsHandlerTestContext(t *testing.T) (*TestContext, persistence.InsightsStore) {
@@ -127,25 +126,6 @@ func TestInsightsMutations_EnforceProjectOwnershipAndRenderScopedCards(t *testin
 		t.Fatalf("foreign insight disappeared after delete rejection: %#v err=%v", stillThere, err)
 	}
 
-	foreignKnowledge := &models.KnowledgeEntry{
-		ProjectID: projectB.ID,
-		Topic:     "Project B knowledge",
-		Content:   "Project B content",
-		Source:    "test",
-		SourceRef: "project-b",
-		Tags:      "[]",
-	}
-	if err := insightsRepo.CreateKnowledge(context.Background(), foreignKnowledge); err != nil {
-		t.Fatalf("create foreign knowledge: %v", err)
-	}
-	foreignKnowledgeDelete := tc.HTMX().Delete("/insights/knowledge/" + foreignKnowledge.ID + "?project_id=" + projectA.ID).Execute()
-	if foreignKnowledgeDelete.Code != http.StatusNotFound || strings.Contains(foreignKnowledgeDelete.Body.String(), foreignKnowledge.Content) {
-		t.Fatalf("foreign knowledge delete response = %d %q, want not found", foreignKnowledgeDelete.Code, foreignKnowledgeDelete.Body.String())
-	}
-	if stillThere, err := tc.stores.Fixtures.KnowledgeEntry(context.Background(), projectB.ID, foreignKnowledge.ID); err != nil || stillThere == nil {
-		t.Fatalf("foreign knowledge disappeared after delete rejection: %#v err=%v", stillThere, err)
-	}
-
 	sameProject := createHandlerTestInsight(t, insightsRepo, projectA.ID, models.InsightStatusNew, "Project A insight")
 	statusCases := []struct {
 		status models.InsightStatus
@@ -194,25 +174,6 @@ func TestInsightsMutations_EnforceProjectOwnershipAndRenderScopedCards(t *testin
 		t.Fatalf("same-project insight remained after delete: %#v err=%v", deleted, err)
 	}
 
-	sameKnowledge := &models.KnowledgeEntry{
-		ProjectID: projectA.ID,
-		Topic:     "Project A knowledge",
-		Content:   "Project A content",
-		Source:    "test",
-		SourceRef: "project-a",
-		Tags:      "[]",
-	}
-	if err := insightsRepo.CreateKnowledge(context.Background(), sameKnowledge); err != nil {
-		t.Fatalf("create same-project knowledge: %v", err)
-	}
-	sameKnowledgeDelete := tc.HTMX().Delete("/insights/knowledge/" + sameKnowledge.ID + "?project_id=" + projectA.ID).Execute()
-	if sameKnowledgeDelete.Code != http.StatusOK || sameKnowledgeDelete.Body.Len() != 0 {
-		t.Fatalf("same-project knowledge delete = %d %q, want empty 200", sameKnowledgeDelete.Code, sameKnowledgeDelete.Body.String())
-	}
-	if deleted, err := tc.stores.Fixtures.KnowledgeEntry(context.Background(), projectA.ID, sameKnowledge.ID); err != nil || deleted != nil {
-		t.Fatalf("same-project knowledge remained after delete: %#v err=%v", deleted, err)
-	}
-
 	missingContextInsight := createHandlerTestInsight(t, insightsRepo, projectA.ID, models.InsightStatusNew, "Missing project context")
 	missingStatus := tc.HTMX().Patch("/insights/" + missingContextInsight.ID + "/status").
 		WithForm(url.Values{"status": []string{"accepted"}}).Execute()
@@ -222,14 +183,6 @@ func TestInsightsMutations_EnforceProjectOwnershipAndRenderScopedCards(t *testin
 	missingDelete := tc.HTMX().Delete("/insights/" + missingContextInsight.ID).Execute()
 	if missingDelete.Code != http.StatusBadRequest {
 		t.Fatalf("missing project insight delete code = %d, want %d", missingDelete.Code, http.StatusBadRequest)
-	}
-	missingKnowledge := &models.KnowledgeEntry{ProjectID: projectA.ID, Topic: "Missing context", Content: "content", Source: "test", SourceRef: "missing", Tags: "[]"}
-	if err := insightsRepo.CreateKnowledge(context.Background(), missingKnowledge); err != nil {
-		t.Fatalf("create missing-context knowledge: %v", err)
-	}
-	missingKnowledgeDelete := tc.HTMX().Delete("/insights/knowledge/" + missingKnowledge.ID).Execute()
-	if missingKnowledgeDelete.Code != http.StatusBadRequest {
-		t.Fatalf("missing project knowledge delete code = %d, want %d", missingKnowledgeDelete.Code, http.StatusBadRequest)
 	}
 }
 
@@ -243,47 +196,6 @@ func TestRunInsightsAnalysis_NilService(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/insights/analyze?project_id=proj-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
-}
-
-func TestExtractInsightsKnowledge_NilService(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	rec := tc.HTTP().Post("/insights/extract-knowledge?project_id=proj-1").Execute()
-	tc.Assert(rec).StatusCode(http.StatusBadRequest)
-}
-
-func TestExtractInsightsKnowledge_UnreadableOutputShowsFailure(t *testing.T) {
-	tc, _ := newInsightsHandlerTestContext(t)
-	ctx := context.Background()
-	stores := tc.stores
-
-	llmSvc := service.NewLLMService(stores.LLMConfigs, stores.Executions, stores.Tasks, stores.Projects, stores.Schedules, stores.Attachments)
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = "not json"
-	llmSvc.SetLLMCaller(mock)
-	tc.handler.insightsSvc.SetLLMService(llmSvc)
-
-	project := &models.Project{Name: "Knowledge Render Project", RepoPath: t.TempDir()}
-	if err := stores.Projects.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	agent := &models.LLMConfig{Name: "knowledge-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
-	if err := stores.LLMConfigs.Create(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-	task := &models.Task{ProjectID: project.ID, Title: "Fixed bug", Prompt: strings.Repeat("meaningful task prompt ", 12), Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 1, Tag: models.TagBug, AgentID: &agent.ID}
-	if err := stores.Tasks.Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	rec := tc.HTTP().Post("/insights/extract-knowledge?project_id=" + project.ID).Execute()
-	tc.Assert(rec).StatusCode(http.StatusOK)
-	body := rec.Body.String()
-	if !strings.Contains(body, "Knowledge extraction failed") {
-		t.Fatalf("response does not report extraction failure: %s", body)
-	}
-	if strings.Contains(body, "No new knowledge entries to extract.") {
-		t.Fatalf("response reports a successful empty result for unreadable output: %s", body)
-	}
 }
 
 func TestUpdateInsightStatus_NilService(t *testing.T) {
@@ -344,11 +256,5 @@ func TestGradeIdeas_MissingProjectID(t *testing.T) {
 func TestGradeIdeas_NilService(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/history/grade-ideas?project_id=proj-1").Execute()
-	tc.Assert(rec).StatusCode(http.StatusBadRequest)
-}
-
-func TestDeleteKnowledgeEntry_NilService(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	rec := tc.HTTP().Delete("/insights/knowledge/k-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }

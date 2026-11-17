@@ -21,9 +21,6 @@ func TestInsightsResultWritesRecheckActorAndAuditAtomically(t *testing.T) {
 		{"insight_reports", "insight.report_created", func(ctx context.Context, r *InsightsRepo) error {
 			return r.CreateReport(ctx, &models.InsightReport{ProjectID: "default", ReportDate: "2026-10-30", Summary: "private generated text"})
 		}},
-		{"knowledge_entries", "knowledge.created", func(ctx context.Context, r *InsightsRepo) error {
-			return r.CreateKnowledge(ctx, &models.KnowledgeEntry{ProjectID: "default", Topic: "private generated text", Source: "commit"})
-		}},
 		{"health_checks", "insight.health_check_created", func(ctx context.Context, r *InsightsRepo) error {
 			return r.CreateHealthCheck(ctx, &models.HealthCheck{ProjectID: "default", Grade: "B", Assessment: "private generated text"})
 		}},
@@ -74,15 +71,13 @@ func TestInsightsResultWritesRecheckActorAndAuditAtomically(t *testing.T) {
 }
 
 func TestInsightsMutationsRecheckAccessAndRollbackAuditFailure(t *testing.T) {
-	for _, operation := range []string{"status", "link", "delete", "knowledge"} {
+	for _, operation := range []string{"status", "link", "delete"} {
 		t.Run(operation, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			repo := NewInsightsRepo(db)
 			ctx := t.Context()
 			insight := &models.Insight{ProjectID: "default", Type: models.InsightBugPattern, Severity: models.InsightSeverityHigh, Status: models.InsightStatusNew, Title: "original"}
 			require.NoError(t, repo.CreateInsight(ctx, insight))
-			knowledge := &models.KnowledgeEntry{ProjectID: "default", Topic: "original", Source: "test"}
-			require.NoError(t, repo.CreateKnowledge(ctx, knowledge))
 			task := createThreadInputTask(t, ctx, db, "default")
 			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('editor','editor'); INSERT INTO org_memberships VALUES('default','editor','member'); INSERT INTO project_members VALUES('default','editor','editor')`)
 			require.NoError(t, err)
@@ -93,19 +88,14 @@ func TestInsightsMutationsRecheckAccessAndRollbackAuditFailure(t *testing.T) {
 					return repo.UpdateStatus(actor, "default", insight.ID, models.InsightStatusResolved)
 				case "link":
 					return repo.LinkTask(actor, "default", insight.ID, task.ID)
-				case "delete":
-					return repo.DeleteInsight(actor, "default", insight.ID)
 				default:
-					return repo.DeleteKnowledge(actor, "default", knowledge.ID)
+					return repo.DeleteInsight(actor, "default", insight.ID)
 				}
 			}
 			unchanged := func() {
 				got, err := repo.GetInsight(ctx, "default", insight.ID)
 				require.NoError(t, err)
 				require.Equal(t, insight, got)
-				gotK, err := repo.GetKnowledge(ctx, "default", knowledge.ID)
-				require.NoError(t, err)
-				require.Equal(t, knowledge, gotK)
 			}
 			_, err = db.Exec(`UPDATE project_members SET role='viewer' WHERE project_id='default' AND user_id='editor'`)
 			require.NoError(t, err)

@@ -115,41 +115,6 @@ func (r *InsightReport) SetInsightIDs(ids []string) error {
 	return nil
 }
 
-// KnowledgeEntry represents a piece of extracted knowledge from git/task history
-type KnowledgeEntry struct {
-	ID        string    `json:"id"`
-	ProjectID string    `json:"project_id"`
-	Topic     string    `json:"topic"`
-	Content   string    `json:"content"`    // the "why" explanation
-	Source    string    `json:"source"`     // where it was extracted from (commit, task, etc.)
-	SourceRef string    `json:"source_ref"` // specific reference (commit hash, task ID)
-	Tags      string    `json:"tags"`       // JSON array of searchable tags
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// ParseTags returns the list of tags
-func (k *KnowledgeEntry) ParseTags() ([]string, error) {
-	if k.Tags == "" || k.Tags == "[]" {
-		return nil, nil
-	}
-	var tags []string
-	if err := json.Unmarshal([]byte(k.Tags), &tags); err != nil {
-		return nil, err
-	}
-	return tags, nil
-}
-
-// SetTags serializes tags to JSON
-func (k *KnowledgeEntry) SetTags(tags []string) error {
-	b, err := json.Marshal(tags)
-	if err != nil {
-		return err
-	}
-	k.Tags = string(b)
-	return nil
-}
-
 // HealthCheck represents a project health evaluation
 type HealthCheck struct {
 	ID               string    `json:"id"`
@@ -189,27 +154,25 @@ type IdeaGrade struct {
 
 // InsightDashboardData aggregates all data for the insights page
 type InsightDashboardData struct {
-	NewInsights       []Insight        `json:"new_insights"`
-	RecentInsights    []Insight        `json:"recent_insights"`
-	LatestReport      *InsightReport   `json:"latest_report,omitempty"`
-	KnowledgeEntries  []KnowledgeEntry `json:"knowledge_entries"`
-	Stats             InsightStats     `json:"stats"`
-	LatestHealthCheck *HealthCheck     `json:"latest_health_check,omitempty"`
-	HealthHistory     []HealthCheck    `json:"health_history,omitempty"`
-	LatestIdeaGrade   *IdeaGrade       `json:"latest_idea_grade,omitempty"`
-	IdeaGradeHistory  []IdeaGrade      `json:"idea_grade_history,omitempty"`
+	NewInsights       []Insight      `json:"new_insights"`
+	RecentInsights    []Insight      `json:"recent_insights"`
+	LatestReport      *InsightReport `json:"latest_report,omitempty"`
+	Stats             InsightStats   `json:"stats"`
+	LatestHealthCheck *HealthCheck   `json:"latest_health_check,omitempty"`
+	HealthHistory     []HealthCheck  `json:"health_history,omitempty"`
+	LatestIdeaGrade   *IdeaGrade     `json:"latest_idea_grade,omitempty"`
+	IdeaGradeHistory  []IdeaGrade    `json:"idea_grade_history,omitempty"`
 }
 
 // InsightStats holds summary stats for the insights page
 type InsightStats struct {
-	TotalInsights  int     `json:"total_insights"`
-	NewCount       int     `json:"new_count"`
-	AcceptedCount  int     `json:"accepted_count"`
-	RejectedCount  int     `json:"rejected_count"`
-	ResolvedCount  int     `json:"resolved_count"`
-	AvgConfidence  float64 `json:"avg_confidence"`
-	KnowledgeCount int     `json:"knowledge_count"`
-	BugPatterns    int     `json:"bug_patterns"`
-	TechDebtItems  int     `json:"tech_debt_items"`
-	Optimizations  int     `json:"optimizations"`
+	TotalInsights int     `json:"total_insights"`
+	NewCount      int     `json:"new_count"`
+	AcceptedCount int     `json:"accepted_count"`
+	RejectedCount int     `json:"rejected_count"`
+	ResolvedCount int     `json:"resolved_count"`
+	AvgConfidence float64 `json:"avg_confidence"`
+	BugPatterns   int     `json:"bug_patterns"`
+	TechDebtItems int     `json:"tech_debt_items"`
+	Optimizations int     `json:"optimizations"`
 }

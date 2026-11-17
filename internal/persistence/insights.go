@@ -5,8 +5,7 @@ import (
 )
 
 var (
-	ErrInsightNotFound   = errors.New("insight not found")
-	ErrKnowledgeNotFound = errors.New("knowledge entry not found")
+	ErrInsightNotFound = errors.New("insight not found")
 )
 
 type InsightFailedTaskPattern struct {

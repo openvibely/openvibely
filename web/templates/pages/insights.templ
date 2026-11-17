@@ -190,22 +190,6 @@ templ InsightAnalysisResult(report *models.InsightReport, err error) {
 	}
 }
 
-templ KnowledgeExtractionResult(entries []models.KnowledgeEntry, err error) {
-	if err != nil {
-		<div class="alert alert-error mb-4">
-			<span>Knowledge extraction failed: { err.Error() }</span>
-		</div>
-	} else if len(entries) > 0 {
-		<div class="alert alert-success mb-4">
-			<span>Extracted { fmt.Sprintf("%d", len(entries)) } knowledge entries.</span>
-		</div>
-	} else {
-		<div class="alert alert-info mb-4">
-			<span>No new knowledge entries to extract.</span>
-		</div>
-	}
-}
-
 type gradeReportMetric struct {
 	Label      string
 	Value      string

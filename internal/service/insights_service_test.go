@@ -82,7 +82,6 @@ func TestInsightsService_DirectAnalysisReportsPreserveSetupErrors(t *testing.T) 
 			name string
 			run  func() error
 		}{
-			{name: "knowledge extraction", run: func() error { _, err := svc.ExtractKnowledge(ctx, "missing-project"); return err }},
 			{name: "health check", run: func() error { _, err := svc.RunHealthCheck(ctx, "missing-project"); return err }},
 			{name: "idea grade", run: func() error { _, err := svc.GradeIdeas(ctx, "missing-project"); return err }},
 		} {
@@ -128,7 +127,6 @@ func TestInsightsService_DirectAnalysisReportsPreserveSetupErrors(t *testing.T) 
 			run       func() error
 			wantError string
 		}{
-			{name: "knowledge extraction", run: func() error { _, err := svc.ExtractKnowledge(ctx, project.ID); return err }, wantError: "no default agent"},
 			{name: "health check", run: func() error { _, err := svc.RunHealthCheck(ctx, project.ID); return err }, wantError: "no default agent configured"},
 			{name: "idea grade", run: func() error { _, err := svc.GradeIdeas(ctx, project.ID); return err }, wantError: "no default agent configured"},
 		} {
@@ -155,10 +153,6 @@ func TestInsightsService_DirectAnalysisReportsPreserveNilLLMBehavior(t *testing.
 		env.Executions,
 	)
 
-	knowledge, err := svc.ExtractKnowledge(ctx, "missing-project")
-	if err != nil || knowledge != nil {
-		t.Fatalf("knowledge = %#v, %v; want nil, nil", knowledge, err)
-	}
 	if _, err := svc.RunHealthCheck(ctx, "missing-project"); err == nil || err.Error() != "LLM service not available" {
 		t.Fatalf("health check error = %v, want unavailable service", err)
 	}
@@ -634,21 +628,9 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 		t.Fatalf("grade history len=%d err=%v", len(gradeHistory), err)
 	}
 
-	mock.Response = `[{"topic":"Retry policy","content":"Retries were bounded to avoid duplicate side effects.","tags":["retries","reliability"]},{"topic":"Attachment validation","content":"Files are sniffed before routing to vision models.","tags":["attachments","safety"]}]`
-	knowledge, err := svc.ExtractKnowledge(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("ExtractKnowledge: %v", err)
-	}
-	if len(knowledge) != 2 {
-		t.Fatalf("knowledge len=%d, want 2", len(knowledge))
-	}
-	tags, err := knowledge[0].ParseTags()
-	if err != nil || len(tags) == 0 {
-		t.Fatalf("knowledge tags=%v err=%v", tags, err)
-	}
-	wantPromptFragments := []string{"## Project Metrics", "## Task Statistics", "Recent tasks:"}
+	wantPromptFragments := []string{"## Project Metrics", "## Task Statistics"}
 	if len(directUsageProjectIDs) != len(wantPromptFragments) {
-		t.Fatalf("direct usage contexts = %v, want three report calls", directUsageProjectIDs)
+		t.Fatalf("direct usage contexts = %v, want two report calls", directUsageProjectIDs)
 	}
 	if len(mock.Calls) != len(wantPromptFragments) {
 		t.Fatalf("direct calls = %d, want %d", len(mock.Calls), len(wantPromptFragments))
@@ -664,13 +646,6 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 			t.Errorf("call %d prompt missing %q", i, wantPromptFragment)
 		}
 	}
-	if err := svc.DeleteKnowledge(ctx, project.ID, knowledge[0].ID); err != nil {
-		t.Fatalf("DeleteKnowledge: %v", err)
-	}
-	if deleted, err := env.Fixtures.KnowledgeEntry(ctx, project.ID, knowledge[0].ID); err != nil || deleted != nil {
-		t.Fatalf("knowledge should be deleted, got %#v err=%v", deleted, err)
-	}
-
 	manual := &models.Insight{ProjectID: project.ID, Type: models.InsightOptimization, Severity: models.InsightSeverityLow, Status: models.InsightStatusNew, Title: "Trim slow startup", Evidence: "{}", Confidence: 0.7}
 	if err := insightsRepo.CreateInsight(ctx, manual); err != nil {
 		t.Fatalf("create manual insight: %v", err)
@@ -689,48 +664,6 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	reports, err := svc.ListReports(ctx, project.ID, 10)
 	if err != nil || len(reports) != 0 {
 		t.Fatalf("ListReports len=%d err=%v", len(reports), err)
-	}
-}
-
-func TestInsightsService_ExtractKnowledgeRejectsUnreadableOutput(t *testing.T) {
-	for _, output := range []string{"not json", `[{"topic":"Retry policy","content":"Bounded`} {
-		env := teststores.New(t)
-		ctx := context.Background()
-
-		llmSvc := NewLLMService(env.LLMConfigs, env.Executions, env.Tasks, env.Projects, env.Schedules, env.Attachments)
-		mock := testutil.NewMockLLMCaller()
-		llmSvc.SetLLMCaller(mock)
-		svc := NewInsightsService(env.Insights, env.Tasks, env.Projects, env.LLMConfigs, env.Executions)
-		svc.SetLLMService(llmSvc)
-
-		project := &models.Project{Name: "Unreadable Knowledge Project", RepoPath: t.TempDir()}
-		if err := env.Projects.Create(ctx, project); err != nil {
-			t.Fatalf("create project: %v", err)
-		}
-		agent := &models.LLMConfig{Name: "knowledge-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
-		if err := env.LLMConfigs.Create(ctx, agent); err != nil {
-			t.Fatalf("create agent: %v", err)
-		}
-		task := &models.Task{ProjectID: project.ID, Title: "Fixed bug", Prompt: strings.Repeat("meaningful task prompt ", 12), Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 1, Tag: models.TagBug, AgentID: &agent.ID}
-		if err := env.Tasks.Create(ctx, task); err != nil {
-			t.Fatalf("create task: %v", err)
-		}
-
-		mock.Response = output
-		knowledge, err := svc.ExtractKnowledge(ctx, project.ID)
-		if err == nil {
-			t.Fatalf("ExtractKnowledge(%q) error = nil, want parse failure", output)
-		}
-		if knowledge != nil {
-			t.Fatalf("ExtractKnowledge(%q) returned entries %#v, want none", output, knowledge)
-		}
-		persisted, err := env.Insights.ListKnowledge(ctx, project.ID, 10)
-		if err != nil {
-			t.Fatalf("ListKnowledge: %v", err)
-		}
-		if len(persisted) != 0 {
-			t.Fatalf("persisted knowledge = %d, want 0", len(persisted))
-		}
 	}
 }
 
@@ -856,45 +789,8 @@ func TestInsightsService_ProjectScopedMutations(t *testing.T) {
 		t.Fatalf("foreign insight disappeared after rejected service delete: %#v err=%v", stillThere, err)
 	}
 
-	knowledge := &models.KnowledgeEntry{
-		ProjectID: projectB.ID,
-		Topic:     "Project B knowledge",
-		Content:   "Project B content",
-		Source:    "test",
-		SourceRef: "project-b",
-		Tags:      "[]",
-	}
-	if err := insightsRepo.CreateKnowledge(ctx, knowledge); err != nil {
-		t.Fatalf("create knowledge: %v", err)
-	}
-	if err := svc.DeleteKnowledge(ctx, projectA.ID, knowledge.ID); !errors.Is(err, ErrKnowledgeNotFound) {
-		t.Fatalf("foreign knowledge delete error = %v, want %v", err, ErrKnowledgeNotFound)
-	}
-	if stillThere, err := env.Fixtures.KnowledgeEntry(ctx, projectB.ID, knowledge.ID); err != nil || stillThere == nil {
-		t.Fatalf("foreign knowledge disappeared after rejected service delete: %#v err=%v", stillThere, err)
-	}
-	if err := svc.DeleteKnowledge(ctx, projectB.ID, knowledge.ID); err != nil {
-		t.Fatalf("same-project knowledge delete: %v", err)
-	}
 	if err := svc.DeleteInsight(ctx, projectB.ID, insight.ID); err != nil {
 		t.Fatalf("same-project insight delete: %v", err)
-	}
-}
-
-func TestParseKnowledgeEntriesExtractsJSONArrays(t *testing.T) {
-	entries, err := parseKnowledgeEntries(`Here you go:
-[
-  {"topic":"deploys","content":"Use staged rollouts","tags":["release","safety"]},
-  {"topic":"tests","content":"Keep fixtures small","tags":[]}
-]`)
-	if err != nil {
-		t.Fatalf("parseKnowledgeEntries: %v", err)
-	}
-	if len(entries) != 2 || entries[0].Topic != "deploys" || entries[0].Tags[1] != "safety" || entries[1].Content != "Keep fixtures small" {
-		t.Fatalf("unexpected entries: %#v", entries)
-	}
-	if _, err := parseKnowledgeEntries("not json"); err == nil {
-		t.Fatal("expected invalid knowledge JSON to fail")
 	}
 }
 

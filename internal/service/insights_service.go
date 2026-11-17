@@ -18,8 +18,7 @@ import (
 )
 
 var (
-	ErrInsightNotFound   = persistence.ErrInsightNotFound
-	ErrKnowledgeNotFound = persistence.ErrKnowledgeNotFound
+	ErrInsightNotFound = persistence.ErrInsightNotFound
 
 	errDirectAnalysisDefaultAgentUnavailable = errors.New("direct analysis default agent unavailable")
 )
@@ -66,7 +65,6 @@ func (s *InsightsService) GetDashboard(ctx context.Context, projectID string) (*
 		newInsights      []models.Insight
 		recentInsights   []models.Insight
 		latestReport     *models.InsightReport
-		knowledge        []models.KnowledgeEntry
 		stats            models.InsightStats
 		latestHC         *models.HealthCheck
 		healthHistory    []models.HealthCheck
@@ -99,15 +97,6 @@ func (s *InsightsService) GetDashboard(ctx context.Context, projectID string) (*
 		latestReport, err = s.insightsRepo.GetLatestReport(ctx, projectID)
 		if err != nil {
 			return fmt.Errorf("get latest report: %w", err)
-		}
-		return nil
-	})
-
-	g.Go(func() error {
-		var err error
-		knowledge, err = s.insightsRepo.ListKnowledge(ctx, projectID, 20)
-		if err != nil {
-			return fmt.Errorf("list knowledge: %w", err)
 		}
 		return nil
 	})
@@ -173,7 +162,6 @@ func (s *InsightsService) GetDashboard(ctx context.Context, projectID string) (*
 		NewInsights:       newInsights,
 		RecentInsights:    recentInsights,
 		LatestReport:      latestReport,
-		KnowledgeEntries:  knowledge,
 		Stats:             stats,
 		LatestHealthCheck: latestHC,
 		HealthHistory:     healthHistory,
@@ -187,7 +175,6 @@ func (s *InsightsService) computeStats(ctx context.Context, projectID string) (m
 		statusCounts map[string]int
 		typeCounts   map[string]int
 		avgConf      float64
-		entries      []models.KnowledgeEntry
 	)
 
 	var g errgroup.Group
@@ -210,12 +197,6 @@ func (s *InsightsService) computeStats(ctx context.Context, projectID string) (m
 		return err
 	})
 
-	g.Go(func() error {
-		var err error
-		entries, err = s.insightsRepo.ListKnowledge(ctx, projectID, 1000)
-		return err
-	})
-
 	if err := g.Wait(); err != nil {
 		return models.InsightStats{}, err
 	}
@@ -226,16 +207,15 @@ func (s *InsightsService) computeStats(ctx context.Context, projectID string) (m
 	}
 
 	return models.InsightStats{
-		TotalInsights:  total,
-		NewCount:       statusCounts["new"],
-		AcceptedCount:  statusCounts["accepted"],
-		RejectedCount:  statusCounts["rejected"],
-		ResolvedCount:  statusCounts["resolved"],
-		AvgConfidence:  avgConf,
-		KnowledgeCount: len(entries),
-		BugPatterns:    typeCounts["bug_pattern"],
-		TechDebtItems:  typeCounts["tech_debt"],
-		Optimizations:  typeCounts["optimization"],
+		TotalInsights: total,
+		NewCount:      statusCounts["new"],
+		AcceptedCount: statusCounts["accepted"],
+		RejectedCount: statusCounts["rejected"],
+		ResolvedCount: statusCounts["resolved"],
+		AvgConfidence: avgConf,
+		BugPatterns:   typeCounts["bug_pattern"],
+		TechDebtItems: typeCounts["tech_debt"],
+		Optimizations: typeCounts["optimization"],
 	}, nil
 }
 
@@ -689,83 +669,6 @@ func (s *InsightsService) resolveDirectAnalysisContext(ctx context.Context, proj
 	return project, agent, nil
 }
 
-// ExtractKnowledge analyzes task completions and extracts knowledge entries
-func (s *InsightsService) ExtractKnowledge(ctx context.Context, projectID string) ([]models.KnowledgeEntry, error) {
-	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
-	if authErr != nil {
-		return nil, authErr
-	}
-	if s.llmSvc == nil {
-		return nil, nil
-	}
-
-	project, agent, err := s.resolveDirectAnalysisContext(ctx, projectID)
-	if err != nil {
-		if errors.Is(err, errDirectAnalysisDefaultAgentUnavailable) {
-			return nil, fmt.Errorf("no default agent")
-		}
-		return nil, err
-	}
-
-	// Get recent completed tasks
-	completedTasks, err := s.insightsRepo.GetCompletedBugFixes(ctx, projectID, 20)
-	if err != nil {
-		return nil, err
-	}
-	if len(completedTasks) == 0 {
-		return nil, nil
-	}
-
-	// Build context from recent tasks
-	var taskSummaries []string
-	for _, t := range completedTasks {
-		taskSummaries = append(taskSummaries, fmt.Sprintf("- [%s] %s: %s", t.Tag, t.Title, util.Truncate(t.Prompt, 100)))
-	}
-
-	prompt := fmt.Sprintf(`Analyze these recently completed tasks for a project called "%s" and extract 2-3 key decisions or learnings that would be valuable for the team's knowledge base.
-
-Recent tasks:
-%s
-
-Respond with a JSON array where each entry has:
-- "topic": concise topic title
-- "content": explanation of the decision/learning and WHY it was made
-- "tags": array of 2-3 relevant tags for searchability
-
-Respond with ONLY the JSON array, no markdown fences.`, project.Name, strings.Join(taskSummaries, "\n"))
-
-	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), insightsScopePrompt(project.ID, prompt), nil, *agent, project.RepoPath)
-	if err != nil {
-		return nil, fmt.Errorf("knowledge extraction failed: %w", err)
-	}
-
-	entries, err := parseKnowledgeEntries(output)
-	if err != nil {
-		applog.Infof("[insights-svc] failed to parse knowledge entries: %v", err)
-		return nil, fmt.Errorf("knowledge extraction returned an unreadable result: %w", err)
-	}
-
-	var results []models.KnowledgeEntry
-	for _, e := range entries {
-		k := &models.KnowledgeEntry{
-			ProjectID: projectID,
-			Topic:     e.Topic,
-			Content:   e.Content,
-			Source:    "ai_analysis",
-			SourceRef: fmt.Sprintf("analysis_%s", time.Now().Format("20060102")),
-		}
-		if err := k.SetTags(e.Tags); err != nil {
-			continue
-		}
-		if err := s.insightsRepo.CreateKnowledge(ctx, k); err != nil {
-			return nil, err
-		}
-		results = append(results, *k)
-	}
-
-	return results, nil
-}
-
 // UpdateInsightStatus updates the status of an insight within a project.
 func (s *InsightsService) UpdateInsightStatus(ctx context.Context, projectID, id string, status models.InsightStatus) error {
 	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
@@ -812,15 +715,6 @@ func (s *InsightsService) DeleteInsight(ctx context.Context, projectID, id strin
 		return authErr
 	}
 	return s.insightsRepo.DeleteInsight(ctx, projectID, id)
-}
-
-// DeleteKnowledge removes a knowledge entry from a project.
-func (s *InsightsService) DeleteKnowledge(ctx context.Context, projectID, id string) error {
-	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
-	if authErr != nil {
-		return authErr
-	}
-	return s.insightsRepo.DeleteKnowledge(ctx, projectID, id)
 }
 
 // ListReports returns recent insight reports
@@ -1209,21 +1103,6 @@ func parseProactiveSuggestions(output string) ([]aiSuggestion, error) {
 		return nil, fmt.Errorf("parse suggestions: %w", err)
 	}
 	return suggestions, nil
-}
-
-type aiKnowledgeEntry struct {
-	Topic   string   `json:"topic"`
-	Content string   `json:"content"`
-	Tags    []string `json:"tags"`
-}
-
-func parseKnowledgeEntries(output string) ([]aiKnowledgeEntry, error) {
-	cleaned := util.ExtractJSONArray(output)
-	var entries []aiKnowledgeEntry
-	if err := json.Unmarshal([]byte(cleaned), &entries); err != nil {
-		return nil, fmt.Errorf("parse knowledge: %w", err)
-	}
-	return entries, nil
 }
 
 type aiHealthCheck struct {

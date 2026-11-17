@@ -61,21 +61,6 @@ func (h *Handler) RunInsightsAnalysis(c echo.Context) error {
 	return render(c, http.StatusOK, pages.InsightAnalysisResult(report, nil))
 }
 
-// ExtractInsightsKnowledge triggers knowledge extraction
-func (h *Handler) ExtractInsightsKnowledge(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	if projectID == "" || h.insightsSvc == nil {
-		return c.String(http.StatusBadRequest, "missing project_id")
-	}
-
-	entries, err := h.insightsSvc.ExtractKnowledge(c.Request().Context(), projectID)
-	if err != nil {
-		return render(c, http.StatusOK, pages.KnowledgeExtractionResult(nil, err))
-	}
-
-	return render(c, http.StatusOK, pages.KnowledgeExtractionResult(entries, nil))
-}
-
 // UpdateInsightStatus updates the status of an insight
 func (h *Handler) UpdateInsightStatus(c echo.Context) error {
 	id := c.Param("id")
@@ -194,23 +179,4 @@ func (h *Handler) GradeIdeas(c echo.Context) error {
 
 	history, _ := h.insightsSvc.ListIdeaGrades(c.Request().Context(), projectID, 10)
 	return render(c, http.StatusOK, pages.IdeaGradeResult(ig, nil, history...))
-}
-
-// DeleteKnowledgeEntry removes a knowledge entry
-func (h *Handler) DeleteKnowledgeEntry(c echo.Context) error {
-	id := c.Param("id")
-	projectID := strings.TrimSpace(c.QueryParam("project_id"))
-	if h.insightsSvc == nil {
-		return c.String(http.StatusBadRequest, "insights service not available")
-	}
-	if projectID == "" {
-		return c.String(http.StatusBadRequest, "missing project_id")
-	}
-	if err := h.insightsSvc.DeleteKnowledge(c.Request().Context(), projectID, id); err != nil {
-		if errors.Is(err, service.ErrKnowledgeNotFound) {
-			return c.String(http.StatusNotFound, "knowledge entry not found")
-		}
-		return c.String(http.StatusInternalServerError, err.Error())
-	}
-	return c.String(http.StatusOK, "")
 }

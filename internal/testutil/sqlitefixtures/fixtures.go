@@ -145,9 +145,6 @@ func (f *fixtures) SetTaskCreatedAt(ctx context.Context, id string, at time.Time
 func (f *fixtures) SetExecutionCompletedAt(ctx context.Context, id string, at time.Time) error {
 	return f.setTime(ctx, `UPDATE executions SET completed_at = ? WHERE id = ?`, id, at)
 }
-func (f *fixtures) KnowledgeEntry(ctx context.Context, projectID, id string) (*models.KnowledgeEntry, error) {
-	return sqlite.NewInsightsRepo(f.db).GetKnowledge(ctx, projectID, id)
-}
 
 func (f *fixtures) SetVerifiedOAuthPrincipal(ctx context.Context, id, principal string) error {
 	result, err := f.db.ExecContext(ctx, `UPDATE oauth_connections SET oauth_principal_hash = ?, oauth_principal_verified = 1 WHERE id = ?`, principal, id)

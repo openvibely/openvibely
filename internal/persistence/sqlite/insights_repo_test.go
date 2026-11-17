@@ -242,29 +242,6 @@ func TestInsightsRepo_ProjectScopedMutations(t *testing.T) {
 		t.Fatalf("same-project insight delete: %v", err)
 	}
 
-	knowledge := &models.KnowledgeEntry{
-		ProjectID: projectB.ID,
-		Topic:     "Project B knowledge",
-		Content:   "Project B content",
-		Source:    "test",
-		SourceRef: "project-b",
-		Tags:      "[]",
-	}
-	if err := repo.CreateKnowledge(ctx, knowledge); err != nil {
-		t.Fatalf("create knowledge: %v", err)
-	}
-	if got, err := repo.GetKnowledge(ctx, projectA.ID, knowledge.ID); err != nil || got != nil {
-		t.Fatalf("foreign knowledge lookup = %#v, err=%v; want not found", got, err)
-	}
-	if err := repo.DeleteKnowledge(ctx, projectA.ID, knowledge.ID); !errors.Is(err, persistence.ErrKnowledgeNotFound) {
-		t.Fatalf("foreign knowledge delete error = %v, want %v", err, persistence.ErrKnowledgeNotFound)
-	}
-	if stillThere, err := repo.GetKnowledge(ctx, projectB.ID, knowledge.ID); err != nil || stillThere == nil {
-		t.Fatalf("foreign knowledge disappeared after rejected delete: %#v err=%v", stillThere, err)
-	}
-	if err := repo.DeleteKnowledge(ctx, projectB.ID, knowledge.ID); err != nil {
-		t.Fatalf("same-project knowledge delete: %v", err)
-	}
 }
 
 func TestInsightsRepo_CountsAndAvgConfidence(t *testing.T) {
@@ -667,51 +644,6 @@ func TestInsightsRepo_IdeaGrades(t *testing.T) {
 	}
 	if none != nil {
 		t.Error("expected nil for nonexistent project")
-	}
-}
-
-func TestInsightsRepo_Knowledge(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-
-	projectRepo := NewProjectRepo(db)
-	repo := NewInsightsRepo(db)
-
-	project := &models.Project{Name: "Test Knowledge"}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	entry := &models.KnowledgeEntry{
-		ProjectID: project.ID,
-		Topic:     "Why we chose SQLite",
-		Content:   "SQLite was chosen for simplicity and single-binary deployment",
-		Source:    "commit",
-		SourceRef: "abc123",
-		Tags:      `["architecture","database"]`,
-	}
-	if err := repo.CreateKnowledge(ctx, entry); err != nil {
-		t.Fatalf("create knowledge: %v", err)
-	}
-	if entry.ID == "" {
-		t.Fatal("expected knowledge ID")
-	}
-
-	got, err := repo.GetKnowledge(ctx, project.ID, entry.ID)
-	if err != nil {
-		t.Fatalf("get knowledge: %v", err)
-	}
-	if got.Topic != entry.Topic {
-		t.Errorf("topic: got %q, want %q", got.Topic, entry.Topic)
-	}
-
-	// Delete
-	if err := repo.DeleteKnowledge(ctx, project.ID, entry.ID); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	got, _ = repo.GetKnowledge(ctx, project.ID, entry.ID)
-	if got != nil {
-		t.Error("expected nil after delete")
 	}
 }
 

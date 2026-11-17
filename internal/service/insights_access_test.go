@@ -50,11 +50,9 @@ func TestInsightsServiceCurrentPermissions(t *testing.T) {
 	require.Equal(t, 1, store.reads)
 	for _, call := range []func() error{
 		func() error { _, e := svc.RunAnalysis(viewer, project.ID); return e },
-		func() error { _, e := svc.ExtractKnowledge(viewer, project.ID); return e },
 		func() error { _, e := svc.RunHealthCheck(viewer, project.ID); return e },
 		func() error { _, e := svc.GradeIdeas(viewer, project.ID); return e },
 		func() error { return svc.DeleteInsight(viewer, project.ID, "id") },
-		func() error { return svc.DeleteKnowledge(viewer, project.ID, "id") },
 		func() error { return svc.AcceptInsight(viewer, project.ID, "id", nil) },
 		func() error { return svc.UpdateInsightStatus(viewer, project.ID, "id", models.InsightStatusAccepted) },
 	} {
