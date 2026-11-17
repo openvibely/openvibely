@@ -40,7 +40,7 @@ chmod 0600 "$XAUTHORITY"
 xauth -f "$XAUTHORITY" add "$DISPLAY" . "$(mcookie)"
 chown "0:$OPENVIBELY_DESKTOP_UID" "$XAUTHORITY"
 chmod 0640 "$XAUTHORITY"
-chown "$OPENVIBELY_SHELL_UID:$OPENVIBELY_DESKTOP_UID" "$base/home/Files"
+chown "$OPENVIBELY_DESKTOP_UID:$OPENVIBELY_DESKTOP_UID" "$base/home/Files"
 chmod 0770 "$base/home/Files"
 run_desktop Xvfb "$DISPLAY" -auth "$XAUTHORITY" -screen 0 1440x900x24 -nolisten tcp &
 for i in {1..50}; do xdpyinfo >/dev/null 2>&1 && break; sleep .1; done

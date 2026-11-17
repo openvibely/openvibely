@@ -39,7 +39,7 @@ func taskEnvironment(name string) []string {
 	home := filepath.Join("/home/ubuntu/.desktops", name, "home")
 	return []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=" + home,
 		"OPENVIBELY_DESKTOP_ID=" + name, "OPENVIBELY_DESKTOP_PORT=10000", "OPENVIBELY_ISOLATED=1",
-		"OPENVIBELY_DESKTOP_UID=" + strconv.FormatUint(uint64(uid), 10), "OPENVIBELY_SHELL_UID=" + strconv.FormatUint(uint64(uid+1), 10),
+		"OPENVIBELY_DESKTOP_UID=" + strconv.FormatUint(uint64(uid), 10),
 		"TZ=" + os.Getenv("TZ"), "DISPLAY=:100", "PLAYWRIGHT_BROWSERS_PATH=/opt/browsers"}
 }
 func shellCommand(ctx context.Context, command, directory string) (*exec.Cmd, error) {
@@ -50,14 +50,14 @@ func shellCommand(ctx context.Context, command, directory string) (*exec.Cmd, er
 		}
 		return exec.CommandContext(ctx, "/bin/bash", "-lc", command), nil
 	}
-	uid, err := strconv.ParseUint(os.Getenv("OPENVIBELY_SHELL_UID"), 10, 32)
+	uid, err := strconv.ParseUint(os.Getenv("OPENVIBELY_DESKTOP_UID"), 10, 32)
 	if err != nil || uid < 20000 {
 		return nil, fmt.Errorf("invalid shell identity")
 	}
 	// setpriv drops all capabilities and disallows setuid executables. Neither
 	// Xauthority nor the bridge token is inherited by shell jobs.
-	cmd := exec.CommandContext(ctx, "/usr/bin/setpriv", "--reuid="+strconv.FormatUint(uid, 10), "--regid="+strconv.FormatUint(uid, 10), "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/bin/bash", "-c", command)
-	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + computerHome(), "USER=ov-shell", "LOGNAME=ov-shell", "LANG=C.UTF-8", "TZ=" + os.Getenv("TZ"), "TMPDIR=/tmp/agent"}
+	cmd := exec.CommandContext(ctx, "/usr/bin/setpriv", "--reuid="+strconv.FormatUint(uid, 10), "--regid="+strconv.FormatUint(uid+1, 10), "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/bin/bash", "-c", command)
+	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + computerHome(), "USER=ov-desktop", "LOGNAME=ov-desktop", "LANG=C.UTF-8", "TZ=" + os.Getenv("TZ"), "TMPDIR=/tmp/agent"}
 	return cmd, nil
 }
 
@@ -154,11 +154,11 @@ func taskOwnFile(f *os.File) error {
 	if os.Getenv("OPENVIBELY_ISOLATED") != "1" {
 		return nil
 	}
-	uid, err := strconv.Atoi(os.Getenv("OPENVIBELY_SHELL_UID"))
+	uid, err := strconv.Atoi(os.Getenv("OPENVIBELY_DESKTOP_UID"))
 	if err != nil {
 		return err
 	}
-	if err = f.Chown(uid, uid-1); err != nil {
+	if err = f.Chown(uid, uid); err != nil {
 		return err
 	}
 	return f.Chmod(0660)
@@ -170,12 +170,12 @@ func taskMkdirAll(root *os.Root, path string) error {
 	if os.Getenv("OPENVIBELY_ISOLATED") != "1" {
 		return nil
 	}
-	uid, err := strconv.Atoi(os.Getenv("OPENVIBELY_SHELL_UID"))
+	uid, err := strconv.Atoi(os.Getenv("OPENVIBELY_DESKTOP_UID"))
 	if err != nil {
 		return err
 	}
 	for path != "." {
-		if err = root.Chown(path, uid, uid-1); err != nil {
+		if err = root.Chown(path, uid, uid); err != nil {
 			return err
 		}
 		if err = root.Chmod(path, 0770); err != nil {
@@ -290,13 +290,14 @@ func stopDesktopProcess(p *desktopProcess) {
 	}
 }
 
-// Kill every shell-owned process, including children that escaped the original
-// process group with setsid. Each bridge sees only its task's PID namespace.
+// The shell uses the desktop UID and a dedicated primary GID for job tracking.
+// Match that GID even when children escape their process group with setsid.
+// Each bridge sees only its task's PID namespace.
 func stopShellProcesses(ctx context.Context) error {
 	if os.Getenv("OPENVIBELY_ISOLATED") != "1" {
 		return nil
 	}
-	uid, err := strconv.ParseUint(os.Getenv("OPENVIBELY_SHELL_UID"), 10, 32)
+	uid, err := strconv.ParseUint(os.Getenv("OPENVIBELY_DESKTOP_UID"), 10, 32)
 	if err != nil || uid < 20000 {
 		return fmt.Errorf("invalid shell identity")
 	}
@@ -316,7 +317,7 @@ func stopShellProcesses(ctx context.Context) error {
 				continue
 			}
 			stat, ok := info.Sys().(*syscall.Stat_t)
-			if !ok || stat.Uid != uint32(uid) {
+			if !ok || stat.Uid != uint32(uid) || stat.Gid != uint32(uid+1) {
 				continue
 			}
 			data, err := os.ReadFile("/proc/" + entry.Name() + "/stat")
@@ -380,7 +381,7 @@ func shellProcessesRunning() bool {
 	if os.Getenv("OPENVIBELY_ISOLATED") != "1" {
 		return false
 	}
-	uid, err := strconv.ParseUint(os.Getenv("OPENVIBELY_SHELL_UID"), 10, 32)
+	uid, err := strconv.ParseUint(os.Getenv("OPENVIBELY_DESKTOP_UID"), 10, 32)
 	if err != nil || uid < 20000 {
 		return true
 	}
@@ -396,7 +397,7 @@ func shellProcessesRunning() bool {
 		if err != nil {
 			continue
 		}
-		if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Uid == uint32(uid) {
+		if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Uid == uint32(uid) && stat.Gid == uint32(uid+1) {
 			return true
 		}
 	}

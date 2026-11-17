@@ -4,6 +4,19 @@
 Playwright over CDP. It does not control the user's local browser. The existing
 `computer` tool remains available for desktop screenshots, coordinates and keys.
 
+## Task user
+
+The browser, desktop applications and agent shell use the same non-root Linux
+user within a task. Files created by either are readable by the other, including
+browser downloads with owner-only permissions. The shell can also access that
+task's browser profile and local services. Different tasks retain separate users,
+PID/mount/network namespaces and files; the trusted bridge remains root-only.
+
+Shell processes use a separate primary group solely to identify jobs for
+cancellation and idle tracking without stopping the desktop. This is not a
+separate login user or a browser credential boundary. On startup, files owned by
+the previous shell user are migrated to the shared task user.
+
 ## Tabs
 
 Use `tabs`, `open_tab`, `select_tab`, `close_tab`, and `reload`. `tabs` returns IDs,
@@ -125,6 +138,10 @@ docker run --rm --network none --entrypoint node \
   -v "$PWD:/src:ro" IMAGE /src/scripts/test-computer-browser.cjs
 
 go test ./internal/service ./pkg/agenttools ./internal/persistence/sqlite
+
+# Live shared-user checks require an image built with current binary/scripts.
+# Creates and removes its own container and volume.
+python3 scripts/test-computer-shared-user.py IMAGE
 
 # On macOS, cross-compile the Linux helper tests, then run in a matching image.
 GOOS=linux GOARCH=arm64 go test -c ./cmd/computer -o /tmp/ov-computer.test

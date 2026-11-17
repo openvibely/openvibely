@@ -28,7 +28,7 @@ func TestTaskAndShellEnvironmentsExcludeControlCredentials(t *testing.T) {
 		t.Fatal("task inherited router credentials")
 	}
 	t.Setenv("OPENVIBELY_ISOLATED", "1")
-	t.Setenv("OPENVIBELY_SHELL_UID", "20001")
+	t.Setenv("OPENVIBELY_DESKTOP_UID", "20000")
 	t.Setenv("OPENVIBELY_DESKTOP_ID", "task-test")
 	cmd, err := shellCommand(context.Background(), "true", "/")
 	if err != nil {
@@ -41,7 +41,7 @@ func TestTaskAndShellEnvironmentsExcludeControlCredentials(t *testing.T) {
 		}
 	}
 	args := strings.Join(cmd.Args, " ")
-	for _, flag := range []string{"--reuid=20001", "--clear-groups", "--bounding-set=-all", "--no-new-privs"} {
+	for _, flag := range []string{"--reuid=20000", "--regid=20001", "--clear-groups", "--bounding-set=-all", "--no-new-privs"} {
 		if !strings.Contains(args, flag) {
 			t.Fatalf("missing %s", flag)
 		}
@@ -54,7 +54,7 @@ func TestShellFailsClosedWithoutIsolation(t *testing.T) {
 		t.Fatal("unisolated task shell accepted")
 	}
 	t.Setenv("OPENVIBELY_ISOLATED", "1")
-	t.Setenv("OPENVIBELY_SHELL_UID", "0")
+	t.Setenv("OPENVIBELY_DESKTOP_UID", "0")
 	if _, err := shellCommand(context.Background(), "true", "/"); err == nil {
 		t.Fatal("root shell accepted")
 	}

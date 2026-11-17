@@ -72,6 +72,28 @@ test('project browser features in isolated Chromium',{timeout:30000},async t=>{
    await assert.rejects(run({action:'type',snapshot:old.snapshot,ref:old.controls.find(c=>c.id==='normal').ref,text:'stale'}),/changed/);
    await run({action:'type',locator:{selector:'#normal'},text:'fresh'});assert.equal(await page.locator('#normal').inputValue(),'fresh');
   });
+  await t.test('locator keys require focus on the requested element',async()=>{
+   const page=client.contexts()[0].pages()[0];
+   await page.setContent('<input id="normal"><input id="password" type="password"><div id="shadow"></div><iframe srcdoc="&lt;input id=inside&gt;"></iframe>');
+   await page.locator('#password').focus();
+   await assert.rejects(run({action:'press_key',locator:{selector:'body'},key:'X'}),/Element is not focused/);
+   assert.equal(await page.locator('#password').inputValue(),'');
+   await run({action:'press_key',locator:{selector:'#normal'},key:'A'});
+   assert.equal(await page.locator('#normal').inputValue(),'A');
+   await page.locator('#normal').evaluate(n=>n.onfocus=()=>document.querySelector('#password').focus());
+   await page.locator('#password').focus();
+   await assert.rejects(run({action:'press_key',locator:{selector:'#normal'},key:'X'}),/Element is not focused/);
+   assert.equal(await page.locator('#password').inputValue(),'');
+   await page.locator('#shadow').evaluate(n=>n.attachShadow({mode:'open'}).innerHTML='<input id="shadow-input">');
+   await run({action:'press_key',locator:{selector:'#shadow-input'},key:'S'});
+   assert.equal(await page.locator('#shadow-input').inputValue(),'S');
+   await run({action:'press_key',frames:['iframe'],locator:{selector:'#inside'},key:'F'});
+   assert.equal(await page.frameLocator('iframe').locator('#inside').inputValue(),'F');
+   await page.frameLocator('iframe').locator('#inside').evaluate(n=>n.onfocus=()=>parent.document.querySelector('#password').focus());
+   await page.locator('#password').focus();
+   await assert.rejects(run({action:'press_key',frames:['iframe'],locator:{selector:'#inside'},key:'X'}),e=>browserError(e).code==='not_focused');
+   assert.equal(await page.locator('#password').inputValue(),'');
+  });
   await t.test('waits, navigation and safe diagnostics',async()=>{
    const page=client.contexts()[0].pages()[0];
    await page.setContent('<button>Duplicate</button><button>Duplicate</button><a href="'+url+'">Go</a>');

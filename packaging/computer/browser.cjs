@@ -256,7 +256,23 @@ async function run(args,session) {
    case 'set_checked':if(typeof args.checked!=='boolean')throw Error('checked must be a boolean');await target.setChecked(args.checked,{force:args.force});break;
    case 'type':await target.fill(args.text);break;
    case 'select':await target.selectOption(args.options??args.value);break;
-   case 'press_key':if(target)await target.press(args.key);else await page.keyboard.press(args.key);break;
+   case 'press_key':
+    if(target){
+     await target.focus();
+     const focused=await target.evaluate(n=>{
+      if(!n.matches(':focus'))return false;
+      let current=n;
+      while(current){
+       const root=current.getRootNode();
+       if(root.activeElement!==current)return false;
+       current=root.host;
+      }
+      return true;
+     });
+     if(!focused)throw Error('Element is not focused');
+     await assertPublicTarget(target);
+    }
+    await page.keyboard.press(args.key);break;
    case 'scroll':await page.mouse.wheel(0,Math.max(-2000,Math.min(2000,Number(args.amount)||600)));break;
    default:throw Error('Unsupported browser action');
   }
@@ -271,9 +287,9 @@ async function run(args,session) {
 }
 function browserError(error){
  const text=String(error?.message??'');
- const code=/strict mode violation/i.test(text)?'multiple_matches':/Timeout|timed out/i.test(text)?'timeout':/private login/i.test(text)?'private_login_required':/changed|detached/i.test(text)?'page_changed':/not found|No node/i.test(text)?'not_found':'invalid_request';
+ const code=/Element is not focused/i.test(text)?'not_focused':/strict mode violation/i.test(text)?'multiple_matches':/Timeout|timed out/i.test(text)?'timeout':/private login/i.test(text)?'private_login_required':/changed|detached/i.test(text)?'page_changed':/not found|No node/i.test(text)?'not_found':'invalid_request';
  // Playwright errors can contain page data or typed values; never echo raw traces.
- const messages={multiple_matches:'More than one element matched. Narrow the locator.',timeout:'The action timed out. Check whether the element exists, is visible, enabled, and unobstructed.',private_login_required:'Use a private login handoff for credential fields.',page_changed:'The page or element changed. Read again or use a locator.',not_found:'The tab or element was not found. Refresh the tab list or locator.',invalid_request:'Invalid browser request. Check the action and arguments.'};
+ const messages={not_focused:'Element is not focused. No key was sent.',multiple_matches:'More than one element matched. Narrow the locator.',timeout:'The action timed out. Check whether the element exists, is visible, enabled, and unobstructed.',private_login_required:'Use a private login handoff for credential fields.',page_changed:'The page or element changed. Read again or use a locator.',not_found:'The tab or element was not found. Refresh the tab list or locator.',invalid_request:'Invalid browser request. Check the action and arguments.'};
  return {code,message:messages[code]};
 }
 function createRunner(browser){
