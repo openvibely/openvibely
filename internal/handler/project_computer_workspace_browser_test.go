@@ -162,7 +162,16 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(!disconnectedFrame||!disconnectedFrame.getContext('2d').getImageData(1,1,1,1).data[3])throw Error('Unexpected disconnect lost the last painted frame');
  await wait(()=>overlay.textContent.includes('Retrying in 1 second'),'retry countdown');
  await wait(()=>window.fixtureRFB!==dropped&&window.fixtureRFB.painted,'reconnected');
- Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));const hiddenRFB=window.fixtureRFB;if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming');
+ Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));const hiddenRFB=window.fixtureRFB;
+ if(!hiddenRFB.viewOnly)throw Error('Hidden viewer kept input enabled');
+ await window.pushComputer();await new Promise(r=>setTimeout(r,250));
+ if(hiddenRFB.disconnected)throw Error('Brief app switch disconnected viewer');
+ Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));
+ await wait(()=>!hiddenRFB.viewOnly,'input restored after app switch');
+ if(window.fixtureRFB!==hiddenRFB)throw Error('Brief app switch replaced viewer');
+ Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));
+ await new Promise(r=>setTimeout(r,10100));
+ if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming past grace period');
  Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));await wait(()=>window.fixtureRFB!==hiddenRFB&&window.fixtureRFB.painted,'visible reconnect');
  // Painting precedes the viewer's frame check; capture requires live input,
  // after the retained frame is removed and control is restored.

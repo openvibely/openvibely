@@ -128,7 +128,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       const label=connectionOverlay.querySelector('[data-computer-connection-text]');if(label.textContent!==text)label.textContent=text;
      }
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
-     let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null, liveCanvas=null;
+     let rfb=null, mode='', pending=false, generation=0, closed=false, refreshVersion=0, attemptedStart=false, closing=false, retained=null, frameTimer=null, liveCanvas=null, hiddenTimer=null;
      let statusStream=null, statusLive=false, statusFailed=false, statusTimer=null, connectTimer=null, refreshPromise=null, refreshQueued=false, pendingState=null;
      // A queued status snapshot must not undo a tool destination saved after it arrived.
      let targetSaveVersion=0, pendingTargetSaveVersion=0;
@@ -186,7 +186,8 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      let connected=false, currentState=null, inViewport=true, ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[], savingDemo=false, generationAbort=null, workflowID="";
      function inputActive(){return connected && frameReady && !retained && mode==='control' && dialog.open && !document.hidden && !closing;}
 
-     function visible(){const host=root;return !host.closest('[data-computer-permission-pending]') && !document.hidden && (dialog.open || host.getClientRects().length>0);}
+     function viewerShown(){return !root.closest('[data-computer-permission-pending]') && (dialog.open || root.getClientRects().length>0);}
+     function visible(){return !document.hidden && viewerShown();}
      function chord(key,code,{ctrl=false,shift=false,alt=false}={}){
       if(!inputActive())return;
       for(const [sym,name] of [[0xffeb,'MetaLeft'],[0xffec,'MetaRight'],[0xffe3,'ControlLeft'],[0xffe4,'ControlRight'],[0xffe1,'ShiftLeft'],[0xffe2,'ShiftRight'],[0xffe9,'AltLeft'],[0xffea,'AltRight']])rfb.sendKey(sym,name,false);
@@ -252,7 +253,18 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      async function workflowAction(body){const res=await fetch(scoped('/workflows'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await res.json();if(!res.ok)throw Error(data.message||'Workflow operation failed');return data;}
      find('[data-workflow-save]').onclick=async e=>{e.target.disabled=true;try{await workflowAction({action:'save',id:workflowID,name:find('[data-workflow-name]').value,instructions:find('[data-workflow-instructions]').value});find('[data-teach-draft]').hidden=true;teachNote.textContent='Reusable workflow saved.';await loadWorkflows();}catch(e){teachNote.textContent=e.message;}finally{e.target.disabled=false;}};
      async function loadWorkflows(){const res=await fetch(scoped('/workflows'),{cache:'no-store'});if(!res.ok)throw Error('Could not load workflows');const items=await res.json();const list=find('[data-workflow-list]');list.replaceChildren();for(const item of items){const row=document.createElement('details'),title=document.createElement('summary'),instructions=document.createElement('pre');title.textContent=item.name;instructions.textContent=item.instructions;instructions.style.whiteSpace='pre-wrap';row.append(title,instructions);for(const [action,label] of [['edit','Edit workflow'],['use','Create task from workflow'],['delete','Delete workflow']]){const button=document.createElement('button');button.type='button';button.className='btn btn-sm';button.textContent=label;button.onclick=async()=>{if(action==='edit'){generationAbort?.abort();workflowID=item.id;find('[data-workflow-name]').value=item.name;find('[data-workflow-instructions]').value=item.instructions;find('[data-teach-draft]').hidden=false;return;}button.disabled=true;try{const data=await workflowAction({action,id:item.id});if(action==='delete'){await loadWorkflows();return;}teachNote.replaceChildren(document.createTextNode('Backlog task created. '));const link=document.createElement('a');link.href=data.url;link.textContent='Review task';link.onclick=async event=>{if(event.metaKey||event.ctrlKey)return;event.preventDefault();dialog.close();if(await finishViewer())location.assign(data.url);};teachNote.append(link);}catch(e){teachNote.textContent=e.message;}finally{button.disabled=false;}};row.append(button);}list.append(row);}}
-     function visibilityChanged(){if(!visible()){++refreshVersion;recording=false;renderDemo();disconnect();}else refresh();}
+     function suspendViewer(){
+      recording=false;renderDemo();syncViewerInput();
+      // Brief app switches keep the stream alive, but release keyboard and mouse input.
+      if(document.hidden && viewerShown() && rfb){
+       if(hiddenTimer===null)hiddenTimer=setTimeout(()=>{hiddenTimer=null;if(!visible())disconnect();},10000);
+      }else disconnect();
+     }
+     function visibilityChanged(){
+      if(closed || previewDeleted)return;
+      if(!visible()){++refreshVersion;suspendViewer();}
+      else{clearTimeout(hiddenTimer);hiddenTimer=null;refresh();}
+     }
      document.addEventListener('visibilitychange',visibilityChanged);
      const viewportObserver=new IntersectionObserver(entries=>{inViewport=entries[0].isIntersecting;visibilityChanged()});viewportObserver.observe(preview);
      // Only capture on disconnect; keep at most 12 task previews, each at most 640x400.
@@ -329,7 +341,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.addEventListener('securityfailure',()=>{if(epoch===generation){connected=false;window.showToast('Desktop authentication failed.','error','',{toastKey:previewKey+':authentication'});}});
       rfb.addEventListener('disconnect',event=>{if(epoch===generation){clearTimeout(connectTimer);retainFrame();liveCanvas=null;connected=false;frameReady=false;rfb=null;mode='';recording=false;renderDemo();renderConnection();retryStatus();}});
      }
-     function disconnect(){++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;frameReady=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;liveCanvas=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();renderConnection();}
+     function disconnect(){clearTimeout(hiddenTimer);hiddenTimer=null;++generation;clearTimeout(connectTimer);screenRetry.cancel();connected=false;frameReady=false;ime?.remove();ime=null;composing=false;clearTimeout(frameTimer);if(rfb)retainFrame();if(rfb)rfb.disconnect();rfb=null;liveCanvas=null;mode='';if(retained)screen.append(retained);else if(!closed)restoreFrame();renderConnection();}
      function refresh(){
       if(refreshPromise){refreshQueued=true;return refreshPromise;}
       refreshPromise=(async()=>{do{refreshQueued=false;await refreshStatus();}while(refreshQueued&&!closed&&!previewDeleted);})().finally(()=>{refreshPromise=null;retryStatus();});
@@ -337,7 +349,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      }
      async function refreshStatus(){
       if(closed || previewDeleted || pending || closing)return;
- if(!visible()){disconnect();return;}
+ if(!visible()){suspendViewer();return;}
       if(!pendingState){if(rfb&&connected&&currentState){syncViewerInput();return;}subscribeStatus(true);return;}
       screenRetry.cancel();
       const version=++refreshVersion;
