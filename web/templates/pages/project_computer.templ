@@ -257,7 +257,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       recording=false;renderDemo();syncViewerInput();
       // Brief app switches keep the stream alive, but release keyboard and mouse input.
       if(document.hidden && viewerShown() && rfb){
-       if(hiddenTimer===null)hiddenTimer=setTimeout(()=>{hiddenTimer=null;if(!visible())disconnect();},10000);
+       if(hiddenTimer===null)hiddenTimer=setTimeout(()=>{hiddenTimer=null;if(!visible())disconnect();},600000);
       }else disconnect();
      }
      function visibilityChanged(){

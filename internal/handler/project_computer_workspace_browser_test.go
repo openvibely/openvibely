@@ -170,7 +170,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>!hiddenRFB.viewOnly,'input restored after app switch');
  if(window.fixtureRFB!==hiddenRFB)throw Error('Brief app switch replaced viewer');
  Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));
- await new Promise(r=>setTimeout(r,10100));
+ await new Promise(r=>setTimeout(r,600100));
  if(!hiddenRFB.disconnected)throw Error('Hidden page kept streaming past grace period');
  Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));await wait(()=>window.fixtureRFB!==hiddenRFB&&window.fixtureRFB.painted,'visible reconnect');
  // Painting precedes the viewer's frame check; capture requires live input,
@@ -295,7 +295,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--user-data-dir="+t.TempDir(), "--virtual-time-budget=45000", "--dump-dom", server.URL)
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--user-data-dir="+t.TempDir(), "--virtual-time-budget=660000", "--dump-dom", server.URL)
 	out, err := runHandlerBrowserProcess(t, cmd)
 	require.NoError(t, err)
 	if !bytes.Contains(out, []byte(`id="browser-result" data-status="pass"`)) {
