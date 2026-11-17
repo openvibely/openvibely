@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"sync"
 
@@ -63,12 +64,38 @@ func (v *viewerConnections) proxy(w http.ResponseWriter, r *http.Request, target
 			}
 		}
 	}
-	go copyFrames(downstream, upstream)
+	go func() {
+		defer func() { done <- struct{}{} }()
+		forwardViewerScreen(ctx, downstream, upstream)
+	}()
 	go copyFrames(upstream, downstream)
 	// A connected viewer protects its desktop, even without keyboard or mouse
 	// input. Only the desktop reaper owns an inactivity timer.
 	select {
 	case <-done:
 	case <-ctx.Done():
+	}
+}
+
+// forwardViewerScreen streams each screen message with bounded buffering while
+// preserving its type and boundary. Do not close the writer after a copy error:
+// that would finalize an incomplete update as a successful message.
+func forwardViewerScreen(ctx context.Context, dst, src *websocket.Conn) error {
+	buffer := make([]byte, 32<<10)
+	for {
+		kind, reader, err := src.Reader(ctx)
+		if err != nil {
+			return err
+		}
+		writer, err := dst.Writer(ctx, kind)
+		if err != nil {
+			return err
+		}
+		if _, err := io.CopyBuffer(writer, reader, buffer); err != nil {
+			return err
+		}
+		if err := writer.Close(); err != nil {
+			return err
+		}
 	}
 }
