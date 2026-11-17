@@ -49,7 +49,7 @@ func browserRoutes(mux *http.ServeMux) {
 		}
 		if currentBrowserWorker == nil {
 			cmd := newBrowserCommand(context.Background(), "node", "/usr/local/lib/openvibely-browser.cjs", "--serve")
-			cmd.Env = append(cmd.Env, "OPENVIBELY_CDP_PORT="+computerPort(1))
+			cmd.Env = append(cmd.Environ(), "OPENVIBELY_CDP_PORT="+computerPort(1))
 			input, e := cmd.StdinPipe()
 			if e != nil {
 				http.Error(w, "Browser unavailable", 502)

@@ -1,4 +1,5 @@
-// Runs inside the computer. Browser credentials never appear in tool results.
+// Runs inside the task computer. Cookie APIs are internal; model actions are
+// allowlisted by the server and credential fields require a private handoff.
 const {chromium}=require('/opt/browser/node_modules/playwright');
 const {createHash,randomUUID}=require('node:crypto');
 const fs=require('node:fs/promises');
@@ -95,7 +96,8 @@ async function findElements(page,args){
  const {offset,limit}=pageRange(args),count=await locator.count(),elements=[];
  for(let index=offset;index<Math.min(count,offset+limit);index++){
   const item=locator.nth(index);
-  elements.push(await item.evaluate((n,index)=>({index,tag:n.tagName.toLowerCase(),text:(n.innerText||n.textContent||'').slice(0,1000),role:n.getAttribute('role'),name:n.getAttribute('aria-label'),visible:!!n.getClientRects().length,disabled:!!n.disabled}),index));
+  let sensitive=false;try{await assertPublicTarget(item);}catch{sensitive=true;}
+  elements.push(await item.evaluate((n,{index,sensitive})=>({index,tag:n.tagName.toLowerCase(),text:sensitive?'':(n.innerText||'').slice(0,1000),role:n.getAttribute('role'),name:n.getAttribute('aria-label'),visible:!!n.getClientRects().length,disabled:!!n.disabled,sensitive}),{index,sensitive}));
  }
  return {count,offset,elements,next_offset:offset+elements.length<count?offset+elements.length:null};
 }
@@ -151,6 +153,7 @@ async function run(args,session) {
    if(!session)throw Error('Dialog actions require the persistent browser session');
    const pending=session.dialogs.get(page);
    if(!pending)return {tab_id:id,dialog:null};
+   if(/password|verification|security.code|passcode|\botp\b|\bpin\b/i.test(pending.dialog.message()))throw Error('Use a private login handoff for credential prompts.');
    const info={type:pending.dialog.type(),message:pending.dialog.message().slice(0,2000),default_value:pending.dialog.defaultValue().slice(0,2000)};
    if(args.dialog_action==='accept'||args.dialog_action==='dismiss'){
     if(args.dialog_action==='accept')await pending.dialog.accept(args.text);else await pending.dialog.dismiss();
@@ -172,6 +175,11 @@ async function run(args,session) {
   if(args.action==='wait_element'){
    const locator=buildLocator(locatorRoot(page,args.frames),args.locator);
    const state=args.state??'visible';
+   if(state==='enabled'||state==='disabled'){
+    const deadline=Date.now()+timeout;
+    while(Date.now()<deadline){const count=await locator.count();if(count>1)throw Error('strict mode violation: multiple matches');if(count===1&&(await locator.isEnabled())===(state==='enabled'))return {tab_id:id,state};await new Promise(resolve=>setTimeout(resolve,50));}
+    throw Error('Timeout waiting for element state');
+   }
    if(!['visible','hidden','attached','detached'].includes(state))throw Error('Unsupported element state');
    await locator.waitFor({state,timeout});return {tab_id:id,state};
   }
@@ -185,6 +193,7 @@ async function run(args,session) {
    if(count!==1)throw Error('Inspection requires exactly one matching element');
    if(args.property==='visible')return {tab_id:id,value:await item.isVisible()};
    if(args.property==='enabled')return {tab_id:id,value:await item.isEnabled()};
+   if(['text','attribute'].includes(args.property))await assertPublicTarget(item);
    if(args.property==='text')return {tab_id:id,value:(await item.innerText()).slice(0,20000)};
    if(args.property==='attribute'){
     if(!/^(id|class|role|title|alt|href|src|name|type|placeholder|disabled|checked|aria-[a-z-]+|data-testid)$/.test(args.attribute||''))throw Error('Attribute is not available for inspection');

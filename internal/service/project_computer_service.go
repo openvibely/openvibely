@@ -615,12 +615,19 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 					Code    string `json:"code"`
 					Message string `json:"message"`
 				} `json:"error"`
+				Content json.RawMessage `json:"content"`
 			}
-			if json.Unmarshal(data, &result) == nil && result.Error != nil {
-				return string(data), true, true, nil
+			if json.Unmarshal(data, &result) == nil {
+				if result.Error != nil {
+					return string(data), true, true, nil
+				}
+				if len(result.Content) > 0 {
+					output, err := agenttools.EncodeImageResult(data)
+					return output, true, err != nil, err
+				}
 			}
 		}
-		if (name == "computer" || name == "project_browser") && bytes.Contains(data, []byte(`"content"`)) {
+		if name == "computer" && bytes.Contains(data, []byte(`"content"`)) {
 			output, err := agenttools.EncodeImageResult(data)
 			return output, true, err != nil, err
 		}

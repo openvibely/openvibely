@@ -192,7 +192,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 					"checked":       &toolschema.Schema{Type: "boolean"},
 					"options":       &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"value": {Type: "string"}, "label": {Type: "string"}, "index": {Type: "integer", Minimum: toolschema.Number("0")}}, AdditionalProperties: toolschema.Pointer(false)}},
 					"timeout_ms":    &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("20000")},
-					"state":         &toolschema.Schema{Type: "string", Enum: []any{"visible", "hidden", "attached", "detached", "load", "domcontentloaded", "networkidle"}},
+					"state":         &toolschema.Schema{Type: "string", Enum: []any{"visible", "hidden", "attached", "detached", "enabled", "disabled", "load", "domcontentloaded", "networkidle"}},
 					"full_page":     &toolschema.Schema{Type: "boolean"},
 					"clip":          &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"x": {Type: "number", Minimum: toolschema.Number("0")}, "y": {Type: "number", Minimum: toolschema.Number("0")}, "width": {Type: "number"}, "height": {Type: "number"}}, Required: []string{"x", "y", "width", "height"}, AdditionalProperties: toolschema.Pointer(false)},
 					"dialog_action": &toolschema.Schema{Type: "string", Enum: []any{"inspect", "accept", "dismiss"}},
@@ -272,7 +272,7 @@ func projectBrowserLocatorSchema(depth int) *toolschema.Schema {
 	p["exact"] = &toolschema.Schema{Type: "boolean"}
 	p["visible"] = &toolschema.Schema{Type: "boolean"}
 	p["index"] = &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")}
-	if depth < 2 {
+	if depth < 1 {
 		for _, key := range []string{"and", "or", "has", "has_not", "child"} {
 			p[key] = projectBrowserLocatorSchema(depth + 1)
 		}

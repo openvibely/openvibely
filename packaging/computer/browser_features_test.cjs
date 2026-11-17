@@ -49,7 +49,8 @@ test('project browser features in isolated Chromium',{timeout:30000},async t=>{
    await page.setContent('<input type="password" value="secret"><button disabled title="Public">Disabled</button>'+Array.from({length:130},(_,i)=>`<button>${i}</button>`).join('')+'<p>'+ 'x'.repeat(21000)+'</p>');
    assert.equal((await run({action:'inspect',locator:{role:'button',name:'Disabled'},property:'enabled'})).value,false);
    assert.equal((await run({action:'inspect',locator:{role:'button',name:'Disabled'},property:'attribute',attribute:'title'})).value,'Public');
-   await assert.rejects(run({action:'inspect',locator:{selector:'input'},property:'attribute',attribute:'value'}),/not available/);
+   await assert.rejects(run({action:'inspect',locator:{selector:'input'},property:'attribute',attribute:'value'}),/private login|not available/);
+   await assert.rejects(run({action:'inspect',locator:{selector:'input'},property:'text'}),/private login/);
    assert.equal((await run({action:'inspect',locator:{role:'button'},property:'count'})).value,131);
    assert.ok((await run({action:'read',offset:100})).controls.length>0);
    assert.ok((await run({action:'read',text_offset:20000})).text.length>1000);
@@ -76,6 +77,8 @@ test('project browser features in isolated Chromium',{timeout:30000},async t=>{
    await page.setContent('<button>Duplicate</button><button>Duplicate</button><a href="'+url+'">Go</a>');
    await page.evaluate(()=>setTimeout(()=>{const b=document.createElement('button');b.id='later';b.textContent='Ready';document.body.append(b)},100));
    await run({action:'wait_element',locator:{selector:'#later'},state:'visible',timeout_ms:2000});
+   await page.locator('#later').evaluate(n=>{n.disabled=true;setTimeout(()=>n.disabled=false,100)});
+   await run({action:'wait_element',locator:{selector:'#later'},state:'enabled',timeout_ms:2000});
    try{await run({action:'click',locator:{role:'button',name:'Duplicate'},timeout_ms:200});assert.fail('must reject ambiguous locator');}catch(e){assert.equal(browserError(e).code,'multiple_matches');}
    try{await run({action:'wait_element',locator:{text:'secret-not-in-error'},timeout_ms:100});assert.fail('must time out');}catch(e){assert.equal(browserError(e).code,'timeout');assert.ok(!JSON.stringify(browserError(e)).includes('secret-not-in-error'));}
    await run({action:'click_navigation',locator:{role:'link',name:'Go'},url:url+'/',timeout_ms:2000});
