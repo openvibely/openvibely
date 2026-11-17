@@ -553,10 +553,16 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     if (!value) return "Reset time unavailable";
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return "Reset time unavailable";
-    const minutes = Math.ceil((d - Date.now()) / 60000);
-    return minutes <= 0
-      ? "Reset pending refresh"
-      : "Resets " + d.toLocaleString();
+    const totalMinutes = Math.ceil((d - Date.now()) / 60000);
+    if (totalMinutes <= 0) return "Reset due";
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    const parts = [];
+    if (days > 0) parts.push(days + (days === 1 ? " day" : " days"));
+    if (hours > 0) parts.push(hours + (hours === 1 ? " hour" : " hours"));
+    if (minutes > 0 || !parts.length) parts.push(minutes + (minutes === 1 ? " minute" : " minutes"));
+    return "Resets in " + parts.join(", ");
   }
   function drawPopup() {
     const a = state.accounts.find((a) => a.key === state.selected);
