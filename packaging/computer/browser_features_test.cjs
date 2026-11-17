@@ -88,6 +88,18 @@ test('project browser features in isolated Chromium',{timeout:30000},async t=>{
    assert.equal(viewport[0],255);assert.equal(viewport[1],216);assert.ok(full.length>viewport.length);assert.ok(clip.length<viewport.length);
    await assert.rejects(run({action:'screenshot',clip:{x:0,y:0,width:-1,height:2}}),/Invalid/);
   });
+  await t.test('website uploads and downloads use computer Files',async()=>{
+   server.removeAllListeners('request');server.on('request',(req,res)=>{if(req.url==='/file'){res.setHeader('Content-Disposition','attachment; filename="result.txt"');res.end('downloaded');}else if(req.url==='/media'){res.setHeader('Content-Type','text/plain');res.end('media bytes');}else{res.setHeader('Content-Type','text/html');res.end('<input type="file" multiple><a href="/file">Download</a><a href="/media">Media</a>');}});
+   await fs.mkdir(path.join(home,'Files'),{recursive:true});await fs.writeFile(path.join(home,'Files','input.txt'),'upload data');await fs.writeFile(path.join(home,'outside.txt'),'private');await fs.symlink(path.join(home,'outside.txt'),path.join(home,'Files','escape'));
+   await run({action:'navigate',url});
+   await run({action:'upload',locator:{selector:'input'},files:['input.txt']});
+   assert.equal(await client.contexts()[0].pages()[0].locator('input').evaluate(n=>n.files[0].name),'input.txt');
+   await assert.rejects(run({action:'upload',locator:{selector:'input'},files:['../outside.txt']}),/inside computer Files/);
+   await assert.rejects(run({action:'upload',locator:{selector:'input'},files:['escape']}),/inside computer Files/);
+   const saved=await run({action:'download',locator:{text:'Download',exact:true}});assert.equal(await fs.readFile(path.join(home,'Files',saved.computer_path),'utf8'),'downloaded');
+   const media=await run({action:'download_media',locator:{text:'Media',exact:true}});assert.equal(await fs.readFile(path.join(home,'Files',media.computer_path),'utf8'),'media bytes');
+   const again=await run({action:'download',locator:{text:'Download',exact:true}});assert.notEqual(saved.computer_path,again.computer_path);
+  });
   await t.test('dialogs survive calls and can be inspected and resolved',async()=>{
    const page=client.contexts()[0].pages()[0];await page.setContent('<button onclick="document.querySelector(\'p\').textContent=prompt(\'Name?\',\'Default\')">Ask</button><p></p>');
    const execute=createRunner(client);

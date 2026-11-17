@@ -166,7 +166,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 				AdditionalProperties: toolschema.Pointer(false),
 			}},
 		{Name: "project_browser",
-			Description: "Use this task's signed-in browser. List/open/select/close tabs or navigate/read/interact with a tab. Supply tab_id to target a tab; otherwise the selected tab is used. Use find with a structured locator and optional frames to inspect matching elements. For element actions use a locator (optionally within frames), or read first and send snapshot plus ref. click_navigation clicks while waiting for navigation, optionally to url. wait_element uses state; wait_url uses url; wait_load uses state. type replaces text; append/type_sequential preserve existing text. set_checked uses checked. select accepts value or options with value/label/index. Re-read after changes. Password and verification-code entry require a private login handoff. Never read cookie values or browser storage.",
+			Description: "Use this task's signed-in browser. List/open/select/close tabs or navigate/read/interact with a tab. Supply tab_id to target a tab; otherwise the selected tab is used. Use find with a structured locator and optional frames to inspect matching elements. For element actions use a locator (optionally within frames), or read first and send snapshot plus ref. click_navigation clicks while waiting for navigation, optionally to url. wait_element uses state; wait_url uses url; wait_load uses state. type replaces text; append/type_sequential preserve existing text. set_checked uses checked. select accepts value or options with value/label/index. Re-read after changes. upload targets a file input or chooser button and takes files. download clicks a download control and waits; download_media saves an HTTP media/link URL. Both return computer_path for computer_attachment publishing. Password and verification-code entry require a private login handoff. Never read cookie values or browser storage.",
 			Access:      llmcontracts.RuntimeToolAccessWrite,
 			Schema: &toolschema.Schema{
 				Type: "object",
@@ -196,6 +196,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 					"full_page":     &toolschema.Schema{Type: "boolean"},
 					"clip":          &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"x": {Type: "number", Minimum: toolschema.Number("0")}, "y": {Type: "number", Minimum: toolschema.Number("0")}, "width": {Type: "number"}, "height": {Type: "number"}}, Required: []string{"x", "y", "width", "height"}, AdditionalProperties: toolschema.Pointer(false)},
 					"dialog_action": &toolschema.Schema{Type: "string", Enum: []any{"inspect", "accept", "dismiss"}},
+					"files":         &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "string"}, Description: "Upload paths relative to computer Files (or absolute paths within it), maximum 25 MB total."},
 					"snapshot":      &toolschema.Schema{Type: "string"},
 					"ref":           &toolschema.Schema{Type: "string"},
 					"text": &toolschema.Schema{
@@ -251,7 +252,7 @@ func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDe
 }
 
 func projectBrowserActions() []any {
-	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation", "screenshot", "dialog"}
+	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation", "screenshot", "dialog", "upload", "download", "download_media"}
 }
 
 func validProjectBrowserAction(action string) bool {

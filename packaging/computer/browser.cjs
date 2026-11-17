@@ -1,6 +1,6 @@
 // Runs inside the computer. Browser credentials never appear in tool results.
 const {chromium}=require('/opt/browser/node_modules/playwright');
-const {createHash}=require('node:crypto');
+const {createHash,randomUUID}=require('node:crypto');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const tabStatePath=()=>path.join(process.env.HOME,'.ov-browser-selected-tab');
@@ -45,6 +45,45 @@ function locatorRoot(page,frames=[]) {
 async function assertPublicTarget(target) {
  const sensitive=await target.evaluate(n=>/password|one[- ]?time|verification[ -]?code|security[ -]?code|passcode|\bpin\b|\btotp\b|\botp\b|\b2fa\b/i.test([n.type,n.autocomplete,n.name,n.id,n.getAttribute('aria-label'),n.getAttribute('placeholder'),...[...(n.labels||[])].map(l=>l.innerText)].join(' ')));
  if(sensitive)throw Error('Use a private login handoff for passwords or verification codes.');
+}
+const maxFileBytes=25*1024*1024;
+async function filesRoot(){
+ const home=await fs.realpath(process.env.HOME),root=path.join(home,'Files');
+ await fs.mkdir(root,{recursive:true});
+ if((await fs.lstat(root)).isSymbolicLink())throw Error('Files directory cannot be a symlink');
+ return root;
+}
+async function uploadPaths(files){
+ if(!Array.isArray(files)||!files.length||files.length>20)throw Error('Supply 1 to 20 files');
+ const root=await filesRoot(),result=[];let total=0;
+ for(const file of files){
+  if(typeof file!=='string'||!file)throw Error('Invalid upload path');
+  const resolved=await fs.realpath(path.resolve(root,file));
+  if(!resolved.startsWith(root+path.sep))throw Error('Upload must be inside computer Files');
+  const stat=await fs.stat(resolved);total+=stat.size;
+  if(!stat.isFile()||total>maxFileBytes)throw Error('Upload files exceed 25 MB or are not regular files');
+  result.push(resolved);
+ }
+ return result;
+}
+async function saveStream(stream,name){
+ const root=await filesRoot(),filename=randomUUID()+'-'+path.basename(name||'download').replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,120);
+ const destination=path.join(root,filename),file=await fs.open(destination,'wx',0o600);let size=0;
+ try{for await(const chunk of stream){size+=chunk.length;if(size>maxFileBytes)throw Error('Download exceeds 25 MB');await file.writeFile(chunk);}return {computer_path:filename,bytes:size};}
+ catch(error){await fs.unlink(destination).catch(()=>{});throw error;}
+ finally{await file.close();}
+}
+async function downloadMedia(context,url,timeout){
+ for(let hop=0;hop<6;hop++){
+  const parsed=new URL(url);if(!['http:','https:'].includes(parsed.protocol)||parsed.username||parsed.password)throw Error('Media requires an HTTP URL');
+  const cookies=await context.cookies(parsed.href);
+  const response=await fetch(parsed.href,{redirect:'manual',signal:AbortSignal.timeout(timeout),headers:{Cookie:cookies.map(c=>c.name+'='+c.value).join('; ')}});
+  if([301,302,303,307,308].includes(response.status)){const location=response.headers.get('location');await response.body?.cancel();if(!location)throw Error('Invalid media redirect');url=new URL(location,parsed).href;continue;}
+  if(!response.ok||!response.body)throw Error('Media download failed');
+  if(Number(response.headers.get('content-length'))>maxFileBytes){await response.body.cancel();throw Error('Download exceeds 25 MB');}
+  return saveStream(response.body,path.basename(parsed.pathname)||'media');
+ }
+ throw Error('Too many media redirects');
 }
 function pageRange(args){
  const offset=args.offset??0,limit=args.limit??100;
@@ -150,6 +189,22 @@ async function run(args,session) {
     return {tab_id:id,value:(await item.getAttribute(args.attribute))?.slice(0,20000)??null};
    }
    throw Error('Unknown inspection property');
+  }
+  if(['upload','download','download_media'].includes(args.action)){
+   const locator=buildLocator(locatorRoot(page,args.frames),args.locator),target=await locator.elementHandle();
+   if(!target)throw Error('Element not found');await assertPublicTarget(target);
+   if(args.action==='upload'){
+    const paths=await uploadPaths(args.files);
+    if(await target.evaluate(n=>n.tagName==='INPUT'&&n.type==='file'))await target.setInputFiles(paths,{timeout});
+    else{const [chooser]=await Promise.all([page.waitForEvent('filechooser',{timeout}),target.click()]);if(paths.length>1&&!chooser.isMultiple())throw Error('File chooser accepts one file');await chooser.setFiles(paths,{timeout});}
+    return {tab_id:id,uploaded:paths.length};
+   }
+   if(args.action==='download_media'){
+    const url=await target.evaluate(n=>n.currentSrc||n.src||n.href||null);if(!url)throw Error('Element has no media URL');
+    return {tab_id:id,...await downloadMedia(context,url,timeout)};
+   }
+   const [download]=await Promise.all([page.waitForEvent('download',{timeout}),target.click()]);
+   try{const stream=await download.createReadStream();if(!stream)throw Error('Download failed');return {tab_id:id,...await saveStream(stream,download.suggestedFilename())};}finally{await download.delete().catch(()=>{});}
   }
   if(args.action==='find')return {tab_id:id,...await findElements(page,args)};
   let target;
