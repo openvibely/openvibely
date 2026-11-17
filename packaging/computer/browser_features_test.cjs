@@ -7,7 +7,7 @@ const fs=require('node:fs/promises');
 const os=require('node:os');
 const path=require('node:path');
 const {chromium}=require('/opt/browser/node_modules/playwright');
-const {run}=require('./browser.cjs');
+const {run,browserError}=require('./browser.cjs');
 test('project browser features in isolated Chromium',async t=>{
  const home=await fs.mkdtemp(path.join(os.tmpdir(),'ov-browser-test-'));
  const previousHome=process.env.HOME;process.env.HOME=home;process.env.OPENVIBELY_CDP_PORT='19222';
@@ -70,6 +70,16 @@ test('project browser features in isolated Chromium',async t=>{
    const old=await run({action:'read'});await page.locator('#normal').evaluate(n=>n.outerHTML='<input id="normal">');
    await assert.rejects(run({action:'type',snapshot:old.snapshot,ref:old.controls.find(c=>c.id==='normal').ref,text:'stale'}),/changed/);
    await run({action:'type',locator:{selector:'#normal'},text:'fresh'});assert.equal(await page.locator('#normal').inputValue(),'fresh');
+  });
+  await t.test('waits, navigation and safe diagnostics',async()=>{
+   const page=client.contexts()[0].pages()[0];
+   await page.setContent('<button>Duplicate</button><button>Duplicate</button><a href="'+url+'">Go</a>');
+   await page.evaluate(()=>setTimeout(()=>{const b=document.createElement('button');b.id='later';b.textContent='Ready';document.body.append(b)},100));
+   await run({action:'wait_element',locator:{selector:'#later'},state:'visible',timeout_ms:2000});
+   try{await run({action:'click',locator:{role:'button',name:'Duplicate'},timeout_ms:200});assert.fail('must reject ambiguous locator');}catch(e){assert.equal(browserError(e).code,'multiple_matches');}
+   try{await run({action:'wait_element',locator:{text:'secret-not-in-error'},timeout_ms:100});assert.fail('must time out');}catch(e){assert.equal(browserError(e).code,'timeout');assert.ok(!JSON.stringify(browserError(e)).includes('secret-not-in-error'));}
+   await run({action:'click_navigation',locator:{role:'link',name:'Go'},url:url+'/',timeout_ms:2000});
+   await run({action:'wait_url',url:url+'/'});await run({action:'wait_load',state:'load'});
   });
  }finally{await client.close();await browser.close();await new Promise(resolve=>server.close(resolve));process.env.HOME=previousHome;await fs.rm(home,{recursive:true,force:true});}
 });

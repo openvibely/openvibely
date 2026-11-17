@@ -166,7 +166,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 				AdditionalProperties: toolschema.Pointer(false),
 			}},
 		{Name: "project_browser",
-			Description: "Use this task's signed-in browser. List/open/select/close tabs or navigate/read/interact with a tab. Supply tab_id to target a tab; otherwise the selected tab is used. Use find with a structured locator and optional frames to inspect matching elements. For element actions use a locator (optionally within frames), or read first and send snapshot plus ref. type replaces text; append/type_sequential preserve existing text. set_checked uses checked. select accepts value or options with value/label/index. Re-read after changes. Password and verification-code entry require a private login handoff. Never read cookie values or browser storage.",
+			Description: "Use this task's signed-in browser. List/open/select/close tabs or navigate/read/interact with a tab. Supply tab_id to target a tab; otherwise the selected tab is used. Use find with a structured locator and optional frames to inspect matching elements. For element actions use a locator (optionally within frames), or read first and send snapshot plus ref. click_navigation clicks while waiting for navigation, optionally to url. wait_element uses state; wait_url uses url; wait_load uses state. type replaces text; append/type_sequential preserve existing text. set_checked uses checked. select accepts value or options with value/label/index. Re-read after changes. Password and verification-code entry require a private login handoff. Never read cookie values or browser storage.",
 			Access:      llmcontracts.RuntimeToolAccessWrite,
 			Schema: &toolschema.Schema{
 				Type: "object",
@@ -191,6 +191,8 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 					"force":       &toolschema.Schema{Type: "boolean"},
 					"checked":     &toolschema.Schema{Type: "boolean"},
 					"options":     &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"value": {Type: "string"}, "label": {Type: "string"}, "index": {Type: "integer", Minimum: toolschema.Number("0")}}, AdditionalProperties: toolschema.Pointer(false)}},
+					"timeout_ms":  &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("20000")},
+					"state":       &toolschema.Schema{Type: "string", Enum: []any{"visible", "hidden", "attached", "detached", "load", "domcontentloaded", "networkidle"}},
 					"snapshot":    &toolschema.Schema{Type: "string"},
 					"ref":         &toolschema.Schema{Type: "string"},
 					"text": &toolschema.Schema{
@@ -246,7 +248,7 @@ func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDe
 }
 
 func projectBrowserActions() []any {
-	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked"}
+	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find", "inspect", "double_click", "append", "type_sequential", "set_checked", "wait_element", "wait_url", "wait_load", "click_navigation"}
 }
 
 func validProjectBrowserAction(action string) bool {

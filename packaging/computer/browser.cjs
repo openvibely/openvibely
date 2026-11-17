@@ -101,7 +101,17 @@ async function run(args) {
   if(args.action==='close_tab'){if(!args.tab_id)throw Error('close_tab requires tab_id');await page.close();return {closed:true,tab_id:id};}
   if(args.action==='select_tab'){await fs.writeFile(tabStatePath(),id,{mode:0o600});await page.bringToFront();}
 
-  page.setDefaultTimeout(10000);
+  const timeout=args.timeout_ms??10000;
+  if(!Number.isInteger(timeout)||timeout<1||timeout>20000)throw Error('timeout_ms must be between 1 and 20000');
+  page.setDefaultTimeout(timeout);page.setDefaultNavigationTimeout(timeout);
+  if(args.action==='wait_element'){
+   const locator=buildLocator(locatorRoot(page,args.frames),args.locator);
+   const state=args.state??'visible';
+   if(!['visible','hidden','attached','detached'].includes(state))throw Error('Unsupported element state');
+   await locator.waitFor({state,timeout});return {tab_id:id,state};
+  }
+  if(args.action==='wait_url'){await page.waitForURL(args.url,{timeout,waitUntil:'domcontentloaded'});return {tab_id:id,url:page.url()};}
+  if(args.action==='wait_load'){const state=args.state??'load';if(!['load','domcontentloaded','networkidle'].includes(state))throw Error('Unsupported load state');await page.waitForLoadState(state,{timeout});return {tab_id:id,state};}
   if(args.action==='read'){const textOffset=args.text_offset??0;if(!Number.isInteger(textOffset)||textOffset<0)throw Error('Invalid text_offset');return {...await snapshot(page,pageRange(args),textOffset),tab_id:id};}
   if(args.action==='inspect'){
    const item=buildLocator(locatorRoot(page,args.frames),args.locator);
@@ -119,7 +129,7 @@ async function run(args) {
   }
   if(args.action==='find')return {tab_id:id,...await findElements(page,args)};
   let target;
-  const targetActions=['click','double_click','type','append','type_sequential','select','press_key','set_checked'];
+  const targetActions=['click','double_click','type','append','type_sequential','select','press_key','set_checked','click_navigation'];
   if(targetActions.includes(args.action)&&args.locator){
    const locator=buildLocator(locatorRoot(page,args.frames),args.locator);
    target=await locator.elementHandle();if(!target)throw Error('Element not found');
@@ -145,6 +155,10 @@ async function run(args) {
    case 'reload':await page.reload({waitUntil:'domcontentloaded'});break;
    case 'back':await page.goBack({waitUntil:'domcontentloaded'});break;
    case 'forward':await page.goForward({waitUntil:'domcontentloaded'});break;
+   case 'click_navigation':{
+    const waiting=args.url?page.waitForURL(args.url,{timeout,waitUntil:'domcontentloaded'}):page.waitForNavigation({timeout,waitUntil:'domcontentloaded'});
+    await Promise.all([waiting,target.click({button:args.button,modifiers:args.modifiers,force:args.force})]);break;
+   }
    case 'click':await target.click({button:args.button,modifiers:args.modifiers,force:args.force});break;
    case 'double_click':await target.dblclick({button:args.button,modifiers:args.modifiers,force:args.force});break;
    case 'append':
@@ -165,5 +179,12 @@ async function run(args) {
   return {...result,tab_id:id};
  } finally {await browser.close();}
 }
-module.exports={run};
-if(require.main===module)(async()=>{let raw='';for await(const chunk of process.stdin)raw+=chunk;process.stdout.write(JSON.stringify(await run(JSON.parse(raw))));})().catch(()=>{process.stderr.write('Browser operation failed. Read the page again; use private login for credentials.');process.exitCode=1;});
+function browserError(error){
+ const text=String(error?.message??'');
+ const code=/strict mode violation/i.test(text)?'multiple_matches':/Timeout|timed out/i.test(text)?'timeout':/private login/i.test(text)?'private_login_required':/changed|detached/i.test(text)?'page_changed':/not found|No node/i.test(text)?'not_found':'invalid_request';
+ // Playwright errors can contain page data or typed values; never echo raw traces.
+ const messages={multiple_matches:'More than one element matched. Narrow the locator.',timeout:'The action timed out. Check whether the element exists, is visible, enabled, and unobstructed.',private_login_required:'Use a private login handoff for credential fields.',page_changed:'The page or element changed. Read again or use a locator.',not_found:'The tab or element was not found. Refresh the tab list or locator.',invalid_request:'Invalid browser request. Check the action and arguments.'};
+ return {code,message:messages[code]};
+}
+module.exports={run,browserError};
+if(require.main===module)(async()=>{let raw='';for await(const chunk of process.stdin)raw+=chunk;process.stdout.write(JSON.stringify(await run(JSON.parse(raw))));})().catch(error=>{process.stdout.write(JSON.stringify({error:browserError(error)}));});

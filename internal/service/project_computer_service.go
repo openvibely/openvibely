@@ -609,6 +609,17 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 		if err != nil {
 			return "", true, true, err
 		}
+		if name == "project_browser" {
+			var result struct {
+				Error *struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(data, &result) == nil && result.Error != nil {
+				return string(data), true, true, nil
+			}
+		}
 		if name == "computer" && bytes.Contains(data, []byte(`"content"`)) {
 			output, err := agenttools.EncodeImageResult(data)
 			return output, true, err != nil, err
