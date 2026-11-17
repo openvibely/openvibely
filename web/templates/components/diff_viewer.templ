@@ -341,11 +341,14 @@ func scanQuotedGitPath(s string) (path string, rest string, ok bool) {
 	if err != nil {
 		return "", "", false
 	}
-	return path, s[len(quoted):], true
+	// Keep quoting until parseGitPath so escaped whitespace remains filename data.
+	return quoted, s[len(quoted):], true
 }
 
 func parseGitPath(path string, prefix string) string {
-	path = strings.TrimSpace(path)
+	// Git separates an unquoted ---/+++ path from optional metadata with a tab.
+	// Literal tabs in filenames are quoted; spaces are always filename data.
+	path, _, _ = strings.Cut(path, "\t")
 	if strings.HasPrefix(path, "\"") {
 		if unquoted, err := strconv.Unquote(path); err == nil {
 			path = unquoted
