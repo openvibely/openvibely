@@ -310,6 +310,7 @@ func TestBrowserFunctional_UsageMeterAppearance(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "usage-meter-appearance", func(b *composerFocusCDP) {
 		b.waitFor("meter and previews ready", `String(document.querySelectorAll('[data-meter-preview] svg').length===8&&document.querySelectorAll('.rail-account').length===1)`, "true")
+		b.waitFor("default logo rings", `String(document.documentElement.dataset.usageMeterStyle==='logos'&&!!document.querySelector('.rail-account svg path'))`, "true")
 		for _, style := range []string{"letters", "logos", "fill", "bars"} {
 			b.evaluate(`selectOpenVibelyDisplay('meters','` + style + `'); 'selected'`)
 			b.waitFor("saved and rendered meter style", `(()=>{const style='`+style+`';if(localStorage.getItem('openvibely.usageMeterStyle')!==style||document.documentElement.dataset.usageMeterStyle!==style)return 'preference';const svg=document.querySelector('.rail-account svg');if(svg.getBoundingClientRect().width!==28)return 'size';if(style==='letters'&&!svg.querySelector('text'))return 'letter';if(style!=='letters'&&!svg.querySelector('path'))return 'logo';if(style==='fill'&&!svg.querySelector('clipPath'))return 'fill';if(style==='bars'&&svg.querySelectorAll('rect').length!==4)return 'bars';return 'ok'})()`, "ok")

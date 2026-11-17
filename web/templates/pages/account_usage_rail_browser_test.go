@@ -204,6 +204,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.evaluate(`document.getElementById('rail-accounts').dispatchEvent(new PointerEvent('pointerleave')); 'leave clicked meter'`)
 		b.waitFor("clicked hover popup dismisses on leave", `String(!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
 		// Provider failure marks usage stale without replacing the provider identity.
+		b.evaluate(`window.openVibelyDisplay.set("meters", "letters"); "letters selected"`)
 		mu.Lock()
 		failed = true
 		mu.Unlock()
