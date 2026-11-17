@@ -39,6 +39,11 @@ templ AccountUsageRail() {
 #rail-more[aria-expanded="true"] {
   background: oklch(var(--bc) / 0.06);
 }
+.rail-account:is(:hover, :active, :focus-visible, [aria-expanded="true"]),
+#rail-more:is(:hover, :active, :focus-visible, [aria-expanded="true"]) {
+  color: oklch(var(--bc));
+  --ov-usage-remaining: currentColor;
+}
 .rail-account:focus-visible,
 #rail-more:focus-visible {
   outline: 2px solid var(--ov-focus, oklch(var(--p)));
