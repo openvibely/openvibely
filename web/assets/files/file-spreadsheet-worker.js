@@ -1,7 +1,17 @@
 importScripts('/static/vendor/xlsx.full.min.js');
 onmessage = event => {
   try {
-    const workbook = XLSX.read(event.data, {type: 'array', bookVBA: false, cellHTML: false});
+    const bytes = new Uint8Array(event.data);
+    // Binary workbooks (ZIP/OLE containers, UTF-16 text) contain NUL bytes or fail strict UTF-8
+    // decoding. Other input is plain-text CSV/TSV, which must be decoded as UTF-8 explicitly
+    // because SheetJS otherwise treats the bytes as a legacy single-byte codepage.
+    let text = null;
+    if (bytes.length && !bytes.includes(0)) {
+      try { text = new TextDecoder('utf-8', {fatal: true}).decode(bytes); } catch (_) { text = null; }
+    }
+    const workbook = text !== null
+      ? XLSX.read(text, {type: 'string', bookVBA: false, cellHTML: false})
+      : XLSX.read(event.data, {type: 'array', bookVBA: false, cellHTML: false});
     const maxRows = 10001, maxColumns = 100, maxSheetCells = 100000;
     let remainingCells = 200000;
     const sheets = workbook.SheetNames.map(name => {

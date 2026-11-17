@@ -37,7 +37,7 @@ XLSX.utils.sheet_to_json = function(sheet, options) {
  return original(sheet, options);
 };
 let output;
-const context = {XLSX, importScripts(){}, postMessage(value){output=value}, close(){}};
+const context = {XLSX, TextDecoder, importScripts(){}, postMessage(value){output=value}, close(){}};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'), context);
 context.onmessage({data:input});
@@ -55,5 +55,76 @@ assert.equal(output.sheets[3].truncated,false);
 	defer cancel()
 	if output, err := exec.CommandContext(ctx, node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("spreadsheet worker bounds: %v\n%s", err, output)
+	}
+}
+
+func TestSpreadsheetWorkerKeepsASCIIAndBinaryParsing(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node required")
+	}
+	script := `
+const assert = require('node:assert/strict'), fs = require('node:fs'), vm = require('node:vm');
+const XLSX = require('../../assets/file-vendor/xlsx.full.min.js');
+const workbook = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['Name','Count'],['Alpha',42]]), 'Data');
+const xlsx = XLSX.write(workbook, {type: 'array', bookType: 'xlsx'});
+const utf16 = Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from('Name,City\nJosé,Zürich\n', 'utf16le')]);
+const cases = [
+ {name:'ascii csv', bytes:Buffer.from('Name,Value\nAlpha,42\n,\nBeta,84\n', 'utf8'), rows:[['Name','Value'],['Alpha','42'],['',''],['Beta','84']]},
+ {name:'ascii tsv', bytes:Buffer.from('Name\tValue\nAlpha\t42\n', 'utf8'), rows:[['Name','Value'],['Alpha','42']]},
+ {name:'xlsx', bytes:Buffer.from(xlsx), rows:[['Name','Count'],['Alpha','42']]},
+ {name:'utf-16le bom', bytes:utf16, rows:[['Name','City'],['José','Zürich']]},
+];
+for (const {name, bytes, rows: expected} of cases) {
+  const input = Uint8Array.from(bytes).buffer;
+  let output;
+  const context = {XLSX, TextDecoder, importScripts(){}, postMessage(value){output=value}, close(){}};
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'), context);
+  context.onmessage({data:input});
+  assert.equal(output.error, undefined, name);
+  assert.deepEqual(output.sheets[0].rows, expected, name);
+}
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("spreadsheet worker ASCII and binary parsing: %v\n%s", err, output)
+	}
+}
+
+func TestSpreadsheetWorkerDecodesUTF8Text(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node required")
+	}
+	script := `
+const assert = require('node:assert/strict'), fs = require('node:fs'), vm = require('node:vm');
+const XLSX = require('../../assets/file-vendor/xlsx.full.min.js');
+const cases = [
+ {name:'csv', fs:',', text:'Name,City\nJosé,Zürich\n李雷,東京\n'},
+ {name:'tsv', fs:'\t', text:'Name\tCity\nJosé\tZürich\n李雷\t東京\n'},
+];
+for (const {name, text} of cases) {
+ for (const bom of ["", String.fromCharCode(0xFEFF)]) {
+  const bytes = Buffer.from(bom + text, 'utf8');
+  const input = Uint8Array.from(bytes).buffer;
+  let output;
+  const context = {XLSX, TextDecoder, importScripts(){}, postMessage(value){output=value}, close(){}};
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'), context);
+  context.onmessage({data:input});
+  assert.equal(output.error, undefined, name);
+  const rows = output.sheets[0].rows;
+  assert.deepEqual(rows, [['Name','City'],['José','Zürich'],['李雷','東京']], name + ' bom=' + (bom ? 'yes' : 'no'));
+  assert.equal(rows[0][0].charCodeAt(0) === 0xFEFF, false, 'no leading BOM in A1');
+ }
+}
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("spreadsheet worker utf-8 decoding: %v\n%s", err, output)
 	}
 }
