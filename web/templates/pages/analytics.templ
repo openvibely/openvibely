@@ -1880,14 +1880,14 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                     const rawExpiry=credit.expires_at ?? credit.expiresAt;
                                                     const date=rawExpiry==null?null:new Date(typeof rawExpiry==='number'?rawExpiry*1000:rawExpiry);
                                                     const validDate=date&&!Number.isNaN(date.getTime());
-                                                    expiry.textContent=rawExpiry==null?'Does not expire':validDate?'Expires '+date.toLocaleString():'Expiration unavailable';details.appendChild(expiry);
-                                                    const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline';button.textContent='Use reset';
+                                                    expiry.textContent=rawExpiry==null?'Does not expire':validDate?(date.getTime()<=Date.now()?'Expired':formatResetCountdown(date).replace('Resets: ','Expires in ')):'Expiration unavailable';details.appendChild(expiry);
+                                                    const button=document.createElement('button');button.type='button';button.className='btn btn-ghost btn-sm btn-square shrink-0';button.title='Use reset';button.setAttribute('aria-label','Use reset: '+(credit.title||'Usage reset'));button.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 11a9 9 0 1 1 2.7 7.3"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v8h8"></path></svg>';
                                                     button.disabled=!credit.id||credit.usable===false||(validDate&&date.getTime()<=Date.now());
                                                     button.addEventListener('click',async()=>{
                                                         const attemptKey=JSON.stringify([account.stable_key||account.key,credit.id]);
                                                         card.dataset.resetBusy='true';
                                                         const buttons=Array.from(section.querySelectorAll('button'));const disabledBefore=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);
-                                                        button.textContent='Resetting…';
+                                                        button.setAttribute('aria-busy','true');button.title='Resetting…';
                                                         const message=document.createElement('p');message.className='text-xs mt-2';message.setAttribute('role','status');section.appendChild(message);
                                                         try{
                                                             if(!attempts.has(attemptKey)){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');attempts.set(attemptKey,[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-'));}
@@ -1901,7 +1901,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                                                             const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);query.set('refresh','false');
                                                             try{const limits=await fetchJSON('/api/analytics/usage?'+query.toString());const temporary=document.createElement('div');renderAccountUsageCards(limits.account_limits||[],temporary);const body=temporary.querySelector('.card-body');if(body&&card.isConnected){card.replaceChildren(body);body.appendChild(section);}}catch(e){if(e.name==='AbortError')return;}
                                                             await refreshResets();if(section.isConnected){message.textContent=text;section.appendChild(message);}
-                                                        }catch(e){message.textContent=e.message;if(window.showToast)window.showToast('Usage reset failed: '+e.message, 'error');button.textContent='Retry reset';buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}finally{delete card.dataset.resetBusy;loadUsageAccounts(false);}
+                                                        }catch(e){message.textContent=e.message;if(window.showToast)window.showToast('Usage reset failed: '+e.message, 'error');button.removeAttribute('aria-busy');button.title='Retry reset';button.setAttribute('aria-label','Retry reset: '+(credit.title||'Usage reset'));buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}finally{delete card.dataset.resetBusy;loadUsageAccounts(false);}
                                                     },{signal:eventSignal});
                                                     row.append(details,button);section.appendChild(row);
                                                 });

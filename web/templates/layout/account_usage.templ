@@ -275,18 +275,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         ),
       ) + "px";
   }
-  let hoverCloseTimer;
-  function cancelHoverClose() {
-    clearTimeout(hoverCloseTimer);
-  }
-  function scheduleHoverClose() {
-    cancelHoverClose();
-    hoverCloseTimer = setTimeout(() => {
-      if (!popup.contains(document.activeElement)) closeUsage();
-    }, 250);
-  }
   function closeUsage(focus = false) {
-    cancelHoverClose();
     hideSurface(popup);
     if (focus)
       host
@@ -540,9 +529,8 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
             : " · Loading usage");
       button.setAttribute("aria-label", button.title);
       button.append(svgFor(a));
-      // Only keyboard activation moves focus into the popup. A pointer click
-      // must not pin a hover-opened popup by focusing its refresh control.
-      button.onclick = (event) => openAccount(a, event.detail !== 0);
+      // Match the rail overflow menus: activate again to close.
+      button.onclick = () => openAccount(a);
       return button;
     });
     host.replaceChildren(...nodes);
@@ -684,7 +672,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
           c.gives_back_weekly ? "Returns usage to weekly allowance" : "",
           expiry
             ? Number.isFinite(expiry.getTime())
-              ? "Expires " + expiry.toLocaleString()
+              ? (expiry <= new Date() ? "Expired" : resetTime(expiry).replace("Resets in ", "Expires in "))
               : "Expiration unavailable"
             : "Does not expire",
           c.usable === false
@@ -756,11 +744,10 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     drawRail();
     if (shown() && state.selected === a.key) drawPopup();
   }
-  async function openAccount(a, hover = false) {
-    cancelHoverClose();
+  async function openAccount(a) {
     closeOverflow();
     if (shown() && state.selected === a.key) {
-      if (!hover) popup.querySelector('[data-action="refresh"]')?.focus();
+      closeUsage(true);
       return;
     }
     state.selected = a.key;
@@ -768,7 +755,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     if (!shown()) showSurface(popup);
     drawRail();
     drawPopup();
-    if (!hover) popup.querySelector('[data-action="refresh"]')?.focus();
+    popup.querySelector('[data-action="refresh"]')?.focus();
     await loadResets(a);
   }
   async function redeem(a, c) {
@@ -864,17 +851,6 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       }
     }
   }
-  host.addEventListener("pointerover", (event) => {
-    if (event.pointerType === "touch") return;
-    const button = event.target.closest(".rail-account");
-    if (!button) return;
-    const account = state.accounts.find((a) => a.key === button.dataset.key);
-    if (account) openAccount(account, true);
-  });
-  host.addEventListener("pointerenter", cancelHoverClose);
-  host.addEventListener("pointerleave", scheduleHoverClose);
-  popup.addEventListener("pointerenter", cancelHoverClose);
-  popup.addEventListener("pointerleave", scheduleHoverClose);
   host.addEventListener("click", (e) => e.stopPropagation());
   popup.addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", (e) => {
