@@ -2017,16 +2017,26 @@ func TestCommitWorktreeChanges(t *testing.T) {
 	}
 }
 
-func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
-	// Isolate the fallback from the developer or runner's Git identity.
+func isolateWorktreeFallbackIdentity(t *testing.T) {
+	t.Helper()
+	// Isolate both native Git and the OV wrapper inherited by agent test runs.
+	// The wrapper resolves identity from its saved config before isolating Git.
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	t.Setenv("OV_GIT_IDENTITY_GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("OV_GIT_IDENTITY_GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("OV_GIT_IDENTITY_PARAMETERS", "")
+	for _, key := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL", "GIT_CONFIG_PARAMETERS"} {
 		t.Setenv(key, "")
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
+	isolateWorktreeFallbackIdentity(t)
 
 	// Create repo WITHOUT git config (simulating VPS scenario)
 	dir := t.TempDir()
@@ -2085,9 +2095,7 @@ func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
 }
 
 func TestCommitWorktreeChanges_AutoConfigSetupMissingName(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	isolateWorktreeFallbackIdentity(t)
 
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init")

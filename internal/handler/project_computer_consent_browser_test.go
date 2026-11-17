@@ -41,10 +41,29 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
  q('[data-computer-grant-scope]').value='project';q('[data-computer-grant-hours]').value='24';q('[data-computer-import]').click();
  await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-chrome-form]').hidden && toastMessages.some(t=>t.message.includes('Imported 2')));
  q('[data-computer-target]').click();q('#computer-target-picker button[data-value=computer]').click();
+ // Observe the queued snapshot being applied before checking the saved destination.
+ await wait(()=>q('[data-computer-login-site]').textContent.includes('Status queued before target save'));
  await wait(()=>q('[data-computer-target]').dataset.value==='computer');
  finish('pass','Selected cookies across two profiles and tool destination saved');
  }catch(error){finish('fail',error.message);}
  })();</script>`
+	live := `<script>
+ window.openVibelyLive={computer:(project,task,options,handlers)=>{
+  const emit=reason=>handlers.listeners.computer_status({data:JSON.stringify({project_id:project,task_id:task,viewer_mode:options.viewer_mode,enabled:false,ready:false,held:true,handoff_kind:'request_chrome_login',handoff_reason:reason,handoff_url:'https://example.test',chrome_available:true,tool_target:'worktree'})});
+  window.queueStaleComputerStatus=()=>emit('Status queued before target save');
+  setTimeout(()=>{handlers.onopen?.();emit('');},0);
+  return {close(){}};
+ }};
+ // Deliver an old status after the response arrives, before the save handler resumes.
+ // The panel debounces status rendering, so this snapshot is applied after the save.
+ const realFetch=window.fetch;
+ window.fetch=async(...args)=>{
+  const response=await realFetch(...args);
+  if(String(args[0]).includes('/target-computer'))window.queueStaleComputerStatus();
+  return response;
+ };
+ window.toastMessages=[];window.showToast=(message,type)=>toastMessages.push({message,type});
+ </script>`
 	var mu sync.Mutex
 	var imported struct {
 		GrantID    string                         `json:"grant_id"`
@@ -62,7 +81,7 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
 		switch {
 		case r.URL.Path == "/":
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<!doctype html><html><body><script src=\"/static/retry.js\"></script><script>window.openVibelyLive={computer:(project,task,options,handlers)=>{setTimeout(()=>{handlers.onopen?.();handlers.listeners.computer_status({data:JSON.stringify({project_id:project,task_id:task,viewer_mode:options.viewer_mode,enabled:false,ready:false,held:true,handoff_kind:'request_chrome_login',handoff_url:'https://example.test',chrome_available:true})});},0);return {close(){}};}};window.toastMessages=[];window.showToast=(message,type)=>toastMessages.push({message,type});</script>"+fragment.String()+runner+"</body></html>")
+			fmt.Fprint(w, "<!doctype html><html><body><script src=\"/static/retry.js\"></script>"+live+fragment.String()+runner+"</body></html>")
 		case strings.HasSuffix(r.URL.Path, "/chrome"):
 			profile := r.URL.Query().Get("profile")
 			if profile == "" {
