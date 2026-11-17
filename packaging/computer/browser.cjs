@@ -11,6 +11,49 @@ async function tabId(page) {
 async function tabs(context) {
  return Promise.all(context.pages().filter(p=>!p.url().startsWith('devtools:')).map(async page=>({page,id:await tabId(page)})));
 }
+function buildLocator(root, spec, depth=0) {
+ if(!spec||typeof spec!=='object'||depth>8)throw Error('Invalid locator');
+ const keys=['selector','role','text','label','placeholder','test_id'].filter(k=>typeof spec[k]==='string');
+ if(keys.length!==1)throw Error('Locator requires exactly one selector, role, text, label, placeholder or test_id');
+ const exact=spec.exact===true;
+ let result;
+ switch(keys[0]){
+  case 'selector':result=root.locator(spec.selector);break;
+  case 'role':result=root.getByRole(spec.role,{name:spec.name,exact});break;
+  case 'text':result=root.getByText(spec.text,{exact});break;
+  case 'label':result=root.getByLabel(spec.label,{exact});break;
+  case 'placeholder':result=root.getByPlaceholder(spec.placeholder,{exact});break;
+  case 'test_id':result=root.getByTestId(spec.test_id);break;
+ }
+ if(spec.has_text!==undefined)result=result.filter({hasText:spec.has_text});
+ if(spec.has_not_text!==undefined)result=result.filter({hasNotText:spec.has_not_text});
+ if(spec.visible!==undefined)result=result.filter({visible:spec.visible});
+ if(spec.has)result=result.filter({has:buildLocator(root,spec.has,depth+1)});
+ if(spec.has_not)result=result.filter({hasNot:buildLocator(root,spec.has_not,depth+1)});
+ if(spec.and)result=result.and(buildLocator(root,spec.and,depth+1));
+ if(spec.or)result=result.or(buildLocator(root,spec.or,depth+1));
+ if(spec.child)result=buildLocator(result,spec.child,depth+1);
+ if(spec.index!==undefined){if(!Number.isInteger(spec.index)||spec.index<0)throw Error('Locator index must be nonnegative');result=result.nth(spec.index);}
+ return result;
+}
+function locatorRoot(page,frames=[]) {
+ if(!Array.isArray(frames)||frames.length>8||frames.some(f=>typeof f!=='string'||!f))throw Error('Invalid frame selectors');
+ return frames.reduce((root,selector)=>root.frameLocator(selector),page);
+}
+function pageRange(args){
+ const offset=args.offset??0,limit=args.limit??100;
+ if(!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>500)throw Error('Use offset >= 0 and limit between 1 and 500');
+ return {offset,limit};
+}
+async function findElements(page,args){
+ const locator=buildLocator(locatorRoot(page,args.frames),args.locator);
+ const {offset,limit}=pageRange(args),count=await locator.count(),elements=[];
+ for(let index=offset;index<Math.min(count,offset+limit);index++){
+  const item=locator.nth(index);
+  elements.push(await item.evaluate((n,index)=>({index,tag:n.tagName.toLowerCase(),text:(n.innerText||n.textContent||'').slice(0,1000),role:n.getAttribute('role'),name:n.getAttribute('aria-label'),visible:!!n.getClientRects().length,disabled:!!n.disabled}),index));
+ }
+ return {count,offset,elements,next_offset:offset+elements.length<count?offset+elements.length:null};
+}
 async function snapshot(page) {
  const view=await page.evaluate(()=>{
 function computerUUID() {
@@ -52,6 +95,7 @@ async function run(args) {
   if(args.action==='select_tab'){await fs.writeFile(tabStatePath(),id,{mode:0o600});await page.bringToFront();}
 
   page.setDefaultTimeout(10000);
+  if(args.action==='find')return {tab_id:id,...await findElements(page,args)};
   let target;
   if(['click','type','select','press_key'].includes(args.action)) {
    const current=await snapshot(page);

@@ -166,7 +166,7 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 				AdditionalProperties: toolschema.Pointer(false),
 			}},
 		{Name: "project_browser",
-			Description: "Use this task's signed-in browser. List/open/select/close tabs or navigate/read/interact with a tab. Supply tab_id to target a tab; otherwise the selected tab is used. Read first. For click, type, select and press_key, send the snapshot token from the latest result; targeted actions also require its control ref. Re-read after changes. Password and verification-code entry require a private login handoff. Never read cookie values or browser storage.",
+			Description: "Use this task's signed-in browser. List/open/select/close tabs or navigate/read/interact with a tab. Supply tab_id to target a tab; otherwise the selected tab is used. Use find with a structured locator and optional frames to inspect matching elements. Read first. For click, type, select and press_key, send the snapshot token from the latest result; targeted actions also require its control ref. Re-read after changes. Password and verification-code entry require a private login handoff. Never read cookie values or browser storage.",
 			Access:      llmcontracts.RuntimeToolAccessWrite,
 			Schema: &toolschema.Schema{
 				Type: "object",
@@ -179,6 +179,10 @@ func projectComputerToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 						Type: "string",
 					},
 					"tab_id":   &toolschema.Schema{Type: "string"},
+					"locator":  projectBrowserLocatorSchema(0),
+					"frames":   &toolschema.Schema{Type: "array", Items: &toolschema.Schema{Type: "string"}, Description: "Outer-to-inner iframe selectors."},
+					"offset":   &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")},
+					"limit":    &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("1"), Maximum: toolschema.Number("500")},
 					"snapshot": &toolschema.Schema{Type: "string"},
 					"ref":      &toolschema.Schema{Type: "string"},
 					"text": &toolschema.Schema{
@@ -234,7 +238,7 @@ func computerProcessDefinition(name, standard string) llmcontracts.RuntimeToolDe
 }
 
 func projectBrowserActions() []any {
-	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload"}
+	return []any{"navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward", "tabs", "open_tab", "select_tab", "close_tab", "reload", "find"}
 }
 
 func validProjectBrowserAction(action string) bool {
@@ -244,4 +248,20 @@ func validProjectBrowserAction(action string) bool {
 		}
 	}
 	return false
+}
+
+func projectBrowserLocatorSchema(depth int) *toolschema.Schema {
+	p := map[string]*toolschema.Schema{}
+	for _, key := range []string{"selector", "role", "name", "text", "label", "placeholder", "test_id", "has_text", "has_not_text"} {
+		p[key] = &toolschema.Schema{Type: "string"}
+	}
+	p["exact"] = &toolschema.Schema{Type: "boolean"}
+	p["visible"] = &toolschema.Schema{Type: "boolean"}
+	p["index"] = &toolschema.Schema{Type: "integer", Minimum: toolschema.Number("0")}
+	if depth < 2 {
+		for _, key := range []string{"and", "or", "has", "has_not", "child"} {
+			p[key] = projectBrowserLocatorSchema(depth + 1)
+		}
+	}
+	return &toolschema.Schema{Type: "object", Description: "Exactly one of selector, role, text, label, placeholder or test_id; role can use name. Optional filters, zero-based index, and nested combinations.", Properties: p, AdditionalProperties: toolschema.Pointer(false)}
 }
