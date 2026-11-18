@@ -121,7 +121,7 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 				return err
 			}
 			if actual != nil {
-				restart = !actual.matchesDesktop(v)
+				restart = !actual.matchesDesktop(v) || !actual.State.Running
 				updateLimit = !restart && actual.HostConfig.PidsLimit != int64(v.Resources.PidsLimit)
 			} else if old.Enabled {
 				// A failed replacement may have removed the old container before creation failed.

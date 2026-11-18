@@ -195,6 +195,8 @@ func TestComputerSettingsApplyOnSave(t *testing.T) {
 	running := true
 	exists := true
 	failRun := false
+	failStart := false
+	starts := 0
 	p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
 		switch args[0] {
 		case "container":
@@ -239,6 +241,16 @@ func TestComputerSettingsApplyOnSave(t *testing.T) {
 					pids = parsed
 				}
 			}
+			if failStart {
+				running = false
+				return nil, errors.New("start failed after creation")
+			}
+		case "start":
+			starts++
+			if failStart {
+				return nil, errors.New("start failed")
+			}
+			running = true
 		case "update":
 			updates++
 			if failUpdate {
@@ -292,6 +304,21 @@ func TestComputerSettingsApplyOnSave(t *testing.T) {
 	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
 	require.True(t, exists)
 	require.True(t, running)
+
+	// Docker run can create the correctly configured container but fail to start it.
+	cpus = 2e9
+	failStart = true
+	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, settings), "start failed after creation")
+	require.True(t, exists)
+	require.False(t, running)
+	createdRuns := runs
+	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, settings), "start failed")
+	require.False(t, running)
+	failStart = false
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
+	require.True(t, running, "retry must start the correctly configured container")
+	require.Equal(t, createdRuns, runs, "retry must reuse the existing container")
+	require.Equal(t, 2, starts)
 
 	running = false
 	settings.Enabled = false
