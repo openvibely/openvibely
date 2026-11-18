@@ -75,9 +75,12 @@ templ ComputerSettingsContent(projects []models.Project, id string, values model
  <h2 class="section-heading">Browser</h2><div class="setting-row"><div class="label-copy">Sign-in permissions<div class="muted">Manage approved imports from your local Chrome.</div></div>
  @ProjectComputerPermissions(id,"",true)
  </div>
+ if message!="" && !saved {
+ <div class="alert alert-error mt-4" role="alert" data-computer-settings-error>{message}</div>
+ }
  <div class="settings-footer">
- if message!="" {
- <span class={"text-xs",templ.KV("text-error",!saved),templ.KV("opacity-60",saved)} role="status">{message}</span>
+ if message!="" && saved {
+ <span class="text-xs opacity-60" role="status">{message}</span>
  }
  <button class="btn btn-primary" type="submit">Save changes</button></div>
  </form>
@@ -85,6 +88,7 @@ templ ComputerSettingsContent(projects []models.Project, id string, values model
  <script>
  (()=>{
  const root=document.getElementById('computer-settings-content');if(!root||root.dataset.bound)return;root.dataset.bound='true';
+ const error=root.querySelector('[data-computer-settings-error]');if(error)window.showToast?.(error.textContent,'error');
  const form=root.querySelector('form'),project=root.querySelector('#computer-settings-project');let dirty=false;
  form?.addEventListener('input',()=>dirty=true);
  project.onchange=()=>{if(dirty&&!confirm('Discard unsaved computer settings?')){project.value=project.dataset.currentProject;return;}location.assign('/settings/computer?project_id='+encodeURIComponent(project.value));};
