@@ -3029,38 +3029,46 @@ func (s *GitHubService) fetchInstallationAccountMetadataAt(ctx context.Context, 
 }
 
 func (s *GitHubService) createOperationAccessToken(ctx context.Context, apiBaseURL string) (string, error) {
+	token, _, err := s.createOperationAccessTokenWithMode(ctx, apiBaseURL)
+	return token, err
+}
+
+// createOperationAccessTokenWithMode also returns the resolved auth mode so callers
+// can branch on App vs PAT without repeating the mode lookup.
+func (s *GitHubService) createOperationAccessTokenWithMode(ctx context.Context, apiBaseURL string) (string, string, error) {
 	appCfg, err := s.getAppConfig(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	mode, err := s.resolveAuthMode(ctx, appCfg)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if mode == GitHubAuthModePAT {
 		if s.personalConnections != nil {
 			c, err := s.PersonalConnection(ctx)
 			if err != nil {
-				return "", err
+				return "", "", err
 			}
 			expected, err := personalGitHubAPIEndpoint(c.APIEndpoint)
 			if err != nil {
-				return "", err
+				return "", "", err
 			}
 			if strings.TrimRight(apiBaseURL, "/") != expected {
-				return "", fmt.Errorf("your GitHub connection is configured for a different server")
+				return "", "", fmt.Errorf("your GitHub connection is configured for a different server")
 			}
 		}
 		pat, err := s.getPAT(ctx)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if strings.TrimSpace(pat) == "" {
-			return "", fmt.Errorf("github personal access token is not configured")
+			return "", "", fmt.Errorf("github personal access token is not configured")
 		}
-		return strings.TrimSpace(pat), nil
+		return strings.TrimSpace(pat), GitHubAuthModePAT, nil
 	}
-	return s.createInstallationAccessToken(ctx, apiBaseURL)
+	token, err := s.createInstallationAccessToken(ctx, apiBaseURL)
+	return token, GitHubAuthModeApp, err
 }
 
 func (s *GitHubService) createInstallationAccessToken(ctx context.Context, apiBaseURL string) (string, error) {

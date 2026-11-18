@@ -1,10 +1,18 @@
 package service
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestAutomaticPublicationRepository(t *testing.T) {
@@ -103,6 +111,58 @@ func TestAutomaticPublicationRepository(t *testing.T) {
 				t.Fatalf("fork creations=%d", creates)
 			}
 		})
+	}
+}
+
+func TestAppInstallationPushDeniedSkipsUserForkLookup(t *testing.T) {
+	storeEnv := teststores.New(t)
+	settingsRepo := storeEnv.Stores.Settings
+	ctx := context.Background()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+	for key, value := range map[string]string{
+		GitHubSettingAuthMode:       GitHubAuthModeApp,
+		githubSettingInstallationID: "123",
+		githubSettingAccountLogin:   "upstream",
+		githubSettingAccountType:    "Organization",
+	} {
+		if err := settingsRepo.Set(ctx, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var userRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v3/app/installations/123/access_tokens":
+			fmt.Fprint(w, `{"token":"ghs_installation"}`)
+		case "/api/v3/repos/upstream/project":
+			fmt.Fprint(w, `{"id":1,"permissions":{"push":false}}`)
+		case "/api/v3/user":
+			userRequests++
+			w.WriteHeader(403)
+			fmt.Fprint(w, `{"message":"Resource not accessible by integration"}`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "1", "test-app", string(privateKeyPEM), "")
+	repo, _ := ParseGitHubRepoURL("https://github.com/upstream/project")
+	repo.APIBaseURL = server.URL + "/api/v3"
+	if _, err := svc.PreparePublicationRepository(ctx, &repo); err == nil {
+		t.Fatal("expected app installation without push access to fail early")
+	} else if !strings.Contains(err.Error(), "GitHub App installation") {
+		t.Fatalf("expected actionable app-mode error, got %v", err)
+	}
+	if userRequests != 0 {
+		t.Fatalf("app installation token requested GET /user %d times", userRequests)
 	}
 }
 
