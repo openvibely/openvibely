@@ -294,9 +294,22 @@ func TestComputerSettingsApplyOnSave(t *testing.T) {
 	require.True(t, running)
 
 	running = false
+	settings.Enabled = false
 	settings.TimeZone = "Europe/Berlin"
-	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
-	require.False(t, running, "a deliberately stopped computer stays stopped")
-	require.Contains(t, env, "TZ=Europe/Berlin")
+	beforeRuns, beforeUpdates := runs, updates
+	for i := 0; i < 2; i++ {
+		require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
+		require.False(t, running, "disabled computer must stay stopped on repeated saves")
+		require.Equal(t, beforeRuns, runs)
+		require.Equal(t, beforeUpdates, updates)
+	}
+	saved, err := svc.Settings(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, settings, saved)
+	require.Contains(t, env, "TZ=Europe/London", "disabled changes are saved without starting the computer")
+	require.NoError(t, svc.SetEnabled(t.Context(), project.ID, true))
+	require.NoError(t, svc.Start(t.Context(), project.ID))
+	require.True(t, running)
+	require.Contains(t, env, "TZ=Europe/Berlin", "normal startup applies saved changes")
 
 }

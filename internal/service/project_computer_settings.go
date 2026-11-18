@@ -112,7 +112,6 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 	repo := s.projects.Computers()
 	restart := false
 	updateLimit := false
-	keepStopped := false
 	var local *LocalComputerProvisioner
 	if p, ok := s.provisioner.(*LocalComputerProvisioner); ok {
 		local = p
@@ -123,7 +122,6 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 			}
 			if actual != nil {
 				restart = !actual.matchesDesktop(v)
-				keepStopped = !actual.State.Running && old != v
 				updateLimit = !restart && actual.HostConfig.PidsLimit != int64(v.Resources.PidsLimit)
 			} else if old.Enabled {
 				// A failed replacement may have removed the old container before creation failed.
@@ -182,11 +180,6 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 		if err := s.startLocked(ctx, id, false); err != nil {
 			return fmt.Errorf("Settings saved, but the computer could not restart: %w", err)
 		}
-		if keepStopped {
-			if err := local.Stop(ctx, id); err != nil {
-				return fmt.Errorf("Settings applied, but the computer could not be stopped: %w", err)
-			}
-		}
 	}
 	if updateLimit {
 		p := s.provisioner.(*LocalComputerProvisioner)
@@ -200,7 +193,7 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 			return fmt.Errorf("Settings saved, but verification failed: %w", err)
 		}
 		if actual != nil {
-			if restart && actual.State.Running == keepStopped {
+			if restart && !actual.State.Running {
 				return errors.New("Settings saved, but the computer did not reach the expected running state. Save again to retry")
 			}
 			if !actual.matchesDesktop(v) || actual.HostConfig.PidsLimit != int64(v.Resources.PidsLimit) {
