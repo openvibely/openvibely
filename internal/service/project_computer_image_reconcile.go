@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 )
@@ -17,6 +18,9 @@ func (s *ProjectComputerService) reconcileComputerImage(ctx context.Context, id 
 	gate.Lock()
 	defer gate.Unlock()
 	state, err := s.projects.Computers().Get(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // Computer use was never configured for this project.
+	}
 	if err != nil {
 		return err
 	}
@@ -54,12 +58,5 @@ func (s *ProjectComputerService) reconcileComputerImage(ctx context.Context, id 
 		return nil
 	}
 	// Normal startup checks active leases and waits for health/isolation readiness.
-	if err := s.startLocked(ctx, id, false); err != nil {
-		return err
-	}
-	// Only upgrades need another sweep; ordinary readiness checks do not.
-	if actual != nil && actual.Config.Image != image {
-		_ = p.cleanupImages(ctx)
-	}
-	return nil
+	return s.startLocked(ctx, id, false)
 }

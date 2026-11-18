@@ -36,33 +36,44 @@ func (s *ProjectComputerService) StartIdleMaintenance(ctx context.Context) {
 func (s *ProjectComputerService) runIdleMaintenance(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	// One startup sweep catches leftovers from interrupted upgrades.
-	if p, ok := s.provisioner.(*LocalComputerProvisioner); ok {
-		go func() {
-			cleanup, cancel := context.WithTimeout(ctx, 15*time.Minute)
-			defer cancel()
-			_ = p.cleanupImages(cleanup)
-		}()
-	}
+	imagesCleaned := false
 	for {
 		projects, err := s.projects.List(ctx)
 		if err == nil {
+			results := make(chan error, len(projects))
 			for _, project := range projects {
 				id := project.ID
 				key := "idle-maintenance:" + id
 				if _, busy := s.active.LoadOrStore(key, true); busy {
+					results <- errors.New("computer maintenance is still running")
 					continue
 				}
 				go func() {
 					defer s.active.Delete(key)
 					upgrade, done := context.WithTimeout(ctx, 15*time.Minute)
-					_ = s.reconcileComputerImage(upgrade, id)
+					results <- s.reconcileComputerImage(upgrade, id)
 					done()
 					sweep, cancel := context.WithTimeout(ctx, 45*time.Second)
 					defer cancel()
 					_ = s.reconcileDeletedDesktops(sweep, id)
 					_ = s.reapIdleDesktops(sweep, id)
 				}()
+			}
+			allReady := true
+			for range projects {
+				select {
+				case err := <-results:
+					allReady = allReady && err == nil
+				case <-ctx.Done():
+					return
+				}
+			}
+			if allReady && !imagesCleaned {
+				if p, ok := s.provisioner.(*LocalComputerProvisioner); ok {
+					cleanup, cancel := context.WithTimeout(ctx, 15*time.Minute)
+					imagesCleaned = p.cleanupImages(cleanup) == nil
+					cancel()
+				}
 			}
 		}
 		select {

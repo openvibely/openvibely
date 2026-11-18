@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -153,9 +154,7 @@ func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
 				return
 			}
 			require.True(t, running)
-			if name == "running" || name == "stopped" || name == "remove-failure" {
-				require.Equal(t, 1, cleanups)
-			}
+			require.Zero(t, cleanups, "individual upgrades must not clean images")
 			cleanupCount := cleanups
 			require.Equal(t, "new-image", image)
 			mutations = nil
@@ -179,4 +178,66 @@ func TestComputerImageBuildWaitCancellation(t *testing.T) {
 		return nil, nil
 	}}
 	require.ErrorIs(t, p.ensureImage(ctx), context.Canceled)
+}
+
+func TestComputerMaintenanceCleanupWaitsForAllProjects(t *testing.T) {
+	t.Setenv("OPENVIBELY_COMPUTER_IMAGE", "current")
+	db := teststores.New(t)
+	var ready atomic.Bool
+	var checks, cleanups atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			checks.Add(1)
+			if !ready.Load() {
+				w.WriteHeader(503)
+				return
+			}
+			_, _ = w.Write([]byte(`{"isolation":1,"viewer_connections":1}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer backend.Close()
+	port := strings.TrimPrefix(backend.URL, "http://127.0.0.1:")
+	names := map[string]string{}
+	for _, name := range []string{"first", "second"} {
+		project := &models.Project{Name: name}
+		require.NoError(t, db.Projects.Create(t.Context(), project))
+		names[computerContainerName(project.ID)] = project.ID
+		require.NoError(t, db.Projects.Computers().Configure(t.Context(), project.ID, "local"))
+		require.NoError(t, db.Projects.Computers().SetEnabled(t.Context(), project.ID, true))
+		require.NoError(t, db.Projects.Computers().SetIdleMinutes(t.Context(), project.ID, 0))
+	}
+	p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "container":
+			for name := range names {
+				if strings.Contains(strings.Join(args, " "), name) {
+					return []byte(name), nil
+				}
+			}
+		case "inspect":
+			return json.Marshal([]any{map[string]any{
+				"Config": map[string]any{"Image": "current", "Labels": map[string]string{"openvibely.project": names[args[1]], "openvibely.computer-isolation": "1"}, "Env": []string{"OPENVIBELY_COMPUTER_TOKEN=test"}},
+				"State":  map[string]bool{"Running": true}, "HostConfig": map[string]int64{"PidsLimit": 4096},
+				"NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}},
+			}})
+		case "image":
+			cleanups.Add(1)
+			return nil, nil
+		}
+		return nil, errors.New("unexpected Docker operation")
+	}}
+	svc := NewProjectComputerService(db.Projects, p)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); svc.runIdleMaintenance(ctx, 20*time.Millisecond) }()
+	defer func() { cancel(); <-done }()
+	require.Eventually(t, func() bool { return checks.Load() >= 4 }, 5*time.Second, time.Millisecond)
+	require.Zero(t, cleanups.Load(), "failed readiness must block cleanup")
+	ready.Store(true)
+	require.Eventually(t, func() bool { return cleanups.Load() == 1 }, 5*time.Second, time.Millisecond)
+	baseline := checks.Load()
+	require.Eventually(t, func() bool { return checks.Load() >= baseline+4 }, 5*time.Second, time.Millisecond)
+	require.EqualValues(t, 1, cleanups.Load(), "successful cleanup must not repeat on later passes")
 }
