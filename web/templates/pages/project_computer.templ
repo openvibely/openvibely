@@ -393,7 +393,7 @@ currentState=state;if(state.handoff_kind){recording=false;renderDemo();}find('[d
  const option=event.target.closest('button[data-value]');if(!option||target.disabled)return;
  target.disabled=true;
  try{const res=await fetch(scoped('/target-'+option.dataset.value),{method:'POST'});if(!res.ok)throw Error('Could not change tool destination');targetSaveVersion++;target.dataset.value=option.dataset.value;target.querySelector('[data-property-label]').textContent=option.textContent;targetPickerUI.close();targetPickerUI.returnFocus(target);}
- catch(e){targetPicker.querySelector('[data-property-error]').textContent=e.message;}
+ catch(e){computerToast(e.message,'error');}
  finally{target.disabled=false;}
  });
  function changed(){attemptedStart=false;setTimeout(visibilityChanged,0);}
