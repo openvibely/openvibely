@@ -2,13 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
-	"time"
-
-	"github.com/openvibely/openvibely/internal/persistence"
 )
 
-// Maintenance upgrades enabled computers without starting stopped desktops.
+// Maintenance keeps enabled computers running on the current image.
 // The lifecycle lock also serializes normal starts and settings saves.
 func (s *ProjectComputerService) reconcileComputerImage(ctx context.Context, id string) error {
 	p, ok := s.provisioner.(*LocalComputerProvisioner)
@@ -33,20 +31,12 @@ func (s *ProjectComputerService) reconcileComputerImage(ctx context.Context, id 
 	if image == "" {
 		image = computerImageTag()
 	}
-	if actual != nil && actual.Config.Image == image && actual.Config.Labels["openvibely.computer-isolation"] == "1" {
+	if actual != nil && actual.State.Running && actual.Config.Image == image && actual.Config.Labels["openvibely.computer-isolation"] == "1" {
+		if !s.Ready(ctx, id) {
+			return errors.New("project computer is not ready")
+		}
 		return nil
 	}
-	busy, err := s.projects.Computers().SessionsBusy(ctx, id)
-	if err != nil {
-		return err
-	}
-	if busy || (state.Owner != "" && state.LeaseUntil >= time.Now().Unix()) {
-		return persistence.ErrComputerBusy
-	}
-	if err := s.projects.Computers().MarkCleanupRequired(ctx, id); err != nil {
-		return err
-	}
-	defer s.publishStatus(id, true)
-	_, err = p.prepare(ctx, id, state.TimeZone, actual != nil && actual.State.Running)
-	return err
+	// Normal startup checks active leases and waits for health/isolation readiness.
+	return s.startLocked(ctx, id, false)
 }

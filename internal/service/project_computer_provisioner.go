@@ -177,9 +177,6 @@ func (p *LocalComputerProvisioner) Start(ctx context.Context, id string) (Comput
 	return p.StartWithTimeZone(ctx, id, "UTC")
 }
 func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zone string) (ComputerConnection, error) {
-	return p.prepare(ctx, id, zone, true)
-}
-func (p *LocalComputerProvisioner) prepare(ctx context.Context, id, zone string, running bool) (ComputerConnection, error) {
 	if err := validateComputerTimeZone(zone); err != nil {
 		return ComputerConnection{}, err
 	}
@@ -226,9 +223,6 @@ func (p *LocalComputerProvisioner) prepare(ctx context.Context, id, zone string,
 			if _, err = p.docker(ctx, nil, "update", "--pids-limit", strconv.Itoa(resources.PidsLimit), name); err != nil {
 				return ComputerConnection{}, err
 			}
-			if !running {
-				return ComputerConnection{}, nil
-			}
 			if _, err = p.docker(ctx, nil, "start", name); err != nil {
 				return ComputerConnection{}, err
 			}
@@ -252,21 +246,11 @@ func (p *LocalComputerProvisioner) prepare(ctx context.Context, id, zone string,
 	if _, err := rand.Read(secret); err != nil {
 		return ComputerConnection{}, err
 	}
-	operation := "run"
-	if !running {
-		operation = "create"
-	}
-	args := []string{operation}
-	if running {
-		args = append(args, "-d")
-	}
+	args := []string{"run", "-d"}
 	args = append(args, "--name", name, "--label", "openvibely.project="+id, "--label", "openvibely.computer-isolation=1", "--publish", "127.0.0.1::8090", "--mount", "type=volume,src="+name+"-home,dst=/home/ubuntu", "--shm-size", "1g", "--memory", strconv.Itoa(resources.MemoryGiB)+"g", "--cpus", strconv.Itoa(resources.CPUs), "--pids-limit", strconv.Itoa(resources.PidsLimit), "--cap-add", "SYS_ADMIN", "--cap-add", "NET_ADMIN", "--device", "/dev/net/tun", "--security-opt", "apparmor=unconfined", "--security-opt", "no-new-privileges:true", "--restart", "unless-stopped", "--env", "OPENVIBELY_COMPUTER_TOKEN="+hex.EncodeToString(secret), "--env", "TZ="+zone, "--env", "OPENVIBELY_COMPUTER_CPUS="+strconv.Itoa(resources.CPUs), "--env", "OPENVIBELY_COMPUTER_MEMORY_GIB="+strconv.Itoa(resources.MemoryGiB), image)
 	_, err = p.docker(ctx, nil, args...)
 	if err != nil {
 		return ComputerConnection{}, err
-	}
-	if !running {
-		return ComputerConnection{}, nil
 	}
 	return p.Resolve(ctx, id)
 }

@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -47,71 +51,95 @@ func TestComputerImageBuildShared(t *testing.T) {
 	require.Equal(t, 1, builds)
 }
 
-func TestComputerImageReconciliationPreservesState(t *testing.T) {
-	for _, tc := range []struct {
-		name                   string
-		running, enabled, busy bool
-	}{
-		{"running", true, true, false}, {"stopped", false, true, false}, {"disabled", true, false, false}, {"busy", true, true, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
+	for _, name := range []string{"running", "stopped", "current-stopped", "disabled", "busy", "remove-failure", "start-failure"} {
+		t.Run(name, func(t *testing.T) {
 			t.Setenv("OPENVIBELY_COMPUTER_IMAGE", "new-image")
 			db := teststores.New(t)
-			project := &models.Project{Name: tc.name}
+			project := &models.Project{Name: name}
 			require.NoError(t, db.Projects.Create(t.Context(), project))
-			image, running := "old-image", tc.running
+			var unhealthy atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if unhealthy.Load() {
+					w.WriteHeader(503)
+					return
+				}
+				_, _ = w.Write([]byte(`{"isolation":1,"viewer_connections":1}`))
+			}))
+			defer server.Close()
+			port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
+			running := name != "stopped" && name != "current-stopped" && name != "disabled"
+			image := "old-image"
+			if name == "current-stopped" {
+				image = "new-image"
+			}
+			failRemove, failStart := name == "remove-failure", name == "start-failure"
 			mutations := []string{}
 			p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
 				switch args[0] {
+				case "info":
+					return nil, nil
 				case "container":
 					return []byte(computerContainerName(project.ID)), nil
 				case "inspect":
 					return json.Marshal([]any{map[string]any{
 						"Config": map[string]any{"Image": image, "Labels": map[string]string{"openvibely.project": project.ID, "openvibely.computer-isolation": "1"}, "Env": []string{"TZ=UTC", "OPENVIBELY_COMPUTER_TOKEN=test"}},
 						"State":  map[string]bool{"Running": running}, "HostConfig": map[string]int64{"NanoCpus": 2e9, "Memory": 4 << 30, "PidsLimit": 4096},
-						"NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": "1234"}}}},
+						"NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}},
 					}})
 				case "stop":
 					running = false
 				case "rm":
+					if failRemove {
+						failRemove = false
+						return nil, errors.New("remove failed")
+					}
 				case "run":
+					image = "new-image"
+					if failStart {
+						failStart = false
+						return nil, errors.New("start failed")
+					}
 					running = true
-					image = "new-image"
-				case "create":
-					running = false
-					image = "new-image"
+				case "start":
+					running = true
+				case "update":
 				default:
-					return nil, errors.New("unexpected Docker operation")
+					return nil, errors.New("unexpected Docker operation: " + args[0])
 				}
 				mutations = append(mutations, args[0])
 				return nil, nil
 			}}
 			svc := NewProjectComputerService(db.Projects, p)
 			require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "local"))
-			require.NoError(t, svc.repo.SetEnabled(t.Context(), project.ID, tc.enabled))
-			if tc.busy {
+			require.NoError(t, svc.repo.SetEnabled(t.Context(), project.ID, name != "disabled"))
+			if name == "busy" {
 				require.NoError(t, svc.repo.Reserve(t.Context(), project.ID, "agent"))
 			}
-			err := svc.reconcileComputerImage(t.Context(), project.ID)
-			if tc.busy {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
+			if failRemove || failStart {
+				require.Error(t, svc.reconcileComputerImage(t.Context(), project.ID))
+				require.False(t, running)
 			}
-			require.Equal(t, tc.running, running)
-			if !tc.enabled || tc.busy {
+			err := svc.reconcileComputerImage(t.Context(), project.ID)
+			if name == "busy" {
+				require.Error(t, err)
 				require.Empty(t, mutations)
 				return
 			}
-			require.Equal(t, "new-image", image)
-			if tc.running {
-				require.Equal(t, []string{"stop", "rm", "run"}, mutations)
-			} else {
-				require.Equal(t, []string{"rm", "create"}, mutations)
+			require.NoError(t, err)
+			if name == "disabled" {
+				require.False(t, running)
+				require.Empty(t, mutations)
+				return
 			}
+			require.True(t, running)
+			require.Equal(t, "new-image", image)
 			mutations = nil
 			require.NoError(t, svc.reconcileComputerImage(t.Context(), project.ID))
 			require.Empty(t, mutations)
+			// A current, running container must still pass readiness.
+			unhealthy.Store(true)
+			require.ErrorContains(t, svc.reconcileComputerImage(t.Context(), project.ID), "not ready")
 		})
 	}
 }
