@@ -1,4 +1,4 @@
-FROM golang:1.27.1 AS builder
+FROM golang:1.27.4 AS builder
 WORKDIR /src
 COPY cmd/computer/ ./cmd/computer/
 COPY pkg/agenttools/ ./pkg/agenttools/
