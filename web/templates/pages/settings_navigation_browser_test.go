@@ -32,6 +32,8 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 			content = ThemesContent(nil)
 		case "/models", "/agents", "/skills", "/channels", "/personality":
 			content = templ.Raw(`<div id="` + r.URL.Path[1:] + `-container">Configuration</div>`)
+		case "/settings/computer":
+			content = ComputerSettingsContent([]models.Project{{ID: "project", Name: "Project"}}, "project", models.ComputerSettings{Resources: models.DefaultComputerResources(), TimeZone: "UTC", IdleMinutes: 30}, true, false, "")
 		case "/workers", "/settings/workers":
 			content = WorkerSettingsContent(5, 1, 1, 0, nil, nil)
 		case "/tasks":
@@ -104,6 +106,9 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 			}
 
 		}
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/settings/computer"]').click();'computer settings'`)
+		waitFor("computer keeps settings tree", `String(!!document.getElementById('computer-settings-content') && document.documentElement.classList.contains('appearance-settings') && document.getElementById('appearance-settings-nav').getBoundingClientRect().width > 0 && !document.documentElement.classList.contains('task-list-collapsed'))`, "true")
+		waitFor("computer keeps retained workspace", `String(window.originalWorkspace.isConnected && window.originalWorkspace.closest('#settings-retained-workspace').hidden)`, "true")
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/workers"]').click();'limits'`)
 		waitFor("worker limits editable", `String(document.documentElement.classList.contains('appearance-settings') && !!document.getElementById('limit-input-global') && document.getElementById('limit-input-global').getBoundingClientRect().width>0)`, "true")
 		waitFor("workers only in settings with utilization visible", `String(!document.querySelector('.sidebar-aside [data-nav-base="/workers"]') && Array.from(document.querySelectorAll('#worker-settings-content th')).some(el=>el.textContent==='Running' && el.getBoundingClientRect().width>0))`, "true")

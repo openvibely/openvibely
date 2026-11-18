@@ -387,7 +387,7 @@ templ TaskListPanel(currentProjectID string) {
                 var reviewing = !settingsPane && !!changes && !changes.classList.contains('hidden');
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
-                var settings = appearance || workers || !!document.querySelector('#main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container, #main-content #plugin-settings');
+                var settings = appearance || workers || !!document.querySelector('#main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container, #main-content #plugin-settings, #main-content #computer-settings-content');
                 var active = reviewing || settings;
                 if (active && !inContextSidebar) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');
