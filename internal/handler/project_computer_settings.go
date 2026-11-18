@@ -81,6 +81,10 @@ func (h *Handler) ProjectComputerSettings(c echo.Context) error {
 				next.Resources = models.ComputerResources{CPUs: cpu, MemoryGiB: memory, PidsLimit: pids}
 				next.IdleMinutes = idle
 				next.TimeZone = c.FormValue("time_zone")
+				next.PreviewQuality = c.FormValue("preview_quality")
+				if next.PreviewQuality == "" {
+					next.PreviewQuality = values.PreviewQuality
+				}
 				next.Enabled = c.FormValue("enabled") == "on"
 				values = next
 				if err := h.computerSvc.SaveSettings(c.Request().Context(), id, next); err != nil {

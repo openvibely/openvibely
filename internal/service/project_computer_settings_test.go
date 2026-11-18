@@ -113,6 +113,8 @@ func TestComputerSettingsSaveTogether(t *testing.T) {
 	initial, err := svc.Settings(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.False(t, initial.Enabled)
+	require.Equal(t, "balanced", initial.PreviewQuality)
+	initial.PreviewQuality = "high"
 	initial.Enabled = true
 	initial.IdleMinutes = 60
 	initial.TimeZone = "Europe/London"
@@ -121,7 +123,17 @@ func TestComputerSettingsSaveTogether(t *testing.T) {
 	saved, err := svc.Settings(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.Equal(t, initial, saved)
+	task := &models.Task{ProjectID: project.ID, Title: "Quality viewer", Status: models.StatusPending, Category: models.CategoryActive, Priority: 2}
+	require.NoError(t, db.Tasks.Create(t.Context(), task))
+	scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
+	require.NoError(t, err)
+	state, err := scoped.Get(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "high", state.PreviewQuality, "task viewers inherit the project quality")
 	bad := initial
+	bad.PreviewQuality = "invalid"
+	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, bad), "preview quality")
+	bad = initial
 	bad.Resources.CPUs = 3
 	bad.IdleMinutes = 120
 	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, bad), "Stop the project computer")

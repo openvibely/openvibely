@@ -21,7 +21,7 @@ func (r *ProjectComputerRepo) Get(ctx context.Context, id string) (*models.Proje
 		return r.getSession(ctx, id)
 	}
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,owner,lease_until,enabled,time_zone,idle_minutes,cleanup_required,cpu_count,memory_gib,pids_limit FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.IdleMinutes, &c.CleanupRequired, &c.Resources.CPUs, &c.Resources.MemoryGiB, &c.Resources.PidsLimit)
+	err := r.db.QueryRowContext(ctx, `SELECT project_id,provider,owner,lease_until,enabled,time_zone,idle_minutes,cleanup_required,cpu_count,memory_gib,pids_limit,preview_quality FROM project_computers WHERE project_id=?`, id).Scan(&c.ProjectID, &c.Provider, &c.Owner, &c.LeaseUntil, &c.Enabled, &c.TimeZone, &c.IdleMinutes, &c.CleanupRequired, &c.Resources.CPUs, &c.Resources.MemoryGiB, &c.Resources.PidsLimit, &c.PreviewQuality)
 	return c, err
 }
 func (r *ProjectComputerRepo) Configure(ctx context.Context, id, provider string) error {
@@ -114,7 +114,7 @@ func (r *ProjectComputerRepo) ForTask(ctx context.Context, projectID, taskID str
 }
 func (r *ProjectComputerRepo) getSession(ctx context.Context, id string) (*models.ProjectComputer, error) {
 	c := &models.ProjectComputer{}
-	err := r.db.QueryRowContext(ctx, `SELECT s.project_id,p.provider,s.held,s.owner,s.lease_until,s.handoff_kind,s.handoff_url,s.handoff_reason,s.handoff_expected_text,s.handoff_alert_id,s.tool_target,(p.enabled AND s.enabled),p.time_zone,p.idle_minutes,s.enabled,p.enabled FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.HandoffKind, &c.HandoffURL, &c.HandoffReason, &c.HandoffExpectedText, &c.HandoffAlertID, &c.ToolTarget, &c.Enabled, &c.TimeZone, &c.IdleMinutes, &c.TaskEnabled, &c.ProjectEnabled)
+	err := r.db.QueryRowContext(ctx, `SELECT s.project_id,p.provider,s.held,s.owner,s.lease_until,s.handoff_kind,s.handoff_url,s.handoff_reason,s.handoff_expected_text,s.handoff_alert_id,s.tool_target,(p.enabled AND s.enabled),p.time_zone,p.idle_minutes,s.enabled,p.enabled,p.preview_quality FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&c.ProjectID, &c.Provider, &c.Held, &c.Owner, &c.LeaseUntil, &c.HandoffKind, &c.HandoffURL, &c.HandoffReason, &c.HandoffExpectedText, &c.HandoffAlertID, &c.ToolTarget, &c.Enabled, &c.TimeZone, &c.IdleMinutes, &c.TaskEnabled, &c.ProjectEnabled, &c.PreviewQuality)
 	return c, err
 }
 func (r *ProjectComputerRepo) SessionsBusy(ctx context.Context, id string) (bool, error) {
@@ -222,8 +222,8 @@ func (r *ProjectComputerRepo) SetResources(ctx context.Context, id string, v mod
 // SaveSettings commits all form fields together so validation failures never leave partial settings.
 func (r *ProjectComputerRepo) SaveSettings(ctx context.Context, id, provider string, v models.ComputerSettings) error {
 	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO project_computers(project_id,provider,enabled,time_zone,idle_minutes,cpu_count,memory_gib,pids_limit) VALUES (?,?,?,?,?,?,?,?)
-  ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled,time_zone=excluded.time_zone,idle_minutes=excluded.idle_minutes,cpu_count=excluded.cpu_count,memory_gib=excluded.memory_gib,pids_limit=excluded.pids_limit`, id, provider, v.Enabled, v.TimeZone, v.IdleMinutes, v.Resources.CPUs, v.Resources.MemoryGiB, v.Resources.PidsLimit)
+		_, err := tx.ExecContext(ctx, `INSERT INTO project_computers(project_id,provider,enabled,time_zone,idle_minutes,cpu_count,memory_gib,pids_limit,preview_quality) VALUES (?,?,?,?,?,?,?,?,?)
+  ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled,time_zone=excluded.time_zone,idle_minutes=excluded.idle_minutes,cpu_count=excluded.cpu_count,memory_gib=excluded.memory_gib,pids_limit=excluded.pids_limit,preview_quality=excluded.preview_quality`, id, provider, v.Enabled, v.TimeZone, v.IdleMinutes, v.Resources.CPUs, v.Resources.MemoryGiB, v.Resources.PidsLimit, v.PreviewQuality)
 		return err
 	})
 }

@@ -74,15 +74,23 @@ func (s *ProjectComputerService) SetResourceSettings(ctx context.Context, id str
 func (s *ProjectComputerService) Settings(ctx context.Context, id string) (models.ComputerSettings, error) {
 	c, err := s.projects.Computers().Get(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return models.ComputerSettings{Resources: models.DefaultComputerResources(), IdleMinutes: 30, TimeZone: "UTC"}, nil
+		return models.ComputerSettings{PreviewQuality: "balanced", Resources: models.DefaultComputerResources(), IdleMinutes: 30, TimeZone: "UTC"}, nil
 	}
 	if err != nil {
 		return models.ComputerSettings{}, err
 	}
-	return models.ComputerSettings{Resources: c.Resources, Enabled: c.Enabled, IdleMinutes: c.IdleMinutes, TimeZone: c.TimeZone}, nil
+	return models.ComputerSettings{PreviewQuality: c.PreviewQuality, Resources: c.Resources, Enabled: c.Enabled, IdleMinutes: c.IdleMinutes, TimeZone: c.TimeZone}, nil
 }
 
 func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v models.ComputerSettings) error {
+	if v.PreviewQuality == "" {
+		v.PreviewQuality = "balanced"
+	}
+	switch v.PreviewQuality {
+	case "low", "balanced", "high":
+	default:
+		return errors.New("Choose Low, Balanced, or High preview quality")
+	}
 	if v.Resources.CPUs < 1 || v.Resources.CPUs > 64 || v.Resources.MemoryGiB < 1 || v.Resources.MemoryGiB > 256 || v.Resources.PidsLimit < 256 || v.Resources.PidsLimit > 65536 {
 		return errors.New("Use 1–64 CPUs, 1–256 GiB memory, and 256–65,536 processes/threads")
 	}

@@ -315,8 +315,9 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.viewOnly=!want;mode=want?'control':'view';
       if(want){if(!ime)installKeyboard();}else{ime?.remove();ime=null;composing=false;}
      }
+     function previewQuality(state){return ({low:3,balanced:7,high:9})[state.preview_quality]??7;}
      async function viewer(state){
-      if(rfb){syncViewerInput();return;}
+      if(rfb){rfb.qualityLevel=previewQuality(state);syncViewerInput();return;}
       disconnect();mode='view';
       const epoch=++generation;
       const {default:RFB}=await import(root.dataset.computerViewer);
@@ -326,7 +327,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       liveCanvas=screen.querySelector('canvas:not([data-retained-frame])');
       if(retained)screen.append(retained);
       rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
-      rfb.qualityLevel=7;rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=true;
+      rfb.qualityLevel=previewQuality(state);rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=true;
       revealFrame(epoch);
       connectTimer=setTimeout(()=>{if(epoch===generation&&!frameReady){disconnect();retryStatus();}},10000);
       rfb.addEventListener('connect',()=>{if(epoch!==generation||closed)return;connected=true;revealFrame(epoch);syncViewerInput();});

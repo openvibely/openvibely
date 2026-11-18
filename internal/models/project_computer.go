@@ -12,6 +12,7 @@ func DefaultComputerResources() ComputerResources {
 }
 
 type ProjectComputer struct {
+	PreviewQuality      string            `json:"preview_quality"`
 	Resources           ComputerResources `json:"resources"`
 	TaskEnabled         bool              `json:"task_enabled"`
 	ProjectEnabled      bool              `json:"project_enabled"`
@@ -34,8 +35,9 @@ type ProjectComputer struct {
 
 // ComputerSettings is the project-wide configuration edited in Settings.
 type ComputerSettings struct {
-	Resources   ComputerResources
-	Enabled     bool
-	IdleMinutes int
-	TimeZone    string
+	PreviewQuality string
+	Resources      ComputerResources
+	Enabled        bool
+	IdleMinutes    int
+	TimeZone       string
 }

@@ -58,6 +58,11 @@ templ ComputerSettingsContent(projects []models.Project, id string, values model
  }
  </select></div>
  <div class="setting-row"><label for="computer-settings-zone">Time zone</label><select id="computer-settings-zone" name="time_zone" class="select select-bordered" data-saved-zone={values.TimeZone}><option value={values.TimeZone} selected>{values.TimeZone}</option></select></div>
+ <div class="setting-row"><div class="label-copy"><label for="computer-settings-quality">Preview quality</label><div class="muted">Both preview sizes. Lower quality uses less bandwidth.</div></div><select id="computer-settings-quality" name="preview_quality" class="select select-bordered">
+ <option value="low" selected?={values.PreviewQuality=="low"}>Low</option>
+ <option value="balanced" selected?={values.PreviewQuality=="balanced" || values.PreviewQuality==""}>Balanced</option>
+ <option value="high" selected?={values.PreviewQuality=="high"}>High</option>
+ </select></div>
  <h2 class="section-heading">Resources</h2><p class="muted">Shared by all task desktops in this project.</p>
  if available {
  <div class="setting-row"><label for="computer-settings-cpus">CPU</label><div class="resource-value"><input id="computer-settings-cpus" name="cpus" type="number" min="1" max="64" value={strconv.Itoa(values.Resources.CPUs)} class="input input-bordered" required/><span class="unit">cores</span></div></div>

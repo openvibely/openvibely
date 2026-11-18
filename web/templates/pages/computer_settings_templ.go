@@ -308,61 +308,91 @@ func ComputerSettingsContent(projects []models.Project, id string, values models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</option></select></div><h2 class=\"section-heading\">Resources</h2><p class=\"muted\">Shared by all task desktops in this project.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</option></select></div><div class=\"setting-row\"><div class=\"label-copy\"><label for=\"computer-settings-quality\">Preview quality</label><div class=\"muted\">Both preview sizes. Lower quality uses less bandwidth.</div></div><select id=\"computer-settings-quality\" name=\"preview_quality\" class=\"select select-bordered\"><option value=\"low\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if values.PreviewQuality == "low" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, ">Low</option> <option value=\"balanced\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if values.PreviewQuality == "balanced" || values.PreviewQuality == "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, ">Balanced</option> <option value=\"high\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if values.PreviewQuality == "high" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, ">High</option></select></div><h2 class=\"section-heading\">Resources</h2><p class=\"muted\">Shared by all task desktops in this project.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if available {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<div class=\"setting-row\"><label for=\"computer-settings-cpus\">CPU</label><div class=\"resource-value\"><input id=\"computer-settings-cpus\" name=\"cpus\" type=\"number\" min=\"1\" max=\"64\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"setting-row\"><label for=\"computer-settings-cpus\">CPU</label><div class=\"resource-value\"><input id=\"computer-settings-cpus\" name=\"cpus\" type=\"number\" min=\"1\" max=\"64\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(strconv.Itoa(values.Resources.CPUs)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/computer_settings.templ`, Line: 63, Col: 221}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/computer_settings.templ`, Line: 68, Col: 221}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" class=\"input input-bordered\" required><span class=\"unit\">cores</span></div></div><div class=\"setting-row\"><label for=\"computer-settings-memory\">Memory</label><div class=\"resource-value\"><input id=\"computer-settings-memory\" name=\"memory_gib\" type=\"number\" min=\"1\" max=\"256\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" class=\"input input-bordered\" required><span class=\"unit\">cores</span></div></div><div class=\"setting-row\"><label for=\"computer-settings-memory\">Memory</label><div class=\"resource-value\"><input id=\"computer-settings-memory\" name=\"memory_gib\" type=\"number\" min=\"1\" max=\"256\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression(strconv.Itoa(values.Resources.MemoryGiB)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/computer_settings.templ`, Line: 64, Col: 240}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/computer_settings.templ`, Line: 69, Col: 240}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" class=\"input input-bordered\" required><span class=\"unit\">GiB</span></div></div><div class=\"setting-row\"><label for=\"computer-settings-pids\">Process / thread limit</label><div class=\"resource-value\"><input id=\"computer-settings-pids\" name=\"pids_limit\" type=\"number\" min=\"256\" max=\"65536\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" class=\"input input-bordered\" required><span class=\"unit\">GiB</span></div></div><div class=\"setting-row\"><label for=\"computer-settings-pids\">Process / thread limit</label><div class=\"resource-value\"><input id=\"computer-settings-pids\" name=\"pids_limit\" type=\"number\" min=\"256\" max=\"65536\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var18 string
 				templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression(strconv.Itoa(values.Resources.PidsLimit)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/computer_settings.templ`, Line: 65, Col: 256}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/computer_settings.templ`, Line: 70, Col: 256}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" class=\"input input-bordered\" required><span class=\"unit\"></span></div></div><p class=\"muted\">Stop the computer before changing CPU or memory.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" class=\"input input-bordered\" required><span class=\"unit\"></span></div></div><p class=\"muted\">Stop the computer before changing CPU or memory.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<p class=\"muted\">Resource limits are managed by the computer provider.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<p class=\"muted\">Resource limits are managed by the computer provider.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<h2 class=\"section-heading\">Browser</h2><div class=\"setting-row\"><div class=\"label-copy\">Sign-in permissions<div class=\"muted\">Manage approved imports from your local Chrome.</div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<h2 class=\"section-heading\">Browser</h2><div class=\"setting-row\"><div class=\"label-copy\">Sign-in permissions<div class=\"muted\">Manage approved imports from your local Chrome.</div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -370,7 +400,7 @@ func ComputerSettingsContent(projects []models.Project, id string, values models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</div><div class=\"settings-footer\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</div><div class=\"settings-footer\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -379,7 +409,7 @@ func ComputerSettingsContent(projects []models.Project, id string, values models
 					templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 					templ_7745c5c3_Buffer := templ.GetBuffer()
 					var templ_7745c5c3_ElementScripts []templ.ComponentScript
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<span class=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<span class=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -397,7 +427,7 @@ func ComputerSettingsContent(projects []models.Project, id string, values models
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" role=\"status\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" role=\"status\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -411,30 +441,30 @@ func ComputerSettingsContent(projects []models.Project, id string, values models
 					}
 					templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, ">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, ">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/computer_settings.templ`, Line: 75, Col: 106}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/computer_settings.templ`, Line: 80, Col: 106}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<button class=\"btn btn-primary\" type=\"submit\">Save changes</button></div></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<button class=\"btn btn-primary\" type=\"submit\">Save changes</button></div></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<script>\n (()=>{\n const root=document.getElementById('computer-settings-content');if(!root||root.dataset.bound)return;root.dataset.bound='true';\n const form=root.querySelector('form'),project=root.querySelector('#computer-settings-project');let dirty=false;\n form?.addEventListener('input',()=>dirty=true);\n project.onchange=()=>{if(dirty&&!confirm('Discard unsaved computer settings?')){project.value=project.dataset.currentProject;return;}location.assign('/settings/computer?project_id='+encodeURIComponent(project.value));};\n const zone=root.querySelector('[data-saved-zone]');if(zone){const selected=zone.dataset.savedZone;const names=new Set(['UTC',selected,...(Intl.supportedValuesOf?.('timeZone')||[])]);zone.replaceChildren(...[...names].sort().map(name=>new Option(name,name,false,name===selected)));}\n })();\n </script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<script>\n (()=>{\n const root=document.getElementById('computer-settings-content');if(!root||root.dataset.bound)return;root.dataset.bound='true';\n const form=root.querySelector('form'),project=root.querySelector('#computer-settings-project');let dirty=false;\n form?.addEventListener('input',()=>dirty=true);\n project.onchange=()=>{if(dirty&&!confirm('Discard unsaved computer settings?')){project.value=project.dataset.currentProject;return;}location.assign('/settings/computer?project_id='+encodeURIComponent(project.value));};\n const zone=root.querySelector('[data-saved-zone]');if(zone){const selected=zone.dataset.savedZone;const names=new Set(['UTC',selected,...(Intl.supportedValuesOf?.('timeZone')||[])]);zone.replaceChildren(...[...names].sort().map(name=>new Option(name,name,false,name===selected)));}\n })();\n </script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
