@@ -91,7 +91,7 @@ func (h *Handler) ProjectComputerSettings(c echo.Context) error {
 					message = err.Error()
 				} else {
 					saved = true
-					message = "Settings saved. CPU, memory, and time zone apply on the next computer start."
+					message = "Settings saved."
 				}
 			}
 		}

@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,8 +110,12 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 		return err
 	}
 	repo := s.projects.Computers()
+	restart := false
+	updateLimit := false
 	if p, ok := s.provisioner.(*LocalComputerProvisioner); ok {
-		if old.Resources.CPUs != v.Resources.CPUs || old.Resources.MemoryGiB != v.Resources.MemoryGiB {
+		resourceChange := old.Resources != v.Resources
+		restartChange := old.Resources.CPUs != v.Resources.CPUs || old.Resources.MemoryGiB != v.Resources.MemoryGiB || old.TimeZone != v.TimeZone
+		if resourceChange || restartChange {
 			raw, err := p.docker(ctx, nil, "container", "ls", "--all", "--filter", "name=^/"+computerContainerName(id)+"$", "--format", "{{.Names}}")
 			if err != nil {
 				return err
@@ -126,13 +132,28 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 				if json.Unmarshal(raw, &rows) != nil || len(rows) != 1 || rows[0].Config.Labels["openvibely.project"] != id {
 					return errors.New("computer ownership mismatch")
 				}
-				if rows[0].State.Running {
-					return errors.New("Stop the project computer before changing CPU or memory")
-				}
+				restart = v.Enabled && restartChange && rows[0].State.Running
+				updateLimit = v.Enabled && !restart && old.Resources.PidsLimit != v.Resources.PidsLimit
 			}
 		}
 	} else if old.Resources != v.Resources {
 		return errors.New("Resource settings are managed by the hosted computer provider")
+	}
+	if restart {
+		busy, err := repo.SessionsBusy(ctx, id)
+		if err != nil {
+			return err
+		}
+		if busy {
+			return persistence.ErrComputerBusy
+		}
+		state, err := repo.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if state.Owner != "" && state.LeaseUntil >= time.Now().Unix() {
+			return persistence.ErrComputerBusy
+		}
 	}
 	persist := func() error { return repo.SaveSettings(ctx, id, s.provisioner.Provider(), v) }
 	if old.Enabled && !v.Enabled {
@@ -162,6 +183,17 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 	if err := persist(); err != nil {
 		return err
 	}
-	s.publishStatus(id, true)
+	defer s.publishStatus(id, true)
+	if restart {
+		if err := s.startLocked(ctx, id, false); err != nil {
+			return fmt.Errorf("Settings saved, but the computer could not restart: %w", err)
+		}
+	}
+	if updateLimit {
+		p := s.provisioner.(*LocalComputerProvisioner)
+		if _, err := p.docker(ctx, nil, "update", "--pids-limit", strconv.Itoa(v.Resources.PidsLimit), computerContainerName(id)); err != nil {
+			return fmt.Errorf("Settings saved, but the process limit could not be applied: %w", err)
+		}
+	}
 	return nil
 }

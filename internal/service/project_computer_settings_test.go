@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -99,9 +101,13 @@ func TestComputerSettingsSaveTogether(t *testing.T) {
 	project := &models.Project{Name: "Settings save"}
 	require.NoError(t, db.Projects.Create(t.Context(), project))
 	running := true
+	exists := false
 	p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
 		switch args[0] {
 		case "container":
+			if !exists {
+				return nil, nil
+			}
 			return []byte(computerContainerName(project.ID)), nil
 		case "inspect":
 			return json.Marshal([]any{map[string]any{"Config": map[string]any{"Labels": map[string]string{"openvibely.project": project.ID}}, "State": map[string]bool{"Running": running}}})
@@ -130,13 +136,16 @@ func TestComputerSettingsSaveTogether(t *testing.T) {
 	state, err := scoped.Get(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.Equal(t, "high", state.PreviewQuality, "task viewers inherit the project quality")
+	exists = true
 	bad := initial
 	bad.PreviewQuality = "invalid"
 	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, bad), "preview quality")
 	bad = initial
 	bad.Resources.CPUs = 3
 	bad.IdleMinutes = 120
-	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, bad), "Stop the project computer")
+	require.NoError(t, db.Projects.Computers().Reserve(t.Context(), project.ID, "agent"))
+	require.Error(t, svc.SaveSettings(t.Context(), project.ID, bad))
+	require.NoError(t, db.Projects.Computers().Release(t.Context(), project.ID, "agent"))
 	saved, err = svc.Settings(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.Equal(t, initial, saved, "failed CPU change must not persist idle changes")
@@ -162,4 +171,62 @@ func TestComputerSettingsSaveTogether(t *testing.T) {
 	saved, err = svc.Settings(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.Equal(t, initial, saved)
+}
+
+func TestComputerSettingsApplyOnSave(t *testing.T) {
+	db := teststores.New(t)
+	project := &models.Project{Name: "Immediate settings"}
+	require.NoError(t, db.Projects.Create(t.Context(), project))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"isolation":1,"viewer_connections":1}`))
+	}))
+	defer server.Close()
+	port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
+	t.Setenv("OPENVIBELY_COMPUTER_IMAGE", "settings-fixture")
+	env := []string{"TZ=UTC", "OPENVIBELY_COMPUTER_TOKEN=fixture"}
+	runs, updates := 0, 0
+	p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "container":
+			return []byte(computerContainerName(project.ID)), nil
+		case "inspect":
+			return json.Marshal([]any{map[string]any{
+				"Config":          map[string]any{"Labels": map[string]string{"openvibely.project": project.ID, "openvibely.computer-isolation": "1"}, "Image": "settings-fixture", "Env": env},
+				"State":           map[string]bool{"Running": true},
+				"NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}},
+			}})
+		case "run":
+			runs++
+			env = nil
+			for i, arg := range args {
+				if arg == "--env" {
+					env = append(env, args[i+1])
+				}
+			}
+		case "update":
+			updates++
+			require.Contains(t, strings.Join(args, " "), "--pids-limit 8192")
+		}
+		return nil, nil
+	}}
+	svc := NewProjectComputerService(db.Projects, p)
+	require.NoError(t, svc.SetEnabled(t.Context(), project.ID, true))
+	settings, err := svc.Settings(t.Context(), project.ID)
+	require.NoError(t, err)
+	settings.Resources.CPUs = 3
+	settings.Resources.MemoryGiB = 6
+	settings.TimeZone = "Europe/London"
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
+	require.Equal(t, 1, runs)
+	require.Contains(t, env, "OPENVIBELY_COMPUTER_CPUS=3")
+	require.Contains(t, env, "OPENVIBELY_COMPUTER_MEMORY_GIB=6")
+	require.Contains(t, env, "TZ=Europe/London")
+	settings.Resources.PidsLimit = 8192
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
+	require.Equal(t, 1, updates)
+	require.Equal(t, 1, runs, "process limit must not restart")
+	settings.PreviewQuality = "low"
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
+	require.Equal(t, 1, updates)
+	require.Equal(t, 1, runs, "quality must not restart")
 }

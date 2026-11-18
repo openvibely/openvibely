@@ -186,6 +186,11 @@ func (s *ProjectComputerService) start(ctx context.Context, id string, automatic
 	gate := s.lifecycle(id)
 	gate.Lock()
 	defer gate.Unlock()
+	return s.startLocked(ctx, id, automatic)
+}
+
+// startLocked requires the project lifecycle write lock.
+func (s *ProjectComputerService) startLocked(ctx context.Context, id string, automatic bool) error {
 	if s.taskID != "" {
 		return errors.New("start the project computer")
 	}

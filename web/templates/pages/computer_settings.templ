@@ -68,7 +68,7 @@ templ ComputerSettingsContent(projects []models.Project, id string, values model
  <div class="setting-row"><label for="computer-settings-cpus">CPU</label><div class="resource-value"><input id="computer-settings-cpus" name="cpus" type="number" min="1" max="64" value={strconv.Itoa(values.Resources.CPUs)} class="input input-bordered" required/><span class="unit">cores</span></div></div>
  <div class="setting-row"><label for="computer-settings-memory">Memory</label><div class="resource-value"><input id="computer-settings-memory" name="memory_gib" type="number" min="1" max="256" value={strconv.Itoa(values.Resources.MemoryGiB)} class="input input-bordered" required/><span class="unit">GiB</span></div></div>
  <div class="setting-row"><label for="computer-settings-pids">Process / thread limit</label><div class="resource-value"><input id="computer-settings-pids" name="pids_limit" type="number" min="256" max="65536" value={strconv.Itoa(values.Resources.PidsLimit)} class="input input-bordered" required/><span class="unit"></span></div></div>
- <p class="muted">Stop the computer before changing CPU or memory.</p>
+ <p class="muted">Changing CPU, memory, or time zone restarts a running computer. Open apps close; saved files remain.</p>
  } else {
  <p class="muted">Resource limits are managed by the computer provider.</p>
  }

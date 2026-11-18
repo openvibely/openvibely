@@ -382,7 +382,7 @@ func ComputerSettingsContent(projects []models.Project, id string, values models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" class=\"input input-bordered\" required><span class=\"unit\"></span></div></div><p class=\"muted\">Stop the computer before changing CPU or memory.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" class=\"input input-bordered\" required><span class=\"unit\"></span></div></div><p class=\"muted\">Changing CPU, memory, or time zone restarts a running computer. Open apps close; saved files remain.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
