@@ -16,14 +16,7 @@ templ ProjectComputer(projects []models.Project, projectID string, taskIDs ...st
 func computerTaskID(ids []string)string {if len(ids)>0{return ids[0]};return ""}
 
 templ ProjectComputerContent(projectID string, taskIDs ...string) {
- if computerTaskID(taskIDs)=="" {
- <section id="project-computer" data-computer-project={projectID} class="p-4 flex flex-col gap-4">
- <h1 class="text-xl font-bold">Project computer</h1>
- <p class="text-sm opacity-70">Each task has its own desktop. Open a task’s Computer tab to view it.</p>
- @ProjectComputerToggle(projectID)
- @ProjectComputerPermissions(projectID, "")
- </section>
- } else {
+ if computerTaskID(taskIDs)!="" {
   <section id="project-computer" data-computer-task={computerTaskID(taskIDs)} data-computer-project={ projectID } data-computer-viewer={ static.URL("vendor/novnc/core/rfb.js") } class="flex flex-col gap-4 text-sm">
    <div data-computer-preview hidden style="position:relative">
  <div data-computer-screen tabindex="-1" aria-label="Computer screen" class="rounded-lg overflow-hidden outline-none" style="position:relative;aspect-ratio:16/10;width:100%;user-select:none;-webkit-user-select:none;background:var(--shell-card,var(--fallback-b1,oklch(var(--b1))))"></div>

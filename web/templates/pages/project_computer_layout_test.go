@@ -37,7 +37,7 @@ func TestComputerPreviewLeadsDedicatedPanel(t *testing.T) {
 
 func TestComputerPermissionsAvailableWithoutTask(t *testing.T) {
 	var out bytes.Buffer
-	if err := ProjectComputerContent("project").Render(t.Context(), &out); err != nil {
+	if err := ComputerSettingsContent("project", "Project", models.DefaultComputerResources(), true, false, "").Render(t.Context(), &out); err != nil {
 		t.Fatal(err)
 	}
 	// Check rendered controls, not their selectors in the embedded script.
@@ -48,9 +48,9 @@ func TestComputerPermissionsAvailableWithoutTask(t *testing.T) {
 	}
 }
 
-func TestComputerProjectPageHasNoDesktopRuntime(t *testing.T) {
+func TestComputerSettingsHasNoDesktopRuntime(t *testing.T) {
 	var project, task bytes.Buffer
-	if err := ProjectComputerContent("project").Render(t.Context(), &project); err != nil {
+	if err := ComputerSettingsContent("project", "Project", models.DefaultComputerResources(), true, false, "").Render(t.Context(), &project); err != nil {
 		t.Fatal(err)
 	}
 	if err := ProjectComputerContent("project", "task").Render(t.Context(), &task); err != nil {

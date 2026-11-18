@@ -34,7 +34,8 @@ func TestProjectComputerSettingsPage(t *testing.T) {
 	for _, fragment := range []bool{false, true} {
 		rec := request(http.MethodGet, "", "", fragment)
 		require.Equal(t, 200, rec.Code, rec.Body.String())
-		for _, text := range []string{"Project Computer", "Computer resources", `name="cpus"`, `name="memory_gib"`, `name="pids_limit"`, `value="4096"`} {
+		require.NotContains(t, rec.Body.String(), "Open project computer")
+		for _, text := range []string{"Project Computer", "Computer resources", `name="cpus"`, `name="memory_gib"`, `name="pids_limit"`, `value="4096"`, "data-computer-enabled", "data-computer-idle", "data-computer-time-zone", "data-computer-grants", "data-computer-preference=\"" + p.ID + "\""} {
 			require.Contains(t, rec.Body.String(), text)
 		}
 	}

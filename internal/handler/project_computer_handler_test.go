@@ -44,7 +44,7 @@ func TestProjectComputerHandlersScopeAndRemovedTakeover(t *testing.T) {
 		want                 int
 	}{
 		{"GET", "/projects/missing/computer", "", 404},
-		{"GET", "/projects/" + project.ID + "/computer", "", 200},
+		{"GET", "/projects/" + project.ID + "/computer", "", 303},
 		{"POST", "/projects/" + project.ID + "/computer/takeover", "https://evil.example", 403},
 		{"POST", "/projects/" + project.ID + "/computer/takeover", "", 404},
 		{"POST", "/projects/" + project.ID + "/computer/release", "", 404},
@@ -58,6 +58,9 @@ func TestProjectComputerHandlersScopeAndRemovedTakeover(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		if rec.Code != tc.want {
 			t.Fatalf("%s: %d want %d: %s", tc.path, rec.Code, tc.want, rec.Body.String()[:min(200, rec.Body.Len())])
+		}
+		if rec.Code == http.StatusSeeOther && rec.Header().Get("Location") != "/settings/computer?project_id="+project.ID {
+			t.Fatal("expected redirect to computer settings")
 		}
 		if tc.method == http.MethodGet && rec.Code == 200 && !strings.Contains(rec.Body.String(), "data-computer-project=\""+project.ID+"\"") {
 			t.Fatal("viewer missing project identity")
