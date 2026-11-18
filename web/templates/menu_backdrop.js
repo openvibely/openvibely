@@ -10,7 +10,7 @@
     '#conversation-model-picker', '#conversation-provider-models',
     '#chat-custom-select-panel', '#project-tab-menu',
     '.inspector-picker', '.schedule-datetime-popup',
-    '#changes-actions-menu', '#schedule-context-menu',
+    '#rail-account-popup', '#changes-actions-menu', '#schedule-context-menu',
     '#schedule-project-menu[open] > .ov-menu', '[data-project-results]'
   ].join(',');
   const backdrop = document.createElement('div');

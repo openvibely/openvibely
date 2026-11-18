@@ -275,16 +275,13 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         ),
       ) + "px";
   }
-  function closeUsage(focus = false) {
-    hideSurface(popup);
-    if (focus)
-      host
-        .querySelector('[data-key="' + CSS.escape(state.selected || "") + '"]')
-        ?.focus();
-    host
-      .querySelectorAll("button")
-      .forEach((b) => b.setAttribute("aria-expanded", "false"));
-  }
+  const usageMenu = window.ovMenuController.create({
+    trigger: () => host.querySelector('[data-key="' + CSS.escape(state.selected || "") + '"]'),
+    panels: () => [popup],
+    isOpen: shown,
+    open: () => showSurface(popup),
+    close: () => hideSurface(popup),
+  });
   function closeOverflow(focus = false) {
     hideSurface(overflow);
     more.setAttribute("aria-expanded", "false");
@@ -321,7 +318,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   });
   more.onclick = () => {
     const open = !surfaceShown(overflow);
-    closeUsage();
+    usageMenu.close();
     if (open) {
       showSurface(overflow);
       more.setAttribute("aria-expanded", "true");
@@ -548,7 +545,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   function drawPopup() {
     const a = state.accounts.find((a) => a.key === state.selected);
     if (!a) {
-      closeUsage();
+      usageMenu.close();
       return;
     }
     const focus = document.activeElement?.dataset.action;
@@ -729,7 +726,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       const data = await read(url("snapshots", a.key, refresh));
       applySnapshot(a, data.snapshots?.[a.key]);
     } catch (e) {
-      if (e.denied) { state.accounts = []; closeUsage(); }
+      if (e.denied) { state.accounts = []; usageMenu.close(); }
       else a.error = e.message;
     }
     drawRail();
@@ -738,12 +735,12 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   async function openAccount(a) {
     closeOverflow();
     if (shown() && state.selected === a.key) {
-      closeUsage(true);
+      usageMenu.close(true);
       return;
     }
     state.selected = a.key;
     a.message = "";
-    if (!shown()) showSurface(popup);
+    usageMenu.open();
     drawRail();
     drawPopup();
     popup.querySelector('[data-action="refresh"]')?.focus();
@@ -828,7 +825,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         state.subscription = null;
         state.denied = true;
         state.accounts = [];
-        closeUsage();
+        usageMenu.close();
         drawRail();
       } else {
         state.accounts.forEach((a) => (a.error = e.message));
@@ -842,19 +839,12 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       }
     }
   }
-  host.addEventListener("click", (e) => e.stopPropagation());
-  popup.addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", (e) => {
-    if (!popup.contains(e.target) && !host.contains(e.target)) closeUsage();
     if (!overflow.contains(e.target) && !more.contains(e.target))
       closeOverflow();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (shown()) {
-        e.preventDefault();
-        closeUsage(true);
-      }
       if (surfaceShown(overflow)) {
         e.preventDefault();
         closeOverflow(true);
@@ -862,7 +852,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     }
   });
   window.addEventListener("resize", () => {
-    closeUsage();
+    usageMenu.close();
     closeOverflow();
   });
   document.addEventListener("visibilitychange", () => {
@@ -870,7 +860,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   });
   document.body.addEventListener("htmx:afterSettle", (event) => {
     if (event.detail?.target?.id !== "main-content") return;
-    closeUsage();
+    usageMenu.close();
     closeOverflow();
     refreshAll();
   });
