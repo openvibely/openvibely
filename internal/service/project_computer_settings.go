@@ -112,28 +112,22 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 	repo := s.projects.Computers()
 	restart := false
 	updateLimit := false
+	keepStopped := false
+	var local *LocalComputerProvisioner
 	if p, ok := s.provisioner.(*LocalComputerProvisioner); ok {
-		resourceChange := old.Resources != v.Resources
-		restartChange := old.Resources.CPUs != v.Resources.CPUs || old.Resources.MemoryGiB != v.Resources.MemoryGiB || old.TimeZone != v.TimeZone
-		if resourceChange || restartChange {
-			raw, err := p.docker(ctx, nil, "container", "ls", "--all", "--filter", "name=^/"+computerContainerName(id)+"$", "--format", "{{.Names}}")
+		local = p
+		if v.Enabled {
+			actual, err := p.inspectSettings(ctx, id)
 			if err != nil {
 				return err
 			}
-			if strings.TrimSpace(string(raw)) != "" {
-				raw, err = p.docker(ctx, nil, "inspect", computerContainerName(id))
-				if err != nil {
-					return err
-				}
-				var rows []struct {
-					Config struct{ Labels map[string]string }
-					State  struct{ Running bool }
-				}
-				if json.Unmarshal(raw, &rows) != nil || len(rows) != 1 || rows[0].Config.Labels["openvibely.project"] != id {
-					return errors.New("computer ownership mismatch")
-				}
-				restart = v.Enabled && restartChange && rows[0].State.Running
-				updateLimit = v.Enabled && !restart && old.Resources.PidsLimit != v.Resources.PidsLimit
+			if actual != nil {
+				restart = !actual.matchesDesktop(v)
+				keepStopped = !actual.State.Running && old != v
+				updateLimit = !restart && actual.HostConfig.PidsLimit != int64(v.Resources.PidsLimit)
+			} else if old.Enabled {
+				// A failed replacement may have removed the old container before creation failed.
+				restart = true
 			}
 		}
 	} else if old.Resources != v.Resources {
@@ -188,11 +182,35 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 		if err := s.startLocked(ctx, id, false); err != nil {
 			return fmt.Errorf("Settings saved, but the computer could not restart: %w", err)
 		}
+		if keepStopped {
+			if err := local.Stop(ctx, id); err != nil {
+				return fmt.Errorf("Settings applied, but the computer could not be stopped: %w", err)
+			}
+		}
 	}
 	if updateLimit {
 		p := s.provisioner.(*LocalComputerProvisioner)
 		if _, err := p.docker(ctx, nil, "update", "--pids-limit", strconv.Itoa(v.Resources.PidsLimit), computerContainerName(id)); err != nil {
 			return fmt.Errorf("Settings saved, but the process limit could not be applied: %w", err)
+		}
+	}
+	if local != nil && v.Enabled {
+		actual, err := local.inspectSettings(ctx, id)
+		if err != nil {
+			return fmt.Errorf("Settings saved, but verification failed: %w", err)
+		}
+		if actual != nil {
+			if restart && actual.State.Running == keepStopped {
+				return errors.New("Settings saved, but the computer did not reach the expected running state. Save again to retry")
+			}
+			if !actual.matchesDesktop(v) || actual.HostConfig.PidsLimit != int64(v.Resources.PidsLimit) {
+				return errors.New("Settings saved, but the computer does not match them. Save again to retry")
+			}
+			if actual.State.Running && !s.Ready(ctx, id) {
+				return errors.New("Settings saved, but the computer is not ready. Save again to retry")
+			}
+		} else if restart {
+			return errors.New("Settings saved, but the computer did not start. Save again to retry")
 		}
 	}
 	return nil

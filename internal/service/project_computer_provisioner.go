@@ -197,6 +197,10 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 				Image  string
 				Env    []string
 			}
+			HostConfig struct {
+				NanoCpus int64
+				Memory   int64
+			}
 		}
 		if json.Unmarshal(raw, &rows) != nil || len(rows) != 1 || rows[0].Config.Labels["openvibely.project"] != id {
 			return ComputerConnection{}, errors.New("computer ownership mismatch")
@@ -214,7 +218,7 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 				existingZone = strings.TrimPrefix(value, "TZ=")
 			}
 		}
-		if rows[0].Config.Image == image && existingZone == zone && existingCPUs == strconv.Itoa(resources.CPUs) && existingMemory == strconv.Itoa(resources.MemoryGiB) && rows[0].Config.Labels["openvibely.computer-isolation"] == "1" {
+		if rows[0].HostConfig.NanoCpus == int64(resources.CPUs)*1e9 && rows[0].HostConfig.Memory == int64(resources.MemoryGiB)*(1<<30) && rows[0].Config.Image == image && existingZone == zone && existingCPUs == strconv.Itoa(resources.CPUs) && existingMemory == strconv.Itoa(resources.MemoryGiB) && rows[0].Config.Labels["openvibely.computer-isolation"] == "1" {
 			// Reconcile existing containers without replacing their desktops or volume.
 			if _, err = p.docker(ctx, nil, "update", "--pids-limit", strconv.Itoa(resources.PidsLimit), name); err != nil {
 				return ComputerConnection{}, err
@@ -434,4 +438,49 @@ func (p *LocalComputerProvisioner) resourceSettings(ctx context.Context, id stri
 		return models.DefaultComputerResources(), nil
 	}
 	return v, err
+}
+
+// computerSettingsInspection contains only configuration needed for settings reconciliation.
+type computerSettingsInspection struct {
+	Config struct {
+		Labels map[string]string
+		Env    []string
+	}
+	HostConfig struct {
+		NanoCpus  int64
+		Memory    int64
+		PidsLimit int64
+	}
+	State struct{ Running bool }
+}
+
+func (c *computerSettingsInspection) matchesDesktop(v models.ComputerSettings) bool {
+	zone, cpus := "UTC", "2"
+	for _, value := range c.Config.Env {
+		if strings.HasPrefix(value, "TZ=") {
+			zone = strings.TrimPrefix(value, "TZ=")
+		}
+		if strings.HasPrefix(value, "OPENVIBELY_COMPUTER_CPUS=") {
+			cpus = strings.TrimPrefix(value, "OPENVIBELY_COMPUTER_CPUS=")
+		}
+	}
+	return c.HostConfig.NanoCpus == int64(v.Resources.CPUs)*1e9 && c.HostConfig.Memory == int64(v.Resources.MemoryGiB)*(1<<30) && zone == v.TimeZone && cpus == strconv.Itoa(v.Resources.CPUs)
+}
+func (p *LocalComputerProvisioner) inspectSettings(ctx context.Context, id string) (*computerSettingsInspection, error) {
+	raw, err := p.docker(ctx, nil, "container", "ls", "--all", "--filter", "name=^/"+computerContainerName(id)+"$", "--format", "{{.Names}}")
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return nil, nil
+	}
+	raw, err = p.docker(ctx, nil, "inspect", computerContainerName(id))
+	if err != nil {
+		return nil, err
+	}
+	var rows []computerSettingsInspection
+	if json.Unmarshal(raw, &rows) != nil || len(rows) != 1 || rows[0].Config.Labels["openvibely.project"] != id {
+		return nil, errors.New("computer ownership mismatch")
+	}
+	return &rows[0], nil
 }

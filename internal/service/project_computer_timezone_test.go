@@ -36,7 +36,7 @@ func TestComputerTimeZoneReachesDockerAndReplacesChangedContainer(t *testing.T) 
 			if !exists {
 				return nil, errors.New("not found")
 			}
-			return json.Marshal([]any{map[string]any{"Config": map[string]any{"Labels": map[string]string{"openvibely.project": project.ID, "openvibely.computer-isolation": isolation}, "Image": "timezone-fixture", "Env": []string{"TZ=" + zone, "OPENVIBELY_COMPUTER_TOKEN=fixture"}}, "State": map[string]bool{"Running": true}, "NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}}}})
+			return json.Marshal([]any{map[string]any{"Config": map[string]any{"Labels": map[string]string{"openvibely.project": project.ID, "openvibely.computer-isolation": isolation}, "Image": "timezone-fixture", "Env": []string{"TZ=" + zone, "OPENVIBELY_COMPUTER_TOKEN=fixture"}}, "HostConfig": map[string]int64{"NanoCpus": 2e9, "Memory": 4 << 30}, "State": map[string]bool{"Running": true}, "NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}}}})
 		case "update":
 			require.Equal(t, []string{"update", "--pids-limit", "4096", computerContainerName(project.ID)}, args)
 			updates++

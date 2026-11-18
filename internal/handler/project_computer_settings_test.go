@@ -3,6 +3,8 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,6 +51,9 @@ func TestProjectComputerSettingsPage(t *testing.T) {
 }
 
 func TestComputerSettingsSaveAndProjectScope(t *testing.T) {
+	bin := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0755))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	h, _, _ := setupTestHandler(t)
 	first := createProject(t, h, "First computer")
 	second := createProject(t, h, "Second computer")

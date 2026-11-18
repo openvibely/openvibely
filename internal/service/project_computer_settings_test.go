@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -166,6 +167,8 @@ func TestComputerSettingsSaveTogether(t *testing.T) {
 	require.Equal(t, initial, saved, "busy disable must not persist other fields")
 	require.NoError(t, db.Projects.Computers().Release(t.Context(), project.ID, "agent"))
 	running = false
+	exists = false
+	initial.Enabled = false
 	initial.Resources.CPUs = 3
 	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, initial))
 	saved, err = svc.Settings(t.Context(), project.ID)
@@ -185,26 +188,65 @@ func TestComputerSettingsApplyOnSave(t *testing.T) {
 	t.Setenv("OPENVIBELY_COMPUTER_IMAGE", "settings-fixture")
 	env := []string{"TZ=UTC", "OPENVIBELY_COMPUTER_TOKEN=fixture"}
 	runs, updates := 0, 0
+	cpus, memory, pids := int64(2e9), int64(4<<30), int64(4096)
+	failRemove := true
+	failUpdate := false
+	ignoreUpdate := false
+	running := true
+	exists := true
+	failRun := false
 	p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
 		switch args[0] {
 		case "container":
+			if !exists {
+				return nil, nil
+			}
 			return []byte(computerContainerName(project.ID)), nil
 		case "inspect":
+			if !exists {
+				return nil, errors.New("not found")
+			}
 			return json.Marshal([]any{map[string]any{
 				"Config":          map[string]any{"Labels": map[string]string{"openvibely.project": project.ID, "openvibely.computer-isolation": "1"}, "Image": "settings-fixture", "Env": env},
-				"State":           map[string]bool{"Running": true},
+				"State":           map[string]bool{"Running": running},
+				"HostConfig":      map[string]int64{"NanoCpus": cpus, "Memory": memory, "PidsLimit": pids},
 				"NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}},
 			}})
+		case "stop":
+			running = false
+		case "rm":
+			if failRemove {
+				return nil, errors.New("temporary Docker error")
+			}
+			exists = false
 		case "run":
+			if failRun {
+				return nil, errors.New("creation failed")
+			}
+			exists = true
+			running = true
+			cpus = 3e9
+			memory = 6 << 30
+			pids = 4096
 			runs++
 			env = nil
 			for i, arg := range args {
 				if arg == "--env" {
 					env = append(env, args[i+1])
 				}
+				if arg == "--pids-limit" {
+					parsed, _ := strconv.ParseInt(args[i+1], 10, 64)
+					pids = parsed
+				}
 			}
 		case "update":
 			updates++
+			if failUpdate {
+				return nil, errors.New("temporary update error")
+			}
+			if !ignoreUpdate {
+				pids = 8192
+			}
 			require.Contains(t, strings.Join(args, " "), "--pids-limit 8192")
 		}
 		return nil, nil
@@ -216,17 +258,45 @@ func TestComputerSettingsApplyOnSave(t *testing.T) {
 	settings.Resources.CPUs = 3
 	settings.Resources.MemoryGiB = 6
 	settings.TimeZone = "Europe/London"
+	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, settings), "could not restart")
+	failRemove = false
 	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
 	require.Equal(t, 1, runs)
 	require.Contains(t, env, "OPENVIBELY_COMPUTER_CPUS=3")
 	require.Contains(t, env, "OPENVIBELY_COMPUTER_MEMORY_GIB=6")
 	require.Contains(t, env, "TZ=Europe/London")
 	settings.Resources.PidsLimit = 8192
+	failUpdate = true
+	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, settings), "could not be applied")
+	failUpdate = false
 	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
-	require.Equal(t, 1, updates)
+	require.Equal(t, 2, updates)
 	require.Equal(t, 1, runs, "process limit must not restart")
 	settings.PreviewQuality = "low"
 	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
-	require.Equal(t, 1, updates)
+	require.Equal(t, 2, updates)
 	require.Equal(t, 1, runs, "quality must not restart")
+	pids = 4096
+	ignoreUpdate = true
+	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, settings), "does not match")
+	ignoreUpdate = false
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
+	require.Equal(t, int64(8192), pids)
+	require.True(t, running, "retry after failed restart restores running computer")
+
+	cpus = 2e9
+	failRun = true
+	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, settings), "creation failed")
+	require.False(t, exists)
+	failRun = false
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
+	require.True(t, exists)
+	require.True(t, running)
+
+	running = false
+	settings.TimeZone = "Europe/Berlin"
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
+	require.False(t, running, "a deliberately stopped computer stays stopped")
+	require.Contains(t, env, "TZ=Europe/Berlin")
+
 }
