@@ -54,6 +54,10 @@ func TestProjectComputerSharingPermissions(t *testing.T) {
 			require.Equal(t, expected, save.Code, save.Body.String())
 			idle := orgRequest(e, http.MethodPost, "/projects/"+project.ID+"/computer/idle-timeout", url.Values{"idle_minutes": {"30"}}, cookie)
 			require.Equal(t, expected, idle.Code, idle.Body.String())
+			settings := orgRequest(e, http.MethodGet, "/settings/computer?project_id="+project.ID, nil, cookie)
+			require.Equal(t, expected, settings.Code, settings.Body.String())
+			settings = orgRequest(e, http.MethodPost, "/settings/computer?project_id="+project.ID, url.Values{"cpus": {"2"}, "memory_gib": {"4"}, "pids_limit": {"8192"}}, cookie)
+			require.Equal(t, expected, settings.Code, settings.Body.String())
 		})
 	}
 }

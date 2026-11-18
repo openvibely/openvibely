@@ -1,0 +1,36 @@
+package pages
+
+import (
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+	"net/url"
+	"strconv"
+)
+
+templ ComputerSettingsPage(projects []models.Project, id string, name string, values models.ComputerResources, available bool, saved bool, message string) {
+	@layout.Base("Project Computer", projects, id) {
+		@ComputerSettingsContent(id, name, values, available, saved, message)
+	}
+}
+
+templ ComputerSettingsContent(id string, name string, values models.ComputerResources, available bool, saved bool, message string) {
+	<div id="computer-settings-content" class="w-full max-w-3xl pb-6">
+		@layout.PageTitle("Project Computer")
+		<p class="text-base-content/70 mb-6">Resources for <strong>{ name }</strong>. These limits are shared by all task desktops in this project.</p>
+		if message!="" {
+			<div role="status" class="alert mb-4">
+				<span>{ message }</span>
+			</div>
+		}
+		if available {
+			<form method="post" action={ templ.SafeURL("/settings/computer?project_id=" + url.QueryEscape(id)) } hx-post={ "/settings/computer?project_id=" + url.QueryEscape(id) } hx-target="#computer-settings-content" hx-swap="outerHTML" class="card bg-base-200 border border-base-300">
+				<div class="card-body gap-5">
+					<label class="form-control"><span class="label-text mb-2">CPU cores</span><input class="input input-bordered" type="number" name="cpus" min="1" max="64" step="1" required value={ strconv.Itoa(values.CPUs) }/><span class="text-sm text-base-content/60 mt-2">Default: 2. Controls CPU time and desktop CPU affinity.</span></label>
+					<label class="form-control"><span class="label-text mb-2">Memory (GiB)</span><input class="input input-bordered" type="number" name="memory_gib" min="1" max="256" step="1" required value={ strconv.Itoa(values.MemoryGiB) }/><span class="text-sm text-base-content/60 mt-2">Default: 4. Stop the project computer before changing CPU or memory.</span></label>
+					<label class="form-control"><span class="label-text mb-2">Maximum processes and threads</span><input class="input input-bordered" type="number" name="pids_limit" min="256" max="65536" step="1" required value={ strconv.Itoa(values.PidsLimit) }/><span class="text-sm text-base-content/60 mt-2">Default: 4,096. Increasing this limit does not reserve memory. Changes apply without restarting the desktop.</span></label>
+					<div class="flex gap-3 items-center"><button type="submit" class="btn btn-primary">Save settings</button><a class="btn btn-ghost" href={ templ.SafeURL("/projects/" + id + "/computer") }>Open project computer</a></div>
+				</div>
+			</form>
+		}
+	</div>
+}

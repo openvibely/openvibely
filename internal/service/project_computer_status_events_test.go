@@ -85,6 +85,7 @@ func TestComputerReadyUsesSingleInspectionAndPreservesImageChecks(t *testing.T) 
 		return json.Marshal([]any{map[string]any{
 			"Config":          map[string]any{"Image": image, "Labels": map[string]string{"openvibely.project": project.ID, "openvibely.computer-isolation": isolation}, "Env": []string{"OPENVIBELY_COMPUTER_TOKEN=fixture"}},
 			"State":           map[string]bool{"Running": true},
+			"HostConfig":      map[string]int{"PidsLimit": 4096},
 			"NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}},
 		}})
 	}}

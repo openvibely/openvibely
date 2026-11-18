@@ -44,6 +44,17 @@ func NewProjectComputerService(projects persistence.ProjectStore, p ComputerProv
 	if p == nil {
 		p = defaultComputerProvisioner()
 	}
+	if local, ok := p.(*LocalComputerProvisioner); ok {
+		copy := *local
+		copy.resources = func(ctx context.Context, id string) (models.ComputerResources, error) {
+			c, err := projects.Computers().Get(ctx, id)
+			if err != nil {
+				return models.ComputerResources{}, err
+			}
+			return c.Resources, nil
+		}
+		p = &copy
+	}
 	return &ProjectComputerService{repo: projects.Computers(), readinessLookups: &singleflight.Group{}, locks: &sync.Map{}, active: &sync.Map{}, projects: projects, provisioner: p, client: &http.Client{Timeout: (agenttools.MaxBashTimeoutSeconds + 10) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,10 +17,12 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
 	computerassets "github.com/openvibely/openvibely"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 // ComputerConnection is private backend state, never an API response or tool result.
@@ -35,7 +38,8 @@ type ComputerProvisioner interface {
 }
 
 type LocalComputerProvisioner struct {
-	run func(context.Context, io.Reader, ...string) ([]byte, error)
+	resources func(context.Context, string) (models.ComputerResources, error)
+	run       func(context.Context, io.Reader, ...string) ([]byte, error)
 }
 
 func (*LocalComputerProvisioner) Provider() string { return "local" }
@@ -138,9 +142,15 @@ func (p *LocalComputerProvisioner) resolve(ctx context.Context, id string, curre
 	}
 	// Reconcile resource policy during readiness, without restarting desktops.
 	// Cleanup uses Resolve (current=false) and must remain side-effect free.
-	if current && rows[0].HostConfig.PidsLimit != 4096 {
-		if _, err := p.docker(ctx, nil, "update", "--pids-limit", "4096", computerContainerName(id)); err != nil {
-			return ComputerConnection{}, fmt.Errorf("update computer process limit: %w", err)
+	if current {
+		resources, err := p.resourceSettings(ctx, id)
+		if err != nil {
+			return ComputerConnection{}, err
+		}
+		if rows[0].HostConfig.PidsLimit != int64(resources.PidsLimit) {
+			if _, err := p.docker(ctx, nil, "update", "--pids-limit", strconv.Itoa(resources.PidsLimit), computerContainerName(id)); err != nil {
+				return ComputerConnection{}, fmt.Errorf("update computer process limit: %w", err)
+			}
 		}
 	}
 	return c, nil
@@ -170,6 +180,10 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 	if err := validateComputerTimeZone(zone); err != nil {
 		return ComputerConnection{}, err
 	}
+	resources, err := p.resourceSettings(ctx, id)
+	if err != nil {
+		return ComputerConnection{}, err
+	}
 	name := computerContainerName(id)
 	image := os.Getenv("OPENVIBELY_COMPUTER_IMAGE")
 	if image == "" {
@@ -188,14 +202,21 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 			return ComputerConnection{}, errors.New("computer ownership mismatch")
 		}
 		existingZone := "UTC"
+		existingCPUs, existingMemory := "2", "4"
 		for _, value := range rows[0].Config.Env {
+			if strings.HasPrefix(value, "OPENVIBELY_COMPUTER_CPUS=") {
+				existingCPUs = strings.TrimPrefix(value, "OPENVIBELY_COMPUTER_CPUS=")
+			}
+			if strings.HasPrefix(value, "OPENVIBELY_COMPUTER_MEMORY_GIB=") {
+				existingMemory = strings.TrimPrefix(value, "OPENVIBELY_COMPUTER_MEMORY_GIB=")
+			}
 			if strings.HasPrefix(value, "TZ=") {
 				existingZone = strings.TrimPrefix(value, "TZ=")
 			}
 		}
-		if rows[0].Config.Image == image && existingZone == zone && rows[0].Config.Labels["openvibely.computer-isolation"] == "1" {
+		if rows[0].Config.Image == image && existingZone == zone && existingCPUs == strconv.Itoa(resources.CPUs) && existingMemory == strconv.Itoa(resources.MemoryGiB) && rows[0].Config.Labels["openvibely.computer-isolation"] == "1" {
 			// Reconcile existing containers without replacing their desktops or volume.
-			if _, err = p.docker(ctx, nil, "update", "--pids-limit", "4096", name); err != nil {
+			if _, err = p.docker(ctx, nil, "update", "--pids-limit", strconv.Itoa(resources.PidsLimit), name); err != nil {
 				return ComputerConnection{}, err
 			}
 			if _, err = p.docker(ctx, nil, "start", name); err != nil {
@@ -250,7 +271,7 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 	if _, err := rand.Read(secret); err != nil {
 		return ComputerConnection{}, err
 	}
-	_, err := p.docker(ctx, nil, "run", "-d", "--name", name, "--label", "openvibely.project="+id, "--label", "openvibely.computer-isolation=1", "--publish", "127.0.0.1::8090", "--mount", "type=volume,src="+name+"-home,dst=/home/ubuntu", "--shm-size", "1g", "--memory", "4g", "--cpus", "2", "--pids-limit", "4096", "--cap-add", "SYS_ADMIN", "--cap-add", "NET_ADMIN", "--device", "/dev/net/tun", "--security-opt", "apparmor=unconfined", "--security-opt", "no-new-privileges:true", "--restart", "unless-stopped", "--env", "OPENVIBELY_COMPUTER_TOKEN="+hex.EncodeToString(secret), "--env", "TZ="+zone, image)
+	_, err = p.docker(ctx, nil, "run", "-d", "--name", name, "--label", "openvibely.project="+id, "--label", "openvibely.computer-isolation=1", "--publish", "127.0.0.1::8090", "--mount", "type=volume,src="+name+"-home,dst=/home/ubuntu", "--shm-size", "1g", "--memory", strconv.Itoa(resources.MemoryGiB)+"g", "--cpus", strconv.Itoa(resources.CPUs), "--pids-limit", strconv.Itoa(resources.PidsLimit), "--cap-add", "SYS_ADMIN", "--cap-add", "NET_ADMIN", "--device", "/dev/net/tun", "--security-opt", "apparmor=unconfined", "--security-opt", "no-new-privileges:true", "--restart", "unless-stopped", "--env", "OPENVIBELY_COMPUTER_TOKEN="+hex.EncodeToString(secret), "--env", "TZ="+zone, "--env", "OPENVIBELY_COMPUTER_CPUS="+strconv.Itoa(resources.CPUs), "--env", "OPENVIBELY_COMPUTER_MEMORY_GIB="+strconv.Itoa(resources.MemoryGiB), image)
 	if err != nil {
 		return ComputerConnection{}, err
 	}
@@ -402,4 +423,15 @@ func (p *LocalComputerProvisioner) RemoveProject(ctx context.Context, id string)
 func (p *LocalComputerProvisioner) CheckAvailable(ctx context.Context) error {
 	_, err := p.docker(ctx, nil, "info", "--format", "{{.ServerVersion}}")
 	return err
+}
+
+func (p *LocalComputerProvisioner) resourceSettings(ctx context.Context, id string) (models.ComputerResources, error) {
+	if p.resources == nil {
+		return models.DefaultComputerResources(), nil
+	}
+	v, err := p.resources(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.DefaultComputerResources(), nil
+	}
+	return v, err
 }

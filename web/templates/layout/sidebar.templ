@@ -340,7 +340,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/analytics?' + nextAnalyticsParams.toString();
 						} else if (currentPath.includes('/alerts')) {
 							newUrl = '/alerts?project_id=' + encodeURIComponent(newProjectId);
-						} else if (currentPath.includes('/workers')) {
+						} else if (currentPath === '/settings/computer') {
+ newUrl = '/settings/computer?project_id=' + encodeURIComponent(newProjectId);
+ } else if (currentPath.includes('/workers')) {
 							newUrl = (currentPath === '/settings/workers' ? '/settings/workers' : '/workers') + '?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/insights')) {
 							newUrl = '/insights?project_id=' + encodeURIComponent(newProjectId);
@@ -678,7 +680,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var currentPath = new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href).pathname;
 							document.querySelectorAll('[data-nav-base], [data-sidebar-path]').forEach(function(link) {
 								var base = link.getAttribute('data-nav-base') || link.getAttribute('data-sidebar-path');
-                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/plugin-pages)(\/|$)/.test(currentPath));
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/computer|settings\/plugin-pages)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
