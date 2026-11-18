@@ -44,6 +44,13 @@ func TestProjectComputerSettingsPage(t *testing.T) {
 	}
 	rec := request(http.MethodPost, "cpus=oops&memory_gib=4&pids_limit=4096", "", true)
 	require.Contains(t, rec.Body.String(), "Enter whole numbers")
+	require.Contains(t, rec.Body.String(), "hidden data-computer-settings-error")
+	require.NotContains(t, rec.Body.String(), `class="alert alert-error mt-4"`)
+	alerts, err := h.alertSvc.ListByProject(t.Context(), p.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Equal(t, models.SeverityError, alerts[0].Severity)
+	require.Contains(t, alerts[0].Message, "Enter whole numbers")
 	rec = request(http.MethodPost, "cpus=0&memory_gib=4&pids_limit=4096&idle_minutes=30&time_zone=UTC", "", true)
 	require.Contains(t, rec.Body.String(), "1–64 CPUs")
 	rec = request(http.MethodPost, "cpus=2&memory_gib=4&pids_limit=8192", "https://other.example", true)

@@ -96,6 +96,13 @@ func (h *Handler) ProjectComputerSettings(c echo.Context) error {
 			}
 		}
 	}
+	if c.Request().Method == http.MethodPost && message != "" && !saved && h.alertSvc != nil {
+		alert := &models.Alert{ProjectID: id, Type: models.AlertCustom, Severity: models.SeverityError,
+			Title: "Project computer settings could not be applied", Message: message, Source: "project_computer"}
+		if err := h.alertSvc.Create(c.Request().Context(), alert); err != nil {
+			c.Logger().Errorf("Could not create computer settings failure alert: %v", err)
+		}
+	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.ComputerSettingsContent(options, id, values, available, saved, message))
 	}
