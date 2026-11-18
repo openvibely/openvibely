@@ -78,6 +78,30 @@ func TestProjectComputerLocalDockerLifecycle(t *testing.T) {
 		t.Fatalf("persistent home lost: %q", got)
 	}
 	call("computer", `{"action":"get_desktop_state"}`)
+	// Check the actual desktop processes, not docker exec's own affinity:
+	// exec sessions do not inherit the image entrypoint's scheduler settings.
+	out, err := exec.Command("docker", "exec", name, "python3", "-c", `
+import os
+checked = set()
+for pid in os.listdir('/proc'):
+    if not pid.isdigit():
+        continue
+    try:
+        with open('/proc/' + pid + '/comm') as f:
+            name = f.read().strip()
+        if name not in ('chromium', 'xfwm4', 'Xvfb', 'openvibely-compu'):
+            continue
+        cpus = os.sched_getaffinity(int(pid))
+    except (FileNotFoundError, ProcessLookupError):
+        continue
+    assert 1 <= len(cpus) <= 2, (name, pid, cpus)
+    checked.add(name)
+assert 'Xvfb' in checked, checked
+print('CPU affinity verified:', sorted(checked))
+`).CombinedOutput()
+	if err != nil {
+		t.Fatalf("desktop CPU affinity: %v: %s", err, out)
+	}
 	call("release_computer", `{}`)
 }
 

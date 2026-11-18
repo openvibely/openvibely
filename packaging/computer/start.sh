@@ -9,7 +9,15 @@ if [ "$desktop_base" -eq 0 ]; then
   chmod 0711 /home/ubuntu
   chmod 0700 /run/ov-desktops
   chmod 0711 /home/ubuntu/.desktops
-  exec openvibely-computer
+  # Match the two-CPU quota with inherited affinity. Quotas alone leave every
+  # host CPU visible to browser/graphics worker pools. Select from the allowed
+  # CPUs rather than assuming CPUs 0 and 1 exist (rootless/nested Docker).
+  exec python3 -c '
+import os
+cpus = sorted(os.sched_getaffinity(0))[:2]
+os.sched_setaffinity(0, cpus)
+os.execvp("openvibely-computer", ["openvibely-computer"])
+'
 fi
 [ "${OPENVIBELY_ISOLATED:-}" = 1 ] || exit 1
 base="/home/ubuntu/.desktops/$OPENVIBELY_DESKTOP_ID"
