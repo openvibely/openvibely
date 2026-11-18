@@ -99,6 +99,7 @@ func (p *LocalComputerProvisioner) resolve(ctx context.Context, id string, curre
 			Env    []string
 			Labels map[string]string
 		}
+		HostConfig      struct{ PidsLimit int64 }
 		State           struct{ Running bool }
 		NetworkSettings struct {
 			Ports map[string][]struct{ HostIP, HostPort string }
@@ -134,6 +135,13 @@ func (p *LocalComputerProvisioner) resolve(ctx context.Context, id string, curre
 	}
 	if c.Token == "" {
 		return ComputerConnection{}, errors.New("project computer requires authentication; recreate its container while retaining its volume")
+	}
+	// Reconcile resource policy during readiness, without restarting desktops.
+	// Cleanup uses Resolve (current=false) and must remain side-effect free.
+	if current && rows[0].HostConfig.PidsLimit != 4096 {
+		if _, err := p.docker(ctx, nil, "update", "--pids-limit", "4096", computerContainerName(id)); err != nil {
+			return ComputerConnection{}, fmt.Errorf("update computer process limit: %w", err)
+		}
 	}
 	return c, nil
 }
