@@ -462,24 +462,17 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
           });
           continue;
         }
-        for (const [value, offset, color] of [
-          [p, 0, "used"],
-          [100 - p, -p, "remaining"],
-        ]) {
-          if (!value) continue;
-          add("circle", {
-            cx: 20,
-            cy: 20,
-            r,
-            fill: "none",
-            pathLength: 100,
-            stroke: "var(--ov-usage-" + color + ")",
-            "stroke-width": 1.67,
-            "vector-effect": "non-scaling-stroke",
-            "stroke-dasharray": value + " 100",
-            "stroke-dashoffset": offset,
-            transform: "rotate(-90 20 20)",
-          });
+        const stroke = {fill: "none", "stroke-width": 1.67, "vector-effect": "non-scaling-stroke"};
+        add("circle", {cx: 20, cy: 20, r, ...stroke,
+          stroke: p === 0 ? "var(--ov-usage-remaining)" : "var(--ov-usage-used)"});
+        if (p > 0 && p < 100) {
+          // Draw the remaining arc in viewBox coordinates so scaling the icon
+          // cannot change its length relative to the non-scaling stroke.
+          const angle = 2 * Math.PI * p / 100;
+          const x = 20 + r * Math.sin(angle);
+          const y = 20 - r * Math.cos(angle);
+          add("path", {...stroke, stroke: "var(--ov-usage-remaining)",
+            d: `M ${x} ${y} A ${r} ${r} 0 ${p < 50 ? 1 : 0} 1 20 ${20 - r}`});
         }
       }
     if (style === "logos") {
