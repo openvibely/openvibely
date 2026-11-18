@@ -840,6 +840,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/computer-stream", h.ProjectComputerNativeStream)
 	e.GET("/projects/:id/computer", h.ProjectComputerPage)
 	e.GET("/projects/:id/computer/status", h.ProjectComputerStatus)
+	e.POST("/projects/:id/computer/error", h.ProjectComputerError)
 	e.GET("/projects/:id/computer/chrome-grants", h.ProjectComputerChromeGrants)
 	e.POST("/projects/:id/computer/chrome-grants", h.ProjectComputerChromeGrants)
 	e.GET("/projects/:id/computer/chrome", h.ProjectComputerChrome)
