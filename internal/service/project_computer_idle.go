@@ -47,6 +47,9 @@ func (s *ProjectComputerService) runIdleMaintenance(ctx context.Context, interva
 				}
 				go func() {
 					defer s.active.Delete(key)
+					upgrade, done := context.WithTimeout(ctx, 15*time.Minute)
+					_ = s.reconcileComputerImage(upgrade, id)
+					done()
 					sweep, cancel := context.WithTimeout(ctx, 45*time.Second)
 					defer cancel()
 					_ = s.reconcileDeletedDesktops(sweep, id)

@@ -187,7 +187,7 @@ func (s *ProjectComputerService) SaveSettings(ctx context.Context, id string, v 
 			return fmt.Errorf("Settings saved, but the process limit could not be applied: %w", err)
 		}
 	}
-	if local != nil && v.Enabled {
+	if local != nil && v.Enabled && (restart || updateLimit) {
 		actual, err := local.inspectSettings(ctx, id)
 		if err != nil {
 			return fmt.Errorf("Settings saved, but verification failed: %w", err)

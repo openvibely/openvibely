@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -180,7 +181,12 @@ func TestComputerSettingsApplyOnSave(t *testing.T) {
 	db := teststores.New(t)
 	project := &models.Project{Name: "Immediate settings"}
 	require.NoError(t, db.Projects.Create(t.Context(), project))
+	var unavailable atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if unavailable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.Write([]byte(`{"isolation":1,"viewer_connections":1}`))
 	}))
 	defer server.Close()
@@ -285,9 +291,11 @@ func TestComputerSettingsApplyOnSave(t *testing.T) {
 	require.Equal(t, 2, updates)
 	require.Equal(t, 1, runs, "process limit must not restart")
 	settings.PreviewQuality = "low"
+	unavailable.Store(true)
 	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, settings))
 	require.Equal(t, 2, updates)
 	require.Equal(t, 1, runs, "quality must not restart")
+	unavailable.Store(false)
 	pids = 4096
 	ignoreUpdate = true
 	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, settings), "does not match")
