@@ -76,8 +76,12 @@ func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
 			failStop := name == "disabled-stop-failure"
 			failRemove, failStart := name == "remove-failure", name == "start-failure"
 			mutations := []string{}
+			cleanups := 0
 			p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
 				switch args[0] {
+				case "image":
+					cleanups++
+					return nil, nil
 				case "info":
 					return nil, nil
 				case "container":
@@ -149,10 +153,15 @@ func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
 				return
 			}
 			require.True(t, running)
+			if name == "running" || name == "stopped" || name == "remove-failure" {
+				require.Equal(t, 1, cleanups)
+			}
+			cleanupCount := cleanups
 			require.Equal(t, "new-image", image)
 			mutations = nil
 			require.NoError(t, svc.reconcileComputerImage(t.Context(), project.ID))
 			require.Empty(t, mutations)
+			require.Equal(t, cleanupCount, cleanups)
 			// A current, running container must still pass readiness.
 			unhealthy.Store(true)
 			require.ErrorContains(t, svc.reconcileComputerImage(t.Context(), project.ID), "not ready")

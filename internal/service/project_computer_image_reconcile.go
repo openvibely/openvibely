@@ -54,5 +54,12 @@ func (s *ProjectComputerService) reconcileComputerImage(ctx context.Context, id 
 		return nil
 	}
 	// Normal startup checks active leases and waits for health/isolation readiness.
-	return s.startLocked(ctx, id, false)
+	if err := s.startLocked(ctx, id, false); err != nil {
+		return err
+	}
+	// Only upgrades need another sweep; ordinary readiness checks do not.
+	if actual != nil && actual.Config.Image != image {
+		_ = p.cleanupImages(ctx)
+	}
+	return nil
 }
