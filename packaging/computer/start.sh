@@ -14,7 +14,7 @@ fi
 [ "${OPENVIBELY_ISOLATED:-}" = 1 ] || exit 1
 base="/home/ubuntu/.desktops/$OPENVIBELY_DESKTOP_ID"
 run_desktop() {
- setpriv --reuid="$OPENVIBELY_DESKTOP_UID" --regid="$OPENVIBELY_DESKTOP_UID" --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$base/home" DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" XDG_CONFIG_HOME="$base/config" XDG_CACHE_HOME="$base/cache" TZ="${TZ:-UTC}" LANG=C.UTF-8 PLAYWRIGHT_BROWSERS_PATH=/opt/browsers "$@"
+ setpriv --reuid="$OPENVIBELY_DESKTOP_UID" --regid="$OPENVIBELY_DESKTOP_UID" --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$base/home" DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" XDG_CONFIG_HOME="$base/config" XDG_CACHE_HOME="$base/cache" TZ="${TZ:-UTC}" LANG=C.UTF-8 "$@"
 }
 # Only isolated task desktops reach this point; the supervisor execs above.
 [ "$desktop_base" -gt 0 ] || exit 1
@@ -52,9 +52,7 @@ run_desktop x11vnc -noshm -display "$DISPLAY" -localhost -rfbport "$control" -fo
 run_desktop websockify "127.0.0.1:$view_ws" "127.0.0.1:$vnc" >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/websockify-view.log" 2>&1 &
 run_desktop websockify "127.0.0.1:$control_ws" "127.0.0.1:$control" >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/websockify-control.log" 2>&1 &
 run_desktop dbus-run-session -- xfce4-session >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/xfce.log" 2>&1 &
-IFS= read -r chrome < /usr/local/lib/openvibely-chromium-path
-[[ "$chrome" = /* && -x "$chrome" ]] || exit 1
-run_desktop "$chrome" --no-sandbox --disable-dev-shm-usage --no-first-run --no-default-browser-check --password-store=basic --remote-debugging-address=127.0.0.1 --remote-debugging-port="$cdp" --user-data-dir="$profile" --window-size=1280,800 about:blank >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/browser.log" 2>&1 &
+run_desktop /usr/local/bin/openvibely-browser --restore-last-session >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/browser.log" 2>&1 &
 browser_pid=$!
 openvibely-computer &
 bridge_pid=$!

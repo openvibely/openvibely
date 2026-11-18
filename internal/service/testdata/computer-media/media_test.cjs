@@ -7,7 +7,7 @@ const {chromium} = require('/opt/browser/node_modules/playwright');
 
 test('bundled browser decodes H.264 video and AAC audio', {timeout: 30000}, async () => {
   const browser = await chromium.launch({
-    executablePath: chromium.executablePath(),
+    executablePath: require('node:fs').readFileSync('/usr/local/lib/openvibely-chromium-path','utf8').trim(),
     headless: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });

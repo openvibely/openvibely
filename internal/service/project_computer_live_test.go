@@ -74,7 +74,7 @@ func TestProjectComputerLocalDockerLifecycle(t *testing.T) {
 	if err := svc.Start(t.Context(), project.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := call("computer_files", `{"operation":"read_file","input":{"file_path":"persist.txt"}}`); got != "durable" {
+	if got := call("computer_files", `{"operation":"read_file","input":{"file_path":"persist.txt"}}`); got != "1\tdurable\n" {
 		t.Fatalf("persistent home lost: %q", got)
 	}
 	call("computer", `{"action":"get_desktop_state"}`)
@@ -134,7 +134,7 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 		call(i, "project_browser", `{"action":"navigate","url":"http://127.0.0.1:10001/json/version"}`)
 	}
 	for i := range ids {
-		if got := call(i, "computer_files", `{"operation":"read_file","input":{"file_path":"same.txt"}}`); got != fmt.Sprintf("task-%d", i) {
+		if got := call(i, "computer_files", `{"operation":"read_file","input":{"file_path":"same.txt"}}`); got != fmt.Sprintf("1\ttask-%d\n", i) {
 			t.Fatal("task files shared", got)
 		}
 		call(i, "computer", `{"action":"get_desktop_state"}`)
@@ -189,7 +189,7 @@ func TestProjectComputerTaskDesktopsLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range ids {
-		if got := call(i, "computer_files", `{"operation":"read_file","input":{"file_path":"same.txt"}}`); got != fmt.Sprintf("task-%d", i) {
+		if got := call(i, "computer_files", `{"operation":"read_file","input":{"file_path":"same.txt"}}`); got != fmt.Sprintf("1\ttask-%d\n", i) {
 			t.Fatal("session persistence failed", got)
 		}
 		call(i, "release_computer", `{}`)

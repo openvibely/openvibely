@@ -14,20 +14,25 @@ RUN mkdir -p /licenses/coder-websocket /licenses/go /licenses/jsonschema && \
 
 FROM node:22-bookworm-slim AS node-runtime
 
-FROM ubuntu:24.04
-# Use a supported Node runtime on both amd64 and arm64; Ubuntu 24.04 ships Node 18.
+FROM debian:trixie-slim
+# Keep the same Node runtime for both supported architectures.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=node-runtime /usr/local/LICENSE /usr/share/licenses/openvibely-computer/node/LICENSE
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
-ENV DEBIAN_FRONTEND=noninteractive DISPLAY=:99 PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
-RUN apt-get update && apt-get install -y --no-install-recommends x11vnc websockify git curl python3 python3-venv jq ripgrep zip unzip xfce4 xfce4-terminal x11-utils wmctrl xvfb xdotool imagemagick dbus-x11 ca-certificates tzdata fonts-dejavu tini util-linux iproute2 iptables slirp4netns xauth && npm install --prefix /opt/browser playwright@1.63.0 && /opt/browser/node_modules/.bin/playwright install --with-deps --no-shell chromium && chmod -R a+rX /opt/browsers && rm -rf /opt/browsers/ffmpeg-* /var/lib/apt/lists/* /root/.npm
-# Playwright 1.63 supplies Chrome for Testing with H.264/AAC on Linux arm64 too.
-# Only the visible browser executable is used; recordings and headless shell are not shipped.
-# Resolve the architecture-specific executable once, rather than loading Playwright
-# for every task desktop startup.
-RUN node -e 'const fs = require("fs"); const path = require("/opt/browser/node_modules/playwright").chromium.executablePath(); fs.accessSync(path, fs.constants.X_OK); fs.writeFileSync("/usr/local/lib/openvibely-chromium-path", path + "\n", {mode: 0o644});'
+ENV DEBIAN_FRONTEND=noninteractive DISPLAY=:99
+# Debian installs the native Chromium package for the image's target architecture.
+RUN apt-get update && apt-get install -y --no-install-recommends chromium x11vnc websockify git curl python3 python3-venv jq ripgrep zip unzip xfce4 xfce4-terminal x11-utils wmctrl xvfb xdotool imagemagick dbus-x11 ca-certificates tzdata fonts-dejavu tini util-linux iproute2 iptables slirp4netns xauth && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --prefix /opt/browser playwright@1.63.0 && rm -rf /var/lib/apt/lists/* /root/.npm
+# Preserve the existing volume layout; task accounts are created by the supervisor.
+RUN mkdir -p /home/ubuntu && printf '/usr/bin/chromium\n' > /usr/local/lib/openvibely-chromium-path
+COPY packaging/computer/open-browser.sh /usr/local/bin/openvibely-browser
+RUN chmod +x /usr/local/bin/openvibely-browser && \
+    sed -i 's|Exec=/usr/bin/chromium|Exec=/usr/local/bin/openvibely-browser|;s|Exec=chromium|Exec=/usr/local/bin/openvibely-browser|' /usr/share/applications/chromium.desktop && \
+    update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/local/bin/openvibely-browser 200 && \
+    mkdir -p /etc/xdg/xfce4 && printf '[Desktop Entry]\nVersion=1.0\nType=X-XFCE-Helper\nName=Chromium\nIcon=chromium\nX-XFCE-Category=WebBrowser\nX-XFCE-Commands=/usr/local/bin/openvibely-browser;\nX-XFCE-CommandsWithParameter=/usr/local/bin/openvibely-browser "%%s";\n' > /usr/share/xfce4/helpers/openvibely-chromium.desktop && \
+    printf 'WebBrowser=openvibely-chromium\n' > /etc/xdg/xfce4/helpers.rc && \
+    printf '[Default Applications]\nx-scheme-handler/http=chromium.desktop\nx-scheme-handler/https=chromium.desktop\ntext/html=chromium.desktop\n' > /etc/xdg/mimeapps.list
 COPY --from=builder /licenses/ /usr/share/licenses/openvibely-computer/
 COPY packaging/computer/licenses.cjs /tmp/openvibely-licenses.cjs
 RUN node /tmp/openvibely-licenses.cjs && rm /tmp/openvibely-licenses.cjs

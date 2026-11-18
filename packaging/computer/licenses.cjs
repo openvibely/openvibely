@@ -9,29 +9,29 @@ async function main() {
   fs.mkdirSync(root, {recursive: true});
   const inventory = execFileSync('dpkg-query', ['-W', '-f=${db:Status-Status}\t${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n'], {encoding: 'utf8'})
     .split('\n').filter(line => line.startsWith('installed\t')).map(line => line.slice(10)).join('\n') + '\n';
-  fs.writeFileSync(path.join(root, 'ubuntu-packages.tsv'), inventory);
+  fs.writeFileSync(path.join(root, 'debian-packages.tsv'), inventory);
   const sources = new Map();
   for (const line of inventory.trim().split('\n')) {
     const [, , name, version] = line.split('\t');
-    if (!name || !version) throw new Error(`Missing Ubuntu source identity: ${line}`);
-    sources.set(`${name}\t${version}`, `https://launchpad.net/ubuntu/+source/${encodeURIComponent(name)}/${encodeURIComponent(version)}`);
+    if (!name || !version) throw new Error(`Missing Debian source identity: ${line}`);
+    sources.set(`${name}\t${version}`, `https://snapshot.debian.org/package/${encodeURIComponent(name)}/${encodeURIComponent(version)}/`);
   }
-  fs.writeFileSync(`${root}/ubuntu-sources.tsv`, 'source_package\tsource_version\tsource_url\n' +
+  fs.writeFileSync(`${root}/debian-sources.tsv`, 'source_package\tsource_version\tsource_url\n' +
     [...sources].sort(([a], [b]) => a.localeCompare(b)).map(([identity, url]) => `${identity}\t${url}`).join('\n') + '\n');
-  fs.writeFileSync(`${root}/SOURCES.txt`, `Ubuntu dependency source downloads
+  fs.writeFileSync(`${root}/SOURCES.txt`, `Debian dependency source downloads
 
-Ubuntu publishes the source for the Ubuntu packages in this image:
-https://launchpad.net/ubuntu/+source
+Debian publishes the source for the Debian packages in this image:
+https://snapshot.debian.org/
 
-See ubuntu-sources.tsv in this directory for a link to each exact source
+See debian-sources.tsv in this directory for a link to each exact source
 package version installed in this image. Open its link and use the source
 package downloads, including the .dsc file, original source archive(s), and
-Debian/Ubuntu patch or packaging archive. These include Ubuntu's changes;
+Debian patch or packaging archive. These include Debian's changes;
 the upstream project's latest source alone may not match the installed binary.
-ubuntu-packages.tsv maps installed binary packages to those source versions.
+debian-packages.tsv maps installed binary packages to those source versions.
 
-These links cover packages installed through Ubuntu, not the separately
-installed Node.js, npm, Playwright, browser, or Go dependencies. Their notices and version
+These links cover packages installed through Debian, not the separately
+installed Node.js, npm, Playwright, or Go dependencies. Their notices and version
 information are also recorded in this directory.
 
 If matching source cannot be obtained, contact admin@openvibely.ai and identify
@@ -41,8 +41,8 @@ the image and package version. See SOURCE-OFFER.txt for our source offer.
     const name = line.split('\t')[0].split(':')[0];
     const copyright = `/usr/share/doc/${name}/copyright`;
     if (!fs.existsSync(copyright)) throw new Error(`Missing package copyright: ${name}`);
-    fs.mkdirSync(`${root}/ubuntu/${name}`, {recursive: true});
-    fs.copyFileSync(copyright, `${root}/ubuntu/${name}/copyright`);
+    fs.mkdirSync(`${root}/debian/${name}`, {recursive: true});
+    fs.copyFileSync(copyright, `${root}/debian/${name}/copyright`);
   }
   fs.cpSync('/usr/share/common-licenses', `${root}/common-licenses`, {recursive: true, dereference: true});
   function collect(directory, relative = '') {
@@ -59,7 +59,7 @@ the image and package version. See SOURCE-OFFER.txt for our source offer.
   collect('/opt/browser/node_modules');
   collect('/usr/local/lib/node_modules', 'node-runtime');
   fs.writeFileSync(`${root}/node/version.txt`, process.version + '\n');
-  const browser = await chromium.launch({executablePath: chromium.executablePath(), args: ['--no-sandbox']});
+  const browser = await chromium.launch({executablePath: fs.readFileSync('/usr/local/lib/openvibely-chromium-path','utf8').trim(), args: ['--no-sandbox']});
   try {
     const page = await browser.newPage();
     await page.goto('chrome://credits/');

@@ -11,7 +11,7 @@ const {run,browserError,createRunner}=require('./browser.cjs');
 test('project browser features in isolated Chromium',{timeout:30000},async t=>{
  const home=await fs.mkdtemp(path.join(os.tmpdir(),'ov-browser-test-'));
  const previousHome=process.env.HOME;process.env.HOME=home;process.env.OPENVIBELY_CDP_PORT='19222';
- const browser=await chromium.launch({headless:true,executablePath:chromium.executablePath(),args:['--no-sandbox','--remote-debugging-port=19222']});
+ const browser=await chromium.launch({headless:true,executablePath:require('node:fs').readFileSync('/usr/local/lib/openvibely-chromium-path','utf8').trim(),args:['--no-sandbox','--remote-debugging-port=19222']});
  const client=await chromium.connectOverCDP('http://127.0.0.1:19222');
  const server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<h1>Fixture</h1><button id="save" onclick="this.textContent=\'Saved\'">Save</button><input id="normal"><input type="password" id="password">');});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));

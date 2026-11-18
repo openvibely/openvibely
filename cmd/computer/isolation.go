@@ -40,7 +40,7 @@ func taskEnvironment(name string) []string {
 	return []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=" + home,
 		"OPENVIBELY_DESKTOP_ID=" + name, "OPENVIBELY_DESKTOP_PORT=10000", "OPENVIBELY_ISOLATED=1",
 		"OPENVIBELY_DESKTOP_UID=" + strconv.FormatUint(uint64(uid), 10),
-		"TZ=" + os.Getenv("TZ"), "DISPLAY=:100", "PLAYWRIGHT_BROWSERS_PATH=/opt/browsers"}
+		"TZ=" + os.Getenv("TZ"), "DISPLAY=:100"}
 }
 func shellCommand(ctx context.Context, command, directory string) (*exec.Cmd, error) {
 	if os.Getenv("OPENVIBELY_ISOLATED") != "1" {
@@ -357,7 +357,7 @@ func desktopCommand(ctx context.Context, name string, args ...string) *exec.Cmd 
 	prefix := []string{"--reuid=" + identity, "--regid=" + identity, "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", name}
 	cmd := exec.CommandContext(ctx, "/usr/bin/setpriv", append(prefix, args...)...)
 	base := filepath.Join("/home/ubuntu/.desktops", os.Getenv("OPENVIBELY_DESKTOP_ID"))
-	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + computerHome(), "DISPLAY=:100", "XAUTHORITY=/tmp/ov-display-authority", "XDG_CONFIG_HOME=" + base + "/config", "XDG_CACHE_HOME=" + base + "/cache", "TZ=" + os.Getenv("TZ"), "PLAYWRIGHT_BROWSERS_PATH=/opt/browsers", "LANG=C.UTF-8"}
+	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + computerHome(), "DISPLAY=:100", "XAUTHORITY=/tmp/ov-display-authority", "XDG_CONFIG_HOME=" + base + "/config", "XDG_CACHE_HOME=" + base + "/cache", "TZ=" + os.Getenv("TZ"), "LANG=C.UTF-8"}
 	return cmd
 }
 
