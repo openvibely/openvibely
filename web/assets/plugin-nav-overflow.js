@@ -2,15 +2,10 @@
 // in a top-layer menu so the scrolling rail cannot clip them.
 (function () {
  'use strict';
- let nav, inner, more, menu, frame, resize, mutation, hiddenEntries = [];
- function close(focus) {
-  if (!menu) return;
+ let nav, inner, more, menu, controller, frame, resize, mutation, hiddenEntries = [];
+ function hide() {
   if (typeof menu.hidePopover === 'function' && menu.matches(':popover-open')) menu.hidePopover();
   menu.hidden = true;
-  if (more) {
-   more.querySelector('button').setAttribute('aria-expanded', 'false');
-   if (focus) more.querySelector('button').focus();
-  }
  }
  function syncSelection() {
   if (!more) return;
@@ -21,7 +16,7 @@
  function fit() {
   frame = null;
   if (!nav || !nav.isConnected || !nav.getClientRects().length) return;
-  close(false);
+  controller?.close();
   const entries = Array.from(nav.querySelectorAll('[data-plugin-nav-entry]'));
   more = nav.querySelector('[data-plugin-nav-overflow]');
   if (!more) return;
@@ -44,8 +39,6 @@
   if (!frame) frame = requestAnimationFrame(fit);
  }
  function open() {
-  if (!hiddenEntries.length) return;
-  if (!menu.hidden) { close(true); return; }
   menu.replaceChildren();
   hiddenEntries.forEach(entry => {
    const original = entry.querySelector('a');
@@ -64,7 +57,6 @@
   const rect = more.getBoundingClientRect();
   menu.style.left = Math.max(8, Math.min(rect.right + 8, window.innerWidth - menu.offsetWidth - 8)) + 'px';
   menu.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - menu.offsetHeight - 8)) + 'px';
-  more.querySelector('button').setAttribute('aria-expanded', 'true');
   menu.querySelector('a').focus();
  }
  function init() {
@@ -73,7 +65,7 @@
   if (current === nav) { schedule(); return; }
   if (resize) resize.disconnect();
   if (mutation) mutation.disconnect();
-  close(false);
+  controller?.close();
   nav = current; inner = nav.closest('.sidebar-inner');
   if (!inner) return;
   if (!menu) {
@@ -81,29 +73,30 @@
    menu.id = 'plugin-pages-overflow-menu';
    menu.className = 'ov-menu ov-menu-actions menu';
    menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'More pages');
-   if (typeof menu.showPopover === 'function') menu.setAttribute('popover', 'auto');
+   if (typeof menu.showPopover === 'function') menu.setAttribute('popover', 'manual');
    menu.hidden = true;
    menu.style.cssText = 'position:fixed;inset:auto;margin:0;width:280px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:auto;z-index:1000;';
    document.body.append(menu);
-   menu.addEventListener('toggle', e => {
-    if (e.newState === 'closed') { menu.hidden = true; if (more) more.querySelector('button').setAttribute('aria-expanded', 'false'); }
+   controller = window.ovMenuController.create({
+    trigger: () => more?.querySelector('button'),
+    panels: () => [menu],
+    isOpen: () => !menu.hidden,
+    open,
+    close: hide,
    });
-   menu.addEventListener('click', e => { if (e.target.closest('a')) close(false); });
+   menu.addEventListener('click', e => { if (e.target.closest('a')) controller?.close(); });
    menu.addEventListener('keydown', e => {
     const links = Array.from(menu.querySelectorAll('a'));
     let i = links.indexOf(document.activeElement);
-    if (e.key === 'Escape') { e.preventDefault(); close(true); }
-    else if (e.key === 'Tab') close(false);
-    else if (['ArrowDown','ArrowUp','Home','End'].includes(e.key)) {
+    if (['ArrowDown','ArrowUp','Home','End'].includes(e.key)) {
      e.preventDefault();
      i = e.key === 'Home' ? 0 : e.key === 'End' ? links.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + links.length) % links.length;
      links[i].focus();
     }
    });
-   document.addEventListener('pointerdown', e => { if (!menu.contains(e.target) && more && !more.contains(e.target)) close(false); });
   }
-  nav.addEventListener('click', e => { if (e.target.closest('[data-plugin-nav-overflow] button')) open(); });
-  nav.addEventListener('keydown', e => { if (e.key === 'ArrowDown' && e.target.closest('[data-plugin-nav-overflow] button')) { e.preventDefault(); open(); } });
+  nav.addEventListener('click', e => { if (e.target.closest('[data-plugin-nav-overflow] button') && hiddenEntries.length) controller.toggle(e); });
+  nav.addEventListener('keydown', e => { if (e.key === 'ArrowDown' && e.target.closest('[data-plugin-nav-overflow] button') && hiddenEntries.length) { e.preventDefault(); controller.open(e); } });
   resize = new ResizeObserver(schedule); resize.observe(inner); resize.observe(nav);
   mutation = new MutationObserver(schedule); mutation.observe(nav, {childList:true, subtree:true});
   schedule();

@@ -282,11 +282,6 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     open: () => showSurface(popup),
     close: () => hideSurface(popup),
   });
-  function closeOverflow(focus = false) {
-    hideSurface(overflow);
-    more.setAttribute("aria-expanded", "false");
-    if (focus) more.focus();
-  }
   const nav = document.querySelector("#sidebar .sidebar-inner > .menu");
   const more = el("button", "", "");
   more.id = "rail-more";
@@ -316,18 +311,20 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       n.remove();
     }
   });
-  more.onclick = () => {
-    const open = !surfaceShown(overflow);
-    usageMenu.close();
-    if (open) {
+  const overflowMenu = window.ovMenuController.create({
+    trigger: more,
+    panels: () => [overflow],
+    isOpen: () => surfaceShown(overflow),
+    open: () => {
       showSurface(overflow);
-      more.setAttribute("aria-expanded", "true");
       position(overflow, more, true);
       overflow.querySelector("a")?.focus();
-    } else closeOverflow(true);
-  };
+    },
+    close: () => hideSurface(overflow),
+  });
+  more.onclick = (event) => overflowMenu.toggle(event);
   overflow.addEventListener("click", (e) => {
-    if (e.target.closest("a")) closeOverflow();
+    if (e.target.closest("a")) overflowMenu.close();
   });
   overflow.addEventListener("keydown", (e) => {
     const links = [...overflow.querySelectorAll("a")];
@@ -733,7 +730,6 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     if (shown() && state.selected === a.key) drawPopup();
   }
   async function openAccount(a) {
-    closeOverflow();
     if (shown() && state.selected === a.key) {
       usageMenu.close(true);
       return;
@@ -839,21 +835,9 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       }
     }
   }
-  document.addEventListener("click", (e) => {
-    if (!overflow.contains(e.target) && !more.contains(e.target))
-      closeOverflow();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      if (surfaceShown(overflow)) {
-        e.preventDefault();
-        closeOverflow(true);
-      }
-    }
-  });
   window.addEventListener("resize", () => {
     usageMenu.close();
-    closeOverflow();
+    overflowMenu.close();
   });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) refreshAll();
@@ -861,7 +845,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   document.body.addEventListener("htmx:afterSettle", (event) => {
     if (event.detail?.target?.id !== "main-content") return;
     usageMenu.close();
-    closeOverflow();
+    overflowMenu.close();
     refreshAll();
   });
   document.body.addEventListener("accountUsageChanged", (event) => {

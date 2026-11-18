@@ -177,8 +177,8 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.click(`#rail-more`)
 		b.waitFor("overflow destinations", `[...document.querySelectorAll('#rail-overflow .sidebar-text')].map(n=>n.textContent.trim()).join(',')`, "Analytics,Grades,Reflection,Pulse")
 		b.waitFor("exclusive popup", `String(!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
-		b.evaluate(`document.body.click(); 'dismissed'`)
-		b.waitFor("outside dismiss", `String(!document.getElementById('rail-overflow').matches(':popover-open'))`, "true")
+		b.clickMenuBackdrop(`[data-key="personal"]`)
+		b.waitFor("outside dismiss", `String(document.getElementById('rail-overflow').hidden && document.getElementById('rail-account-popup').hidden)`, "true")
 		// Exercise real theme application and every surface/layout combination. The
 		// popup must use the shared menu surface and both ring colors must resolve.
 		for _, theme := range themes.Catalog() {
