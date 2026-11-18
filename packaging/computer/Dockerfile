@@ -31,7 +31,7 @@ RUN chmod +x /usr/local/bin/openvibely-browser && \
     sed -i 's|Exec=/usr/bin/chromium|Exec=/usr/local/bin/openvibely-browser|;s|Exec=chromium|Exec=/usr/local/bin/openvibely-browser|' /usr/share/applications/chromium.desktop && \
     update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/local/bin/openvibely-browser 200 && \
     mkdir -p /etc/xdg/xfce4 && printf '[Desktop Entry]\nVersion=1.0\nType=X-XFCE-Helper\nName=Chromium\nIcon=chromium\nX-XFCE-Category=WebBrowser\nX-XFCE-Commands=/usr/local/bin/openvibely-browser;\nX-XFCE-CommandsWithParameter=/usr/local/bin/openvibely-browser "%%s";\n' > /usr/share/xfce4/helpers/openvibely-chromium.desktop && \
-    printf 'WebBrowser=openvibely-chromium\n' > /etc/xdg/xfce4/helpers.rc && \
+    printf 'WebBrowser=openvibely-chromium\nTerminalEmulator=xfce4-terminal\n' > /etc/xdg/xfce4/helpers.rc && \
     printf '[Default Applications]\nx-scheme-handler/http=chromium.desktop\nx-scheme-handler/https=chromium.desktop\ntext/html=chromium.desktop\n' > /etc/xdg/mimeapps.list
 COPY --from=builder /licenses/ /usr/share/licenses/openvibely-computer/
 COPY packaging/computer/licenses.cjs /tmp/openvibely-licenses.cjs
