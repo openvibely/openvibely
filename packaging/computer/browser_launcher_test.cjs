@@ -1,5 +1,6 @@
 // Opt-in check; Docker --init is needed for xvfb-run's startup signal handling:
-// docker run --rm --init --network none --entrypoint xvfb-run -v "$PWD/packaging/computer:/suite:ro" IMAGE --server-num=100 node --test /suite/browser_launcher_test.cjs
+// Use the production container's namespace permissions and no-new-privileges setting.
+// docker run --rm --init --network none --cap-add SYS_ADMIN --security-opt apparmor=unconfined --security-opt no-new-privileges:true --entrypoint xvfb-run -v "$PWD/packaging/computer:/suite:ro" IMAGE --server-num=100 node --test /suite/browser_launcher_test.cjs
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {spawn,execFile}=require('node:child_process');
@@ -10,12 +11,21 @@ const exec=promisify(execFile);
 
 test('desktop launcher reuses the task profile and restores tabs without adding blanks',{timeout:60000},async()=>{
  const base='/home/ubuntu/.desktops/task-launcher-fixture';
+ assert.equal(process.getuid(),0,'run this fixture in a disposable container as documented above');
+ const uid=1000,gid=1000;
  await fs.mkdir(base+'/home',{recursive:true});
+ await fs.chown(base,uid,gid);
+ await fs.chown(base+'/home',uid,gid);
+ // xvfb-run keeps its authority file in a root-only directory. Give the fixture
+ // user a private copy so both Chromium and the desktop shortcut can use X11.
+ await fs.copyFile(process.env.XAUTHORITY,base+'/Xauthority');
+ await fs.chown(base+'/Xauthority',uid,gid);
+ await fs.chmod(base+'/Xauthority',0o600);
  const server=require('node:http').createServer((req,res)=>res.end('Launcher fixture'));
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const url='http://127.0.0.1:'+server.address().port;
- const env={...process.env,HOME:base+'/home',XDG_CONFIG_HOME:base+'/config',XDG_CACHE_HOME:base+'/cache'};
- const launch=()=>spawn('/usr/local/bin/openvibely-browser',['--restore-last-session'],{env,stdio:'ignore'});
+ const env={...process.env,HOME:base+'/home',XAUTHORITY:base+'/Xauthority',XDG_CONFIG_HOME:base+'/config',XDG_CACHE_HOME:base+'/cache'};
+ const launch=()=>spawn('/usr/local/bin/openvibely-browser',['--restore-last-session'],{env,uid,gid,stdio:'ignore'});
  let child,browser;
  async function connect(){
   for(let n=0;n<100;n++){
@@ -34,9 +44,12 @@ test('desktop launcher reuses the task profile and restores tabs without adding 
  try{
   child=launch();browser=await connect();
   const context=browser.contexts()[0];
-  await context.pages()[0].goto(url+'/saved');
+  const page=context.pages()[0];
+  await page.goto('chrome://sandbox');
+  assert.match(await page.locator('body').innerText(),/Seccomp-BPF sandbox\s+Yes/);
+  await page.goto(url+'/saved');
   await context.addCookies([{name:'fixture',value:'retained',domain:'example.test',path:'/',expires:Math.floor(Date.now()/1000)+3600}]);
-  await exec('exo-open',['--launch','WebBrowser',url+'/launcher'],{env,timeout:10000});
+  await exec('exo-open',['--launch','WebBrowser',url+'/launcher'],{env,uid,gid,timeout:10000});
   for(let n=0;n<100&&!context.pages().some(p=>p.url()===url+'/launcher');n++)await new Promise(r=>setTimeout(r,50));
   assert.ok(context.pages().some(p=>p.url()===url+'/launcher'),'desktop shortcut did not use the task browser: '+JSON.stringify(context.pages().map(p=>p.url())));
   const before=context.pages().map(p=>p.url()).sort();
