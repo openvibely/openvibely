@@ -52,7 +52,7 @@ func TestComputerImageBuildShared(t *testing.T) {
 }
 
 func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
-	for _, name := range []string{"running", "stopped", "current-stopped", "disabled", "busy", "remove-failure", "start-failure"} {
+	for _, name := range []string{"running", "stopped", "current-stopped", "disabled", "disabled-running", "disabled-stop-failure", "busy", "remove-failure", "start-failure"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("OPENVIBELY_COMPUTER_IMAGE", "new-image")
 			db := teststores.New(t)
@@ -73,6 +73,7 @@ func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
 			if name == "current-stopped" {
 				image = "new-image"
 			}
+			failStop := name == "disabled-stop-failure"
 			failRemove, failStart := name == "remove-failure", name == "start-failure"
 			mutations := []string{}
 			p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
@@ -88,6 +89,10 @@ func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
 						"NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}},
 					}})
 				case "stop":
+					if failStop {
+						failStop = false
+						return nil, errors.New("stop failed")
+					}
 					running = false
 				case "rm":
 					if failRemove {
@@ -112,9 +117,13 @@ func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
 			}}
 			svc := NewProjectComputerService(db.Projects, p)
 			require.NoError(t, svc.repo.Configure(t.Context(), project.ID, "local"))
-			require.NoError(t, svc.repo.SetEnabled(t.Context(), project.ID, name != "disabled"))
+			require.NoError(t, svc.repo.SetEnabled(t.Context(), project.ID, !strings.HasPrefix(name, "disabled")))
 			if name == "busy" {
 				require.NoError(t, svc.repo.Reserve(t.Context(), project.ID, "agent"))
+			}
+			if failStop {
+				require.ErrorContains(t, svc.reconcileComputerImage(t.Context(), project.ID), "stop failed")
+				require.True(t, running)
 			}
 			if failRemove || failStart {
 				require.Error(t, svc.reconcileComputerImage(t.Context(), project.ID))
@@ -127,8 +136,15 @@ func TestComputerImageReconciliationFollowsEnabledToggle(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			if name == "disabled" {
+			if strings.HasPrefix(name, "disabled") {
 				require.False(t, running)
+				if name == "disabled" {
+					require.Empty(t, mutations)
+				} else {
+					require.Equal(t, []string{"stop"}, mutations)
+				}
+				mutations = nil
+				require.NoError(t, svc.reconcileComputerImage(t.Context(), project.ID))
 				require.Empty(t, mutations)
 				return
 			}

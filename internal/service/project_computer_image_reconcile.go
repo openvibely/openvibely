@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// Maintenance keeps enabled computers running on the current image.
+// Maintenance keeps enabled computers current and running, and disabled ones stopped.
 // The lifecycle lock also serializes normal starts and settings saves.
 func (s *ProjectComputerService) reconcileComputerImage(ctx context.Context, id string) error {
 	p, ok := s.provisioner.(*LocalComputerProvisioner)
@@ -20,12 +20,28 @@ func (s *ProjectComputerService) reconcileComputerImage(ctx context.Context, id 
 	if err != nil {
 		return err
 	}
-	if !state.Enabled || state.Provider != p.Provider() {
+	if state.Provider != p.Provider() {
 		return nil
 	}
 	actual, err := p.inspectSettings(ctx, id)
 	if err != nil {
 		return err
+	}
+	if !state.Enabled {
+		if actual == nil || !actual.State.Running {
+			return nil
+		}
+		if err := s.stopLocked(ctx, id); err != nil {
+			return err
+		}
+		actual, err = p.inspectSettings(ctx, id)
+		if err != nil {
+			return err
+		}
+		if actual != nil && actual.State.Running {
+			return errors.New("disabled project computer did not stop")
+		}
+		return nil
 	}
 	image := os.Getenv("OPENVIBELY_COMPUTER_IMAGE")
 	if image == "" {
