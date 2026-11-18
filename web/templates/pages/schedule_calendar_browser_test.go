@@ -383,7 +383,16 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
    window.fetch=async()=>new Response(JSON.stringify({message:'Editor access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
    var feedbackBefore=replacement.querySelector('#schedule-calendar-feedback').innerHTML;
    var undoBefore=window._scheduleCalendarUndo;
-   replacement.querySelector('[data-calendar-action="pause_all"]').click();await tick();
+   // Permission handling reads a cloned response body asynchronously. Observe the
+   // action's completion instead of assuming that a timer means the body was read.
+   var permissionActionFinished=new Promise(function(resolve){
+    var observer=new MutationObserver(function(){
+     if(replacement.dataset.calendarBusy==='false') { observer.disconnect();resolve(); }
+    });
+    observer.observe(replacement,{attributes:true,attributeFilter:['data-calendar-busy']});
+   });
+   replacement.querySelector('[data-calendar-action="pause_all"]').click();
+   await permissionActionFinished;
    check(permissionToasts.length===1&&permissionToasts[0]==='Editor access required','calendar permission toast');
    check(replacement.isConnected&&replacement.querySelector('#schedule-calendar-feedback').innerHTML===feedbackBefore&&window._scheduleCalendarUndo===undoBefore,'denial preserves calendar and feedback');
    window.showToast=originalToast;
