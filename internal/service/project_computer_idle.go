@@ -36,7 +36,19 @@ func (s *ProjectComputerService) StartIdleMaintenance(ctx context.Context) {
 func (s *ProjectComputerService) runIdleMaintenance(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	var nextImageCleanup time.Time
 	for {
+		if p, ok := s.provisioner.(*LocalComputerProvisioner); ok && time.Now().After(nextImageCleanup) {
+			nextImageCleanup = time.Now().Add(time.Hour)
+			if _, busy := s.active.LoadOrStore("computer-image-cleanup", true); !busy {
+				go func() {
+					defer s.active.Delete("computer-image-cleanup")
+					cleanup, cancel := context.WithTimeout(ctx, 15*time.Minute)
+					defer cancel()
+					_ = p.cleanupImages(cleanup)
+				}()
+			}
+		}
 		projects, err := s.projects.List(ctx)
 		if err == nil {
 			for _, project := range projects {
