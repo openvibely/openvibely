@@ -460,11 +460,15 @@ templ ProjectComputerToggle(projectID string) {
  </div>
 }
 
-templ ProjectComputerPermissions(projectID, taskID string) {
+templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  <div data-computer-grants data-grants-project={projectID} data-grants-task={taskID}>
+ if len(compact)>0 && compact[0] {
+ <button type="button" class="btn btn-ghost permissions-button" data-computer-grants-open data-picker-align="end" aria-haspopup="dialog">Manage <span aria-hidden="true">›</span></button>
+ } else {
  <button type="button" class="inspector-property-row" data-computer-grants-open aria-haspopup="dialog">
  @components.InspectorPropertyContent("Chrome permissions", "")
  </button>
+ }
  @components.InspectorPicker("computer-grants-picker") {
  <div data-options="grants" data-computer-grant-list></div>
  }

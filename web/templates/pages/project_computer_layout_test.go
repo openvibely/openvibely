@@ -37,11 +37,11 @@ func TestComputerPreviewLeadsDedicatedPanel(t *testing.T) {
 
 func TestComputerPermissionsAvailableWithoutTask(t *testing.T) {
 	var out bytes.Buffer
-	if err := ComputerSettingsContent("project", "Project", models.DefaultComputerResources(), true, false, "").Render(t.Context(), &out); err != nil {
+	if err := ComputerSettingsContent(nil, "project", models.ComputerSettings{Resources: models.DefaultComputerResources()}, true, false, "").Render(t.Context(), &out); err != nil {
 		t.Fatal(err)
 	}
 	// Check rendered controls, not their selectors in the embedded script.
-	for _, control := range []string{"<div data-computer-grants data-grants-project=\"project\"", "data-computer-grants-open aria-haspopup=\"dialog\"", "id=\"computer-grants-picker\"", "<div data-options=\"grants\" data-computer-grant-list>"} {
+	for _, control := range []string{"<div data-computer-grants data-grants-project=\"project\"", "data-computer-grants-open data-picker-align=\"end\" aria-haspopup=\"dialog\"", "id=\"computer-grants-picker\"", "<div data-options=\"grants\" data-computer-grant-list>"} {
 		if !strings.Contains(out.String(), control) {
 			t.Fatalf("project page missing %s", control)
 		}
@@ -50,7 +50,7 @@ func TestComputerPermissionsAvailableWithoutTask(t *testing.T) {
 
 func TestComputerSettingsHasNoDesktopRuntime(t *testing.T) {
 	var project, task bytes.Buffer
-	if err := ComputerSettingsContent("project", "Project", models.DefaultComputerResources(), true, false, "").Render(t.Context(), &project); err != nil {
+	if err := ComputerSettingsContent(nil, "project", models.ComputerSettings{Resources: models.DefaultComputerResources()}, true, false, "").Render(t.Context(), &project); err != nil {
 		t.Fatal(err)
 	}
 	if err := ProjectComputerContent("project", "task").Render(t.Context(), &task); err != nil {

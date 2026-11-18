@@ -1,40 +1,95 @@
 package pages
 
 import (
-	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/web/templates/layout"
-	"net/url"
-	"strconv"
+ "net/url"
+ "strconv"
+ "github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/web/templates/layout"
 )
 
-templ ComputerSettingsPage(projects []models.Project, id string, name string, values models.ComputerResources, available bool, saved bool, message string) {
-	@layout.Base("Project Computer", projects, id) {
-		@ComputerSettingsContent(id, name, values, available, saved, message)
-	}
+templ ComputerSettingsPage(projects []models.Project, options []models.Project, id string, values models.ComputerSettings, available bool, saved bool, message string) {
+ @layout.Base("Project Computer",projects,id) {
+  @ComputerSettingsContent(options,id,values,available,saved,message)
+ }
 }
 
-templ ComputerSettingsContent(id string, name string, values models.ComputerResources, available bool, saved bool, message string) {
-	<div id="computer-settings-content" class="w-full max-w-3xl pb-6">
-		@layout.PageTitle("Project Computer")
-		<p class="text-base-content/70 mb-6">Computer settings for <strong>{ name }</strong>. Each task has its own desktop. Resource limits are shared by all task desktops in this project.</p>
-		if message!="" {
-			<div role="status" class="alert mb-4">
-				<span>{ message }</span>
-			</div>
-		}
-		<section class="card bg-base-200 border border-base-300 mb-4"><div class="card-body">
-			@ProjectComputerToggle(id)
-			@ProjectComputerPermissions(id, "")
-		</div></section>
-		if available {
-			<form method="post" action={ templ.SafeURL("/settings/computer?project_id=" + url.QueryEscape(id)) } hx-post={ "/settings/computer?project_id=" + url.QueryEscape(id) } hx-target="#computer-settings-content" hx-swap="outerHTML" class="card bg-base-200 border border-base-300">
-				<div class="card-body gap-5">
-					<label class="form-control"><span class="label-text mb-2">CPU cores</span><input class="input input-bordered" type="number" name="cpus" min="1" max="64" step="1" required value={ strconv.Itoa(values.CPUs) }/><span class="text-sm text-base-content/60 mt-2">Default: 2. Controls CPU time and desktop CPU affinity.</span></label>
-					<label class="form-control"><span class="label-text mb-2">Memory (GiB)</span><input class="input input-bordered" type="number" name="memory_gib" min="1" max="256" step="1" required value={ strconv.Itoa(values.MemoryGiB) }/><span class="text-sm text-base-content/60 mt-2">Default: 4. Stop the project computer before changing CPU or memory.</span></label>
-					<label class="form-control"><span class="label-text mb-2">Maximum processes and threads</span><input class="input input-bordered" type="number" name="pids_limit" min="256" max="65536" step="1" required value={ strconv.Itoa(values.PidsLimit) }/><span class="text-sm text-base-content/60 mt-2">Default: 4,096. Increasing this limit does not reserve memory. Changes apply without restarting the desktop.</span></label>
-					<div class="flex gap-3 items-center"><button type="submit" class="btn btn-primary">Save settings</button></div>
-				</div>
-			</form>
-		}
-	</div>
+templ ComputerSettingsContent(projects []models.Project, id string, values models.ComputerSettings, available bool, saved bool, message string) {
+ <div id="computer-settings-content">
+ <style>
+ #computer-settings-content{max-width:760px;padding:12px 0 32px;font-size:13px}
+ #computer-settings-content h1{font-size:18px;font-weight:500;margin:0 0 24px}
+ #computer-settings-content .project-choice{display:flex;align-items:center;justify-content:space-between;padding-bottom:22px;gap:24px}
+ #computer-settings-content .muted{opacity:.55;font-size:12px;line-height:1.5;margin-top:5px}
+ #computer-settings-content .section-heading{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.5;margin:24px 0 6px;font-weight:500}
+ #computer-settings-content .setting-row{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:58px;border-bottom:1px solid oklch(var(--bc)/.07);padding:10px 0}
+ #computer-settings-content .label-copy{line-height:1.5}
+ #computer-settings-content .select,#computer-settings-content .input{font-size:13px;height:34px;min-height:34px;border-radius:7px}
+ #computer-settings-content .select{width:190px}
+ #computer-settings-content .input{width:94px;text-align:right;padding-right:12px}
+ #computer-settings-content .resource-value{display:flex;align-items:center;gap:10px}
+ #computer-settings-content .unit{width:32px;opacity:.55;font-size:12px}
+ #computer-settings-content .settings-footer{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-top:24px}
+ #computer-settings-content .settings-footer .btn{font-size:12px;height:32px;min-height:32px;font-weight:500;border-radius:7px;padding:0 14px}
+ #computer-settings-content .permissions-button{font-size:12px;height:30px;min-height:30px;font-weight:400}
+ #computer-settings-content input[type=number]{appearance:textfield;-moz-appearance:textfield}
+ #computer-settings-content input[type=number]::-webkit-inner-spin-button,#computer-settings-content input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+ @media(max-width:700px){#computer-settings-content .setting-row{gap:12px}#computer-settings-content .select{width:150px}}
+ </style>
+ <h1>Project Computer</h1>
+ <div class="project-choice"><div><label for="computer-settings-project">Project</label><div class="muted">Settings apply only to this project.</div></div>
+ <select id="computer-settings-project" class="select select-bordered" aria-label="Project" data-current-project={id}>
+ <option value="" disabled selected?={id==""}>Select a project</option>
+ for _, project := range projects {
+ <option value={project.ID} selected?={project.ID==id}>{project.Name}</option>
+ }
+ </select></div>
+ if id=="" {
+ <p class="muted">Select a project to configure its computer.</p>
+ } else {
+ <form data-computer-settings-form method="post" action={templ.SafeURL("/settings/computer?project_id="+url.QueryEscape(id))} hx-post={"/settings/computer?project_id="+url.QueryEscape(id)} hx-target="#computer-settings-content" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+ <div class="setting-row"><div class="label-copy"><label for="computer-settings-enabled">Enable computer</label><div class="muted">Tasks can opt into their own desktop.</div></div><input id="computer-settings-enabled" name="enabled" type="checkbox" class="toggle toggle-sm" checked?={values.Enabled}/></div>
+ <h2 class="section-heading">Desktop</h2>
+ <div class="setting-row"><label for="computer-settings-idle">Stop idle desktops after</label><select id="computer-settings-idle" name="idle_minutes" class="select select-bordered">
+ for _, minutes := range []int{15,30,60,120,0} {
+ <option value={strconv.Itoa(minutes)} selected?={values.IdleMinutes==minutes}>{computerIdleLabel(minutes)}</option>
+ }
+ if values.IdleMinutes!=15 && values.IdleMinutes!=30 && values.IdleMinutes!=60 && values.IdleMinutes!=120 && values.IdleMinutes!=0 {
+ <option value={strconv.Itoa(values.IdleMinutes)} selected>{computerIdleLabel(values.IdleMinutes)}</option>
+ }
+ </select></div>
+ <div class="setting-row"><label for="computer-settings-zone">Time zone</label><select id="computer-settings-zone" name="time_zone" class="select select-bordered" data-saved-zone={values.TimeZone}><option value={values.TimeZone} selected>{values.TimeZone}</option></select></div>
+ <h2 class="section-heading">Resources</h2><p class="muted">Shared by all task desktops in this project.</p>
+ if available {
+ <div class="setting-row"><label for="computer-settings-cpus">CPU</label><div class="resource-value"><input id="computer-settings-cpus" name="cpus" type="number" min="1" max="64" value={strconv.Itoa(values.Resources.CPUs)} class="input input-bordered" required/><span class="unit">cores</span></div></div>
+ <div class="setting-row"><label for="computer-settings-memory">Memory</label><div class="resource-value"><input id="computer-settings-memory" name="memory_gib" type="number" min="1" max="256" value={strconv.Itoa(values.Resources.MemoryGiB)} class="input input-bordered" required/><span class="unit">GiB</span></div></div>
+ <div class="setting-row"><label for="computer-settings-pids">Process / thread limit</label><div class="resource-value"><input id="computer-settings-pids" name="pids_limit" type="number" min="256" max="65536" value={strconv.Itoa(values.Resources.PidsLimit)} class="input input-bordered" required/><span class="unit"></span></div></div>
+ <p class="muted">Stop the computer before changing CPU or memory.</p>
+ } else {
+ <p class="muted">Resource limits are managed by the computer provider.</p>
+ }
+ <h2 class="section-heading">Browser</h2><div class="setting-row"><div class="label-copy">Sign-in permissions<div class="muted">Manage approved imports from your local Chrome.</div></div>
+ @ProjectComputerPermissions(id,"",true)
+ </div>
+ <div class="settings-footer">
+ if message!="" {
+ <span class={"text-xs",templ.KV("text-error",!saved),templ.KV("opacity-60",saved)} role="status">{message}</span>
+ }
+ <button class="btn btn-primary" type="submit">Save changes</button></div>
+ </form>
+ }
+ <script>
+ (()=>{
+ const root=document.getElementById('computer-settings-content');if(!root||root.dataset.bound)return;root.dataset.bound='true';
+ const form=root.querySelector('form'),project=root.querySelector('#computer-settings-project');let dirty=false;
+ form?.addEventListener('input',()=>dirty=true);
+ project.onchange=()=>{if(dirty&&!confirm('Discard unsaved computer settings?')){project.value=project.dataset.currentProject;return;}location.assign('/settings/computer?project_id='+encodeURIComponent(project.value));};
+ const zone=root.querySelector('[data-saved-zone]');if(zone){const selected=zone.dataset.savedZone;const names=new Set(['UTC',selected,...(Intl.supportedValuesOf?.('timeZone')||[])]);zone.replaceChildren(...[...names].sort().map(name=>new Option(name,name,false,name===selected)));}
+ })();
+ </script>
+ </div>
+}
+
+func computerIdleLabel(minutes int) string {
+ switch minutes { case 0:return "Never"; case 60:return "1 hour";case 120:return "2 hours" }
+ return strconv.Itoa(minutes)+" minutes"
 }

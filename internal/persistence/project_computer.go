@@ -9,6 +9,7 @@ import (
 var ErrComputerBusy = errors.New("project computer is controlled by a user or another task")
 
 type ProjectComputerStore interface {
+	SaveSettings(context.Context, string, string, models.ComputerSettings) error
 	SetResources(context.Context, string, models.ComputerResources) error
 	TaskIDsForDesktopCleanup(context.Context, string) ([]string, error)
 	SetIdleMinutes(context.Context, string, int) error

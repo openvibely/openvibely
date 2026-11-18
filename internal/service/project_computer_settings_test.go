@@ -93,3 +93,61 @@ func TestComputerProvisionerUsesResourceSettings(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, updates)
 }
+
+func TestComputerSettingsSaveTogether(t *testing.T) {
+	db := teststores.New(t)
+	project := &models.Project{Name: "Settings save"}
+	require.NoError(t, db.Projects.Create(t.Context(), project))
+	running := true
+	p := &LocalComputerProvisioner{run: func(_ context.Context, _ io.Reader, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "container":
+			return []byte(computerContainerName(project.ID)), nil
+		case "inspect":
+			return json.Marshal([]any{map[string]any{"Config": map[string]any{"Labels": map[string]string{"openvibely.project": project.ID}}, "State": map[string]bool{"Running": running}}})
+		default:
+			return nil, errors.New("unexpected Docker command")
+		}
+	}}
+	svc := NewProjectComputerService(db.Projects, p)
+	initial, err := svc.Settings(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.False(t, initial.Enabled)
+	initial.Enabled = true
+	initial.IdleMinutes = 60
+	initial.TimeZone = "Europe/London"
+	initial.Resources.PidsLimit = 8192
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, initial))
+	saved, err := svc.Settings(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, initial, saved)
+	bad := initial
+	bad.Resources.CPUs = 3
+	bad.IdleMinutes = 120
+	require.ErrorContains(t, svc.SaveSettings(t.Context(), project.ID, bad), "Stop the project computer")
+	saved, err = svc.Settings(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, initial, saved, "failed CPU change must not persist idle changes")
+	bad = initial
+	bad.TimeZone = "Invalid/Zone"
+	bad.Resources.PidsLimit = 4096
+	require.Error(t, svc.SaveSettings(t.Context(), project.ID, bad))
+	saved, err = svc.Settings(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, initial, saved)
+	require.NoError(t, db.Projects.Computers().Reserve(t.Context(), project.ID, "agent"))
+	bad = initial
+	bad.Enabled = false
+	bad.IdleMinutes = 15
+	require.Error(t, svc.SaveSettings(t.Context(), project.ID, bad))
+	saved, err = svc.Settings(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, initial, saved, "busy disable must not persist other fields")
+	require.NoError(t, db.Projects.Computers().Release(t.Context(), project.ID, "agent"))
+	running = false
+	initial.Resources.CPUs = 3
+	require.NoError(t, svc.SaveSettings(t.Context(), project.ID, initial))
+	saved, err = svc.Settings(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, initial, saved)
+}

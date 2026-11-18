@@ -31,3 +31,11 @@ type ProjectComputer struct {
 	Owner               string            `json:"owner,omitempty"`
 	LeaseUntil          int64             `json:"lease_until,omitempty"`
 }
+
+// ComputerSettings is the project-wide configuration edited in Settings.
+type ComputerSettings struct {
+	Resources   ComputerResources
+	Enabled     bool
+	IdleMinutes int
+	TimeZone    string
+}

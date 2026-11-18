@@ -218,3 +218,12 @@ func (r *ProjectComputerRepo) SetResources(ctx context.Context, id string, v mod
 		return err
 	})
 }
+
+// SaveSettings commits all form fields together so validation failures never leave partial settings.
+func (r *ProjectComputerRepo) SaveSettings(ctx context.Context, id, provider string, v models.ComputerSettings) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO project_computers(project_id,provider,enabled,time_zone,idle_minutes,cpu_count,memory_gib,pids_limit) VALUES (?,?,?,?,?,?,?,?)
+  ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled,time_zone=excluded.time_zone,idle_minutes=excluded.idle_minutes,cpu_count=excluded.cpu_count,memory_gib=excluded.memory_gib,pids_limit=excluded.pids_limit`, id, provider, v.Enabled, v.TimeZone, v.IdleMinutes, v.Resources.CPUs, v.Resources.MemoryGiB, v.Resources.PidsLimit)
+		return err
+	})
+}
