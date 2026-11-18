@@ -74,7 +74,7 @@ func (s *GitHubService) ValidatePublicationRepository(ctx context.Context, proje
 }
 
 func (s *GitHubService) PreparePublicationRepository(ctx context.Context, project *GitHubRepoRef) (*GitHubRepoRef, error) {
-	token, err := s.createOperationAccessToken(ctx, githubAPIBaseURLForRepo(project, s.apiBaseURL))
+	token, mode, err := s.createOperationAccessTokenWithMode(ctx, githubAPIBaseURLForRepo(project, s.apiBaseURL))
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +85,10 @@ func (s *GitHubService) PreparePublicationRepository(ctx context.Context, projec
 	// Installation tokens may omit user permissions. Retain their existing path.
 	if source.Permissions == nil || source.Permissions.Push {
 		return project, nil
+	}
+	// GET /user rejects installation tokens, so App installations cannot use the personal-fork path.
+	if mode == GitHubAuthModeApp {
+		return nil, fmt.Errorf("the GitHub App installation cannot push to %s and cannot publish through a fork; grant the installation contents write access to this repository, or connect a personal GitHub token for fork publication", project.FullName)
 	}
 	base := githubAPIBaseURLForRepo(project, s.apiBaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/user", nil)
