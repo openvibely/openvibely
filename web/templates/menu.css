@@ -194,6 +194,7 @@
 }
 
 /* The current overflow page remains distinct from menu focus and hover. */
+#rail-overflow a[aria-current="page"],
 #plugin-pages-overflow-menu a[aria-current="page"],
 #sidebar [data-plugin-nav-overflow] > button[data-active-page] {
   background: var(--shell-row-selected, var(--ov-menu-active));
