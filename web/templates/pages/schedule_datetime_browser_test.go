@@ -159,8 +159,8 @@ func TestBrowserFunctional_SchedulePageDateTimePicker(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/schedule", "schedule-page-picker", func(b *composerFocusCDP) {
 		b.waitFor("schedule page ready", `String(typeof openNewScheduledTaskModal==='function')`, "true")
-		b.click(`#schedule-project-menu > summary`)
-		assertMenuConsumesOutsideClick(b, `!document.getElementById('schedule-project-menu').open`)
+		b.click(`#schedule-header-actions [aria-label="Calendar actions"]`)
+		assertMenuConsumesOutsideClick(b, `document.querySelector('#schedule-header-actions [aria-label="Calendar actions"]').getAttribute('aria-expanded') === 'false'`)
 		b.click(`[data-calendar-day]`)
 		b.evaluate(`const anchor=document.querySelector('[data-calendar-day]'),rect=anchor.getBoundingClientRect();window.openScheduleSelectionContextMenu({preventDefault(){},stopPropagation(){},clientX:rect.left,clientY:rect.bottom},anchor);'opened'`)
 		assertMenuConsumesOutsideClick(b, `document.getElementById('schedule-context-menu').classList.contains('hidden')`)

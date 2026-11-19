@@ -93,7 +93,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
    var hintKey=document.querySelector('#ov-shared-tooltip:not([hidden]) kbd');
    check(hintKey && hintKey.textContent===modifier+'+click','schedule hints use shared key badge');
    window.openVibelyTooltip.close();
-   var menu=root.querySelector('#schedule-project-menu');
+   var menu=root.querySelector('#schedule-header-actions [data-menu-dropdown]');
    function checkHeaderAlignment() {
     var top=pageHeader.getBoundingClientRect().top+parseFloat(getComputedStyle(pageHeader).paddingTop);
     var titleRect=pageHeader.querySelector('h2').getBoundingClientRect();
@@ -108,8 +108,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
    check(getComputedStyle(toolbar).display==='none','empty selection hides panel');
    check(!root.querySelector('#schedule-paused-status'),'no redundant paused header status');
    check(pageHeader.contains(menu),'calendar menu belongs beside New');
-   check(menu.querySelector('summary svg.h-5.w-5 path'),'standard SVG kebab');
-   (function(){var kebab=menu.querySelector("summary"),add=root.querySelector("[aria-label=\"New Scheduled Task\"]"),k=getComputedStyle(kebab),a=getComputedStyle(add),kr=kebab.getBoundingClientRect(),ar=add.getBoundingClientRect();check(kr.width===32&&kr.height===32&&kr.width===ar.width&&kr.top===ar.top&&k.borderTopLeftRadius===a.borderTopLeftRadius&&k.opacity==="1"&&a.opacity==="1"&&k.color===a.color&&kr.left-ar.right===2,"kebab matches New button: "+kr.width+"x"+kr.height+" r="+k.borderTopLeftRadius+" op="+k.opacity+"/"+a.opacity+" gap="+(kr.left-ar.right));})();
+   check(menu.querySelector('button svg.h-5.w-5 path'),'standard SVG kebab');
+   (function(){var kebab=menu.querySelector("button"),add=root.querySelector("[aria-label=\"New Scheduled Task\"]"),k=getComputedStyle(kebab),a=getComputedStyle(add),kr=kebab.getBoundingClientRect(),ar=add.getBoundingClientRect();check(kr.width===32&&kr.height===32&&kr.width===ar.width&&kr.top===ar.top&&k.borderTopLeftRadius===a.borderTopLeftRadius&&k.opacity==="1"&&a.opacity==="1"&&k.color===a.color&&kr.left-ar.right===2,"kebab matches New button: "+kr.width+"x"+kr.height+" r="+k.borderTopLeftRadius+" op="+k.opacity+"/"+a.opacity+" gap="+(kr.left-ar.right));})();
    check(!menu.hidden,'calendar menu stays visible');
    if (JSON.parse(root.querySelector('#schedule-calendar-controls').dataset.state).paused) {
     var pausedContext=root.querySelector('#schedule-context-menu');
@@ -127,7 +127,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
     check(root.querySelector('[data-calendar-action="pause_all"]').hidden,'paused project hides pause action');
     var resume=root.querySelector('[data-calendar-action="resume_all"]');
     check(!resume.hidden && menu.contains(resume),'resume remains in permanent menu');
-    menu.open=true;
+    menu.querySelector('button').click();
     resume.click();await tick();
     check(requests[0].action==='resume_all','project resume action works from menu');
    report('pass','');return;
@@ -303,7 +303,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
    check(root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').textContent==='Unskip','single run uses singular unskip label');
    selectScheduleContextCard(b);
    check(!visible('skip') && !visible('restore') && !visible('pause') && visible('resume'),'paused schedule only offers resume');
-   check(root.querySelector('[data-calendar-action="pause_all"]').closest('details'),'pause all belongs in overflow');
+   check(menu.contains(root.querySelector('[data-calendar-action="pause_all"]')),'pause all belongs in overflow');
    clearScheduleSelection();
    a.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));
    a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));

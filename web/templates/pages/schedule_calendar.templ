@@ -65,17 +65,12 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  #schedule-selection-toolbar[aria-hidden="true"] { display: none; }
  #schedule-calendar-feedback { position: absolute; bottom: 2rem; right: 1rem; z-index: 45; padding: .75rem; border-radius: .5rem; background: var(--ov-menu-surface); box-shadow: 0 2px 12px rgba(0,0,0,.2); }
  #schedule-content [hidden] { display: none !important; }
- #schedule-project-menu { position: relative; flex-shrink: 0; }
- /* Avoid font-dependent inline baseline space below the menu button. */
- #schedule-project-menu > summary { display: flex; list-style: none; }
- #schedule-project-menu > summary::-webkit-details-marker { display: none; }
  #schedule-content [data-page-header] { gap: 2rem; align-items: flex-start; }
  #schedule-content [data-page-header] > h2, #schedule-header-actions { flex-shrink: 0; }
  #schedule-header-actions { margin-left: auto; }
  @media (max-width: 767px) {
   #schedule-content [data-page-header] { gap: .5rem; }
  }
- #schedule-project-menu > .ov-menu { position: absolute; right: 0; z-index: 50; min-width: 12rem; }
  #schedule-content [data-calendar-day], #schedule-content [data-calendar-hour] { cursor: pointer; user-select: none; touch-action: pan-y; }
  #schedule-content .schedule-day-selected { background: rgba(116,128,255,.16) !important; }
  #schedule-content [data-calendar-day].schedule-day-selected { box-shadow: inset 0 2px var(--ov-link-color); }
@@ -252,7 +247,7 @@ templ ScheduleCalendarScript() {
    if (wasSelected) selection.delete(key); else selection.add(key);
    paintDates(); window.updateScheduleSelection();
   }
-  function closeMenus() { if(projectController)projectController.close(false); if(window.closeScheduleContextMenu)window.closeScheduleContextMenu(false); }
+  function closeMenus() { if(window.closeScheduleContextMenu)window.closeScheduleContextMenu(false); }
   async function apply(request, isUndo) {
    if (busy) return;
    busy = true; root.dataset.calendarBusy = 'true'; closeMenus();
@@ -312,10 +307,6 @@ templ ScheduleCalendarScript() {
   document.addEventListener('keydown', function(event) {
    if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && event.keyCode!==229) { cancelGesture(); closeMenus(); window.clearScheduleDates(); clearScheduleSelection(); }
   }, {signal: signal});
-  var projectMenu=root.querySelector('#schedule-project-menu');
-  var projectController=window.ovMenuController.create({trigger:projectMenu.querySelector('summary'),panels:[projectMenu.querySelector('.ov-menu')],isOpen:function(){return projectMenu.open;},open:function(){projectMenu.open=true;},close:function(){projectMenu.open=false;}});
-  projectMenu.addEventListener('toggle',function(){projectController.sync();},{signal:signal});
-  projectMenu.querySelector('summary').addEventListener('click',function(event){event.preventDefault();projectController.toggle(event);},{signal:signal});
   root.addEventListener('pointerdown', function(event) {
    if (busy || event.button !== 0 || event.target.closest('[data-schedule-card]')) return;
    var day = event.target.closest('[data-calendar-day], [data-calendar-hour]');

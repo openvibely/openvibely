@@ -12,7 +12,7 @@
     '.inspector-picker', '.schedule-datetime-popup',
     '#rail-account-popup', '#rail-overflow', '#plugin-pages-overflow-menu',
     '#changes-actions-menu', '#schedule-context-menu',
-    '#schedule-project-menu[open] > .ov-menu', '[data-project-results]'
+    '[data-project-results]'
   ].join(',');
   const backdrop = document.createElement('div');
   backdrop.id = 'ov-menu-backdrop';

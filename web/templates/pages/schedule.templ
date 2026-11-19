@@ -502,17 +502,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				<button class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="New Scheduled Task" data-tooltip-disabled onclick="openNewScheduledTaskModal()">
 					@pageCreateIcon()
 				</button>
-                    <details id="schedule-project-menu">
-                        <summary class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Calendar actions">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-                            </svg>
-                        </summary>
-                        <ul class="ov-menu ov-menu-actions menu">
-                            <li><button type="button" data-calendar-action="pause_all">Pause all</button></li>
-                            <li><button type="button" data-calendar-action="resume_all" hidden>Resume all</button></li>
-                        </ul>
-                    </details>
+                    @components.CardActionDropdown(components.CardActionDropdownConfig{Label: "Calendar actions", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5"}) {
+                        <li><button type="button" data-calendar-action="pause_all">Pause all</button></li>
+                        <li><button type="button" data-calendar-action="resume_all" hidden>Resume all</button></li>
+                    }
                 </div>
 			</div>
 			<!-- Header: Row 2 – Week navigation controls -->
