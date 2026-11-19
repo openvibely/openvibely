@@ -149,7 +149,8 @@ import "C"
 
 import "github.com/wailsapp/wails/v3/pkg/application"
 
-func registerPlatformWindowControls(app *application.App, _ *application.WebviewWindow) {
+func registerPlatformWindowControls(app *application.App, window *application.WebviewWindow) {
+	registerVerticalOverscrollFix(window)
 	visibility := &captionVisibility{}
 	app.Event.On("desktop:controls-visibility", func(event *application.CustomEvent) {
 		visibility.handle(event, application.InvokeAsync, func(hidden bool) {
