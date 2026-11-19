@@ -127,10 +127,10 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     if (!response.ok) throw new Error();
     var values = await response.json();
     if (request !== tagRequest || !root.isConnected || !pickerOpen() || current !== row || busy) return;
-    var currentValue = row.dataset.value.toLowerCase();
+    var currentValue = pickerUI.searchPattern(row.dataset.value, true);
     var options = document.createDocumentFragment();
     for (var value of values) {
-     if (value.toLowerCase() !== currentValue) options.appendChild(customTagOption(value));
+     if (!currentValue.test(value)) options.appendChild(customTagOption(value));
     }
     tags.appendChild(options);
     search.dispatchEvent(new Event('input'));
@@ -152,8 +152,10 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   function available(option) {
    if (option.hasAttribute('data-clear-tag')) return !search.value.trim();
    if (option === createTag) {
-    var query = search.value.trim().toLowerCase();
-    return field === 'tag' && query && !Array.from(tags.children).some(tag => tag.dataset.value.toLowerCase() === query);
+    var query = search.value.trim();
+    if (field !== 'tag' || !query) return false;
+    var exact = pickerUI.searchPattern(query, true);
+    return !Array.from(tags.children).some(tag => exact.test(tag.dataset.value));
    }
    return !destination || option.dataset.agentScope !== 'project' || (!!destination.value && option.dataset.agentProject === destination.value);
   }
@@ -208,7 +210,8 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     if (field === 'tag') {
      tags.querySelectorAll('[data-custom-option]').forEach(option => option.remove());
      var value = row.dataset.value;
-     if (value && !Array.from(tags.children).some(option => option.dataset.value.toLowerCase() === value.toLowerCase())) {
+     var exact = pickerUI.searchPattern(value, true);
+     if (value && !Array.from(tags.children).some(option => exact.test(option.dataset.value))) {
       tags.appendChild(customTagOption(value));
      }
     }

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	sqlitedriver "modernc.org/sqlite"
 
@@ -3184,10 +3185,24 @@ func (r *TaskRepo) CountBacklogByPriority(ctx context.Context, projectID string)
 	return counts, rows.Err()
 }
 
+// Use the lowest code point in each Unicode simple-fold group as its sort key.
+// The tag picker uses the same simple folding via JavaScript's /iu matching.
+func taskTagFoldKey(tag string) string {
+	return strings.Map(func(r rune) rune {
+		lowest := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < lowest {
+				lowest = next
+			}
+		}
+		return lowest
+	}, tag)
+}
+
 // SQLite's built-in NOCASE collation only covers ASCII.
 func init() {
 	sqlitedriver.MustRegisterCollationUtf8("task_tag_nocase", func(left, right string) int {
-		return strings.Compare(strings.ToLower(left), strings.ToLower(right))
+		return strings.Compare(taskTagFoldKey(left), taskTagFoldKey(right))
 	})
 }
 

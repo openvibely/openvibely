@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -59,6 +60,23 @@ func TestCustomTagsCreationEditingAndScopedExecution(t *testing.T) {
 	tasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Invalid", Prompt: "Work", Tag: strings.Repeat("x", 65)}}, "default", svc)
 	require.Empty(t, tasks)
 	require.Contains(t, summary, models.ErrInvalidTaskTag.Error())
+}
+
+func TestUnicodeTaskTagFilters(t *testing.T) {
+	env := teststores.New(t)
+	ctx := t.Context()
+	for i, tag := range []models.TaskTag{"ΟΣ", "ος", "οσ"} {
+		task := &models.Task{ProjectID: "default", Title: fmt.Sprintf("Greek tag %d", i), Category: models.CategoryBacklog, Status: models.StatusPending, Tag: tag}
+		require.NoError(t, env.Tasks.Create(ctx, task))
+	}
+	tags, err := env.Tasks.ListCustomTags(ctx, "default")
+	require.NoError(t, err)
+	require.Len(t, tags, 1)
+	for _, query := range []models.TaskTag{"ΟΣ", "ος", "οσ"} {
+		tasks, err := env.Tasks.ListByTags(ctx, []models.TaskTag{query}, "default", "", 0, "")
+		require.NoError(t, err)
+		require.Len(t, tasks, 3)
+	}
 }
 
 func TestLegacyTagSurvivesUnrelatedEdits(t *testing.T) {

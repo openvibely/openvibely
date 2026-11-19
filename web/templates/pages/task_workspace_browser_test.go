@@ -39,7 +39,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		var component templ.Component
 		switch r.URL.Path {
 		case "/api/tasks/tags":
-			fmt.Fprint(w, `["From Another Task", "feat"]`)
+			fmt.Fprint(w, `["From Another Task", "feat", "ΟΣ"]`)
 			return
 		case "/tasks/new":
 			component = NewTask([]models.Project{project}, &project, agents, nil)
@@ -132,6 +132,11 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			b.evaluate(fmt.Sprintf(`var search=document.querySelector('#task-property-picker .ov-menu-search input'); search.value=%q; search.dispatchEvent(new Event('input')); 'filtered'`, query))
 		}
 		b.waitFor("empty search hides Add", addVisible, "false")
+		for _, query := range []string{"ΟΣ", "ος", "οσ"} {
+			setSearch(query)
+			b.waitFor("sigma spelling matches existing tag", addVisible, "false")
+			b.waitFor("sigma spelling highlights original tag", `document.querySelector('#task-property-picker [data-active]').dataset.value`, "ΟΣ")
+		}
 		setSearch("fea")
 		b.waitFor("partial match offers Add", addVisible, "true")
 		b.waitFor("partial match keeps Feature", `String(document.querySelector('[data-options="tag"] [data-value="feature"]').checkVisibility())`, "true")
