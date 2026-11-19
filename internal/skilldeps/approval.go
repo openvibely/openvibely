@@ -28,6 +28,19 @@ type InstallationRequest struct {
 
 type InstallationPrompt func(context.Context, InstallationRequest) error
 
+// installedNow reports whether the cache holds a healthy executable. A non-nil
+// error means the cache could not be inspected, not that the package is missing.
+// The lock is released before returning, so it is never held while a human
+// answers a prompt.
+func installedNow(ctx context.Context, root, executable string, args []string) (bool, error) {
+	unlock, err := lockCache(ctx, root, false)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	return cachedHealth(ctx, root, executable, args) == nil, nil
+}
+
 // ResolveWithInstallPrompt uses installed executables normally. Only a missing
 // or damaged installation asks for a human answer before downloading anything.
 func (m *Manager) ResolveWithInstallPrompt(ctx context.Context, identity SkillIdentity, deps []Dependency, prompt InstallationPrompt) ([]Result, error) {
@@ -88,10 +101,19 @@ func (m *Manager) ResolveWithInstallPrompt(ctx context.Context, identity SkillId
 			return nil, err
 		}
 		executable := filepath.Join(root, filepath.FromSlash(p.Executable))
-		if cachedHealth(ctx, root, executable, d.HealthCheck) == nil {
+		// Recheck under the cache lock so a concurrent repair is awaited, not mistaken
+		// for a missing package during its brief replacement window.
+		installed, err := installedNow(ctx, root, executable, d.HealthCheck)
+		if err != nil {
+			return nil, err
+		}
+		if installed {
 			results[i] = Result{Name: d.Name, Version: d.Version, EnvironmentVariable: d.EnvironmentVariable, OverrideVariable: OverrideVariable(d.Name), Status: "cached", Executable: executable}
 			manager.notify(d.Name, "ready")
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		missing = append(missing, d)
 		indexes = append(indexes, i)
