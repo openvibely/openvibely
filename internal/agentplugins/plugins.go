@@ -677,7 +677,7 @@ func newestVersionedDir(root string) string {
 	}
 	cands := make([]candidate, 0, len(entries))
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".tmp-") {
 			continue
 		}
 		path := filepath.Join(root, e.Name())
@@ -688,9 +688,6 @@ func newestVersionedDir(root string) string {
 		cands = append(cands, candidate{path: path, mod: info.ModTime()})
 	}
 	if len(cands) == 0 {
-		if dirExists(root) {
-			return root
-		}
 		return ""
 	}
 	sort.Slice(cands, func(i, j int) bool {
@@ -1112,6 +1109,7 @@ func installPluginLocally(ctx context.Context, id pluginID) error {
 
 	if err := materializePluginSource(ctx, marketDir, plugin.Source, tempInstall); err != nil {
 		_ = os.RemoveAll(tempInstall)
+		_ = os.Remove(installRoot)
 		return err
 	}
 
