@@ -300,7 +300,16 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("tag validation visible", `String(document.querySelector('#task-property-picker [data-property-error]').textContent.includes('64 characters'))`, "true")
 		setSearch("")
 		b.clickMenuBackdrop(`[data-detail-property="tag"]`)
+		b.evaluate(`const originalRemoveFetch = window.fetch;
+window.fetch = (url, ...args) => {
+ if (!String(url).includes('/details/property')) return originalRemoveFetch(url, ...args);
+ window.fetch = originalRemoveFetch;
+ return Promise.resolve(new Response('Could not remove tag', {status: 500}));
+}; 'ready'`)
 		b.click(`[data-remove-tag]`)
+		b.waitFor("failed removal shows error", `document.querySelector('[data-tag-remove-error]').textContent`, "Could not remove tag")
+		b.waitFor("remove button ready for keyboard retry", `String(document.activeElement.matches('[data-remove-tag]:enabled'))`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "text": "\r", "windowsVirtualKeyCode": 13}, nil)
 		b.waitFor("saved tag cleared", `document.querySelector('[data-detail-property="tag"]').dataset.value`, "")
 		b.waitFor("cleared badge exposes No tag", `document.querySelector('[data-detail-property="tag"]').textContent.trim()`, "No tag")
 		b.click(`[data-detail-property="tag"]`)

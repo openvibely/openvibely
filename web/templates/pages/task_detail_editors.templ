@@ -250,8 +250,11 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      if (taskID) await save('tag', '');
      else updateDraftTag('', 'No tag', '');
      returnToRow(root.querySelector('[data-detail-property="tag"]'));
-    } catch (error) { if (!error.toastOnly) errorLabel.textContent = error.message; }
-    finally { busy = false; remove.disabled = false; }
+    } catch (error) {
+     if (!error.toastOnly) errorLabel.textContent = error.message;
+     remove.disabled = false;
+     if (document.activeElement === document.body) remove.focus({preventScroll:true});
+    } finally { busy = false; remove.disabled = false; }
     return;
    }
    if (busy && event.target.closest('[data-detail-property], [data-detail-editor]')) { event.preventDefault(); return; }
