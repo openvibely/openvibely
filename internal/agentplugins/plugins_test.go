@@ -873,6 +873,52 @@ func TestInstallUpdateRemoveMarketplaceLifecycleUsesLocalSources(t *testing.T) {
 	}
 }
 
+func TestFailedInstallAndStagingDirsAreNotReportedInstalled(t *testing.T) {
+	tmp := t.TempDir()
+	pluginRoot := filepath.Join(tmp, "plugins")
+	marketplace := filepath.Join(pluginRoot, "marketplaces", "demo")
+	if err := os.MkdirAll(filepath.Join(marketplace, ".claude-plugin"), 0o755); err != nil {
+		t.Fatalf("mkdir manifest: %v", err)
+	}
+	manifest := `{"name":"demo","metadata":{"description":"demo"},"plugins":[{"name":"worker","description":"worker plugin","source":{"source":"unsupported"}}]}`
+	if err := os.WriteFile(filepath.Join(marketplace, ".claude-plugin", "marketplace.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	origUserPluginBase := userPluginBaseFn
+	defer func() { userPluginBaseFn = origUserPluginBase }()
+	userPluginBaseFn = func() string { return pluginRoot }
+
+	if err := InstallPlugin(context.Background(), "worker@demo", ""); err == nil {
+		t.Fatalf("expected install error for unsupported source")
+	}
+	state, err := DiscoverState(context.Background())
+	if err != nil {
+		t.Fatalf("discover state: %v", err)
+	}
+	if len(state.Installed) != 0 {
+		t.Fatalf("expected no installed plugins after failed install, got %+v", state.Installed)
+	}
+
+	installRoot := filepath.Join(pluginRoot, "cache", "demo", "worker")
+	if err := os.MkdirAll(filepath.Join(installRoot, ".tmp-20240102T010101"), 0o755); err != nil {
+		t.Fatalf("mkdir staging dir: %v", err)
+	}
+	if got := newestVersionedDir(installRoot); got != "" {
+		t.Fatalf("expected staging-only cache to be ignored, got %q", got)
+	}
+	finalInstall := filepath.Join(installRoot, "20240101T010101")
+	if err := os.MkdirAll(finalInstall, 0o755); err != nil {
+		t.Fatalf("mkdir final install: %v", err)
+	}
+	if err := os.Chtimes(finalInstall, time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("chtimes final install: %v", err)
+	}
+	if got := newestVersionedDir(installRoot); got != finalInstall {
+		t.Fatalf("newestVersionedDir = %q, want %q", got, finalInstall)
+	}
+}
+
 func TestResetDefaultMarketplacesAddsMissingRemovesTempAndAggregatesErrors(t *testing.T) {
 	tmp := t.TempDir()
 	pluginRoot := filepath.Join(tmp, "plugins")
