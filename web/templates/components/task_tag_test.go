@@ -10,8 +10,8 @@ import (
 
 func TestCustomTagRenderingEscapesText(t *testing.T) {
 	tag := models.TaskTag(`<script>alert("tag")</script>`)
-	if TagLabel(tag) != string(tag) || TagBadgeClass(tag) != "badge-neutral" {
-		t.Fatal("custom tag should have a readable neutral fallback")
+	if TagLabel(tag) != string(tag) || TagBadgeClass(tag) != TagBadgeClass(models.TagFeature) {
+		t.Fatal("custom tag should have the same badge style as Feature")
 	}
 	var out bytes.Buffer
 	task := models.Task{ID: "task", Title: "Task", ProjectID: "default", Category: models.CategoryBacklog, Tag: tag}

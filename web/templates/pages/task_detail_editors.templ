@@ -98,9 +98,9 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      <button type="button" data-value={ fmt.Sprint(i+1) } class="ov-menu-option w-full">{ label }</button>
     }
    </div>
-   <div data-options="tag">
+   <div data-options="tag" data-default-badge={ components.TagBadgeClass(models.TagFeature) }>
     for _, option := range []struct{ Value, Label string }{{"", "None"}, {"feature", "Feature"}, {"bug", "Bug"}} {
-     <button type="button" data-value={ option.Value } class="ov-menu-option w-full">{ option.Label }</button>
+     <button type="button" data-value={ option.Value } data-badge={ components.TagBadgeClass(models.TaskTag(option.Value)) } class="ov-menu-option w-full">{ option.Label }</button>
     }
     for _, tag := range taskTagOptions(ctx) {
      <button type="button" data-custom-option data-value={ tag } class="ov-menu-option w-full">{ tag }</button>
@@ -246,7 +246,10 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     if (taskID) await save(name, value);
     else {
      var input = root.querySelector('[data-draft-property="' + name + '"]'); if (input) { input.value = value; if (name === 'destination_project') input.dispatchEvent(new Event('change', {bubbles:true})); }
-     current.dataset.value = value; current.querySelector('[data-property-label]').textContent = label;
+     current.dataset.value = value;
+     var propertyLabel = current.querySelector('[data-property-label]');
+     propertyLabel.textContent = label;
+     if (name === 'tag') propertyLabel.className = value ? 'badge badge-sm ' + (option.dataset.badge || tags.dataset.defaultBadge) : '';
     }
     if (name === 'agent_id') composerModel(value, label);
     hidePicker(); var row = root.querySelector('[data-detail-property="' + name + '"]'); returnToRow(row);

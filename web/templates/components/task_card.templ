@@ -90,13 +90,12 @@ func PriorityLabel(p int) string {
 
 func TagBadgeClass(tag models.TaskTag) string {
 	switch tag {
-	case models.TagFeature:
-		return "badge-primary"
+	case models.TagNone:
+		return ""
 	case models.TagBug:
 		return "badge-error"
 	default:
-        if tag == "" { return "" }
-		return "badge-neutral"
+		return "badge-primary"
 	}
 }
 
