@@ -346,22 +346,28 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   async function read(url, options) {
     if (!options && state.reads.has(url)) return state.reads.get(url);
     const request = (async () => {
-      const response = await fetch(url, {
-        credentials: "same-origin",
-        ...options,
-        signal: AbortSignal.timeout(20000),
-      });
-      if (
-        response.status === 401 ||
-        response.status === 403 ||
-        response.status === 404
-      ) {
-        const error = new Error("Account usage is unavailable.");
-        error.denied = true;
-        throw error;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        const response = await fetch(url, {
+          credentials: "same-origin",
+          ...options,
+          signal: controller.signal,
+        });
+        if (
+          response.status === 401 ||
+          response.status === 403 ||
+          response.status === 404
+        ) {
+          const error = new Error("Account usage is unavailable.");
+          error.denied = true;
+          throw error;
+        }
+        if (!response.ok) throw new Error("Unable to refresh account usage.");
+        return await response.json();
+      } finally {
+        clearTimeout(timer);
       }
-      if (!response.ok) throw new Error("Unable to refresh account usage.");
-      return response.json();
     })();
     if (!options) state.reads.set(url, request);
     try {
