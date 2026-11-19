@@ -117,6 +117,9 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		mu.Lock()
 		initialLoading = false
 		mu.Unlock()
+		b.evaluate(`window.testUsageHandlers.listeners.account_usage_updated(); 'usage available'`)
+		b.waitFor("meters appear when delayed usage arrives", `String(document.querySelectorAll('#rail-accounts .rail-account').length)`, "3")
+
 		// Start a fresh document with the same missing API as the macOS 12 webview.
 		b.call("Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": `Object.defineProperty(AbortSignal, "timeout", { value: undefined, configurable: true })`}, nil)
 		b.call("Page.reload", map[string]any{}, nil)
