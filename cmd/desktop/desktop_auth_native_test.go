@@ -9,7 +9,9 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,13 +54,33 @@ func runDesktopAuthNativeHelper(backend string) error {
 	}
 	proxy := desktopAssetProxy(target)
 	var app *application.App
+	// Record document requests at the proxy. A redirect page may execute its
+	// script before the WebView test hook gets to inspect the document.
+	var navigationMu sync.Mutex
+	var submitted bool
+	var documents []string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/__desktop_auth_result" {
-			fmt.Println("DESKTOP AUTH " + r.URL.Query().Get("result"))
+			result := r.URL.Query().Get("result")
+			navigationMu.Lock()
+			if result == "PASS" && !slices.Equal(documents, []string{"GET /chat"}) {
+				result = fmt.Sprintf("FAIL: documents requested after submitting login: %v", documents)
+			}
+			navigationMu.Unlock()
+			fmt.Println("DESKTOP AUTH " + result)
 			w.WriteHeader(http.StatusNoContent)
 			app.Quit()
 			return
 		}
+		navigationMu.Lock()
+		if r.Method == http.MethodPost && r.URL.Path == "/login" {
+			submitted = true
+		}
+		dest := r.Header.Get("Sec-Fetch-Dest")
+		if submitted && (dest == "document" || (dest == "" && r.Header.Get("Upgrade-Insecure-Requests") == "1" && strings.Contains(r.Header.Get("Accept"), "text/html"))) {
+			documents = append(documents, r.Method+" "+r.URL.RequestURI())
+		}
+		navigationMu.Unlock()
 		proxy.ServeHTTP(w, r)
 	})
 	app = application.New(application.Options{
@@ -79,6 +101,13 @@ func runDesktopAuthNativeHelper(backend string) error {
       const form = document.querySelector('form[action="/login"]');
       if (!form) throw Error('login form missing: ' + document.body.innerText.slice(0, 500));
       form.elements.username.value = 'alice';
+      form.elements.password.value = 'incorrect-password';
+      form.requestSubmit();
+      const button = form.querySelector('button[type=submit]');
+      for (let i = 0; i < 100 && !document.getElementById('login-error'); i++) await new Promise(resolve => setTimeout(resolve, 50));
+      const error = document.getElementById('login-error');
+      if (!error || error.textContent !== 'Incorrect username or password.' || !error.getClientRects().length) throw Error('missing visible credential error');
+      if (!form.isConnected || button.disabled) throw Error('sign-in form unavailable for retry');
       form.elements.password.value = 'alice-password-long';
       form.requestSubmit();
     } else if (location.pathname === '/chat' && document.getElementById('main-content')) {
