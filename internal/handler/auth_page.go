@@ -9,9 +9,13 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
+func (h *Handler) nativeAuthWindow(c echo.Context) bool {
+	return h.desktopMode && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1"
+}
+
 // Standalone auth documents bypass Base, but still need native window chrome.
 func (h *Handler) renderAuthDocument(c echo.Context, status int, body string) error {
-	if h.desktopMode && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1" {
+	if h.nativeAuthWindow(c) {
 		var bar bytes.Buffer
 		if err := layout.AuthTitlebar(runtime.GOOS).Render(c.Request().Context(), &bar); err != nil {
 			return err

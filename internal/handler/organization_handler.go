@@ -104,11 +104,7 @@ func (h *Handler) organizationLogin(c echo.Context) error {
 		}
 	}
 	c.SetCookie(h.authCfg.SessionCookie(token, c.Scheme() == "https"))
-	next, err := auth.DecodeNext(c.FormValue("next"))
-	if err != nil {
-		next = "/"
-	}
-	return c.Redirect(http.StatusFound, next)
+	return h.finishLogin(c)
 }
 func (h *Handler) organizationMe(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")

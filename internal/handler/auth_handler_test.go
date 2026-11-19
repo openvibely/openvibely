@@ -97,6 +97,27 @@ func TestAuthLogin_SuccessSetsCookieAndRedirects(t *testing.T) {
 	}
 }
 
+func TestAuthLogin_DesktopNavigatesDirectly(t *testing.T) {
+	h, e := authTestHandler(t)
+	h.SetDesktopMode(true)
+	for _, test := range []struct{ next, destination string }{
+		{"", "/chat"},
+		{"/tasks?project_id=one", "/tasks?project_id=one"},
+	} {
+		form := url.Values{"username": {"admin"}, "password": {"secret"}, "next": {base64.RawURLEncoding.EncodeToString([]byte(test.next))}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("X-OpenVibely-Native-Window", "1")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		var result struct{ Destination string }
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &result) != nil || result.Destination != test.destination {
+			t.Fatalf("next %q: status %d, body %s", test.next, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestAuthLogin_FailureRedirectsBackToLogin(t *testing.T) {
 	_, e := authTestHandler(t)
 	form := url.Values{}

@@ -276,7 +276,63 @@ func (h *Handler) renderLoginPage(c echo.Context, status int, username, nextValu
   </div>
 </body>
 </html>`
+	if h.nativeAuthWindow(c) {
+		body = strings.Replace(body, "</body>", desktopLoginScript+"</body>", 1)
+	}
 	return h.renderAuthDocument(c, status, body)
+}
+
+// Submit from the current document so WebKit can navigate straight to the workspace.
+const desktopLoginScript = `<script>
+const form = document.querySelector('form[action="/login"]');
+form.addEventListener('submit', async function(event) {
+  event.preventDefault();
+  const button = form.querySelector('button[type="submit"]');
+  if (button.disabled) return;
+  button.disabled = true;
+  let message = 'Sign-in failed. Please try again.';
+  try {
+    const response = await fetch(form.action, {
+      method: 'POST', headers: {Accept: 'application/json'},
+      body: new URLSearchParams(new FormData(form))
+    });
+    if (response.ok) {
+      const result = await response.json();
+      window.location.replace(result.destination);
+      return;
+    }
+    if (response.status === 401) message = 'Incorrect username or password.';
+    if (response.status === 429) message = 'Too many attempts. Try again later.';
+  } catch (_) {}
+  let error = document.getElementById('login-error');
+  if (!error) {
+    error = document.createElement('p');
+    error.id = 'login-error';
+    error.className = 'text-sm text-error';
+    error.setAttribute('role', 'alert');
+    form.before(error);
+  }
+  error.textContent = message;
+  button.disabled = false;
+});
+</script>`
+
+func (h *Handler) desktopLoginRequest(c echo.Context) bool {
+	return h.nativeAuthWindow(c) && c.Request().Header.Get("Accept") == "application/json"
+}
+
+func (h *Handler) finishLogin(c echo.Context) error {
+	next, err := auth.DecodeNext(c.FormValue("next"))
+	if err != nil {
+		next = "/"
+	}
+	if h.desktopLoginRequest(c) {
+		if next == "/" {
+			next = "/chat"
+		}
+		return c.JSON(http.StatusOK, map[string]string{"destination": next})
+	}
+	return c.Redirect(http.StatusFound, next)
 }
 
 func (h *Handler) AuthLogin(c echo.Context) error {
@@ -295,6 +351,9 @@ func (h *Handler) AuthLogin(c echo.Context) error {
 	now := time.Now()
 	username := strings.TrimSpace(c.FormValue("username"))
 	if h.isConfiguredLoginUser(username) && h.isLoginLocked(now) {
+		if h.desktopLoginRequest(c) {
+			return c.NoContent(http.StatusUnauthorized)
+		}
 		encodedNext := c.FormValue("next")
 		nextPath, _ := auth.DecodeNext(encodedNext)
 		loginURL := auth.RedirectURL(nextPath)
@@ -305,6 +364,9 @@ func (h *Handler) AuthLogin(c echo.Context) error {
 	if !h.authCfg.ValidateCredentials(username, password) {
 		if h.isConfiguredLoginUser(username) {
 			h.recordFailedLoginAttempt(now)
+		}
+		if h.desktopLoginRequest(c) {
+			return c.NoContent(http.StatusUnauthorized)
 		}
 		encodedNext := c.FormValue("next")
 		nextPath, _ := auth.DecodeNext(encodedNext)
@@ -320,11 +382,7 @@ func (h *Handler) AuthLogin(c echo.Context) error {
 	secure := c.Scheme() == "https"
 	c.SetCookie(h.authCfg.SessionCookie(token, secure))
 
-	nextPath, err := auth.DecodeNext(c.FormValue("next"))
-	if err != nil {
-		nextPath = "/"
-	}
-	return c.Redirect(http.StatusFound, nextPath)
+	return h.finishLogin(c)
 }
 
 func (h *Handler) HostedSSOStart(c echo.Context) error {
