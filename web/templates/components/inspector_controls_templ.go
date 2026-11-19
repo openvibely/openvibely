@@ -31,7 +31,7 @@ func InspectorStyles() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n .inspector-body { min-height:0; flex:1; overflow-y:auto; padding:12px 24px; }\n .inspector-tabs { display:flex; flex-wrap:nowrap; overflow-x:auto; flex-shrink:0; margin:8px 12px 16px; box-shadow:inset 0 -1px var(--ov-border-subtle); box-shadow:inset 0 -1px color-mix(in srgb,currentColor 20%,transparent); }\n .inspector-tabs > [role=tab] { outline:none !important; box-shadow:none !important; background:none; flex:1; white-space:nowrap; color:inherit; opacity:.6; font-size:.8125rem; font-weight:400; line-height:20px; padding:6px 8px; border-bottom:2px solid transparent !important; }\n .inspector-tabs > [aria-selected=true] { opacity:1; border-bottom-color:currentColor !important; }\n [data-ov-theme-layer=\"custom\"] .inspector-tabs { box-shadow:inset 0 -1px var(--ov-subtle-border); }\n [data-ov-theme-layer=\"custom\"] .inspector-tabs > [role=tab] { color:var(--ov-text-muted) !important; opacity:1; }\n [data-ov-theme-layer=\"custom\"] .inspector-tabs > [aria-selected=true] { color:var(--ov-text) !important; }\n .inspector-property-row { display:grid; grid-template-columns:7rem minmax(0,1fr) 1rem; align-items:baseline; gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; font-size:14px; }\n .inspector-property-row > span { min-width:0; overflow-wrap:anywhere; }\n .inspector-property-row:hover:not(:disabled), .inspector-summary:hover:not(:disabled) { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }\n .inspector-summary { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }\n .inspector-summary:disabled { cursor:default; }\n .inspector-picker { position:fixed; display:none; margin:0; width:280px; max-width:calc(100vw - 24px); }\n .inspector-picker:popover-open { display:block; }\n .inspector-picker[data-openvibely-picker-open=true] { display:block; z-index:1000; }\n .inspector-picker [hidden] { display:none !important; }\n .inspector-picker button[data-value] { outline:none; }\n [data-picker-return-focus] { outline:none; }\n </style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n .inspector-body { min-height:0; flex:1; overflow-y:auto; padding:12px 24px; }\n .inspector-tabs { display:flex; flex-wrap:nowrap; overflow-x:auto; flex-shrink:0; margin:8px 12px 16px; box-shadow:inset 0 -1px var(--ov-border-subtle); box-shadow:inset 0 -1px color-mix(in srgb,currentColor 20%,transparent); }\n .inspector-tabs > [role=tab] { outline:none !important; box-shadow:none !important; background:none; flex:1; white-space:nowrap; color:inherit; opacity:.6; font-size:.8125rem; font-weight:400; line-height:20px; padding:6px 8px; border-bottom:2px solid transparent !important; }\n .inspector-tabs > [aria-selected=true] { opacity:1; border-bottom-color:currentColor !important; }\n [data-ov-theme-layer=\"custom\"] .inspector-tabs { box-shadow:inset 0 -1px var(--ov-subtle-border); }\n [data-ov-theme-layer=\"custom\"] .inspector-tabs > [role=tab] { color:var(--ov-text-muted) !important; opacity:1; }\n [data-ov-theme-layer=\"custom\"] .inspector-tabs > [aria-selected=true] { color:var(--ov-text) !important; }\n .inspector-property-row { display:grid; grid-template-columns:7rem minmax(0,1fr) 1rem; align-items:baseline; gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; font-size:14px; }\n .inspector-property-row > span { min-width:0; overflow-wrap:anywhere; }\n .inspector-property-row:hover:not(:disabled), .inspector-summary:hover:not(:disabled) { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }\n .inspector-summary { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }\n .inspector-summary:disabled { cursor:default; }\n .inspector-picker { position:fixed; display:none; margin:0; width:280px; max-width:calc(100vw - 24px); }\n .inspector-picker:popover-open { display:block; }\n .inspector-picker[data-openvibely-picker-open=true] { display:block; z-index:1000; }\n .inspector-picker [hidden] { display:none !important; }\n .inspector-picker .ov-menu-create-row:has(button[hidden]) { display:none; }\n .inspector-picker button[data-value] { outline:none; }\n [data-picker-return-focus] { outline:none; }\n </style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -67,7 +67,7 @@ func InspectorTabs(idPrefix, panelPrefix, label string, tabs []InspectorTab) tem
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templruntime.NewAttributeExpression(label).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 33, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 34, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {
@@ -85,7 +85,7 @@ func InspectorTabs(idPrefix, panelPrefix, label string, tabs []InspectorTab) tem
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templruntime.NewAttributeExpression(idPrefix + tab.Key).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 35, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 36, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 			if templ_7745c5c3_Err != nil {
@@ -98,7 +98,7 @@ func InspectorTabs(idPrefix, panelPrefix, label string, tabs []InspectorTab) tem
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(tab.Key).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 35, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 36, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 			if templ_7745c5c3_Err != nil {
@@ -111,7 +111,7 @@ func InspectorTabs(idPrefix, panelPrefix, label string, tabs []InspectorTab) tem
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(panelPrefix + tab.Key).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 35, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 36, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -124,7 +124,7 @@ func InspectorTabs(idPrefix, panelPrefix, label string, tabs []InspectorTab) tem
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(tab.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 35, Col: 170}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 36, Col: 170}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -167,7 +167,7 @@ func InspectorPropertyContent(label, text string) templ.Component {
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(label + ":")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 41, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 42, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -180,7 +180,7 @@ func InspectorPropertyContent(label, text string) templ.Component {
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(text)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 41, Col: 80}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 42, Col: 80}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
@@ -246,7 +246,7 @@ func InspectorSummary(title, timing, context string, attrs templ.Attributes, rea
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 46, Col: 76}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 47, Col: 76}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
@@ -259,7 +259,7 @@ func InspectorSummary(title, timing, context string, attrs templ.Attributes, rea
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(timing)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 46, Col: 157}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 47, Col: 157}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
@@ -272,7 +272,7 @@ func InspectorSummary(title, timing, context string, attrs templ.Attributes, rea
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(context)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 46, Col: 240}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 47, Col: 240}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 		if templ_7745c5c3_Err != nil {
@@ -329,7 +329,7 @@ func InspectorDialog(id, title string, attributes ...templ.Attributes) templ.Com
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 55, Col: 16}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 56, Col: 16}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
@@ -342,7 +342,7 @@ func InspectorDialog(id, title string, attributes ...templ.Attributes) templ.Com
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id + "-title").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 55, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 56, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 			if templ_7745c5c3_Err != nil {
@@ -373,7 +373,7 @@ func InspectorDialog(id, title string, attributes ...templ.Attributes) templ.Com
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id + "-title").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 58, Col: 25}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 59, Col: 25}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
@@ -386,7 +386,7 @@ func InspectorDialog(id, title string, attributes ...templ.Attributes) templ.Com
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 58, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 59, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
@@ -408,7 +408,7 @@ func InspectorDialog(id, title string, attributes ...templ.Attributes) templ.Com
 	})
 }
 
-func InspectorPicker(id string) templ.Component {
+func InspectorPicker(id string, actions ...templ.Component) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -445,13 +445,23 @@ func InspectorPicker(id string) templ.Component {
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 69, Col: 13}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/inspector_controls.templ`, Line: 70, Col: 13}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" popover=\"manual\" role=\"dialog\" aria-label=\"Choose property\" class=\"inspector-picker ov-menu p-0\"><div class=\"ov-menu-search\"><input type=\"search\" aria-label=\"Search options\" placeholder=\"Search…\"></div><div class=\"ov-menu-list ov-menu-scroll\" style=\"max-height:240px\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" popover=\"manual\" role=\"dialog\" aria-label=\"Choose property\" class=\"inspector-picker ov-menu p-0\"><div class=\"ov-menu-search\"><input type=\"search\" aria-label=\"Search options\" placeholder=\"Search…\"></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for _, action := range actions {
+			templ_7745c5c3_Err = action.Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div class=\"ov-menu-list ov-menu-scroll\" style=\"max-height:240px\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -459,7 +469,7 @@ func InspectorPicker(id string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</div><p data-property-error role=\"alert\" class=\"text-error text-sm\"></p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</div><p data-property-error role=\"alert\" class=\"text-error text-sm\"></p></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -484,7 +494,7 @@ func InspectorPickerScript() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<script>\n window.createInspectorPicker = window.createInspectorPicker || function(root, picker, isBusy, available) {\n  var current=null, active=null, abort=new AbortController();\n  var nativePopover=typeof picker.showPopover==='function', search=picker.querySelector('input');\n  function on(el,name,fn){el.addEventListener(name,fn,{signal:abort.signal});}\n  function isOpen(){return nativePopover?picker.matches(':popover-open'):picker.hasAttribute('data-openvibely-picker-open');}\n  function hide(){if(nativePopover && isOpen())picker.hidePopover();picker.removeAttribute('data-openvibely-picker-open');}\n  function returnFocus(row){if(!row||!row.isConnected)return;row.setAttribute('data-picker-return-focus','');row.focus({preventScroll:true});row.addEventListener('blur',function(){row.removeAttribute('data-picker-return-focus');},{once:true});}\n  function options(){return Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(b){return !b.disabled;});}\n  function highlight(option){if(active===option&&(!option||option.hasAttribute('data-active')))return;active=option;picker.querySelectorAll('button[data-value]').forEach(function(b){b.toggleAttribute('data-active',b===option);});}\n  if(!nativePopover)picker.removeAttribute('popover');\n  var menus=new WeakMap();\n  function menu(row){var controller=menus.get(row);if(!controller){controller=window.ovMenuController.create({trigger:row,panels:[picker],isOpen:function(){return current===row&&isOpen();},open:function(){show(row);},close:hide,restoreFocus:returnFocus});menus.set(row,controller);}return controller;}\n  function open(row){menu(row).toggle();}\n  function close(){if(current)menu(current).close(false);}\n  function place(row){var r=row.getBoundingClientRect(),end=row.dataset.pickerAlign==='end',gap=end?6:0;var left=end?r.right-picker.offsetWidth:r.left;var top=end&&r.bottom+gap+picker.offsetHeight>innerHeight-12?r.top-gap-picker.offsetHeight:r.bottom+gap;picker.style.left=Math.max(12,Math.min(left,innerWidth-picker.offsetWidth-12))+'px';picker.style.top=Math.max(12,Math.min(top,innerHeight-picker.offsetHeight-12))+'px';}\n  var sizeObserver=new ResizeObserver(function(){if(isOpen()&&current)place(current);});\n  sizeObserver.observe(picker);\n  abort.signal.addEventListener('abort',function(){sizeObserver.disconnect();},{once:true});\n  on(window,'resize',function(){if(isOpen()&&current)place(current);});\n  var scroller=root.closest('#main-content');if(scroller)on(scroller,'scroll',function(){if(current?.dataset.pickerAlign==='end')close();});\n  function show(row){current=row;search.value='';picker.querySelector('[data-property-error]').textContent='';picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=!!available&&!available(b);b.setAttribute('aria-pressed',String(b.dataset.value===row.dataset.value));});highlight(options().find(function(b){return b.dataset.value===row.dataset.value;})||options()[0]);picker.style.visibility='hidden';if(nativePopover)picker.showPopover();else picker.setAttribute('data-openvibely-picker-open','true');place(row);picker.style.visibility='';search.focus();}\n  on(search,'input',function(){picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=(!!available&&!available(b))||!b.textContent.toLowerCase().includes(search.value.toLowerCase());});if(!options().includes(active))highlight(options()[0]);});\n  on(picker,'pointermove',function(e){var b=e.target.closest('button[data-value]');if(b&&!b.disabled)highlight(b);});\n  on(picker,'focusin',function(e){if(e.target.matches('button[data-value]'))highlight(e.target);});\n  on(picker, 'keydown', function(e) {\n   if(e.defaultPrevented||e.isComposing||e.keyCode===229)return;if((isBusy&&isBusy())||e.altKey||e.ctrlKey||e.metaKey||!['ArrowDown','ArrowUp','Enter'].includes(e.key))return;var items=options();if(!items.length)return;e.preventDefault();var i=items.indexOf(active);if(e.key==='Enter'){(items[i]||items[0]).click();return;}i=i<0?(e.key==='ArrowDown'?0:items.length-1):(i+(e.key==='ArrowDown'?1:items.length-1))%items.length;items[i].focus({preventScroll:true});window.openVibelyScrollIntoPanel(items[i]);\n  });\n  on(root,'htmx:beforeCleanupElement',function(e){if(e.target===root){hide();abort.abort();}});\n  return {open:open,close:close,isOpen:isOpen,returnFocus:returnFocus};\n };\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<script>\n window.createInspectorPicker = window.createInspectorPicker || function(root, picker, isBusy, available) {\n  var current=null, active=null, abort=new AbortController();\n  var nativePopover=typeof picker.showPopover==='function', search=picker.querySelector('input');\n  function on(el,name,fn){el.addEventListener(name,fn,{signal:abort.signal});}\n  function isOpen(){return nativePopover?picker.matches(':popover-open'):picker.hasAttribute('data-openvibely-picker-open');}\n  function hide(){if(nativePopover && isOpen())picker.hidePopover();picker.removeAttribute('data-openvibely-picker-open');}\n  function returnFocus(row){if(!row||!row.isConnected)return;row.setAttribute('data-picker-return-focus','');row.focus({preventScroll:true});row.addEventListener('blur',function(){row.removeAttribute('data-picker-return-focus');},{once:true});}\n  function options(){return Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(b){return !b.disabled;});}\n  function highlight(option){if(active===option&&(!option||option.hasAttribute('data-active')))return;active=option;picker.querySelectorAll('button[data-value]').forEach(function(b){b.toggleAttribute('data-active',b===option);});}\n  if(!nativePopover)picker.removeAttribute('popover');\n  var menus=new WeakMap();\n  function menu(row){var controller=menus.get(row);if(!controller){controller=window.ovMenuController.create({trigger:row,panels:[picker],isOpen:function(){return current===row&&isOpen();},open:function(){show(row);},close:hide,restoreFocus:returnFocus});menus.set(row,controller);}return controller;}\n  function open(row){menu(row).toggle();}\n  function close(){if(current)menu(current).close(false);}\n  function place(row){var r=row.getBoundingClientRect(),end=row.dataset.pickerAlign==='end',gap=end?6:0;var left=end?r.right-picker.offsetWidth:r.left;var top=end&&r.bottom+gap+picker.offsetHeight>innerHeight-12?r.top-gap-picker.offsetHeight:r.bottom+gap;picker.style.left=Math.max(12,Math.min(left,innerWidth-picker.offsetWidth-12))+'px';picker.style.top=Math.max(12,Math.min(top,innerHeight-picker.offsetHeight-12))+'px';}\n  var sizeObserver=new ResizeObserver(function(){if(isOpen()&&current)place(current);});\n  sizeObserver.observe(picker);\n  abort.signal.addEventListener('abort',function(){sizeObserver.disconnect();},{once:true});\n  on(window,'resize',function(){if(isOpen()&&current)place(current);});\n  var scroller=root.closest('#main-content');if(scroller)on(scroller,'scroll',function(){if(current?.dataset.pickerAlign==='end')close();});\n  function show(row){current=row;search.value='';picker.querySelector('[data-property-error]').textContent='';picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=!!available&&!available(b);b.setAttribute('aria-pressed',String(b.dataset.value===row.dataset.value));});highlight(options().find(function(b){return b.dataset.value===row.dataset.value;})||options()[0]);picker.style.visibility='hidden';if(nativePopover)picker.showPopover();else picker.setAttribute('data-openvibely-picker-open','true');place(row);picker.style.visibility='';search.focus();}\n  on(search,'input',function(){picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=(!!available&&!available(b))||!b.textContent.toLowerCase().includes(search.value.trim().toLowerCase());});if(!options().includes(active))highlight(options()[0]);});\n  on(picker,'pointermove',function(e){var b=e.target.closest('button[data-value]');if(b&&!b.disabled)highlight(b);});\n  on(picker,'focusin',function(e){if(e.target.matches('button[data-value]'))highlight(e.target);});\n  on(picker, 'keydown', function(e) {\n   if(e.defaultPrevented||e.isComposing||e.keyCode===229)return;if((isBusy&&isBusy())||e.altKey||e.ctrlKey||e.metaKey||!['ArrowDown','ArrowUp','Enter'].includes(e.key))return;var items=options();if(!items.length)return;e.preventDefault();var i=items.indexOf(active);if(e.key==='Enter'){(items[i]||items[0]).click();return;}i=i<0?(e.key==='ArrowDown'?0:items.length-1):(i+(e.key==='ArrowDown'?1:items.length-1))%items.length;items[i].focus({preventScroll:true});window.openVibelyScrollIntoPanel(items[i]);\n  });\n  on(root,'htmx:beforeCleanupElement',function(e){if(e.target===root){hide();abort.abort();}});\n  return {open:open,close:close,isOpen:isOpen,returnFocus:returnFocus};\n };\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

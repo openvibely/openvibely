@@ -3182,6 +3182,23 @@ func (r *TaskRepo) CountBacklogByPriority(ctx context.Context, projectID string)
 	return counts, rows.Err()
 }
 
+func (r *TaskRepo) ListCustomTags(ctx context.Context, projectID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT tag FROM tasks WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND category NOT IN ('chat','page_chat') AND tag NOT IN ('','feature','bug') ORDER BY tag`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, err
+		}
+		tags = append(tags, tag)
+	}
+	return tags, rows.Err()
+}
+
 // ListByTags returns tasks matching the specified tags and optional filters.
 // Tags can be a single tag or multiple tags (returns tasks matching ANY of the tags).
 // Optional filters: projectID (empty string = all projects), category (empty string = all categories),

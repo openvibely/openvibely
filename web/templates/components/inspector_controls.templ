@@ -23,6 +23,7 @@ templ InspectorStyles() {
  .inspector-picker:popover-open { display:block; }
  .inspector-picker[data-openvibely-picker-open=true] { display:block; z-index:1000; }
  .inspector-picker [hidden] { display:none !important; }
+ .inspector-picker .ov-menu-create-row:has(button[hidden]) { display:none; }
  .inspector-picker button[data-value] { outline:none; }
  [data-picker-return-focus] { outline:none; }
  </style>
@@ -62,12 +63,15 @@ templ InspectorDialog(id, title string, attributes ...templ.Attributes) {
  </dialog>
 }
 
-templ InspectorPicker(id string) {
+templ InspectorPicker(id string, actions ...templ.Component) {
  @templateui.MenuStyles()
  @InspectorStyles()
  @InspectorPickerScript()
  <div id={ id } popover="manual" role="dialog" aria-label="Choose property" class="inspector-picker ov-menu p-0">
   <div class="ov-menu-search"><input type="search" aria-label="Search options" placeholder="Search…"/></div>
+  for _, action := range actions {
+   @action
+  }
   <div class="ov-menu-list ov-menu-scroll" style="max-height:240px">{ children... }</div>
   <p data-property-error role="alert" class="text-error text-sm"></p>
  </div>
@@ -96,7 +100,7 @@ templ InspectorPickerScript() {
   on(window,'resize',function(){if(isOpen()&&current)place(current);});
   var scroller=root.closest('#main-content');if(scroller)on(scroller,'scroll',function(){if(current?.dataset.pickerAlign==='end')close();});
   function show(row){current=row;search.value='';picker.querySelector('[data-property-error]').textContent='';picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=!!available&&!available(b);b.setAttribute('aria-pressed',String(b.dataset.value===row.dataset.value));});highlight(options().find(function(b){return b.dataset.value===row.dataset.value;})||options()[0]);picker.style.visibility='hidden';if(nativePopover)picker.showPopover();else picker.setAttribute('data-openvibely-picker-open','true');place(row);picker.style.visibility='';search.focus();}
-  on(search,'input',function(){picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=(!!available&&!available(b))||!b.textContent.toLowerCase().includes(search.value.toLowerCase());});if(!options().includes(active))highlight(options()[0]);});
+  on(search,'input',function(){picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=(!!available&&!available(b))||!b.textContent.toLowerCase().includes(search.value.trim().toLowerCase());});if(!options().includes(active))highlight(options()[0]);});
   on(picker,'pointermove',function(e){var b=e.target.closest('button[data-value]');if(b&&!b.disabled)highlight(b);});
   on(picker,'focusin',function(e){if(e.target.matches('button[data-value]'))highlight(e.target);});
   on(picker, 'keydown', function(e) {

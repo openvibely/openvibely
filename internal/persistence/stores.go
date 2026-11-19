@@ -711,6 +711,7 @@ type TaskStore interface {
 	ListBreadcrumbSelector(ctx context.Context, projectID string, search string, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error)
 	ListByProject(ctx context.Context, projectID string, category string) ([]models.Task, error)
 	ListByProjectWithCategorySorts(ctx context.Context, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error)
+	ListCustomTags(ctx context.Context, projectID string) ([]string, error)
 	ListByTags(ctx context.Context, tags []models.TaskTag, projectID string, category models.TaskCategory, minPriority int, status models.TaskStatus) ([]models.Task, error)
 	ListChatContextByProject(ctx context.Context, projectID string) ([]ChatTaskContextRow, error)
 	ListReservedActiveLaneAdmissions(ctx context.Context) ([]ActiveLaneTaskAdmission, error)

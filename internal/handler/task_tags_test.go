@@ -21,6 +21,9 @@ func TestCustomTagsFormCreationEditingAndValidation(t *testing.T) {
 	require.Len(t, tasks, 1)
 	task := tasks[0]
 	require.Equal(t, models.TaskTag("docs/security"), task.Tag)
+	draft := htmxGet(e, "/tasks/new?project_id=default")
+	assertCode(t, draft, http.StatusOK)
+	require.Contains(t, draft.Body.String(), `data-value="docs/security"`)
 	form.Del("tag")
 	form.Set("prompt", "Updated")
 	assertCode(t, htmxPut(e, "/tasks/"+task.ID, form), http.StatusOK)
