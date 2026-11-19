@@ -20,14 +20,22 @@ templ taskTagCreateRow() {
 }
 
 templ TaskPropertyRow(label, field, value, text string) {
- <button type="button" class="task-property-row inspector-property-row" data-detail-property={ field } data-value={ value } aria-haspopup="dialog">
-  if field == "tag" && value != "" {
-  <span class="opacity-60">{ label + ":" }</span>
-  <span data-property-label class={ "badge badge-sm", components.TagBadgeClass(models.TaskTag(value)) }>{ text }</span><span aria-hidden="true">›</span>
+ if field == "tag" {
+  <div class="task-property-row inspector-property-row task-tag-row">
+   <span class="opacity-60">{ label + ":" }</span>
+   <span data-tag-badge class={ templ.KV("badge badge-sm", value != ""), components.TagBadgeClass(models.TaskTag(value)) }>
+    <button type="button" data-detail-property="tag" data-value={ value } aria-haspopup="dialog" aria-label={ "Tag: " + text }><span data-property-label>{ text }</span></button>
+    <button type="button" data-remove-tag aria-label={ "Remove tag " + text } title="Remove tag" hidden?={ value == "" }>
+     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m2 2 6 6m0-6-6 6"/></svg>
+    </button>
+   </span>
+  </div>
+  <p data-tag-remove-error role="alert" class="text-error text-sm"></p>
  } else {
-  @components.InspectorPropertyContent(label, text)
+  <button type="button" class="task-property-row inspector-property-row" data-detail-property={ field } data-value={ value } aria-haspopup="dialog">
+   @components.InspectorPropertyContent(label, text)
+  </button>
  }
- </button>
 }
 
 templ TaskAutoMergeSwitches(task *models.Task) {
@@ -90,7 +98,6 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     <span class="loading loading-spinner loading-sm opacity-50" aria-hidden="true"></span>
    </div>
    <div data-options="tag" data-prefer-exact-value data-default-badge={ components.TagBadgeClass(models.TagFeature) }>
-    <button type="button" data-clear-tag data-value="" class="ov-menu-option w-full">Clear tag</button>
     for _, option := range []struct{ Value, Label string }{{"feature", "Feature"}, {"bug", "Bug"}} {
      <button type="button" data-value={ option.Value } data-badge={ components.TagBadgeClass(models.TaskTag(option.Value)) } class="ov-menu-option w-full">{ option.Label }</button>
     }
@@ -169,7 +176,6 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var taskID = root.dataset.taskId, projectID = root.dataset.projectId;
   var destination = root.querySelector('#new-task-project');
   function available(option) {
-   if (option.hasAttribute('data-clear-tag')) return !search.value.trim();
    if (option === createTag) {
     var query = search.value.trim();
     if (field !== 'tag' || !tagsLoaded || !query) return false;
@@ -220,7 +226,34 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    catch (error) { input.checked = !input.checked; if (!error.toastOnly) panel.querySelector('[data-auto-merge-error]').textContent = error.message; }
    finally { busy = false; panel.querySelectorAll('input').forEach(function(control) { control.disabled = false; }); }
   });
-  root.addEventListener('click', function(event) {
+  function updateDraftTag(value, label, badgeClass) {
+   var button = root.querySelector('[data-detail-property="tag"]');
+   var badge = button.closest('[data-tag-badge]');
+   root.querySelector('[data-draft-property="tag"]').value = value;
+   button.dataset.value = value;
+   button.querySelector('[data-property-label]').textContent = label;
+   button.setAttribute('aria-label', 'Tag: ' + label);
+   badge.className = value ? 'badge badge-sm ' + badgeClass : '';
+   var remove = badge.querySelector('[data-remove-tag]');
+   remove.hidden = !value;
+   remove.setAttribute('aria-label', 'Remove tag ' + label);
+  }
+  root.addEventListener('click', async function(event) {
+   var remove = event.target.closest('[data-remove-tag]');
+   if (remove) {
+    if (busy) return;
+    busy = true;
+    remove.disabled = true;
+    var errorLabel = root.querySelector('[data-tag-remove-error]');
+    errorLabel.textContent = '';
+    try {
+     if (taskID) await save('tag', '');
+     else updateDraftTag('', 'No tag', '');
+     returnToRow(root.querySelector('[data-detail-property="tag"]'));
+    } catch (error) { if (!error.toastOnly) errorLabel.textContent = error.message; }
+    finally { busy = false; remove.disabled = false; }
+    return;
+   }
    if (busy && event.target.closest('[data-detail-property], [data-detail-editor]')) { event.preventDefault(); return; }
    var row = event.target.closest('[data-detail-property]');
    if (row) {
@@ -263,12 +296,12 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    busy = true; picker.querySelectorAll('button').forEach(function(button) { button.disabled = true; });
    try {
     if (taskID) await save(name, value);
+    else if (name === 'tag') updateDraftTag(value, label, option.dataset.badge || tags.dataset.defaultBadge);
     else {
      var input = root.querySelector('[data-draft-property="' + name + '"]'); if (input) { input.value = value; if (name === 'destination_project') input.dispatchEvent(new Event('change', {bubbles:true})); }
      current.dataset.value = value;
      var propertyLabel = current.querySelector('[data-property-label]');
-     propertyLabel.textContent = option.hasAttribute('data-clear-tag') ? 'No tag' : label;
-     if (name === 'tag') propertyLabel.className = value ? 'badge badge-sm ' + (option.dataset.badge || tags.dataset.defaultBadge) : '';
+     propertyLabel.textContent = label;
     }
     if (name === 'agent_id') composerModel(value, label);
     hidePicker(); var row = root.querySelector('[data-detail-property="' + name + '"]'); returnToRow(row);

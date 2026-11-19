@@ -12,6 +12,13 @@ templ TaskDetailPanel() {
 		</div>
 	}
 	<style>
+  #task-details-panel .task-tag-row:hover { background:transparent; }
+  .task-tag-row [data-tag-badge] { display:inline-flex; align-items:center; justify-self:start; max-width:100%; gap:0; }
+  .task-tag-row [data-tag-badge].badge { padding-inline:8px 2px; height:auto; min-height:22px; border-radius:999px; }
+  .task-tag-row [data-detail-property="tag"] { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; color:inherit; font:inherit; }
+  .task-tag-row [data-remove-tag]:not([hidden]) { width:20px; height:20px; display:grid; place-items:center; flex:none; padding:0; position:relative; color:inherit; }
+  .task-tag-row [data-remove-tag]:hover::before { content:""; position:absolute; inset:2px; border-radius:50%; background:currentColor; opacity:.12; }
+
         #inspector-tab-computer:not([data-computer-allowed]):not([data-computer-pending]) { display:none; }
 		/* Prevent scroll-boundary gestures from bouncing the app shell independently
 		   of the fixed inspector. The thread and panel retain their own scrolling. */

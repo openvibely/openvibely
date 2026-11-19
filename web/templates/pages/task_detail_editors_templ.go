@@ -114,51 +114,21 @@ func TaskPropertyRow(label, field, value, text string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<button type=\"button\" class=\"task-property-row inspector-property-row\" data-detail-property=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field).Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 23, Col: 100}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" data-value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(value).Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 23, Col: 121}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" aria-haspopup=\"dialog\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if field == "tag" && value != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<span class=\"opacity-60\">")
+		if field == "tag" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"task-property-row inspector-property-row task-tag-row\"><span class=\"opacity-60\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var7 string
-			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(label + ":")
+			var templ_7745c5c3_Var5 string
+			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(label + ":")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 25, Col: 40}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 25, Col: 41}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -166,25 +136,25 @@ func TaskPropertyRow(label, field, value, text string) templ.Component {
 				templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 				templ_7745c5c3_Buffer := templ.GetBuffer()
 				var templ_7745c5c3_ElementScripts []templ.ComponentScript
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<span data-property-label class=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<span data-tag-badge class=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var8 = []any{"badge badge-sm", components.TagBadgeClass(models.TaskTag(value))}
-				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var8...)
+				var templ_7745c5c3_Var6 = []any{templ.KV("badge badge-sm", value != ""), components.TagBadgeClass(models.TaskTag(value))}
+				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var6...)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var9 string
-				templ_7745c5c3_Var9, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var8).String()).Resolve(ctx)
+				var templ_7745c5c3_Var7 string
+				templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var6).String()).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
 					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 1, Col: 0}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -198,32 +168,111 @@ func TaskPropertyRow(label, field, value, text string) templ.Component {
 				}
 				templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, ">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "><button type=\"button\" data-detail-property=\"tag\" data-value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var8 string
+			templ_7745c5c3_Var8, templ_7745c5c3_Err = templruntime.NewAttributeExpression(value).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 27, Col: 71}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" aria-haspopup=\"dialog\" aria-label=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var9 string
+			templ_7745c5c3_Var9, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Tag: " + text).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 27, Col: 124}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"><span data-property-label>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(text)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 26, Col: 110}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 27, Col: 159}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</span><span aria-hidden=\"true\">›</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</span></button> <button type=\"button\" data-remove-tag aria-label=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var11 string
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Remove tag " + text).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 28, Col: 75}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" title=\"Remove tag\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if value == "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, " hidden")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "><svg width=\"10\" height=\"10\" viewBox=\"0 0 10 10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"m2 2 6 6m0-6-6 6\"></path></svg></button></span></div><p data-tag-remove-error role=\"alert\" class=\"text-error text-sm\"></p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<button type=\"button\" class=\"task-property-row inspector-property-row\" data-detail-property=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var12 string
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 35, Col: 101}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" data-value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var13 string
+			templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(value).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 35, Col: 122}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" aria-haspopup=\"dialog\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 			templ_7745c5c3_Err = components.InspectorPropertyContent(label, text).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</button>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</button>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
 		return nil
 	})
@@ -246,7 +295,7 @@ func TaskAutoMergeSwitches(task *models.Task) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<div class=\"form-control mt-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"form-control mt-2\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -257,48 +306,48 @@ func TaskAutoMergeSwitches(task *models.Task) templ.Component {
 			{"auto_merge", "Auto-merge on successful completion", task.AutoMerge},
 			{"auto_merge_on_goal_achieved", "Auto-merge when goal is achieved", task.AutoMergeOnGoalAchieved},
 		} {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(option.Name).Resolve(ctx)
+			var templ_7745c5c3_Var15 string
+			templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.NewAttributeExpression(option.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 40, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 48, Col: 45}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" class=\"toggle toggle-sm toggle-primary shrink-0\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" class=\"toggle toggle-sm toggle-primary shrink-0\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if option.Checked {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, " checked")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, " checked")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, " data-auto-merge-toggle> <span class=\"label-text\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " data-auto-merge-toggle> <span class=\"label-text\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var13 string
-			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(option.Label)
+			var templ_7745c5c3_Var16 string
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(option.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 41, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 49, Col: 43}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</span></label>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</span></label>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -323,7 +372,7 @@ func TaskAutoMergePanel(task *models.Task) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<section id=\"task-auto-merge-panel\" class=\"mb-4\"><h3 class=\"text-sm font-semibold\">Auto-merge</h3>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<section id=\"task-auto-merge-panel\" class=\"mb-4\"><h3 class=\"text-sm font-semibold\">Auto-merge</h3>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -331,7 +380,7 @@ func TaskAutoMergePanel(task *models.Task) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<p data-auto-merge-error role=\"alert\" class=\"text-error text-sm\"></p></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<p data-auto-merge-error role=\"alert\" class=\"text-error text-sm\"></p></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -356,7 +405,7 @@ func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var16 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var19 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -369,292 +418,292 @@ func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions
 			}
 			ctx = templ.InitializeContext(ctx)
 			if task.ID == "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<div data-options=\"destination_project\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div data-options=\"destination_project\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				for _, project := range templateui.ProjectOptions(ctx) {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<button type=\"button\" data-value=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<button type=\"button\" data-value=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var17 string
-					templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression(project.ID).Resolve(ctx)
+					var templ_7745c5c3_Var20 string
+					templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(project.ID).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 60, Col: 51}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 68, Col: 51}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" class=\"ov-menu-option w-full\">")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var18 string
-					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(project.Name)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 60, Col: 98}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" class=\"ov-menu-option w-full\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</button>")
+					var templ_7745c5c3_Var21 string
+					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(project.Name)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 68, Col: 98}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</button>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, " <div data-options=\"agent_id\"><button type=\"button\" data-value=\"default\" class=\"ov-menu-option w-full\">Default</button> <button type=\"button\" data-value=\"\" class=\"ov-menu-option w-full\">Auto</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, " <div data-options=\"agent_id\"><button type=\"button\" data-value=\"default\" class=\"ov-menu-option w-full\">Default</button> <button type=\"button\" data-value=\"\" class=\"ov-menu-option w-full\">Auto</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, model := range agents {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<button type=\"button\" data-value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<button type=\"button\" data-value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var19 string
-				templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.NewAttributeExpression(model.ID).Resolve(ctx)
+				var templ_7745c5c3_Var22 string
+				templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(model.ID).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 68, Col: 48}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 76, Col: 48}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" class=\"ov-menu-option w-full\">")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var20 string
-				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(model.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 68, Col: 93}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" class=\"ov-menu-option w-full\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</button>")
+				var templ_7745c5c3_Var23 string
+				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(model.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 76, Col: 93}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</button>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</div><div data-options=\"agent_definition_id\"><button type=\"button\" data-value=\"\" class=\"ov-menu-option w-full\">No agent</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</div><div data-options=\"agent_definition_id\"><button type=\"button\" data-value=\"\" class=\"ov-menu-option w-full\">No agent</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, agent := range definitions {
 				if agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<button type=\"button\" data-value=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var21 string
-					templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 75, Col: 49}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" data-agent-scope=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var22 string
-					templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(agent.Scope)).Resolve(ctx)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 75, Col: 90}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" data-agent-project=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var23 string
-					templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ProjectID).Resolve(ctx)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 75, Col: 129}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" class=\"ov-menu-option w-full\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<button type=\"button\" data-value=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var24 string
-					templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
+					templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 75, Col: 174}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 83, Col: 49}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</button>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" data-agent-scope=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var25 string
+					templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(agent.Scope)).Resolve(ctx)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 83, Col: 90}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" data-agent-project=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var26 string
+					templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ProjectID).Resolve(ctx)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 83, Col: 129}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" class=\"ov-menu-option w-full\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var27 string
+					templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 83, Col: 174}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</button>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div><div data-options=\"category\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</div><div data-options=\"category\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, category := range models.SelectableCategories {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<button type=\"button\" data-value=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var25 string
-				templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(category)).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 81, Col: 56}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" class=\"ov-menu-option w-full\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var26 string
-				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(string(category))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 81, Col: 107}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</button>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</div><div data-options=\"priority\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			for i, label := range []string{"Low", "Normal", "High", "Urgent"} {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<button type=\"button\" data-value=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var27 string
-				templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(i + 1)).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 86, Col: 55}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" class=\"ov-menu-option w-full\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<button type=\"button\" data-value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var28 string
-				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(label)
+				templ_7745c5c3_Var28, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(category)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 86, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 89, Col: 56}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</button>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" class=\"ov-menu-option w-full\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var29 string
+				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(string(category))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 89, Col: 107}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</button>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div><div data-tag-loading role=\"status\" aria-label=\"Loading tags\" class=\"flex justify-center py-2\" hidden><span class=\"loading loading-spinner loading-sm opacity-50\" aria-hidden=\"true\"></span></div><div data-options=\"tag\" data-prefer-exact-value data-default-badge=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</div><div data-options=\"priority\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var29 string
-			templ_7745c5c3_Var29, templ_7745c5c3_Err = templruntime.NewAttributeExpression(components.TagBadgeClass(models.TagFeature)).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 92, Col: 115}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\"><button type=\"button\" data-clear-tag data-value=\"\" class=\"ov-menu-option w-full\">Clear tag</button> ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			for _, option := range []struct{ Value, Label string }{{"feature", "Feature"}, {"bug", "Bug"}} {
+			for i, label := range []string{"Low", "Normal", "High", "Urgent"} {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<button type=\"button\" data-value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var30 string
-				templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(option.Value).Resolve(ctx)
+				templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(i + 1)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 95, Col: 52}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 94, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" data-badge=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" class=\"ov-menu-option w-full\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var31 string
-				templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression(components.TagBadgeClass(models.TaskTag(option.Value))).Resolve(ctx)
+				templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 95, Col: 122}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 94, Col: 95}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" class=\"ov-menu-option w-full\">")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var32 string
-				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(option.Label)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 95, Col: 169}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</button>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</button>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</div><div data-tag-loading role=\"status\" aria-label=\"Loading tags\" class=\"flex justify-center py-2\" hidden><span class=\"loading loading-spinner loading-sm opacity-50\" aria-hidden=\"true\"></span></div><div data-options=\"tag\" data-prefer-exact-value data-default-badge=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var32 string
+			templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(components.TagBadgeClass(models.TagFeature)).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 100, Col: 115}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, option := range []struct{ Value, Label string }{{"feature", "Feature"}, {"bug", "Bug"}} {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<button type=\"button\" data-value=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var33 string
+				templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(option.Value).Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 102, Col: 52}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\" data-badge=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var34 string
+				templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(components.TagBadgeClass(models.TaskTag(option.Value))).Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 102, Col: 122}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" class=\"ov-menu-option w-full\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var35 string
+				templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(option.Label)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 102, Col: 169}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</button>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.InspectorPicker("task-property-picker", taskTagCreateRow()).Render(templ.WithChildren(ctx, templ_7745c5c3_Var16), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.InspectorPicker("task-property-picker", taskTagCreateRow()).Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var33 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var36 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -666,17 +715,17 @@ func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<form method=\"post\"><textarea aria-label=\"Value\" class=\"textarea textarea-bordered w-full h-48\" required></textarea><p data-editor-error role=\"alert\" class=\"text-error text-sm\"></p><div class=\"modal-action\"><button type=\"button\" class=\"btn btn-ghost\" data-goal-action=\"pause\" hidden>Pause</button><button type=\"button\" class=\"btn btn-ghost\" data-goal-action=\"resume\" hidden>Resume</button><button type=\"button\" class=\"btn btn-outline btn-error\" data-goal-action=\"clear\" hidden>Clear goal</button><button type=\"button\" class=\"btn btn-ghost\" data-editor-cancel>Cancel</button><button type=\"submit\" class=\"btn btn-primary\">Save</button></div></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<form method=\"post\"><textarea aria-label=\"Value\" class=\"textarea textarea-bordered w-full h-48\" required></textarea><p data-editor-error role=\"alert\" class=\"text-error text-sm\"></p><div class=\"modal-action\"><button type=\"button\" class=\"btn btn-ghost\" data-goal-action=\"pause\" hidden>Pause</button><button type=\"button\" class=\"btn btn-ghost\" data-goal-action=\"resume\" hidden>Resume</button><button type=\"button\" class=\"btn btn-outline btn-error\" data-goal-action=\"clear\" hidden>Clear goal</button><button type=\"button\" class=\"btn btn-ghost\" data-editor-cancel>Cancel</button><button type=\"submit\" class=\"btn btn-primary\">Save</button></div></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.InspectorDialog("task-detail-text-editor", "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var33), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.InspectorDialog("task-detail-text-editor", "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var36), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<script>\n (function() {\n  var root = document.getElementById('task-detail-content');\n  var picker = root.querySelector('#task-property-picker'), dialog = root.querySelector('#task-detail-text-editor');\n  var current = null, field = '', busy = false, revision = 0;\n  var search = picker.querySelector('.ov-menu-search input');\n  var createTag = picker.querySelector('[data-custom-tag]');\n  var tags = picker.querySelector('.ov-menu-list [data-options=\"tag\"]');\n  function customTagOption(value) {\n   var option = document.createElement('button');\n   option.type = 'button';\n   option.className = 'ov-menu-option w-full';\n   option.dataset.customOption = '';\n   option.dataset.value = value;\n   option.textContent = value;\n   return option;\n  }\n  var tagLoading = picker.querySelector('[data-tag-loading]');\n  var tagRequest = 0, tagsLoaded = false;\n  async function refreshTags(row) {\n   var request = ++tagRequest;\n   var scope = destination?.value || projectID;\n   try {\n    var response = await fetch('/api/tasks/tags?project_id=' + encodeURIComponent(scope));\n    if (!response.ok) throw new Error();\n    var values = await response.json();\n    if (request !== tagRequest || !root.isConnected || !pickerOpen() || current !== row) return;\n    var currentValue = pickerUI.searchPattern(row.dataset.value, true);\n    var options = document.createDocumentFragment();\n    for (var value of values) {\n     if (!currentValue.test(value)) options.appendChild(customTagOption(value));\n    }\n    tags.appendChild(options);\n    tagsLoaded = true;\n    tagLoading.hidden = true;\n    tags.hidden = false;\n    search.dispatchEvent(new Event('input'));\n   } catch (_) {\n    if (request !== tagRequest || current !== row || !pickerOpen()) return;\n    tagLoading.hidden = true;\n    tags.hidden = false;\n    search.dispatchEvent(new Event('input'));\n    picker.querySelector('[data-property-error]').textContent = 'Could not refresh project tags.';\n   }\n  }\n  function updateTagAction() {\n   var query = search.value.trim();\n   createTag.dataset.value = query;\n   createTag.querySelector('span').textContent = 'Add tag “' + query + '”';\n  }\n  search.addEventListener('input', updateTagAction);\n  var pickerUI = window.createInspectorPicker(root, picker, function() { return busy; }, available);\n  search.addEventListener('keydown', function(event) {\n   if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || field !== 'tag' || tagsLoaded) return;\n   var query = search.value.trim();\n   var highlighted = tags.querySelector('[data-active]');\n   if (query && (!highlighted || !pickerUI.searchPattern(query, true).test(highlighted.dataset.value))) {\n    event.preventDefault();\n   }\n  });\n  var pickerOpen = pickerUI.isOpen, hidePicker = pickerUI.close, returnToRow = pickerUI.returnFocus;\n  root.addEventListener('htmx:beforeRequest', function(event) { if (event.detail.elt.id === 'task-detail-metrics') event.detail.xhr.detailRevision = revision; });\n  var taskID = root.dataset.taskId, projectID = root.dataset.projectId;\n  var destination = root.querySelector('#new-task-project');\n  function available(option) {\n   if (option.hasAttribute('data-clear-tag')) return !search.value.trim();\n   if (option === createTag) {\n    var query = search.value.trim();\n    if (field !== 'tag' || !tagsLoaded || !query) return false;\n    var exact = pickerUI.searchPattern(query, true);\n    return !Array.from(tags.children).some(tag => exact.test(tag.dataset.value));\n   }\n   return !destination || option.dataset.agentScope !== 'project' || (!!destination.value && option.dataset.agentProject === destination.value);\n  }\n  if (destination) destination.addEventListener('change', function() {\n   hidePicker();\n   var input = root.querySelector('[data-draft-property=\"agent_definition_id\"]');\n   var selectedOption = Array.from(picker.querySelectorAll('[data-options=\"agent_definition_id\"] button')).find(function(option) { return option.dataset.value === input.value; });\n   if (input.value && (!selectedOption || !available(selectedOption))) {\n    input.value = '';\n    var row = root.querySelector('[data-detail-property=\"agent_definition_id\"]');\n    row.dataset.value = '';\n    row.querySelector('[data-property-label]').textContent = 'No agent';\n   }\n\n  });\n  function composerModel(value, label) {\n   var input = root.querySelector('#task-thread-form-agent-id'), button = root.querySelector('#task-thread-form-agent-select');\n   if (input) input.value = value || 'auto';\n   if (button) { button.dataset.currentValue = value || 'auto'; var text = button.querySelector('.chat-custom-select-label'); if (text) text.textContent = label; }\n  }\n  async function save(name, value, action) {\n   revision++;\n   var path = name === 'goal' ? '/goal' + (action ? '/' + action : '') : '/details/property';\n   var body = new URLSearchParams(name === 'goal' ? {goal:value} : {field:name,value:value});\n   var response = await fetch('/tasks/' + encodeURIComponent(taskID) + path + '?project_id=' + encodeURIComponent(projectID), {method:name === 'goal' ? 'POST' : 'PATCH',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});\n   if (await window.openVibelyPermissionErrors?.fetch(response)) { var denied = new Error('Permission denied'); denied.toastOnly = true; throw denied; }\n   if (!response.ok) { var error = await response.text(); try { error = JSON.parse(error).message || error; } catch (_) {} throw new Error(error); }\n   var html = await response.text();\n   var editInput = root.querySelector('#task-detail-edit [name=\"' + name + '\"]');\n   if (editInput) editInput.value = value;\n   var target = root.querySelector(name === 'goal' ? '#task-goal-panel' : name === 'prompt' ? '#task-prompt-panel' : name.startsWith('auto_merge') ? '#task-auto-merge-panel' : '#task-detail-metrics');\n   if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }\n  }\n  root.addEventListener('change', async function(event) {\n   var input = event.target.closest('[data-auto-merge-toggle]');\n   if (!input || !taskID) return;\n   if (busy) { input.checked = !input.checked; return; }\n   var panel = input.closest('#task-auto-merge-panel');\n   busy = true;\n   panel.querySelector('[data-auto-merge-error]').textContent = '';\n   panel.querySelectorAll('input').forEach(function(control) { control.disabled = true; });\n   try { await save(input.name, String(input.checked)); }\n   catch (error) { input.checked = !input.checked; if (!error.toastOnly) panel.querySelector('[data-auto-merge-error]').textContent = error.message; }\n   finally { busy = false; panel.querySelectorAll('input').forEach(function(control) { control.disabled = false; }); }\n  });\n  root.addEventListener('click', function(event) {\n   if (busy && event.target.closest('[data-detail-property], [data-detail-editor]')) { event.preventDefault(); return; }\n   var row = event.target.closest('[data-detail-property]');\n   if (row) {\n    current = row; field = row.dataset.detailProperty;\n    picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });\n    tagLoading.hidden = field !== 'tag';\n    if (field === 'tag') {\n     tags.hidden = true;\n     tagsLoaded = false;\n     tags.querySelectorAll('[data-custom-option]').forEach(option => option.remove());\n     var value = row.dataset.value;\n     var exact = pickerUI.searchPattern(value, true);\n     if (value && !Array.from(tags.children).some(option => exact.test(option.dataset.value))) {\n      tags.appendChild(customTagOption(value));\n     }\n    }\n    search.placeholder = field === 'tag' ? 'Search tags' : 'Search…';\n    search.setAttribute('aria-label', field === 'tag' ? 'Search tags' : 'Search options');\n    pickerUI.open(row);\n    if (field === 'tag' && pickerOpen()) refreshTags(row);\n    return;\n   }\n   var editor = event.target.closest('[data-detail-editor]');\n   if (!editor) return;\n   current = editor; field = editor.dataset.detailEditor;\n   dialog.querySelector('[data-editor-title]').textContent = field === 'goal' ? 'Goal' : 'Prompt';\n   dialog.querySelector('textarea').value = editor.dataset.value || '';\n   dialog.querySelector('textarea').required = field !== 'goal';\n   dialog.querySelectorAll('[data-goal-action]').forEach(function(button) {\n    var status = editor.dataset.goalStatus;\n    button.hidden = field !== 'goal' || !taskID || !editor.dataset.value || (button.dataset.goalAction === 'pause' && status !== 'active') || (button.dataset.goalAction === 'resume' && status !== 'blocked' && !String(status).toLowerCase().startsWith('paused'));\n   });\n   dialog.querySelector('[data-editor-error]').textContent = '';\n   dialog.showModal(); dialog.querySelector('textarea').focus();\n  });\n  picker.addEventListener('click', async function(event) {\n   var option = event.target.closest('button[data-value], button[data-custom-tag]'); if (!option || busy) return;\n   var name = field, value = option.dataset.value;\n   var label = option === createTag ? value : option.textContent;\n   busy = true; picker.querySelectorAll('button').forEach(function(button) { button.disabled = true; });\n   try {\n    if (taskID) await save(name, value);\n    else {\n     var input = root.querySelector('[data-draft-property=\"' + name + '\"]'); if (input) { input.value = value; if (name === 'destination_project') input.dispatchEvent(new Event('change', {bubbles:true})); }\n     current.dataset.value = value;\n     var propertyLabel = current.querySelector('[data-property-label]');\n     propertyLabel.textContent = option.hasAttribute('data-clear-tag') ? 'No tag' : label;\n     if (name === 'tag') propertyLabel.className = value ? 'badge badge-sm ' + (option.dataset.badge || tags.dataset.defaultBadge) : '';\n    }\n    if (name === 'agent_id') composerModel(value, label);\n    hidePicker(); var row = root.querySelector('[data-detail-property=\"' + name + '\"]'); returnToRow(row);\n   } catch (error) { if (!error.toastOnly) picker.querySelector('[data-property-error]').textContent = error.message; }\n   finally { busy = false; picker.querySelectorAll('button').forEach(function(button) { button.disabled = false; }); }\n  });\n  dialog.querySelectorAll('[data-goal-action]').forEach(function(button) {\n   button.onclick = async function() {\n    if (busy) return;\n    busy = true;\n    dialog.querySelectorAll('button').forEach(function(control) { control.disabled = true; });\n    try { await save('goal', '', button.dataset.goalAction); dialog.close(); }\n    catch (error) { if (!error.toastOnly) dialog.querySelector('[data-editor-error]').textContent = error.message; }\n    finally { busy = false; dialog.querySelectorAll('button').forEach(function(control) { control.disabled = false; }); }\n   };\n  });\n  dialog.querySelector('[data-editor-cancel]').onclick = function() { dialog.close(); };\n  dialog.querySelector('form').addEventListener('submit', async function(event) {\n   event.preventDefault(); if (busy) return; busy = true;\n   var button = dialog.querySelector('[type=\"submit\"]'); button.disabled = true;\n   try {\n    var value = dialog.querySelector('textarea').value;\n    if (taskID) await save(field, value, field === 'goal' && !value.trim() ? 'clear' : '');\n    else { root.querySelector('[data-draft-property=\"goal\"]').value = value; current.dataset.value = value; current.textContent = value ? 'Edit' : '+'; }\n    dialog.close();\n    var trigger = root.querySelector('[data-detail-editor=\"' + field + '\"]'); if (trigger) trigger.focus({preventScroll:true});\n   } catch (error) { if (!error.toastOnly) dialog.querySelector('[data-editor-error]').textContent = error.message; }\n   finally { busy = false; button.disabled = false; }\n  });\n  // Do not replace rows underneath an open picker; the following poll reconciles them.\n  root.addEventListener('htmx:beforeSwap', function(event) { if (event.detail.target.id === 'task-detail-metrics' && (pickerOpen() || busy || event.detail.xhr.detailRevision !== revision)) event.preventDefault(); });\n  root.addEventListener('chat-select-change', function(event) {\n   if (!taskID && event.target.id === 'task-thread-form-agent-select') {\n    var row = root.querySelector('[data-detail-property=\"agent_id\"]'), value = event.detail.value;\n    var option = Array.from(picker.querySelectorAll('[data-options=\"agent_id\"] button')).find(function(item) { return item.dataset.value === value; });\n    row.dataset.value = option ? value : ''; row.querySelector('[data-property-label]').textContent = option ? option.textContent : 'Auto';\n   }\n  });\n })();\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<script>\n (function() {\n  var root = document.getElementById('task-detail-content');\n  var picker = root.querySelector('#task-property-picker'), dialog = root.querySelector('#task-detail-text-editor');\n  var current = null, field = '', busy = false, revision = 0;\n  var search = picker.querySelector('.ov-menu-search input');\n  var createTag = picker.querySelector('[data-custom-tag]');\n  var tags = picker.querySelector('.ov-menu-list [data-options=\"tag\"]');\n  function customTagOption(value) {\n   var option = document.createElement('button');\n   option.type = 'button';\n   option.className = 'ov-menu-option w-full';\n   option.dataset.customOption = '';\n   option.dataset.value = value;\n   option.textContent = value;\n   return option;\n  }\n  var tagLoading = picker.querySelector('[data-tag-loading]');\n  var tagRequest = 0, tagsLoaded = false;\n  async function refreshTags(row) {\n   var request = ++tagRequest;\n   var scope = destination?.value || projectID;\n   try {\n    var response = await fetch('/api/tasks/tags?project_id=' + encodeURIComponent(scope));\n    if (!response.ok) throw new Error();\n    var values = await response.json();\n    if (request !== tagRequest || !root.isConnected || !pickerOpen() || current !== row) return;\n    var currentValue = pickerUI.searchPattern(row.dataset.value, true);\n    var options = document.createDocumentFragment();\n    for (var value of values) {\n     if (!currentValue.test(value)) options.appendChild(customTagOption(value));\n    }\n    tags.appendChild(options);\n    tagsLoaded = true;\n    tagLoading.hidden = true;\n    tags.hidden = false;\n    search.dispatchEvent(new Event('input'));\n   } catch (_) {\n    if (request !== tagRequest || current !== row || !pickerOpen()) return;\n    tagLoading.hidden = true;\n    tags.hidden = false;\n    search.dispatchEvent(new Event('input'));\n    picker.querySelector('[data-property-error]').textContent = 'Could not refresh project tags.';\n   }\n  }\n  function updateTagAction() {\n   var query = search.value.trim();\n   createTag.dataset.value = query;\n   createTag.querySelector('span').textContent = 'Add tag “' + query + '”';\n  }\n  search.addEventListener('input', updateTagAction);\n  var pickerUI = window.createInspectorPicker(root, picker, function() { return busy; }, available);\n  search.addEventListener('keydown', function(event) {\n   if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || field !== 'tag' || tagsLoaded) return;\n   var query = search.value.trim();\n   var highlighted = tags.querySelector('[data-active]');\n   if (query && (!highlighted || !pickerUI.searchPattern(query, true).test(highlighted.dataset.value))) {\n    event.preventDefault();\n   }\n  });\n  var pickerOpen = pickerUI.isOpen, hidePicker = pickerUI.close, returnToRow = pickerUI.returnFocus;\n  root.addEventListener('htmx:beforeRequest', function(event) { if (event.detail.elt.id === 'task-detail-metrics') event.detail.xhr.detailRevision = revision; });\n  var taskID = root.dataset.taskId, projectID = root.dataset.projectId;\n  var destination = root.querySelector('#new-task-project');\n  function available(option) {\n   if (option === createTag) {\n    var query = search.value.trim();\n    if (field !== 'tag' || !tagsLoaded || !query) return false;\n    var exact = pickerUI.searchPattern(query, true);\n    return !Array.from(tags.children).some(tag => exact.test(tag.dataset.value));\n   }\n   return !destination || option.dataset.agentScope !== 'project' || (!!destination.value && option.dataset.agentProject === destination.value);\n  }\n  if (destination) destination.addEventListener('change', function() {\n   hidePicker();\n   var input = root.querySelector('[data-draft-property=\"agent_definition_id\"]');\n   var selectedOption = Array.from(picker.querySelectorAll('[data-options=\"agent_definition_id\"] button')).find(function(option) { return option.dataset.value === input.value; });\n   if (input.value && (!selectedOption || !available(selectedOption))) {\n    input.value = '';\n    var row = root.querySelector('[data-detail-property=\"agent_definition_id\"]');\n    row.dataset.value = '';\n    row.querySelector('[data-property-label]').textContent = 'No agent';\n   }\n\n  });\n  function composerModel(value, label) {\n   var input = root.querySelector('#task-thread-form-agent-id'), button = root.querySelector('#task-thread-form-agent-select');\n   if (input) input.value = value || 'auto';\n   if (button) { button.dataset.currentValue = value || 'auto'; var text = button.querySelector('.chat-custom-select-label'); if (text) text.textContent = label; }\n  }\n  async function save(name, value, action) {\n   revision++;\n   var path = name === 'goal' ? '/goal' + (action ? '/' + action : '') : '/details/property';\n   var body = new URLSearchParams(name === 'goal' ? {goal:value} : {field:name,value:value});\n   var response = await fetch('/tasks/' + encodeURIComponent(taskID) + path + '?project_id=' + encodeURIComponent(projectID), {method:name === 'goal' ? 'POST' : 'PATCH',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});\n   if (await window.openVibelyPermissionErrors?.fetch(response)) { var denied = new Error('Permission denied'); denied.toastOnly = true; throw denied; }\n   if (!response.ok) { var error = await response.text(); try { error = JSON.parse(error).message || error; } catch (_) {} throw new Error(error); }\n   var html = await response.text();\n   var editInput = root.querySelector('#task-detail-edit [name=\"' + name + '\"]');\n   if (editInput) editInput.value = value;\n   var target = root.querySelector(name === 'goal' ? '#task-goal-panel' : name === 'prompt' ? '#task-prompt-panel' : name.startsWith('auto_merge') ? '#task-auto-merge-panel' : '#task-detail-metrics');\n   if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }\n  }\n  root.addEventListener('change', async function(event) {\n   var input = event.target.closest('[data-auto-merge-toggle]');\n   if (!input || !taskID) return;\n   if (busy) { input.checked = !input.checked; return; }\n   var panel = input.closest('#task-auto-merge-panel');\n   busy = true;\n   panel.querySelector('[data-auto-merge-error]').textContent = '';\n   panel.querySelectorAll('input').forEach(function(control) { control.disabled = true; });\n   try { await save(input.name, String(input.checked)); }\n   catch (error) { input.checked = !input.checked; if (!error.toastOnly) panel.querySelector('[data-auto-merge-error]').textContent = error.message; }\n   finally { busy = false; panel.querySelectorAll('input').forEach(function(control) { control.disabled = false; }); }\n  });\n  function updateDraftTag(value, label, badgeClass) {\n   var button = root.querySelector('[data-detail-property=\"tag\"]');\n   var badge = button.closest('[data-tag-badge]');\n   root.querySelector('[data-draft-property=\"tag\"]').value = value;\n   button.dataset.value = value;\n   button.querySelector('[data-property-label]').textContent = label;\n   button.setAttribute('aria-label', 'Tag: ' + label);\n   badge.className = value ? 'badge badge-sm ' + badgeClass : '';\n   var remove = badge.querySelector('[data-remove-tag]');\n   remove.hidden = !value;\n   remove.setAttribute('aria-label', 'Remove tag ' + label);\n  }\n  root.addEventListener('click', async function(event) {\n   var remove = event.target.closest('[data-remove-tag]');\n   if (remove) {\n    if (busy) return;\n    busy = true;\n    remove.disabled = true;\n    var errorLabel = root.querySelector('[data-tag-remove-error]');\n    errorLabel.textContent = '';\n    try {\n     if (taskID) await save('tag', '');\n     else updateDraftTag('', 'No tag', '');\n     returnToRow(root.querySelector('[data-detail-property=\"tag\"]'));\n    } catch (error) { if (!error.toastOnly) errorLabel.textContent = error.message; }\n    finally { busy = false; remove.disabled = false; }\n    return;\n   }\n   if (busy && event.target.closest('[data-detail-property], [data-detail-editor]')) { event.preventDefault(); return; }\n   var row = event.target.closest('[data-detail-property]');\n   if (row) {\n    current = row; field = row.dataset.detailProperty;\n    picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });\n    tagLoading.hidden = field !== 'tag';\n    if (field === 'tag') {\n     tags.hidden = true;\n     tagsLoaded = false;\n     tags.querySelectorAll('[data-custom-option]').forEach(option => option.remove());\n     var value = row.dataset.value;\n     var exact = pickerUI.searchPattern(value, true);\n     if (value && !Array.from(tags.children).some(option => exact.test(option.dataset.value))) {\n      tags.appendChild(customTagOption(value));\n     }\n    }\n    search.placeholder = field === 'tag' ? 'Search tags' : 'Search…';\n    search.setAttribute('aria-label', field === 'tag' ? 'Search tags' : 'Search options');\n    pickerUI.open(row);\n    if (field === 'tag' && pickerOpen()) refreshTags(row);\n    return;\n   }\n   var editor = event.target.closest('[data-detail-editor]');\n   if (!editor) return;\n   current = editor; field = editor.dataset.detailEditor;\n   dialog.querySelector('[data-editor-title]').textContent = field === 'goal' ? 'Goal' : 'Prompt';\n   dialog.querySelector('textarea').value = editor.dataset.value || '';\n   dialog.querySelector('textarea').required = field !== 'goal';\n   dialog.querySelectorAll('[data-goal-action]').forEach(function(button) {\n    var status = editor.dataset.goalStatus;\n    button.hidden = field !== 'goal' || !taskID || !editor.dataset.value || (button.dataset.goalAction === 'pause' && status !== 'active') || (button.dataset.goalAction === 'resume' && status !== 'blocked' && !String(status).toLowerCase().startsWith('paused'));\n   });\n   dialog.querySelector('[data-editor-error]').textContent = '';\n   dialog.showModal(); dialog.querySelector('textarea').focus();\n  });\n  picker.addEventListener('click', async function(event) {\n   var option = event.target.closest('button[data-value], button[data-custom-tag]'); if (!option || busy) return;\n   var name = field, value = option.dataset.value;\n   var label = option === createTag ? value : option.textContent;\n   busy = true; picker.querySelectorAll('button').forEach(function(button) { button.disabled = true; });\n   try {\n    if (taskID) await save(name, value);\n    else if (name === 'tag') updateDraftTag(value, label, option.dataset.badge || tags.dataset.defaultBadge);\n    else {\n     var input = root.querySelector('[data-draft-property=\"' + name + '\"]'); if (input) { input.value = value; if (name === 'destination_project') input.dispatchEvent(new Event('change', {bubbles:true})); }\n     current.dataset.value = value;\n     var propertyLabel = current.querySelector('[data-property-label]');\n     propertyLabel.textContent = label;\n    }\n    if (name === 'agent_id') composerModel(value, label);\n    hidePicker(); var row = root.querySelector('[data-detail-property=\"' + name + '\"]'); returnToRow(row);\n   } catch (error) { if (!error.toastOnly) picker.querySelector('[data-property-error]').textContent = error.message; }\n   finally { busy = false; picker.querySelectorAll('button').forEach(function(button) { button.disabled = false; }); }\n  });\n  dialog.querySelectorAll('[data-goal-action]').forEach(function(button) {\n   button.onclick = async function() {\n    if (busy) return;\n    busy = true;\n    dialog.querySelectorAll('button').forEach(function(control) { control.disabled = true; });\n    try { await save('goal', '', button.dataset.goalAction); dialog.close(); }\n    catch (error) { if (!error.toastOnly) dialog.querySelector('[data-editor-error]').textContent = error.message; }\n    finally { busy = false; dialog.querySelectorAll('button').forEach(function(control) { control.disabled = false; }); }\n   };\n  });\n  dialog.querySelector('[data-editor-cancel]').onclick = function() { dialog.close(); };\n  dialog.querySelector('form').addEventListener('submit', async function(event) {\n   event.preventDefault(); if (busy) return; busy = true;\n   var button = dialog.querySelector('[type=\"submit\"]'); button.disabled = true;\n   try {\n    var value = dialog.querySelector('textarea').value;\n    if (taskID) await save(field, value, field === 'goal' && !value.trim() ? 'clear' : '');\n    else { root.querySelector('[data-draft-property=\"goal\"]').value = value; current.dataset.value = value; current.textContent = value ? 'Edit' : '+'; }\n    dialog.close();\n    var trigger = root.querySelector('[data-detail-editor=\"' + field + '\"]'); if (trigger) trigger.focus({preventScroll:true});\n   } catch (error) { if (!error.toastOnly) dialog.querySelector('[data-editor-error]').textContent = error.message; }\n   finally { busy = false; button.disabled = false; }\n  });\n  // Do not replace rows underneath an open picker; the following poll reconciles them.\n  root.addEventListener('htmx:beforeSwap', function(event) { if (event.detail.target.id === 'task-detail-metrics' && (pickerOpen() || busy || event.detail.xhr.detailRevision !== revision)) event.preventDefault(); });\n  root.addEventListener('chat-select-change', function(event) {\n   if (!taskID && event.target.id === 'task-thread-form-agent-select') {\n    var row = root.querySelector('[data-detail-property=\"agent_id\"]'), value = event.detail.value;\n    var option = Array.from(picker.querySelectorAll('[data-options=\"agent_id\"] button')).find(function(item) { return item.dataset.value === value; });\n    row.dataset.value = option ? value : ''; row.querySelector('[data-property-label]').textContent = option ? option.textContent : 'Auto';\n   }\n  });\n })();\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
