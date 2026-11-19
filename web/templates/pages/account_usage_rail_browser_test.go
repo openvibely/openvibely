@@ -175,6 +175,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.clickMenuBackdrop(`#rail-more`)
 		b.waitFor("click off dismisses only the meter popup", `String(document.getElementById('rail-account-popup').hidden && document.getElementById('rail-overflow').hidden)`, "true")
 		b.click(`#rail-more`)
+		b.waitFor("overflow link receives pointer input", `(()=>{const panel=document.getElementById('rail-overflow'), link=panel.querySelector('a'), r=link.getBoundingClientRect();return String(panel.parentNode===document.body && link.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)))})()`, "true")
 		b.waitFor("overflow destinations", `[...document.querySelectorAll('#rail-overflow .sidebar-text')].map(n=>n.textContent.trim()).join(',')`, "Analytics,Grades,Reflection,Pulse")
 		b.waitFor("exclusive popup", `String(!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
 		b.clickMenuBackdrop(`[data-key="personal"]`)
