@@ -9,7 +9,7 @@ import (
 func TestNormalizeTaskTag(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
 		{"", ""}, {"  ", ""}, {" Feature ", "feature"}, {"BUG", "bug"},
-		{" Docs/Security ", "docs/security"}, {"Release Notes", "release notes"},
+		{" Docs/Security ", "Docs/Security"}, {"Release Notes", "Release Notes"},
 		{"文档", "文档"}, {strings.Repeat("界", 64), strings.Repeat("界", 64)},
 		{"<script>", "<script>"},
 	} {

@@ -57,7 +57,7 @@ func TestTaskDetailPropertyIsScopedAndPreservesOtherFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.AutoMerge || !got.AutoMergeOnGoalAchieved || got.Priority != 4 || got.Tag != "docs/security" || got.Title != task.Title || got.Prompt != task.Prompt || got.Status != task.Status {
+	if !got.AutoMerge || !got.AutoMergeOnGoalAchieved || got.Priority != 4 || got.Tag != "Docs/Security" || got.Title != task.Title || got.Prompt != task.Prompt || got.Status != task.Status {
 		t.Fatalf("unexpected task changes: %+v", got)
 	}
 }

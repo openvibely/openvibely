@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	sqlitedriver "modernc.org/sqlite"
+
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -3182,8 +3184,15 @@ func (r *TaskRepo) CountBacklogByPriority(ctx context.Context, projectID string)
 	return counts, rows.Err()
 }
 
+// SQLite's built-in NOCASE collation only covers ASCII.
+func init() {
+	sqlitedriver.MustRegisterCollationUtf8("task_tag_nocase", func(left, right string) int {
+		return strings.Compare(strings.ToLower(left), strings.ToLower(right))
+	})
+}
+
 func (r *TaskRepo) ListCustomTags(ctx context.Context, projectID string) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT tag FROM tasks WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND category NOT IN ('chat','page_chat') AND tag NOT IN ('','feature','bug') ORDER BY tag`, projectID)
+	rows, err := r.db.QueryContext(ctx, `SELECT MIN(tag) FROM tasks WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND category NOT IN ('chat','page_chat') AND tag COLLATE task_tag_nocase NOT IN ('','feature','bug') GROUP BY tag COLLATE task_tag_nocase ORDER BY tag COLLATE task_tag_nocase`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -3215,7 +3224,7 @@ func (r *TaskRepo) ListByTags(ctx context.Context, tags []models.TaskTag, projec
 			tagPlaceholders[i] = "?"
 			args = append(args, tag)
 		}
-		query += fmt.Sprintf(` AND tag IN (%s)`, strings.Join(tagPlaceholders, ","))
+		query += fmt.Sprintf(` AND tag COLLATE task_tag_nocase IN (%s)`, strings.Join(tagPlaceholders, ","))
 	}
 
 	// Apply optional filters

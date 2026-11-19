@@ -123,7 +123,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var createTag = picker.querySelector('[data-custom-tag]');
   var tags = picker.querySelector('.ov-menu-list [data-options="tag"]');
   function rememberTag(value) {
-   if (!value || Array.from(tags.children).some(option => option.dataset.value === value)) return;
+   if (!value || Array.from(tags.children).some(option => option.dataset.value.toLowerCase() === value.toLowerCase())) return;
    var option = document.createElement('button');
    option.type = 'button';
    option.className = 'ov-menu-option w-full';
@@ -132,7 +132,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    tags.appendChild(option);
   }
   function updateTagAction() {
-   var query = search.value.trim().toLowerCase();
+   var query = search.value.trim();
    createTag.dataset.value = query;
    createTag.querySelector('span').textContent = 'Add tag “' + query + '”';
   }

@@ -20,14 +20,14 @@ func TestCustomTagsCreationEditingAndScopedExecution(t *testing.T) {
 	create := func(project, title, category string) models.Task {
 		tasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: title, Prompt: "Work", Category: category, Priority: 2, Tag: " Docs/Security "}}, project, svc)
 		require.Len(t, tasks, 1, summary)
-		require.Equal(t, models.TaskTag("docs/security"), tasks[0].Tag)
+		require.Equal(t, models.TaskTag("Docs/Security"), tasks[0].Tag)
 		return tasks[0]
 	}
 	target := create("default", "Target", "backlog")
 	foreign := create(other.ID, "Foreign", "backlog")
 	completed := create("default", "Completed", "backlog")
 	require.NoError(t, svc.UpdateCategory(ctx, completed.ID, models.CategoryCompleted))
-	summary := ExecuteTaskExecutions(ctx, []TaskExecutionRequest{{Tags: []string{" Docs/Security "}}}, "default", svc)
+	summary := ExecuteTaskExecutions(ctx, []TaskExecutionRequest{{Tags: []string{" docs/SECURITY "}}}, "default", svc)
 	require.Contains(t, summary, "Executed 1 task(s)")
 	for _, id := range []string{foreign.ID, completed.ID} {
 		require.NotContains(t, summary, "[TASK_ID:"+id+"]")
@@ -38,7 +38,7 @@ func TestCustomTagsCreationEditingAndScopedExecution(t *testing.T) {
 	require.Contains(t, ExecuteTaskEdits(ctx, []TaskEditRequest{req}, "default", svc, nil, ""), "Edited 1")
 	saved, err := svc.GetByID(ctx, target.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.TaskTag("docs/security"), saved.Tag)
+	require.Equal(t, models.TaskTag("Docs/Security"), saved.Tag)
 	require.NoError(t, json.Unmarshal([]byte(`{"id":"`+target.ID+`","tag":""}`), &req))
 	require.True(t, req.TagSet)
 	require.Contains(t, ExecuteTaskEdits(ctx, []TaskEditRequest{req}, "default", svc, nil, ""), "Edited 1")
@@ -49,11 +49,11 @@ func TestCustomTagsCreationEditingAndScopedExecution(t *testing.T) {
 	require.Contains(t, ExecuteTaskEdits(ctx, []TaskEditRequest{req}, "default", svc, nil, ""), "Edited 1")
 	saved, err = svc.GetByID(ctx, target.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.TaskTag("maintenance"), saved.Tag)
+	require.Equal(t, models.TaskTag("Maintenance"), saved.Tag)
 	req.Tag = strings.Repeat("x", 65)
 	require.Contains(t, ExecuteTaskEdits(ctx, []TaskEditRequest{req}, "default", svc, nil, ""), models.ErrInvalidTaskTag.Error())
 	// A mixed valid/invalid filter must fail instead of executing a valid subset.
-	summary = ExecuteTaskExecutions(ctx, []TaskExecutionRequest{{Tags: []string{"docs/security", "bad\ntag"}, IncludeCompleted: true}}, "default", svc)
+	summary = ExecuteTaskExecutions(ctx, []TaskExecutionRequest{{Tags: []string{"Docs/Security", "bad\ntag"}, IncludeCompleted: true}}, "default", svc)
 	require.Contains(t, summary, models.ErrInvalidTaskTag.Error())
 	require.NotContains(t, summary, "Executed")
 	tasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Invalid", Prompt: "Work", Tag: strings.Repeat("x", 65)}}, "default", svc)

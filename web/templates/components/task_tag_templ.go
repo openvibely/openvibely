@@ -42,7 +42,7 @@ func TaskTagInput(tag models.TaskTag) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" list=\"task-tag-defaults\" placeholder=\"None\" class=\"input input-bordered w-full\"> <datalist id=\"task-tag-defaults\"><option value=\"feature\">Feature</option><option value=\"bug\">Bug</option></datalist><p class=\"text-xs opacity-60\">One tag, up to 64 characters. Trimmed and lowercased. Leave empty for none.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" list=\"task-tag-defaults\" placeholder=\"None\" class=\"input input-bordered w-full\"> <datalist id=\"task-tag-defaults\"><option value=\"feature\">Feature</option><option value=\"bug\">Bug</option></datalist><p class=\"text-xs opacity-60\">One tag, up to 64 characters. Custom tags keep their capitalization. Leave empty for none.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

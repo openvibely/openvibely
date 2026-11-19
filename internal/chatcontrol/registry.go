@@ -178,7 +178,7 @@ var chainSchemaProperties = &toolschema.Schema{
 var createTaskParams = &toolschema.Schema{
 	Type: "object",
 	Properties: map[string]*toolschema.Schema{
-		"tag": {Type: "string", Description: "One tag, trimmed and lowercased, at most 64 Unicode characters without control or formatting characters. Empty clears the tag; feature and bug are defaults."},
+		"tag": {Type: "string", Description: "One tag, trimmed with custom capitalization preserved, at most 64 Unicode characters without control or formatting characters. Empty clears the tag; feature and bug are defaults."},
 		"title": {
 			Type: "string"},
 		"prompt": {
@@ -524,7 +524,7 @@ var createSwarmTaskParams = &toolschema.Schema{
 		},
 		"tag": {
 			Type:        "string",
-			Description: "One tag, trimmed and lowercased, at most 64 Unicode characters without control or formatting characters. Empty clears the tag; feature and bug are defaults.",
+			Description: "One tag, trimmed with custom capitalization preserved, at most 64 Unicode characters without control or formatting characters. Empty clears the tag; feature and bug are defaults.",
 		},
 		"max_workers": {
 			Type:    "integer",
@@ -608,7 +608,7 @@ var editTaskParams = &toolschema.Schema{
 			Maximum: toolschema.Number("4"),
 		},
 		"tag": {
-			Type: "string", Description: "One tag, trimmed and lowercased, at most 64 Unicode characters without control or formatting characters. Empty clears the tag; feature and bug are defaults."},
+			Type: "string", Description: "One tag, trimmed with custom capitalization preserved, at most 64 Unicode characters without control or formatting characters. Empty clears the tag; feature and bug are defaults."},
 		"agent_id": {
 			Type:        "string",
 			Description: "Internal model config ID. Do not use for Agent definitions from the Agents page.",
@@ -1073,7 +1073,7 @@ var registry = []ActionDef{
 				"title": {
 					Type: "string"},
 				"tags": {
-					Description: "Match any of these single task tags. Values are trimmed and lowercased, with at most 64 Unicode characters and no control or formatting characters. An empty string matches untagged tasks; omit the array for all tags.",
+					Description: "Match any of these single task tags. Values are trimmed and matched case-insensitively, with at most 64 Unicode characters and no control or formatting characters. An empty string matches untagged tasks; omit the array for all tags.",
 					Type:        "array",
 					Items: &toolschema.Schema{
 						Type: "string"},
@@ -2000,7 +2000,7 @@ var registry = []ActionDef{
 				},
 				"tag": {
 					Type:        "string",
-					Description: "One tag, trimmed and lowercased, at most 64 Unicode characters without control or formatting characters. Empty clears the tag; feature and bug are defaults.",
+					Description: "One tag, trimmed with custom capitalization preserved, at most 64 Unicode characters without control or formatting characters. Empty clears the tag; feature and bug are defaults.",
 				},
 			},
 			Required:             []string{"alert_id", "title", "prompt"},

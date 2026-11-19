@@ -21,9 +21,15 @@ func NormalizeTaskTag(value string) (TaskTag, error) {
 			return "", ErrInvalidTaskTag
 		}
 	}
-	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
 	if utf8.RuneCountInString(value) > MaxTaskTagLength {
 		return "", ErrInvalidTaskTag
+	}
+	// Built-in choices have stable IDs. Custom tags keep their display spelling.
+	for _, tag := range []TaskTag{TagFeature, TagBug} {
+		if strings.EqualFold(value, string(tag)) {
+			return tag, nil
+		}
 	}
 	return TaskTag(value), nil
 }
