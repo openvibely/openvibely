@@ -116,7 +116,7 @@ templ InspectorPickerScript() {
     return option.parentElement.hasAttribute('data-prefer-exact-value') && equals.test(option.dataset.value);
    });
    if (exact) highlight(exact);
-   else if (!items.includes(active)) highlight(items[0]);
+   else if (!items.includes(active)) highlight((!query && items.find(option => option.dataset.value === current.dataset.value)) || items[0]);
   });
   on(picker,'pointermove',function(e){var b=e.target.closest('button[data-value]');if(b&&!b.disabled)highlight(b);});
   on(picker,'focusin',function(e){if(e.target.matches('button[data-value]'))highlight(e.target);});

@@ -126,7 +126,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		previousOption := `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`
 		b.waitFor("old tags cleared before refresh completes", previousOption, "false")
 		setSearch("feat")
-		b.waitFor("partial Feature visible during refresh", `String(document.querySelector('[data-options="tag"] [data-value="feature"]').checkVisibility())`, "true")
+		b.waitFor("loading message visible", `String(document.querySelector('[data-tag-loading]').checkVisibility())`, "true")
+		b.waitFor("partial Feature hidden during refresh", `String(document.querySelector('[data-options="tag"] [data-value="feature"]').checkVisibility())`, "false")
 		b.waitFor("pending refresh hides Add", addVisible, "false")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
 		b.waitFor("Enter during refresh leaves draft tag empty", `document.querySelector('[data-draft-property="tag"]').value`, "")
@@ -165,7 +166,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("None assigned as a tag", `document.querySelector('[data-draft-property="tag"]').value`, "None")
 		b.click(`[data-detail-property="tag"]`)
 		setSearch("NONE")
-		b.waitFor("existing None tag is highlighted", `document.querySelector('#task-property-picker [data-active]').dataset.value`, "None")
+		b.waitFor("existing None tag is highlighted", `document.querySelector('#task-property-picker [data-active]')?.dataset.value || ''`, "None")
 		setSearch(" Docs/Security ")
 		b.waitFor("new tag can be added after refresh", addVisible, "true")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)

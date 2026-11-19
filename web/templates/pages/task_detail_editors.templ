@@ -86,6 +86,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      <button type="button" data-value={ fmt.Sprint(i+1) } class="ov-menu-option w-full">{ label }</button>
     }
    </div>
+   <p data-tag-loading role="status" class="px-3 py-2 text-sm opacity-60" hidden>Loading tags…</p>
    <div data-options="tag" data-prefer-exact-value data-default-badge={ components.TagBadgeClass(models.TagFeature) }>
     <button type="button" data-clear-tag data-value="" class="ov-menu-option w-full">Clear tag</button>
     for _, option := range []struct{ Value, Label string }{{"feature", "Feature"}, {"bug", "Bug"}} {
@@ -118,6 +119,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    option.textContent = value;
    return option;
   }
+  var tagLoading = picker.querySelector('[data-tag-loading]');
   var tagRequest = 0, tagsLoaded = false;
   async function refreshTags(row) {
    var request = ++tagRequest;
@@ -126,7 +128,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     var response = await fetch('/api/tasks/tags?project_id=' + encodeURIComponent(scope));
     if (!response.ok) throw new Error();
     var values = await response.json();
-    if (request !== tagRequest || !root.isConnected || !pickerOpen() || current !== row || busy) return;
+    if (request !== tagRequest || !root.isConnected || !pickerOpen() || current !== row) return;
     var currentValue = pickerUI.searchPattern(row.dataset.value, true);
     var options = document.createDocumentFragment();
     for (var value of values) {
@@ -134,9 +136,15 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     }
     tags.appendChild(options);
     tagsLoaded = true;
+    tagLoading.hidden = true;
+    tags.hidden = false;
     search.dispatchEvent(new Event('input'));
    } catch (_) {
-    if (request === tagRequest && current === row && pickerOpen()) picker.querySelector('[data-property-error]').textContent = 'Could not refresh project tags.';
+    if (request !== tagRequest || current !== row || !pickerOpen()) return;
+    tagLoading.hidden = true;
+    tags.hidden = false;
+    search.dispatchEvent(new Event('input'));
+    picker.querySelector('[data-property-error]').textContent = 'Could not refresh project tags.';
    }
   }
   function updateTagAction() {
@@ -216,7 +224,9 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    if (row) {
     current = row; field = row.dataset.detailProperty;
     picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });
+    tagLoading.hidden = field !== 'tag';
     if (field === 'tag') {
+     tags.hidden = true;
      tagsLoaded = false;
      tags.querySelectorAll('[data-custom-option]').forEach(option => option.remove());
      var value = row.dataset.value;
