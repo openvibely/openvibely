@@ -1609,6 +1609,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				#main-content [data-page-header] > span { font-size: 16px; line-height: 22px; font-weight: 400; }
 				#main-content [data-page-header] .btn:not(.dropdown-content .btn) { min-height: 32px; height: 32px; }
 				#main-content [data-page-header] .btn-square { width: 32px; padding: 0; }
+				/* Size header dropdowns from their buttons, independent of platform font baselines. */
+				#main-content [data-page-header] .dropdown > button { display: flex; }
 				/* --- App shell surfaces --- */
 				[data-theme="light"] body,
 				[data-theme="light"] .drawer-content {
