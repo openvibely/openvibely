@@ -1736,7 +1736,7 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "\"><style>\n\n\t\t\t#task-detail-metrics { grid-template-columns:minmax(0,1fr); }\n\t\t\t#task-detail-metrics > div { display:grid; grid-template-columns:7rem minmax(0,1fr); align-items:baseline; gap:0.75rem; min-width:0; }\n\t\t\t#task-detail-metrics > div > span:last-child { min-width:0; overflow-wrap:anywhere; }\n\t\t\t#task-detail-metrics .badge { justify-self:start; margin-left:0; max-width:100%; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; flex-shrink:0; line-height:1.4; }\n\t\t</style><h3 class=\"text-sm font-semibold\">Task</h3>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "\"><style>\n\n\t\t\t#task-detail-metrics { grid-template-columns:minmax(0,1fr); }\n\t\t\t#task-detail-metrics > div:not(.inspector-property-row) { display:grid; grid-template-columns:7rem minmax(0,1fr); align-items:baseline; gap:0.75rem; min-width:0; }\n\t\t\t#task-detail-metrics > div > span:last-child { min-width:0; overflow-wrap:anywhere; }\n\t\t\t#task-detail-metrics .badge { justify-self:start; margin-left:0; max-width:100%; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; flex-shrink:0; line-height:1.4; }\n\t\t</style><h3 class=\"text-sm font-semibold\">Task</h3>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

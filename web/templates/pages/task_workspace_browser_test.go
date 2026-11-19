@@ -118,7 +118,9 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		setSearch := func(query string) {
 			b.evaluate(fmt.Sprintf(`var search=document.querySelector('#task-property-picker .ov-menu-search input'); search.value=%q; search.dispatchEvent(new Event('input')); 'filtered'`, query))
 		}
-		b.click(`[data-detail-property="tag"]`)
+		tagArrow := `.task-tag-row label[for="task-tag-picker-trigger"]`
+		b.waitFor("tag arrow aligns with priority arrow", `String(Math.abs(document.querySelector('.task-tag-row label').getBoundingClientRect().left - document.querySelector('[data-detail-property="priority"] > :last-child').getBoundingClientRect().left) < 1)`, "true")
+		b.click(tagArrow)
 		b.waitFor("existing draft refreshes tags from other tasks", `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`, "true")
 		b.clickMenuBackdrop(`[data-detail-property="tag"]`)
 		b.evaluate(`window.originalTagFetch=window.fetch; window.fetch=(url,...args)=>String(url).includes('/api/tasks/tags?') ? new Promise(resolve=>window.failTagRefresh=()=>resolve(new Response(null,{status:503}))) : window.originalTagFetch(url,...args); 'delayed'`)
@@ -293,7 +295,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.click(`[data-custom-tag]`)
 		b.waitFor("saved custom tag", `document.querySelector('[data-detail-property="tag"]').dataset.value`, "Docs/Security")
 		b.waitFor("custom tag uses primary badge", `document.querySelector('[data-tag-badge].badge-primary [data-property-label]').textContent`, "Docs/Security")
-		b.click(`[data-detail-property="tag"]`)
+		b.click(tagArrow)
 		setSearch(strings.Repeat("x", 65))
 		b.waitFor("new tag can be added after refresh", addVisible, "true")
 		b.click(`[data-custom-tag]`)

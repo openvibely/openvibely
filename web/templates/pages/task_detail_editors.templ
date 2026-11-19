@@ -24,11 +24,12 @@ templ TaskPropertyRow(label, field, value, text string) {
   <div class="task-property-row inspector-property-row task-tag-row">
    <span class="opacity-60">{ label + ":" }</span>
    <span data-tag-badge class={ templ.KV("badge badge-sm", value != ""), components.TagBadgeClass(models.TaskTag(value)) }>
-    <button type="button" data-detail-property="tag" data-value={ value } aria-haspopup="dialog" aria-label={ "Tag: " + text }><span data-property-label>{ text }</span></button>
+    <button type="button" id="task-tag-picker-trigger" data-detail-property="tag" data-value={ value } aria-haspopup="dialog" aria-label={ "Tag: " + text }><span data-property-label>{ text }</span></button>
     <button type="button" data-remove-tag aria-label={ "Remove tag " + text } title="Remove tag" hidden?={ value == "" }>
      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m2 2 6 6m0-6-6 6"/></svg>
     </button>
    </span>
+   <label for="task-tag-picker-trigger" class="cursor-pointer" aria-hidden="true">›</label>
   </div>
   <p data-tag-remove-error role="alert" class="text-error text-sm"></p>
  } else {
