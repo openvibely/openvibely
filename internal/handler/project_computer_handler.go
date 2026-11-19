@@ -115,7 +115,13 @@ func (h *Handler) computerStatus(ctx context.Context, svc *service.ProjectComput
 	if err != nil {
 		return nil, err
 	}
-	status := map[string]any{"preview_quality": state.PreviewQuality, "idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": svc.Ready(ctx, projectID), "held": state.Held, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": svc.ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
+	stage := svc.StartupStage(projectID)
+	ready := false
+	if stage == "" {
+		ready = svc.Ready(ctx, projectID)
+		stage = svc.StartupStage(projectID)
+	}
+	status := map[string]any{"startup_stage": stage, "preview_quality": state.PreviewQuality, "idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": ready && stage == "", "held": state.Held, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": svc.ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
 	if h.desktopMode && h.computerDesktopURL != "" && native && status["ready"] == true {
 		mode := "view"
 		// Permission is checked when the stream connects; never silently issue

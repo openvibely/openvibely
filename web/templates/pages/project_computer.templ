@@ -114,12 +114,12 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      connectionOverlay.style.cssText='position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(20,24,32,.65);color:white;text-align:center;padding:16px';
      connectionOverlay.innerHTML='<span class="loading loading-spinner loading-sm" aria-hidden="true"></span><span data-computer-connection-text></span>';
      screen.append(connectionOverlay);
-     let frameReady=false,everConnected=false;
+     let frameReady=false,everConnected=false,startupStage='';
      function renderConnection(){
       const waiting=!frameReady;connectionOverlay.style.display=waiting?'flex':'none';screen.setAttribute('aria-busy',String(waiting));
       if(!waiting)return;
       const seconds=Math.ceil(Math.max(0,screenRetry.nextRetryAt-Date.now())/1000);
-      const text=seconds?'Retrying in '+seconds+(seconds===1?' second…':' seconds…'):everConnected||retained?'Reconnecting to computer…':'Connecting to computer…';
+      const text=startupStage==='building'?'Building computer image…':startupStage==='starting'||pending?'Starting computer…':seconds?'Retrying in '+seconds+(seconds===1?' second…':' seconds…'):everConnected||retained?'Reconnecting to computer…':'Connecting to computer…';
       const label=connectionOverlay.querySelector('[data-computer-connection-text]');if(label.textContent!==text)label.textContent=text;
      }
      const buttons=[...root.querySelectorAll('[data-computer-action]')];
@@ -144,6 +144,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      function statusChanged(event){
       let data;try{data=JSON.parse(event.data);}catch{return;}
       if(data.project_id!==root.dataset.computerProject || data.task_id!==root.dataset.computerTask)return;
+      startupStage=data.startup_stage||'';renderConnection();
       pendingState=data;pendingTargetSaveVersion=targetSaveVersion;statusFailed=false;queueStatus();
      }
      function subscribeStatus(force=false){
@@ -356,7 +357,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
        const taskToggle=find('[data-task-computer-toggle]');if(taskToggle){taskToggle.checked=!!state.task_enabled;taskToggle.disabled=!state.project_enabled;}
        preview.hidden=!state.enabled;
 currentState=state;if(state.handoff_kind){recording=false;renderDemo();}find('[data-teach-open]').hidden=!!state.handoff_kind;if(state.handoff_kind)teach.hidden=true;
-       if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;refreshQueued=true;}catch(e){pending=false;computerToast(e.message,'error');find('[data-computer-action=ensure]').hidden=false;find('[data-computer-action=ensure]').disabled=false;}return;}
+       if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;refreshQueued=true;}catch(e){pending=false;startupStage='';renderConnection();computerToast(e.message,'error');find('[data-computer-action=ensure]').hidden=false;find('[data-computer-action=ensure]').disabled=false;}return;}
        find('[data-computer-login]').hidden=!state.handoff_kind;
  find('[data-computer-login-site]').textContent=state.handoff_kind?(state.handoff_reason||'Computer help requested')+(state.handoff_url?' — '+state.handoff_url:''):'';
  const target=find('[data-computer-target]');if(target&&!target.disabled&&stateTargetSaveVersion===targetSaveVersion){target.dataset.value=state.tool_target||'worktree';target.querySelector('[data-property-label]').textContent=target.dataset.value==='computer'?'Task computer':'Task worktree';}

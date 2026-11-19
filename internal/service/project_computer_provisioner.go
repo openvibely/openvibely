@@ -38,6 +38,7 @@ type ComputerProvisioner interface {
 }
 
 type LocalComputerProvisioner struct {
+	progress  func(string, string)
 	resources func(context.Context, string) (models.ComputerResources, error)
 	run       func(context.Context, io.Reader, ...string) ([]byte, error)
 }
@@ -230,7 +231,11 @@ func (p *LocalComputerProvisioner) StartWithTimeZone(ctx context.Context, id, zo
 		}
 		replace = true
 	}
-	if err := p.ensureImage(ctx); err != nil {
+	if err := p.ensureImage(ctx, func(stage string) {
+		if p.progress != nil {
+			p.progress(id, stage)
+		}
+	}); err != nil {
 		return ComputerConnection{}, err
 	}
 
@@ -462,19 +467,32 @@ func (p *LocalComputerProvisioner) inspectSettings(ctx context.Context, id strin
 // Shared across project provisioners: inspect again after acquiring the build lock.
 var computerImageBuildLock = make(chan struct{}, 1)
 
-func (p *LocalComputerProvisioner) ensureImage(ctx context.Context) error {
+func (p *LocalComputerProvisioner) ensureImage(ctx context.Context, progress ...func(string)) error {
+	report := func(stage string) {
+		for _, fn := range progress {
+			fn(stage)
+		}
+	}
+	// A contended build lock means this project is waiting for the shared image.
 	select {
 	case computerImageBuildLock <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
+	default:
+		report("building")
+		select {
+		case computerImageBuildLock <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	defer func() { <-computerImageBuildLock }()
+	defer report("starting")
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if os.Getenv("OPENVIBELY_COMPUTER_IMAGE") == "" {
 		image := computerImageTag()
 		if _, err := p.docker(ctx, nil, "image", "inspect", image); err != nil {
+			report("building")
 			var archive bytes.Buffer
 			tw := tar.NewWriter(&archive)
 			err = fs.WalkDir(computerassets.Source, ".", func(path string, d fs.DirEntry, err error) error {

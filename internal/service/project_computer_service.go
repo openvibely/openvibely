@@ -55,7 +55,11 @@ func NewProjectComputerService(projects persistence.ProjectStore, p ComputerProv
 		}
 		p = &copy
 	}
-	return &ProjectComputerService{repo: projects.Computers(), readinessLookups: &singleflight.Group{}, locks: &sync.Map{}, active: &sync.Map{}, projects: projects, provisioner: p, client: &http.Client{Timeout: (agenttools.MaxBashTimeoutSeconds + 10) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	svc := &ProjectComputerService{repo: projects.Computers(), readinessLookups: &singleflight.Group{}, locks: &sync.Map{}, active: &sync.Map{}, projects: projects, provisioner: p, client: &http.Client{Timeout: (agenttools.MaxBashTimeoutSeconds + 10) * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	if local, ok := p.(*LocalComputerProvisioner); ok {
+		local.progress = func(id, stage string) { svc.setStartupStage(id, stage) }
+	}
+	return svc
 }
 
 // SetBroadcaster wires status invalidations into the app's existing live transport.
@@ -235,6 +239,8 @@ func (s *ProjectComputerService) startLocked(ctx context.Context, id string, aut
 			return err
 		}
 	}
+	s.setStartupStage(id, "starting")
+	defer s.setStartupStage(id, "")
 	defer s.publishStatus(id, true)
 	if err := s.repo.MarkCleanupRequired(ctx, id); err != nil {
 		return err
@@ -885,4 +891,20 @@ func (s *ProjectComputerService) requireIsolation(data []byte) error {
 		}
 	}
 	return nil
+}
+
+// StartupStage is ephemeral and shared by all task-scoped services.
+func (s *ProjectComputerService) StartupStage(id string) string {
+	if stage, ok := s.active.Load("startup-stage:" + id); ok {
+		return stage.(string)
+	}
+	return ""
+}
+func (s *ProjectComputerService) setStartupStage(id, stage string) {
+	if stage == "" {
+		s.active.Delete("startup-stage:" + id)
+	} else {
+		s.active.Store("startup-stage:"+id, stage)
+	}
+	s.publishStatus(id, true)
 }
