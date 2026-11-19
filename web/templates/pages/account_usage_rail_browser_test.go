@@ -117,8 +117,10 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		mu.Lock()
 		initialLoading = false
 		mu.Unlock()
-		// The macOS 12 desktop webview lacks AbortSignal.timeout.
-		b.evaluate(`Object.defineProperty(AbortSignal, "timeout", { value: undefined, configurable: true }); document.body.dispatchEvent(new CustomEvent('accountUsageUpdated')); 'shared results'`)
+		// Start a fresh document with the same missing API as the macOS 12 webview.
+		b.call("Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": `Object.defineProperty(AbortSignal, "timeout", { value: undefined, configurable: true })`}, nil)
+		b.call("Page.reload", map[string]any{}, nil)
+		b.waitFor("OpenAI meter on startup without AbortSignal.timeout", `String(typeof AbortSignal.timeout==='undefined' && !!document.querySelector('#rail-accounts .rail-account[data-key="personal"] svg'))`, "true")
 		b.waitFor("sorted account rings", `JSON.stringify([...document.querySelectorAll('.rail-account')].map(b=>[b.dataset.key,b.querySelectorAll('circle').length]))`, `[["personal",1],["work",2],["anthropic",2]]`)
 		b.waitFor("weekly ring shows 15 percent remaining", `(()=>{const svg=document.querySelector('[data-key="personal"] svg');return String(Math.round(100*svg.querySelector('path[stroke]').getTotalLength()/svg.querySelector('circle').getTotalLength()))})()`, "15")
 		b.waitFor("standard footer spacing", `String(Math.round(document.querySelector('#sidebar [data-nav-base="/themes"]').getBoundingClientRect().top-document.querySelector('.rail-account:last-child').getBoundingClientRect().bottom))`, "2")
