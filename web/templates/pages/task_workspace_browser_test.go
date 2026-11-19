@@ -39,7 +39,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		var component templ.Component
 		switch r.URL.Path {
 		case "/api/tasks/tags":
-			fmt.Fprint(w, `["From Another Task"]`)
+			fmt.Fprint(w, `["From Another Task", "feat"]`)
 			return
 		case "/tasks/new":
 			component = NewTask([]models.Project{project}, &project, agents, nil)
@@ -126,6 +126,15 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("partial match keeps Feature", `String(document.querySelector('[data-options="tag"] [data-value="feature"]').checkVisibility())`, "true")
 		setSearch(" FEATURE ")
 		b.waitFor("exact match hides Add", addVisible, "false")
+		setSearch(" FeAt ")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
+		b.waitFor("Enter selects exact tag ahead of Feature", `document.querySelector('[data-draft-property="tag"]').value`, "feat")
+		b.click(`[data-detail-property="tag"]`)
+		setSearch("feat")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowUp"}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
+		b.waitFor("arrow selection overrides exact tag", `document.querySelector('[data-draft-property="tag"]').value`, "feature")
+		b.click(`[data-detail-property="tag"]`)
 		setSearch(" Docs/Security ")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
 		b.waitFor("draft custom tag", `document.querySelector('[data-draft-property="tag"]').value`, "Docs/Security")

@@ -98,7 +98,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      <button type="button" data-value={ fmt.Sprint(i+1) } class="ov-menu-option w-full">{ label }</button>
     }
    </div>
-   <div data-options="tag" data-default-badge={ components.TagBadgeClass(models.TagFeature) }>
+   <div data-options="tag" data-prefer-exact-value data-default-badge={ components.TagBadgeClass(models.TagFeature) }>
     for _, option := range []struct{ Value, Label string }{{"", "None"}, {"feature", "Feature"}, {"bug", "Bug"}} {
      <button type="button" data-value={ option.Value } data-badge={ components.TagBadgeClass(models.TaskTag(option.Value)) } class="ov-menu-option w-full">{ option.Label }</button>
     }
