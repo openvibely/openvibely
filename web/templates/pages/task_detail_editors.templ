@@ -86,7 +86,9 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      <button type="button" data-value={ fmt.Sprint(i+1) } class="ov-menu-option w-full">{ label }</button>
     }
    </div>
-   <p data-tag-loading role="status" class="px-3 py-2 text-sm opacity-60" hidden>Loading tags…</p>
+   <div data-tag-loading role="status" aria-label="Loading tags" class="flex justify-center py-2" hidden>
+    <span class="loading loading-spinner loading-sm opacity-50" aria-hidden="true"></span>
+   </div>
    <div data-options="tag" data-prefer-exact-value data-default-badge={ components.TagBadgeClass(models.TagFeature) }>
     <button type="button" data-clear-tag data-value="" class="ov-menu-option w-full">Clear tag</button>
     for _, option := range []struct{ Value, Label string }{{"feature", "Feature"}, {"bug", "Bug"}} {

@@ -126,7 +126,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		previousOption := `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`
 		b.waitFor("old tags cleared before refresh completes", previousOption, "false")
 		setSearch("feat")
-		b.waitFor("loading message visible", `String(document.querySelector('[data-tag-loading]').checkVisibility())`, "true")
+		b.waitFor("loading spinner centered", `String((() => { const spinner = document.querySelector('[data-tag-loading] .loading-spinner'); const bounds = spinner.getBoundingClientRect(), row = spinner.parentElement.getBoundingClientRect(); return spinner.checkVisibility() && Math.abs(bounds.left + bounds.width / 2 - row.left - row.width / 2) < 1; })())`, "true")
 		b.waitFor("partial Feature hidden during refresh", `String(document.querySelector('[data-options="tag"] [data-value="feature"]').checkVisibility())`, "false")
 		b.waitFor("pending refresh hides Add", addVisible, "false")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)

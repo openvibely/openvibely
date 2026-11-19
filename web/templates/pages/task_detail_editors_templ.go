@@ -582,14 +582,14 @@ func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div><p data-tag-loading role=\"status\" class=\"px-3 py-2 text-sm opacity-60\" hidden>Loading tags…</p><div data-options=\"tag\" data-prefer-exact-value data-default-badge=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div><div data-tag-loading role=\"status\" aria-label=\"Loading tags\" class=\"flex justify-center py-2\" hidden><span class=\"loading loading-spinner loading-sm opacity-50\" aria-hidden=\"true\"></span></div><div data-options=\"tag\" data-prefer-exact-value data-default-badge=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var29 string
 			templ_7745c5c3_Var29, templ_7745c5c3_Err = templruntime.NewAttributeExpression(components.TagBadgeClass(models.TagFeature)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 90, Col: 115}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 92, Col: 115}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 			if templ_7745c5c3_Err != nil {
@@ -607,7 +607,7 @@ func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions
 				var templ_7745c5c3_Var30 string
 				templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(option.Value).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 93, Col: 52}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 95, Col: 52}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 				if templ_7745c5c3_Err != nil {
@@ -620,7 +620,7 @@ func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions
 				var templ_7745c5c3_Var31 string
 				templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression(components.TagBadgeClass(models.TaskTag(option.Value))).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 93, Col: 122}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 95, Col: 122}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 				if templ_7745c5c3_Err != nil {
@@ -633,7 +633,7 @@ func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions
 				var templ_7745c5c3_Var32 string
 				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(option.Label)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 93, Col: 169}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_editors.templ`, Line: 95, Col: 169}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 				if templ_7745c5c3_Err != nil {
