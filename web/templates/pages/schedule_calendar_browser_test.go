@@ -127,10 +127,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
     check(root.querySelector('[data-calendar-action="pause_all"]').hidden,'paused project hides pause action');
     var resume=root.querySelector('[data-calendar-action="resume_all"]');
     check(!resume.hidden && menu.contains(resume),'resume remains in permanent menu');
-    menu.querySelector('button').click();
-    resume.click();await tick();
-    check(requests[0].action==='resume_all','project resume action works from menu');
-   report('pass','');return;
+    window.calendarTestRequests = requests;
+    report('ready','');return;
    }
    check(root.querySelector('[data-calendar-action="resume_all"]').hidden,'active project offers pause only');
    if (JSON.parse(root.querySelector('#schedule-calendar-controls').dataset.state).project_pauses) {
@@ -443,6 +441,26 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
 		_, _ = w.Write([]byte(strings.Replace(out.String(), "</head>", runner+"</head>", 1)))
 	}))
 	defer server.Close()
+	if paused {
+		runComposerFocusCDP(t, chrome, server.URL+"/schedule?project_id="+project.ID, "schedule-paused-menu", func(b *composerFocusCDP) {
+			select {
+			case outcome := <-result:
+				if outcome != "ready:" {
+					t.Fatalf("paused calendar setup: %s", outcome)
+				}
+			case <-time.After(60 * time.Second):
+				t.Fatal("timed out waiting for paused calendar setup")
+			}
+			b.waitFor("setup notifications to clear", `String(!document.querySelector('.toast-notification'))`, "true")
+			b.click(`#schedule-header-actions [aria-label="Calendar actions"]`)
+			b.click(`#schedule-header-actions [data-calendar-action="resume_all"]`)
+			b.waitFor("resume action finished", `document.querySelector('#schedule-content').dataset.calendarBusy`, "false")
+			if got := b.evaluate(`JSON.stringify(window.calendarTestRequests.map(request => request.action))`); got != `["resume_all"]` {
+				t.Fatalf("expected exactly one resume_all request, got %s", got)
+			}
+		})
+		return
+	}
 	windowSize := "--window-size=1440,1200"
 	if mobile {
 		windowSize = "--window-size=500,900"
