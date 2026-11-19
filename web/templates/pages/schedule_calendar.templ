@@ -67,7 +67,8 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  #schedule-content [hidden] { display: none !important; }
  #schedule-project-menu { position: relative; flex-shrink: 0; }
  /* Avoid font-dependent inline baseline space below the menu button. */
- #schedule-project-menu > summary { display: flex; }
+ #schedule-project-menu > summary { display: flex; list-style: none; }
+ #schedule-project-menu > summary::-webkit-details-marker { display: none; }
  #schedule-content [data-page-header] { gap: 2rem; align-items: flex-start; }
  #schedule-content [data-page-header] > h2, #schedule-header-actions { flex-shrink: 0; }
  #schedule-header-actions { margin-left: auto; }
