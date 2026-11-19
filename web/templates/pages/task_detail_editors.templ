@@ -99,7 +99,8 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     }
    </div>
    <div data-options="tag" data-prefer-exact-value data-default-badge={ components.TagBadgeClass(models.TagFeature) }>
-    for _, option := range []struct{ Value, Label string }{{"", "None"}, {"feature", "Feature"}, {"bug", "Bug"}} {
+    <button type="button" data-clear-tag data-value="" class="ov-menu-option w-full">Clear tag</button>
+    for _, option := range []struct{ Value, Label string }{{"feature", "Feature"}, {"bug", "Bug"}} {
      <button type="button" data-value={ option.Value } data-badge={ components.TagBadgeClass(models.TaskTag(option.Value)) } class="ov-menu-option w-full">{ option.Label }</button>
     }
     for _, tag := range taskTagOptions(ctx) {
@@ -163,9 +164,10 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var taskID = root.dataset.taskId, projectID = root.dataset.projectId;
   var destination = root.querySelector('#new-task-project');
   function available(option) {
+   if (option.hasAttribute('data-clear-tag')) return !search.value.trim();
    if (option === createTag) {
     var query = search.value.trim().toLowerCase();
-    return field === 'tag' && query && !Array.from(tags.children).some(tag => tag.textContent.toLowerCase() === query);
+    return field === 'tag' && query && !Array.from(tags.children).some(tag => tag.dataset.value.toLowerCase() === query);
    }
    return !destination || option.dataset.agentScope !== 'project' || (!!destination.value && option.dataset.agentProject === destination.value);
   }
@@ -248,7 +250,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      var input = root.querySelector('[data-draft-property="' + name + '"]'); if (input) { input.value = value; if (name === 'destination_project') input.dispatchEvent(new Event('change', {bubbles:true})); }
      current.dataset.value = value;
      var propertyLabel = current.querySelector('[data-property-label]');
-     propertyLabel.textContent = label;
+     propertyLabel.textContent = option.hasAttribute('data-clear-tag') ? 'No tag' : label;
      if (name === 'tag') propertyLabel.className = value ? 'badge badge-sm ' + (option.dataset.badge || tags.dataset.defaultBadge) : '';
     }
     if (name === 'agent_id') composerModel(value, label);

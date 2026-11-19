@@ -2289,7 +2289,7 @@ templ SwarmContextPanel(task *models.Task) {
 }
 
 func taskDetailTagLabel(tag models.TaskTag) string {
- if tag == "" { return "None" }; return components.TagLabel(tag)
+ if tag == "" { return "No tag" }; return components.TagLabel(tag)
 }
 
 templ TaskPromptPanel(task *models.Task) {

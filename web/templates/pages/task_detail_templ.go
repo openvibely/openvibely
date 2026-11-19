@@ -2235,7 +2235,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 
 func taskDetailTagLabel(tag models.TaskTag) string {
 	if tag == "" {
-		return "None"
+		return "No tag"
 	}
 	return components.TagLabel(tag)
 }
