@@ -3155,6 +3155,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-group { margin-bottom: 10px; }
 				.task-list-group:not([open]) { margin-bottom: 2px; }
 				.task-list-group > summary { list-style: none; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 8px; font-size: 13.5px; color: oklch(var(--bc) / .6); cursor: pointer; user-select: none; }
+				html:not([data-keyboard-navigation]) .task-list-group > summary:focus { outline: none; }
 				.task-list-group > summary:hover { color: oklch(var(--bc) / .85); background: oklch(var(--bc) / .06); }
 				.task-list-group > summary::-webkit-details-marker { display: none; }
 				.task-list-chevron { width: 14px; height: 14px; flex-shrink: 0; transition: transform .15s; }

@@ -38,7 +38,7 @@
  function schedule() {
   if (!frame) frame = requestAnimationFrame(fit);
  }
- function open() {
+ function open(event) {
   menu.replaceChildren();
   hiddenEntries.forEach(entry => {
    const original = entry.querySelector('a');
@@ -57,7 +57,7 @@
   const rect = more.getBoundingClientRect();
   menu.style.left = Math.max(8, Math.min(rect.right + 8, window.innerWidth - menu.offsetWidth - 8)) + 'px';
   menu.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - menu.offsetHeight - 8)) + 'px';
-  menu.querySelector('a').focus();
+  if (event.type === 'keydown' || event.detail === 0) menu.querySelector('a').focus();
  }
  function init() {
   const current = document.getElementById('plugin-pages-nav');

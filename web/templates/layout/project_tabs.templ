@@ -114,7 +114,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   /* The project selector already communicates focus through its hover/open surface. */
   #desktop-project-titlebar #project-selector-trigger:focus-visible { outline: none; }
   #desktop-project-titlebar [data-project-tab]:focus-visible { outline: none; }
-  #desktop-project-titlebar:not([data-keyboard-navigation]) [data-project-tab]:focus { outline: none; }
+  html:not([data-keyboard-navigation]) #desktop-project-titlebar [data-project-tab]:focus { outline: none; }
   #desktop-project-tabs { position: relative; display: flex; min-width: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; gap: 4px; align-self: stretch; padding: 6px 10px 0; }
   /* Keep native scrollbars out of the header, including older WebKitGTK. */
   #desktop-project-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
@@ -260,12 +260,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (!event.relatedTarget) addButton.removeAttribute('data-pointer-over');
    }, true);
    window.addEventListener('blur', function() { addButton.removeAttribute('data-pointer-over'); });
-   // WebViews may focus the first tab automatically on launch. Only show
-   // its focus outline after keyboard input, not startup or pointer focus.
+   // WebViews can focus navigation controls automatically on launch.
    document.addEventListener('keydown', function(event) {
-    if (['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'ContextMenu', 'F10'].includes(event.key)) bar.setAttribute('data-keyboard-navigation', '');
+    if (['Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'ContextMenu', 'F10'].includes(event.key)) document.documentElement.setAttribute('data-keyboard-navigation', '');
    }, true);
-   document.addEventListener('pointerdown', function() { bar.removeAttribute('data-keyboard-navigation'); }, true);
+   document.addEventListener('pointerdown', function() { document.documentElement.removeAttribute('data-keyboard-navigation'); }, true);
    bar.addEventListener('dblclick', function(event) {
     if (getComputedStyle(event.target).getPropertyValue('--wails-draggable').trim() !== 'drag') return;
     if (window.wails && window.wails.Window) window.wails.Window.ToggleMaximise();

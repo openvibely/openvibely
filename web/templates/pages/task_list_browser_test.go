@@ -851,6 +851,10 @@ func TestBrowserFunctional_TaskListKeyboardRevealsNestedRow(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL, "task-list-nested-reveal", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1440, "height": 500, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("sidebar rows", `String(!!document.querySelector('[data-task-list-row="scheduled-24"]'))`, "true")
+		b.waitFor("startup focus leaves the first group unoutlined", `(()=>{const header=document.querySelector('.task-list-group > summary');header.focus();return String(document.activeElement===header && getComputedStyle(header).outlineStyle==='none')})()`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Tab", "code": "Tab"}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Tab", "code": "Tab"}, nil)
+		b.waitFor("keyboard focus outlines the group", `(()=>{const header=document.querySelector('.task-list-group > summary');header.focus();return String(header.matches(':focus-visible') && getComputedStyle(header).outlineStyle!=='none')})()`, "true")
 		result := b.evaluateAwait(`(async()=>{
  const paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
  document.querySelectorAll('.task-list-group').forEach(g=>g.open=true);await paint();

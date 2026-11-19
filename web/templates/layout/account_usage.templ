@@ -319,10 +319,10 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     trigger: more,
     panels: () => [overflow],
     isOpen: () => surfaceShown(overflow),
-    open: () => {
+    open: (event) => {
       showSurface(overflow);
       position(overflow, more, true);
-      overflow.querySelector("a")?.focus();
+      if (event.detail === 0) overflow.querySelector("a")?.focus();
     },
     close: () => hideSurface(overflow),
   });
