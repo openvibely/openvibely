@@ -357,6 +357,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
        const taskToggle=find('[data-task-computer-toggle]');if(taskToggle){taskToggle.checked=!!state.task_enabled;taskToggle.disabled=!state.project_enabled;}
        preview.hidden=!state.enabled;
 currentState=state;if(state.handoff_kind){recording=false;renderDemo();}find('[data-teach-open]').hidden=!!state.handoff_kind;if(state.handoff_kind)teach.hidden=true;
+       if(state.startup_stage && !state.ready){disconnect();return;}
        if(state.enabled!==false && !state.ready && !attemptedStart){attemptedStart=true;pending=true;try{const started=await fetch(scoped('/ensure'),{method:'POST'});if(!started.ok){const data=await started.json();throw Error(data.message||'Could not start computer');}pending=false;refreshQueued=true;}catch(e){pending=false;startupStage='';renderConnection();computerToast(e.message,'error');find('[data-computer-action=ensure]').hidden=false;find('[data-computer-action=ensure]').disabled=false;}return;}
        find('[data-computer-login]').hidden=!state.handoff_kind;
  find('[data-computer-login-site]').textContent=state.handoff_kind?(state.handoff_reason||'Computer help requested')+(state.handoff_url?' — '+state.handoff_url:''):'';

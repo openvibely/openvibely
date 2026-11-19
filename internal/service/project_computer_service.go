@@ -381,9 +381,27 @@ func (s *ProjectComputerService) request(ctx context.Context, conn ComputerConne
 	return b, nil
 }
 func (s *ProjectComputerService) Ready(ctx context.Context, id string) bool {
+	return s.ReadyWithProgress(ctx, id, nil)
+}
+
+// ReadyWithProgress reports task desktop startup before the blocking health call.
+// The probe only observes the desktop; the normal health request starts it.
+func (s *ProjectComputerService) ReadyWithProgress(ctx context.Context, id string, starting func()) bool {
 	conn, err := s.connection(ctx, id, true)
 	if err != nil {
 		return false
+	}
+	if starting != nil && s.taskID != "" {
+		probe, cancel := context.WithTimeout(ctx, 2*time.Second)
+		data, err := s.request(probe, conn, "GET", "/health?probe=1", nil)
+		cancel()
+		if err == nil && s.requireIsolation(data) == nil {
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		starting()
 	}
 	check, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

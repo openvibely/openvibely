@@ -107,7 +107,7 @@ func (h *Handler) computerAvailability(ctx context.Context, svc *service.Project
 	return map[string]any{"configured": true, "enabled": state.Enabled}, nil
 }
 
-func (h *Handler) computerStatus(ctx context.Context, svc *service.ProjectComputerService, projectID, taskID, viewerID, viewerMode string, native bool) (map[string]any, error) {
+func (h *Handler) computerStatus(ctx context.Context, svc *service.ProjectComputerService, projectID, taskID, viewerID, viewerMode string, native bool, progress ...func(map[string]any)) (map[string]any, error) {
 	state, err := svc.Get(ctx, projectID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return map[string]any{"idle_minutes": 30, "time_zone": "UTC", "configured": false, "ready": false, "enabled": false}, nil
@@ -115,13 +115,29 @@ func (h *Handler) computerStatus(ctx context.Context, svc *service.ProjectComput
 	if err != nil {
 		return nil, err
 	}
+	status := map[string]any{"startup_stage": "", "preview_quality": state.PreviewQuality, "idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": false, "held": state.Held, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": svc.ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
 	stage := svc.StartupStage(projectID)
 	ready := false
 	if stage == "" {
-		ready = svc.Ready(ctx, projectID)
+		var starting func()
+		if len(progress) > 0 {
+			starting = func() {
+				for _, notify := range progress {
+					update := make(map[string]any, len(status))
+					for key, value := range status {
+						update[key] = value
+					}
+					update["startup_stage"] = "starting"
+					notify(update)
+				}
+			}
+		}
+		ready = svc.ReadyWithProgress(ctx, projectID, starting)
 		stage = svc.StartupStage(projectID)
 	}
-	status := map[string]any{"startup_stage": stage, "preview_quality": state.PreviewQuality, "idle_minutes": state.IdleMinutes, "time_zone": state.TimeZone, "configured": true, "enabled": state.Enabled, "task_enabled": state.TaskEnabled, "project_enabled": state.ProjectEnabled, "ready": ready && stage == "", "held": state.Held, "handoff_kind": state.HandoffKind, "handoff_reason": state.HandoffReason, "tool_target": state.ToolTarget, "handoff_url": state.HandoffURL, "chrome_available": svc.ChromeImportAvailable(), "busy": state.Owner != "" && state.LeaseUntil >= time.Now().Unix()}
+	status["startup_stage"] = stage
+	status["ready"] = ready && stage == ""
+
 	if h.desktopMode && h.computerDesktopURL != "" && native && status["ready"] == true {
 		mode := "view"
 		// Permission is checked when the stream connects; never silently issue

@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -142,5 +144,15 @@ func TestDesktopShutdownWaitsForStartupWithoutHoldingLock(t *testing.T) {
 	defer m.mu.Unlock()
 	if m.sessions["task-new"] == nil {
 		t.Fatal("shutdown cannot find the newly started process")
+	}
+}
+
+func TestDesktopHealthProbeDoesNotStartDesktop(t *testing.T) {
+	mux := http.NewServeMux()
+	desktopRoutes(mux)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest("GET", "/desktops/task-probe-regression/health?probe=1", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing desktop probe: %d %s", recorder.Code, recorder.Body.String())
 	}
 }

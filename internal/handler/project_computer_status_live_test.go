@@ -34,6 +34,12 @@ func TestComputerStatusUsesExistingLiveWebSocket(t *testing.T) {
 			require.Equal(t, exec.TaskID, state["task_id"])
 			require.Contains(t, state, "ready")
 			require.Contains(t, state, "handoff_kind")
+			// Even a failed task desktop check first announces startup, then
+			// clears that stage so the existing retry flow can take over.
+			require.Equal(t, "starting", state["startup_stage"])
+			finished := client.next(t, cmd.ID, "computer_status").Data.(map[string]any)
+			require.Empty(t, finished["startup_stage"])
+			require.Equal(t, false, finished["ready"])
 			break
 		}
 	}

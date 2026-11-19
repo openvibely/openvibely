@@ -91,6 +91,23 @@ func desktopRoutes(mux *http.ServeMux) {
 			return
 		}
 		name := parts[0]
+		// A status probe must never create a desktop or wait for its startup.
+		if r.Method == http.MethodGet && parts[1] == "health" && r.URL.Query().Get("probe") == "1" {
+			ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+			defer cancel()
+			transport := desktopTransport(name)
+			defer transport.CloseIdleConnections()
+			req, _ := http.NewRequestWithContext(ctx, "GET", "http://desktop/health", nil)
+			res, err := (&http.Client{Transport: transport}).Do(req)
+			if err != nil {
+				http.Error(w, "Desktop is not ready", 503)
+				return
+			}
+			defer res.Body.Close()
+			w.WriteHeader(res.StatusCode)
+			io.Copy(w, io.LimitReader(res.Body, 65536))
+			return
+		}
 		if r.Method == "DELETE" && parts[1] == "" {
 			mu.Lock()
 			if manager.deleting[name] {

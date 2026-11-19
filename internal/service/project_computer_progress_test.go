@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,4 +49,39 @@ func TestComputerStartupProgressSharedAndCleared(t *testing.T) {
 	require.Empty(t, scoped.StartupStage("other"))
 	svc.setStartupStage(project.ID, "")
 	require.Empty(t, scoped.StartupStage(project.ID))
+}
+
+func TestComputerTaskDesktopStartupProgress(t *testing.T) {
+	for _, mode := range []string{"ready", "starting", "failed"} {
+		t.Run(mode, func(t *testing.T) {
+			var started atomic.Bool
+			var healthCalls atomic.Int32
+			_, svc, project, _ := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("probe") == "1" {
+					if mode != "ready" {
+						http.Error(w, "not started", 503)
+						return
+					}
+				} else {
+					healthCalls.Add(1)
+					if !started.Load() {
+						t.Error("blocking health called before starting status")
+					}
+					if mode == "failed" {
+						http.Error(w, "startup failed", 503)
+						return
+					}
+				}
+				io.WriteString(w, `{"isolation":1,"viewer_connections":1}`)
+			})
+			ready := svc.ReadyWithProgress(t.Context(), project.ID, func() { started.Store(true) })
+			require.Equal(t, mode != "failed", ready)
+			require.Equal(t, mode != "ready", started.Load())
+			if mode == "ready" {
+				require.Zero(t, healthCalls.Load())
+			} else {
+				require.EqualValues(t, 1, healthCalls.Load())
+			}
+		})
+	}
 }
