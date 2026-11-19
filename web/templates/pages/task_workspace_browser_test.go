@@ -116,6 +116,17 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		assertTabGutters()
 		b.click(`[data-detail-property="tag"]`)
 		b.waitFor("existing draft refreshes tags from other tasks", `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`, "true")
+		b.clickMenuBackdrop(`[data-detail-property="tag"]`)
+		b.evaluate(`window.originalTagFetch=window.fetch; window.fetch=(url,...args)=>String(url).includes('/api/tasks/tags?') ? new Promise(resolve=>window.failTagRefresh=()=>resolve(new Response(null,{status:503}))) : window.originalTagFetch(url,...args); 'delayed'`)
+		b.click(`[data-detail-property="tag"]`)
+		previousOption := `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`
+		b.waitFor("old tags cleared before refresh completes", previousOption, "false")
+		b.evaluate(`window.failTagRefresh(); window.fetch=window.originalTagFetch; 'failed'`)
+		b.waitFor("refresh error shown", `document.querySelector('#task-property-picker [data-property-error]').textContent`, "Could not refresh project tags.")
+		b.waitFor("failed refresh keeps stale options out", previousOption, "false")
+		b.clickMenuBackdrop(`[data-detail-property="tag"]`)
+		b.click(`[data-detail-property="tag"]`)
+		b.waitFor("reopen fetches fresh options", previousOption, "true")
 		addVisible := `String(document.querySelector('[data-custom-tag]').checkVisibility())`
 		setSearch := func(query string) {
 			b.evaluate(fmt.Sprintf(`var search=document.querySelector('#task-property-picker .ov-menu-search input'); search.value=%q; search.dispatchEvent(new Event('input')); 'filtered'`, query))

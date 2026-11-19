@@ -413,16 +413,6 @@ func (h *Handler) GetTaskTags(c echo.Context) error {
 	return c.JSON(http.StatusOK, tags)
 }
 
-func (h *Handler) renderTaskWorkspace(c echo.Context, projectID string, component templ.Component) error {
-	ctx := c.Request().Context()
-	tags, err := h.taskRepo.ListCustomTags(ctx, projectID)
-	if err != nil {
-		return err
-	}
-	c.SetRequest(c.Request().WithContext(pages.WithTaskTagOptions(ctx, tags)))
-	return render(c, http.StatusOK, component)
-}
-
 func (h *Handler) NewTask(c echo.Context) error {
 	ctx := c.Request().Context()
 	projectID := c.QueryParam("project_id")
@@ -460,9 +450,9 @@ func (h *Handler) NewTask(c echo.Context) error {
 		agentDefs = h.listTaskFormAgentDefinitions(ctx, projectID, nil)
 	}
 	if isHTMX(c) {
-		return h.renderTaskWorkspace(c, layout.WorkspaceProjectID(ctx, projectID), pages.NewTaskContent(project, agents, agentDefs, projects...))
+		return render(c, http.StatusOK, pages.NewTaskContent(project, agents, agentDefs, projects...))
 	}
-	return h.renderTaskWorkspace(c, layout.WorkspaceProjectID(ctx, projectID), pages.NewTask(projects, project, agents, agentDefs))
+	return render(c, http.StatusOK, pages.NewTask(projects, project, agents, agentDefs))
 }
 
 func isSwarmTaskForm(c echo.Context) bool {
@@ -858,7 +848,7 @@ func (h *Handler) renderTaskDetailContent(c echo.Context, taskID, selectedTab st
 
 func (h *Handler) renderTaskDetailContentData(c echo.Context, data *taskDetailContentData, selectedTab string) error {
 	c.SetRequest(c.Request().WithContext(components.WithTaskFiles(c.Request().Context(), data.files)))
-	return h.renderTaskWorkspace(c, data.task.ProjectID, pages.TaskDetailContent(data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, selectedTab, data.reviewComments))
+	return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, selectedTab, data.reviewComments))
 }
 
 func (h *Handler) GetTask(c echo.Context) error {
@@ -898,7 +888,7 @@ func (h *Handler) GetTask(c echo.Context) error {
 	// Full page load: wrap in layout
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	c.SetRequest(c.Request().WithContext(components.WithTaskFiles(c.Request().Context(), data.files)))
-	return h.renderTaskWorkspace(c, data.task.ProjectID, pages.TaskDetailPage(projects, data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
+	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
 }
 
 // GetTaskExecutions returns the bounded execution-history fragment for a task.
@@ -3395,9 +3385,9 @@ func (h *Handler) getTaskThread(c echo.Context, detail *taskDetailContentData, s
 		c.SetRequest(c.Request().WithContext(components.WithTaskFiles(c.Request().Context(), detail.files)))
 		if !isHTMX(c) {
 			projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-			return h.renderTaskWorkspace(c, detail.task.ProjectID, pages.TaskDetailPage(projects, detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
+			return render(c, http.StatusOK, pages.TaskDetailPage(projects, detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
 		}
-		return h.renderTaskWorkspace(c, detail.task.ProjectID, pages.TaskDetailContent(detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
+		return render(c, http.StatusOK, pages.TaskDetailContent(detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
 	}
 	return render(c, http.StatusOK, thread)
 }

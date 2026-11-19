@@ -8,14 +8,16 @@ templ TaskTagInput(tag models.TaskTag) {
  <datalist id="task-tag-defaults"><option value="feature">Feature</option><option value="bug">Bug</option></datalist>
  <script>
   (function(input) {
+   var latestRequest = 0;
    input.addEventListener('focus', async function() {
+    var request = ++latestRequest;
+    input.list.querySelectorAll('[data-custom-option]').forEach(option => option.remove());
     var project = input.form?.elements.namedItem('destination_project')?.value || new URL(input.form?.action || location.href).searchParams.get('project_id') || new URL(location.href).searchParams.get('project_id') || '';
     try {
      var response = await fetch('/api/tasks/tags?project_id=' + encodeURIComponent(project));
      if (!response.ok) return;
      var tags = await response.json();
-     if (!input.isConnected || document.activeElement !== input) return;
-     input.list.querySelectorAll('[data-custom-option]').forEach(option => option.remove());
+     if (request !== latestRequest || !input.isConnected || document.activeElement !== input) return;
      tags.forEach(function(tag) {
       var option = new Option(tag, tag);
       option.dataset.customOption = '';
