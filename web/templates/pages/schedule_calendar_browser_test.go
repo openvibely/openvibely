@@ -104,6 +104,11 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile, mixed bool) {
     check(Math.abs(root.querySelector('#schedule-header-actions').getBoundingClientRect().top-top)<1,'New button uses standard page header top');
    }
    checkHeaderAlignment();
+   // The icon-only dropdown must not grow with the inherited text line box.
+   // Font metrics differ between macOS and Linux browser runners.
+   menu.style.lineHeight='40px';
+   checkHeaderAlignment();
+   menu.style.lineHeight='';
    check(pageHeader.contains(toolbar),'selection panel belongs in header');
    check(getComputedStyle(toolbar).display==='none','empty selection hides panel');
    check(!root.querySelector('#schedule-paused-status'),'no redundant paused header status');
