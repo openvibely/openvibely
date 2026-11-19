@@ -146,6 +146,14 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   }
   search.addEventListener('input', updateTagAction);
   var pickerUI = window.createInspectorPicker(root, picker, function() { return busy; }, available);
+  search.addEventListener('keydown', function(event) {
+   if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || field !== 'tag' || tagsLoaded) return;
+   var query = search.value.trim();
+   var highlighted = tags.querySelector('[data-active]');
+   if (query && (!highlighted || !pickerUI.searchPattern(query, true).test(highlighted.dataset.value))) {
+    event.preventDefault();
+   }
+  });
   var pickerOpen = pickerUI.isOpen, hidePicker = pickerUI.close, returnToRow = pickerUI.returnFocus;
   root.addEventListener('htmx:beforeRequest', function(event) { if (event.detail.elt.id === 'task-detail-metrics') event.detail.xhr.detailRevision = revision; });
   var taskID = root.dataset.taskId, projectID = root.dataset.projectId;

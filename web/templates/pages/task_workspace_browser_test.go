@@ -125,7 +125,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.click(`[data-detail-property="tag"]`)
 		previousOption := `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`
 		b.waitFor("old tags cleared before refresh completes", previousOption, "false")
-		setSearch("from another task")
+		setSearch("feat")
+		b.waitFor("partial Feature visible during refresh", `String(document.querySelector('[data-options="tag"] [data-value="feature"]').checkVisibility())`, "true")
 		b.waitFor("pending refresh hides Add", addVisible, "false")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
 		b.waitFor("Enter during refresh leaves draft tag empty", `document.querySelector('[data-draft-property="tag"]').value`, "")
