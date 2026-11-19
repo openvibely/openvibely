@@ -77,7 +77,7 @@ templ changesSplitActionView(task *models.Task, taskPR *models.TaskPullRequest, 
   .ov-changes-split { border-radius:var(--rounded-btn,.5rem);overflow:hidden; }
   .ov-changes-split.join > [data-changes-primary], .ov-changes-split.join > [data-linked-pr-action] { border-top-left-radius:var(--rounded-btn,.5rem);border-bottom-left-radius:var(--rounded-btn,.5rem); }
   .ov-changes-split > .btn { transition:background-color 100ms ease; }
-  .ov-changes-split > [data-changes-settings-toggle] { position:relative; }
+  .ov-changes-split > [data-changes-settings-toggle] { position:relative;border-left-width:0; }
   .ov-changes-split > [data-changes-settings-toggle]::before { content:"";position:absolute;left:0;top:-1px;bottom:-1px;width:1px;background:var(--board-page-bg, var(--ov-content-bg, var(--fallback-b1, oklch(var(--b1) / 1))));pointer-events:none; }
   [data-color-theme][data-theme] .ov-changes-split > .btn:active { transform:none; }
   /* Keep the hit area fixed between pointer press and release, including the edges. */
