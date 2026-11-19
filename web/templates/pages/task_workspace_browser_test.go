@@ -38,6 +38,9 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		task := &models.Task{ID: "details-task", ProjectID: project.ID, Title: "Task", Prompt: "Original prompt", Status: models.StatusCompleted, Category: models.CategoryCompleted, Tag: models.TaskTag(tag.Load().(string)), Priority: int(priority.Load()), AutoMerge: autoMerge.Load()}
 		var component templ.Component
 		switch r.URL.Path {
+		case "/api/tasks/tags":
+			fmt.Fprint(w, `["From Another Task"]`)
+			return
 		case "/tasks/new":
 			component = NewTask([]models.Project{project}, &project, agents, nil)
 		case "/tasks/details-task":
@@ -112,6 +115,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		}
 		assertTabGutters()
 		b.click(`[data-detail-property="tag"]`)
+		b.waitFor("existing draft refreshes tags from other tasks", `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`, "true")
 		addVisible := `String(document.querySelector('[data-custom-tag]').checkVisibility())`
 		setSearch := func(query string) {
 			b.evaluate(fmt.Sprintf(`var search=document.querySelector('#task-property-picker .ov-menu-search input'); search.value=%q; search.dispatchEvent(new Event('input')); 'filtered'`, query))

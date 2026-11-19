@@ -103,7 +103,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      <button type="button" data-value={ option.Value } class="ov-menu-option w-full">{ option.Label }</button>
     }
     for _, tag := range taskTagOptions(ctx) {
-     <button type="button" data-value={ tag } class="ov-menu-option w-full">{ tag }</button>
+     <button type="button" data-custom-option data-value={ tag } class="ov-menu-option w-full">{ tag }</button>
     }
    </div>
  }
@@ -127,9 +127,29 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    var option = document.createElement('button');
    option.type = 'button';
    option.className = 'ov-menu-option w-full';
+   option.dataset.customOption = '';
    option.dataset.value = value;
    option.textContent = value;
    tags.appendChild(option);
+  }
+  var tagRequest = 0;
+  async function refreshTags(row) {
+   var request = ++tagRequest;
+   var scope = destination?.value || projectID;
+   try {
+    var response = await fetch('/api/tasks/tags?project_id=' + encodeURIComponent(scope));
+    if (!response.ok) throw new Error();
+    var values = await response.json();
+    if (request !== tagRequest || !root.isConnected || !pickerOpen() || current !== row || busy) return;
+    var visible = new Set(values.concat(row.dataset.value || '').map(value => value.toLowerCase()));
+    tags.querySelectorAll('[data-custom-option]').forEach(function(option) {
+     if (!visible.has(option.dataset.value.toLowerCase())) option.remove();
+    });
+    values.forEach(rememberTag);
+    search.dispatchEvent(new Event('input'));
+   } catch (_) {
+    if (request === tagRequest && current === row && pickerOpen()) picker.querySelector('[data-property-error]').textContent = 'Could not refresh project tags.';
+   }
   }
   function updateTagAction() {
    var query = search.value.trim();
@@ -200,7 +220,9 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     if (field === 'tag') rememberTag(row.dataset.value);
     search.placeholder = field === 'tag' ? 'Search tags' : 'Search…';
     search.setAttribute('aria-label', field === 'tag' ? 'Search tags' : 'Search options');
-    pickerUI.open(row); return;
+    pickerUI.open(row);
+    if (field === 'tag' && pickerOpen()) refreshTags(row);
+    return;
    }
    var editor = event.target.closest('[data-detail-editor]');
    if (!editor) return;

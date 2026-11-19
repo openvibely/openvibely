@@ -2,9 +2,28 @@ package components
 
 import "github.com/openvibely/openvibely/internal/models"
 
-// TaskTagInput offers defaults without requiring a catalog.
+// TaskTagInput suggests built-in and project tags while allowing free text.
 templ TaskTagInput(tag models.TaskTag) {
  <input type="text" name="tag" aria-label="Tag" value={ string(tag) } list="task-tag-defaults" placeholder="None" class="input input-bordered w-full"/>
  <datalist id="task-tag-defaults"><option value="feature">Feature</option><option value="bug">Bug</option></datalist>
+ <script>
+  (function(input) {
+   input.addEventListener('focus', async function() {
+    var project = input.form?.elements.namedItem('destination_project')?.value || new URL(input.form?.action || location.href).searchParams.get('project_id') || new URL(location.href).searchParams.get('project_id') || '';
+    try {
+     var response = await fetch('/api/tasks/tags?project_id=' + encodeURIComponent(project));
+     if (!response.ok) return;
+     var tags = await response.json();
+     if (!input.isConnected || document.activeElement !== input) return;
+     input.list.querySelectorAll('[data-custom-option]').forEach(option => option.remove());
+     tags.forEach(function(tag) {
+      var option = new Option(tag, tag);
+      option.dataset.customOption = '';
+      input.list.appendChild(option);
+     });
+    } catch (_) { /* The text field also accepts manually entered tags. */ }
+   });
+  })(document.currentScript.previousElementSibling.previousElementSibling);
+ </script>
  <p class="text-xs opacity-60">One tag, up to 64 characters. Custom tags keep their capitalization. Leave empty for none.</p>
 }

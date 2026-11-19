@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import "github.com/openvibely/openvibely/internal/models"
 
-// TaskTagInput offers defaults without requiring a catalog.
+// TaskTagInput suggests built-in and project tags while allowing free text.
 func TaskTagInput(tag models.TaskTag) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -42,7 +42,7 @@ func TaskTagInput(tag models.TaskTag) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" list=\"task-tag-defaults\" placeholder=\"None\" class=\"input input-bordered w-full\"> <datalist id=\"task-tag-defaults\"><option value=\"feature\">Feature</option><option value=\"bug\">Bug</option></datalist><p class=\"text-xs opacity-60\">One tag, up to 64 characters. Custom tags keep their capitalization. Leave empty for none.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" list=\"task-tag-defaults\" placeholder=\"None\" class=\"input input-bordered w-full\"> <datalist id=\"task-tag-defaults\"><option value=\"feature\">Feature</option><option value=\"bug\">Bug</option></datalist><script>\n  (function(input) {\n   input.addEventListener('focus', async function() {\n    var project = input.form?.elements.namedItem('destination_project')?.value || new URL(input.form?.action || location.href).searchParams.get('project_id') || new URL(location.href).searchParams.get('project_id') || '';\n    try {\n     var response = await fetch('/api/tasks/tags?project_id=' + encodeURIComponent(project));\n     if (!response.ok) return;\n     var tags = await response.json();\n     if (!input.isConnected || document.activeElement !== input) return;\n     input.list.querySelectorAll('[data-custom-option]').forEach(option => option.remove());\n     tags.forEach(function(tag) {\n      var option = new Option(tag, tag);\n      option.dataset.customOption = '';\n      input.list.appendChild(option);\n     });\n    } catch (_) { /* The text field also accepts manually entered tags. */ }\n   });\n  })(document.currentScript.previousElementSibling.previousElementSibling);\n </script><p class=\"text-xs opacity-60\">One tag, up to 64 characters. Custom tags keep their capitalization. Leave empty for none.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

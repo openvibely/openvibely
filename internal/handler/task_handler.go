@@ -397,6 +397,22 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
 }
 
+func (h *Handler) GetTaskTags(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	tags, err := h.taskRepo.ListCustomTags(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return c.JSON(http.StatusOK, tags)
+}
+
 func (h *Handler) renderTaskWorkspace(c echo.Context, projectID string, component templ.Component) error {
 	ctx := c.Request().Context()
 	tags, err := h.taskRepo.ListCustomTags(ctx, projectID)

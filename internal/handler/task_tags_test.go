@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -62,4 +64,31 @@ func TestCustomTagScheduledCreation(t *testing.T) {
 	schedules, err := h.scheduleRepo.ListByTask(context.Background(), tasks[0].ID)
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)
+}
+
+func TestTaskTagsReusableAcrossOpenTasks(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	a := createTask(t, h, "default", "Source")
+	b := createTask(t, h, "default", "Destination")
+	page := htmxGet(e, "/tasks/"+b.ID+"?project_id=default&tab=details")
+	assertCode(t, page, http.StatusOK)
+	require.NotContains(t, page.Body.String(), `data-value="Release QA"`)
+	assign := func(taskID, tag string) {
+		body := url.Values{"field": {"tag"}, "value": {tag}}
+		req := httptest.NewRequest(http.MethodPatch, "/tasks/"+taskID+"/details/property?project_id=default", strings.NewReader(body.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assertCode(t, rec, http.StatusOK)
+	}
+	assign(a.ID, "Release QA")
+	options := htmxGet(e, "/api/tasks/tags?project_id=default")
+	assertCode(t, options, http.StatusOK)
+	var tags []string
+	require.NoError(t, json.Unmarshal(options.Body.Bytes(), &tags))
+	require.Equal(t, []string{"Release QA"}, tags)
+	assign(b.ID, tags[0])
+	saved, err := h.taskRepo.GetByID(t.Context(), b.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskTag("Release QA"), saved.Tag)
 }
