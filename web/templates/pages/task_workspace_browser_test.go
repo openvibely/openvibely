@@ -141,6 +141,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
 		b.waitFor("Enter selects exact tag ahead of Feature", `document.querySelector('[data-draft-property="tag"]').value`, "feat")
 		b.click(`[data-detail-property="tag"]`)
+		b.waitFor("project tags loaded after reopening", previousOption, "true")
+		b.waitFor("selected tag appears once", `String(document.querySelectorAll('[data-custom-option][data-value="feat"]').length)`, "1")
 		setSearch("feat")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowUp"}, nil)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)

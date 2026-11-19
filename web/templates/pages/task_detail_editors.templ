@@ -109,15 +109,14 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var search = picker.querySelector('.ov-menu-search input');
   var createTag = picker.querySelector('[data-custom-tag]');
   var tags = picker.querySelector('.ov-menu-list [data-options="tag"]');
-  function rememberTag(value) {
-   if (!value || Array.from(tags.children).some(option => option.dataset.value.toLowerCase() === value.toLowerCase())) return;
+  function customTagOption(value) {
    var option = document.createElement('button');
    option.type = 'button';
    option.className = 'ov-menu-option w-full';
    option.dataset.customOption = '';
    option.dataset.value = value;
    option.textContent = value;
-   tags.appendChild(option);
+   return option;
   }
   var tagRequest = 0;
   async function refreshTags(row) {
@@ -128,7 +127,12 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     if (!response.ok) throw new Error();
     var values = await response.json();
     if (request !== tagRequest || !root.isConnected || !pickerOpen() || current !== row || busy) return;
-    values.forEach(rememberTag);
+    var currentValue = row.dataset.value.toLowerCase();
+    var options = document.createDocumentFragment();
+    for (var value of values) {
+     if (value.toLowerCase() !== currentValue) options.appendChild(customTagOption(value));
+    }
+    tags.appendChild(options);
     search.dispatchEvent(new Event('input'));
    } catch (_) {
     if (request === tagRequest && current === row && pickerOpen()) picker.querySelector('[data-property-error]').textContent = 'Could not refresh project tags.';
@@ -203,7 +207,10 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });
     if (field === 'tag') {
      tags.querySelectorAll('[data-custom-option]').forEach(option => option.remove());
-     rememberTag(row.dataset.value);
+     var value = row.dataset.value;
+     if (value && !Array.from(tags.children).some(option => option.dataset.value.toLowerCase() === value.toLowerCase())) {
+      tags.appendChild(customTagOption(value));
+     }
     }
     search.placeholder = field === 'tag' ? 'Search tags' : 'Search…';
     search.setAttribute('aria-label', field === 'tag' ? 'Search tags' : 'Search options');
