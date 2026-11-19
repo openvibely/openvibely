@@ -129,6 +129,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.waitFor("standard footer spacing", `String(Math.round(document.querySelector('#sidebar [data-nav-base="/themes"]').getBoundingClientRect().top-document.querySelector('.rail-account:last-child').getBoundingClientRect().bottom))`, "2")
 		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'opened'`)
 		b.waitFor("provider reset", `String(document.querySelector('#rail-account-popup button[data-action="reset-grant"]')!==null)`, "true")
+		b.waitFor("meter popup receives pointer input", `(()=>{const panel=document.getElementById('rail-account-popup'), refresh=panel.querySelector('[data-action="refresh"]'), r=refresh.getBoundingClientRect();return String(panel.parentElement===document.body && refresh.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)))})()`, "true")
 		b.waitFor("weekly-only popup", `String(document.getElementById('rail-account-popup').querySelectorAll('[role="meter"]').length)`, "1")
 		// HTTP LAN origins do not expose randomUUID, but getRandomValues remains available.
 		b.evaluate(`Object.defineProperty(crypto, 'randomUUID', {value: undefined, configurable: true}); 'HTTP crypto capabilities'`)

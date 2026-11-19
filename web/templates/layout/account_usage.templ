@@ -297,8 +297,8 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>';
   const moreItem = el("li");
   moreItem.append(more);
-  // Keep the popup outside the rail so WebKit hit-tests it over the task list.
-  document.body.append(overflow);
+  // Keep both popups outside the rail so WebKit paints them over the task list.
+  document.body.append(popup, overflow);
   const paths = ["/analytics", "/insights", "/history", "/upcoming"];
   for (const path of paths) {
     const link = nav?.querySelector('[data-nav-base="' + path + '"]');
