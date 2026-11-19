@@ -527,7 +527,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       button.setAttribute("aria-label", button.title);
       button.append(svgFor(a));
       // Match the rail overflow menus: activate again to close.
-      button.onclick = () => openAccount(a);
+      button.onclick = (event) => openAccount(a, event);
       return button;
     });
     host.replaceChildren(...nodes);
@@ -739,7 +739,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     drawRail();
     if (shown() && state.selected === a.key) drawPopup();
   }
-  async function openAccount(a) {
+  async function openAccount(a, event) {
     if (shown() && state.selected === a.key) {
       usageMenu.close(true);
       return;
@@ -749,7 +749,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
     usageMenu.open();
     drawRail();
     drawPopup();
-    popup.querySelector('[data-action="refresh"]')?.focus();
+    if (event.detail === 0) popup.querySelector('[data-action="refresh"]')?.focus();
     await loadResets(a);
   }
   async function redeem(a, c) {
