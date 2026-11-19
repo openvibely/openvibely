@@ -114,6 +114,10 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			}
 		}
 		assertTabGutters()
+		addVisible := `String(document.querySelector('[data-custom-tag]').checkVisibility())`
+		setSearch := func(query string) {
+			b.evaluate(fmt.Sprintf(`var search=document.querySelector('#task-property-picker .ov-menu-search input'); search.value=%q; search.dispatchEvent(new Event('input')); 'filtered'`, query))
+		}
 		b.click(`[data-detail-property="tag"]`)
 		b.waitFor("existing draft refreshes tags from other tasks", `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`, "true")
 		b.clickMenuBackdrop(`[data-detail-property="tag"]`)
@@ -121,16 +125,17 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.click(`[data-detail-property="tag"]`)
 		previousOption := `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`
 		b.waitFor("old tags cleared before refresh completes", previousOption, "false")
+		setSearch("from another task")
+		b.waitFor("pending refresh hides Add", addVisible, "false")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
+		b.waitFor("Enter during refresh leaves draft tag empty", `document.querySelector('[data-draft-property="tag"]').value`, "")
 		b.evaluate(`window.failTagRefresh(); window.fetch=window.originalTagFetch; 'failed'`)
 		b.waitFor("refresh error shown", `document.querySelector('#task-property-picker [data-property-error]').textContent`, "Could not refresh project tags.")
 		b.waitFor("failed refresh keeps stale options out", previousOption, "false")
+		b.waitFor("failed refresh keeps Add hidden", addVisible, "false")
 		b.clickMenuBackdrop(`[data-detail-property="tag"]`)
 		b.click(`[data-detail-property="tag"]`)
 		b.waitFor("reopen fetches fresh options", previousOption, "true")
-		addVisible := `String(document.querySelector('[data-custom-tag]').checkVisibility())`
-		setSearch := func(query string) {
-			b.evaluate(fmt.Sprintf(`var search=document.querySelector('#task-property-picker .ov-menu-search input'); search.value=%q; search.dispatchEvent(new Event('input')); 'filtered'`, query))
-		}
 		b.waitFor("empty search hides Add", addVisible, "false")
 		for _, query := range []string{"ΟΣ", "ος", "οσ"} {
 			setSearch(query)
@@ -161,6 +166,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		setSearch("NONE")
 		b.waitFor("existing None tag is highlighted", `document.querySelector('#task-property-picker [data-active]').dataset.value`, "None")
 		setSearch(" Docs/Security ")
+		b.waitFor("new tag can be added after refresh", addVisible, "true")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
 		b.waitFor("draft custom tag", `document.querySelector('[data-draft-property="tag"]').value`, "Docs/Security")
 		b.waitFor("draft custom tag uses primary badge", `document.querySelector('[data-detail-property="tag"] .badge-primary')?.textContent`, "Docs/Security")
@@ -275,11 +281,13 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("saved priority", `document.querySelector('[data-detail-property="priority"]').dataset.value`, "4")
 		b.click(`[data-detail-property="tag"]`)
 		b.typeText(" Docs/Security ")
+		b.waitFor("new tag can be added after refresh", addVisible, "true")
 		b.click(`[data-custom-tag]`)
 		b.waitFor("saved custom tag", `document.querySelector('[data-detail-property="tag"]').dataset.value`, "Docs/Security")
 		b.waitFor("custom tag uses primary badge", `document.querySelector('[data-detail-property="tag"] .badge-primary').textContent`, "Docs/Security")
 		b.click(`[data-detail-property="tag"]`)
 		setSearch(strings.Repeat("x", 65))
+		b.waitFor("new tag can be added after refresh", addVisible, "true")
 		b.click(`[data-custom-tag]`)
 		b.waitFor("tag validation visible", `String(document.querySelector('#task-property-picker [data-property-error]').textContent.includes('64 characters'))`, "true")
 		setSearch("")
