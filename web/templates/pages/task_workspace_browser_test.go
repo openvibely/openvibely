@@ -146,6 +146,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		}
 		setSearch("fea")
 		b.waitFor("partial match offers Add", addVisible, "true")
+		b.waitFor("Add is a regular button", `String(document.querySelector('[data-custom-tag]').hasAttribute('aria-pressed'))`, "false")
 		b.waitFor("partial match keeps Feature", `String(document.querySelector('[data-options="tag"] [data-value="feature"]').checkVisibility())`, "true")
 		setSearch(" FEATURE ")
 		b.waitFor("exact match hides Add", addVisible, "false")
