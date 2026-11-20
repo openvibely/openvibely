@@ -125,13 +125,21 @@ test('project browser features in isolated Chromium',{timeout:30000},async t=>{
    const media=await run({action:'download_media',locator:{text:'Media',exact:true}});assert.equal(await fs.readFile(path.join(home,'Files',media.computer_path),'utf8'),'media bytes');
    const again=await run({action:'download',locator:{text:'Download',exact:true}});assert.notEqual(saved.computer_path,again.computer_path);
   });
-  await t.test('login verification accepts same-document navigation but rejects HTTP failures',async()=>{
-   server.removeAllListeners('request');server.on('request',(req,res)=>{res.setHeader('Content-Type','text/html');if(req.url.startsWith('/denied'))res.statusCode=401;res.end('<h1>Metrics</h1>');});
+  await t.test('login verification reloads same-document checks and rejects repeated HTTP failures',async()=>{
+   let status=200,requests=0;
+   server.removeAllListeners('request');server.on('request',(req,res)=>{if(req.url.startsWith('/verify-fixture'))requests++;res.statusCode=status;res.setHeader('Content-Type','text/html');res.end('<h1>Metrics</h1>');});
    const target=url+'/verify-fixture#metrics';
    await run({action:'navigate',url:target});
+   const before=requests;
    assert.deepEqual(await run({action:'verify_access',url:target,expected_text:'Metrics'}),{verified:true});
+   assert.equal(requests,before+1,'same-page check must reload exactly once');
    assert.deepEqual(await run({action:'verify_access',url:url+'/verify-fixture#other',expected_text:'Metrics'}),{verified:true});
-   await assert.rejects(run({action:'verify_access',url:url+'/denied',expected_text:'Metrics'}),/Page inaccessible/);
+   for(const denied of [401,403]){
+    status=denied;
+    for(let attempt=0;attempt<2;attempt++)await assert.rejects(run({action:'verify_access',url:target,expected_text:'Metrics'}),/Page inaccessible/);
+   }
+   status=200;
+   assert.deepEqual(await run({action:'verify_access',url:target,expected_text:'Metrics'}),{verified:true});
   });
   await t.test('console diagnostics do not collect idle human browsing',async()=>{
    server.removeAllListeners('request');server.on('request',(req,res)=>{res.setHeader('Content-Type','text/html');res.end('<script>console.log("agent navigation");console.error("fixture error")</script><h1>Logs</h1>');});

@@ -239,7 +239,17 @@ async function run(args,session) {
   }
   switch(args.action){
    case 'verify_access':
-   case 'navigate': {const url=new URL(args.url);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('HTTP URL required');const response=await page.goto(url.href,{waitUntil:'domcontentloaded',timeout:20000});if(args.action==='verify_access'&&response&&!response.ok())throw Error('Page inaccessible');break;}
+   case 'navigate': {
+    const url=new URL(args.url);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('HTTP URL required');
+    let response=await page.goto(url.href,{waitUntil:'domcontentloaded',timeout:20000});
+    if(args.action==='verify_access'){
+     // Same-document navigation has no response. Obtain a fresh status rather
+     // than accepting text from a previously rejected or expired session.
+     if(!response)response=await page.reload({waitUntil:'domcontentloaded',timeout:20000});
+     if(!response||!response.ok())throw Error('Page inaccessible');
+    }
+    break;
+   }
    case 'select_tab':
    case 'read':break;
    case 'reload':await page.reload({waitUntil:'domcontentloaded'});break;
