@@ -56,7 +56,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <button type="button" class="btn" data-computer-action="login-cancel">Decline request</button>
  </div>
    @layout.FullscreenViewer(templ.Attributes{"data-computer-dialog": true, "aria-label": "Live computer screen"}) {
-   @layout.FullscreenViewerHeader(templ.Attributes{"data-computer-close": true, "aria-label": "Close computer preview"}) {
+   @layout.FullscreenViewerHeader(templ.Attributes{"aria-label": "Close computer preview"}) {
     <span data-fullscreen-title></span><button type="button" class="btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal" data-teach-open>Teach a task</button>
    }
    <div data-computer-teach data-fullscreen-interactive hidden style="max-height:40vh;overflow:auto;padding:12px">
