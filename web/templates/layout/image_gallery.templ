@@ -2,7 +2,7 @@ package layout
 
 // ImageGallery is shared by saved attachments, message attachments and drafts.
 templ ImageGallery() {
- <dialog id="image-gallery" tabindex="-1" aria-label="File preview">
+ @FullscreenViewer(templ.Attributes{"id": "image-gallery", "tabindex": "-1", "aria-label": "File preview"}) {
   <div class="modal-box image-gallery-shell file-viewer-shell">
    <header><span data-result-title data-gallery-name></span><div data-result-actions></div><span data-gallery-count aria-live="polite"></span><button data-tooltip-disabled type="button" data-gallery-close data-file-close class="ov-modal-close" aria-label="Close image preview"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></header>
    <div class="image-gallery-viewer">
@@ -20,9 +20,9 @@ templ ImageGallery() {
     </div>
    </footer>
   </div>
- </dialog>
+ }
  <style>
- #image-gallery { padding:0; border:0; border-radius:0; color:#eee; background:transparent; width:100vw; max-width:none; height:100dvh; max-height:none; margin:0; }
+ #image-gallery { color:#eee; background:transparent; }
  #image-gallery, #image-gallery * { -webkit-user-select:none; user-select:none; }
  #image-gallery::backdrop { background:rgb(0 0 0 / .9); }
  #image-gallery .image-gallery-shell { color:inherit; background:transparent; box-shadow:none; padding:0; width:100%; max-width:none; max-height:none; transform:none; border-radius:0; height:100%; display:flex; flex-direction:column; }

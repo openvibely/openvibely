@@ -551,7 +551,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						let visibilityRetry;
 						const syncNativeVisibility = (force = false) => {
 							// Resolve the live dialog: navigation can replace the original node.
-							const hidden = !!document.querySelector('#image-gallery[open]');
+							const hidden = !!document.querySelector('dialog[data-fullscreen-viewer][open]');
 							if (!force && hidden === previewHidden) return;
 							clearTimeout(visibilityRetry);
 							previewHidden = hidden;

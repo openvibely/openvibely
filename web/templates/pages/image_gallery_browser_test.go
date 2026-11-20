@@ -70,6 +70,9 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			if err := components.AttachmentList([]models.Attachment{{ID: "one", FileName: "one.svg", MediaType: "image/svg+xml"}, {ID: "two", FileName: "two.svg", MediaType: "image/svg+xml"}, {ID: "document", FileName: "notes.txt", MediaType: "text/plain"}}, project.ID, "task").Render(ctx, w); err != nil {
 				return err
 			}
+			if err := layout.FullscreenViewer(templ.Attributes{"data-computer-dialog": true, "aria-label": "Live computer screen"}).Render(ctx, w); err != nil {
+				return err
+			}
 			return components.ChatBubbleWithAttachments("User", "Message", []models.ChatAttachment{{ID: "three", FileName: "message.svg", MediaType: "image/svg+xml"}}, project.ID).Render(ctx, w)
 		})
 		_ = layout.Base("Gallery", []models.Project{project}, project.ID).Render(templ.WithChildren(layout.WithDesktopMode(r.Context(), true), child), w)
@@ -84,6 +87,14 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 	})
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "native-visibility-recovery", func(b *composerFocusCDP) {
 		b.waitFor("native bridge ready", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
+		b.evaluate(`document.querySelector('[data-computer-dialog]').showModal();'opened'`)
+		b.waitFor("computer shell hides native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
+		b.waitFor("computer shell fills viewport", `String(document.querySelector('[data-computer-dialog]').getBoundingClientRect().width===innerWidth && document.querySelector('[data-computer-dialog]').getBoundingClientRect().height===innerHeight)`, "true")
+		b.evaluate(`document.getElementById('image-gallery').showModal();document.querySelector('[data-computer-dialog]').close();'opened'`)
+		b.waitFor("remaining viewer keeps controls hidden", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
+		b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
+		b.waitFor("last viewer restores native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
+
 		// WKWebView's timeOrigin can drift without navigation. All messages from
 		// this document must retain the same page key or native stale-event
 		// rejection will silently discard a valid gallery open.
@@ -142,7 +153,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.evaluate(`window.savedGallery=document.getElementById('image-gallery');window.savedGallery.remove();'removed'`)
 			b.waitFor("removing preview restores native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
-			b.evaluate(`const replacement=document.createElement('dialog');replacement.id='image-gallery';document.body.append(replacement);replacement.showModal();'replaced'`)
+			b.evaluate(`const replacement=document.createElement('dialog');replacement.id='image-gallery';replacement.setAttribute('data-fullscreen-viewer','');document.body.append(replacement);replacement.showModal();'replaced'`)
 			b.waitFor("replacement preview hides native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
 			b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
 			b.waitFor("replacement close restores native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
