@@ -225,12 +225,7 @@
   if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();show(index+(event.key==='ArrowRight'?1:-1));return}
   if(currentKind==='image'&&['+','=','-','0'].includes(event.key)){event.preventDefault();window.OVFileImage.key(event.key)}
  });
- let backdropPress=false;
- const isBackdrop=target=>!target.closest('#toast-container,img,video,button,a,[data-result-content],[data-gallery-name],[data-gallery-count]');
- dialog.addEventListener('pointerdown',event=>{backdropPress=event.button===0&&isBackdrop(event.target)},true);
- dialog.addEventListener('pointerup',event=>{const released=document.elementFromPoint(event.clientX,event.clientY);backdropPress=backdropPress&&event.button===0&&released&&dialog.contains(released)&&isBackdrop(released)},true);
- dialog.addEventListener('pointercancel',()=>{backdropPress=false});
- dialog.addEventListener('click',event=>{if(backdropPress&&isBackdrop(event.target))close();backdropPress=false;const toggle=event.target.closest('[data-file-html-mode]');if(toggle){const root=toggle.closest('[data-file-viewer]'),source=toggle.dataset.fileHtmlMode==='source';root.querySelector('iframe').hidden=source;root.querySelector('[data-file-source]').hidden=!source}});
+ dialog.addEventListener('click',event=>{const toggle=event.target.closest('[data-file-html-mode]');if(toggle){const root=toggle.closest('[data-file-viewer]'),source=toggle.dataset.fileHtmlMode==='source';root.querySelector('iframe').hidden=source;root.querySelector('[data-file-source]').hidden=!source}});
  // The preview owns its loaded content and item snapshot. Replacing a
  // message/attachment during background refresh must not dismiss it.
  document.addEventListener('htmx:beforeSwap',event=>{

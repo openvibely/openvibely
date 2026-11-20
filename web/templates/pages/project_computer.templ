@@ -39,7 +39,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  }
 
  </div>
- <div data-computer-login hidden class="p-3 bg-base-200 rounded-lg">
+ <div data-computer-login data-fullscreen-interactive hidden class="p-3 bg-base-200 rounded-lg">
  <p data-computer-login-site></p>
  <p class="text-sm">Complete the requested step privately. Done checks access and resumes this task. If needed, your task model checks a screenshot.</p>
  <button type="button" class="btn" data-computer-chrome>Choose Chrome sign-ins</button>
@@ -55,8 +55,11 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <button type="button" class="btn" data-computer-action="login-done">Done — resume task</button>
  <button type="button" class="btn" data-computer-action="login-cancel">Decline request</button>
  </div>
-   @layout.FullscreenViewer(templ.Attributes{"data-computer-dialog": true, "aria-label": "Live computer screen", "class": "bg-base-100 text-base-content"}) {
-   <header style="display:flex;justify-content:flex-end;gap:12px;height:52px;flex-shrink:0;padding:8px 16px;align-items:center"><button type="button" class="btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal" data-teach-open>Teach a task</button><button type="button" class="btn btn-ghost btn-sm btn-square rounded-md" data-computer-close aria-label="Exit fullscreen" title="Exit fullscreen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 9h5V4m11 5h-5V4M4 15h5v5m11-5h-5v5"></path></svg></button></header><div data-computer-teach hidden style="max-height:40vh;overflow:auto;padding:12px">
+   @layout.FullscreenViewer(templ.Attributes{"data-computer-dialog": true, "aria-label": "Live computer screen"}) {
+   @layout.FullscreenViewerHeader(templ.Attributes{"data-computer-close": true, "aria-label": "Close computer preview"}) {
+    <span data-fullscreen-title></span><button type="button" class="btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal" data-teach-open>Teach a task</button>
+   }
+   <div data-computer-teach data-fullscreen-interactive hidden style="max-height:40vh;overflow:auto;padding:12px">
  <p>Demonstrate the task, then review the steps and captures before generating a workflow. Typed values are omitted. Pause before entering private information.</p>
  <label>Goal <input class="input input-bordered" data-teach-goal maxlength="2000"/></label>
  <button type="button" class="btn btn-sm" data-teach-record>Record steps</button>
@@ -69,16 +72,16 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <p role="status" data-teach-status></p><pre data-teach-output hidden style="max-height:160px;overflow:auto;white-space:pre-wrap"></pre>
  <div data-teach-draft hidden><label>Workflow name <input class="input input-bordered" data-workflow-name maxlength="200"/></label><label>Instructions <textarea class="textarea textarea-bordered" data-workflow-instructions maxlength="30000" style="width:100%;height:160px"></textarea></label><button type="button" class="btn btn-sm" data-workflow-save>Save reusable workflow</button></div>
  <details data-workflows><summary>Saved workflows</summary><div data-workflow-list></div></details>
- </div><div data-computer-expanded></div>
+ </div><div data-computer-expanded data-fullscreen-stage></div>
    }
    <style>
     .computer-summary { cursor:pointer; list-style:none; }
     .computer-summary::-webkit-details-marker { display:none; }
     details[open] > .computer-summary > [aria-hidden] { transform:rotate(90deg); }
     #project-computer[data-computer-task] > details > :not(summary) { margin-top:12px; }
-    [data-computer-dialog] > header > button:focus:not(:focus-visible) { outline:none; }
+    [data-computer-dialog] [data-fullscreen-header] > button:focus:not(:focus-visible) { outline:none; }
     [data-computer-expanded] { display:flex; flex-direction:column; flex:1; min-height:0; }
-    [data-computer-expanded] [data-computer-screen] { flex:1; min-height:0 !important; height:auto !important; border-radius:0; background:var(--shell-card,var(--fallback-b1,oklch(var(--b1)))); }
+    [data-computer-expanded] [data-computer-screen] { flex:1; min-height:0 !important; height:auto !important; border-radius:0; background:transparent !important; }
     [data-computer-expanded] [data-computer-login] { max-height:35vh; overflow:auto; flex-shrink:0; }
    </style>
    <script>
@@ -104,11 +107,10 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const dialog=find('[data-computer-dialog]');
      const homes=[];
      const expand=find('[data-computer-preview-open]');
-     function openViewer(){if(closing)return;if(dialog.open){refresh();return;}for(const node of [find('[data-computer-login]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();screen.focus({preventScroll:true});refresh();}
+     function openViewer(){if(closing)return;if(dialog.open){refresh();return;}for(const node of [find('[data-computer-login]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();if(rfb)rfb.background='transparent';screen.focus({preventScroll:true});refresh();}
      find('[data-computer-preview-open]').onclick=openViewer;
-     find('[data-computer-close]').onclick=()=>{dialog.close();finishViewer();};
      dialog.addEventListener('close',finishViewer);
-     async function finishViewer(){if(dialog.open)return;if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();syncViewerInput();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';expand.focus();closing=false;await refresh();return true;}
+     async function finishViewer(){if(dialog.open)return;if(savingDemo)teachNote.textContent="Generation cancelled. Your demonstration is preserved.";generationAbort?.abort();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();syncViewerInput();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';if(rfb)rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';expand.focus();closing=false;await refresh();return true;}
      const screen=find('[data-computer-screen]');
      const connectionOverlay=document.createElement('div');connectionOverlay.dataset.computerConnection='';
      connectionOverlay.setAttribute('role','status');connectionOverlay.setAttribute('aria-live','polite');
@@ -330,7 +332,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb=new RFB(screen,ws.href,{wsProtocols:state.ticket?['binary',state.ticket]:['binary']});
       liveCanvas=screen.querySelector('canvas:not([data-retained-frame])');
       if(retained)screen.append(retained);
-      rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
+      rfb.background=dialog.open?'transparent':'var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';
       rfb.qualityLevel=previewQuality(state);rfb.scaleViewport=true;rfb.resizeSession=false;rfb.viewOnly=true;
       revealFrame(epoch);
       connectTimer=setTimeout(()=>{if(epoch===generation&&!frameReady){disconnect();retryStatus();}},10000);

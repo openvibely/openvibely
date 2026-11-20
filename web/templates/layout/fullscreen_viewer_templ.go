@@ -9,8 +9,7 @@ package layout
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// FullscreenViewer shares viewport sizing and native window-control exclusion
-// across media previews and live computer desktops. Contents own their controls.
+// FullscreenViewer is the shared gallery frame for file previews and desktops.
 func FullscreenViewer(attributes templ.Attributes) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -29,7 +28,7 @@ func FullscreenViewer(attributes templ.Attributes) templ.Component {
 		ctx = templ.InitializeContext(ctx)
 		templ_7745c5c3_Var1 := templ.GetChildren(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n  dialog[data-fullscreen-viewer] { position:fixed; inset:0; width:100vw; max-width:100vw; height:100dvh; max-height:100dvh; margin:0; padding:0; border:0; border-radius:0; overflow:hidden; }\n  dialog[data-fullscreen-viewer][open] { display:flex; flex-direction:column; }\n </style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n  dialog[data-fullscreen-viewer] { position:fixed; inset:0; width:100vw; max-width:100vw; height:100dvh; max-height:100dvh; margin:0; padding:0; border:0; border-radius:0; overflow:hidden; color:#eee; background:transparent; }\n  dialog[data-fullscreen-viewer]::backdrop { background:rgb(0 0 0 / .9); }\n  dialog[data-fullscreen-viewer][open] { display:flex; flex-direction:column; }\n  [data-fullscreen-shell] { color:inherit; background:transparent; box-shadow:none; padding:0; width:100%; max-width:none; max-height:none; transform:none; border-radius:0; height:100%; display:flex; flex-direction:column; }\n  [data-fullscreen-header] { display:flex; align-items:center; gap:8px; padding:12px 72px 12px 12px; flex-shrink:0; min-height:64px; }\n  [data-fullscreen-title] { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }\n  [data-fullscreen-close] { display:flex; align-items:center; justify-content:center; padding:0; cursor:pointer; position:absolute; top:12px; right:12px; width:44px; height:44px; border:0; border-radius:50%; background:rgb(0 0 0 / .7); color:#eee; }\n  [data-fullscreen-close]:hover, [data-fullscreen-close]:focus-visible { background-image:linear-gradient(rgb(255 255 255 / .12),rgb(255 255 255 / .12)); }\n  [data-fullscreen-stage] { flex:1; min-width:0; margin-inline:68px; min-height:0; overflow:hidden; position:relative; display:flex; justify-content:center; align-items:center; }\n  @media (max-width:640px) { [data-fullscreen-stage] { margin-inline:16px; } }\n </style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -55,7 +54,7 @@ func FullscreenViewer(attributes templ.Attributes) templ.Component {
 			}
 			templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, ">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "><div data-fullscreen-shell class=\"image-gallery-shell file-viewer-shell\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -63,7 +62,63 @@ func FullscreenViewer(attributes templ.Attributes) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</dialog>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div></dialog><script>\n  if (!window.openVibelyBindFullscreenViewers) {\n   window.openVibelyBindFullscreenViewers = function() {\n    document.querySelectorAll('dialog[data-fullscreen-viewer]').forEach(dialog => {\n     if(dialog.dataset.fullscreenBound)return;\n     dialog.dataset.fullscreenBound='true';\n     const isBackdrop=target=>target instanceof Element && !target.closest('#toast-container,img,video,canvas,button,a,input,textarea,select,[contenteditable],[data-result-content],[data-gallery-name],[data-gallery-count],[data-fullscreen-title],[data-fullscreen-interactive]');\n     let backdropPress=false;\n     dialog.addEventListener('pointerdown',event=>{backdropPress=event.button===0&&isBackdrop(event.target)},true);\n     dialog.addEventListener('pointerup',event=>{const released=document.elementFromPoint(event.clientX,event.clientY);backdropPress=backdropPress&&event.button===0&&released&&dialog.contains(released)&&isBackdrop(released)},true);\n     dialog.addEventListener('pointercancel',()=>{backdropPress=false});\n     dialog.addEventListener('close',()=>{backdropPress=false});\n     dialog.addEventListener('click',event=>{if(backdropPress&&isBackdrop(event.target))dialog.close();backdropPress=false},true);\n     dialog.querySelector('[data-fullscreen-close]')?.addEventListener('click',()=>dialog.close());\n    });\n   };\n  }\n  window.openVibelyBindFullscreenViewers();\n </script>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func FullscreenViewerHeader(closeAttributes templ.Attributes) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var2 := templ.GetChildren(ctx)
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<header data-fullscreen-header>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templ_7745c5c3_Var2.Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		{
+			templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
+			templ_7745c5c3_Buffer := templ.GetBuffer()
+			var templ_7745c5c3_ElementScripts []templ.ComponentScript
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<button data-fullscreen-close data-tooltip-disabled type=\"button\" class=\"ov-modal-close\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.RenderAttributes(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_ElementWriter, "button", closeAttributes)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_ElementScripts...)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_ElementWriter)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "><svg class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button></header>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

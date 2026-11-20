@@ -70,7 +70,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			if err := components.AttachmentList([]models.Attachment{{ID: "one", FileName: "one.svg", MediaType: "image/svg+xml"}, {ID: "two", FileName: "two.svg", MediaType: "image/svg+xml"}, {ID: "document", FileName: "notes.txt", MediaType: "text/plain"}}, project.ID, "task").Render(ctx, w); err != nil {
 				return err
 			}
-			if err := layout.FullscreenViewer(templ.Attributes{"data-computer-dialog": true, "aria-label": "Live computer screen"}).Render(ctx, w); err != nil {
+			if err := ProjectComputerContent(project.ID, "fullscreen-test").Render(ctx, w); err != nil {
 				return err
 			}
 			return components.ChatBubbleWithAttachments("User", "Message", []models.ChatAttachment{{ID: "three", FileName: "message.svg", MediaType: "image/svg+xml"}}, project.ID).Render(ctx, w)
@@ -87,9 +87,20 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 	})
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "native-visibility-recovery", func(b *composerFocusCDP) {
 		b.waitFor("native bridge ready", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
-		b.evaluate(`document.querySelector('[data-computer-dialog]').showModal();'opened'`)
+		b.evaluate(`document.querySelector('[data-computer-preview]').hidden=false;document.querySelector('[data-computer-preview-open]').click();'opened'`)
 		b.waitFor("computer shell hides native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
 		b.waitFor("computer shell fills viewport", `String(document.querySelector('[data-computer-dialog]').getBoundingClientRect().width===innerWidth && document.querySelector('[data-computer-dialog]').getBoundingClientRect().height===innerHeight)`, "true")
+		b.waitFor("computer uses gallery backdrop and close button", `String((()=>{const c=document.querySelector('[data-computer-dialog]'),g=document.getElementById('image-gallery');return getComputedStyle(c,'::backdrop').backgroundColor===getComputedStyle(g,'::backdrop').backgroundColor && getComputedStyle(c.querySelector('[data-fullscreen-close]')).borderRadius==='50%' && getComputedStyle(c).backgroundColor==='rgba(0, 0, 0, 0)'})())`, "true")
+		b.evaluate(`const canvas=document.createElement('canvas');canvas.id='test-desktop-canvas';canvas.style.cssText='width:200px;height:150px';document.querySelector('[data-computer-screen]').append(canvas);document.querySelector('[data-computer-connection]').style.setProperty('display','none','important');'canvas'`)
+		b.click("#test-desktop-canvas")
+		b.waitFor("desktop clicks do not dismiss", `String(document.querySelector('[data-computer-dialog]').open)`, "true")
+		b.click("[data-teach-open]")
+		b.click("[data-teach-goal]")
+		b.waitFor("teaching controls do not dismiss", `String(document.querySelector('[data-computer-dialog]').open)`, "true")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": 5, "y": 5, "button": "left", "clickCount": 1}, nil)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 5, "y": 5, "button": "left", "clickCount": 1}, nil)
+		b.waitFor("computer background closes and restores mini preview", `String(!document.querySelector('[data-computer-dialog]').open && !!document.querySelector('[data-computer-preview] [data-computer-screen]'))`, "true")
+		b.evaluate(`document.getElementById('test-desktop-canvas').remove();document.querySelector('[data-computer-preview-open]').click();'reopened'`)
 		b.evaluate(`document.getElementById('image-gallery').showModal();document.querySelector('[data-computer-dialog]').close();'opened'`)
 		b.waitFor("remaining viewer keeps controls hidden", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
 		b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
