@@ -735,7 +735,7 @@ func (s *ProjectComputerService) CompleteLogin(ctx context.Context, id string) e
 		body, _ := json.Marshal(map[string]string{"action": "verify_access", "url": state.HandoffURL, "expected_text": state.HandoffExpectedText})
 		data, err := s.request(ctx, conn, "POST", "/browser", body)
 		if err != nil {
-			return errors.New("the requested page is not accessible yet; finish signing in and retry")
+			return errors.New("could not connect to the browser; reopen it and retry")
 		}
 		if err := s.verifyLoginResult(ctx, state, data); err != nil {
 			return err

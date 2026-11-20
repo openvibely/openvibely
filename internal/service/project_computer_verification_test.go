@@ -108,3 +108,21 @@ func TestComputerLoginVerificationBrowserErrorKeepsHandoffPaused(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, state.Held)
 }
+
+func TestComputerLoginVerificationConnectionFailureKeepsHandoffPaused(t *testing.T) {
+	for _, status := range []int{http.StatusBadGateway, http.StatusGatewayTimeout} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			_, computer, project, _ := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "browser_unavailable", "message": "private browser diagnostic"}})
+			})
+			require.NoError(t, computer.repo.RequestHandoff(t.Context(), project.ID, "request_browser_login", "https://example.test/account", "Read account", "Metrics"))
+			err := computer.CompleteLogin(t.Context(), project.ID)
+			require.EqualError(t, err, "could not connect to the browser; reopen it and retry")
+			state, err := computer.Get(t.Context(), project.ID)
+			require.NoError(t, err)
+			require.True(t, state.Held)
+			require.Equal(t, "request_browser_login", state.HandoffKind)
+		})
+	}
+}
