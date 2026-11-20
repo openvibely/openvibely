@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/require"
 	"net/http"
@@ -47,6 +48,7 @@ func TestSavedTaskComputerTabStartsBeforeFirstMessage(t *testing.T) {
 	// startup and visibility events while the initial failure is settling.
 	html = strings.Replace(html, "const screenRetry=window.openVibelyRetry(()=>refresh());", "window.screenRetryAttempts=[];const screenRetry=window.openVibelyRetry(()=>{window.screenRetryAttempts.push(performance.now());return refresh();});", 1)
 	script := `<script>
+window.fixtureErrors=[];window.addEventListener('error',e=>window.fixtureErrors.push(e.message));window.addEventListener('unhandledrejection',e=>window.fixtureErrors.push(String(e.reason)));
 Object.defineProperty(navigator,'platform',{value:'MacIntel',configurable:true});
 Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copiedRemote=text}},configurable:true});
 (async()=>{
@@ -86,14 +88,16 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(!q('[data-computer-dialog]').open||!q('[data-computer-expanded]').contains(overlay))throw Error('Overlay did not follow expansion');
  if(!window.fixtureRFB.viewOnly||q('[aria-label="Remote computer keyboard"]'))throw Error('Input enabled before live frame');
  await new Promise(r=>setTimeout(r,150));if(overlay.style.display==='none')throw Error('Handshake hid loading overlay before frame');
- q('[data-computer-close]').click();
+ // Flush close explicitly: virtual time can advance before Chrome delivers the native dialog event.
+ q('[data-computer-dialog] [data-fullscreen-close]').click();if(!q('[data-computer-dialog]').open)q('[data-computer-dialog]').dispatchEvent(new Event('close'));await wait(()=>!q('[data-computer-dialog]').open&&q('[data-computer-preview]').contains(q('[data-computer-screen]')),'viewer closed');
  if(q('[data-computer-dialog]').open||!q('[data-computer-preview]').contains(overlay)||overlay.style.display==='none')throw Error('Collapse while reconnecting lost loading overlay');
  if(!q('[data-retained-frame]')||!window.fixtureRFB.viewOnly)throw Error('Collapse while reconnecting lost retained frame or enabled input');
  q('[data-computer-preview-open]').click();
  if(!q('[data-computer-dialog]').open||!q('[data-computer-expanded]').contains(overlay)||!window.fixtureRFB.viewOnly)throw Error('Reopening while reconnecting must preserve overlay and block input');
  window.holdComputerFrame=false;
  await wait(()=>overlay.style.display==='none'&&!window.fixtureRFB.viewOnly,'live frame enables input');
- q('[data-computer-close]').click();
+ // Flush close explicitly: virtual time can advance before Chrome delivers the native dialog event.
+ q('[data-computer-dialog] [data-fullscreen-close]').click();if(!q('[data-computer-dialog]').open)q('[data-computer-dialog]').dispatchEvent(new Event('close'));await wait(()=>!q('[data-computer-dialog]').open&&q('[data-computer-preview]').contains(q('[data-computer-screen]')),'viewer closed');
  if(!window.fixtureRFB.viewOnly||overlay.style.display!=='none')throw Error('Live collapse changed connection readiness');
 
  if(q('#task-thread-form textarea')?.value)throw Error('Preview required a message');
@@ -124,7 +128,11 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  window.computerLive.onopen();await window.pushComputer();
  await new Promise(r=>setTimeout(r,100));if(window.computerStatusReads!==0)throw Error('Retry fetched HTTP status');
 
- q('[data-teach-open]').click();q('[data-teach-goal]').value='Download a report';q('[data-teach-record]').click();
+ q('[data-teach-open]').click();await wait(()=>!q('[data-teach-stop]').hidden&&!q('[data-teach-stop]').disabled,'recording started');
+ if(q('[data-teach-review]')||q('[data-teach-goal]'))throw Error('Old draft form remains');
+ const teachBounds=q('[data-computer-teach]').getBoundingClientRect(),desktopBounds=q('[data-computer-expanded]').getBoundingClientRect();
+ if(teachBounds.height>180||desktopBounds.height<innerHeight/2)throw Error('Recording displaced desktop');
+ await wait(()=>q('[data-teach-timer]').textContent!=='0:00','recording timer');
  const ime=q('[aria-label="Remote computer keyboard"]');if(!ime)throw Error('No IME field');
  ime.value='private-value';ime.dispatchEvent(new Event('input',{bubbles:true}));
  ime.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));ime.value='你';ime.dispatchEvent(new Event('input',{bubbles:true}));ime.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));await Promise.resolve();
@@ -134,28 +142,24 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  const paste=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(paste,'clipboardData',{value:{getData:()=> 'private-paste'}});ime.dispatchEvent(paste);
  if(window.fixtureRFB.pasted!=='private-paste')throw Error('Paste not bridged');
  if(q('[data-computer-clipboard]'))throw Error('Manual clipboard control remains');window.fixtureRFB.listeners.clipboard({detail:{text:'remote-copy'}});await wait(()=>window.copiedRemote==='remote-copy','clipboard');
- q('[data-teach-note]').value='Choose Reports';q('[data-teach-capture]').click();if(!q('[data-teach-images] img'))throw Error('Capture missing');
- if(q('[data-teach-steps]').textContent.includes('private-value'))throw Error('Typed value recorded');
- q('[data-teach-auto]').checked=true;
- await wait(()=>q('[data-teach-images]').children.length===2,'automatic initial capture');
- await new Promise(r=>setTimeout(r,1400));if(q('[data-teach-images]').children.length!==2)throw Error('Unchanged screen captured twice');
+ const recordingStatus=async()=>await(await fetch('/projects/project/computer/recording?task_id=task')).json();
+ await new Promise(r=>setTimeout(r,1500));const first=await recordingStatus();if(first.image_count!==1)throw Error('Initial capture not persisted');
+ await new Promise(r=>setTimeout(r,1400));if((await recordingStatus()).image_count!==1)throw Error('Unchanged screen captured twice');
  window.fixtureRFB.canvas.getContext('2d').fillStyle='white';window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
- await wait(()=>q('[data-teach-images]').children.length===3,'changed screen capture');
- q('[data-teach-record]').click();window.fixtureRFB.canvas.getContext('2d').fillStyle='red';window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
- await new Promise(r=>setTimeout(r,1400));if(q('[data-teach-images]').children.length!==3)throw Error('Captured while paused');
- q('[data-teach-record]').click();await fetch('/fixture-private');await window.pushComputer();
- await wait(()=>q('[data-teach-record]').textContent==='Record steps','private recording pause');
- const privateCount=q('[data-teach-images]').children.length;window.fixtureRFB.canvas.getContext('2d').fillStyle='blue';window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
- await new Promise(r=>setTimeout(r,1400));if(q('[data-teach-images]').children.length!==privateCount)throw Error('Captured private handoff');
- await fetch('/fixture-public');await window.pushComputer();await wait(()=>!q('[data-teach-open]').hidden);q('[data-teach-open]').click();
- q('[data-teach-save]').click();await wait(()=>!q('[data-teach-draft]').hidden,'generated workflow');
- if(q('[data-workflow-name]').value!=='Reusable report')throw Error('Generated draft missing');
- q('[data-workflow-instructions]').value='Reviewed report instructions';q('[data-workflow-save]').click();await wait(()=>q('[data-teach-status]').textContent.includes('Reusable workflow saved'),'saved workflow');
- if(!q('[data-teach-output]').textContent.includes('Generated'))throw Error('No streamed generation feedback');
- await wait(()=>q('[data-workflow-list] button'));[...q('[data-workflow-list]').querySelectorAll('button')].find(b=>b.textContent==='Edit workflow').click();if(q('[data-teach-draft]').hidden)throw Error('Saved workflow cannot be edited');q('[data-workflow-save]').click();await wait(()=>q('[data-teach-draft]').hidden,'saved edit');
- await wait(()=>q('[data-workflow-list] button'));[...q('[data-workflow-list]').querySelectorAll('button')].find(b=>b.textContent==='Create task from workflow').click();await wait(()=>q('[data-teach-status] a'),'reuse workflow');
- const originalFetch=window.fetch;let cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};
- q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled);q('[data-teach-discard]').click();await wait(()=>cancelledGeneration&&!q('[data-teach-save]').disabled,'discard cancellation');window.fetch=originalFetch;
+ await new Promise(r=>setTimeout(r,1500));if((await recordingStatus()).image_count!==2)throw Error('Changed screen not recorded');
+ await fetch('/fixture-private');await window.pushComputer();await new Promise(r=>setTimeout(r,1500));
+ if((await recordingStatus()).recording.state!=='stopped')throw Error('Private handoff did not stop recording');
+ await fetch('/fixture-public');await window.pushComputer();q('[data-teach-open]').click();await wait(()=>!q('[data-teach-stop]').disabled&&!q('[data-teach-stop]').hidden);
+ q('[data-teach-stop]').click();await wait(()=>!q('[data-computer-dialog]').open,'save minimizes desktop');
+ // Deliver the dialog close event when running under Chrome virtual time.
+ q('[data-computer-dialog]').dispatchEvent(new Event('close'));
+ if((await recordingStatus()).recording.state!=='saved')throw Error('Save did not submit recording');
+ await wait(()=>document.activeElement===q('#task-message-input'),'save returns focus to chat');
+ const originalFetch=window.fetch;
+ q('[data-computer-preview-open]').click();await wait(()=>!window.fixtureRFB.viewOnly);
+ q('[data-teach-open]').click();await wait(()=>!q('[data-teach-stop]').disabled&&!q('[data-teach-stop]').hidden);
+ q('[data-teach-discard]').click();await wait(()=>q('[data-computer-teach]').hidden,'discard');
+ if((await recordingStatus()).recording.state!=='discarded')throw Error('Discard was not persisted');
  const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});
  if(overlay.style.display==='none')throw Error('Disconnect did not show overlay immediately');
  const disconnectedFrame=q('[data-retained-frame]');
@@ -176,8 +180,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  // Painting precedes the viewer's frame check; capture requires live input,
  // after the retained frame is removed and control is restored.
  await wait(()=>!window.fixtureRFB.viewOnly&&!q('[data-retained-frame]')&&q('[data-computer-screen]').getAttribute('aria-busy')==='false','visible viewer ready for capture');
- cancelledGeneration=false;window.fetch=(url,options)=>{if(String(url).includes('/teach')&&options?.signal){return new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>{cancelledGeneration=true;reject(new DOMException('Cancelled','AbortError'));});});}return originalFetch(url,options);};q('[data-teach-note]').value='New capture';q('[data-teach-capture]').click();if(q('[data-teach-images]').children.length!==1)throw Error('New capture missing after reconnect');q('[data-teach-save]').click();await wait(()=>q('[data-teach-save]').disabled,'second generation');
- const closingRFB=window.fixtureRFB;q('[data-computer-close]').click();if(!cancelledGeneration)throw Error('Closing viewer did not cancel generation');window.fetch=originalFetch;if(window.fixtureRFB!==closingRFB||closingRFB.disconnected||!closingRFB.canvas.isConnected)throw Error('Closing viewer replaced screen connection');if(q('[data-computer-dialog]').open)throw Error('Did not close');if(!window.fixtureRFB.viewOnly)throw Error('Collapse did not disable input immediately');
+ const closingRFB=window.fixtureRFB;q('[data-computer-dialog] [data-fullscreen-close]').click();q('[data-computer-dialog]').dispatchEvent(new Event('close'));
+ await wait(()=>!q('[data-computer-dialog]').open&&q('[data-computer-preview]').contains(q('[data-computer-screen]')),'viewer closed');
+ if(window.fixtureRFB!==closingRFB||closingRFB.disconnected||!closingRFB.canvas.isConnected)throw Error('Closing viewer replaced screen connection');if(!window.fixtureRFB.viewOnly)throw Error('Collapse did not disable input');
 
  await wait(()=>window.fixtureRFB.painted && !q('[data-retained-frame]'),'preview first frame');
 
@@ -194,7 +199,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  await wait(()=>!q('[data-task-computer-toggle]').disabled);q('[data-task-computer-toggle]').click();
  await wait(()=>window.fixtureRFB.painted&&!window.fixtureRFB.disconnected,'stream before cleanup');
  const liveBeforeCleanup=window.fixtureRFB;
- htmx.trigger(q('[data-teach-note]'),'htmx:beforeCleanupElement');
+ htmx.trigger(q('[data-teach-timer]'),'htmx:beforeCleanupElement');
  if(liveBeforeCleanup.disconnected)throw Error('Child cleanup disconnected preview');
  const closedBeforeCleanup=window.closedComputerSubscriptions;
  htmx.swap(q('#task-detail-content'),'<div id="cleaned-task">Task removed</div>',{swapStyle:'outerHTML',settleDelay:0});
@@ -206,14 +211,15 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(window.computerSubscriptions!==subscriptionsAfterCleanup)throw Error('Removed preview reopened subscription');
 
  finish('pass','Saved task preview, automatic startup, expansion, takeover, release and project toggle');
- }catch(e){finish('fail',e.message);}
+ }catch(e){finish('fail',(e.stack||e.message)+'; errors='+JSON.stringify(window.fixtureErrors)+'; dialog='+q('[data-computer-dialog]')?.open+'; preview='+q('[data-computer-preview]')?.contains(q('[data-computer-screen]')));}
 })();</script>`
 	html = strings.Replace(html, "</body>", script+"</body>", 1)
 	var mu sync.Mutex
 	enabled, ready, held := false, false, false
 	starts := 0
 
-	savedWorkflow := false
+	fixtureRecording := computerTeachRecording{State: "idle"}
+	saveCount := 0
 	handoff := ""
 	var demonstration struct {
 		Goal   string   `json:"goal"`
@@ -238,6 +244,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		defer mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/thread"):
+			w.Header().Set("Content-Type", "text/html")
+			require.NoError(t, components.TaskThreadView(&models.Task{ID: "task", ProjectID: "project", Title: "Preview", Category: models.CategoryActive, Status: models.StatusPending}, nil, nil, nil, nil, nil, false, 50).Render(r.Context(), w))
 		case strings.HasSuffix(r.URL.Path, "/idle-timeout"):
 
 			fmt.Fprint(w, `{}`)
@@ -253,30 +262,39 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		case r.URL.Path == "/fixture-public":
 			handoff = ""
 			fmt.Fprint(w, `{}`)
-		case strings.HasSuffix(r.URL.Path, "/teach"):
-			_ = json.NewDecoder(r.Body).Decode(&demonstration)
-			fmt.Fprint(w, "{\"text\":\"Generated\"}\n{\"draft\":{\"name\":\"Reusable report\",\"instructions\":\"Generated instructions\"}}\n")
-		case strings.HasSuffix(r.URL.Path, "/workflows"):
-			if r.Method == "GET" {
-				if savedWorkflow {
-					fmt.Fprint(w, `[{"id":"workflow","name":"Reusable report","instructions":"Reviewed report instructions"}]`)
-				} else {
-					fmt.Fprint(w, `[]`)
+		case strings.HasSuffix(r.URL.Path, "/recording"):
+			if r.Method == "POST" {
+				var input struct {
+					Action, ID, RequestID string
+					Revision              int
+					Steps, Images         []string
 				}
-				return
-			}
-			var input map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&input)
-			if input["action"] == "save" {
-				if savedWorkflow {
-					require.Equal(t, "workflow", input["id"])
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+				switch input.Action {
+				case "start":
+					if fixtureRecording.State != "stopped" && fixtureRecording.State != "recording" {
+						fixtureRecording = computerTeachRecording{ID: "fixture", StartedAt: time.Now(), Deadline: time.Now().Add(10 * time.Minute)}
+					}
+					fixtureRecording.State = "recording"
+				case "append":
+					fixtureRecording.Steps = append(fixtureRecording.Steps, input.Steps...)
+					fixtureRecording.Images = append(fixtureRecording.Images, input.Images...)
+					fixtureRecording.Revision++
+				case "pause":
+					fixtureRecording.State = "stopped"
+				case "discard":
+					fixtureRecording.State = "discarded"
+				case "save":
+					saveCount++
+					demonstration.Steps = fixtureRecording.Steps
+					demonstration.Images = fixtureRecording.Images
+					fixtureRecording.State = "saved"
 				}
-				savedWorkflow = true
-				require.Equal(t, "Reviewed report instructions", input["instructions"])
-				fmt.Fprint(w, `{"id":"workflow"}`)
-			} else {
-				fmt.Fprint(w, `{"url":"/tasks/demonstration","task_id":"demonstration"}`)
 			}
+			copy := fixtureRecording
+			copy.Steps = nil
+			copy.Images = nil
+			_ = json.NewEncoder(w).Encode(map[string]any{"recording": copy, "step_count": len(fixtureRecording.Steps), "image_count": len(fixtureRecording.Images)})
 		case strings.HasSuffix(r.URL.Path, "/ensure"):
 			starts++
 			ready = true
@@ -306,9 +324,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 	require.Equal(t, 2, starts) // Initial opt-in, then re-enable for cleanup coverage.
 
 	require.True(t, enabled) // Removing the preview must not disable the computer.
-	require.Equal(t, "Download a report", demonstration.Goal)
-	require.Len(t, demonstration.Images, 3)
+	require.Equal(t, 1, saveCount)
+	require.GreaterOrEqual(t, len(demonstration.Images), 2)
 	require.NotContains(t, strings.Join(demonstration.Steps, " "), "private-value")
 	require.NotContains(t, strings.Join(demonstration.Steps, " "), "private-paste")
-	require.Contains(t, strings.Join(demonstration.Steps, " "), "Choose Reports")
+	require.Contains(t, strings.Join(demonstration.Steps, " "), "Capture:")
 }

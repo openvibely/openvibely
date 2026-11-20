@@ -18,10 +18,6 @@ type ProjectComputerStore interface {
 	ChromeImportProgress(context.Context, string, string) (map[string]int, error)
 	RecordChromeProfile(context.Context, string, string, string, int) error
 	PendingChromeImport(context.Context, string) (*models.ComputerChromeGrant, error)
-	SaveWorkflow(context.Context, *models.ComputerWorkflow) error
-	Workflows(context.Context, string) ([]models.ComputerWorkflow, error)
-	Workflow(context.Context, string, string) (*models.ComputerWorkflow, error)
-	DeleteWorkflow(context.Context, string, string) error
 	SetEnabled(context.Context, string, bool) error
 	RequestHandoff(ctx context.Context, id, kind, url, reason, expected string) error
 	FinishHandoff(ctx context.Context, id string, cancelled bool) error

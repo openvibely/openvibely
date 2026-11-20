@@ -4610,6 +4610,10 @@ func (h *Handler) buildTaskFollowupQueuedInput(task *models.Task, agentID, messa
 }
 
 func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, origin, originAgent string, channelReply ...service.ChannelReplyContext) (*models.ThreadInput, error) {
+	return h.enqueueTaskThreadInputConfigured(ctx, taskID, message, origin, originAgent, nil, channelReply...)
+}
+
+func (h *Handler) enqueueTaskThreadInputConfigured(ctx context.Context, taskID, message, origin, originAgent string, configure func(*models.ThreadInput), channelReply ...service.ChannelReplyContext) (*models.ThreadInput, error) {
 	if h.threadInputRepo == nil {
 		return nil, fmt.Errorf("thread input queue is unavailable")
 	}
@@ -4668,6 +4672,9 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 		Source:         origin,
 		OriginAgent:    originAgent,
 		GoalID:         goalID,
+	}
+	if configure != nil {
+		configure(queued)
 	}
 	if origin == models.TaskOriginEmail && strings.TrimSpace(reply.EmailFrom) != "" {
 		queued.EmailFrom = reply.EmailFrom

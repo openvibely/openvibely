@@ -404,8 +404,8 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 			email_from, email_message_id, email_references, email_subject, email_session_key,
 			discord_channel_id, discord_thread_id, discord_message_id, discord_user_id,
 			x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username, goal_id
-		) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING `+threadInputSelectColumns, input.Scope,
+		) VALUES (COALESCE(NULLIF(?, ''), lower(hex(randomblob(16)))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING `+threadInputSelectColumns, input.ID, input.Scope,
 		input.ProjectID,
 		input.TaskID,
 		input.RunExecutionID,
