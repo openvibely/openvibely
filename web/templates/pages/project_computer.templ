@@ -412,13 +412,14 @@ currentState=state;if(state.handoff_kind){pauseTeaching();recording=false;render
      }
      async function computerAction(event){
       const button=event.target.closest('[data-computer-action]');if(!button || pending || button.disabled)return;
-      pending=true;++refreshVersion;buttons.forEach(b=>b.disabled=true);disconnect();
+      pending=true;++refreshVersion;buttons.forEach(b=>b.disabled=true);
       const action=button.dataset.computerAction;
+      if(action!=='login-done')disconnect();
       try{
        const res=await fetch(scoped('/'+action),{method:'POST',headers:{'Content-Type':'application/json'}});
        if(!res.ok){const body=await res.json();throw new Error(body.message||'Computer operation failed');}
        pending=false;await refresh();
-      }catch(e){computerToast(e.message,'error');pending=false;buttons.forEach(b=>b.disabled=false);}
+      }catch(e){computerToast(e.message,'error');pending=false;buttons.forEach(b=>b.disabled=false);await refresh();}
      }
      root.addEventListener('click',computerAction);
  const profile=find('[data-computer-profile]');
