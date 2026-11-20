@@ -57,6 +57,11 @@ type InputFile struct {
 
 // ModelInputs sends only supported images inline. Other files remain on disk.
 func ModelInputs(ctx context.Context, attachments []models.Attachment) ([]InputFile, error) {
+	return ModelInputsWithProfile(ctx, attachments, "")
+}
+
+// ModelInputsWithProfile prepares new attachments before the provider records them for replay.
+func ModelInputsWithProfile(ctx context.Context, attachments []models.Attachment, profile models.ImageResizeProfile) ([]InputFile, error) {
 	var out []InputFile
 	for _, att := range attachments {
 		if err := ctx.Err(); err != nil {
@@ -74,7 +79,17 @@ func ModelInputs(ctx context.Context, attachments []models.Attachment) ([]InputF
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
 		}
-		out = append(out, InputFile{Name: name, MediaType: filecontent.FileMediaType(name, data), Data: data})
+		input := InputFile{Name: name, MediaType: filecontent.FileMediaType(name, data), Data: data}
+		if profile != "" {
+			input, err = prepareImage(input, profile)
+			if err != nil {
+				if profile != models.ImageResize6000 {
+					return nil, fmt.Errorf("prepare %s: %w", name, err)
+				}
+				input = InputFile{Name: name, MediaType: "text/plain", Data: []byte("image content omitted because it could not be processed")}
+			}
+		}
+		out = append(out, input)
 	}
 	return out, nil
 }

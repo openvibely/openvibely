@@ -56,7 +56,7 @@ func TestOpenAILocalSteeringCallbackPreservesMessageBoundaries(t *testing.T) {
 	ctx := llmcontracts.WithLocalSteeringCallback(context.Background(), func(context.Context) (llmcontracts.LocalSteeringInput, error) {
 		return llmcontracts.LocalSteeringInput{Messages: []llmcontracts.LocalSteeringMessage{{Text: "first"}, {Text: "second"}}}, nil
 	})
-	callback := openAILocalSteeringCallback(ctx)
+	callback := openAILocalSteeringCallback(ctx, "gpt-6-astra")
 	if callback == nil {
 		t.Fatal("local steering callback was not adapted")
 	}

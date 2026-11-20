@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,6 +33,46 @@ import (
 func TestCompactionServerSummaryMatrix(t *testing.T) {
 	t.Run("http_error", func(t *testing.T) { runCompactionServerSummaryMatrix(t, false) })
 	t.Run("litellm_sse_error", func(t *testing.T) { runCompactionServerSummaryMatrix(t, true) })
+}
+
+// Each image case submits one user attachment. Read it from the provider's wire format.
+func compactionUserImage(body map[string]any) (string, []byte, error) {
+	messages, ok := body["messages"].([]any)
+	if !ok {
+		messages, _ = body["input"].([]any)
+	}
+	for _, item := range messages {
+		message, _ := item.(map[string]any)
+		if message["role"] != "user" {
+			continue
+		}
+		content, _ := message["content"].([]any)
+		for _, part := range content {
+			block, _ := part.(map[string]any)
+			var media, data string
+			switch block["type"] {
+			case "image":
+				source, _ := block["source"].(map[string]any)
+				media, _ = source["media_type"].(string)
+				data, _ = source["data"].(string)
+			case "input_image", "image_url":
+				url, ok := block["image_url"].(string)
+				if !ok {
+					ref, _ := block["image_url"].(map[string]any)
+					url, _ = ref["url"].(string)
+				}
+				media, data, _ = strings.Cut(strings.TrimPrefix(url, "data:"), ";base64,")
+			default:
+				continue
+			}
+			decoded, err := base64.StdEncoding.DecodeString(data)
+			if err != nil || len(decoded) == 0 || http.DetectContentType(decoded) != media || !strings.HasPrefix(media, "image/") {
+				return "", nil, fmt.Errorf("invalid embedded user image (%q)", media)
+			}
+			return media, decoded, nil
+		}
+	}
+	return "", nil, fmt.Errorf("missing user image block")
 }
 
 func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
@@ -71,6 +113,17 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 							file = attachment.FilePath
 						}
 						var mu sync.Mutex
+						var sentImage []byte
+						var sentMedia string
+						checkSavedImage := func(stage string, body map[string]any) {
+							t.Helper()
+							mediaType, data, err := compactionUserImage(body)
+							if err != nil {
+								t.Errorf("%s: %v", stage, err)
+							} else if mediaType != sentMedia || !bytes.Equal(data, sentImage) {
+								t.Errorf("%s changed the attached image", stage)
+							}
+						}
 						var events []string
 						summaries, generations, lastSummarySize := 0, 0, 0
 						restarted := false
@@ -131,8 +184,8 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 								if outcome != "continuation_overflow" && outcome != "continuation_partial_failure" && !strings.Contains(text, "FINAL_739") {
 									t.Error("reload lost the post-compaction answer")
 								}
-								if retainsAttachment && !strings.Contains(text, "image/png") {
-									t.Error("reload lost attached image")
+								if retainsAttachment {
+									checkSavedImage("reload", body)
 								}
 								if !strings.Contains(text, "RECOVERED_739") || !strings.Contains(text, "NEXT_FOLLOWUP_739") {
 									t.Error("restart lost saved summary or new prompt")
@@ -160,7 +213,10 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 								if summaries == 1 && strings.HasPrefix(phase, "steering") && !strings.Contains(text, "STEER_SUMMARY_739") {
 									t.Error("summary lost steering")
 								}
-								if summaries == 1 && (media == "tool_image" || (media == "image" && (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")))) && !strings.Contains(text, "image/png") {
+								if summaries == 1 && media == "image" && (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")) {
+									checkSavedImage("summary", body)
+								}
+								if summaries == 1 && media == "tool_image" && !strings.Contains(text, "image/png") {
 									t.Error("summary lost tool image")
 								}
 								if summaries == 1 && (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")) && media != "tool_image" {
@@ -200,8 +256,13 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 								return
 							}
 							generations++
-							if media == "image" && ((generations == 1 && summaries == 0) || retainsAttachment) && !strings.Contains(text, "image/png") {
-								t.Error("generation lost attached image")
+							if media == "image" && ((generations == 1 && summaries == 0) || retainsAttachment) {
+								mediaType, data, err := compactionUserImage(body)
+								if err != nil {
+									t.Errorf("generation: %v", err)
+								} else if sentImage == nil {
+									sentMedia, sentImage = mediaType, data
+								}
 							}
 							if (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")) && generations == 1 {
 								events = append(events, "tool_call")

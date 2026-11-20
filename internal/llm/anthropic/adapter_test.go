@@ -961,7 +961,7 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 }
 
 func TestConvertAttachmentsContextPDFUsesReference(t *testing.T) {
-	files, err := convertAttachmentsContext(context.Background(), []models.Attachment{{FileName: "report.pdf", FilePath: "/missing/report.pdf", MediaType: "application/pdf"}})
+	files, err := convertAttachmentsContext(context.Background(), []models.Attachment{{FileName: "report.pdf", FilePath: "/missing/report.pdf", MediaType: "application/pdf"}}, "claude-opus-5")
 	if err != nil || len(files) != 1 {
 		t.Fatalf("prepare PDF reference: %v %v", files, err)
 	}

@@ -489,7 +489,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		return "", llmusage.FromTotal(0), err
 	}
 
-	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
+	mcAttachments, err := convertAttachmentsContext(ctx, attachments, agent.Model)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -584,7 +584,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 	client.History = append(client.History, preparedhistory.Take(ctx, chatHistory, buildClientHistory)...)
 
-	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
+	mcAttachments, err := convertAttachmentsContext(ctx, attachments, agent.Model)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -698,7 +698,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := prompt
-	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
+	mcAttachments, err := convertAttachmentsContext(ctx, attachments, agent.Model)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -1018,8 +1018,9 @@ func appendMergedMessage(messages []anthropicclient.Message, role, content strin
 }
 
 // convertAttachmentsContext prepares file references and supported images for Anthropic.
-func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*anthropicclient.FileAttachment, error) {
-	inputs, err := llmattachment.ModelInputs(ctx, attachments)
+func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment, model string) ([]*anthropicclient.FileAttachment, error) {
+	spec, _ := models.LookupModel(models.ProviderAnthropic, model)
+	inputs, err := llmattachment.ModelInputsWithProfile(ctx, attachments, spec.ImageResizeProfile)
 	if err != nil {
 		return nil, err
 	}

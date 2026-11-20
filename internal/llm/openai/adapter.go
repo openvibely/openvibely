@@ -459,7 +459,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		fullPrompt = attached.String()
 	}
 
-	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments, agent.Model)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -507,7 +507,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, toolPolicy),
 			OnSteeringToolRefresh:          openAISteeringToolRefresh(nil, nil, nil, toolPolicy, false, false),
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
-			OnLocalSteering:                openAILocalSteeringCallback(ctx),
+			OnLocalSteering:                openAILocalSteeringCallback(ctx, agent.Model),
 			HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 			InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
 			InitialInputItems:              nativeCompactionInputItems(ctx),
@@ -564,7 +564,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	fullPrompt := llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
 
-	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments, agent.Model)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -624,7 +624,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnSteeringToolRefresh:          openAISteeringToolRefresh(steeringBaseTools, steeringBaseExecutor, steeringBaseFilter, toolPolicy, agentSkipDefaultTools(agentDef), enableAsyncTools),
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
-		OnLocalSteering:                openAILocalSteeringCallback(ctx),
+		OnLocalSteering:                openAILocalSteeringCallback(ctx, agent.Model),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
 		OnReplayChanged:                saveReplay,
@@ -716,7 +716,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
-	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments, agent.Model)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -778,7 +778,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnSteeringToolRefresh:          openAISteeringToolRefresh(steeringBaseTools, steeringBaseExecutor, steeringBaseFilter, toolPolicy, agentSkipDefaultTools(agentDef), enableAsyncTools),
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
-		OnLocalSteering:                openAILocalSteeringCallback(ctx),
+		OnLocalSteering:                openAILocalSteeringCallback(ctx, agent.Model),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
 		OnReplayChanged:                saveReplay,
@@ -861,7 +861,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	fullPrompt := llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
 
-	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments, agent.Model)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -951,7 +951,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	}
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
-	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments, agent.Model)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -1304,8 +1304,9 @@ func restoreOpenAIAstraReasoningState(ctx context.Context, client *openaiclient.
 	}
 }
 
-func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
-	inputs, err := llmattachment.ModelInputs(ctx, attachments)
+func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment, model string) ([]*openaiclient.FileAttachment, error) {
+	spec, _ := models.LookupModel(models.ProviderOpenAI, model)
+	inputs, err := llmattachment.ModelInputsWithProfile(ctx, attachments, spec.ImageResizeProfile)
 	if err != nil {
 		return nil, err
 	}
@@ -1315,11 +1316,8 @@ func convertAttachmentsContext(ctx context.Context, attachments []models.Attachm
 	}
 	return out, nil
 }
-func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
-	return convertAttachmentsContext(context.Background(), attachments)
-}
 
-func openAILocalSteeringCallback(ctx context.Context) func(context.Context) (openaiclient.LocalSteeringInput, error) {
+func openAILocalSteeringCallback(ctx context.Context, model string) func(context.Context) (openaiclient.LocalSteeringInput, error) {
 	callback := llmcontracts.LocalSteeringCallbackFromContext(ctx)
 	if callback == nil {
 		return nil
@@ -1329,18 +1327,18 @@ func openAILocalSteeringCallback(ctx context.Context) func(context.Context) (ope
 		if err != nil {
 			return openaiclient.LocalSteeringInput{}, err
 		}
-		return convertLocalSteeringInput(input)
+		return convertLocalSteeringInput(callbackCtx, input, model)
 	}
 }
 
-func convertLocalSteeringInput(input llmcontracts.LocalSteeringInput) (openaiclient.LocalSteeringInput, error) {
-	attachments, err := convertAttachments(input.Attachments)
+func convertLocalSteeringInput(ctx context.Context, input llmcontracts.LocalSteeringInput, model string) (openaiclient.LocalSteeringInput, error) {
+	attachments, err := convertAttachmentsContext(ctx, input.Attachments, model)
 	if err != nil {
 		return openaiclient.LocalSteeringInput{}, err
 	}
 	messages := make([]openaiclient.LocalSteeringMessage, 0, len(input.Messages))
 	for _, message := range input.Messages {
-		messageAttachments, convertErr := convertAttachments(message.Attachments)
+		messageAttachments, convertErr := convertAttachmentsContext(ctx, message.Attachments, model)
 		if convertErr != nil {
 			return openaiclient.LocalSteeringInput{}, convertErr
 		}

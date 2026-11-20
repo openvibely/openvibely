@@ -416,7 +416,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 								assert.Contains(t, text, "OLD_NATIVE")
 								assert.Contains(t, text, "OLD_RESULT")
 								if media == "image" {
-									assert.NotContains(t, text, "image/png")
+									assert.NotContains(t, text, `"type":"image"`)
 								}
 								native++
 								connectedAnthropicPausedReply(w, outcome == "null")
@@ -474,7 +474,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 							if successful && !strings.Contains(text, "SAVED_NATIVE_ANTHROPIC") {
 								t.Error("restart lost native context")
 							}
-							if !summaryAfterNative && (media == "tool_image" || (media == "image" && !successful)) && !strings.Contains(text, "image/png") {
+							if !summaryAfterNative && (media == "tool_image" || (media == "image" && !successful)) && !strings.Contains(text, `"type":"image"`) {
 								t.Error("reload lost image")
 							}
 							if !successful && !strings.Contains(text, "CURRENT_NATIVE") {
@@ -495,7 +495,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 							compactionServerError(w, 401, "stop", "stop")
 							return
 						}
-						if calls == 1 && media == "image" && !strings.Contains(text, "image/png") {
+						if calls == 1 && media == "image" && !strings.Contains(text, "image/jpeg") {
 							t.Error("initial image missing")
 						}
 						if calls > checkpointStep+1 {
@@ -1137,7 +1137,11 @@ func TestConnectedImageFollowupLifecycle(t *testing.T) {
 						compactionServerError(w, 401, "stop", "stop")
 						return
 					}
-					if !strings.Contains(text, "image/png") {
+					expectedMedia := "image/png"
+					if provider == models.ProviderAnthropic {
+						expectedMedia = "image/jpeg"
+					}
+					if !strings.Contains(text, expectedMedia) {
 						t.Errorf("image missing from generation %d", generations)
 					}
 					if generations == 2 && !strings.Contains(text, "IMAGE_FOLLOWUP") {
