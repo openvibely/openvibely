@@ -16,12 +16,16 @@ import (
 
 func (s *ProjectComputerService) verifyLoginResult(ctx context.Context, state *models.ProjectComputer, data []byte) error {
 	var result struct {
-		Verified   bool   `json:"verified"`
-		URL        string `json:"url"`
-		Screenshot string `json:"screenshot"`
+		Error      json.RawMessage `json:"error"`
+		Verified   bool            `json:"verified"`
+		URL        string          `json:"url"`
+		Screenshot string          `json:"screenshot"`
 	}
 	if json.Unmarshal(data, &result) != nil {
 		return errors.New("invalid login verification response")
+	}
+	if len(result.Error) > 0 && string(result.Error) != "null" {
+		return errors.New("could not check sign-in because the browser operation failed; reopen the task browser and retry")
 	}
 	if result.Verified {
 		return nil

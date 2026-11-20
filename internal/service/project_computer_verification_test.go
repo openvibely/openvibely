@@ -94,3 +94,17 @@ func TestComputerChromeExtendedGrantDurations(t *testing.T) {
 	_, err := s.repo.CreateChromeGrant(t.Context(), p.ID, "task", picks, time.Now().Add(31*24*time.Hour).Unix())
 	require.Error(t, err)
 }
+
+func TestComputerLoginVerificationBrowserErrorKeepsHandoffPaused(t *testing.T) {
+	_, computer, project, _ := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "browser_unavailable", "message": "private browser diagnostic"}})
+	})
+	require.NoError(t, computer.repo.RequestHandoff(t.Context(), project.ID, "request_browser_login", "https://example.test/account", "Read account", "Metrics"))
+	err := computer.CompleteLogin(t.Context(), project.ID)
+	require.ErrorContains(t, err, "browser operation failed")
+	require.NotContains(t, err.Error(), "private browser diagnostic")
+	require.NotContains(t, err.Error(), "access not verified")
+	state, err := computer.Get(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.True(t, state.Held)
+}

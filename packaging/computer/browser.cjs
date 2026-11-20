@@ -287,9 +287,9 @@ async function run(args,session) {
 }
 function browserError(error){
  const text=String(error?.message??'');
- const code=/Element is not focused/i.test(text)?'not_focused':/strict mode violation/i.test(text)?'multiple_matches':/Timeout|timed out/i.test(text)?'timeout':/private login/i.test(text)?'private_login_required':/changed|detached/i.test(text)?'page_changed':/not found|No node/i.test(text)?'not_found':'invalid_request';
+ const code=error?.code==='browser_unavailable'?'browser_unavailable':/Element is not focused/i.test(text)?'not_focused':/strict mode violation/i.test(text)?'multiple_matches':/Timeout|timed out/i.test(text)?'timeout':/private login/i.test(text)?'private_login_required':/changed|detached|ERR_ABORTED|Target page, context or browser has been closed/i.test(text)?'page_changed':/not found|No node/i.test(text)?'not_found':'invalid_request';
  // Playwright errors can contain page data or typed values; never echo raw traces.
- const messages={not_focused:'Element is not focused. No key was sent.',multiple_matches:'More than one element matched. Narrow the locator.',timeout:'The action timed out. Check whether the element exists, is visible, enabled, and unobstructed.',private_login_required:'Use a private login handoff for credential fields.',page_changed:'The page or element changed. Read again or use a locator.',not_found:'The tab or element was not found. Refresh the tab list or locator.',invalid_request:'Invalid browser request. Check the action and arguments.'};
+ const messages={browser_unavailable:'Browser connection lost or unavailable. Reopen the task browser and retry. The action was not replayed.',not_focused:'Element is not focused. No key was sent.',multiple_matches:'More than one element matched. Narrow the locator.',timeout:'The action timed out. Check whether the element exists, is visible, enabled, and unobstructed.',private_login_required:'Use a private login handoff for credential fields.',page_changed:'The page or element changed. Read again or use a locator.',not_found:'The tab or element was not found. Refresh the tab list or locator.',invalid_request:'Invalid browser request. Check the action and arguments.'};
  return {code,message:messages[code]};
 }
 function createRunner(browser){
@@ -308,13 +308,31 @@ function createRunner(browser){
   try{return await Promise.race([action,notified]);}finally{notify=undefined;session.active=false;session.currentPage=null;}
  };
 }
-module.exports={run,browserError,createRunner};
+// Requests are serialized by the worker. Reconnect only before an action: an
+// interrupted click or submission must never be silently replayed.
+function createReconnectingRunner(connect=()=>chromium.connectOverCDP('http://127.0.0.1:'+process.env.OPENVIBELY_CDP_PORT)){
+ let browser,execute;
+ const unavailable=()=>Object.assign(new Error('Browser unavailable'),{code:'browser_unavailable'});
+ return {
+  async run(args){
+   if(!browser?.isConnected()){
+    execute=undefined;
+    try{browser=await connect();execute=createRunner(browser);}catch{throw unavailable();}
+   }
+   try{return await execute(args);}catch(error){
+    if(!browser.isConnected())throw unavailable();
+    throw error;
+   }
+  },
+  async close(){if(browser)await browser.close();}
+ };
+}
+module.exports={run,browserError,createRunner,createReconnectingRunner};
 if(require.main===module)(async()=>{
  if(process.argv.includes('--serve')){
-  const browser=await chromium.connectOverCDP('http://127.0.0.1:'+process.env.OPENVIBELY_CDP_PORT);
-  const execute=createRunner(browser);
+  const runner=createReconnectingRunner();
   try{for await(const line of require('node:readline').createInterface({input:process.stdin,crlfDelay:Infinity})){
-   try{process.stdout.write(JSON.stringify(await execute(JSON.parse(line)))+'\n');}catch(error){process.stdout.write(JSON.stringify({error:browserError(error)})+'\n');}
-  }}finally{await browser.close();}
+   try{process.stdout.write(JSON.stringify(await runner.run(JSON.parse(line)))+'\n');}catch(error){process.stdout.write(JSON.stringify({error:browserError(error)})+'\n');}
+  }}finally{await runner.close();}
  }else{let raw='';for await(const chunk of process.stdin)raw+=chunk;process.stdout.write(JSON.stringify(await run(JSON.parse(raw))));}
 })().catch(error=>{process.stdout.write(JSON.stringify({error:browserError(error)}));});
