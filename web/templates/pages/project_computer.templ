@@ -5,6 +5,7 @@ import (
  "github.com/openvibely/openvibely/web/templates/layout"
  "github.com/openvibely/openvibely/web/templates/components"
  "github.com/openvibely/openvibely/web/static"
+ templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 templ ProjectComputer(projects []models.Project, projectID string, taskIDs ...string) {
@@ -54,7 +55,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <label class="import-row">Allow access for <select class="select select-bordered" data-computer-grant-scope><option value="task">This task</option><option value="project">This project</option></select></label>
  <label class="import-row">Expires <select class="select select-bordered" data-computer-grant-hours><option value="-1">One import for this task (1 hour)</option><option value="1" selected>1 hour</option><option value="24">1 day</option><option value="168">7 days</option><option value="720">30 days</option><option value="0">Until revoked</option></select></label>
  <h4>Cookies</h4><input type="search" class="input input-bordered" data-computer-cookie-search placeholder="Search sites or cookies…" aria-label="Search sites or cookies"/>
- <div data-computer-sites></div><p class="import-muted" data-computer-selection-count></p>
+ <div data-computer-sites></div>
  <p class="import-muted">Your computer may ask you to unlock Chrome’s saved cookies.</p>
  <div class="import-actions"><button type="button" class="btn" data-computer-import-cancel>Cancel</button><button type="button" class="btn btn-primary" data-computer-import>Import selected</button></div>
  </div><form method="dialog" class="modal-backdrop"><button type="submit">close</button></form>
@@ -77,7 +78,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  </style>
    @layout.FullscreenViewer(templ.Attributes{"data-computer-dialog": true, "aria-label": "Live computer screen"}) {
    @layout.FullscreenViewerHeader(templ.Attributes{"aria-label": "Close computer preview"}) {
-    <span data-fullscreen-title></span><button type="button" class="btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal" data-teach-open>Teach a task</button>
+    <span data-fullscreen-title></span><button type="button" class="btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal" data-teach-open>Teach a skill</button>
    }
    <div data-computer-teach data-fullscreen-interactive hidden>
     <div data-teach-toolbar>
@@ -420,7 +421,7 @@ currentState=state;if(state.handoff_kind){pauseTeaching();recording=false;render
 
  const selectedCookies=new Map();let pendingImport="",importBusy=false;
  const cookieKey=c=>JSON.stringify([c.profile,c.domain,c.name,c.path]);
- const updateSelection=()=>{find('[data-computer-selection-count]').textContent=selectedCookies.size?selectedCookies.size+' cookies selected across profiles':'No cookies selected';find('[data-computer-import]').disabled=importBusy||(!pendingImport&&!selectedCookies.size);};
+ const updateSelection=()=>{find('[data-computer-import]').disabled=importBusy||(!pendingImport&&!selectedCookies.size);};
  const importDialog=find('[data-computer-import-dialog]'),cookieSearch=find('[data-computer-cookie-search]');
  let loadedCookies=[],cookieLoad=0;
  function renderCookies(){sites.replaceChildren();const groups=new Map(),query=cookieSearch.value.toLowerCase();for(const cookie of loadedCookies){if(!(cookie.domain+' '+cookie.name+' '+cookie.path).toLowerCase().includes(query))continue;if(!groups.has(cookie.domain))groups.set(cookie.domain,[]);groups.get(cookie.domain).push(cookie);}
@@ -515,6 +516,7 @@ templ ProjectComputerToggle(projectID string) {
 templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  @ComputerErrorReporter()
  <div data-computer-grants data-grants-project={projectID} data-grants-task={taskID}>
+ <style>.ov-menu [data-computer-grant-list] > .ov-menu-option{align-items:flex-start;text-align:left}</style>
  if len(compact)>0 && compact[0] {
  <button type="button" class="btn btn-ghost permissions-button" data-computer-grants-open data-picker-align="end" aria-haspopup="dialog">Manage <span aria-hidden="true">›</span></button>
  } else {
@@ -523,14 +525,14 @@ templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  </button>
  }
  @components.InspectorPicker("computer-grants-picker") {
- <div data-options="import"><button type="button" class="ov-menu-option w-full" data-value="import" data-computer-manual-import hidden>Import Chrome sign-ins</button></div>
+ <div data-options="import" class="ov-menu-create-row"><button type="button" class="ov-menu-option w-full" data-value="import" data-computer-manual-import hidden>@templateui.SearchableSelectorCreateIcon()<span>Import Chrome sign-ins</span></button></div>
  <div data-options="grants" data-computer-grant-list></div>
  }
  <script>
  (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{
  if(root.dataset.bound)return;root.dataset.bound='true';
  const trigger=root.querySelector('[data-computer-grants-open]'),picker=root.querySelector('.inspector-picker'),list=root.querySelector('[data-computer-grant-list]');
- picker.setAttribute('aria-label','Chrome permissions');
+ picker.setAttribute('aria-label','Chrome permissions');picker.setAttribute('data-picker-no-default-highlight','');
  const search=picker.querySelector('input');search.setAttribute('aria-label','Search Chrome permissions');
  let importAvailable=false;
  const ui=window.createInspectorPicker(root,picker,()=>busy,option=>!option.hasAttribute('data-computer-manual-import')||(importAvailable&&!!root.closest('[data-computer-task]')));

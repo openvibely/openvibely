@@ -38,7 +38,7 @@ func (r *ProjectComputerRepo) CreateChromeGrant(ctx context.Context, id, scope s
 	return grant, err
 }
 func (r *ProjectComputerRepo) ChromeGrants(ctx context.Context, id string) ([]models.ComputerChromeGrant, error) {
-	return r.chromeGrants(ctx, id, 200, 0)
+	return r.chromeGrants(ctx, id, 200, 0, false)
 }
 
 // Fetch one extra row so callers can determine whether another page exists.
@@ -46,11 +46,11 @@ func (r *ProjectComputerRepo) ChromeGrantsPage(ctx context.Context, id string, o
 	if offset < 0 {
 		return nil, errors.New("invalid grant offset")
 	}
-	return r.chromeGrants(ctx, id, 201, offset)
+	return r.chromeGrants(ctx, id, 201, offset, true)
 }
 
-func (r *ProjectComputerRepo) chromeGrants(ctx context.Context, id string, limit, offset int) ([]models.ComputerChromeGrant, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,project_id,COALESCE(task_id,''),scope,selections,expires_at,revoked,one_time FROM computer_chrome_grants WHERE project_id=? AND (scope='project' OR task_id=?) ORDER BY expires_at DESC,id DESC LIMIT ? OFFSET ?`, id, r.taskID, limit, offset)
+func (r *ProjectComputerRepo) chromeGrants(ctx context.Context, id string, limit, offset int, visibleOnly bool) ([]models.ComputerChromeGrant, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id,project_id,COALESCE(task_id,''),scope,selections,expires_at,revoked,one_time FROM computer_chrome_grants WHERE project_id=? AND (scope='project' OR task_id=?) AND (?=0 OR revoked=0 OR EXISTS (SELECT 1 FROM computer_chrome_installations i WHERE i.grant_id=computer_chrome_grants.id)) ORDER BY expires_at DESC,id DESC LIMIT ? OFFSET ?`, id, r.taskID, visibleOnly, limit, offset)
 	if err != nil {
 		return nil, err
 	}

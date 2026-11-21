@@ -30,6 +30,7 @@ func TestComputerChromeRevokeGrantOutsideListWindow(t *testing.T) {
 		g, err := svc.repo.CreateChromeGrant(t.Context(), project.ID, "task", picks, time.Now().Add(time.Hour).Unix())
 		require.NoError(t, err)
 		if i%2 == 0 {
+			require.NoError(t, svc.repo.RecordChromeInstall(t.Context(), project.ID, g.ID))
 			require.NoError(t, svc.repo.RevokeChromeGrant(t.Context(), project.ID, g.ID))
 		} else {
 			require.NoError(t, db.Fixtures.ExpireComputerChromeGrant(t.Context(), g.ID))
@@ -66,6 +67,11 @@ func TestComputerChromeRevokeGrantOutsideListWindow(t *testing.T) {
 	found, err = svc.repo.ChromeGrant(t.Context(), project.ID, old.ID)
 	require.NoError(t, err)
 	require.True(t, found.Revoked)
+	remaining, _, err := svc.ChromeGrantsPage(t.Context(), project.ID, 0)
+	require.NoError(t, err)
+	for _, grant := range remaining {
+		require.NotEqual(t, old.ID, grant.ID, "fully cleared revoked permission must not offer retry")
+	}
 	require.Error(t, svc.repo.RecordChromeInstall(t.Context(), project.ID, old.ID))
 
 	other := &models.Task{ProjectID: project.ID, Title: "Other desktop", Status: models.StatusPending, Category: models.CategoryBacklog, Priority: 2}

@@ -77,7 +77,7 @@ func TestComputerProjectGrantSurvivesOriginTaskDeletion(t *testing.T) {
 			require.NoError(t, NewTaskService(db.Tasks, nil, nil).Delete(t.Context(), other.ID))
 			grants, _, err := root.ChromeGrantsPage(t.Context(), project.ID, 0)
 			require.NoError(t, err)
-			require.Len(t, grants, 1)
+			require.Empty(t, grants, "cleared revoked grants are hidden")
 			require.NoError(t, root.RevokeChromeGrant(t.Context(), project.ID, shared.ID), "project revocation works without tasks")
 			require.Error(t, root.RevokeChromeGrant(t.Context(), "another-project", shared.ID))
 		})
