@@ -64,6 +64,7 @@ type XAPI interface {
 const XSettingRunAsUserID = "x_run_as_user_id"
 
 type XService struct {
+	localServiceGate
 	workerSvc                *WorkerService
 	mu                       sync.RWMutex
 	api                      XAPI
@@ -179,6 +180,14 @@ func (s *XService) prepareConnection(ctx context.Context) (XUser, string, error)
 }
 
 func (s *XService) Start() error {
+	if !s.startAllowed() {
+		return nil
+	}
+	s.mu.Lock()
+	if s.ctx.Err() != nil {
+		s.ctx, s.cancel = context.WithCancel(context.Background())
+	}
+	s.mu.Unlock()
 	ctx, err := s.startupPrincipal(s.ctx)
 	if err != nil {
 		return err
@@ -219,11 +228,17 @@ func (s *XService) Start() error {
 // no provider call, so a settings transaction can commit before activation
 // without a second verification race.
 func (s *XService) StartVerified(me XUser) error {
+	if !s.startAllowed() {
+		return nil
+	}
 	if _, err := s.startupPrincipal(s.ctx); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.startAllowed() {
+		return nil
+	}
 	if s.running {
 		return nil
 	}

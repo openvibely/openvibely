@@ -14,6 +14,7 @@ import (
 
 type nativeLiveTicket struct {
 	cookie  string
+	path    string
 	expires time.Time
 }
 type nativeLiveTickets struct {
@@ -35,6 +36,10 @@ func nativeLiveOrigin(origin string) bool {
 // through its authenticated HTTP proxy, then connect directly to loopback. The
 // capability carries the original session cookie server-side, never in JS.
 func (h *Handler) NativeLiveTicket(c echo.Context) error {
+	return h.issueNativeLiveTicket(c, "/events/ws")
+}
+
+func (h *Handler) issueNativeLiveTicket(c echo.Context, wsPath string) error {
 	r := c.Request()
 	if !h.desktopMode || r.Header.Get("X-OpenVibely-Native-Window") != "1" || r.Header.Get("X-OpenVibely-Live") != "1" || (r.Header.Get("Origin") != "" && !nativeLiveOrigin(r.Header.Get("Origin"))) {
 		return echo.NewHTTPError(http.StatusForbidden)
@@ -66,13 +71,17 @@ func (h *Handler) NativeLiveTicket(c echo.Context) error {
 	if len(h.nativeLiveTickets.entries) >= 256 {
 		return echo.NewHTTPError(http.StatusTooManyRequests)
 	}
-	h.nativeLiveTickets.entries[token] = nativeLiveTicket{cookie: r.Header.Get("Cookie"), expires: now.Add(time.Minute)}
+	h.nativeLiveTickets.entries[token] = nativeLiveTicket{cookie: r.Header.Get("Cookie"), path: wsPath, expires: now.Add(time.Minute)}
 	c.Response().Header().Set("Cache-Control", "no-store")
-	return c.JSON(http.StatusOK, map[string]string{"url": "ws://" + address.String() + "/events/ws", "ticket": token})
+	return c.JSON(http.StatusOK, map[string]string{"url": "ws://" + address.String() + wsPath, "ticket": token})
 }
 
 func (h *Handler) consumeNativeLiveTicket(c echo.Context) error {
-	if c.Request().URL.Path != "/events/ws" || c.Get(nativeLiveContextKey) != nil {
+	path := c.Request().URL.Path
+	if c.Get(nativeLiveContextKey) != nil {
+		return nil
+	}
+	if path != "/events/ws" {
 		return nil
 	}
 	var token string
@@ -97,7 +106,7 @@ func (h *Handler) consumeNativeLiveTicket(c echo.Context) error {
 	ticket, ok := h.nativeLiveTickets.entries[token]
 	delete(h.nativeLiveTickets.entries, token)
 	h.nativeLiveTickets.Unlock()
-	if !ok || !time.Now().Before(ticket.expires) {
+	if !ok || !time.Now().Before(ticket.expires) || ticket.path != path {
 		return echo.NewHTTPError(http.StatusForbidden)
 	}
 	r := c.Request().Clone(c.Request().Context())

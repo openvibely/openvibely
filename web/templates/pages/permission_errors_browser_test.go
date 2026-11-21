@@ -85,3 +85,30 @@ func TestBrowserFunctional_PermissionErrorsPreserveForms(t *testing.T) {
 		})
 	}
 }
+
+// A saved server's expired sign-in opens its sign-in screen from both fetch
+// responses and live frames; other failures are left to the caller.
+func TestBrowserFunctional_ReconnectOpensServerSignIn(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		fmt.Fprintf(w, `<!doctype html><html><body><script src="%s"></script></body></html>`, static.URL("permission-errors.js"))
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "reconnect", func(browser *composerFocusCDP) {
+		browser.waitFor("reconnect helper", `document.readyState+':'+typeof window.openVibelyReconnect`, "complete:object")
+		if result := browser.evaluateAwait(`(async()=>{
+ const target='/servers?reconnect=0123456789abcdef';
+ for(const response of [new Response('',{status:401}),new Response(JSON.stringify({reconnect:'https://evil.example'}),{status:401}),new Response(JSON.stringify({reconnect:target}),{status:403})]){
+  if(await openVibelyReconnect.fetch(response))return 'non-reconnect response intercepted';
+ }
+ if(openVibelyReconnect.frame('subscription denied')||openVibelyReconnect.frame(JSON.stringify({reconnect:'//evil.example'})))return 'non-reconnect frame intercepted';
+ return 'ok';})()`); result != "ok" {
+			t.Fatal(result)
+		}
+		browser.evaluate(`openVibelyReconnect.fetch(new Response('',{status:401,headers:{'HX-Redirect':'/servers?reconnect=0123456789abcdef'}}));'started'`)
+		browser.waitFor("sign-in screen", `location.pathname+location.search`, "/servers?reconnect=0123456789abcdef")
+	})
+}

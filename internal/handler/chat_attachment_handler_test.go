@@ -796,7 +796,7 @@ func TestUploadChatAttachment_RollsBackSecondFileFailure(t *testing.T) {
 				sessionID = id
 				// Validation has succeeded. Simulate the second multipart source
 				// disappearing before it can be opened for publication.
-				c.Request().MultipartForm.File["files"][1] = &multipart.FileHeader{Filename: "second.txt"}
+				*c.Request().MultipartForm.File["files"][1] = multipart.FileHeader{Filename: "second.txt"}
 			}
 			err := h.UploadChatAttachment(c)
 			require.Error(t, err)

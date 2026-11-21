@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 	"net/http"
 	"strconv"
@@ -19,6 +20,16 @@ func (h *Handler) ProjectComputerChrome(c echo.Context) error {
 		return echo.NewHTTPError(403)
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		res, err := actComputerChrome(h, c.Request().Context(), computerChromeArgs{ComputerArgs: ComputerArgs{ProjectID: c.Param("id"), TaskID: c.QueryParam("task_id")}, Profile: c.QueryParam("profile")})
+		if err != nil {
+			return err
+		}
+		if c.QueryParam("profile") != "" {
+			return c.JSON(200, map[string]any{"cookies": res.Cookies})
+		}
+		return c.JSON(200, map[string]any{"profiles": res.Profiles, "pending_import": res.Pending})
+	}
 	state, err := h.computerService(c).Get(c.Request().Context(), c.Param("id"))
 	if err != nil || c.QueryParam("task_id") == "" || !state.Enabled {
 		return echo.NewHTTPError(409, "Enable the task computer before importing Chrome sign-ins")
@@ -56,6 +67,17 @@ func (h *Handler) ProjectComputerChromeImport(c echo.Context) error {
 	if json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, 65536)).Decode(&input) != nil {
 		return echo.NewHTTPError(400, "Select a profile and sites")
 	}
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		res, err := actComputerChromeImport(h, c.Request().Context(), computerChromeImportArgs{ComputerArgs: ComputerArgs{ProjectID: c.Param("id"), TaskID: c.QueryParam("task_id")}, GrantID: input.GrantID, Scope: input.Scope, Hours: input.Hours, Selections: input.Selections})
+		if err != nil {
+			return err
+		}
+		if res.Incomplete != "" {
+			return c.JSON(409, map[string]any{"message": res.Message, "grant_id": res.Incomplete, "imported": res.Imported})
+		}
+		c.Response().Header().Set("Cache-Control", "no-store")
+		return c.JSON(200, map[string]int{"imported": res.Imported})
+	}
 	var count int
 	var err error
 	if input.GrantID != "" {
@@ -90,6 +112,7 @@ func (h *Handler) ProjectComputerChromeGrants(c echo.Context) error {
 		}
 		offset = parsed
 	}
+	var revoke string
 	if c.Request().Method == "POST" {
 		var input struct {
 			ID string `json:"grant_id"`
@@ -97,6 +120,17 @@ func (h *Handler) ProjectComputerChromeGrants(c echo.Context) error {
 		if json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, 1024)).Decode(&input) != nil || input.ID == "" {
 			return echo.NewHTTPError(400, "Choose a grant")
 		}
+		revoke = input.ID
+	}
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		res, err := actComputerGrants(h, c.Request().Context(), computerGrantsArgs{ComputerArgs: ComputerArgs{ProjectID: c.Param("id"), TaskID: c.QueryParam("task_id")}, Revoke: revoke, Offset: offset})
+		if err != nil {
+			return err
+		}
+		return c.JSON(200, map[string]any{"grants": res.Grants, "offset": offset, "has_more": res.More, "next_offset": offset + len(res.Grants)})
+	}
+	if revoke != "" {
+		input := struct{ ID string }{revoke}
 		if err := h.computerService(c).RevokeChromeGrant(c.Request().Context(), c.Param("id"), input.ID); err != nil {
 			return echo.NewHTTPError(400, err.Error())
 		}

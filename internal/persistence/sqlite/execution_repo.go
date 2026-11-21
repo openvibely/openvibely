@@ -1786,8 +1786,8 @@ func queryFailedTaskPatterns(ctx context.Context, db *sql.DB, projectID string, 
 	}
 
 	query := failedTaskPatternsQuery
-	if projectID == models.AllProjectsID {
-		query = strings.Replace(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID)+" AND t.category NOT IN ('chat','page_chat')", 1)
+	if models.IsAggregateProject(projectID) {
+		query = strings.Replace(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", projectID)+" AND t.category NOT IN ('chat','page_chat')", 1)
 	}
 	rows, err := db.QueryContext(ctx, query, projectID, minFailures, limit)
 	if err != nil {

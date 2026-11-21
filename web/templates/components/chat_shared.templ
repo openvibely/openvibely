@@ -126,6 +126,11 @@ type ChatInputFormConfig struct {
 	DefaultAgentID         string // project default, when different from the global default
 	PendingInputs          []models.ThreadInput
 	QueuedSteerEndpointFor func(models.ThreadInput) string
+	// ProjectChoices adds a composer project picker; sending waits until one is chosen.
+	ProjectChoices []models.Project
+	ProjectInputID string // hidden input that holds the chosen project ID
+	ProjectSendURL string // optional send URL prefix; the chosen project ID is appended
+	ProjectOpenURL string // optional URL prefix opened with the chosen project ID after a successful send
 }
 
 // chatElementIDs returns derived element IDs based on the form ID prefix.
@@ -1688,6 +1693,28 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			<!-- Bottom controls row -->
 			<div class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden">
 				<div data-composer-options class="flex items-center gap-1 min-w-0 flex-1">
+					if len(config.ProjectChoices) > 0 {
+						<div class="relative inline-flex min-w-0">
+							<button
+								type="button"
+								id={ config.FormID + "-project-select" }
+								class="chat-project-select chat-custom-select-btn btn btn-ghost btn-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[8rem] sm:max-w-[200px] rounded-lg flex items-center gap-1 px-2"
+								data-project-input={ config.ProjectInputID }
+								data-project-send-url={ config.ProjectSendURL }
+								data-project-open-url={ config.ProjectOpenURL }
+								data-placeholder="Choose a project"
+								data-current-value=""
+								aria-label="Project"
+								aria-haspopup="listbox"
+								aria-expanded="false"
+							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none">Choose a project</span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
+								for _, project := range config.ProjectChoices {
+									<li data-value={ project.ID }>{ project.Name }</li>
+								}
+							</ul>
+						</div>
+					}
 					if config.ShowModelSelector {
 						<!-- Custom mobile-safe model selector: replaces native <select> to avoid
 						     incorrect popup positioning inside overflow:auto containers on mobile Chrome. -->
@@ -2046,7 +2073,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				if (li.dataset.value === currentValue) matchingLi = li;
 			});
 			var firstLi = optList.querySelector('li[data-value]');
-			var label = matchingLi ? (matchingLi.dataset.pickerName || matchingLi.textContent.trim()) : (firstLi ? firstLi.textContent.trim() : '');
+			var label = matchingLi ? (matchingLi.dataset.pickerName || matchingLi.textContent.trim()) : (btn.dataset.placeholder || (firstLi ? firstLi.textContent.trim() : ''));
 			var labelEl = btn.querySelector('.chat-custom-select-label');
 			if (labelEl) labelEl.textContent = label;
 			if (!btn._chatCustomSelectBound) {
@@ -3045,16 +3072,71 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				}
 				modeSelect.dataset.hydrated = 'true';
 
-				modeSelect.addEventListener('chat-select-change', function(e) {
-					modeInput.value = e.detail.value;
-					if (modeStorageKey) {
-						localStorage.setItem(modeStorageKey, e.detail.value);
+					modeSelect.addEventListener('chat-select-change', function(e) {
+						modeInput.value = e.detail.value;
+						if (modeStorageKey) {
+							localStorage.setItem(modeStorageKey, e.detail.value);
+						}
+						modeSelect.dataset.hydrated = 'true';
+						reevaluatePlanPrompt();
+					});
+				}
+
+			// Aggregate workspaces send to one chosen project; Send opens the picker until then.
+			var projectSelect = form.querySelector('[id$="-project-select"]');
+			var projectInput = projectSelect ? document.getElementById(projectSelect.getAttribute('data-project-input')) : null;
+			var projectSendPending = false;
+			function chosenProject() { return projectInput ? projectInput.value : ''; }
+			function openProjectPicker() {
+				if (window._closeChatCustomSelectPanel) window._closeChatCustomSelectPanel();
+				if (window._openChatCustomSelectPanel) window._openChatCustomSelectPanel(projectSelect);
+			}
+			if (projectSelect && projectInput) {
+				if (window._initChatCustomSelect) window._initChatCustomSelect(projectSelect);
+				var syncProjectLabel = function() {
+					if (projectInput.value) window._setChatCustomSelectValue(projectSelect, projectInput.value);
+					else {
+						projectSelect.dataset.currentValue = '';
+						projectSelect.querySelector('.chat-custom-select-label').textContent = projectSelect.dataset.placeholder;
 					}
-					modeSelect.dataset.hydrated = 'true';
-					reevaluatePlanPrompt();
+				};
+				syncProjectLabel();
+				var uploadedForProject = projectInput.value;
+				projectInput.addEventListener('change', function() {
+					syncProjectLabel();
+					// Uploaded files are staged on the previous project's server.
+					if (uploadedForProject !== projectInput.value && window[clearFuncName]) window[clearFuncName]();
+					uploadedForProject = projectInput.value;
+				});
+				projectSelect.addEventListener('chat-select-change', function(e) {
+					projectInput.value = e.detail.value;
+					projectInput.dispatchEvent(new Event('change', {bubbles: true}));
+					if (!projectSendPending) return;
+					projectSendPending = false;
+					submitComposer(normalPostEndpoint, 'normal');
+				});
+				// Closing the picker without a choice cancels the waiting Send, not the draft.
+				new MutationObserver(function() {
+					if (projectSelect.getAttribute('aria-expanded') === 'false') projectSendPending = false;
+				}).observe(projectSelect, {attributes: true, attributeFilter: ['aria-expanded']});
+				form.addEventListener('htmx:configRequest', function(event) {
+					if (event.detail.elt !== form || event.detail.path !== normalPostEndpoint) return;
+					if (!chosenProject()) {
+						event.preventDefault();
+						openProjectPicker();
+						projectSendPending = true;
+						return;
+					}
+					var sendURL = projectSelect.getAttribute('data-project-send-url');
+					if (sendURL) event.detail.path = sendURL + encodeURIComponent(chosenProject());
+				});
+				form.addEventListener('htmx:afterRequest', function(event) {
+					var openURL = projectSelect.getAttribute('data-project-open-url');
+					var request = event.detail.xhr;
+					if (event.detail.elt !== form || !openURL || !event.detail.successful || !request || !(request.responseText || '').trim()) return;
+					window.openVibelyNavigate(openURL + encodeURIComponent(chosenProject()));
 				});
 			}
-
 			function formatBytes(bytes) {
 				if (bytes < 1024) return bytes + ' B';
 				var k = 1024;
@@ -3080,7 +3162,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					if (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);
 					files.forEach(function(file) { formData.append('files', file); });
 					try {
-						var response = await fetch('/chat/attachments' + (document.getElementById('task-detail-content') ? '?project_id='+encodeURIComponent(document.getElementById('task-detail-content').dataset.projectId) : ''), {
+						var uploadProjectId = projectSelect ? chosenProject() : (projectId || (document.getElementById('task-detail-content')?.dataset.projectId || ''));
+						if (projectSelect && !uploadProjectId) {
+							openProjectPicker();
+							return;
+						}
+						var response = await fetch('/chat/attachments' + (uploadProjectId ? '?project_id='+encodeURIComponent(uploadProjectId) : ''), {
 							method: 'POST',
 							body: formData
 						});

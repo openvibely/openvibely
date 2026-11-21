@@ -24,7 +24,7 @@ func (h *Handler) GeneratedFileContent(c echo.Context) error {
 	if c.QueryParam("metadata") == "1" {
 		return c.JSON(http.StatusOK, file)
 	}
-	return serveFileContent(c, file.FilePath, file.FileName)
+	return serveFile(c, h.sourceFor(fileKindGenerated, file.ID, project, file.FilePath), file.FileName)
 }
 func (h *Handler) ListFilesPanel(c echo.Context) error {
 	project, err := h.getCurrentProjectID(c)

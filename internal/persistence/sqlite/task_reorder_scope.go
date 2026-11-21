@@ -129,5 +129,5 @@ func (r *TaskRepo) ReorderTaskRelative(ctx context.Context, taskID, anchorID str
 	if anchorID == "" {
 		return fmt.Errorf("reorder target is required")
 	}
-	return r.reorderTaskInScope(ctx, taskID, 0, projectScope == models.AllProjectsID, anchorID, before)
+	return r.reorderTaskInScope(ctx, taskID, 0, models.IsAggregateProject(projectScope), anchorID, before)
 }

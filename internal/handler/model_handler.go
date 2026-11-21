@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/modeldiscovery"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -63,14 +64,15 @@ func modelCardListState(projectID string, filter persistence.ModelCardListFilter
 func (h *Handler) ListModels(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	ctx := c.Request().Context()
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
+	ctx = c.Request().Context()
 	filter := modelCardListFilter(c, page)
 	agents, err := h.llmConfigRepo.ListCardsPageFiltered(ctx, page.PageSize+1, page.Offset, filter)
 	if err != nil {
 		applog.Infof("[handler] ListModels error: %v", err)
 		return err
 	}
-	agents, hasMore := cardPageItems(agents, page.PageSize)
+	agents, hasMore := finishCardPage(c, agents, page.PageSize)
 
 	// Build per-model worker utilization only for the rendered page.
 	modelWorkerStats := make(map[string]int, len(agents))
@@ -155,12 +157,19 @@ func (h *Handler) GetModelEditDetails(c echo.Context) error {
 	if config == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "model configuration not found")
 	}
+	connected := config.HasValidOAuthToken()
+	if _, remote := remoteid.ServerOf(config.ID); remote {
+		connected, err = actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: config.ID, Operation: "status"})
+		if err != nil {
+			return err
+		}
+	}
 	details := modelEditDetails{
 		ID: config.ID, Name: config.Name, Provider: config.Provider, Model: config.Model,
 		ReasoningEffort: config.ReasoningEffort, ServiceTier: config.EffectiveServiceTier(), Temperature: config.Temperature,
 		IsDefault: config.IsDefault, APIKey: config.APIKey, AuthMethod: config.AuthMethod,
 		OAuthConnectionID: config.OAuthConnectionID,
-		OAuthConnected:    config.HasValidOAuthToken(), OAuthNeedsReauth: config.OAuthNeedsReauth,
+		OAuthConnected:    connected, OAuthNeedsReauth: config.OAuthNeedsReauth,
 		MaxWorkers: config.MaxWorkers, WorkerTimeout: config.WorkerTimeout,
 		OAuthClientID: config.OAuthClientID, OAuthAuthorizeURL: config.OAuthAuthorizeURL,
 		OAuthTokenURL: config.OAuthTokenURL, OAuthScopes: config.OAuthScopes,
@@ -342,7 +351,7 @@ func openAICompatibleModelsURLs(baseURL, modelsURL string) ([]string, error) {
 	return urls, nil
 }
 
-func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
+func applyOpenAICompatibleForm(c ownerForm, agent *models.LLMConfig) error {
 	baseURL, err := validateOpenAICompatibleBaseURL(c.FormValue("base_url"))
 	if err != nil {
 		return err
@@ -470,7 +479,7 @@ func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
 	return nil
 }
 
-func applyContextLimitForm(c echo.Context, agent *models.LLMConfig, mode modelFormMode) error {
+func applyContextLimitForm(c ownerForm, agent *models.LLMConfig, mode modelFormMode) error {
 	if raw, present := formValueIfPresent(c, "provider_context_window"); present {
 		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v >= 0 {
 			agent.ProviderContextWindow = v
@@ -557,7 +566,7 @@ func openAICompatiblePresetUsesPrivateEndpoints(preset string) bool {
 	}
 }
 
-func applyOptionalSecretHeaderMap(c echo.Context, valueField, clearField string, target *map[string]string, label string) error {
+func applyOptionalSecretHeaderMap(c ownerForm, valueField, clearField string, target *map[string]string, label string) error {
 	raw, present := formValueIfPresent(c, valueField)
 	if present {
 		if raw = strings.TrimSpace(raw); raw == "" {
@@ -655,7 +664,7 @@ func oauthSecurityConfigChanged(before, after models.LLMConfig) bool {
 		before.CustomAuthConfigJSON != after.CustomAuthConfigJSON
 }
 
-func parseMixtureConfigForm(c echo.Context) (llmmixture.Config, error) {
+func parseMixtureConfigForm(c ownerForm) (llmmixture.Config, error) {
 	raw := strings.TrimSpace(c.FormValue("mixture_config_json"))
 	if raw != "" {
 		return llmmixture.ParseConfig(raw)
@@ -666,7 +675,11 @@ func parseMixtureConfigForm(c echo.Context) (llmmixture.Config, error) {
 	if cfg.Enabled == false && c.FormValue("mixture_enabled") == "" {
 		cfg.Enabled = true
 	}
-	for _, rawID := range c.Request().Form["mixture_reference_ids"] {
+	form, err := c.FormParams()
+	if err != nil {
+		return cfg, err
+	}
+	for _, rawID := range form["mixture_reference_ids"] {
 		for _, id := range strings.Split(rawID, ",") {
 			id = strings.TrimSpace(id)
 			if id != "" {
@@ -689,7 +702,7 @@ func parseMixtureConfigForm(c echo.Context) (llmmixture.Config, error) {
 	return llmmixture.NormalizeConfig(cfg)
 }
 
-func (h *Handler) applyAndValidateMixtureForm(ctx context.Context, c echo.Context, agent *models.LLMConfig) error {
+func (h *Handler) applyAndValidateMixtureForm(ctx context.Context, c ownerForm, agent *models.LLMConfig) error {
 	cfg, err := parseMixtureConfigForm(c)
 	if err != nil {
 		return err
@@ -708,6 +721,9 @@ func (h *Handler) applyAndValidateMixtureForm(ctx context.Context, c echo.Contex
 		id := strings.TrimSpace(slot.AgentConfigID)
 		if id == "" {
 			return fmt.Errorf("mixture model slot is missing a model")
+		}
+		if _, remote := remoteid.ServerOf(id); remote {
+			return fmt.Errorf("mixture models must belong to this OV instance")
 		}
 		ids[id] = struct{}{}
 	}
@@ -809,8 +825,13 @@ func validateBrowserRunnableModelSlug(agent *models.LLMConfig) error {
 	return nil
 }
 
-func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context, agent *models.LLMConfig, opts modelFormOptions) error {
-	provider, authMethod := resolveFormProviderAndAuth(c)
+func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c ownerForm, agent *models.LLMConfig, opts modelFormOptions) error {
+	provider, authMethod := resolveProviderAndAuth(
+		c.FormValue("provider"),
+		c.FormValue("anthropic_auth_type"),
+		c.FormValue("openai_auth_type"),
+		c.FormValue("auth_method"),
+	)
 	if provider == models.ProviderOpenAICompatible && c.FormValue("custom_auth_method") == string(models.AuthMethodOAuth) {
 		authMethod = models.AuthMethodOAuth
 	}
@@ -923,7 +944,7 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 	return nil
 }
 
-func applyModelOAuthForm(c echo.Context, agent *models.LLMConfig, mode modelFormMode) {
+func applyModelOAuthForm(c ownerForm, agent *models.LLMConfig, mode modelFormMode) {
 	if (agent.Provider != models.ProviderOpenAI && agent.Provider != models.ProviderOpenAICompatible) || agent.AuthMethod != models.AuthMethodOAuth {
 		return
 	}
@@ -983,6 +1004,10 @@ func (h *Handler) mixturesUsingModel(ctx context.Context, modelID string) ([]str
 }
 
 func (h *Handler) CreateModel(c echo.Context) error {
+	if handled, err := h.saveRemoteModel(c, strings.TrimSpace(c.FormValue("model_config_id"))); handled {
+		return err
+	}
+
 	if id := strings.TrimSpace(c.FormValue("model_config_id")); id != "" {
 		applog.Infof("[handler] CreateModel received existing model_config_id=%s; updating instead", id)
 		return h.updateModelByID(c, id)
@@ -1041,6 +1066,10 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 }
 
 func (h *Handler) updateModelByID(c echo.Context, id string) error {
+	if handled, err := h.saveRemoteModel(c, id); handled {
+		return err
+	}
+
 	applog.Infof("[handler] UpdateModel id=%s", id)
 
 	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), id)
@@ -1150,6 +1179,12 @@ func (h *Handler) RenameOAuthConnection(c echo.Context) error {
 	if len(name) > 200 {
 		return echo.NewHTTPError(http.StatusBadRequest, "OAuth account name must be at most 200 characters")
 	}
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "rename", Name: name}); err != nil {
+			return err
+		}
+		return h.oauthConnectionActionResponse(c)
+	}
 	if err := h.llmConfigRepo.RenameOAuthConnection(c.Request().Context(), c.Param("id"), name); err != nil {
 		if errors.Is(err, persistence.ErrOAuthConnectionNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "OAuth account not found")
@@ -1169,6 +1204,9 @@ func (h *Handler) MoveModelsToOAuthConnection(c echo.Context) error {
 	modelIDs := make([]string, 0, len(request.PostForm["model_ids"]))
 	for _, modelID := range request.PostForm["model_ids"] {
 		modelID = strings.TrimSpace(modelID)
+		if _, remote := remoteid.ServerOf(modelID); remote {
+			return echo.NewHTTPError(http.StatusBadRequest, "Manage remote models on their server's OV app.")
+		}
 		if modelID == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "model identifiers must not be empty")
 		}
@@ -1183,6 +1221,12 @@ func (h *Handler) MoveModelsToOAuthConnection(c echo.Context) error {
 	}
 	if len(modelIDs) > bulkDeleteMaxItems {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("at most %d models may be moved at once", bulkDeleteMaxItems))
+	}
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "move", ModelIDs: modelIDs}); err != nil {
+			return err
+		}
+		return h.oauthConnectionActionResponse(c)
 	}
 	if err := h.llmConfigRepo.MoveModelsToOAuthConnection(c.Request().Context(), modelIDs, c.Param("id")); err != nil {
 		switch {
@@ -1199,6 +1243,17 @@ func (h *Handler) MoveModelsToOAuthConnection(c echo.Context) error {
 }
 
 func (h *Handler) DeleteOAuthConnection(c echo.Context) error {
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		replacement := c.QueryParam("new_default_id")
+		if replacement == "" {
+			replacement = c.FormValue("new_default_id")
+		}
+		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "delete-account", ReplacementID: replacement}); err != nil {
+			return err
+		}
+		return h.oauthConnectionActionResponse(c)
+	}
+
 	connection, err := h.llmConfigRepo.GetOAuthConnectionByID(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return err
@@ -1219,6 +1274,20 @@ func (h *Handler) DeleteOAuthConnection(c echo.Context) error {
 }
 
 func (h *Handler) DisconnectModelOAuthConnection(c echo.Context) error {
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		replacement := c.QueryParam("new_default_id")
+		if replacement == "" {
+			replacement = c.FormValue("new_default_id")
+		}
+		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "disconnect", ReplacementID: replacement}); err != nil {
+			return err
+		}
+		if isHTMX(c) {
+			return h.renderRefreshedModels(c)
+		}
+		return c.Redirect(http.StatusSeeOther, "/models")
+	}
+
 	cfg, err := h.llmConfigRepo.GetByID(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return err
@@ -1244,6 +1313,20 @@ func (h *Handler) DisconnectModelOAuthConnection(c echo.Context) error {
 }
 
 func (h *Handler) SetDefaultModel(c echo.Context) error {
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		replacement := c.QueryParam("new_default_id")
+		if replacement == "" {
+			replacement = c.FormValue("new_default_id")
+		}
+		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "default", ReplacementID: replacement}); err != nil {
+			return err
+		}
+		if isHTMX(c) {
+			return h.renderRefreshedModels(c)
+		}
+		return c.Redirect(http.StatusSeeOther, "/models")
+	}
+
 	id := c.Param("id")
 	applog.Infof("[handler] SetDefaultModel id=%s", id)
 
@@ -1282,27 +1365,13 @@ func (h *Handler) DeleteModelsBulk(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	configs, err := h.llmConfigRepo.GetByIDs(c.Request().Context(), ids)
-	if err != nil {
-		return err
-	}
-	if len(configs) != len(ids) {
-		return echo.NewHTTPError(http.StatusBadRequest, "all selected models must exist")
-	}
 	for _, id := range ids {
-		if configs[id].IsDefault {
-			return echo.NewHTTPError(http.StatusBadRequest, "default models cannot be deleted in bulk")
-		}
-		mixtures, dependencyErr := h.mixturesUsingModel(c.Request().Context(), id)
-		if dependencyErr != nil {
-			return dependencyErr
-		}
-		if len(mixtures) > 0 {
-			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Model %s is used by mixtures: %s. Remove the dependency before deleting.", configs[id].Name, strings.Join(mixtures, ", ")))
+		if _, remote := remoteid.ServerOf(id); remote {
+			return echo.NewHTTPError(http.StatusBadRequest, "Manage remote models on their server's OV app.")
 		}
 	}
-	if err := h.llmConfigRepo.DeleteBulk(c.Request().Context(), ids); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if err := h.runCardBulk(c.Request().Context(), "models", "delete", "", ids); err != nil {
+		return err
 	}
 	h.syncAccountUsage()
 	if h.workerSvc != nil {
@@ -1312,6 +1381,20 @@ func (h *Handler) DeleteModelsBulk(c echo.Context) error {
 }
 
 func (h *Handler) DeleteModel(c echo.Context) error {
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		replacement := c.QueryParam("new_default_id")
+		if replacement == "" {
+			replacement = c.FormValue("new_default_id")
+		}
+		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "delete", ReplacementID: replacement}); err != nil {
+			return err
+		}
+		if isHTMX(c) {
+			return h.renderRefreshedModels(c)
+		}
+		return c.Redirect(http.StatusSeeOther, "/models")
+	}
+
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteModel id=%s", id)
 	ctx := c.Request().Context()
@@ -1396,13 +1479,14 @@ func (h *Handler) syncAccountUsage() {
 
 func (h *Handler) renderRefreshedModels(c echo.Context) error {
 	ctx := c.Request().Context()
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
+	ctx = c.Request().Context()
 	filter := modelCardListFilter(c, page)
 	agents, err := h.llmConfigRepo.ListCardsPageFiltered(ctx, page.PageSize+1, page.Offset, filter)
 	if err != nil {
 		return err
 	}
-	agents, hasMore := cardPageItems(agents, page.PageSize)
+	agents, hasMore := finishCardPage(c, agents, page.PageSize)
 	modelOptions, err := h.llmConfigRepo.ListModelCardOptions(ctx)
 	if err != nil {
 		return err
@@ -1475,7 +1559,7 @@ func normalizeOpenAIReasoningEffort(model, value string) string {
 	return ""
 }
 
-func formValueIfPresent(c echo.Context, key string) (string, bool) {
+func formValueIfPresent(c ownerForm, key string) (string, bool) {
 	formValues, err := c.FormParams()
 	if err != nil {
 		return "", false
@@ -1917,9 +2001,15 @@ func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {
 		baseURL = "http://localhost:11434"
 	}
 
-	models, err := service.ListOllamaModels(c.Request().Context(), baseURL)
+	discovered, err := actOllamaDiscovery(h, c.Request().Context(), ollamaDiscoveryArgs{ModelID: c.QueryParam("config_id"), BaseURL: baseURL})
+	models := discovered.Models
 	if err != nil {
 		applog.Infof("[handler] ListOllamaAvailableModels error: %v", err)
+		var reconnect reconnectError
+		var httpErr *echo.HTTPError
+		if errors.As(err, &reconnect) || errors.As(err, &httpErr) {
+			return err
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return c.JSON(http.StatusGatewayTimeout, map[string]string{"error": "Ollama model discovery timed out. Check the server connection."})
 		}
@@ -1957,5 +2047,41 @@ func normalizeOpenAIModel(value string) string {
 
 // DetectOllamaContext returns transient active-window metadata for the model modal.
 func (h *Handler) DetectOllamaContext(c echo.Context) error {
-	return c.JSON(http.StatusOK, service.DiscoverOllamaModelMetadata(c.Request().Context(), c.QueryParam("base_url"), c.QueryParam("model")))
+	discovered, err := actOllamaDiscovery(h, c.Request().Context(), ollamaDiscoveryArgs{ModelID: c.QueryParam("config_id"), BaseURL: c.QueryParam("base_url"), Model: c.QueryParam("model"), Metadata: true})
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, discovered.Metadata)
+}
+
+func (h *Handler) deleteModels(ctx context.Context, ids []string, checkOnly bool) error {
+	configs, err := h.llmConfigRepo.GetByIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	if len(configs) != len(ids) {
+		return echo.NewHTTPError(http.StatusBadRequest, "all selected models must exist")
+	}
+	for _, id := range ids {
+		if configs[id].IsDefault {
+			return echo.NewHTTPError(http.StatusBadRequest, "default models cannot be deleted in bulk")
+		}
+		mixtures, dependencyErr := h.mixturesUsingModel(ctx, id)
+		if dependencyErr != nil {
+			return dependencyErr
+		}
+		if len(mixtures) > 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Model %s is used by mixtures: %s. Remove the dependency before deleting.", configs[id].Name, strings.Join(mixtures, ", ")))
+		}
+	}
+	if checkOnly {
+		return nil
+	}
+	if err := h.llmConfigRepo.DeleteBulk(ctx, ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
+	return nil
 }

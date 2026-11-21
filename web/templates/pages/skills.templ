@@ -832,7 +832,7 @@ func firstSkillNonEmpty(values ...string) string {
 }
 
 templ skillProjectChoice(projectID, id string) {
- if projectID == models.AllProjectsID {
+ if models.IsAggregateProject(projectID) {
  <label class="form-control mb-3"><span class="label-text">Project (for project-scoped skills)</span>
  <select id={ id } class="select select-bordered">
  <option value="">Choose project</option>

@@ -48,6 +48,9 @@ type channelSenderBinder interface {
 }
 
 func (h *Handler) BindChannelSender(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, c.Param("channel"), "bind"); handled {
+		return err
+	}
 	if err := h.prepareChannelSenderOptions(c, "", true); err != nil {
 		return projectAccessHTTPError(err)
 	}

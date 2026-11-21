@@ -74,7 +74,7 @@ func (h *Handler) ensureAgentProjectAccess(c echo.Context, agent *models.Agent) 
 	}
 	// The combined workspace can operate on any existing Agent. Its stored
 	// ProjectID remains authoritative for filesystem and persistence operations.
-	if requestedProjectID == models.AllProjectsID {
+	if models.IsAggregateProject(requestedProjectID) && models.InScope(c.Request().Context(), strings.TrimSpace(agent.ProjectID)) {
 		return nil
 	}
 	if requestedProjectID != "" && requestedProjectID != strings.TrimSpace(agent.ProjectID) {
@@ -121,11 +121,10 @@ func (h *Handler) SaveAgentLifecycleHooks(c echo.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&payloads); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload: "+err.Error())
 	}
-	if err := h.reconcileAgentLifecycleHooks(c.Request().Context(), agentID, payloads); err != nil {
+	hooks, err := actSaveAgentHooks(h, c.Request().Context(), agentHooksArgs{AgentID: agentID, Hooks: payloads})
+	if err != nil {
 		return err
 	}
-
-	hooks, _ := h.lifecycleRepo.HooksByAgent(c.Request().Context(), agentID)
 	return c.JSON(http.StatusOK, hooks)
 }
 

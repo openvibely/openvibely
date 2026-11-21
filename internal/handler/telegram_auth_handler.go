@@ -13,11 +13,19 @@ import (
 
 // ListTelegramAuthorizedUsers returns the authorized users list for a project.
 func (h *Handler) ListTelegramAuthorizedUsers(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "telegram", "list"); handled {
+		return err
+	}
+
 	return h.telegramAuthorizedUserCRUD().listHandler(c)
 }
 
 // AddTelegramAuthorizedUser adds a new authorized Telegram user.
 func (h *Handler) AddTelegramAuthorizedUser(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "telegram", "create"); handled {
+		return err
+	}
+
 	return h.telegramAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
 		userIDOrUsername := c.FormValue("user_id_or_username")
 		displayName := c.FormValue("display_name")
@@ -46,6 +54,10 @@ func (h *Handler) AddTelegramAuthorizedUser(c echo.Context) error {
 
 // RemoveTelegramAuthorizedUser removes an authorized Telegram user.
 func (h *Handler) RemoveTelegramAuthorizedUser(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "telegram", "delete"); handled {
+		return err
+	}
+
 	return h.telegramAuthorizedUserCRUD().deleteHandler(c)
 }
 

@@ -540,8 +540,18 @@ func (m *Manager) Resolve(ctx context.Context, instanceID, requestProjectID stri
 
 // ListEnabled returns enabled instances for a project, or for all projects.
 func (m *Manager) ListEnabled(ctx context.Context, projectID string) ([]models.PagePluginInstance, error) {
-	if projectID == models.AllProjectsID {
-		return m.store.ListAllInstances(ctx, true)
+	if models.IsAggregateProject(projectID) {
+		all, err := m.store.ListAllInstances(ctx, true)
+		if err != nil {
+			return nil, err
+		}
+		var out []models.PagePluginInstance
+		for _, in := range all {
+			if models.InScope(ctx, in.ProjectID) {
+				out = append(out, in)
+			}
+		}
+		return out, nil
 	}
 	return m.store.ListInstances(ctx, projectID, true)
 }

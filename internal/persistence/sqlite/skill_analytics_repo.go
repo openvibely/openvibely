@@ -417,8 +417,8 @@ func skillAnalyticsWhere(ctx context.Context, filter persistence.SkillAnalyticsF
 
 func skillAnalyticsWhereAlias(ctx context.Context, filter persistence.SkillAnalyticsFilter, alias string) (string, []any) {
 	where := "WHERE 1=1"
-	if filter.ProjectID == models.AllProjectsID {
-		where += " AND " + accessibleProjectPredicate(ctx, alias+".project_id", false)
+	if models.IsAggregateProject(filter.ProjectID) {
+		where += " AND " + aggregateProjectPredicate(ctx, alias+".project_id", filter.ProjectID, false)
 	}
 	args := []any{}
 	if !filter.DateFrom.IsZero() {
@@ -429,7 +429,7 @@ func skillAnalyticsWhereAlias(ctx context.Context, filter persistence.SkillAnaly
 		where += " AND " + alias + ".created_at < ?"
 		args = append(args, formatSQLiteTime(filter.DateTo.UTC()))
 	}
-	if filter.ProjectID != "" && filter.ProjectID != models.AllProjectsID {
+	if filter.ProjectID != "" && !models.IsAggregateProject(filter.ProjectID) {
 		where += " AND " + alias + ".project_id = ?"
 		args = append(args, filter.ProjectID)
 	}

@@ -134,7 +134,7 @@ window.addEventListener('DOMContentLoaded', function() {
     add.click();
     var modal = document.getElementById('x_config_modal');
     if (!modal || !modal.open) fail('production X modal did not open');
-    var form = modal.querySelector('form[action="/channels/x/configure"]');
+    var form = modal.querySelector('form[action^="/channels/x/configure?"]');
     ['x_consumer_key','x_consumer_secret','x_access_token','x_access_token_secret'].forEach(function(name) { form.elements[name].value = name + '-value'; });
     form.elements.x_poll_interval_seconds.value = '300';
 	await submitAndWaitForChannelsRefresh(form, 'production configure refresh');
@@ -174,7 +174,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	      var timer = setTimeout(function() { reject(new Error('timed out waiting for production remove request')); }, 15000);
 	      document.body.addEventListener('htmx:afterRequest', function onRemove(event) {
 	        var path = event.detail && event.detail.requestConfig && event.detail.requestConfig.path;
-	        if (path !== '/channels/x/remove') return;
+	        if (String(path || '').split('?')[0] !== '/channels/x/remove') return;
 	        document.body.removeEventListener('htmx:afterRequest', onRemove);
 	        clearTimeout(timer);
 	        if (!event.detail.successful) return reject(new Error('production remove request failed'));

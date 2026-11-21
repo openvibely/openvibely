@@ -116,14 +116,15 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 		return err
 	}
 	projectID = layout.WorkspaceProjectID(ctx, projectID)
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
+	ctx = c.Request().Context()
 	filter := automationCardListFilter(c, page)
 	listState := automationCardListState(projectID, filter)
 	cards, err := h.automationGraphSvc.ListPageFiltered(ctx, projectID, page.PageSize+1, page.Offset, filter)
 	if err != nil {
 		return err
 	}
-	cards, hasMore := cardPageItems(cards, page.PageSize)
+	cards, hasMore := finishCardPage(c, cards, page.PageSize)
 	return h.renderCardBrowserPage(
 		c,
 		projectID,
@@ -213,8 +214,8 @@ func (h *Handler) RefreshAutomationExternalState(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := h.automationExternalStateSvc.Refresh(c.Request().Context(), projectID, c.Param("automationId"), time.Now().UTC()); err != nil {
-		if err.Error() == "automation not found" {
+	if _, err := actAutomationRefresh(h, c.Request().Context(), automationMutationArgs{ProjectID: projectID, AutomationID: c.Param("automationId")}); err != nil {
+		if err.Error() == "automation not found" || isActionNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 		}
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())

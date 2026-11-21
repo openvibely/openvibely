@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,29 +13,54 @@ import (
 
 // UpdateTaskDetailProperty saves one property without replacing the mounted thread.
 func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
-	ctx := c.Request().Context()
 	projectID := h.mutationProjectID(c)
 	if projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project context required")
 	}
-	task, err := h.requireTaskInRequestProject(ctx, c.Param("taskId"), projectID)
+	field := c.FormValue("field")
+	task, err := actTaskProperty(h, c.Request().Context(), taskPropertyArgs{
+		TaskRef: TaskRef{TaskID: c.Param("taskId"), ProjectID: projectID},
+		Field:   field, Value: strings.TrimSpace(c.FormValue("value")),
+	})
 	if err != nil {
 		return err
 	}
-	field, value := c.FormValue("field"), strings.TrimSpace(c.FormValue("value"))
 	switch field {
+	case "auto_merge", "auto_merge_on_goal_achieved":
+		return render(c, http.StatusOK, pages.TaskAutoMergePanel(task))
+	case "prompt":
+		return render(c, http.StatusOK, pages.TaskPromptPanel(task))
+	}
+	return h.GetTaskDetailStatus(c)
+}
+
+type taskPropertyArgs struct {
+	TaskRef
+	Field string
+	Value string
+}
+
+func (a taskPropertyArgs) ref() TaskRef { return a.TaskRef }
+
+var actTaskProperty = defineAction("task.property", ownTaskRef[taskPropertyArgs], func(h *Handler, ctx context.Context, a taskPropertyArgs) (*models.Task, error) {
+	task, err := h.loadTask(ctx, a.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	value := a.Value
+	switch a.Field {
 	case "agent_id":
 		if value == "default" {
 			model, err := h.selectTaskAgent(ctx, task.ProjectID, "default", "", false)
 			if err != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+				return nil, statusErr(http.StatusBadRequest, err.Error())
 			}
 			value = model.ID
 		}
 		if value != "" {
 			options, err := h.llmConfigRepo.ListBadgeOptions(ctx)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			found := false
 			for _, option := range options {
@@ -43,31 +69,31 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 				}
 			}
 			if !found {
-				return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
+				return nil, statusErr(http.StatusBadRequest, "invalid model selection")
 			}
 		}
 	case "agent_definition_id":
 		if _, err := h.resolvePrimaryAgentDefinition(ctx, task.ProjectID, value); err != nil {
-			return err
+			return nil, err
 		}
 	case "auto_merge", "auto_merge_on_goal_achieved":
 		if value != "true" && value != "false" {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid auto-merge setting")
+			return nil, statusErr(http.StatusBadRequest, "invalid auto-merge setting")
 		}
 	case "priority":
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 1 || n > 4 {
-			return echo.NewHTTPError(http.StatusBadRequest, "Priority must be between 1 and 4")
+			return nil, statusErr(http.StatusBadRequest, "Priority must be between 1 and 4")
 		}
 	case "tag":
-		tag, tagErr := models.NormalizeTaskTag(c.FormValue("value"))
+		tag, tagErr := models.NormalizeTaskTag(value)
 		if tagErr != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, tagErr.Error())
+			return nil, statusErr(http.StatusBadRequest, tagErr.Error())
 		}
 		value = string(tag)
 	case "prompt":
 		if value == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Prompt is required")
+			return nil, statusErr(http.StatusBadRequest, "Prompt is required")
 		}
 	case "category":
 		valid := false
@@ -77,15 +103,15 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 			}
 		}
 		if !valid {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid category")
+			return nil, statusErr(http.StatusBadRequest, "invalid category")
 		}
 		if value == string(models.CategoryScheduled) {
 			schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if len(schedules) == 0 {
-				return echo.NewHTTPError(http.StatusBadRequest, "Add a schedule first")
+				return nil, statusErr(http.StatusBadRequest, "Add a schedule first")
 			}
 		}
 		// Match task edit semantics: do not start work merely by changing a property.
@@ -96,28 +122,20 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 				err = h.taskRepo.UpdateCategory(ctx, task.ID, models.TaskCategory(value))
 			}
 		}
+		return task, err
 	default:
-		return echo.NewHTTPError(http.StatusBadRequest, "unsupported task property")
+		return nil, statusErr(http.StatusBadRequest, "unsupported task property")
 	}
-	if err != nil {
-		return err
+	if err := h.taskRepo.UpdateDetailProperty(ctx, task.ID, a.Field, value); err != nil {
+		return nil, err
 	}
-	if field != "category" {
-		if err = h.taskRepo.UpdateDetailProperty(ctx, task.ID, field, value); err != nil {
-			return err
-		}
-	}
-	if field == "auto_merge" || field == "auto_merge_on_goal_achieved" {
-		if field == "auto_merge" {
-			task.AutoMerge = value == "true"
-		} else {
-			task.AutoMergeOnGoalAchieved = value == "true"
-		}
-		return render(c, http.StatusOK, pages.TaskAutoMergePanel(task))
-	}
-	if field == "prompt" {
+	switch a.Field {
+	case "auto_merge":
+		task.AutoMerge = value == "true"
+	case "auto_merge_on_goal_achieved":
+		task.AutoMergeOnGoalAchieved = value == "true"
+	case "prompt":
 		task.Prompt = value
-		return render(c, http.StatusOK, pages.TaskPromptPanel(task))
 	}
-	return h.GetTaskDetailStatus(c)
-}
+	return task, nil
+})

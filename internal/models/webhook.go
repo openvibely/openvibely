@@ -12,8 +12,8 @@ type WebhookEndpoint struct {
 	ProjectID          string    `json:"project_id"`
 	Name               string    `json:"name"`
 	Enabled            bool      `json:"enabled"`
-	PathToken          string    `json:"path_token"`
-	Secret             string    `json:"secret"`
+	PathToken          string    `json:"path_token" remote:"raw,manage"`
+	Secret             string    `json:"secret" remote:"raw,manage"`
 	SystemInstructions string    `json:"system_instructions"`
 	TitleTemplate      string    `json:"title_template"`
 	PromptTemplate     string    `json:"prompt_template"`

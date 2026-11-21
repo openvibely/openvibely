@@ -42,7 +42,9 @@ func TestHandlerWorkerCapacityRowsUseCompactProjectProjection(t *testing.T) {
 
 	requests := []struct {
 		name string
-		run  func() *httptest.ResponseRecorder
+		// Full pages also read projects once to group repository tabs.
+		shellReads int
+		run        func() *httptest.ResponseRecorder
 	}{
 		{
 			name: "three-second poll",
@@ -51,7 +53,8 @@ func TestHandlerWorkerCapacityRowsUseCompactProjectProjection(t *testing.T) {
 			},
 		},
 		{
-			name: "initial Workers page",
+			name:       "initial Workers page",
+			shellReads: 1,
 			run: func() *httptest.ResponseRecorder {
 				rec := httptest.NewRecorder()
 				e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/workers", nil))
@@ -81,7 +84,7 @@ func TestHandlerWorkerCapacityRowsUseCompactProjectProjection(t *testing.T) {
 			if resp.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d", resp.Code, http.StatusOK)
 			}
-			assertWorkerCapacityProjectProjection(t, counter)
+			assertWorkerCapacityProjectProjection(t, counter, tc.shellReads)
 		})
 	}
 
@@ -110,7 +113,7 @@ func TestHandlerWorkerCapacityRowsUseCompactProjectProjection(t *testing.T) {
 	if compactStatementCount := counter.Snapshot().Requests; compactStatementCount != fullStatementCount {
 		t.Fatalf("compact poll statements = %d, full-row baseline statements = %d", compactStatementCount, fullStatementCount)
 	}
-	assertWorkerCapacityProjectProjection(t, counter)
+	assertWorkerCapacityProjectProjection(t, counter, 0)
 
 	full, err := h.projectSvc.GetByID(ctx, project.ID)
 	if err != nil || full == nil {
@@ -148,8 +151,8 @@ func renderFullProjectWorkerStats(ctx context.Context, h *Handler) (string, erro
 	return body.String(), nil
 }
 
-func assertWorkerCapacityProjectProjection(t *testing.T, counter storefixture.IOCounter) {
+func assertWorkerCapacityProjectProjection(t *testing.T, counter storefixture.IOCounter, shellReads int) {
 	t.Helper()
 	require.Equal(t, 1, counter.Snapshot().ProjectCapacityReads)
-	require.Equal(t, 0, counter.Snapshot().ProjectOtherOrderedReads)
+	require.Equal(t, shellReads, counter.Snapshot().ProjectOtherOrderedReads)
 }

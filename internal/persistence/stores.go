@@ -685,6 +685,7 @@ type TaskStore interface {
 	CountBacklogByPriority(ctx context.Context, projectID string) (map[int]int, error)
 	CountByProjectAndCategory(ctx context.Context, projectID string) (map[string]int, error)
 	CountPendingByProject(ctx context.Context) (map[string]int, error)
+	CountPendingForProject(ctx context.Context, projectID string) (int, error)
 	CountProjectStatus(ctx context.Context, projectID string) (ProjectTaskStatusCounts, error)
 	Create(ctx context.Context, t *models.Task) error
 	CreateInTx(ctx context.Context, tx Tx, t *models.Task) error

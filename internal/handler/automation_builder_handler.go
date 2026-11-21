@@ -38,8 +38,8 @@ func (h *Handler) ParseAutomationYAML(c echo.Context) error {
 
 // automationBuilderProjectID permits an unassigned draft only on builder routes.
 func (h *Handler) automationBuilderProjectID(c echo.Context) (string, error) {
-	if c.QueryParam("project_id") == models.AllProjectsID && (c.Request().URL.Path == "/automations/new" || c.Request().URL.Path == "/automations/builder" || c.Request().URL.Path == "/automations/yaml/parse") {
-		return models.AllProjectsID, nil
+	if models.IsAggregateProject(c.QueryParam("project_id")) && (c.Request().URL.Path == "/automations/new" || c.Request().URL.Path == "/automations/builder" || c.Request().URL.Path == "/automations/yaml/parse") {
+		return c.QueryParam("project_id"), nil
 	}
 	return h.getCurrentProjectID(c)
 }
@@ -126,12 +126,13 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 			if h.automationGraphSvc == nil {
 				return echo.NewHTTPError(http.StatusServiceUnavailable, "automations unavailable")
 			}
-			page := parseCardPageRequest(c)
+			page := h.parseCardPageRequest(c)
+			ctx = c.Request().Context()
 			cards, listErr := h.automationGraphSvc.ListPage(ctx, projectID, page.PageSize+1, page.Offset, page.Search)
 			if listErr != nil {
 				return listErr
 			}
-			cards, hasMore := cardPageItems(cards, page.PageSize)
+			cards, hasMore := finishCardPage(c, cards, page.PageSize)
 			projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 			return render(c, http.StatusUnprocessableEntity, pages.AutomationsDescribeFailurePage(projects, projectID, cards, description, message, hasMore))
 		}
@@ -282,7 +283,10 @@ func (h *Handler) applySubmittedAutomationBuilderCandidate(c echo.Context, candi
 }
 
 func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {
-	if projectID == models.AllProjectsID {
+	return actAutomationPreview(h, ctx, automationPreviewArgs{ProjectID: projectID, Candidate: candidate, Definition: definition})
+}
+func (h *Handler) previewAutomationBuilderLocal(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {
+	if models.IsAggregateProject(projectID) {
 		return h.automationDraftSvc.PreviewValidatedCandidate(candidate, definition), nil
 	}
 	if h.automationCompiler == nil {
@@ -343,8 +347,8 @@ func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID strin
 	if page.Source == "template" {
 		source = "template"
 	}
-	saved, err := h.automationCompiler.SaveValidatedCandidate(c.Request().Context(), service.AutomationSaveRequest{
-		ProjectID: projectID, AutomationID: page.AutomationID, Source: source, CreatedVia: "web", Candidate: page.Result.Candidate,
+	saved, err := actAutomationSave(h, c.Request().Context(), automationSaveArgs{
+		ProjectID: projectID, AutomationID: page.AutomationID, Source: source, Candidate: page.Result.Candidate,
 		UpdateToLatestTemplate: updateToLatestTemplate,
 	})
 	if err != nil {
@@ -753,7 +757,7 @@ func (h *Handler) RunAutomationNow(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	invocations, _, err := h.automationLifecycleSvc.RunNow(c.Request().Context(), projectID, c.Param("automationId"))
+	invocations, err := actAutomationMutation(h, c.Request().Context(), automationMutationArgs{ProjectID: projectID, AutomationID: c.Param("automationId"), Operation: "run"})
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
@@ -808,7 +812,7 @@ func (h *Handler) DeleteAutomationsBulk(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.automationLifecycleSvc.DeleteBulk(c.Request().Context(), projectID, ids); err != nil {
+	if err := h.runCardBulk(c.Request().Context(), "automations", "delete", projectID, ids); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
@@ -822,13 +826,13 @@ func (h *Handler) DeleteAutomation(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.automationLifecycleSvc.Delete(c.Request().Context(), projectID, c.Param("automationId")); err != nil {
+	if _, err := actAutomationMutation(h, c.Request().Context(), automationMutationArgs{ProjectID: projectID, AutomationID: c.Param("automationId"), Operation: "delete"}); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	listPage := parseCardPageRequest(c)
+	listPage := h.parseCardPageRequest(c)
 	listURL := pages.CardListURL("automations", automationCardListState(layout.WorkspaceProjectID(c.Request().Context(), projectID), automationCardListFilter(c, listPage)))
 	listURL = workspaceListReturnURL(c, "/automations", listURL)
 	if isHTMX(c) {
@@ -843,13 +847,7 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation lifecycle unavailable")
 	}
 	projectID, _ := h.automationBuilderProjectID(c)
-	var err error
-	switch action {
-	case "pause":
-		err = h.automationLifecycleSvc.Pause(c.Request().Context(), projectID, c.Param("automationId"))
-	case "resume":
-		err = h.automationLifecycleSvc.Resume(c.Request().Context(), projectID, c.Param("automationId"))
-	}
+	_, err := actAutomationMutation(h, c.Request().Context(), automationMutationArgs{ProjectID: projectID, AutomationID: c.Param("automationId"), Operation: action})
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
@@ -883,15 +881,15 @@ func (h *Handler) renderAutomationBuilder(c echo.Context, page models.Automation
 			page.EdgePalette = palette.Edges
 		}
 	}
-	if h.automationCapabilitySvc != nil && projectID != models.AllProjectsID {
+	if h.automationCapabilitySvc != nil && !models.IsAggregateProject(projectID) {
 		capabilities, err := h.automationCapabilitySvc.Build(c.Request().Context(), projectID)
 		if err != nil {
 			return err
 		}
 		page.Capabilities = capabilities
 	}
-	if layout.WorkspaceProjectID(c.Request().Context(), projectID) == models.AllProjectsID && page.AutomationID == "" {
-		page.Projects, _ = h.projectSvc.ListSelectorOptions(c.Request().Context())
+	if workspace := layout.WorkspaceProjectID(c.Request().Context(), projectID); models.IsAggregateProject(workspace) && page.AutomationID == "" {
+		page.Projects, _ = h.workspaceProjectOptions(c.Request().Context(), workspace)
 	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationBuilderContent(page, projectID))

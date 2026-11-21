@@ -1601,3 +1601,38 @@ templ ChatModelInfo(info string) {
 		</div>
 	}
 }
+
+// SharedChat starts a chat in one chosen copy of a shared project.
+templ SharedChat(projects []models.Project, sharedID string, agents []models.LLMConfig, choices []models.Project) {
+	@layout.Base("Chat", projects, sharedID) {
+		@SharedChatContent(agents, sharedID, choices)
+	}
+}
+
+templ SharedChatContent(agents []models.LLMConfig, sharedID string, choices []models.Project) {
+	<div id="shared-chat-root" class="h-full flex flex-col min-w-0 max-w-full" data-project-id={ sharedID }>
+		@layout.PageTitle("Chat")
+		<div data-page-header class="mb-4 flex items-center justify-between">
+			<h2 class="text-2xl font-bold">Chat</h2>
+		</div>
+		<div id="shared-chat-messages" class="relative flex-1 min-h-0 min-w-0">
+			@components.ChatEmptyState("Choose which computer's copy to chat in, then send a message")
+		</div>
+		<input type="hidden" id="shared-chat-project" value=""/>
+		@components.ChatInputForm(components.ChatInputFormConfig{
+			FormID:            "shared-chat-form",
+			InputID:           "shared-chat-input",
+			DraftScope:        "shared-chat-" + sharedID,
+			PostEndpoint:      "/chat/send",
+			TargetID:          "shared-chat-messages",
+			Agents:            agents,
+			ShowModelSelector: true,
+			ShowModeSelector:  true,
+			ChatMode:          models.ChatModeOrchestrate,
+			ProjectChoices:    choices,
+			ProjectInputID:    "shared-chat-project",
+			ProjectSendURL:    "/chat/send?project_id=",
+			ProjectOpenURL:    "/chat?project_id=",
+		})
+	</div>
+}

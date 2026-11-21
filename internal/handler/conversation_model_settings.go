@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
 type conversationModelOverride struct {
@@ -35,14 +37,53 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
 	}
 	taskID := c.QueryParam("task_id")
-	if taskID != "" && c.Request().Method == http.MethodGet {
-		selected := c.QueryParam("agent_id")
+	var req conversationModelRequest
+	if c.Request().Method == http.MethodPost {
+		if err := c.Bind(&req); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid model settings")
+		}
+	} else {
+		req.AgentID = c.QueryParam("agent_id")
+	}
+	result, err := actConversationModel(h, ctx, conversationModelArgs{ProjectID: projectID, TaskID: taskID, Write: c.Request().Method == http.MethodPost, Request: req})
+	if err != nil {
+		return err
+	}
+	if result.NoContent {
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+type conversationModelArgs struct {
+	ProjectID, TaskID string
+	Write             bool
+	Request           conversationModelRequest
+}
+type conversationModelResult struct {
+	AgentID   string `json:"agent_id"`
+	Effort    string `json:"reasoning_effort"`
+	Tier      string `json:"service_tier"`
+	Saved     bool   `json:"saved"`
+	NoContent bool   `json:"-"`
+}
+
+var actConversationModel = defineAction("conversation.model", func(h *Handler, ctx context.Context, a conversationModelArgs) (string, authz.Permission, error) {
+	permission := authz.View
+	if a.Write {
+		permission = authz.Edit
+	}
+	return a.ProjectID, permission, nil
+}, func(h *Handler, ctx context.Context, a conversationModelArgs) (conversationModelResult, error) {
+	projectID, taskID, req := a.ProjectID, a.TaskID, a.Request
+	if taskID != "" && !a.Write {
+		selected := req.AgentID
 		settings, err := h.taskRepo.TaskModelSettings(ctx, taskID, selected)
 		if err != nil {
-			return err
+			return conversationModelResult{}, err
 		}
 		if settings == nil || settings.ProjectID != projectID {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+			return conversationModelResult{}, statusErr(http.StatusNotFound, "task not found")
 		}
 		if selected == "" {
 			selected = settings.Config.ID
@@ -51,34 +92,26 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 			}
 		}
 		if selected != "auto" && settings.Config.ID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid model")
+			return conversationModelResult{}, statusErr(http.StatusBadRequest, "invalid model")
 		}
-		return c.JSON(http.StatusOK, map[string]any{"agent_id": selected, "reasoning_effort": settings.Effort, "service_tier": settings.ServiceTier, "saved": true})
+		return conversationModelResult{AgentID: selected, Effort: settings.Effort, Tier: settings.ServiceTier, Saved: true}, nil
 	}
 	project, err := h.projectSvc.GetByID(ctx, projectID)
 	if err != nil {
-		return err
+		return conversationModelResult{}, err
 	}
 	if project == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+		return conversationModelResult{}, statusErr(http.StatusNotFound, "project not found")
 	}
 	var task *models.Task
 	if taskID != "" {
 		task, err = h.taskRepo.GetByID(ctx, taskID)
 		if err != nil {
-			return err
+			return conversationModelResult{}, err
 		}
 		if task == nil || task.ProjectID != projectID {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+			return conversationModelResult{}, statusErr(http.StatusNotFound, "task not found")
 		}
-	}
-	var req conversationModelRequest
-	if c.Request().Method == http.MethodPost {
-		if err := c.Bind(&req); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid model settings")
-		}
-	} else {
-		req.AgentID = c.QueryParam("agent_id")
 	}
 	settingKey := "conversation.chat.model." + projectID
 	if projectID == models.AllProjectsID {
@@ -91,11 +124,11 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 	if task == nil {
 		raw, err = h.settingsRepo.Get(ctx, settingKey)
 		if err != nil {
-			return err
+			return conversationModelResult{}, err
 		}
 		if raw != "" {
 			if err := json.Unmarshal([]byte(raw), &prefs); err != nil {
-				return err
+				return conversationModelResult{}, err
 			}
 		}
 		if prefs.Overrides == nil {
@@ -104,10 +137,10 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 	}
 	// Imports from another browser must never replace an established preference.
 	if req.ImportOnly && task == nil && raw != "" {
-		return c.NoContent(http.StatusNoContent)
+		return conversationModelResult{NoContent: true}, nil
 	}
 	selected := req.AgentID
-	if c.Request().Method == http.MethodGet && selected == "" {
+	if !a.Write && selected == "" {
 		selected = prefs.AgentID
 	}
 	if selected == "" {
@@ -121,44 +154,44 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 			agent, err = h.llmConfigRepo.GetByID(ctx, selected)
 		}
 		if err != nil {
-			return err
+			return conversationModelResult{}, err
 		}
 		if agent == nil {
-			if task == nil && ((c.Request().Method == http.MethodGet && req.AgentID == "") || req.ImportOnly) {
+			if task == nil && ((!a.Write && req.AgentID == "") || req.ImportOnly) {
 				selected = "auto"
 			} else {
-				return echo.NewHTTPError(http.StatusBadRequest, "invalid model")
+				return conversationModelResult{}, statusErr(http.StatusBadRequest, "invalid model")
 			}
 		}
 	}
 	override := conversationModelOverride{}
-	if c.Request().Method == http.MethodPost {
+	if a.Write {
 		if req.ImportOnly && task != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "imports are only supported for Chat")
+			return conversationModelResult{}, statusErr(http.StatusBadRequest, "imports are only supported for Chat")
 		}
 		if agent != nil {
 			if (req.Effort != "" && !models.ValidConversationEffort(*agent, req.Effort)) || !models.ValidServiceTier(*agent, req.Tier) {
-				return echo.NewHTTPError(http.StatusBadRequest, "unsupported model settings")
+				return conversationModelResult{}, statusErr(http.StatusBadRequest, "unsupported model settings")
 			}
 		} else if req.Effort != "" || req.Tier != "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "automatic selection has no model overrides")
+			return conversationModelResult{}, statusErr(http.StatusBadRequest, "automatic selection has no model overrides")
 		}
 		if task != nil {
 			if agent != nil {
 				if err := h.taskRepo.SetModelOverrides(ctx, task.ID, *agent, &req.Effort, &req.Tier); err != nil {
-					return err
+					return conversationModelResult{}, err
 				}
 				if task.AgentID == nil || *task.AgentID != agent.ID {
 					if err := h.taskRepo.UpdateAgentID(ctx, task.ID, agent.ID); err != nil {
-						return err
+						return conversationModelResult{}, err
 					}
 				}
 			} else if task.SwarmRole == models.SwarmRoleParent {
 				if err := h.taskRepo.UpdateAgentID(ctx, task.ID, ""); err != nil {
-					return err
+					return conversationModelResult{}, err
 				}
 			}
-			return c.NoContent(http.StatusNoContent)
+			return conversationModelResult{NoContent: true}, nil
 		}
 		if req.ImportOnly {
 			for key, value := range req.Overrides {
@@ -168,7 +201,7 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 				}
 				config, err := h.llmConfigRepo.GetByID(ctx, parts[0])
 				if err != nil {
-					return err
+					return conversationModelResult{}, err
 				}
 				if config == nil || config.Model != parts[1] {
 					continue
@@ -188,16 +221,16 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 		}
 		encoded, err := json.Marshal(prefs)
 		if err != nil {
-			return err
+			return conversationModelResult{}, err
 		}
 		updated, err := h.settingsRepo.CompareAndSet(ctx, settingKey, raw, string(encoded), nil)
 		if err != nil {
-			return err
+			return conversationModelResult{}, err
 		}
 		if !updated && !req.ImportOnly {
-			return echo.NewHTTPError(http.StatusConflict, "model settings changed; reopen the picker and retry")
+			return conversationModelResult{}, statusErr(http.StatusConflict, "model settings changed; reopen the picker and retry")
 		}
-		return c.NoContent(http.StatusNoContent)
+		return conversationModelResult{NoContent: true}, nil
 	}
 	if agent != nil {
 		override = prefs.Overrides[agent.ID+":"+agent.Model]
@@ -208,5 +241,5 @@ func (h *Handler) ConversationModelSettings(c echo.Context) error {
 			override.Tier = ""
 		}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"agent_id": selected, "reasoning_effort": override.Effort, "service_tier": override.Tier, "saved": raw != "" || task != nil})
-}
+	return conversationModelResult{AgentID: selected, Effort: override.Effort, Tier: override.Tier, Saved: raw != "" || task != nil}, nil
+})

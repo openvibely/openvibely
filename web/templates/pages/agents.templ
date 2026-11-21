@@ -446,7 +446,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										</select>
 									</div>
 								</div>
-                                if state.ProjectID == models.AllProjectsID {
+                                if models.IsAggregateProject(state.ProjectID) {
                                     <label id="agent-project-choice" class="form-control hidden">
                                         <span class="label-text">Project</span>
                                         <select id="agent-project-owner" name="agent_project_id" class="select select-bordered select-sm" disabled>
@@ -513,7 +513,13 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				return url + currentProjectQueryString();
 			}
 
-			function withCurrentAgentListState(url) {
+			function withAgentOwner(url) {
+                const target = new URL(withCurrentProject(url), location.href);
+                if (activeAgentID) target.searchParams.set('agent_id', activeAgentID);
+                return target.pathname + target.search;
+            }
+
+            function withCurrentAgentListState(url) {
 				var scoped = withCurrentProject(url);
 				if (window.cardCollectionActionURL) return window.cardCollectionActionURL(document.getElementById('agents-container'), scoped);
 				return scoped;
@@ -1136,7 +1142,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			pluginStateLoadInFlight += 1;
 			setPluginCatalogLoading(true);
 			try {
-				const response = await fetch('/agents/plugins/state');
+				const response = await fetch(withAgentOwner('/agents/plugins/state'));
 				if (!response.ok) throw new Error('Failed to load plugin state');
 				const payload = await response.json();
 				if (requestToken !== pluginStateRequestToken) {
@@ -1299,7 +1305,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				if (currentAgentID) {
 					body.agent_id = currentAgentID;
 				}
-				const response = await fetch('/agents/plugins/install', {
+				const response = await fetch(withCurrentProject('/agents/plugins/install'), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify(body)
@@ -1355,12 +1361,12 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			const id = String(pluginID || '').trim();
 			if (!id) return;
 			if (uninstallingPluginIDs.has(id) || installingPluginIDs.has(id) || pluginCatalogLoading || hasActivePluginMutation()) return;
-			if (!await window.openVibelyConfirm('Uninstall plugin "' + id + '"? This removes local plugin files.')) return;
+			if (!await window.openVibelyConfirm('Uninstall plugin "' + id + '"? This removes plugin files on the owning server.')) return;
 			setPluginUninstallInProgress(id, true);
 			pendingUninstalledPluginIDs.add(id);
 			setMarketplaceActionStatus('Removing plugin "' + id + '"...', 'info');
 			try {
-				const response = await fetch('/agents/plugins/uninstall', {
+				const response = await fetch(withAgentOwner('/agents/plugins/uninstall'), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ plugin_id: id })
@@ -1545,8 +1551,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				refreshSelectedPluginsFromDOM();
 				const body = new URLSearchParams();
 				body.set('description', description);
+                body.set('scope', document.getElementById('advanced_scope').value || 'global');
 				body.set('plugins_json', JSON.stringify(selectedPluginIDs));
-                const generationURL = new URL(withCurrentProject('/agents/generate'), location.href);
+                const generationURL = new URL(withAgentOwner('/agents/generate'), location.href);
                 const owner = document.getElementById('agent-project-owner');
                 if (document.getElementById('advanced_scope').value === 'project' && owner) {
                     if (!owner.value) {

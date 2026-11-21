@@ -366,7 +366,7 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 }
 
 func (s *UpcomingService) historyProjectChanges(ctx context.Context, projectID string, since time.Time) (*models.ProjectChanges, []string) {
-	if projectID == models.AllProjectsID && s.projectRepo != nil {
+	if models.IsAggregateProject(projectID) && s.projectRepo != nil {
 		projects, err := s.projectRepo.ListSelectorOptions(ctx)
 		if err != nil {
 			return nil, nil
@@ -374,6 +374,9 @@ func (s *UpcomingService) historyProjectChanges(ctx context.Context, projectID s
 		var combined *models.ProjectChanges
 		var files []string
 		for _, project := range projects {
+			if !models.InScope(ctx, project.ID) {
+				continue
+			}
 			changes, projectFiles := s.historyProjectChanges(ctx, project.ID, since)
 			if changes == nil {
 				continue

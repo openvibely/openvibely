@@ -29,8 +29,8 @@ type OAuthConnection struct {
 	ID                  string      `json:"id"`
 	Provider            LLMProvider `json:"provider"`
 	Name                string      `json:"name"`
-	AccessToken         string      `json:"-"`
-	RefreshToken        string      `json:"-"`
+	AccessToken         string      `json:"-" remote:"-"`
+	RefreshToken        string      `json:"-" remote:"-"`
 	ExpiresAt           int64       `json:"oauth_expires_at,omitempty"`
 	AccountID           string      `json:"-"`
 	ProviderDisplayName string      `json:"-"`
@@ -57,6 +57,8 @@ type PendingModelOAuth struct {
 }
 
 type LLMConfig struct {
+	// RemoteOAuthConnected reports owner status without exposing credentials. It is not persisted.
+	RemoteOAuthConnected *bool `json:"remote_oauth_connected,omitempty"`
 	// PendingOAuthConnection is an in-memory authorization applied atomically with an explicit model save.
 	PendingOAuthConnection *PendingModelOAuth `json:"-"`
 
@@ -66,7 +68,7 @@ type LLMConfig struct {
 	Model           string      `json:"model"`
 	ReasoningEffort string      `json:"reasoning_effort,omitempty"`
 	ServiceTier     string      `json:"service_tier,omitempty"`
-	APIKey          string      `json:"-"`
+	APIKey          string      `json:"-" remote:"-"`
 	MaxTokens       int         `json:"max_tokens"`
 	Temperature     float64     `json:"temperature"`
 	IsDefault       bool        `json:"is_default"`
@@ -75,8 +77,8 @@ type LLMConfig struct {
 
 	// OAuth fields (used when AuthMethod=oauth for Claude Max or OpenAI)
 	AuthMethod               AuthMethod `json:"auth_method"`
-	OAuthAccessToken         string     `json:"-"` // Never serialized
-	OAuthRefreshToken        string     `json:"-"` // Never serialized
+	OAuthAccessToken         string     `json:"-" remote:"-"` // Never serialized
+	OAuthRefreshToken        string     `json:"-" remote:"-"` // Never serialized
 	OAuthExpiresAt           int64      `json:"oauth_expires_at,omitempty"`
 	OAuthAccountID           string     `json:"-"` // ChatGPT workspace/account id for OpenAI OAuth
 	OAuthNeedsReauth         bool       `json:"oauth_needs_reauth,omitempty"`
@@ -89,8 +91,8 @@ type LLMConfig struct {
 	WorkerTimeout int `json:"worker_timeout"` // Inactivity timeout; 0 = use global default (seconds)
 
 	// Configurable OAuth endpoints (used for OpenAI OAuth; Claude Max uses hardcoded endpoints)
-	OAuthClientID     string `json:"-"` // Never serialized
-	OAuthClientSecret string `json:"-"` // Never serialized
+	OAuthClientID     string `json:"-"`            // Never serialized
+	OAuthClientSecret string `json:"-" remote:"-"` // Never serialized
 	OAuthAuthorizeURL string `json:"oauth_authorize_url,omitempty"`
 	OAuthTokenURL     string `json:"oauth_token_url,omitempty"`
 	OAuthScopes       string `json:"oauth_scopes,omitempty"`
@@ -105,7 +107,7 @@ type LLMConfig struct {
 	ModelsURL               string `json:"models_url,omitempty"`
 	AuthHeaderName          string `json:"auth_header_name,omitempty"`
 	AuthHeaderValuePrefix   string `json:"auth_header_value_prefix,omitempty"`
-	ExtraHeadersJSON        string `json:"-"`
+	ExtraHeadersJSON        string `json:"-" remote:"-"`
 	ExtraBodyJSON           string `json:"extra_body_json,omitempty"`
 	DefaultMaxTokens        int    `json:"default_max_tokens,omitempty"`
 	ContextWindow           int    `json:"context_window,omitempty"`
@@ -116,8 +118,8 @@ type LLMConfig struct {
 	ForceNativeCompaction   bool   `json:"-"`
 	TokenExchangeFormat     string `json:"token_exchange_format,omitempty"`
 	TokenRefreshFormat      string `json:"token_refresh_format,omitempty"`
-	CustomAuthConfigJSON    string `json:"-"`
-	CustomAuthStateJSON     string `json:"-"`
+	CustomAuthConfigJSON    string `json:"-" remote:"-"`
+	CustomAuthStateJSON     string `json:"-" remote:"-"`
 	OAuthConfigRevision     int64  `json:"-"`
 	MixtureConfigJSON       string `json:"mixture_config_json,omitempty"`
 

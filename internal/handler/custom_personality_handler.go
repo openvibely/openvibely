@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/cardcursor"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -23,6 +24,9 @@ func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequ
 		}
 	}
 	cards := pages.BuildPersonalityListCards(strings.TrimSpace(selected), customs, personalityListState(page))
+	if cardcursor.From(ctx) != nil {
+		return cardcursor.Finish(ctx, cards, page.PageSize)
+	}
 	start := page.Offset
 	if start > len(cards) {
 		start = len(cards)
@@ -56,7 +60,8 @@ func (h *Handler) renderPersonalitySection(c echo.Context) error {
 		personality, _ = h.settingsRepo.Get(ctx, "personality")
 	}
 
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
+	ctx = c.Request().Context()
 	customs, hasMore, err := h.listPersonalityCardPage(ctx, page, personality)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load custom personalities")
@@ -131,17 +136,13 @@ func (h *Handler) CreateCustomPersonality(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Key is required")
 	}
 
-	// Allow custom personalities to override presets by using the same key
-	existing, err := h.customPersonalityRepo.GetByKey(c.Request().Context(), p.Key)
+	projectID, err := h.getCurrentProjectID(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to check key uniqueness")
+		return err
 	}
-	if existing != nil {
-		return echo.NewHTTPError(http.StatusConflict, "A custom personality with this key already exists")
-	}
-
-	if err := h.customPersonalityRepo.Create(c.Request().Context(), p); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create custom personality")
+	p, err = actPersonalityOperation(h, c.Request().Context(), personalityOperationArgs{ProjectID: projectID, Key: p.Key, Operation: "create", Personality: p})
+	if err != nil {
+		return err
 	}
 
 	if payload.IsJSON {
@@ -192,28 +193,13 @@ func (h *Handler) UpdateCustomPersonality(c echo.Context) error {
 	}
 	p := payload.Personality
 
-	existing, err := h.customPersonalityRepo.GetByKey(c.Request().Context(), key)
+	projectID, err := h.getCurrentProjectID(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load personality")
+		return err
 	}
-
-	if existing != nil {
-		if err := h.customPersonalityRepo.Update(c.Request().Context(), key, p); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to update custom personality")
-		}
-	} else {
-		if key == "" || !service.IsPresetPersonality(key) {
-			return echo.NewHTTPError(http.StatusNotFound, "Custom personality not found")
-		}
-		if err := h.customPersonalityRepo.Create(c.Request().Context(), p); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save personality")
-		}
-	}
-
-	// Refresh from DB to get the complete object with ID and Key
-	updated, err := h.customPersonalityRepo.GetByKey(c.Request().Context(), key)
+	updated, err := actPersonalityOperation(h, c.Request().Context(), personalityOperationArgs{ProjectID: projectID, Key: key, Operation: "update", Personality: p})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve updated personality")
+		return err
 	}
 
 	if payload.IsJSON {
@@ -230,24 +216,8 @@ func (h *Handler) DeleteCustomPersonalitiesBulk(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	active := ""
-	if h.settingsRepo != nil {
-		active, _ = h.settingsRepo.Get(c.Request().Context(), "personality")
-	}
-	for _, key := range keys {
-		if key == active {
-			return echo.NewHTTPError(http.StatusBadRequest, "the active personality cannot be deleted")
-		}
-		if service.IsPresetPersonality(key) {
-			return echo.NewHTTPError(http.StatusBadRequest, "built-in personalities and their overrides cannot be bulk deleted")
-		}
-		personality, getErr := h.customPersonalityRepo.GetByKey(c.Request().Context(), key)
-		if getErr != nil || personality == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "all selected personalities must be inactive custom entries")
-		}
-	}
-	if err := h.customPersonalityRepo.DeleteBulk(c.Request().Context(), keys); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if err := h.runCardBulk(c.Request().Context(), "personalities", "delete", "", keys); err != nil {
+		return err
 	}
 	return c.JSON(http.StatusOK, map[string]int{"deleted": len(keys)})
 }
@@ -259,27 +229,12 @@ func (h *Handler) DeleteCustomPersonality(c echo.Context) error {
 	}
 
 	key := c.Param("key")
-	// Check if exists first
-	existing, err := h.customPersonalityRepo.GetByKey(c.Request().Context(), key)
+	projectID, err := h.getCurrentProjectID(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to check personality existence")
+		return err
 	}
-	if existing == nil && !service.IsPresetPersonality(key) {
-		return echo.NewHTTPError(http.StatusNotFound, "Custom personality not found")
-	}
-
-	if existing != nil {
-		if err := h.customPersonalityRepo.Delete(c.Request().Context(), key); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to delete custom personality")
-		}
-	}
-
-	// Reset to default if the deleted personality was active
-	if h.settingsRepo != nil {
-		current, _ := h.settingsRepo.Get(c.Request().Context(), "personality")
-		if current == key {
-			_ = h.settingsRepo.Set(c.Request().Context(), "personality", "")
-		}
+	if _, err := actPersonalityOperation(h, c.Request().Context(), personalityOperationArgs{ProjectID: projectID, Key: key, Operation: "delete"}); err != nil {
+		return err
 	}
 
 	isJSON := strings.Contains(c.Request().Header.Get(echo.HeaderAccept), echo.MIMEApplicationJSON) ||
@@ -288,4 +243,30 @@ func (h *Handler) DeleteCustomPersonality(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	return h.renderPersonalitySection(c)
+}
+
+func (h *Handler) deletePersonalities(ctx context.Context, keys []string, checkOnly bool) error {
+	active := ""
+	if h.settingsRepo != nil {
+		active, _ = h.settingsRepo.Get(ctx, "personality")
+	}
+	for _, key := range keys {
+		if key == active {
+			return echo.NewHTTPError(http.StatusBadRequest, "the active personality cannot be deleted")
+		}
+		if service.IsPresetPersonality(key) {
+			return echo.NewHTTPError(http.StatusBadRequest, "built-in personalities and their overrides cannot be bulk deleted")
+		}
+		personality, getErr := h.customPersonalityRepo.GetByKey(ctx, key)
+		if getErr != nil || personality == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "all selected personalities must be inactive custom entries")
+		}
+	}
+	if checkOnly {
+		return nil
+	}
+	if err := h.customPersonalityRepo.DeleteBulk(ctx, keys); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return nil
 }

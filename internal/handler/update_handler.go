@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/remote"
 	"github.com/openvibely/openvibely/internal/update"
 )
 
@@ -77,13 +78,9 @@ func (h *Handler) auditedSystemUpdate(c echo.Context, operation string, perform 
 	if err := h.requireCurrentOrgAdmin(c); err != nil {
 		return err
 	}
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil {
-		return err
-	}
-	ctx := c.Request().Context()
+	ctx := remote.WithServer(c.Request().Context(), "")
 	action := "system_update." + operation
-	if err := h.projectAccessSvc.RecordAction(ctx, projectID, action+".requested", "instance", `{}`); err != nil {
+	if err := h.projectAccessSvc.RecordInstanceAction(ctx, action+".requested", `{}`); err != nil {
 		return err
 	}
 	operationErr := perform()
@@ -93,6 +90,6 @@ func (h *Handler) auditedSystemUpdate(c echo.Context, operation string, perform 
 	}
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	auditErr := h.projectAccessSvc.RecordAction(auditCtx, projectID, action+outcome, "instance", `{}`)
+	auditErr := h.projectAccessSvc.RecordInstanceAction(auditCtx, action+outcome, `{}`)
 	return errors.Join(operationErr, auditErr)
 }

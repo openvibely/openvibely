@@ -12,11 +12,19 @@ import (
 
 // ListSlackAuthorizedUsers returns the authorized Slack users list for a project.
 func (h *Handler) ListSlackAuthorizedUsers(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "slack", "list"); handled {
+		return err
+	}
+
 	return h.slackAuthorizedUserCRUD().listHandler(c)
 }
 
 // AddSlackAuthorizedUser adds a new authorized Slack user.
 func (h *Handler) AddSlackAuthorizedUser(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "slack", "create"); handled {
+		return err
+	}
+
 	return h.slackAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
 		slackUserID := strings.TrimSpace(c.FormValue("slack_user_id"))
 		displayName := strings.TrimSpace(c.FormValue("display_name"))
@@ -40,6 +48,10 @@ func (h *Handler) AddSlackAuthorizedUser(c echo.Context) error {
 
 // RemoveSlackAuthorizedUser removes an authorized Slack user.
 func (h *Handler) RemoveSlackAuthorizedUser(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "slack", "delete"); handled {
+		return err
+	}
+
 	return h.slackAuthorizedUserCRUD().deleteHandler(c)
 }
 
@@ -61,6 +73,9 @@ func (h *Handler) slackAuthorizedUserCRUD() authorizedUserCRUD[models.SlackAutho
 
 // BindSlackApplicationUser records an administrator-attested workspace identity.
 func (h *Handler) BindSlackApplicationUser(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "slack", "bind-application"); handled {
+		return err
+	}
 	projectID := c.FormValue("project_id")
 	if err := h.prepareChannelSenderOptions(c, projectID, true); err != nil {
 		return err

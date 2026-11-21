@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/pkg/filecontent"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
@@ -322,48 +323,71 @@ func SetUploadsDir(dir string) {
 func (h *Handler) UploadAttachment(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UploadAttachment task=%s", taskID)
-
-	// Verify task exists and belongs to the active/requested project before parsing or writing files.
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		applog.Infof("[handler] UploadAttachment task not found: %v", err)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	ctx := c.Request().Context()
+	ref := TaskRef{TaskID: taskID, ProjectID: h.mutationProjectID(c)}
+	// Check the task before parsing or writing files.
+	if _, err := actTaskExists(h, ctx, ref); err != nil {
+		return err
 	}
-	projectID := h.mutationProjectID(c)
-	if projectID != "" && task.ProjectID != projectID {
-		applog.Infof("[handler] UploadAttachment task not found in project=%s", projectID)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
 	form, err := parseTaskAttachmentForm(c, "UploadAttachment")
 	if err != nil {
 		return err
 	}
-
 	if form == nil {
-		applog.Infof("[handler] UploadAttachment no multipart form provided")
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
 	}
-
-	// Get the files from request
-	files := form.File["files"]
-	if len(files) == 0 {
-		applog.Infof("[handler] UploadAttachment no files provided")
+	if len(form.File["files"]) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "no files provided")
 	}
+	files, err := h.stageUploads(ctx, taskID, "", requestUploads(form.File["files"]))
+	if err != nil {
+		return actionHTTPError(err)
+	}
+	projectID, err := actUploadAttachments(h, ctx, uploadAttachmentsArgs{TaskRef: ref, Files: files})
+	if err != nil {
+		return err
+	}
+	return h.renderTaskAttachmentList(c, taskID, projectID)
+}
 
-	result := h.persistTaskAttachmentFiles(c.Request().Context(), taskID, files, "UploadAttachment")
+// taskNotFoundRef reports a missing or other-project task as not found.
+func (h *Handler) taskNotFoundRef(ctx context.Context, a TaskRef) (string, authz.Permission, error) {
+	projectID, permission, err := editTask(h, ctx, a.TaskID)
+	if err != nil || (a.ProjectID != "" && a.ProjectID != projectID) {
+		return "", "", statusErr(http.StatusNotFound, "task not found")
+	}
+	return projectID, permission, nil
+}
+
+var actTaskExists = defineAction("task.exists", (*Handler).taskNotFoundRef, func(h *Handler, ctx context.Context, a TaskRef) (struct{}, error) {
+	return struct{}{}, nil
+})
+
+type uploadAttachmentsArgs struct {
+	TaskRef
+	Files []uploadFile
+}
+
+var actUploadAttachments = defineAction("task.attachments.upload", func(h *Handler, ctx context.Context, a uploadAttachmentsArgs) (string, authz.Permission, error) {
+	return h.taskNotFoundRef(ctx, a.TaskRef)
+}, func(h *Handler, ctx context.Context, a uploadAttachmentsArgs) (string, error) {
+	task, err := h.loadTask(ctx, a.TaskID)
+	if err != nil {
+		removeStagedUploads(a.TaskID, a.Files)
+		return "", err
+	}
+	result := h.persistTaskAttachmentFiles(ctx, a.TaskID, a.TaskID, a.Files, "UploadAttachment")
 	if result.directoryError != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create directory")
+		return "", statusErr(http.StatusInternalServerError, "failed to create directory")
 	}
 	if result.listError != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to inspect existing attachments")
+		return "", statusErr(http.StatusInternalServerError, "failed to inspect existing attachments")
 	}
 	if result.uploadedCount == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "no files could be uploaded")
+		return "", statusErr(http.StatusBadRequest, "no files could be uploaded")
 	}
-	return h.renderTaskAttachmentList(c, taskID, task.ProjectID)
-}
+	return task.ProjectID, nil
+})
 
 // GetTaskAttachments includes files sent in this task's messages without changing ownership.
 func (h *Handler) GetTaskAttachments(c echo.Context) error {
@@ -402,7 +426,7 @@ type taskAttachmentUploadResult struct {
 }
 
 // persistTaskAttachmentFiles saves uploaded files to uploads/{taskID}/ and creates task attachment records.
-func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string, files []*multipart.FileHeader, logScope string) taskAttachmentUploadResult {
+func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID, stageKey string, files []uploadFile, logScope string) taskAttachmentUploadResult {
 	result := taskAttachmentUploadResult{}
 	taskDir := filepath.Join(uploadsDir, taskID)
 	if err := taskAttachmentMkdirAll(taskDir, 0755); err != nil {
@@ -423,19 +447,20 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 		usedNames[filepath.Base(attachment.FilePath)] = true
 	}
 
+	defer removeStagedUploads(stageKey, files)
 	for _, file := range files {
-		if file.Size > filecontent.UploadLimit(file.Filename) {
-			applog.Infof("[handler] %s file %s too large (%d bytes)", logScope, file.Filename, file.Size)
-			continue
-		}
-
-		src, err := file.Open()
+		src, size, err := file.open(stageKey)
 		if err != nil {
-			applog.Infof("[handler] %s error opening file %s: %v", logScope, file.Filename, err)
+			applog.Infof("[handler] %s error opening file %s: %v", logScope, file.Name, err)
+			continue
+		}
+		if size > filecontent.UploadLimit(file.Name) {
+			applog.Infof("[handler] %s file %s too large (%d bytes)", logScope, file.Name, size)
+			src.Close()
 			continue
 		}
 
-		filename := uniqueAttachmentName(taskDir, filepath.Base(file.Filename), usedNames)
+		filename := uniqueAttachmentName(taskDir, filepath.Base(file.Name), usedNames)
 		destPath := filepath.Join(taskDir, filename)
 		dest, err := taskAttachmentCreate(destPath)
 		if err != nil {
@@ -454,7 +479,7 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 		src.Close()
 		dest.Close()
 
-		mediaType := file.Header.Get("Content-Type")
+		mediaType := file.ContentType
 		if known, ok := allowedFileExtensions[strings.ToLower(filepath.Ext(filename))]; ok {
 			mediaType = known
 		}
@@ -467,7 +492,7 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 			FileName:  filename,
 			FilePath:  destPath,
 			MediaType: mediaType,
-			FileSize:  file.Size,
+			FileSize:  size,
 		}
 
 		if err := h.attachmentRepo.Create(ctx, attachment); err != nil {
@@ -476,7 +501,7 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 			continue
 		}
 
-		applog.Infof("[handler] %s attachment created id=%s file=%s size=%d", logScope, attachment.ID, filename, file.Size)
+		applog.Infof("[handler] %s attachment created id=%s file=%s size=%d", logScope, attachment.ID, filename, size)
 		result.uploadedCount++
 	}
 
@@ -506,49 +531,59 @@ func (h *Handler) removeTaskAttachmentFileIfUnreferenced(ctx context.Context, ta
 func (h *Handler) DeleteAttachment(c echo.Context) error {
 	attachmentID := c.Param("id")
 	applog.Infof("[handler] DeleteAttachment id=%s", attachmentID)
+	task, err := actDeleteAttachment(h, c.Request().Context(), deleteAttachmentArgs{AttachmentID: attachmentID, ProjectID: h.mutationProjectID(c)})
+	if err != nil {
+		return err
+	}
+	return h.renderTaskAttachmentList(c, task.TaskID, task.ProjectID)
+}
 
-	ctx := c.Request().Context()
-	projectID := h.mutationProjectID(c)
+type deleteAttachmentArgs struct {
+	AttachmentID string
+	ProjectID    string
+}
 
-	// Get attachment to find the parent task and file path, scoped to the active/requested project when present.
+// attachmentTask resolves an attachment's task, scoped to the request's project.
+func (h *Handler) attachmentTask(ctx context.Context, a deleteAttachmentArgs) (*models.Attachment, *models.Task, error) {
+	notFound := statusErr(http.StatusNotFound, "attachment not found")
 	var (
 		attachment *models.Attachment
 		err        error
 	)
-	if projectID != "" {
-		attachment, err = h.attachmentRepo.GetByIDForProject(ctx, attachmentID, projectID)
+	if a.ProjectID != "" {
+		attachment, err = h.attachmentRepo.GetByIDForProject(ctx, a.AttachmentID, a.ProjectID)
 	} else {
-		attachment, err = h.attachmentRepo.GetByID(ctx, attachmentID)
+		attachment, err = h.attachmentRepo.GetByID(ctx, a.AttachmentID)
 	}
 	if err != nil || attachment == nil {
-		applog.Infof("[handler] DeleteAttachment not found: %v", err)
-		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+		return nil, nil, notFound
 	}
-
 	task, err := h.taskSvc.GetByID(ctx, attachment.TaskID)
-	if err != nil || task == nil {
-		applog.Infof("[handler] DeleteAttachment parent task not found: %v", err)
-		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+	if err != nil || task == nil || (a.ProjectID != "" && task.ProjectID != a.ProjectID) {
+		return nil, nil, notFound
 	}
-	if projectID != "" && task.ProjectID != projectID {
-		applog.Infof("[handler] DeleteAttachment attachment not found in project=%s", projectID)
-		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
-	}
+	return attachment, task, nil
+}
 
-	// Delete from database with the same project guard used for lookup.
-	if err := h.attachmentRepo.DeleteByIDForProject(ctx, attachmentID, task.ProjectID); err != nil {
+var actDeleteAttachment = defineAction("task.attachments.delete", func(h *Handler, ctx context.Context, a deleteAttachmentArgs) (string, authz.Permission, error) {
+	_, task, err := h.attachmentTask(ctx, a)
+	if err != nil {
+		return "", "", err
+	}
+	return task.ProjectID, authz.Edit, nil
+}, func(h *Handler, ctx context.Context, a deleteAttachmentArgs) (TaskRef, error) {
+	attachment, task, err := h.attachmentTask(ctx, a)
+	if err != nil {
+		return TaskRef{}, err
+	}
+	if err := h.attachmentRepo.DeleteByIDForProject(ctx, a.AttachmentID, task.ProjectID); err != nil {
 		applog.Infof("[handler] DeleteAttachment error deleting from db: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete attachment")
+		return TaskRef{}, statusErr(http.StatusInternalServerError, "failed to delete attachment")
 	}
-
 	// Delete the file only when no remaining metadata row references it.
 	h.removeTaskAttachmentFileIfUnreferenced(ctx, attachment.TaskID, attachment.FilePath, "DeleteAttachment")
-
-	applog.Infof("[handler] DeleteAttachment success id=%s", attachmentID)
-
-	// Return updated attachments list
-	return h.renderTaskAttachmentList(c, task.ID, task.ProjectID)
-}
+	return TaskRef{TaskID: task.ID, ProjectID: task.ProjectID}, nil
+})
 
 // DownloadTaskAttachment resolves the attachment through its owning project.
 func (h *Handler) DownloadTaskAttachment(c echo.Context) error {
@@ -562,7 +597,7 @@ func (h *Handler) DownloadTaskAttachment(c echo.Context) error {
 	}
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().Header().Set("Content-Security-Policy", "sandbox")
-	return serveFileContent(c, attachment.FilePath, attachment.FileName)
+	return serveFile(c, h.sourceFor(fileKindAttachment, attachment.ID, projectID, attachment.FilePath), attachment.FileName)
 }
 
 // saveDeferredTaskUploads publishes draft files before returning a non-running task.

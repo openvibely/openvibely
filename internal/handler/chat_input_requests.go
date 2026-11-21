@@ -296,12 +296,36 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 		payload.ProjectID = c.FormValue("project_id")
 		payload.Answers = []chatInputRequestAnswer{{QuestionID: c.FormValue("question_id"), Label: c.FormValue("label"), CustomAnswer: c.FormValue("custom_answer")}}
 	}
+	args := inputAnswerArgs{InputID: id, Payload: payload}
+	// Only the session-backed, same-origin browser decision can authorize an installation.
+	args.HumanDecision = h.requireDependencyHuman(c) == nil
+	_, err := actInputAnswer(h, c.Request().Context(), args)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+type inputAnswerArgs struct {
+	InputID       string
+	Payload       chatInputRequestAnswerPayload
+	HumanDecision bool
+}
+
+var actInputAnswer = defineAction("chat.input.answer", func(h *Handler, ctx context.Context, a inputAnswerArgs) (string, authz.Permission, error) {
+	return strings.TrimSpace(a.Payload.ProjectID), authz.Edit, nil
+}, func(h *Handler, ctx context.Context, a inputAnswerArgs) (struct{}, error) {
+	return struct{}{}, h.answerChatInput(ctx, a)
+})
+
+func (h *Handler) answerChatInput(ctx context.Context, a inputAnswerArgs) error {
+	id, payload := a.InputID, a.Payload
 	projectID := strings.TrimSpace(payload.ProjectID)
-	if err := h.requireChatInputProject(c.Request().Context(), projectID, authz.Edit); err != nil {
+	if err := h.requireChatInputProject(ctx, projectID, authz.Edit); err != nil {
 		return err
 	}
 	if projectID == models.AllProjectsID && h.projectAccessSvc != nil {
-		requests, err := h.listChatInputRequests(c.Request().Context(), projectID)
+		requests, err := h.listChatInputRequests(ctx, projectID)
 		if err != nil {
 			return err
 		}
@@ -317,7 +341,7 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 		}
 	}
 	if h.chatInputRequestRepo != nil {
-		record, err := h.chatInputRequestRepo.Get(c.Request().Context(), id)
+		record, err := h.chatInputRequestRepo.Get(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -327,7 +351,10 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 				return err
 			}
 			if installation != nil {
-				return h.answerSkillInstallation(c, record, payload)
+				if !a.HumanDecision {
+					return statusErr(http.StatusForbidden, "same-origin UI decision required")
+				}
+				return h.answerSkillInstallationLocal(ctx, record, payload)
 			}
 		}
 	}
@@ -338,15 +365,15 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 			return err
 		}
 		var recoveredErr error
-		resolved, recovered, recoveredErr = h.resolvePersistedChatInputRequest(c.Request().Context(), id, projectID, payload.Answers)
+		resolved, recovered, recoveredErr = h.resolvePersistedChatInputRequest(ctx, id, projectID, payload.Answers)
 		if recoveredErr != nil {
 			return recoveredErr
 		}
-	} else if err := h.persistChatInputRequestResolution(c.Request().Context(), id, projectID, resolved.Answers); err != nil {
+	} else if err := h.persistChatInputRequestResolution(ctx, id, projectID, resolved.Answers); err != nil {
 		return err
 	}
 	if recovered {
-		h.completeRecoveredChatInputExecution(c.Request().Context(), resolved)
+		h.completeRecoveredChatInputExecution(ctx, resolved)
 	}
 	if h.chatBroadcaster != nil {
 		h.publishChatEvent(events.ChatEvent{
@@ -356,7 +383,7 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 			InputRequest: chatInputRequestForEvent(resolved),
 		})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"ok": true})
+	return nil
 }
 
 func (h *Handler) ChatInputRequests(c echo.Context) error {

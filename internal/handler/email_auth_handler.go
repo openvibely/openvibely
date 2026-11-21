@@ -13,11 +13,19 @@ import (
 
 // ListEmailAuthorizedSenders returns the authorized email senders list for a project.
 func (h *Handler) ListEmailAuthorizedSenders(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "email", "list"); handled {
+		return err
+	}
+
 	return h.emailAuthorizedUserCRUD().listHandler(c)
 }
 
 // AddEmailAuthorizedSender adds a new authorized email sender.
 func (h *Handler) AddEmailAuthorizedSender(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "email", "create"); handled {
+		return err
+	}
+
 	return h.emailAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
 		emailAddress := persistence.NormalizeEmailAddress(c.FormValue("authorized_email_address"))
 		displayName := strings.TrimSpace(c.FormValue("display_name"))
@@ -40,6 +48,10 @@ func (h *Handler) AddEmailAuthorizedSender(c echo.Context) error {
 
 // RemoveEmailAuthorizedSender removes an authorized email sender.
 func (h *Handler) RemoveEmailAuthorizedSender(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "email", "delete"); handled {
+		return err
+	}
+
 	return h.emailAuthorizedUserCRUD().deleteHandler(c)
 }
 

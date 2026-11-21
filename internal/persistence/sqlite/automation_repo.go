@@ -261,8 +261,8 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
 		WHERE a.project_id = ? AND v.state = 'published'`
 	args := []any{projectID}
-	if projectID == models.AllProjectsID {
-		query = strings.Replace(query, "a.project_id = ?", accessibleProjectPredicate(ctx, "a.project_id", false), 1)
+	if models.IsAggregateProject(projectID) {
+		query = strings.Replace(query, "a.project_id = ?", aggregateProjectPredicate(ctx, "a.project_id", projectID, false), 1)
 		args = nil
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
@@ -292,6 +292,10 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
+	query, args, cursorErr := cardCursorQuery(ctx, "automations", "a", query, args)
+	if cursorErr != nil {
+		return nil, cursorErr
+	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing automation portfolio card page: %w", err)

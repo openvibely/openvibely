@@ -21,9 +21,7 @@ func (h *Handler) ProactiveInsights(c echo.Context) error {
 	}
 
 	var currentProject *models.Project
-	if projectID == models.AllProjectsID {
-		currentProject = &models.Project{ID: projectID, Name: "All projects"}
-	}
+	currentProject = h.virtualProject(c.Request().Context(), projectID)
 	var data *models.InsightDashboardData
 
 	if projectID != "" && h.insightsSvc != nil {
@@ -53,7 +51,7 @@ func (h *Handler) RunInsightsAnalysis(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing project_id")
 	}
 
-	report, err := h.insightsSvc.RunAnalysis(c.Request().Context(), projectID)
+	report, err := actInsightsRunAnalysis(h, c.Request().Context(), projectID)
 	if err != nil {
 		return render(c, http.StatusOK, pages.InsightAnalysisResult(nil, err))
 	}
@@ -74,8 +72,8 @@ func (h *Handler) UpdateInsightStatus(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing project_id")
 	}
 
-	if err := h.insightsSvc.UpdateInsightStatus(c.Request().Context(), projectID, id, status); err != nil {
-		if errors.Is(err, service.ErrInsightNotFound) {
+	if err := h.mutateInsight(c.Request().Context(), insightMutationArgs{ProjectID: projectID, InsightID: id, Operation: "status", Status: status}); err != nil {
+		if errors.Is(err, service.ErrInsightNotFound) || isActionNotFound(err) {
 			return c.String(http.StatusNotFound, "insight not found")
 		}
 		return c.String(http.StatusInternalServerError, err.Error())
@@ -83,7 +81,7 @@ func (h *Handler) UpdateInsightStatus(c echo.Context) error {
 
 	insight, err := h.insightsSvc.GetInsight(c.Request().Context(), projectID, id)
 	if err != nil {
-		if errors.Is(err, service.ErrInsightNotFound) {
+		if errors.Is(err, service.ErrInsightNotFound) || isActionNotFound(err) {
 			return c.String(http.StatusNotFound, "insight not found")
 		}
 		return c.String(http.StatusInternalServerError, err.Error())
@@ -107,8 +105,8 @@ func (h *Handler) DeleteInsight(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing project_id")
 	}
 
-	if err := h.insightsSvc.DeleteInsight(c.Request().Context(), projectID, id); err != nil {
-		if errors.Is(err, service.ErrInsightNotFound) {
+	if err := h.mutateInsight(c.Request().Context(), insightMutationArgs{ProjectID: projectID, InsightID: id, Operation: "delete"}); err != nil {
+		if errors.Is(err, service.ErrInsightNotFound) || isActionNotFound(err) {
 			return c.String(http.StatusNotFound, "insight not found")
 		}
 		return c.String(http.StatusInternalServerError, err.Error())
@@ -156,7 +154,7 @@ func (h *Handler) RunHealthCheck(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing project_id")
 	}
 
-	hc, err := h.insightsSvc.RunHealthCheck(c.Request().Context(), projectID)
+	hc, err := actInsightsRunHealthCheck(h, c.Request().Context(), projectID)
 	if err != nil {
 		return render(c, http.StatusOK, pages.HealthCheckResult(nil, err))
 	}
@@ -172,7 +170,7 @@ func (h *Handler) GradeIdeas(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing project_id")
 	}
 
-	ig, err := h.insightsSvc.GradeIdeas(c.Request().Context(), projectID)
+	ig, err := actInsightsGradeIdeas(h, c.Request().Context(), projectID)
 	if err != nil {
 		return render(c, http.StatusOK, pages.IdeaGradeResult(nil, err))
 	}

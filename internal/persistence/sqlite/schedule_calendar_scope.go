@@ -8,10 +8,10 @@ import (
 )
 
 // All calendar changes share one transaction, including cross-project undo.
-func applyAllProjectsCalendarAction(ctx context.Context, exec sqlExecutor, action models.ScheduleCalendarAction, now time.Time) (models.ScheduleCalendarAction, error) {
+func applyAllProjectsCalendarAction(ctx context.Context, exec sqlExecutor, scope string, action models.ScheduleCalendarAction, now time.Time) (models.ScheduleCalendarAction, error) {
 	inverse := models.ScheduleCalendarAction{Action: "undo_projects", ProjectActions: map[string]models.ScheduleCalendarAction{}}
 	projects := map[string]models.ScheduleCalendarAction{}
-	rows, err := exec.QueryContext(ctx, "SELECT id FROM projects WHERE id != ? ORDER BY id", models.AllProjectsID)
+	rows, err := exec.QueryContext(ctx, "SELECT id FROM projects WHERE id != ? AND "+aggregateProjectPredicate(ctx, "id", scope, false)+" ORDER BY id", models.AllProjectsID)
 	if err != nil {
 		return inverse, err
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -665,4 +666,48 @@ func TestOrganizationHTMXMutationsNavigateWithoutHTTPRedirect(t *testing.T) {
 		})
 	}
 	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, bob).Code)
+}
+
+func TestOrganizationIgnoresSelectedRemoteProject(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		name := "authentication off"
+		if enabled {
+			name = "authentication on"
+		}
+		t.Run(name, func(t *testing.T) {
+			tc, app := organizationTestApp(t, enabled)
+			var cookie *http.Cookie
+			if enabled {
+				login := orgRequest(app, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}}, nil)
+				require.Equal(t, http.StatusFound, login.Code)
+				cookie = orgCookie(t, login)
+			}
+			for _, project := range []string{remoteid.ID("0123456789abcdef", "project1"), models.AllProjectsID, models.SharedProjectID("github.com/team/project")} {
+				query := "?project_id=" + url.QueryEscape(project)
+				for _, fragment := range []bool{false, true} {
+					req := httptest.NewRequest("GET", "http://example.com/organization"+query, nil)
+					if fragment {
+						req.Header.Set("HX-Request", "true")
+					}
+					if cookie != nil {
+						req.AddCookie(cookie)
+					}
+					rec := httptest.NewRecorder()
+					app.ServeHTTP(rec, req)
+					require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				}
+				renamed := orgRequest(app, http.MethodPost, "/organization"+query, url.Values{"name": {"Local organization"}}, cookie)
+				require.Equal(t, http.StatusSeeOther, renamed.Code, renamed.Body.String())
+				org, err := tc.stores.Organizations.Organization(t.Context())
+				require.NoError(t, err)
+				require.Equal(t, "Local organization", org.Name)
+				invitation := orgRequest(app, http.MethodPost, "/organization/invitations"+query, url.Values{"role": {"member"}}, cookie)
+				expected := http.StatusForbidden
+				if enabled {
+					expected = http.StatusOK
+				}
+				require.Equal(t, expected, invitation.Code, invitation.Body.String())
+			}
+		})
+	}
 }

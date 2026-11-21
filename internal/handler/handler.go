@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/livelimits"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/remote"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/web/static"
@@ -28,6 +29,7 @@ import (
 )
 
 type Handler struct {
+	remotePluginHandles        sync.Map
 	pagePlugins                *pageplugins.Manager
 	diffChunks                 diffChunkCache
 	channelOAuthMu             sync.Mutex
@@ -134,6 +136,11 @@ type Handler struct {
 	appBaseURL                 string
 	desktopInvitationBaseURL   string
 	desktopMode                bool
+	remoteSessions             remoteSessions
+	remoteExecutor             *remote.Executor
+	localBackend               LocalBackendController
+	localServicesAllowed       func() bool
+	telegramConfigMu           sync.Mutex
 	buildIdentity              buildinfo.Build
 	updateMode                 string
 	distribution               string
@@ -627,10 +634,36 @@ func (h *Handler) SetLocalRepoPathEnabled(enabled bool) {
 	h.localRepoPathEnabled = &v
 }
 
+// SetRemote wires the live hub to saved-server sessions and the executor that
+// answers reads from other servers.
+func (h *Handler) SetRemote(hub *remote.Hub, executor *remote.Executor) {
+	h.remoteSessions.Lock()
+	h.remoteSessions.hub = hub
+	h.remoteSessions.settings = h.settingsRepo
+	h.remoteSessions.Unlock()
+	if hub != nil {
+		hub.Client = h.remoteSessions.httpClient()
+		hub.OnChange = h.remoteSessions.serverChanged
+		hub.OnProjects = h.remoteSessions.projectsChanged
+		hub.OnProjectChanges = h.remoteSessions.projectDelta
+	}
+	h.remoteExecutor = executor
+}
+
 // SetDesktopMode marks the handler as running inside the Wails desktop app.
 // When true, the /open-external endpoint will open URLs in the system browser.
 func (h *Handler) SetDesktopMode(desktop bool) {
 	h.desktopMode = desktop
+}
+
+// LocalBackendController switches the desktop's local task execution on or off.
+type LocalBackendController interface {
+	Mode() string
+	SetEnabled(enabled bool) error
+}
+
+func (h *Handler) SetLocalBackendController(controller LocalBackendController) {
+	h.localBackend = controller
 }
 
 func (h *Handler) SetProjectFolderPicker(picker ProjectFolderPicker) {
@@ -695,9 +728,18 @@ func (h *Handler) mutationProjectID(c echo.Context) string {
 // Explicit non-default IDs must exist. Omitted/default selection uses the
 // selected-project preference, then the first compact selector option.
 func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
+	if instanceSettingsPath(c.Request().URL.Path) && !modelManagementPath(c.Request().URL.Path) {
+		return "", nil
+	}
 	ctx := c.Request().Context()
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if projectID == models.AllProjectsID {
+		return projectID, nil
+	}
+	if models.IsSharedProjectID(projectID) {
+		if h.sharedProject(ctx, projectID) == nil {
+			return "", echo.NewHTTPError(http.StatusNotFound, "project not found")
+		}
 		return projectID, nil
 	}
 	if projectID != "" {
@@ -714,7 +756,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 		selectedProjectID, err := h.settingsRepo.Get(ctx, uiPreferenceSelectedProjectIDKey)
 		if err != nil {
 			applog.Debugf("[handler] failed to load selected project preference: %v", err)
-		} else if selectedProjectID = strings.TrimSpace(selectedProjectID); selectedProjectID != "" && selectedProjectID != models.AllProjectsID {
+		} else if selectedProjectID = strings.TrimSpace(selectedProjectID); selectedProjectID != "" && !models.IsAggregateProject(selectedProjectID) {
 			p, err := h.projectSvc.GetByID(ctx, selectedProjectID)
 			if err != nil && !errors.Is(err, persistence.ErrProjectDenied) {
 				return "", err
@@ -758,6 +800,7 @@ func parseIntClamped(value string, min, max int) int {
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	e.Use(projectLookupMiddleware)
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			c.Set("handler", h)
@@ -765,6 +808,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 		}
 	})
 	// Resolve the virtual workspace to the item owner before enforcing project consistency.
+	e.Use(h.remoteRouting)
 	e.Use(h.allProjectsScope)
 	e.Use(h.projectAccessBoundary, h.taskProjectBoundary, h.threadInputProjectBoundary)
 	e.GET("/files", h.ListFilesPanel)
@@ -777,6 +821,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Machine-readable readiness and immutable build identity.
 	e.GET("/api/system/health", h.SystemHealth)
 	e.POST("/ui/preferences", h.SaveUIPreferences)
+	e.GET("/ui/project-catalog", h.ProjectCatalog)
 	e.GET("/ui/model-favorites", h.GetModelFavorites)
 	e.POST("/ui/model-favorites", h.SaveModelFavorites)
 
@@ -993,6 +1038,15 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/api/tasks/:id/lifecycle-executions/:executionID", h.GetTaskLifecycleExecution)
 	e.GET("/api/tasks/:id/lifecycle-executions", h.GetTaskLifecycleExecutions)
 	e.GET("/api/lifecycle-executions/:id/events", h.GetLifecycleExecutionEvents)
+
+	e.GET("/servers", h.Servers)
+	e.POST("/servers", h.SaveServer)
+	e.POST("/servers/local-backend", h.UpdateLocalBackend)
+	e.POST("/servers/:id", h.SaveServer)
+	e.DELETE("/servers/:id", h.DeleteServer)
+	e.POST("/servers/:id/connect", h.ConnectServer)
+	e.POST("/servers/:id/disconnect", h.DisconnectServer)
+	e.GET("/servers/:id/sso", h.ServerSSOStart)
 
 	e.GET("/models", h.ListModels)
 	e.POST("/models", h.CreateModel)

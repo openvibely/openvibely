@@ -13,13 +13,19 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remote"
+	"github.com/openvibely/openvibely/internal/remoteid"
+	"github.com/openvibely/openvibely/internal/repokey"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 // A subscription ID belongs to one view generation, not to an execution. Late
 // frames from an unsubscribed view can therefore never modify its replacement.
 type liveCommand struct {
+	InstanceID string `json:"instance_id,omitempty"`
+	Handle     string `json:"handle,omitempty"`
 	Op         string `json:"op"`
 	ID         string `json:"id"`
 	ProjectID  string `json:"project_id"`
@@ -29,6 +35,10 @@ type liveCommand struct {
 	ViewerID   string `json:"viewer_id,omitempty"`
 	ViewerMode string `json:"viewer_mode,omitempty"`
 	Native     bool   `json:"native,omitempty"`
+	// Read carries an "op":"read" store call from a desktop/hub client.
+	Read *remote.Read `json:"read,omitempty"`
+	// Action carries an "op":"action" server action from a desktop/hub client.
+	Action *remote.Action `json:"action,omitempty"`
 }
 type liveFrame struct {
 	// Internal owner identity prevents an old worker's terminal frame from
@@ -77,25 +87,29 @@ func (h *Handler) liveEventVisible(ctx context.Context, cache liveProjectVisibil
 	if h.projectAccessSvc == nil {
 		return true
 	}
-	var projectID string
+	var projectID, remoteUser string
 	switch event := frame.Data.(type) {
 	case events.TaskEvent:
 		if event.Type == events.AccountUsageUpdated {
 			// Global delivery is authorized by subscription admission and revocation.
 			return frame.subscription != nil && frame.subscription.command.Op == "account_usage"
 		}
-		projectID = event.ProjectID
+		projectID, remoteUser = event.ProjectID, event.RemoteUserID
 	case events.ChatEvent:
 		if event.ProjectID == models.AllProjectsID {
 			p, ok := models.PrincipalFromContext(ctx)
 			return !ok || (event.AudienceUserID != "" && event.AudienceUserID == p.UserID)
 		}
-		projectID = event.ProjectID
+		projectID, remoteUser = event.ProjectID, event.RemoteUserID
 	default:
 		return true
 	}
 	if projectID == "" {
 		return false
+	}
+	if _, ok := remoteid.ServerOf(projectID); ok {
+		// The remote filtered this event for the account behind the delivering socket.
+		return remoteUser != "" && remoteUser == principalUserID(ctx)
 	}
 	return cache[projectID]
 }
@@ -149,7 +163,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		return err
 	}
 	defer conn.CloseNow()
-	conn.SetReadLimit(4096)
+	conn.SetReadLimit(8 << 20)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	authorized := func() bool {
@@ -164,7 +178,8 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		if !h.liveEventVisible(ctx, visible, f) {
 			return true
 		}
-		writeCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+		// Only a dead peer ends the socket; a slow one applies backpressure.
+		writeCtx, stop := context.WithTimeout(ctx, 2*time.Minute)
 		defer stop()
 		if wsjson.Write(writeCtx, conn, f) != nil {
 			cancel()
@@ -182,31 +197,18 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		return writeFrame(f)
 	}
 	out := make(chan liveFrame, 128)
-	// Never block a broadcaster or accumulate unbounded output for a slow window.
-	// Disconnecting makes its next subscription replay from the last applied byte.
+	// A full queue blocks the producer instead of closing the socket. Execution
+	// streams then overflow their hub subscription and catch up from persisted
+	// output; live notifications are coalesced by the broadcaster and reconcile.
 	send := func(f liveFrame) bool {
 		select {
-		case <-ctx.Done():
-			return false
-		default:
-		}
-		select {
-		case out <- f:
-			return true
-		default:
-		}
-		timer := time.NewTimer(5 * time.Second)
-		defer timer.Stop()
-		select {
 		case out <- f:
 			return true
 		case <-ctx.Done():
-			return false
-		case <-timer.C:
-			cancel()
 			return false
 		}
 	}
+	reads := make(chan struct{}, 8)
 	commands := make(chan liveCommand, 16)
 	go func() {
 		defer cancel()
@@ -214,6 +216,33 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 			var cmd liveCommand
 			if wsjson.Read(ctx, conn, &cmd) != nil {
 				return
+			}
+			if cmd.Op == "read" || cmd.Op == "action" {
+				// Reads answer on the shared queue; the slot limit pushes back on the
+				// peer's socket rather than on the loop that drains the queue. Actions
+				// are uncapped, like HTTP requests, so a slow one never stalls reads.
+				if cmd.Op == "read" {
+					select {
+					case reads <- struct{}{}:
+					case <-ctx.Done():
+						return
+					}
+				}
+				go func(cmd liveCommand) {
+					if cmd.Op == "read" {
+						defer func() { <-reads }()
+					}
+					result := remote.Result{Error: "read unavailable"}
+					switch {
+					case cmd.ID == "" || len(cmd.ID) > 128 || !authorized():
+					case cmd.Read != nil && h.remoteExecutor != nil:
+						result = h.remoteExecutor.Run(ctx, *cmd.Read)
+					case cmd.Action != nil:
+						result = h.runRemoteAction(ctx, *cmd.Action)
+					}
+					send(liveFrame{ID: cmd.ID, Event: "result", Data: result})
+				}(cmd)
+				continue
 			}
 			select {
 			case commands <- cmd:
@@ -258,7 +287,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				continue
 			}
 			projects[sub.command.ProjectID] = true
-			all = all || sub.command.ProjectID == models.AllProjectsID
+			all = all || models.IsAggregateProject(sub.command.ProjectID)
 		}
 		projectWatch.SetProjects(projects, all)
 	}
@@ -287,7 +316,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		}
 		for id, subscription := range subscriptions {
 			cmd := subscription.command
-			if !all && !projects[cmd.ProjectID] && cmd.ProjectID != models.AllProjectsID {
+			if !all && !projects[cmd.ProjectID] && !models.IsAggregateProject(cmd.ProjectID) {
 				continue
 			}
 			if !h.liveSubscriptionAllowed(ctx, cmd) {
@@ -301,11 +330,54 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 	if !authorized() {
 		return nil
 	}
-	writeFrame(liveFrame{Event: "ready"})
+	repositoryChanged, unwatchRepositories := h.repositoryChanges()
+	defer unwatchRepositories()
+	serversChanged, unwatchServers := h.remoteSessions.watch(principalUserID(ctx))
+	defer unwatchServers()
+	var repositorySnapshot map[string]models.ProjectAPIItem
+	writeFrame(liveFrame{Event: "ready", Data: map[string]string{"version": h.buildIdentity.Version}})
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-repositoryChanged:
+			if !authorized() {
+				return nil
+			}
+			var projects []models.ProjectAPIItem
+			var err error
+			if h.remoteExecutor != nil && h.remoteExecutor.Projects != nil {
+				projects, err = h.remoteExecutor.Projects.ListAPIProjects(repokey.CachedOnly(ctx))
+			} else {
+				projects, err = h.projectSvc.ListAPIProjects(repokey.CachedOnly(ctx))
+			}
+			if err == nil {
+				next := make(map[string]models.ProjectAPIItem, len(projects))
+				changes := remote.ProjectChanges{}
+				for _, p := range projects {
+					next[p.ID] = p
+					if previous, ok := repositorySnapshot[p.ID]; !ok || previous != p {
+						changes.Projects = append(changes.Projects, p)
+					}
+				}
+				for id := range repositorySnapshot {
+					if _, ok := next[id]; !ok {
+						changes.RemovedIDs = append(changes.RemovedIDs, id)
+					}
+				}
+				if repositorySnapshot == nil {
+					writeFrame(liveFrame{Event: "repository_projects", Data: projects})
+				} else if len(changes.Projects)+len(changes.RemovedIDs) > 0 {
+					writeFrame(liveFrame{Event: "repository_project_changes", Data: changes})
+				}
+				if repositorySnapshot == nil || len(changes.Projects)+len(changes.RemovedIDs) > 0 {
+					writeFrame(liveFrame{Event: "servers_changed"})
+				}
+				repositorySnapshot = next
+			}
+		case <-serversChanged:
+			// A saved server came or went: pages reload their project list and content.
+			writeFrame(liveFrame{Event: "servers_changed"})
 		case <-projectChanges:
 			reauthorize(projectWatch.Drain())
 		case <-userChanges:
@@ -341,7 +413,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription limit reached"})
 				continue
 			}
-			if cmd.Op != "execution" && cmd.Op != "live" && cmd.Op != "computer" && cmd.Op != "account_usage" {
+			if cmd.Op != "execution" && cmd.Op != "live" && cmd.Op != "computer" && cmd.Op != "account_usage" && cmd.Op != "page" {
 				return nil
 			}
 			if !authorized() {
@@ -354,22 +426,27 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				if cmd.Op != "account_usage" {
 					projects[cmd.ProjectID] = true
 				}
-				all := cmd.ProjectID == models.AllProjectsID
+				all := models.IsAggregateProject(cmd.ProjectID)
 				for _, sub := range subscriptions {
 					if sub.command.Op == "account_usage" {
 						continue
 					}
 					projects[sub.command.ProjectID] = true
-					all = all || sub.command.ProjectID == models.AllProjectsID
+					all = all || models.IsAggregateProject(sub.command.ProjectID)
 				}
 				projectWatch.SetProjects(projects, all)
+			}
+			if server, remote := remoteid.ServerOf(cmd.ProjectID); remote && cmd.Op == "computer" && !h.remoteSignedIn(ctx, server) {
+				updateWatchProjects()
+				writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: map[string]string{"reconnect": "/servers?reconnect=" + url.QueryEscape(server)}})
+				continue
 			}
 			if cmd.Offset < 0 || !h.liveSubscriptionAllowed(ctx, cmd) {
 				updateWatchProjects()
 				writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription denied"})
 				continue
 			}
-			if cmd.ProjectID == models.AllProjectsID {
+			if models.IsAggregateProject(cmd.ProjectID) {
 				if err := h.refreshLiveVisibility(ctx, visible); err != nil {
 					updateWatchProjects()
 					writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription denied"})
@@ -405,8 +482,14 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				}
 				if cmd.Op == "execution" {
 					h.streamExecution(subctx, cmd, emit)
+				} else if cmd.Op == "page" {
+					h.streamPluginEvents(subctx, cmd, emit)
 				} else if cmd.Op == "computer" {
-					h.streamComputerStatus(subctx, cmd, emit)
+					if server, remote := remoteid.ServerOf(cmd.ProjectID); remote {
+						h.relayComputerStatus(subctx, server, cmd, emit)
+					} else {
+						h.streamComputerStatus(subctx, cmd, emit)
+					}
 				} else {
 					h.streamLive(subctx, cmd, emit)
 				}
@@ -467,9 +550,15 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 	if cmd.ProjectID == "" || h.projectRepo == nil {
 		return false
 	}
-	if cmd.ProjectID == models.AllProjectsID && cmd.Op == "live" {
+	if models.IsAggregateProject(cmd.ProjectID) && cmd.Op == "live" {
 		// The virtual scope receives notifications filtered by current project access
 		// at delivery. Execution streams still require their real project.
+		var shared *layout.SharedProject
+		if cmd.ProjectID != models.AllProjectsID {
+			if shared = h.sharedProject(ctx, cmd.ProjectID); shared == nil {
+				return false
+			}
+		}
 		if cmd.TaskID == "" {
 			return true
 		}
@@ -477,12 +566,13 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 			return false
 		}
 		task, err := h.taskRepo.GetByID(ctx, cmd.TaskID)
-		return err == nil && task != nil && (h.projectAccessSvc == nil || h.projectAccessSvc.Require(ctx, task.ProjectID, authz.View) == nil)
+		return err == nil && task != nil && (shared == nil || sharedHasMember(shared, task.ProjectID)) && (h.projectAccessSvc == nil || h.projectAccessSvc.Require(ctx, task.ProjectID, authz.View) == nil)
 	}
 	permission := authz.View
 	if cmd.Op == "computer" {
 		permission = authz.Edit
-		if h.computerSvc == nil || cmd.ProjectID == models.AllProjectsID {
+		_, remote := remoteid.ServerOf(cmd.ProjectID)
+		if !remote && h.computerSvc == nil || cmd.ProjectID == models.AllProjectsID {
 			return false
 		}
 	}
@@ -493,8 +583,20 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 	if err != nil || project == nil {
 		return false
 	}
+	if cmd.Op == "page" {
+		projectID, _, err := pluginHandleOwner(h, ctx, PluginHandleArgs{PluginRefArgs: PluginRefArgs{ProjectID: cmd.ProjectID, InstanceID: cmd.InstanceID}, Handle: cmd.Handle})
+		if err != nil || projectID != cmd.ProjectID {
+			return false
+		}
+		return true
+	}
 	taskID := cmd.TaskID
 	if cmd.Op == "execution" {
+		if _, remote := remoteid.ServerOf(cmd.ExecID); remote {
+			if _, sameServer := remoteid.ServerOf(cmd.ProjectID); !sameServer {
+				return false
+			}
+		}
 		if h.execRepo == nil {
 			return false
 		}
@@ -511,7 +613,19 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 		task, err := h.taskRepo.GetThreadRenderMetadata(ctx, taskID)
 		return err == nil && task != nil && task.ProjectID == cmd.ProjectID
 	}
+
 	return cmd.Op == "live" || cmd.Op == "computer"
+}
+
+// liveMembers lists the copies a shared project's live events come from.
+var liveMembers = func(ctx context.Context, h *Handler, projectID string) map[string]bool {
+	members := map[string]bool{}
+	if shared := h.sharedProject(ctx, projectID); shared != nil {
+		for _, id := range sharedMemberIDs(shared) {
+			members[id] = true
+		}
+	}
+	return members
 }
 
 func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liveFrame) bool) {
@@ -528,10 +642,26 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 	var files events.FileChangeSubscriber
 	var taskMissed, chatMissed, fileMissed <-chan struct{}
 	var err error
+	load := liveMembers
+	members := load(ctx, h, cmd.ProjectID)
+	// Remote project lists can take seconds; reload them off the event loop so
+	// events keep flowing, filtered by the previous copies, meanwhile.
+	reloaded := make(chan map[string]bool, 1)
+	reloading, stale := false, false
+	reload := func() {
+		reloading = true
+		go func() { reloaded <- load(ctx, h, cmd.ProjectID) }()
+	}
+	var serversChanged <-chan struct{}
+	if models.IsSharedProjectID(cmd.ProjectID) {
+		ch, unwatch := h.remoteSessions.watch(principalUserID(ctx))
+		defer unwatch()
+		serversChanged = ch
+	}
 	if h.broadcaster != nil {
 		if cmd.Op == "account_usage" {
 			tasks, err = h.broadcaster.SubscribeAccountUsage()
-		} else if cmd.ProjectID == models.AllProjectsID {
+		} else if models.IsAggregateProject(cmd.ProjectID) {
 			tasks, err = h.broadcaster.Subscribe()
 		} else {
 			tasks, err = h.broadcaster.SubscribeProject(cmd.ProjectID)
@@ -568,6 +698,18 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 		select {
 		case <-ctx.Done():
 			return
+		case <-serversChanged:
+			if reloading {
+				stale = true
+			} else {
+				reload()
+			}
+		case members = <-reloaded:
+			reloading = false
+			if stale {
+				stale = false
+				reload()
+			}
 		case <-taskMissed:
 			discardLiveBacklog(tasks)
 			if !send(liveFrame{Event: "reconcile"}) {
@@ -587,7 +729,7 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 			if !ok {
 				return
 			}
-			if ev.Type == events.AccountUsageUpdated && cmd.Op != "account_usage" {
+			if (ev.Type == events.AccountUsageUpdated && cmd.Op != "account_usage") || (models.IsSharedProjectID(cmd.ProjectID) && !members[ev.ProjectID]) {
 				continue
 			}
 			if !send(liveFrame{Event: string(ev.Type), Data: ev}) {
@@ -614,6 +756,10 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 // Subscribe before reading persistence, closing the replay/live race. Hub events
 // can precede persistence, so never move the delivered byte cursor backwards.
 func (h *Handler) streamExecution(ctx context.Context, cmd liveCommand, send func(liveFrame) bool) {
+	if server, ok := remoteid.ServerOf(cmd.ExecID); ok {
+		h.relayExecution(ctx, server, cmd, send)
+		return
+	}
 	sub, unsubscribe, err := h.executionStreamHub.Subscribe(cmd.ExecID)
 	if err != nil {
 		send(liveFrame{Event: "retry", Data: "execution subscription unavailable"})
@@ -752,11 +898,15 @@ func (h *Handler) RunningExecutions(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Could not list running executions")
 	}
+	items = append(items, h.remoteLiveExecutions(ctx)...)
 	if h.projectAccessSvc != nil {
 		visible := items[:0]
 		allowed := map[string]bool{}
 		for _, item := range items {
 			ok, checked := allowed[item.ProjectID]
+			if _, remote := remoteid.ServerOf(item.ProjectID); remote {
+				ok, checked = true, true
+			}
 			if !checked {
 				ok = h.projectAccessSvc.Require(ctx, item.ProjectID, authz.View) == nil
 				allowed[item.ProjectID] = ok
@@ -769,6 +919,51 @@ func (h *Handler) RunningExecutions(c echo.Context) error {
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, items)
+}
+
+// relayExecution streams a remote execution over the server's hub socket. If
+// this reader falls behind, the hub drops the stream and it resumes from the
+// last delivered offset, so the remote socket never blocks.
+func (h *Handler) relayExecution(ctx context.Context, server string, cmd liveCommand, send func(liveFrame) bool) {
+	conn := h.remoteHub().Get(principalUserID(ctx), server)
+	if conn == nil {
+		send(liveFrame{Event: "retry", Data: "remote server unavailable"})
+		return
+	}
+	strip := func(id string) string { return remoteid.Strip(server, id) }
+	sent := cmd.Offset
+	for ctx.Err() == nil {
+		frames, overflowed, stop, err := conn.Stream(ctx, strip(cmd.ProjectID), strip(cmd.TaskID), strip(cmd.ExecID), sent)
+		if err != nil {
+			send(liveFrame{Event: "retry", Data: "remote server unavailable"})
+			return
+		}
+		for f := range frames {
+			if f.Event == "subscribed" {
+				continue
+			}
+			var data any
+			if len(f.Data) > 0 {
+				_ = json.Unmarshal(f.Data, &data)
+			}
+			if !send(liveFrame{Event: f.Event, Data: data, Start: f.Start, Offset: f.Offset}) {
+				stop()
+				return
+			}
+			if f.Offset > sent {
+				sent = f.Offset
+			}
+			if f.Event == "done" || f.Event == "error" || f.Event == "retry" {
+				stop()
+				return
+			}
+		}
+		stop()
+		if !overflowed() {
+			send(liveFrame{Event: "retry", Data: "remote stream interrupted"})
+			return
+		}
+	}
 }
 
 // Once delivery has a gap, discard the already-buffered stale notifications

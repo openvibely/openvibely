@@ -417,6 +417,10 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
+	query, args, cursorErr := cardCursorQuery(ctx, "models", "", query, args)
+	if cursorErr != nil {
+		return nil, cursorErr
+	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing model card page: %w", err)

@@ -436,7 +436,7 @@ func upcomingBlockedTaskCount(upcoming *models.Upcoming) int {
 }
 
 func upcomingTaskCanBeStopped(bt models.UpcomingTask, currentProjectID string) bool {
-	if (currentProjectID != models.AllProjectsID && bt.Task.ProjectID != currentProjectID) || bt.Task.Category == models.CategoryChat {
+	if (!models.IsAggregateProject(currentProjectID) && bt.Task.ProjectID != currentProjectID) || bt.Task.Category == models.CategoryChat {
 		return false
 	}
 	switch bt.Task.Status {

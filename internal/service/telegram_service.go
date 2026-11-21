@@ -65,6 +65,7 @@ type telegramAuthorizationStore interface {
 // It acts as a proxy to the /chat page orchestrator — every message sent to the bot
 // is forwarded to the same chat assistant that powers the /chat web UI.
 type TelegramService struct {
+	localServiceGate
 	bot                                  *tgbotapi.BotAPI
 	taskSvc                              *TaskService
 	projectSvc                           *ProjectService
@@ -372,6 +373,9 @@ func (s *TelegramService) Start() {
 }
 
 func (s *TelegramService) startLocked() {
+	if !s.startAllowed() {
+		return
+	}
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
 	if s.bot == nil || s.running || s.runDone != nil {
@@ -388,6 +392,14 @@ func (s *TelegramService) Stop() {
 	s.lifecycleOpMu.Lock()
 	defer s.lifecycleOpMu.Unlock()
 	s.stopLocked(false)
+}
+
+// StopAndWait drains the current long poll before a lifecycle restart can
+// create another consumer for the same bot token.
+func (s *TelegramService) StopAndWait() {
+	s.lifecycleOpMu.Lock()
+	defer s.lifecycleOpMu.Unlock()
+	s.stopLocked(true)
 }
 
 func (s *TelegramService) stopLocked(wait bool) bool {

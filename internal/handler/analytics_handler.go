@@ -47,9 +47,7 @@ func (h *Handler) Analytics(c echo.Context) error {
 	}
 
 	var currentProject *models.Project
-	if projectID == models.AllProjectsID {
-		currentProject = &models.Project{ID: projectID, Name: "All projects"}
-	}
+	currentProject = h.virtualProject(c.Request().Context(), projectID)
 	for i := range projects {
 		if projects[i].ID == projectID {
 			currentProject = &projects[i]
@@ -90,6 +88,12 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "usage analytics service is not configured")
 	}
 	filter := parseUsageFilter(c)
+	if instanceAccountProjection(c) {
+		filter.ProjectID = ""
+		filter.EvidencePeriod = ""
+		filter.EvidenceProvider = ""
+		filter.EvidenceModel = ""
+	}
 	if analyticsUsageProjection(c) == "snapshots" {
 		snapshots, err := h.usageAnalyticsSvc.SharedAccountUsage(c.Request().Context(), strings.TrimSpace(c.QueryParam("account_key")), c.QueryParam("refresh") == "true")
 		if err != nil {
@@ -226,11 +230,12 @@ func skillEvidenceRequested(filter persistence.SkillAnalyticsFilter) bool {
 }
 
 func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []persistence.EnabledSkillInfo {
-	if c.QueryParam("project_id") == models.AllProjectsID {
+	if models.IsAggregateProject(c.QueryParam("project_id")) {
 		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 		if err != nil {
 			return nil
 		}
+		projects = scopedProjects(c.Request().Context(), projects)
 		out := []persistence.EnabledSkillInfo{}
 		seen := map[string]int{}
 		for _, project := range projects {
@@ -302,6 +307,16 @@ func serviceProjectSkillRoot(c echo.Context, h *Handler, projectID string) strin
 		return ""
 	}
 	return service.ProjectSkillRootForResolver(c.Request().Context(), h.projectRepo, projectID)
+}
+
+// Account inventory and live limits belong to this installation, not the
+// selected project. Historical usage and supporting evidence remain scoped.
+func instanceAccountProjection(c echo.Context) bool {
+	if c.Request().URL.Path != "/api/analytics/usage" {
+		return false
+	}
+	projection := analyticsUsageProjection(c)
+	return projection == "accounts" || projection == "account_limits" || projection == "snapshots"
 }
 
 func analyticsUsageProjection(c echo.Context) string {

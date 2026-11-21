@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/cardcursor"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 const (
@@ -32,6 +35,7 @@ type cardPageRequest struct {
 }
 
 func parseCardPageRequest(c echo.Context) cardPageRequest {
+	initCardCursor(c)
 	page := parseNonNegativeQueryInt(c, "page", 0)
 	pageSize := parseNonNegativeQueryInt(c, "page_size", cardPageDefaultSize)
 	isRefreshWindow := c.QueryParam("card_window") == "1"
@@ -66,6 +70,9 @@ func parseCardPageRequest(c echo.Context) cardPageRequest {
 		if explicitOffset, err := strconv.Atoi(strings.TrimSpace(c.QueryParam("offset"))); err == nil && explicitOffset >= 0 {
 			offset = explicitOffset
 		}
+	}
+	if s := cardcursor.From(c.Request().Context()); s != nil {
+		s.Limit = pageSize + 1
 	}
 	return cardPageRequest{
 		Page:              page,
@@ -165,6 +172,7 @@ func optionalBoolQuery(c echo.Context, key string) *bool {
 
 func setCardPageResponse(c echo.Context, hasMore bool) {
 	c.Response().Header().Set(cardPageHasMoreHeader, strconv.FormatBool(hasMore))
+	c.Response().Header().Set("X-OpenVibely-Card-Cursor", cardcursor.Encoded(c.Request().Context()))
 	c.Response().Header().Set("Cache-Control", "no-store")
 }
 
@@ -182,4 +190,126 @@ func cardPageItems[T any](items []T, pageSize int) ([]T, bool) {
 		return items, false
 	}
 	return items[:pageSize], true
+}
+
+// Offset parameters remain accepted for older clients; the current loader uses
+// only cursors. Non-card store APIs are unaffected.
+func initCardCursor(c echo.Context) {
+	if c.QueryParam("cursor") == "" && (c.QueryParam("offset") != "" || parseNonNegativeQueryInt(c, "page", 0) > 0) && c.QueryParam("card_window") != "1" {
+		return
+	}
+	// Use the route's leading segment, never user-controlled names later in it.
+	path := c.Path()
+	if path == "" {
+		path = c.Request().URL.Path
+	}
+	section, _, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+	kind := ""
+	switch section {
+	case "automations", "alerts", "models", "agents", "skills":
+		kind = section
+	case "personality":
+		kind = "personalities"
+	case "channels":
+		kind = "webhooks"
+	}
+	if kind == "" {
+		return
+	}
+	query := cardCursorListQuery(c, kind)
+	principal, _ := models.PrincipalFromContext(c.Request().Context())
+	order := query.Get("sort")
+	encoded := c.QueryParam("cursor")
+	if c.QueryParam("card_window") == "1" {
+		encoded = ""
+	}
+	s := cardcursor.New(kind, order, kind+"?"+query.Encode()+"\n"+principal.UserID, encoded)
+	c.SetRequest(c.Request().WithContext(cardcursor.With(c.Request().Context(), s)))
+}
+
+// Only normalized list inputs belong to a continuation scope. Mutation targets
+// (for example skill_project_id or new_default_id) must not affect the next GET.
+func cardCursorListQuery(c echo.Context, kind string) url.Values {
+	query := url.Values{}
+	set := func(key, value string) {
+		if value != "" {
+			query.Set(key, value)
+		}
+	}
+	allowed := func(key, fallback string, values ...string) { set(key, allowlistedQuery(c, key, fallback, values...)) }
+	boolean := func(key string) { set(key, optionalBoolString(optionalBoolQuery(c, key))) }
+	project := strings.TrimSpace(c.QueryParam("project_id"))
+	if resolved, ok := c.Get("cardProjectID").(string); ok {
+		project = resolved
+	}
+	// Aggregate actions temporarily use the item's owner for the write, while
+	// the refreshed list still belongs to the original workspace.
+	set("project_id", layout.WorkspaceProjectID(c.Request().Context(), project))
+	set("search", strings.TrimSpace(c.QueryParam("search")))
+	switch kind {
+	case "automations":
+		filter := automationCardListFilter(c, cardPageRequest{})
+		state := automationCardListState("", filter)
+		set("sort", state.Sort)
+		for key, value := range state.Filters {
+			set(key, value)
+		}
+	case "models":
+		state := modelCardListState("", modelCardListFilter(c, cardPageRequest{}))
+		set("sort", state.Sort)
+		for key, value := range state.Filters {
+			set(key, value)
+		}
+	case "alerts":
+		state := alertCardListState("", alertListFilter(c, cardPageRequest{}))
+		set("sort", state.Sort)
+		for key, value := range state.Filters {
+			set(key, value)
+		}
+	case "agents":
+		allowed("sort", "name_asc", "name_asc", "name_desc", "updated_desc", "created_desc")
+		boolean("enabled")
+		allowed("scope", "", "global", "project")
+		allowed("origin", "", "custom", "generated", "protected")
+	case "skills":
+		allowed("sort", "name_asc", "name_asc", "name_desc", "scope", "source")
+		for _, key := range []string{"enabled", "always_use", "archived"} {
+			boolean(key)
+		}
+		for _, key := range []string{"scope", "source"} {
+			allowed(key, "", "global", "project")
+		}
+	case "personalities":
+		allowed("sort", "name_asc", "name_asc", "name_desc")
+		allowed("kind", "", "base", "built_in", "custom", "override")
+		boolean("active")
+	case "webhooks":
+		allowed("sort", "name_asc", "name_asc", "name_desc")
+		allowed("type", "", "github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets")
+		allowed("connection_state", "", "connected", "configured", "disconnected")
+		boolean("webhook_enabled")
+	}
+	return query
+}
+
+func finishCardPage[T any](c echo.Context, items []T, pageSize int) ([]T, bool) {
+	ctx := c.Request().Context()
+	if s := cardcursor.From(ctx); s != nil {
+		result, more, err := cardcursor.Finish(ctx, items, pageSize)
+		if err != nil {
+			s.Err = err
+		}
+		c.Response().Header().Set("X-OpenVibely-Card-Cursor", cardcursor.Encoded(ctx))
+		return result, more
+	}
+	return cardPageItems(items, pageSize)
+}
+
+func (h *Handler) parseCardPageRequest(c echo.Context) cardPageRequest {
+	if h.projectSvc != nil {
+		if project, err := h.getCurrentProjectID(c); err == nil {
+			c.Set("cardProjectID", project)
+		}
+	}
+	return parseCardPageRequest(c)
 }

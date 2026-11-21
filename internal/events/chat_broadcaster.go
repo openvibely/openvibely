@@ -25,6 +25,7 @@ const (
 // ChatEvent represents a chat event for real-time updates
 type ChatEvent struct {
 	AudienceUserID  string                 `json:"-"`
+	RemoteUserID    string                 `json:"-"` // local owner of the remote socket that delivered the event
 	Type            ChatEventType          `json:"type"`
 	ProjectID       string                 `json:"project_id"`
 	ExecID          string                 `json:"exec_id"`

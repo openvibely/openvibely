@@ -285,6 +285,7 @@ type emailInboundReceiptBatchStore interface {
 }
 
 type EmailService struct {
+	localServiceGate
 	settingsRepo               persistence.SettingsStore
 	projectRepo                persistence.ProjectStore
 	projectSvc                 *ProjectService
@@ -440,6 +441,9 @@ func (s *EmailService) Start() error {
 }
 
 func (s *EmailService) startLocked() error {
+	if !s.startAllowed() {
+		return nil
+	}
 	cfg, err := s.loadConfig(context.Background())
 	if err != nil || !cfg.Configured() {
 		return err

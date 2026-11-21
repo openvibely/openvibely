@@ -225,14 +225,14 @@ templ PluginSettingsContent(v PluginSettingsView) {
 								} else {
 									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/enable") } hx-target="#plugin-settings" hx-swap="outerHTML">Enable</button></li>
 								}
-                                if v.ProjectID == models.AllProjectsID {
+                                if models.IsAggregateProject(v.ProjectID) {
                                     <li><button onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-add-project-" + r.Instance.ID + "').showModal()"} }>Add to another project</button></li>
                                 }
 								<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-delete-" + r.Instance.ID + "').showModal()"} }>Delete</button></li>
 							}
 						</div>
 						<h3 class="card-title pr-12">{ r.Instance.Title }</h3>
- if v.ProjectID == models.AllProjectsID {
+ if models.IsAggregateProject(v.ProjectID) {
  <p class="text-sm opacity-60">{ r.Instance.ProjectName }</p>
  }
 						if r.Description != "" {
@@ -247,7 +247,7 @@ templ PluginSettingsContent(v PluginSettingsView) {
 						</div>
 					</div>
 				</div>
-                if v.ProjectID == models.AllProjectsID {
+                if models.IsAggregateProject(v.ProjectID) {
                     @pluginSettingsDialog("plugin-add-project-"+r.Instance.ID, "Add "+r.Instance.Title+" to another project") {
                         <p class="text-sm opacity-70">Create a separate page with its own data and conversation.</p>
                         <form hx-post={ v.URL("/instances") } hx-target="#plugin-settings" hx-swap="outerHTML" class="space-y-4">
@@ -384,6 +384,7 @@ templ pluginSettingsDialog(id, title string) {
 templ pluginHostBridgeScript() {
 	<script>
 	(function () {
+		const fetch=async(...args)=>{const res=await window.fetch(...args);if(await window.openVibelyReconnect?.fetch(res))return new Promise(()=>{});return res;};
 		var root = document.currentScript.closest('#plugin-page-root');
 		if (!root) return;
 		var frame = root.querySelector('#plugin-frame');
@@ -538,7 +539,7 @@ templ pluginHostBridgeScript() {
 }
 
 templ pluginDestination(v PluginSettingsView) {
- if v.ProjectID == models.AllProjectsID {
+ if models.IsAggregateProject(v.ProjectID) {
  <label class="form-control">
  <span class="label-text">Project</span>
  <select name="destination_project" class="select select-bordered w-full" required aria-label="Project">

@@ -8,12 +8,13 @@ import (
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/internal/persistence"
  "github.com/openvibely/openvibely/web/templates/layout"
+ templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 func newTaskPostURL(ctx context.Context, projectID string) string {
- if layout.WorkspaceProjectID(ctx, projectID) != models.AllProjectsID { return fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", projectID) }
+ if !models.IsAggregateProject(layout.WorkspaceProjectID(ctx, projectID)) { return fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", projectID) }
  q := url.Values{"project_id": {layout.WorkspaceProjectID(ctx, projectID)}, "from": {"new"}, "thread": {"1"}}
- if projectID != models.AllProjectsID { q.Set("destination_project", projectID) }
+ if !models.IsAggregateProject(projectID) { q.Set("destination_project", projectID) }
  return "/tasks?" + q.Encode()
 }
 
@@ -79,6 +80,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      FormID: "task-thread-form", InputID: "task-message-input",
      PostEndpoint: newTaskPostURL(ctx, project.ID),
      TargetID: "main-content", DiscardDraftOnLeave: true, SelectedAgentID: "default", DefaultAgentID: projectDefaultAgentID(project), Agents: agents, ShowModelSelector: true,
+     ProjectChoices: newTaskProjectChoices(ctx, project), ProjectInputID: "new-task-project",
     })
    </div>
   </div>
@@ -89,36 +91,12 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     var root = document.getElementById('task-detail-content');
     var destination = root.querySelector('#new-task-project');
     if (destination) {
-     destination.addEventListener('invalid', function() {
-      window.taskWorkspace.openPanel('details');
-     });
-     var form = root.querySelector('#task-thread-form');
-     var pendingSend = false;
-     var projectPicker = root.querySelector('#task-property-picker');
-     form.addEventListener('htmx:configRequest', function(event) {
-      if (!destination.value) {
-       event.preventDefault();
-       pendingSend = true;
-       window.taskWorkspace.openPanel('details');
-       root.querySelector('[data-detail-property="destination_project"]').click();
-      }
-     });
+     // The composer picker and the Details row edit the same input.
      destination.addEventListener('change', function() {
-      if (!pendingSend || !destination.value) return;
-      pendingSend = false;
-      // Let the property picker finish updating the draft and close first.
-      queueMicrotask(function() {
-       if (root.isConnected && destination.value) form.requestSubmit();
-      });
-     });
-     projectPicker.addEventListener('beforetoggle', function(event) {
-      if (event.newState === 'closed' && !destination.value) pendingSend = false;
-     });
-     root.addEventListener('keydown', function(event) {
-      if (event.key === 'Escape') pendingSend = false;
-     }, true);
-     root.addEventListener('pointerdown', function(event) {
-      if (!projectPicker.contains(event.target) && !event.target.closest('[data-detail-property="destination_project"]')) pendingSend = false;
+      var row = destination.closest('[data-detail-property="destination_project"]');
+      var option = root.querySelector('#task-property-picker [data-options="destination_project"] button[data-value="' + CSS.escape(destination.value) + '"]');
+      row.dataset.value = destination.value;
+      row.querySelector('[data-property-label]').textContent = option ? option.textContent : 'Choose a project';
      });
     }
     root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {
@@ -406,7 +384,7 @@ func projectDefaultAgentID(project *models.Project) string {
 
 // Project selection uses the same compact row as the other Task properties.
 templ NewTaskProjectRow(project *models.Project, projects []models.Project) {
- if layout.WorkspaceProjectID(ctx, project.ID) == models.AllProjectsID {
+ if models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) {
   <button type="button" class="task-property-row inspector-property-row" data-detail-property="destination_project" data-value={ newTaskDestinationValue(project) } aria-haspopup="dialog">
    @components.InspectorPropertyContent("Project", newTaskDestinationLabel(project))
    <input type="hidden" id="new-task-project" name="destination_project" form="task-thread-form" data-draft-property="destination_project" value={ newTaskDestinationValue(project) }/>
@@ -414,11 +392,16 @@ templ NewTaskProjectRow(project *models.Project, projects []models.Project) {
  }
 }
 
+func newTaskProjectChoices(ctx context.Context, project *models.Project) []models.Project {
+ if !models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) { return nil }
+ return templateui.ProjectOptions(ctx)
+}
+
 func newTaskDestinationValue(project *models.Project) string {
- if project.ID == models.AllProjectsID { return "" }
+ if models.IsAggregateProject(project.ID) { return "" }
  return project.ID
 }
 func newTaskDestinationLabel(project *models.Project) string {
- if project.ID == models.AllProjectsID { return "Choose a project" }
+ if models.IsAggregateProject(project.ID) { return "Choose a project" }
  return project.Name
 }

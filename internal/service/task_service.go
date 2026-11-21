@@ -286,8 +286,11 @@ func (s *TaskService) ValidateTaskIDsForProject(ctx context.Context, projectID s
 	for _, id := range ids {
 		var task *models.Task
 		var err error
-		if projectID == models.AllProjectsID {
+		if models.IsAggregateProject(projectID) {
 			task, err = s.repo.GetByID(ctx, id)
+			if err == nil && task != nil && !models.InScope(ctx, task.ProjectID) {
+				task = nil
+			}
 		} else {
 			task, err = s.repo.GetByIDForProject(ctx, projectID, id)
 		}

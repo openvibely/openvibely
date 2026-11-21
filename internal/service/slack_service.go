@@ -79,6 +79,7 @@ type SlackConnectionStatus struct {
 // SlackService manages Slack OAuth, Socket Mode event processing, and
 // Slack-origin task completion notifications.
 type SlackService struct {
+	localServiceGate
 	settingsRepo               persistence.SettingsStore
 	projectRepo                persistence.ProjectStore
 	projectSvc                 *ProjectService
@@ -307,6 +308,9 @@ func (s *SlackService) IsRunning() bool {
 }
 
 func (s *SlackService) Start() error {
+	if !s.startAllowed() {
+		return nil
+	}
 	appToken := s.getSetting(context.Background(), SlackSettingAppToken)
 	botToken := s.resolveBotToken(context.Background())
 	if strings.TrimSpace(appToken) == "" || strings.TrimSpace(botToken) == "" {
@@ -315,6 +319,9 @@ func (s *SlackService) Start() error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.startAllowed() {
+		return nil
+	}
 	if s.running {
 		return nil
 	}

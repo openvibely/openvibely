@@ -76,10 +76,11 @@
                 window.dispatchEvent(new CustomEvent('live-system-update', {detail: frame.data}));
                 return;
             }
-            if (frame.event === 'reconcile') {
+            if (frame.event === 'servers_changed') window.dispatchEvent(new CustomEvent('openvibely-servers-changed'));
+            if (frame.event === 'reconcile' || frame.event === 'servers_changed') {
                 // Only sent after notification loss. Renew computer subscriptions
                 // to receive authorized snapshots over this socket, not HTTP.
-                subscriptions.forEach(function (entry, id) {
+                if (frame.event === 'reconcile') subscriptions.forEach(function (entry, id) {
                     if (entry.command.op !== 'computer') return;
                     entry.retry.cancel();
                     send({op:'unsubscribe', id:id});

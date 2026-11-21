@@ -24,6 +24,7 @@ import (
 	"github.com/openvibely/openvibely/internal/pageintegration"
 	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -107,7 +108,7 @@ func (h *Handler) resolvePluginForRequest(c echo.Context, allowAllProjects bool)
 		return nil, err
 	}
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
-	if projectID == "" || (projectID == models.AllProjectsID && !allowAllProjects) {
+	if projectID == "" || (models.IsAggregateProject(projectID) && !allowAllProjects) {
 		return nil, pluginNotFound()
 	}
 	r, err := h.pagePlugins.Resolve(c.Request().Context(), c.Param("instanceId"), projectID)
@@ -147,6 +148,9 @@ func pluginView(r *pageplugins.Resolved, hd pageplugins.Handle) pages.PluginPage
 
 // PluginPage renders a plugin page instance in the main content area.
 func (h *Handler) PluginPage(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		return h.remotePluginPage(c)
+	}
 	if err := h.requirePagePlugins(); err != nil {
 		return err
 	}
@@ -162,7 +166,7 @@ func (h *Handler) PluginPage(c echo.Context) error {
 	if err := h.requirePageAccess(ctx, in.ProjectID, authz.View); err != nil {
 		return err
 	}
-	if requested == "" || requested == models.AllProjectsID {
+	if requested == "" || models.IsAggregateProject(requested) {
 		// Opening from All Projects (or a bare deep link) keeps the page's own project.
 		target := "/p/" + url.PathEscape(in.ID) + "?project_id=" + url.QueryEscape(in.ProjectID)
 		if isHTMX(c) {
@@ -237,38 +241,46 @@ func (h *Handler) loadPluginChatHistory(ctx context.Context, v *pages.PluginPage
 
 // PluginPagesNav renders enabled plugin pages for the left rail.
 func (h *Handler) PluginPagesNav(c echo.Context) error {
-	if h.pagePlugins == nil {
-		return c.NoContent(http.StatusOK)
-	}
 	projectID, err := h.getCurrentProjectID(c)
 	if err != nil || projectID == "" {
 		return c.NoContent(http.StatusOK)
 	}
-	ins, err := h.pagePlugins.ListEnabled(c.Request().Context(), projectID)
+	entries, err := h.pluginNavigation(c.Request().Context(), projectID)
 	if err != nil {
 		return err
 	}
+	return render(c, http.StatusOK, pages.PluginNav(entries, models.IsAggregateProject(projectID)))
+}
+
+func (h *Handler) localPluginNavigation(ctx context.Context, projectID string) ([]pages.PluginNavEntry, error) {
+	if h.pagePlugins == nil {
+		return nil, nil
+	}
+	ins, err := h.pagePlugins.ListEnabled(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	entries := make([]pages.PluginNavEntry, 0, len(ins))
 	for _, in := range ins {
-		if err := h.requirePageAccess(c.Request().Context(), in.ProjectID, authz.View); err != nil {
+		if err := h.requirePageAccess(ctx, in.ProjectID, authz.View); err != nil {
 			if errors.Is(err, authz.ErrDenied) {
 				continue
 			}
-			return err
+			return nil, err
 		}
 		label := in.ProjectName
 		if label == "" {
 			label = in.ProjectID
 		}
 		icon := ""
-		pkg, err := h.pagePlugins.Store().GetPackage(c.Request().Context(), in.PackageID)
+		pkg, err := h.pagePlugins.Store().GetPackage(ctx, in.PackageID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if pkg != nil {
 			manifest, err := h.pagePlugins.Manifest(pkg)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if page, ok := manifest.Page(in.PageID); ok {
 				icon = strings.TrimSpace(page.Icon)
@@ -279,7 +291,7 @@ func (h *Handler) PluginPagesNav(c echo.Context) error {
 		}
 		entries = append(entries, pages.PluginNavEntry{InstanceID: in.ID, Title: in.Title, Icon: icon, ProjectID: in.ProjectID, ProjectLabel: label})
 	}
-	return render(c, http.StatusOK, pages.PluginNav(entries, projectID == models.AllProjectsID))
+	return entries, nil
 }
 
 var pluginAssetTypes = map[string]string{
@@ -306,6 +318,9 @@ func nativePluginAssetCSP(handle string) string {
 // per-load handle is the capability: sandboxed (opaque-origin) frames do not
 // send session cookies for subresources.
 func (h *Handler) PluginAsset(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("handle")); ok {
+		return h.remotePluginAsset(c)
+	}
 	if err := h.requirePagePlugins(); err != nil {
 		return err
 	}
@@ -426,6 +441,9 @@ func bridgeResult(c echo.Context, v any) error {
 // @Failure 404 {object} ErrorResponse
 // @Router /api/plugin-pages/{instanceId}/bridge [post]
 func (h *Handler) PluginBridge(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		return h.remotePluginBridge(c)
+	}
 	if err := requirePluginMutation(c); err != nil {
 		return err
 	}
@@ -449,25 +467,39 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 	if err != nil {
 		return bridgeError(c, http.StatusBadRequest, err.Error())
 	}
-	ctx := c.Request().Context()
+	out, err := h.runPluginBridge(c.Request().Context(), r, hd, msg, h.authPrincipalID(c), c.QueryParam("agent_id"), parseEffortForm(c))
+	if err != nil {
+		var he *echo.HTTPError
+		if errors.As(err, &he) {
+			return bridgeError(c, he.Code, fmt.Sprint(he.Message))
+		}
+		return err
+	}
+	return c.JSON(http.StatusOK, pluginBridgeResponse{OK: true, Result: out})
+}
+
+func pluginBridgeValue(v any) (json.RawMessage, error) { return json.Marshal(v) }
+func pluginBridgeFailure(status int, message string) (json.RawMessage, error) {
+	return nil, echo.NewHTTPError(status, message)
+}
+func (h *Handler) runPluginBridge(ctx context.Context, r *pageplugins.Resolved, hd pageplugins.Handle, msg *pageplugins.BridgeMessage, principal, agentID string, effort effortForm) (json.RawMessage, error) {
 	integration := h.pagePlugins.Integration(r)
-	principal := h.authPrincipalID(c)
 	switch msg.Type {
 	case pageplugins.BridgePageLoaded, pageplugins.BridgePageFailed:
 		var report struct {
 			Error string `json:"error,omitempty"`
 		}
 		if err := pageplugins.DecodeStrict(msg.Payload, &report); err != nil {
-			return bridgeError(c, http.StatusBadRequest, "invalid startup report")
+			return pluginBridgeFailure(http.StatusBadRequest, "invalid startup report")
 		}
 		state := "loaded"
 		if msg.Type == pageplugins.BridgePageFailed {
 			state = "failed"
 		}
 		if err := h.pagePlugins.ReportStartup(hd.Token, state, report.Error); err != nil {
-			return bridgeError(c, http.StatusBadRequest, err.Error())
+			return pluginBridgeFailure(http.StatusBadRequest, err.Error())
 		}
-		return bridgeResult(c, h.pagePlugins.StartupStatus(r.Instance.ID, r.Package.ContentHash))
+		return pluginBridgeValue(h.pagePlugins.StartupStatus(r.Instance.ID, r.Package.ContentHash))
 	case pageplugins.BridgeReady:
 		type opInfo struct {
 			Name        string `json:"name"`
@@ -478,7 +510,7 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 		for _, op := range integration.Operations() {
 			ops = append(ops, opInfo{Name: op.Name, Kind: string(op.Kind), Description: op.Description})
 		}
-		return bridgeResult(c, map[string]any{
+		return pluginBridgeValue(map[string]any{
 			"bridge_version": pageplugins.BridgeVersion,
 			"instance":       map[string]string{"id": r.Instance.ID, "page_id": r.Page.ID, "title": r.Instance.Title, "project_id": r.Instance.ProjectID},
 			"permissions":    r.Manifest.Permissions,
@@ -487,50 +519,50 @@ func (h *Handler) PluginBridge(c echo.Context) error {
 	case pageplugins.BridgeOpInvoke:
 		var p pageplugins.OpInvokePayload
 		if err := pageplugins.DecodeStrict(msg.Payload, &p); err != nil {
-			return bridgeError(c, http.StatusBadRequest, "invalid op.invoke payload")
+			return pluginBridgeFailure(http.StatusBadRequest, "invalid op.invoke payload")
 		}
 		out, err := pageintegration.Run(ctx, integration, pageintegration.Caller{PrincipalID: principal, Via: "page"}, p.Operation, p.Input)
 		if err != nil {
 			if errors.Is(err, authz.ErrDenied) {
-				return err
+				return nil, err
 			}
 			status := http.StatusBadRequest
 			if errors.Is(err, pageintegration.ErrOperationNotFound) {
 				status = http.StatusNotFound
 			}
-			return bridgeError(c, status, err.Error())
+			return pluginBridgeFailure(status, err.Error())
 		}
-		return c.JSON(http.StatusOK, pluginBridgeResponse{OK: true, Result: out})
+		return out, nil
 	case pageplugins.BridgeContextSet:
 		var pc pageintegration.Context
 		if err := pageplugins.DecodeStrict(msg.Payload, &pc); err != nil {
-			return bridgeError(c, http.StatusBadRequest, "invalid context payload")
+			return pluginBridgeFailure(http.StatusBadRequest, "invalid context payload")
 		}
 		snap, err := h.pagePlugins.Contexts.Set(principal, r.Ref(), pc, "page:"+r.Page.ID)
 		if err != nil {
-			return bridgeError(c, http.StatusBadRequest, err.Error())
+			return pluginBridgeFailure(http.StatusBadRequest, err.Error())
 		}
-		return bridgeResult(c, map[string]any{"revision": snap.Revision})
+		return pluginBridgeValue(map[string]any{"revision": snap.Revision})
 	case pageplugins.BridgeEventsSubscribe:
 		if !r.Manifest.HasPermission(pageplugins.PermissionEvents) {
-			return bridgeError(c, http.StatusForbidden, "plugin lacks the events permission")
+			return pluginBridgeFailure(http.StatusForbidden, "plugin lacks the events permission")
 		}
-		return bridgeResult(c, map[string]bool{"subscribed": true})
+		return pluginBridgeValue(map[string]bool{"subscribed": true})
 	case pageplugins.BridgeAnalyzeRequest:
 		var p pageplugins.AnalyzePayload
 		if err := pageplugins.DecodeStrict(msg.Payload, &p); err != nil || strings.TrimSpace(p.Prompt) == "" || utf8.RuneCountInString(p.Prompt) > maxPluginAnalyzePrompt {
-			return bridgeError(c, http.StatusBadRequest, "analyze.request needs a prompt (max 4000 characters)")
+			return pluginBridgeFailure(http.StatusBadRequest, "analyze.request needs a prompt (max 4000 characters)")
 		}
-		exec, _, err := h.startPluginChatTurn(c, r, strings.TrimSpace(p.Prompt), pageChatInput{AgentID: c.QueryParam("agent_id")})
+		exec, _, err := h.startPageChatTurnOnOwner(ctx, h.pagePlugins.Conversation(r.Ref()), strings.TrimSpace(p.Prompt), pageChatInput{AgentID: agentID}, principal, effort)
 		if err != nil {
 			if errors.Is(err, authz.ErrDenied) {
-				return err
+				return nil, err
 			}
-			return bridgeError(c, pluginChatStatus(err), err.Error())
+			return pluginBridgeFailure(pluginChatStatus(err), err.Error())
 		}
-		return bridgeResult(c, map[string]string{"exec_id": exec.ID})
+		return pluginBridgeValue(map[string]string{"exec_id": exec.ID})
 	}
-	return bridgeError(c, http.StatusBadRequest, "unsupported message")
+	return pluginBridgeFailure(http.StatusBadRequest, "unsupported message")
 }
 
 func pluginChatStatus(err error) int {
@@ -555,6 +587,9 @@ func pluginChatStatus(err error) int {
 // @Failure 404 {object} ErrorResponse
 // @Router /api/plugin-pages/{instanceId}/events [get]
 func (h *Handler) PluginEvents(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		return h.remotePluginEvents(c)
+	}
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
 		return err
@@ -677,6 +712,19 @@ func (h *Handler) pluginSubscriptionAuthorized(c echo.Context, r *pageplugins.Re
 // @Success 204
 // @Router /api/plugin-pages/{instanceId}/handle/retire [post]
 func (h *Handler) PluginRetireHandle(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		if err := requirePluginMutation(c); err != nil {
+			return err
+		}
+		token := c.QueryParam("handle")
+		_, err := actPluginRetire(h, c.Request().Context(), PluginHandleArgs{PluginRefArgs: pluginRequestRef(c), Handle: token})
+		if err != nil {
+			return err
+		}
+		h.remotePluginHandles.Delete(token)
+		return c.NoContent(http.StatusNoContent)
+	}
+
 	if err := h.requirePagePlugins(); err != nil {
 		return err
 	}
@@ -699,6 +747,10 @@ func (h *Handler) PluginRetireHandle(c echo.Context) error {
 // @Failure 409 {object} ErrorResponse
 // @Router /api/plugin-pages/{instanceId}/chat [post]
 func (h *Handler) PluginChatSend(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		return h.remotePluginChat(c)
+	}
+
 	if err := requirePluginMutation(c); err != nil {
 		return err
 	}
@@ -746,6 +798,20 @@ func pluginAPI(instanceID, projectID, suffix string) string {
 // @Failure 404 {object} ErrorResponse
 // @Router /api/plugin-pages/{instanceId}/chat/stop [post]
 func (h *Handler) PluginChatStop(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		if err := requirePluginMutation(c); err != nil {
+			return err
+		}
+		_, err := actPluginStop(h, c.Request().Context(), pluginStopArgs{PluginRefArgs: pluginRequestRef(c), ExecID: c.QueryParam("expected_turn_id")})
+		if err != nil {
+			return err
+		}
+		if isHTMX(c) {
+			return h.PluginChatComposerAction(c)
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
+
 	if err := requirePluginMutation(c); err != nil {
 		return err
 	}
@@ -770,6 +836,15 @@ func (h *Handler) PluginChatStop(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Router /api/plugin-pages/{instanceId}/chat/thread/composer-action [get]
 func (h *Handler) PluginChatComposerAction(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		out, err := actPluginThread(h, c.Request().Context(), pluginRequestRef(c))
+		if err != nil {
+			return err
+		}
+		c.Response().Header().Set("Cache-Control", "no-store")
+		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB(components.PageChatFormID+"-primary-action", pluginAPI(out.InstanceID, out.ProjectID, "/chat/stop"), out.ExecID != "", out.ExecID))
+	}
+
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
 		return err
@@ -812,6 +887,21 @@ func (h *Handler) pluginChatRunningExec(ctx context.Context, instanceID string) 
 
 // requirePluginAdmin enforces administrator access for package-management actions.
 func (h *Handler) requirePluginAdmin(c echo.Context) (string, error) {
+	remoteTarget := c.QueryParam("project_id")
+	for _, key := range []string{"instanceId", "packageId"} {
+		if _, ok := remoteid.ServerOf(c.Param(key)); ok {
+			remoteTarget = c.Param(key)
+		}
+	}
+	if _, ok := remoteid.ServerOf(remoteTarget); ok {
+		if c.Request().Method != http.MethodGet {
+			if err := requirePluginMutation(c); err != nil {
+				return "", err
+			}
+		}
+		return h.authPrincipalID(c), nil
+	}
+
 	if err := h.requirePagePlugins(); err != nil {
 		return "", err
 	}
@@ -845,13 +935,13 @@ func (h *Handler) pluginSettingsProject(c echo.Context) (string, error) {
 
 func (h *Handler) pluginSettingsDestination(c echo.Context, scope string) (string, error) {
 	destination := scope
-	if scope == models.AllProjectsID {
+	if models.IsAggregateProject(scope) {
 		destination = c.QueryParam("destination_project")
 		if destination == "" {
 			destination = c.FormValue("destination_project")
 		}
 	}
-	if destination == "" || destination == models.AllProjectsID {
+	if destination == "" || models.IsAggregateProject(destination) || !models.InScope(c.Request().Context(), destination) {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "choose a project")
 	}
 	if err := h.requirePageAccess(c.Request().Context(), destination, authz.Edit); err != nil {
@@ -860,8 +950,11 @@ func (h *Handler) pluginSettingsDestination(c echo.Context, scope string) (strin
 	return destination, nil
 }
 
-func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pages.PluginSettingsView, error) {
+func (h *Handler) localPluginSettingsView(ctx context.Context, projectID string) (pages.PluginSettingsView, error) {
 	v := pages.PluginSettingsView{ProjectID: projectID}
+	if h.pagePlugins == nil {
+		return v, nil
+	}
 	store := h.pagePlugins.Store()
 	pkgs, err := store.ListPackages(ctx)
 	if err != nil {
@@ -886,18 +979,21 @@ func (h *Handler) pluginSettingsView(ctx context.Context, projectID string) (pag
 		return v, err
 	}
 	for _, project := range projects {
-		if project.ID != models.AllProjectsID && h.requirePageAccess(ctx, project.ID, authz.Edit) == nil {
+		if project.ID != models.AllProjectsID && models.InScope(ctx, project.ID) && h.requirePageAccess(ctx, project.ID, authz.Edit) == nil {
 			v.Projects = append(v.Projects, project)
 		}
 	}
 	ins, err := store.ListInstances(ctx, projectID, false)
-	if projectID == models.AllProjectsID {
+	if models.IsAggregateProject(projectID) {
 		ins, err = store.ListAllInstances(ctx, false)
 	}
 	if err != nil {
 		return v, err
 	}
 	for _, in := range ins {
+		if !models.InScope(ctx, in.ProjectID) {
+			continue
+		}
 		if err := h.requirePageAccess(ctx, in.ProjectID, authz.View); err != nil {
 			if errors.Is(err, authz.ErrDenied) {
 				continue
@@ -916,7 +1012,16 @@ func (h *Handler) renderPluginSettings(c echo.Context, projectID, notice string,
 		return err
 	}
 	c.Response().Header().Set("X-OpenVibely-Card-Page-Has-More", "false")
-	v.NativePicker = h.isLocalRepoPathEnabled()
+	_, remoteProject := remoteid.ServerOf(projectID)
+	v.NativePicker = h.isLocalRepoPathEnabled() && !remoteProject
+	if models.IsAggregateProject(projectID) {
+		for _, p := range v.Projects {
+			if _, remote := remoteid.ServerOf(p.ID); remote {
+				v.NativePicker = false
+				break
+			}
+		}
+	}
 	v.Search = strings.TrimSpace(c.QueryParam("search"))
 	v.Sort = c.QueryParam("sort")
 	v.Enabled = c.QueryParam("enabled")
@@ -1007,11 +1112,16 @@ func (h *Handler) PluginSettingsInstall(c echo.Context) error {
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
-	pkg, err := h.pagePlugins.InstallFromDir(c.Request().Context(), strings.TrimSpace(c.FormValue("path")), by)
+	var pkg *models.PagePluginPackage
+	if _, remote := remoteid.ServerOf(destination); remote {
+		pkg, err = actPluginInstall(h, c.Request().Context(), pluginSettingsArgs{ProjectID: destination, Path: strings.TrimSpace(c.FormValue("path")), AddPages: models.IsAggregateProject(projectID)})
+	} else {
+		pkg, err = h.pagePlugins.InstallFromDir(c.Request().Context(), strings.TrimSpace(c.FormValue("path")), by)
+	}
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
-	if projectID == models.AllProjectsID {
+	if _, remote := remoteid.ServerOf(destination); !remote && models.IsAggregateProject(projectID) {
 		if err := h.addInstalledPluginPages(c.Request().Context(), destination, pkg); err != nil {
 			return h.renderPluginSettings(c, projectID, "", err)
 		}
@@ -1031,7 +1141,12 @@ func (h *Handler) PluginSettingsCreateInstance(c echo.Context) error {
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
-	in, err := h.pagePlugins.CreateInstance(c.Request().Context(), destination, c.FormValue("package_id"), c.FormValue("page_id"))
+	var in *models.PagePluginInstance
+	if _, remote := remoteid.ServerOf(destination); remote {
+		in, err = actPluginCreate(h, c.Request().Context(), pluginSettingsArgs{ProjectID: destination, PackageID: c.FormValue("package_id"), PageID: c.FormValue("page_id")})
+	} else {
+		in, err = h.pagePlugins.CreateInstance(c.Request().Context(), destination, c.FormValue("package_id"), c.FormValue("page_id"))
+	}
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
@@ -1049,11 +1164,15 @@ func (h *Handler) PluginSettingsInstanceAction(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
+	if _, remote := remoteid.ServerOf(c.Param("instanceId")); remote {
+		_, err := actPluginManage(h, ctx, pluginSettingsArgs{ProjectID: projectID, InstanceID: c.Param("instanceId"), Action: c.Param("action")})
+		return h.renderPluginSettings(c, projectID, "Page updated", err)
+	}
 	in, err := h.pagePlugins.Store().GetInstance(ctx, c.Param("instanceId"))
 	if err != nil {
 		return err
 	}
-	if in == nil || (projectID != models.AllProjectsID && in.ProjectID != projectID) {
+	if in == nil || (!models.IsAggregateProject(projectID) && in.ProjectID != projectID) || !models.InScope(ctx, in.ProjectID) {
 		return pluginNotFound()
 	}
 	if err := h.requirePageAccess(ctx, in.ProjectID, authz.Edit); err != nil {
@@ -1082,7 +1201,11 @@ func (h *Handler) PluginSettingsRemovePackage(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	err = h.pagePlugins.RemovePackage(c.Request().Context(), c.Param("packageId"))
+	if _, remote := remoteid.ServerOf(c.Param("packageId")); remote {
+		_, err = actPluginManage(h, c.Request().Context(), pluginSettingsArgs{ProjectID: projectID, PackageID: c.Param("packageId"), Action: "remove-package"})
+	} else {
+		err = h.pagePlugins.RemovePackage(c.Request().Context(), c.Param("packageId"))
+	}
 	return h.renderPluginSettings(c, projectID, "Package removed", err)
 }
 
@@ -1108,6 +1231,13 @@ func (h *Handler) recoverPageConversation(ctx context.Context, task *models.Task
 // Page endpoints authorize the owning surface, then use the task-scoped
 // conversation handlers shared with task threads.
 func (h *Handler) pluginSteeringTask(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		if err := requirePluginMutation(c); err != nil {
+			return err
+		}
+		return h.remotePluginThreadContext(c)
+	}
+
 	if err := requirePluginMutation(c); err != nil {
 		return err
 	}

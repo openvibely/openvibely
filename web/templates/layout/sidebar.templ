@@ -1,16 +1,29 @@
 package layout
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
 	templateui "github.com/openvibely/openvibely/web/templates"
 )
 
-func sidebarProjectDisplayName(projects []models.Project, currentProjectID string) string {
+func sidebarProjectDisplayName(ctx context.Context, projects []models.Project, currentProjectID string) string {
+	for _, project := range SharedProjects(ctx) {
+		if project.ID == currentProjectID {
+			return project.Name
+		}
+	}
 	for _, project := range projects {
 		if project.ID == currentProjectID {
 			return project.Name
+		}
+	}
+	for _, server := range RemoteServers(ctx) {
+		for _, project := range server.Projects {
+			if project.ID == currentProjectID {
+				return project.Name
+			}
 		}
 	}
 	if len(projects) > 0 {
@@ -46,8 +59,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     const preferenceUserID = document.documentElement.getAttribute('data-preference-user-id');
                     if (!preferenceUserID) return;
                     const legacyOutboxPrefix = 'openvibely.project-preference-outbox.';
-                    const preferenceOutboxPrefix = 'openvibely.' + encodeURIComponent(preferenceUserID) + '.project-preference-outbox.';
-                    const activePreferenceUserKey = 'openvibely.active-preference-user';
+                    const preferenceScope = 'openvibely.';
+                    const preferenceOutboxPrefix = preferenceScope + encodeURIComponent(preferenceUserID) + '.project-preference-outbox.';
+                    const activePreferenceUserKey = preferenceScope + 'active-preference-user';
                     let preferenceAccountStopped = false;
                     let activePreferenceController = null;
                     try { localStorage.setItem(activePreferenceUserKey, preferenceUserID); } catch (_) {}
@@ -179,8 +193,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
                     const restoreDesktopLocation = desktopProjectNavigation && location.pathname === '/chat' && !location.search;
                     const recoveredProjectID = recoveredPreferences.project_id;
-                    const startupProjectID = restoreDesktopLocation && Array.from(sel.options).some(function(option) { return option.value === recoveredProjectID; }) ? recoveredProjectID : sel.value;
-                    if (restoreDesktopLocation && (projectLocations.has(startupProjectID) || startupProjectID !== sel.value || startupProjectID === '__all_projects__')) {
+                    const startupProjectID = window.openVibelyProjectPage(restoreDesktopLocation && Array.from(sel.options).some(function(option) { return option.value === recoveredProjectID; }) ? recoveredProjectID : sel.value);
+                    if (restoreDesktopLocation && (projectLocations.has(startupProjectID) || startupProjectID !== sel.value || window.openVibelyIsAggregateProject(startupProjectID))) {
                         const restored = projectLocation(startupProjectID);
                         document.addEventListener('DOMContentLoaded', function() { navigateProject(restored, startupProjectID); }, {once: true});
                     }
@@ -188,30 +202,32 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     const allProjectsLists = new Map();
                     function rememberAllProjectsList() {
                         const url = new URL(location.href);
-                        if (url.searchParams.get('project_id') !== '__all_projects__' || !['/tasks', '/automations'].includes(url.pathname)) return;
+                        if (!window.openVibelyIsAggregateProject(url.searchParams.get('project_id')) || !['/tasks', '/automations'].includes(url.pathname)) return;
                         const path = url.pathname + url.search + url.hash;
-                        allProjectsLists.set(url.pathname, path);
-                        try { sessionStorage.setItem('openvibely.all-projects-list.' + url.pathname, path); } catch (_) {}
+                        const key = url.searchParams.get('project_id') + ':' + url.pathname;
+                        allProjectsLists.set(key, path);
+                        try { sessionStorage.setItem('openvibely.all-projects-list.' + key, path); } catch (_) {}
                     }
                     document.addEventListener('htmx:pushedIntoHistory', rememberAllProjectsList);
                     document.addEventListener('htmx:replacedInHistory', rememberAllProjectsList);
                     document.addEventListener('htmx:historyRestore', rememberAllProjectsList);
                     window.addEventListener('popstate', rememberAllProjectsList);
                     rememberAllProjectsList();
-                    function savedAllProjectsList(path) {
-                        let saved = allProjectsLists.get(path);
-                        try { saved = saved || sessionStorage.getItem('openvibely.all-projects-list.' + path); } catch (_) {}
+                    function savedAllProjectsList(path, scope) {
+                        const key = scope + ':' + path;
+                        let saved = allProjectsLists.get(key);
+                        try { saved = saved || sessionStorage.getItem('openvibely.all-projects-list.' + key); } catch (_) {}
                         if (!saved) return '';
                         const target = new URL(saved, location.href);
-                        if (target.origin !== location.origin || target.pathname !== path || target.searchParams.get('project_id') !== '__all_projects__') return '';
+                        if (target.origin !== location.origin || target.pathname !== path || target.searchParams.get('project_id') !== scope) return '';
                         return target.pathname + target.search + target.hash;
                     }
                     document.addEventListener('click', function(event) {
                         const link = event.target.closest('#task-back-btn, #task-automations-back-btn, [data-automation-breadcrumb] a, [data-workspace-list-return]');
                         if (!link) return;
                         const url = new URL(link.href, location.href);
-                        if (url.origin !== location.origin || url.searchParams.get('project_id') !== '__all_projects__' || !['/tasks', '/automations'].includes(url.pathname)) return;
-                        const saved = savedAllProjectsList(url.pathname);
+                        if (url.origin !== location.origin || !window.openVibelyIsAggregateProject(url.searchParams.get('project_id')) || !['/tasks', '/automations'].includes(url.pathname)) return;
+                        const saved = savedAllProjectsList(url.pathname, url.searchParams.get('project_id'));
                         if (!saved) return;
                         link.href = saved;
                         link.setAttribute('hx-get', saved);
@@ -237,11 +253,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								return url.pathname + url.search + url.hash;
 							}
 						}
-						return (id === '__all_projects__' ? '/tasks' : '/chat') + '?project_id=' + encodeURIComponent(id);
+						return (window.openVibelyIsAggregateProject(id) ? '/tasks' : '/chat') + '?project_id=' + encodeURIComponent(id);
 					}
 					function syncProjectSelector() {
                         const settingsButton = document.getElementById('project-settings-btn');
-                        if (settingsButton) settingsButton.disabled = sel.value === '__all_projects__';
+                        if (settingsButton) settingsButton.disabled = window.openVibelyIsAggregateProject(sel.value);
 						if (window.openVibelySearchableSelector && typeof window.openVibelySearchableSelector.sync === 'function') {
 							window.openVibelySearchableSelector.sync(sel.closest('[data-searchable-selector]'), sel.value);
 						}
@@ -271,6 +287,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     });
 
                     async function switchSelectedProject() {
+						sel.value = window.openVibelyProjectPage(sel.value);
 						const newProjectId = sel.value;
 						if (!newProjectId || newProjectId === previousProjectID) {
 							syncProjectSelector();
@@ -358,7 +375,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
 						}
 
-						if (newProjectId === '__all_projects__' && !['/chat', '/tasks', '/analytics', '/automations'].includes(currentPath)) newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
+						if (window.openVibelyIsAggregateProject(newProjectId) && !['/chat', '/tasks', '/analytics', '/automations'].includes(currentPath)) newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
 						rememberProjectLocation();
 						if (desktopProjectNavigation || matchMedia('(min-width: 1024px)').matches) newUrl = projectLocation(newProjectId);
 
@@ -373,7 +390,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         // the selector already shows the optimistic destination.
                         window.openVibelyProtectedProjectID = new URLSearchParams(location.search).get('project_id');
                         if (window.openVibelyProjectTabsSync) window.openVibelyProjectTabsSync();
-                        const fallback = (id === '__all_projects__' ? '/tasks' : '/chat') + '?project_id=' + encodeURIComponent(id);
+                        const fallback = (window.openVibelyIsAggregateProject(id) ? '/tasks' : '/chat') + '?project_id=' + encodeURIComponent(id);
                         try {
                             try { await window.openVibelyNavigate(url); }
                             catch (error) {
@@ -439,12 +456,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                                 detail.path = worktreeAction.pathname + worktreeAction.search;
                             }
                         }
-                        if (sel.value === '__all_projects__' && detail.verb !== 'get') {
+                        if (window.openVibelyIsAggregateProject(sel.value) && detail.verb !== 'get') {
                             var task = document.getElementById('task-detail-content');
                             var action = new URL(detail.path, location.href);
                             if (action.origin === location.origin) {
                                 const listPath = detail.verb === 'delete' && /^\/tasks\/[^/]+$/.test(action.pathname) ? '/tasks' : detail.verb === 'post' && /^\/automations\/[^/]+\/delete$/.test(action.pathname) ? '/automations' : '';
-                                const saved = listPath && savedAllProjectsList(listPath);
+                                const saved = listPath && savedAllProjectsList(listPath, sel.value);
                                 if (saved) {
                                     action.searchParams.set('return_list', saved);
                                     detail.path = action.pathname + action.search;
@@ -477,6 +494,52 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         if (restoredID && restoredID === sel.value) persistSelectedProject(restoredID);
                     });
 					window.addEventListener('popstate', syncProjectSelectorFromURL);
+
+                    // Saved servers coming or going change which copies each repository
+                    // tab covers; refresh the picker and move the page to the tab's view.
+                    let catalogGeneration = 0;
+                    async function refreshProjectCatalog() {
+                        const generation = ++catalogGeneration;
+                        let html;
+                        try {
+                            const response = await fetch('/ui/project-catalog?current=' + encodeURIComponent(sel.value), {cache: 'no-store'});
+                            if (!response.ok) return;
+                            html = await response.text();
+                        } catch (_) { return; }
+                        if (generation !== catalogGeneration) return;
+                        const doc = new DOMParser().parseFromString(html, 'text/html');
+                        const options = doc.querySelector('[data-project-catalog-options]');
+                        const results = doc.querySelector('[data-project-catalog-results]');
+                        const shared = doc.getElementById('project-catalog-shared');
+                        const list = document.querySelector('#project-selector-dialog [data-searchable-selector-results]');
+                        if (!options || !results || !shared || !list) return;
+                        const current = sel.value;
+                        const kept = Array.from(sel.options).find(function(option) { return option.value === current; });
+                        sel.replaceChildren.apply(sel, Array.from(options.children).map(function(node) { return document.importNode(node, true); }));
+                        if (current && !Array.from(sel.options).some(function(option) { return option.value === current; }) && kept) sel.append(kept);
+                        sel.value = current;
+                        list.replaceChildren.apply(list, Array.from(results.children).map(function(node) { return document.importNode(node, true); }));
+                        try { window.openVibelySharedProjects = JSON.parse(shared.textContent || '{}') || {}; } catch (_) {}
+                        try { window.openVibelySharedProjectMachines = JSON.parse(doc.getElementById('project-catalog-shared-machines').textContent || '{}') || {}; } catch (_) {}
+                        if (window.openVibelyProjectTabsRender) window.openVibelyProjectTabsRender();
+                        syncProjectSelector();
+                        const target = window.openVibelyProjectPage(window.openVibelyProjectTab(current));
+                        if (target === current || !Array.from(sel.options).some(function(option) { return option.value === target; })) return;
+                        // Item pages belong to one copy; only list pages follow the tab.
+                        if (!['/tasks', '/analytics', '/automations', '/chat'].includes(location.pathname)) return;
+                        // A copy's chat stays open; the combined chat page only picks a copy.
+                        if (location.pathname === '/chat' && window.openVibelyIsAggregateProject(target)) return;
+                        if (document.querySelector('dialog[open]')) return;
+                        const url = new URL(location.href);
+                        url.searchParams.set('project_id', target);
+                        sel.value = target;
+                        previousProjectID = target;
+                        syncProjectSelector();
+                        navigateProject(url.pathname + url.search + url.hash, target);
+                    }
+                    window.addEventListener('openvibely-servers-changed', refreshProjectCatalog);
+                    // Covers a server that connected before this page's live socket did.
+                    window.addEventListener('live-transport-connected', refreshProjectCatalog);
 				})();
 
 				(function() {
@@ -528,7 +591,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								// Only refresh alert badge if this is an alert_created event for the current project.
 								if (eventType === 'alert_created' && projectSelector) {
 									const currentProjectID = projectSelector.value;
-									if (data.project_id === currentProjectID || currentProjectID === '__all_projects__') {
+									if (window.openVibelyProjectInScope(data.project_id, currentProjectID)) {
 										if (data.alert_source === 'account_usage' && typeof window.showToast === 'function') {
 											window.showToast(data.alert_title, data.alert_severity === 'error' ? 'error' : data.alert_severity === 'warning' ? 'warning' : 'info', '', {toastKey:'account-usage:'+data.alert_id, clickURL: data.alert_url && data.alert_url.startsWith('/analytics?') ? data.alert_url : '/alerts'});
 										}
@@ -540,7 +603,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									// Skip chat tasks — chat responses appear inline in the chat UI.
 									if (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {
 										const currentProjectID = projectSelector.value;
-										if (data.project_id === currentProjectID || currentProjectID === '__all_projects__') {
+										if (window.openVibelyProjectInScope(data.project_id, currentProjectID)) {
 											const terminalStatuses = ['completed', 'failed', 'cancelled'];
 											if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
 												const rawTaskName = data.task_name || 'Task';
@@ -552,7 +615,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 									if (eventType === 'automation_invocation_started' && projectSelector && typeof window.showToast === 'function') {
 										const currentProjectID = projectSelector.value;
-										if (data.project_id === currentProjectID || currentProjectID === '__all_projects__') {
+										if (window.openVibelyProjectInScope(data.project_id, currentProjectID)) {
 											const automationName = data.task_name || 'Automation';
 											const invocationId = data.invocation_id || data.automation_id || '';
 											const automationUrl = '/automations/' + encodeURIComponent(data.automation_id || '') + '?project_id=' + encodeURIComponent(currentProjectID);
@@ -1195,7 +1258,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				btn.addEventListener('click', function(e) {
 					e.preventDefault();
 					const sel = document.getElementById('project-selector');
-					if (!sel || !sel.value || sel.value === '__all_projects__') return;
+					if (!sel || !sel.value || window.openVibelyIsAggregateProject(sel.value)) return;
 					const container = document.getElementById('project-settings-container');
 					htmx.ajax('GET', '/projects/' + sel.value + '/edit', {
 						target: container,
@@ -1217,7 +1280,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
                         if serverRuntimeMode(ctx) != "desktop" {
 						<button
 							id="project-settings-btn"
-                            disabled?={ currentProjectID == models.AllProjectsID }
+                            disabled?={ models.IsAggregateProject(currentProjectID) }
 							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
 							aria-label="Project Settings" data-tooltip-disabled
 						>
@@ -1244,14 +1307,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 					data-project-selector-value
 					data-searchable-selector-value
 				>
-					for _, p := range projects {
-						<option
-							value={ p.ID }
-							selected?={ p.ID == currentProjectID }
-						>
-							{ p.Name }
-						</option>
-					}
+					@projectSelectorOptions(projects, currentProjectID)
 				</select>
                 if serverRuntimeMode(ctx) == "desktop" {
                     <button id="project-selector-trigger" type="button" aria-label="Open project" title="Open project" aria-haspopup="dialog" aria-expanded="false" aria-controls="project-selector-dialog" data-searchable-selector-trigger><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M7 2v10M2 7h10"/></svg></button>
@@ -1268,7 +1324,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 					disabled?={ len(projects) == 0 }
 				>
 					<svg class="project-selector-plus" width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 2v10M2 7h10"/></svg>
-					<span id="project-selector-current-label" class="min-w-0 truncate" data-searchable-selector-current-label>{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
+					<span id="project-selector-current-label" class="min-w-0 truncate" data-searchable-selector-current-label>{ sidebarProjectDisplayName(ctx, projects, currentProjectID) }</span>
 				</button>
                 }
                 {{ selectorConfig := templateui.SearchableSelectorConfig{ID: "project-selector", Kind: "project", Local: true, InitialStatus: "All projects shown."} }}
@@ -1276,37 +1332,68 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
                     {{ selectorConfig.CreateButtonID = "new-project-btn"; selectorConfig.CreateLabel = "Create New Project" }}
                 }
                 @templateui.SearchableSelector(selectorConfig) {
-					if len(projects) == 0 {
-						<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>
-					} else {
-						<div role="listbox" aria-label="Projects" class={ templateui.SearchableSelectorMenuClass }>
-							for _, p := range projects {
-								<button
-									class={ templateui.SearchableSelectorOptionClass }
-									type="button"
-									role="option"
-									aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
-									tabindex="-1"
-									data-project-selector-option
-									data-project-id={ p.ID }
-									data-project-name={ p.Name }
-									data-searchable-selector-option
-									data-searchable-selector-id={ p.ID }
-									data-searchable-selector-name={ p.Name }
-								>
-									<span class="min-w-0 break-words">{ p.Name }</span>
-								</button>
-							}
-						</div>
-						<div class="px-3 py-8 text-center" data-project-selector-no-match data-searchable-selector-no-match hidden>
-							<p class="font-medium">No projects match your search.</p>
-							<p class="mt-1 text-sm text-base-content/60">Try a different name.</p>
-						</div>
-					}
+					@projectSelectorResults(projects, currentProjectID)
 				}
 			</div>
 }
 
+
+// remoteProjectGroups lists connected servers' projects. Their IDs carry the
+// server, so choosing one opens it on this origin like a local project.
+templ remoteProjectGroups(servers []RemoteServer, currentProjectID string) {
+	for _, server := range servers {
+		if len(remoteUngrouped(ctx, server.Projects)) > 0 {
+		<div role="listbox" aria-label={ server.Name } class={ templateui.SearchableSelectorMenuClass } data-remote-server-group={ server.ID }>
+			<div class="px-3 pt-2 pb-1 text-xs uppercase tracking-wider opacity-60 truncate" aria-hidden="true">{ server.Name }</div>
+			for _, p := range remoteUngrouped(ctx, server.Projects) {
+				<button
+					class={ templateui.SearchableSelectorOptionClass }
+					type="button"
+					role="option"
+					aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
+					tabindex="-1"
+					data-project-selector-option
+					data-project-id={ p.ID }
+					data-project-name={ p.Name }
+					data-searchable-selector-option
+					data-searchable-selector-id={ p.ID }
+					data-searchable-selector-name={ p.Name + " " + server.Name }
+				>
+					<span class="min-w-0 break-words">{ p.Name }</span>
+					<span class="ml-auto shrink-0 badge badge-ghost badge-sm">{ server.Name }</span>
+				</button>
+			}
+		</div>
+		}
+	}
+}
+
+// sharedProjectGroup lists repositories kept on several machines once each.
+templ sharedProjectGroup(shared []SharedProject, currentProjectID string) {
+	if len(shared) > 0 {
+		<div role="listbox" aria-label="Several copies" class={ templateui.SearchableSelectorMenuClass } data-shared-project-group>
+			<div class="px-3 pt-2 pb-1 text-xs uppercase tracking-wider opacity-60 truncate" aria-hidden="true">Several copies</div>
+			for _, p := range shared {
+				<button
+					class={ templateui.SearchableSelectorOptionClass }
+					type="button"
+					role="option"
+					aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
+					tabindex="-1"
+					data-project-selector-option
+					data-project-id={ p.ID }
+					data-project-name={ p.Name }
+					data-searchable-selector-option
+					data-searchable-selector-id={ p.ID }
+					data-searchable-selector-name={ p.Name + " " + p.Machines() }
+				>
+					<span class="min-w-0 break-words">{ p.Name }</span>
+					<span class="ml-auto shrink-0 badge badge-ghost badge-sm truncate max-w-[50%]" title={ p.Machines() }>{ p.Machines() }</span>
+				</button>
+			}
+		</div>
+	}
+}
 
 templ SidebarToggle() {
 				<button
@@ -1325,4 +1412,67 @@ templ SidebarToggle() {
 						<line x1="9" y1="3" x2="9" y2="21"/>
 					</svg>
 				</button>
+}
+
+templ projectSelectorOptions(projects []models.Project, currentProjectID string) {
+	for _, p := range projects {
+		<option value={ p.ID } selected?={ p.ID == currentProjectID }>{ p.Name }</option>
+	}
+	for _, server := range RemoteServers(ctx) {
+		for _, p := range server.Projects {
+			<option value={ p.ID } selected?={ p.ID == currentProjectID }>{ p.Name }</option>
+		}
+	}
+	for _, p := range SharedProjects(ctx) {
+		<option value={ p.ID } selected?={ p.ID == currentProjectID }>{ p.Name }</option>
+	}
+}
+
+templ projectSelectorResults(projects []models.Project, currentProjectID string) {
+	if len(projects) == 0 {
+		<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>
+		@sharedProjectGroup(combinedProjects(ctx), currentProjectID)
+		@remoteProjectGroups(RemoteServers(ctx), currentProjectID)
+	} else {
+		<div role="listbox" aria-label="Projects" class={ templateui.SearchableSelectorMenuClass }>
+			for _, p := range projects {
+				if !sharedMember(ctx, p.ID) {
+				<button
+					class={ templateui.SearchableSelectorOptionClass }
+					type="button"
+					role="option"
+					aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
+					tabindex="-1"
+					data-project-selector-option
+					data-project-id={ p.ID }
+					data-project-name={ p.Name }
+					data-searchable-selector-option
+					data-searchable-selector-id={ p.ID }
+					data-searchable-selector-name={ p.Name }
+				>
+					<span class="min-w-0 break-words">{ p.Name }</span>
+				</button>
+				}
+			}
+		</div>
+		@sharedProjectGroup(combinedProjects(ctx), currentProjectID)
+		@remoteProjectGroups(RemoteServers(ctx), currentProjectID)
+		<div class="px-3 py-8 text-center" data-project-selector-no-match data-searchable-selector-no-match hidden>
+			<p class="font-medium">No projects match your search.</p>
+			<p class="mt-1 text-sm text-base-content/60">Try a different name.</p>
+		</div>
+	}
+}
+
+// ProjectCatalog is the project picker's data, refetched when saved servers come or go.
+templ ProjectCatalog(projects []models.Project, currentProjectID string) {
+	{{ projects = withAllProjectsOption(projects) }}
+	<select data-project-catalog-options>
+		@projectSelectorOptions(projects, currentProjectID)
+	</select>
+	<div data-project-catalog-results>
+		@projectSelectorResults(projects, currentProjectID)
+	</div>
+	@templ.JSONScript("project-catalog-shared", sharedProjectMembers(ctx))
+	@templ.JSONScript("project-catalog-shared-machines", sharedProjectMachines(ctx))
 }

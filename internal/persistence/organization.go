@@ -28,6 +28,8 @@ type OrganizationStore interface {
 	CreateSession(ctx context.Context, tokenHash, userID string, expiresAt int64) error
 	SessionUser(ctx context.Context, tokenHash string, now int64) (*models.OrgUser, error)
 	RevokeSession(context.Context, string) error
+	// ExtendSession moves a live session's expiry later; it never shortens one.
+	ExtendSession(ctx context.Context, tokenHash string, now, expiresAt int64) error
 	BindHostedOwner(ctx context.Context, subject, email string) (*models.OrgUser, error)
 	Preferences(ctx context.Context, userID string, keys []string) (map[string]string, error)
 	SetPreferences(ctx context.Context, userID string, values map[string]string) error

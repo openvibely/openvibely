@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"net/http"
 	"net/url"
 	"os"
@@ -135,6 +136,13 @@ func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.deleteChannels(c.Request().Context(), projectID, ids); err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
+}
+
+func (h *Handler) deleteChannels(ctx context.Context, projectID string, ids []string) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
@@ -142,7 +150,7 @@ func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
 	personalPAT := false
 	if h.personalGitHub != nil {
 		var modeErr error
-		personalPAT, modeErr = h.personalGitHub.UsesPersonalPAT(c.Request().Context())
+		personalPAT, modeErr = h.personalGitHub.UsesPersonalPAT(ctx)
 		if modeErr != nil {
 			return modeErr
 		}
@@ -166,27 +174,48 @@ func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
 		webhookIDs = append(webhookIDs, id)
 	}
 
+	if len(providers) == 0 {
+		if err := h.runCardBulk(ctx, "webhooks", "delete", projectID, webhookIDs); err != nil {
+			return err
+		}
+		return nil
+	}
+	var localWebhooks, remoteWebhooks []string
+	for _, id := range webhookIDs {
+		if _, ok := remoteid.ServerOf(id); ok {
+			remoteWebhooks = append(remoteWebhooks, id)
+		} else {
+			localWebhooks = append(localWebhooks, id)
+		}
+	}
+	if len(remoteWebhooks) > 0 {
+		if err := h.cardBulk(ctx, "webhooks", "delete", projectID, remoteWebhooks, true); err != nil {
+			return err
+		}
+	}
+	webhookIDs = localWebhooks
+
 	if providers["x"] {
 		h.xConfigMu.Lock()
 		defer h.xConfigMu.Unlock()
 	}
-	if err := h.settingsRepo.RemoveChannelsBulk(c.Request().Context(), projectID, settingResets, webhookIDs, providers["discord"]); err != nil {
+	if err := h.settingsRepo.RemoveChannelsBulk(ctx, projectID, settingResets, webhookIDs, providers["discord"]); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "all selected channels must be removable from the current project").SetInternal(err)
 	}
 
 	if providers["github"] && h.githubSvc != nil && (h.personalGitHub == nil || personalPAT) {
-		if err := h.githubSvc.Disconnect(c.Request().Context()); err != nil {
+		if err := h.githubSvc.Disconnect(ctx); err != nil {
 			return err
 		}
 	}
 	if providers["slack"] && h.slackSvc != nil {
-		_ = h.slackSvc.Disconnect(c.Request().Context())
+		_ = h.slackSvc.Disconnect(ctx)
 	}
 	if providers["telegram"] && h.telegramService != nil && h.telegramService.IsRunning() {
 		h.telegramService.Stop()
 	}
 	if providers["discord"] && h.discordSvc != nil {
-		_ = h.discordSvc.Disconnect(c.Request().Context())
+		_ = h.discordSvc.Disconnect(ctx)
 	}
 	if providers["email"] && h.emailService != nil {
 		h.emailService.Stop()
@@ -201,7 +230,13 @@ func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
+	if len(remoteWebhooks) > 0 {
+		if err := h.runCardBulk(ctx, "webhooks", "delete", projectID, remoteWebhooks); err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "Local channel changes succeeded, but some remote webhook deletions failed: "+err.Error())
+		}
+	}
+
+	return nil
 }
 
 // handleChannels renders the channels (integrations) page
@@ -217,7 +252,8 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
+	ctx = c.Request().Context()
 	channelTypeFilter := allowlistedQuery(c, "type", "", "github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets")
 	connectionStateFilter := allowlistedQuery(c, "connection_state", "", "connected", "configured", "disconnected")
 	webhookEnabledFilter := allowlistedQuery(c, "webhook_enabled", "", "true", "false")
@@ -499,7 +535,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 			if err != nil {
 				return err
 			}
-			webhooks, webhooksHasMore = cardPageItems(pageItems, page.PageSize)
+			webhooks, webhooksHasMore = finishCardPage(c, pageItems, page.PageSize)
 		}
 	}
 	setCardPageResponse(c, webhooksHasMore)
@@ -527,6 +563,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		XPollIntervalSeconds:         xPollIntervalSeconds,
 		XSendResponses:               xSendResponses,
 		CurrentProjectID:             resolvedProjectID,
+		WebhookBaseURL:               h.remoteServerURL(ctx, resolvedProjectID),
 		SendResponses:                sendResponses,
 		RichMessagesV2:               richMessagesV2,
 		GitHubStatus:                 githubStatus,
@@ -614,7 +651,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 // handleAppSettings renders the application settings page (personality, etc.)
 func (h *Handler) handleAppSettings(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
 
 	// Get projects for sidebar
 	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
@@ -645,16 +682,33 @@ func (h *Handler) handleAppSettings(c echo.Context) error {
 
 // handleTelegramSave saves the Telegram bot token and starts the bot
 func (h *Handler) handleTelegramSave(c echo.Context) error {
-	token := c.FormValue("token")
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	values, err := c.FormParams()
+	if err != nil {
+		return err
+	}
+	if _, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: projectID, Provider: "telegram", Values: values}); err != nil {
+		return err
+	}
+	return returnToChannels(c)
+}
+
+func (h *Handler) configureTelegramOnOwner(ctx context.Context, form url.Values) error {
+	h.telegramConfigMu.Lock()
+	defer h.telegramConfigMu.Unlock()
+	token := form.Get("token")
 
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 	richValue := "false"
-	if c.FormValue("telegram_rich_messages_v2") == "true" {
+	if form.Get("telegram_rich_messages_v2") == "true" {
 		richValue = "true"
 	}
-	err := h.settingsRepo.SetMany(c.Request().Context(), map[string]string{
+	err := h.settingsRepo.SetMany(ctx, map[string]string{
 		service.TelegramSettingBotToken:       token,
 		service.TelegramSettingRichMessagesV2: richValue,
 	})
@@ -676,6 +730,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start Telegram bot: "+err.Error())
 		}
+		svc.SetStartGate(h.localServicesAllowed)
 		svc.SetTelegramAuthRepo(h.telegramAuthRepo)
 		svc.SetTelegramUserProjectRepo(h.telegramUserProjectRepo)
 		if h.usageAnalyticsSvc != nil {
@@ -713,7 +768,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		h.telegramService = svc
 	}
 
-	return returnToChannels(c)
+	return nil
 }
 
 // handleTelegramTest tests the Telegram bot connection
@@ -731,6 +786,19 @@ func (h *Handler) handleTelegramTest(c echo.Context) error {
 
 // handleTelegramSendResponses toggles the "send task responses to Telegram" setting
 func (h *Handler) handleTelegramSendResponses(c echo.Context) error {
+	if h.projectSvc != nil {
+		project, err := h.getCurrentProjectID(c)
+		if err != nil {
+			return err
+		}
+		if _, remote := remoteid.ServerOf(project); remote {
+			_, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: project, Provider: "telegram-responses", Values: url.Values{"enabled": {c.FormValue("enabled")}}})
+			if err != nil {
+				return err
+			}
+			return c.String(http.StatusOK, "Setting saved")
+		}
+	}
 	// Checkbox sends "true" when checked, nothing when unchecked
 	enabled := c.FormValue("enabled")
 	value := "false"
@@ -748,6 +816,10 @@ func (h *Handler) handleTelegramSendResponses(c echo.Context) error {
 }
 
 func (h *Handler) handleTelegramRemove(c echo.Context) error {
+	if handled, err := h.removeRemoteChannel(c, "telegram"); handled {
+		return err
+	}
+
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
@@ -781,20 +853,38 @@ func (h *Handler) handleGitHubConnect(c echo.Context) error {
 }
 
 func (h *Handler) handleGitHubConfigure(c echo.Context) error {
-	if h.personalGitHub != nil && service.NormalizeGitHubAuthMode(c.FormValue("github_auth_mode")) == service.GitHubAuthModePAT {
-		return h.savePersonalGitHub(c)
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	values, err := c.FormParams()
+	if err != nil {
+		return err
+	}
+	if _, remote := remoteid.ServerOf(projectID); !remote {
+		if err := h.configureGitHubOnOwner(c.Request().Context(), values); err != nil {
+			return err
+		}
+	} else if _, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: projectID, Provider: "github", Values: values}); err != nil {
+		return err
+	}
+	return returnToChannels(c)
+}
+
+func (h *Handler) configureGitHubOnOwner(ctx context.Context, form url.Values) error {
+	if h.personalGitHub != nil && service.NormalizeGitHubAuthMode(form.Get("github_auth_mode")) == service.GitHubAuthModePAT {
+		return h.savePersonalGitHubOnOwner(ctx, ownerFormValues(form))
 	}
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 
-	authMode := service.NormalizeGitHubAuthMode(c.FormValue("github_auth_mode"))
-	appID := strings.TrimSpace(c.FormValue("github_app_id"))
-	appSlug := strings.TrimSpace(c.FormValue("github_app_slug"))
-	privateKey := strings.TrimSpace(c.FormValue("github_app_private_key"))
-	pat := strings.TrimSpace(c.FormValue("github_pat"))
-	apiEndpoint := strings.TrimSpace(c.FormValue("github_api_endpoint"))
-	ctx := c.Request().Context()
+	authMode := service.NormalizeGitHubAuthMode(form.Get("github_auth_mode"))
+	appID := strings.TrimSpace(form.Get("github_app_id"))
+	appSlug := strings.TrimSpace(form.Get("github_app_slug"))
+	privateKey := strings.TrimSpace(form.Get("github_app_private_key"))
+	pat := strings.TrimSpace(form.Get("github_pat"))
+	apiEndpoint := strings.TrimSpace(form.Get("github_api_endpoint"))
 	keys := []string{service.GitHubSettingAuthMode, service.GitHubSettingPAT, service.GitHubSettingPATUserLogin, service.GitHubSettingAppID, service.GitHubSettingAppSlug, service.GitHubSettingAppPrivateKey, service.GitHubSettingAPIEndpoint, "github_app_installation_id", "github_app_account_login", "github_app_account_type", "github_app_connected_at"}
 	snapshot, err := h.settingsRepo.GetMany(ctx, keys)
 	if err != nil {
@@ -805,7 +895,7 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 		expected[key] = snapshot[key]
 	}
 
-	if strings.TrimSpace(c.FormValue("github_auth_mode")) == "" && (appID != "" || appSlug != "" || privateKey != "") {
+	if strings.TrimSpace(form.Get("github_auth_mode")) == "" && (appID != "" || appSlug != "" || privateKey != "") {
 		authMode = service.GitHubAuthModeApp
 	}
 
@@ -854,7 +944,7 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 		return echo.NewHTTPError(409, "GitHub configuration changed; refresh before saving")
 	}
 
-	return returnToChannels(c)
+	return nil
 }
 
 func (h *Handler) handleGitHubCallback(c echo.Context) error {
@@ -891,6 +981,10 @@ func (h *Handler) handleGitHubDisconnect(c echo.Context) error {
 }
 
 func (h *Handler) handleGitHubRemove(c echo.Context) error {
+	if handled, err := h.removeRemoteChannel(c, "github"); handled {
+		return err
+	}
+
 	if h.personalGitHub != nil {
 		personal, err := h.personalGitHub.UsesPersonalPAT(c.Request().Context())
 		if err != nil {
@@ -923,10 +1017,24 @@ func (h *Handler) handleGitHubRemove(c echo.Context) error {
 }
 
 func (h *Handler) handleSlackConfigure(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	values, err := c.FormParams()
+	if err != nil {
+		return err
+	}
+	if _, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: projectID, Provider: "slack", Values: values}); err != nil {
+		return err
+	}
+	return returnToChannels(c)
+}
+
+func (h *Handler) configureSlackOnOwner(ctx context.Context, form url.Values) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
-	ctx := c.Request().Context()
 	keys := []string{service.SlackSettingClientID, service.SlackSettingClientSecret, service.SlackSettingAppToken, service.SlackSettingBotTokenOverride, service.SlackSettingBotTokenSource, service.SlackSettingSendResponses}
 	snapshot, err := h.settingsRepo.GetMany(ctx, keys)
 	if err != nil {
@@ -937,7 +1045,7 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 		expected[key] = snapshot[key]
 	}
 	value := func(key string) string {
-		v := strings.TrimSpace(c.FormValue(key))
+		v := strings.TrimSpace(form.Get(key))
 		if v == "" {
 			v = strings.TrimSpace(snapshot[key])
 		}
@@ -946,11 +1054,11 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 	clientID := value(service.SlackSettingClientID)
 	clientSecret := value(service.SlackSettingClientSecret)
 	appToken := value(service.SlackSettingAppToken)
-	mode := strings.ToLower(strings.TrimSpace(c.FormValue("slack_bot_token_mode")))
+	mode := strings.ToLower(strings.TrimSpace(form.Get("slack_bot_token_mode")))
 	if mode != service.SlackBotTokenSourceManual {
 		mode = service.SlackBotTokenSourceOAuth
 	}
-	token := strings.TrimSpace(c.FormValue("slack_bot_token"))
+	token := strings.TrimSpace(form.Get("slack_bot_token"))
 	if token == "" {
 		token = strings.TrimSpace(snapshot[service.SlackSettingBotTokenOverride])
 	}
@@ -964,7 +1072,7 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 	if mode == service.SlackBotTokenSourceManual {
 		values[service.SlackSettingBotTokenOverride] = token
 	}
-	send := strings.ToLower(strings.TrimSpace(c.FormValue("slack_send_responses")))
+	send := strings.ToLower(strings.TrimSpace(form.Get("slack_send_responses")))
 	if send == "true" || send == "false" {
 		values[service.SlackSettingSendResponses] = send
 	} else if send == "" && strings.TrimSpace(snapshot[service.SlackSettingSendResponses]) == "" {
@@ -983,7 +1091,7 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 	if h.slackSvc != nil {
 		_ = h.slackSvc.ReloadFromSettings(ctx)
 	}
-	return returnToChannels(c)
+	return nil
 }
 
 func (h *Handler) handleSlackConnect(c echo.Context) error {
@@ -1029,6 +1137,10 @@ func (h *Handler) handleSlackDisconnect(c echo.Context) error {
 }
 
 func (h *Handler) handleSlackRemove(c echo.Context) error {
+	if handled, err := h.removeRemoteChannel(c, "slack"); handled {
+		return err
+	}
+
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
@@ -1063,15 +1175,30 @@ func (h *Handler) handleSlackTest(c echo.Context) error {
 }
 
 func (h *Handler) handleDiscordConfigure(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	values, err := c.FormParams()
+	if err != nil {
+		return err
+	}
+	if _, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: projectID, Provider: "discord", Values: values}); err != nil {
+		return err
+	}
+	return returnToChannels(c)
+}
+
+func (h *Handler) configureDiscordOnOwner(ctx context.Context, form url.Values) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
-	snapshot, err := h.settingsRepo.GetMany(c.Request().Context(), []string{service.DiscordSettingBotToken, service.DiscordSettingSendResponses})
+	snapshot, err := h.settingsRepo.GetMany(ctx, []string{service.DiscordSettingBotToken, service.DiscordSettingSendResponses})
 	if err != nil {
 		return echo.NewHTTPError(500, "failed to read Discord settings").SetInternal(err)
 	}
-	botToken := strings.TrimSpace(c.FormValue("discord_bot_token"))
-	sendResponses := strings.TrimSpace(strings.ToLower(c.FormValue("discord_send_responses")))
+	botToken := strings.TrimSpace(form.Get("discord_bot_token"))
+	sendResponses := strings.TrimSpace(strings.ToLower(form.Get("discord_send_responses")))
 	if botToken == "" {
 		botToken = strings.TrimSpace(snapshot[service.DiscordSettingBotToken])
 	}
@@ -1085,7 +1212,7 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 		values[service.DiscordSettingSendResponses] = "true"
 	}
 	expected := map[string]string{service.DiscordSettingBotToken: snapshot[service.DiscordSettingBotToken], service.DiscordSettingSendResponses: snapshot[service.DiscordSettingSendResponses]}
-	updated, err := h.settingsRepo.CompareAndSetMany(c.Request().Context(), expected, values, nil)
+	updated, err := h.settingsRepo.CompareAndSetMany(ctx, expected, values, nil)
 	if errors.Is(err, persistence.ErrOrgDenied) {
 		return echo.NewHTTPError(403, "organization access required")
 	}
@@ -1097,14 +1224,18 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 	}
 
 	if h.discordSvc != nil {
-		if err := h.discordSvc.ReloadFromSettings(c.Request().Context()); err != nil {
+		if err := h.discordSvc.ReloadFromSettings(ctx); err != nil {
 			applog.Infof("warning: failed to reload discord gateway after settings save: %v", err)
 		}
 	}
-	return returnToChannels(c)
+	return nil
 }
 
 func (h *Handler) handleDiscordRemove(c echo.Context) error {
+	if handled, err := h.removeRemoteChannel(c, "discord"); handled {
+		return err
+	}
+
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
@@ -1129,22 +1260,37 @@ func (h *Handler) handleDiscordTest(c echo.Context) error {
 }
 
 func (h *Handler) handleEmailConfigure(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	values, err := c.FormParams()
+	if err != nil {
+		return err
+	}
+	if _, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: projectID, Provider: "email", Values: values}); err != nil {
+		return err
+	}
+	return returnToChannels(c)
+}
+
+func (h *Handler) configureEmailOnOwner(ctx context.Context, form url.Values) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 	provider, imapHost, imapPort, smtpHost, smtpPort, err := service.ResolveEmailProviderSettings(
-		c.FormValue("email_provider"),
-		c.FormValue("email_imap_host"),
-		c.FormValue("email_imap_port"),
-		c.FormValue("email_smtp_host"),
-		c.FormValue("email_smtp_port"),
+		form.Get("email_provider"),
+		form.Get("email_imap_host"),
+		form.Get("email_imap_port"),
+		form.Get("email_smtp_host"),
+		form.Get("email_smtp_port"),
 	)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	emailAddress := persistence.NormalizeEmailAddress(c.FormValue("email_address"))
-	password := service.NormalizeEmailPasswordForProvider(provider, c.FormValue("email_password"))
-	existingPassword, err := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
+	emailAddress := persistence.NormalizeEmailAddress(form.Get("email_address"))
+	password := service.NormalizeEmailPasswordForProvider(provider, form.Get("email_password"))
+	existingPassword, err := h.settingsRepo.Get(ctx, service.EmailSettingPassword)
 	if err != nil {
 		return echo.NewHTTPError(500, "failed to read email settings").SetInternal(err)
 	}
@@ -1163,12 +1309,12 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 		service.EmailSettingIMAPPort:                strconv.Itoa(imapPort),
 		service.EmailSettingSMTPHost:                smtpHost,
 		service.EmailSettingSMTPPort:                strconv.Itoa(smtpPort),
-		service.EmailSettingPollIntervalSeconds:     defaultIfBlank(c.FormValue("email_poll_interval_seconds"), "15"),
-		service.EmailSettingSendResponses:           boolFormValue(c.FormValue("email_send_responses"), true),
-		service.EmailSettingSkipAttachments:         boolFormValue(c.FormValue("email_skip_attachments"), false),
-		service.EmailSettingMarkExistingSeenOnStart: boolFormValue(c.FormValue("email_mark_existing_seen_on_start"), true),
+		service.EmailSettingPollIntervalSeconds:     defaultIfBlank(form.Get("email_poll_interval_seconds"), "15"),
+		service.EmailSettingSendResponses:           boolFormValue(form.Get("email_send_responses"), true),
+		service.EmailSettingSkipAttachments:         boolFormValue(form.Get("email_skip_attachments"), false),
+		service.EmailSettingMarkExistingSeenOnStart: boolFormValue(form.Get("email_mark_existing_seen_on_start"), true),
 	}
-	updated, err := h.settingsRepo.CompareAndSetMany(c.Request().Context(), map[string]string{service.EmailSettingPassword: existingPassword}, settings, nil)
+	updated, err := h.settingsRepo.CompareAndSetMany(ctx, map[string]string{service.EmailSettingPassword: existingPassword}, settings, nil)
 	if errors.Is(err, persistence.ErrOrgDenied) {
 		return echo.NewHTTPError(403, "organization access required")
 	}
@@ -1180,12 +1326,16 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 	}
 
 	if h.emailService != nil {
-		_ = h.emailService.ReloadFromSettings(c.Request().Context())
+		_ = h.emailService.ReloadFromSettings(ctx)
 	}
-	return returnToChannels(c)
+	return nil
 }
 
 func (h *Handler) handleEmailRemove(c echo.Context) error {
+	if handled, err := h.removeRemoteChannel(c, "email"); handled {
+		return err
+	}
+
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
@@ -1332,14 +1482,15 @@ func (h *Handler) handlePersonalitySave(c echo.Context) error {
 		}
 	}
 
-	if !service.IsAvailablePersonalityKey(ctx, personality, h.customPersonalityRepo) {
-		return c.String(http.StatusBadRequest, fmt.Sprintf("Unknown personality %q. Refresh Personality settings and choose an available option.", personality))
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
 	}
-
-	if h.settingsRepo != nil {
-		if err := h.settingsRepo.Set(ctx, "personality", personality); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save personality")
+	if _, err := actPersonalityOperation(h, ctx, personalityOperationArgs{ProjectID: projectID, Key: personality, Operation: "select"}); err != nil {
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusBadRequest {
+			return c.String(http.StatusBadRequest, fmt.Sprintf("Unknown personality %q. Refresh Personality settings and choose an available option.", personality))
 		}
+		return err
 	}
 
 	// Return re-rendered personality section for HTMX requests

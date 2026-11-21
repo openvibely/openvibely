@@ -42,14 +42,15 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
+	ctx = c.Request().Context()
 	filter := alertListFilter(c, page)
 	alerts, err := h.alertSvc.ListSummariesPage(ctx, currentProjectID, filter)
 	if err != nil {
 		applog.Infof("[handler] ListAlerts error: %v", err)
 		return err
 	}
-	alerts, hasMore := cardPageItems(alerts, page.PageSize)
+	alerts, hasMore := finishCardPage(c, alerts, page.PageSize)
 	if alertID := strings.TrimSpace(c.QueryParam("alert_id")); alertID != "" {
 		alert, getErr := h.alertSvc.GetByID(ctx, currentProjectID, alertID)
 		if getErr != nil {
@@ -197,7 +198,8 @@ func alertSummaryFromAlert(a *models.Alert) models.AlertSummary {
 
 func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alerts []models.AlertSummary, unreadCountOverride *int) error {
 	ctx := c.Request().Context()
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
+	ctx = c.Request().Context()
 	filter := alertListFilter(c, page)
 	hasMore := false
 	if alerts == nil {
@@ -206,7 +208,7 @@ func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alert
 		if err != nil {
 			return err
 		}
-		alerts, hasMore = cardPageItems(alerts, page.PageSize)
+		alerts, hasMore = finishCardPage(c, alerts, page.PageSize)
 		if page.IsFragment {
 			setCardPageResponse(c, hasMore)
 		}
@@ -227,7 +229,7 @@ func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alert
 func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionState) error {
 	ctx := c.Request().Context()
 	projectID, _ := h.getCurrentProjectID(c)
-	if err := h.alertSvc.SetDecision(ctx, projectID, c.Param("id"), state); err != nil {
+	if err := h.mutateAlert(ctx, alertMutationArgs{ProjectID: projectID, AlertID: c.Param("id"), Operation: "decision", State: state}); err != nil {
 		applog.Infof("[handler] setAlertDecision project=%s alert=%s state=%s error=%v", projectID, c.Param("id"), state, err)
 		return echo.NewHTTPError(http.StatusNotFound, "notification not found or no longer pending")
 	}
@@ -252,7 +254,7 @@ func (h *Handler) MarkAlertRead(c echo.Context) error {
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
-	if err := h.alertSvc.MarkRead(ctx, currentProjectID, id); err != nil {
+	if err := h.mutateAlert(ctx, alertMutationArgs{ProjectID: currentProjectID, AlertID: id, Operation: "read"}); err != nil {
 		applog.Infof("[handler] MarkAlertRead error: %v", err)
 		return err
 	}
@@ -271,8 +273,8 @@ func (h *Handler) MarkAlertsReadBulk(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.alertSvc.MarkReadBulk(c.Request().Context(), projectID, ids); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "all selected alerts must belong to the current project")
+	if err := h.runCardBulk(c.Request().Context(), "alerts", "read", projectID, ids); err != nil {
+		return err
 	}
 	return c.JSON(http.StatusOK, map[string]int{"updated": len(ids)})
 }
@@ -282,15 +284,14 @@ func (h *Handler) MarkAllAlertsRead(c echo.Context) error {
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
-	if err := h.alertSvc.MarkAllRead(ctx, currentProjectID); err != nil {
+	if err := h.mutateAllAlerts(ctx, currentProjectID, "read_all"); err != nil {
 		applog.Infof("[handler] MarkAllAlertsRead error: %v", err)
 		return err
 	}
 
 	applog.Infof("[handler] MarkAllAlertsRead project=%s", currentProjectID)
 
-	zeroUnread := 0
-	return h.renderAlertListRefresh(c, currentProjectID, nil, &zeroUnread)
+	return h.renderAlertListRefresh(c, currentProjectID, nil, nil)
 }
 
 func (h *Handler) DeleteAlert(c echo.Context) error {
@@ -298,7 +299,7 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
-	if err := h.alertSvc.Delete(ctx, currentProjectID, id); err != nil {
+	if err := h.mutateAlert(ctx, alertMutationArgs{ProjectID: currentProjectID, AlertID: id, Operation: "delete"}); err != nil {
 		applog.Infof("[handler] DeleteAlert error: %v", err)
 		return err
 	}
@@ -358,8 +359,8 @@ func (h *Handler) DeleteAlertsBulk(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.alertSvc.DeleteBulk(c.Request().Context(), projectID, ids); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "all selected alerts must belong to the current project")
+	if err := h.runCardBulk(c.Request().Context(), "alerts", "delete", projectID, ids); err != nil {
+		return err
 	}
 	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
 }
@@ -369,13 +370,12 @@ func (h *Handler) DeleteAllAlerts(c echo.Context) error {
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
-	if err := h.alertSvc.DeleteAll(ctx, currentProjectID); err != nil {
+	if err := h.mutateAllAlerts(ctx, currentProjectID, "delete_all"); err != nil {
 		applog.Infof("[handler] DeleteAllAlerts error: %v", err)
 		return err
 	}
 
 	applog.Infof("[handler] DeleteAllAlerts project=%s", currentProjectID)
 
-	zeroUnread := 0
-	return h.renderAlertListRefresh(c, currentProjectID, []models.AlertSummary{}, &zeroUnread)
+	return h.renderAlertListRefresh(c, currentProjectID, nil, nil)
 }

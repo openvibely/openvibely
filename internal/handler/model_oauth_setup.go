@@ -175,11 +175,15 @@ func (h *Handler) ModelOAuthSetupStatus(c echo.Context) error {
 }
 
 func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig) (string, error) {
+	return h.attachModelOAuthSetupOnOwner(c.Request().Context(), c, config)
+}
+
+func (h *Handler) attachModelOAuthSetupOnOwner(ctx context.Context, c ownerForm, config *models.LLMConfig) (string, error) {
 	key := strings.TrimSpace(c.FormValue("oauth_setup_session"))
 	if key == "" {
 		return "", nil
 	}
-	signedIn, err := h.modelOAuthSetupConfig(key, true, c.Request().Context())
+	signedIn, err := h.modelOAuthSetupConfig(key, true, ctx)
 	if err != nil {
 		return "", err
 	}

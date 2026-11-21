@@ -13,6 +13,29 @@
     } catch (_) { return ''; }
   }
   const fallback = 'You do not have permission to perform this action. Ask an organization admin for access.';
+  // A saved server's sign-in expired; send the user to sign in again.
+  function reconnectTarget(value) {
+    return typeof value === 'string' && value.startsWith('/servers?reconnect=') ? value : '';
+  }
+  window.openVibelyReconnect = {
+    async fetch(response) {
+      if (response.status !== 401) return false;
+      let target = reconnectTarget(response.headers.get('HX-Redirect'));
+      if (!target) {
+        try { target = reconnectTarget((await response.clone().json()).reconnect); } catch (_) {}
+      }
+      if (!target) return false;
+      location.assign(target);
+      return true;
+    },
+    frame(data) {
+      let target = '';
+      try { target = reconnectTarget(JSON.parse(data).reconnect); } catch (_) {}
+      if (!target) return false;
+      location.assign(target);
+      return true;
+    }
+  };
   window.openVibelyPermissionErrors = {
     async fetch(response) {
       if (response.status !== 403 || response.headers.get('X-OpenVibely-Permission-Denied') !== 'true') return false;

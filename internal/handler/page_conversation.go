@@ -83,13 +83,17 @@ func (h *Handler) pageConversationTask(ctx context.Context, binding pageintegrat
 // startPageChatTurn runs one side-chat turn through the shared streaming
 // pipeline with a per-turn page context snapshot and server-resolved page tools.
 func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conversation, message string, input pageChatInput) (*models.Execution, []models.ChatAttachment, error) {
-	if err := h.requirePageAccess(c.Request().Context(), binding.Page.ProjectID, authz.Edit); err != nil {
+	return h.startPageChatTurnOnOwner(c.Request().Context(), binding, message, input, h.authPrincipalID(c), parseEffortForm(c))
+}
+
+func (h *Handler) startPageChatTurnOnOwner(requestCtx context.Context, binding pageintegration.Conversation, message string, input pageChatInput, principal string, effort effortForm) (*models.Execution, []models.ChatAttachment, error) {
+	if err := h.requirePageAccess(requestCtx, binding.Page.ProjectID, authz.Edit); err != nil {
 		return nil, nil, err
 	}
 	if input.AttachmentSessionID != "" && !isValidPendingAttachmentSessionID(input.AttachmentSessionID) {
 		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
 	}
-	ctx, done, err := binding.Begin(c.Request().Context())
+	ctx, done, err := binding.Begin(requestCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -102,7 +106,7 @@ func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conv
 	if integration.Ref().Key() != ref.Key() || integration.Ref().ProjectID != ref.ProjectID {
 		return nil, nil, errors.New("page conversation identity changed")
 	}
-	hasModels, err := h.hasConfiguredModels(c)
+	hasModels, err := h.llmConfigRepo.HasAny(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -114,7 +118,7 @@ func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conv
 	if err != nil {
 		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := h.applyConversationEffort(c, "", agent); err != nil {
+	if err := actionHTTPError(h.applyEffort(ctx, "", agent, effort)); err != nil {
 		return nil, nil, err
 	}
 	lock := persistence.LockTaskLifecycle(binding.LockKey())
@@ -127,7 +131,7 @@ func (h *Handler) startPageChatTurn(c echo.Context, binding pageintegration.Conv
 	if err != nil {
 		return nil, nil, err
 	}
-	turn := pageQueuedContext{Principal: h.authPrincipalID(c)}
+	turn := pageQueuedContext{Principal: principal}
 	if snap, ok := binding.Contexts.Get(turn.Principal, ref); ok {
 		turn.Snapshot = &snap
 	}

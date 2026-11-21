@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -88,6 +89,7 @@ const (
 type sessionRecognition struct {
 	orgUser           *models.OrgUser
 	localUser         *auth.User
+	localToken        string
 	hostedClaims      *auth.SessionClaims
 	hostedCookieState hostedCookieState
 	err               error
@@ -128,7 +130,7 @@ func (h *Handler) recognizeSession(request *http.Request, now time.Time) session
 			if user == nil {
 				return sessionRecognition{err: auth.ErrInvalidToken}
 			}
-			return sessionRecognition{orgUser: user, localUser: &auth.User{Username: user.Username, Display: user.DisplayName}}
+			return sessionRecognition{orgUser: user, localUser: &auth.User{Username: user.Username, Display: user.DisplayName}, localToken: cookie.Value}
 		}
 		user, err := auth.UserFromRequest(request, *h.authCfg, now)
 		return sessionRecognition{localUser: user, err: err}
@@ -725,4 +727,23 @@ func (h *Handler) AuthMe(c echo.Context) error {
 		"username":      user.Username,
 		"display":       user.Display,
 	})
+}
+
+type actionPrincipalKey struct{}
+
+// actionCtx carries authPrincipalID into actions, which have no echo context.
+func (h *Handler) actionCtx(c echo.Context) context.Context {
+	return context.WithValue(c.Request().Context(), actionPrincipalKey{}, h.authPrincipalID(c))
+}
+
+// principalIDFromContext is authPrincipalID inside an action. Remote callers
+// arrive with the socket's principal instead.
+func principalIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(actionPrincipalKey{}).(string); ok {
+		return id
+	}
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		return "user:" + p.UserID
+	}
+	return "local"
 }

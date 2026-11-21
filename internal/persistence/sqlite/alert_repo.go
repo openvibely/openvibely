@@ -291,6 +291,10 @@ func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter m
 func (r *AlertRepo) ListFilteredSummaries(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
 	filter = normalizeAlertListFilter(filter)
 	query, args := buildAlertSummaryListQuery(ctx, projectID, filter)
+	query, args, cursorErr := cardCursorQuery(ctx, "alerts", "alerts", query, args)
+	if cursorErr != nil {
+		return nil, cursorErr
+	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing alert summaries: %w", err)

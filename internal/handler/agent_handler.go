@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,11 +22,13 @@ import (
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/cardcursor"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/mcpconfig"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -591,6 +594,38 @@ func (h *Handler) enablePluginForAgent(ctx context.Context, agentID, pluginID st
 }
 
 func (h *Handler) installPluginForModalAgent(c echo.Context, pluginID, scope, agentID string) (warning string, installErr error, enableErr error) {
+	ownerID := agentID
+	if ownerID == "" {
+		ownerID = c.QueryParam("agent_id")
+	}
+	projectID, err := h.settingsAgentProject(c, ownerID)
+	if _, isRemote := remoteid.ServerOf(ownerID); !isRemote && ownerID != "" {
+		var httpErr *echo.HTTPError
+		if errors.As(err, &httpErr) && httpErr.Code == http.StatusNotFound {
+			// Preserve Local install behavior: installing can succeed even if
+			// attaching it to a removed Agent needs a separate retry.
+			projectID, err = h.settingsAgentProject(c, "")
+		}
+	}
+	if err != nil {
+		return "", err, nil
+	}
+	if _, remoteProject := remoteid.ServerOf(projectID); !remoteProject {
+		if _, remoteAgent := remoteid.ServerOf(agentID); !remoteAgent {
+			return h.installPluginOnOwner(c.Request().Context(), projectID, pluginID, scope, agentID)
+		}
+	}
+	result, err := actPluginOperation(h, c.Request().Context(), pluginOperationArgs{ProjectID: projectID, AgentID: agentID, PluginID: pluginID, Scope: scope, Operation: "install"})
+	if err != nil {
+		return "", err, nil
+	}
+	if result.EnableError != "" {
+		return result.Warning, nil, errors.New(result.EnableError)
+	}
+	return result.Warning, nil, nil
+}
+
+func (h *Handler) installPluginOnOwner(ctx context.Context, projectID, pluginID, scope, agentID string) (warning string, installErr error, enableErr error) {
 	pluginID = strings.TrimSpace(pluginID)
 	agentID = strings.TrimSpace(agentID)
 	if pluginID == "" {
@@ -598,13 +633,12 @@ func (h *Handler) installPluginForModalAgent(c echo.Context, pluginID, scope, ag
 	}
 
 	alreadyInstalled := false
-	if state, err := discoverPluginStateFn(c.Request().Context()); err == nil {
+	if state, err := discoverPluginStateFn(ctx); err == nil {
 		alreadyInstalled = isPluginInstalled(state, pluginID)
 	}
 	if !alreadyInstalled {
-		if err := installPluginFn(c.Request().Context(), pluginID, scope); err != nil {
+		if err := installPluginFn(ctx, pluginID, scope); err != nil {
 			applog.Infof("[handler] InstallPlugin error: %v", err)
-			projectID, _ := h.getCurrentProjectID(c)
 			h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin install failed: %s", pluginID), shortGenerationError(err))
 			return "", err, nil
 		}
@@ -621,16 +655,14 @@ func (h *Handler) installPluginForModalAgent(c echo.Context, pluginID, scope, ag
 	if err := ensurePluginMCPRunningFn(startCtx, []string{pluginID}, workDir); err != nil {
 		warning = shortGenerationError(err)
 		applog.Infof("[handler] InstallPlugin MCP startup warning plugin=%q: %v", pluginID, err)
-		projectID, _ := h.getCurrentProjectID(c)
 		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin MCP startup failed: %s", pluginID), warning)
 	}
 
 	if agentID == "" {
 		return warning, nil, nil
 	}
-	if err := h.enablePluginForAgent(c.Request().Context(), agentID, pluginID); err != nil {
+	if err := h.enablePluginForAgent(ctx, agentID, pluginID); err != nil {
 		applog.Infof("[handler] InstallPlugin enable warning plugin=%q agent=%q: %v", pluginID, agentID, err)
-		projectID, _ := h.getCurrentProjectID(c)
 		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin enable failed: %s", pluginID), shortGenerationError(err))
 		return warning, nil, fmt.Errorf("could not enable plugin for agent: %w", err)
 	}
@@ -658,6 +690,13 @@ type agentDialogFormOptions struct {
 }
 
 func (h *Handler) applyAgentDialogFormFields(c echo.Context, agent *models.Agent, opts agentDialogFormOptions) error {
+	projectID, err := h.settingsAgentProject(c, c.QueryParam("agent_id"))
+	if err != nil {
+		return err
+	}
+	return h.applyAgentOwnerForm(c.Request().Context(), c, projectID, agent, opts)
+}
+func (h *Handler) applyAgentOwnerForm(ctx context.Context, c ownerForm, projectID string, agent *models.Agent, opts agentDialogFormOptions) error {
 	if agent == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "agent is required")
 	}
@@ -671,7 +710,7 @@ func (h *Handler) applyAgentDialogFormFields(c echo.Context, agent *models.Agent
 	agent.SystemPrompt = c.FormValue("system_prompt")
 	agent.Model = c.FormValue("model")
 
-	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
+	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(ctx)
 	if err != nil {
 		applog.Infof("[handler] %s listing model picker options failed: %v", operation, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -703,7 +742,7 @@ func (h *Handler) applyAgentDialogFormFields(c echo.Context, agent *models.Agent
 			applog.Infof("[handler] %s error parsing plugins: %v", operation, err)
 		}
 	}
-	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(c.Request().Context(), agent.Plugins)
+	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(ctx, agent.Plugins)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -730,25 +769,26 @@ func (h *Handler) applyAgentDialogFormFields(c echo.Context, agent *models.Agent
 	if err := applyLifecycleAgentFormFields(c, agent); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if agent.Scope != models.AgentScopeProject {
+		// The selected workspace is navigation state, not global Agent ownership.
+		agent.ProjectID = ""
+	}
 	if owner := strings.TrimSpace(c.FormValue("agent_project_id")); owner != "" && agent.Scope == models.AgentScopeProject {
-		current, err := h.getCurrentProjectID(c)
-		if err != nil {
-			return err
-		}
-		if owner == models.AllProjectsID || (current != models.AllProjectsID && current != owner) {
+		current := projectID
+		if models.IsAggregateProject(owner) || !models.InScope(ctx, owner) || (!models.IsAggregateProject(current) && current != owner) {
 			return echo.NewHTTPError(http.StatusBadRequest, "Choose a valid project for this Agent")
 		}
 		if agent.ProjectID != "" && agent.ProjectID != owner {
 			return echo.NewHTTPError(http.StatusBadRequest, "Cannot change this Agent's project")
 		}
-		project, err := h.projectSvc.GetByID(c.Request().Context(), owner)
+		project, err := h.projectSvc.GetByID(ctx, owner)
 		if err != nil || project == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "Choose a valid project for this Agent")
 		}
 		agent.ProjectID = project.ID
 	}
 	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) == "" {
-		if pid, _ := h.getCurrentProjectID(c); pid != "" && pid != models.AllProjectsID {
+		if pid := projectID; pid != "" && !models.IsAggregateProject(pid) {
 			agent.ProjectID = pid
 		}
 	}
@@ -1231,19 +1271,27 @@ func (h *Handler) GenerateAgent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "description is required")
 	}
 
-	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(c.Request().Context(), selectedPlugins)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	selectedPlugins = validatedPlugins
-
-	callCtx := c.Request().Context()
-	workDir, _ := os.Getwd()
-	projectID, err := h.getCurrentProjectID(c)
+	projectID, err := h.settingsAgentProject(c, c.QueryParam("agent_id"))
 	if err != nil {
 		return err
 	}
-	if projectID == models.AllProjectsID {
+	generated, err := actGenerateAgent(h, c.Request().Context(), generateAgentArgs{ProjectID: projectID, AgentID: c.QueryParam("agent_id"), Description: description, Plugins: selectedPlugins})
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, generated)
+}
+
+func (h *Handler) generateAgentOnOwner(ctx context.Context, projectID, description string, selectedPlugins []string) (generatedAgentResponse, error) {
+	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(ctx, selectedPlugins)
+	if err != nil {
+		return generatedAgentResponse{}, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	selectedPlugins = validatedPlugins
+
+	callCtx := ctx
+	workDir, _ := os.Getwd()
+	if models.IsAggregateProject(projectID) {
 		// A combined/global draft has no repository-local tool configuration.
 		workDir = ""
 	}
@@ -1263,29 +1311,29 @@ func (h *Handler) GenerateAgent(c echo.Context) error {
 
 	if h.llmSvc == nil {
 		generated.GenerationError = "LLM service unavailable"
-		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
+		return normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels), nil
 	}
 
 	if h.llmConfigRepo == nil {
 		generated.GenerationError = "Model configuration repository unavailable"
-		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
+		return normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels), nil
 	}
 
-	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
+	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(ctx)
 	if err != nil {
 		generated.GenerationError = fmt.Sprintf("Could not load model picker options: %s", shortGenerationError(err))
-		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
+		return normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels), nil
 	}
 	allowedModels = buildAllowedAgentModels(modelPickerOptions)
 
-	defaultModel, err := h.llmConfigRepo.GetDefault(c.Request().Context())
+	defaultModel, err := h.llmConfigRepo.GetDefault(ctx)
 	if err != nil {
 		generated.GenerationError = fmt.Sprintf("Could not load default model configuration: %s", shortGenerationError(err))
-		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
+		return normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels), nil
 	}
 	if defaultModel == nil {
 		generated.GenerationError = "No default model configuration available"
-		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
+		return normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels), nil
 	}
 
 	prompt := buildAgentGenerationPrompt(description)
@@ -1301,17 +1349,23 @@ func (h *Handler) GenerateAgent(c echo.Context) error {
 		} else {
 			applog.Infof("[handler] GenerateAgent default model generation failed model=%s provider=%s prompt_len=%d duration=%s err=%v", defaultModel.Name, defaultModel.Provider, len(prompt), duration, err)
 		}
-		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
+		return normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels), nil
 	}
 
 	normalized := normalizeGeneratedAgent(llmGenerated, description, discoveredMCP, allowedModels)
 	normalized.Plugins = selectedPlugins
 	normalized.GenerationMode = "llm"
 	normalized.GenerationError = ""
-	return c.JSON(http.StatusOK, normalized)
+	return normalized, nil
 }
 
 func writePluginJSONError(c echo.Context, err error) error {
+	var reconnect reconnectError
+	var httpErr *echo.HTTPError
+	if errors.As(err, &reconnect) || errors.As(err, &httpErr) {
+		return err
+	}
+
 	return c.JSON(http.StatusBadRequest, map[string]interface{}{
 		"ok":    false,
 		"error": shortGenerationError(err),
@@ -1354,6 +1408,19 @@ func decodePluginRequestBody(r io.Reader, dest interface{}) error {
 }
 
 func (h *Handler) GetPluginState(c echo.Context) error {
+	project, err := h.settingsAgentProject(c, c.QueryParam("agent_id"))
+	if err != nil {
+		return err
+	}
+	_, remoteProject := remoteid.ServerOf(project)
+	_, remoteAgent := remoteid.ServerOf(c.QueryParam("agent_id"))
+	if remoteProject || remoteAgent {
+		state, err := actPluginState(h, c.Request().Context(), pluginOperationArgs{ProjectID: project, AgentID: c.QueryParam("agent_id")})
+		if err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, state)
+	}
 	ctx := c.Request().Context()
 	state, err := discoverPluginStateFn(ctx)
 	runtime := pluginMCPRuntimeStateFn()
@@ -1461,11 +1528,21 @@ func (h *Handler) UninstallPlugin(c echo.Context) error {
 	if err := decodePluginRequestBody(c.Request().Body, &payload); err != nil {
 		return writePluginJSONError(c, err)
 	}
-	if err := uninstallPluginFn(c.Request().Context(), payload.PluginID); err != nil {
-		applog.Infof("[handler] UninstallPlugin error: %v", err)
-		projectID, _ := h.getCurrentProjectID(c)
-		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin uninstall failed: %s", payload.PluginID), shortGenerationError(err))
+	projectID, err := h.settingsAgentProject(c, c.QueryParam("agent_id"))
+	if err != nil {
+		return err
+	}
+	if _, err := actPluginOperation(h, c.Request().Context(), pluginOperationArgs{ProjectID: projectID, AgentID: c.QueryParam("agent_id"), PluginID: payload.PluginID, Operation: "uninstall"}); err != nil {
 		return writePluginJSONError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *Handler) uninstallPluginOnOwner(ctx context.Context, projectID, pluginID string) error {
+	if err := uninstallPluginFn(ctx, pluginID); err != nil {
+		applog.Infof("[handler] UninstallPlugin error: %v", err)
+		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin uninstall failed: %s", pluginID), shortGenerationError(err))
+		return err
 	}
 
 	workDir, err := os.Getwd()
@@ -1477,12 +1554,11 @@ func (h *Handler) UninstallPlugin(c echo.Context) error {
 
 	if err := reconcilePluginMCPRunningFn(reconcileCtx, workDir); err != nil {
 		warning := shortGenerationError(err)
-		applog.Infof("[handler] UninstallPlugin MCP reconcile warning plugin=%q: %v", payload.PluginID, err)
-		projectID, _ := h.getCurrentProjectID(c)
-		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin MCP reconcile warning: %s", payload.PluginID), warning)
+		applog.Infof("[handler] UninstallPlugin MCP reconcile warning plugin=%q: %v", pluginID, err)
+		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin MCP reconcile warning: %s", pluginID), warning)
 	}
 
-	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
+	return nil
 }
 
 func (h *Handler) ResetPluginMarketplaces(c echo.Context) error {
@@ -1524,7 +1600,7 @@ func (h *Handler) materializeDBAgentsInPages(c echo.Context) error {
 	if h == nil || h.agentRepo == nil || h.agentSkillRoot == "" {
 		return nil
 	}
-	ctx := c.Request().Context()
+	ctx := cardcursor.With(c.Request().Context(), nil)
 	projectRoot := h.currentProjectSkillRoot(c)
 	usedKeys := h.usedAgentKeys(nil, projectRoot)
 
@@ -1578,7 +1654,7 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	if h.agentLibraryMaintenanceSvc != nil {
 		projectID := ""
 		projectRoot := ""
-		if resolvedProjectID, err := h.getCurrentProjectID(c); err == nil && resolvedProjectID != "" {
+		if resolvedProjectID, err := h.getCurrentProjectID(c); err == nil && resolvedProjectID != "" && c.QueryParam("scope") != "global" {
 			projectID = resolvedProjectID
 			if h.projectSvc != nil {
 				if project, getErr := h.projectSvc.GetByID(c.Request().Context(), resolvedProjectID); getErr == nil && project != nil && strings.TrimSpace(project.RepoPath) != "" {
@@ -1586,16 +1662,23 @@ func (h *Handler) ListAgents(c echo.Context) error {
 				}
 			}
 		}
-		if projectID == models.AllProjectsID {
+		if models.IsAggregateProject(projectID) {
 			projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 			if err != nil {
 				return err
 			}
+			projects = scopedProjects(c.Request().Context(), projects)
 			// Sync each real project, keeping declarations tied to their owner.
 			for _, project := range projects {
 				full, err := h.projectSvc.GetByID(c.Request().Context(), project.ID)
 				if err != nil {
 					return err
+				}
+				if _, remote := remoteid.ServerOf(project.ID); remote {
+					if _, err := actAgentMaintain(h, c.Request().Context(), agentMaintainArgs{ProjectID: project.ID}); err != nil {
+						return err
+					}
+					continue
 				}
 				if full != nil && strings.TrimSpace(full.RepoPath) != "" {
 					if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarationsForProject(c.Request().Context(), filepath.Join(full.RepoPath, ".openvibely"), project.ID); err != nil {
@@ -1605,11 +1688,15 @@ func (h *Handler) ListAgents(c echo.Context) error {
 			}
 			projectID = ""
 		}
-		if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarationsForProject(c.Request().Context(), projectRoot, projectID); err != nil {
+		if _, remote := remoteid.ServerOf(projectID); remote {
+			if _, err := actAgentMaintain(h, c.Request().Context(), agentMaintainArgs{ProjectID: projectID}); err != nil {
+				return err
+			}
+		} else if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarationsForProject(c.Request().Context(), projectRoot, projectID); err != nil {
 			applog.Infof("[handler] ListAgents sync root declarations warning: %v", err)
 		}
 	}
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
 	if page.Page == 0 && page.Search == "" {
 		if err := h.materializeDBAgentsInPages(c); err != nil {
 			applog.Infof("[handler] ListAgents maintenance list warning: %v", err)
@@ -1625,12 +1712,12 @@ func (h *Handler) ListAgents(c echo.Context) error {
 		Origin:    allowlistedQuery(c, "origin", "", "custom", "generated", "protected"),
 		Sort:      allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc", "updated_desc", "created_desc"),
 	}
-	agents, err := h.agentRepo.ListPageFiltered(c.Request().Context(), page.PageSize+1, page.Offset, agentFilter)
+	agents, err := h.listManagedAgents(c, page.PageSize+1, page.Offset, agentFilter)
 	if err != nil {
 		applog.Infof("[handler] ListAgents error: %v", err)
 		return err
 	}
-	agents, hasMore := cardPageItems(agents, page.PageSize)
+	agents, hasMore := finishCardPage(c, agents, page.PageSize)
 
 	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
@@ -1725,6 +1812,10 @@ func (h *Handler) rollbackCreatedAgent(c echo.Context, agent *models.Agent, proj
 }
 
 func (h *Handler) CreateAgent(c echo.Context) error {
+	if handled, err := h.saveRemoteAgent(c, ""); handled {
+		return err
+	}
+
 	agent := models.Agent{}
 	if err := h.applyAgentDialogFormFields(c, &agent, agentDialogFormOptions{operation: "CreateAgent", defaultMissingCollections: true}); err != nil {
 		return err
@@ -1770,14 +1861,14 @@ func protectedSystemAgentLockedFieldsChanged(existing, candidate *models.Agent) 
 	return !sameJSONForAgentHandler(existing.ToolConfig, candidate.ToolConfig) || !sameJSONForAgentHandler(existing.MCPServers, candidate.MCPServers) || !sameJSONForAgentHandler(existing.Skills, candidate.Skills) || !sameJSONForAgentHandler(existing.PermissionDefaults, candidate.PermissionDefaults) || !sameJSONForAgentHandler(existing.ModelDefaults, candidate.ModelDefaults)
 }
 
-func applyProtectedAgentControlFormFields(c echo.Context, agent *models.Agent, allowedModels map[string]struct{}) error {
+func applyProtectedAgentControlFormFields(c ownerForm, agent *models.Agent, allowedModels map[string]struct{}) error {
 	if agent == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "agent is required")
 	}
-	if err := c.Request().ParseForm(); err != nil {
+	form, err := c.FormParams()
+	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid agent form")
 	}
-	form := c.Request().PostForm
 	if violatesProtectedAgentTextField(form, "name", agent.Name) || violatesProtectedAgentTextField(form, "description", agent.Description) || violatesProtectedAgentTextField(form, "system_prompt", agent.SystemPrompt) || violatesProtectedAgentTextField(form, "key", agent.Key) || violatesProtectedAgentTextField(form, "scope", string(agent.Scope)) || violatesProtectedAgentTextField(form, "project_id", agent.ProjectID) {
 		return echo.NewHTTPError(http.StatusForbidden, "protected system agents only allow model and eligible enabled-state changes")
 	}
@@ -1847,6 +1938,10 @@ func sameJSONForAgentHandler(a, b any) bool {
 }
 
 func (h *Handler) UpdateAgent(c echo.Context) error {
+	if handled, err := h.saveRemoteAgent(c, c.Param("id")); handled {
+		return err
+	}
+
 	id := c.Param("id")
 	existing, err := h.agentRepo.GetByID(c.Request().Context(), id)
 	if err != nil || existing == nil {
@@ -1916,43 +2011,8 @@ func (h *Handler) DeleteAgentsBulk(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	agents := make([]*models.Agent, 0, len(ids))
-	for _, id := range ids {
-		agent, getErr := h.agentRepo.GetByID(c.Request().Context(), id)
-		if getErr != nil || agent == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "all selected agents must exist")
-		}
-		if accessErr := h.ensureAgentProjectAccess(c, agent); accessErr != nil {
-			return accessErr
-		}
-		if agent.GeneratedStatus == models.AgentStatusProtected {
-			return echo.NewHTTPError(http.StatusBadRequest, "protected system agents cannot be deleted")
-		}
-		agents = append(agents, agent)
-	}
-	if err := h.agentRepo.DeleteBulk(c.Request().Context(), ids); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	cleanupFailures := make([]string, 0)
-	for _, agent := range agents {
-		if key := strings.TrimSpace(agent.Key); key != "" && h.agentSkillRoot != "" {
-			root := h.agentSkillRoot
-			if agent.Scope == models.AgentScopeProject {
-				root = h.projectSkillRootForAgent(c, agent)
-			}
-			if root != "" {
-				dir := filepath.Join(root, "agents", key)
-				if err := os.RemoveAll(dir); err != nil {
-					cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s package cleanup failed", key))
-				}
-				if _, err := agentlibrary.RemoveAgentIndexEntry(filepath.Join(root, "agents", "AGENTS.md"), key); err != nil {
-					cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s index cleanup failed", key))
-				}
-			}
-		}
-	}
-	if len(cleanupFailures) > 0 {
-		return echo.NewHTTPError(http.StatusInternalServerError, "database agents were deleted; filesystem cleanup incomplete: "+strings.Join(cleanupFailures, "; "))
+	if err := h.deleteManagedAgents(c, ids); err != nil {
+		return err
 	}
 	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
 }
@@ -1960,6 +2020,14 @@ func (h *Handler) DeleteAgentsBulk(c echo.Context) error {
 func (h *Handler) DeleteAgent(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteAgent id=%s", id)
+
+	// A remote agent's package must only be removed on its owning server.
+	if _, remote := remoteid.ServerOf(id); remote {
+		if err := h.deleteManagedAgents(c, []string{id}); err != nil {
+			return err
+		}
+		return h.ListAgents(c)
+	}
 
 	if h.agentRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "agent repository unavailable")
@@ -2035,4 +2103,50 @@ func (h *Handler) GetAgentJSON(c echo.Context) error {
 		return err
 	}
 	return c.JSON(http.StatusOK, agent)
+}
+
+func (h *Handler) deleteAgents(ctx context.Context, scope string, ids []string, checkOnly bool) error {
+	agents := make([]*models.Agent, 0, len(ids))
+	for _, id := range ids {
+		agent, getErr := h.agentRepo.GetByID(ctx, id)
+		if getErr != nil || agent == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "all selected agents must exist")
+		}
+		if agent.Scope == models.AgentScopeProject && scope != "" && !models.IsAggregateProject(scope) && agent.ProjectID != scope {
+			return authz.ErrDenied
+		}
+
+		if agent.GeneratedStatus == models.AgentStatusProtected {
+			return echo.NewHTTPError(http.StatusBadRequest, "protected system agents cannot be deleted")
+		}
+		agents = append(agents, agent)
+	}
+	if checkOnly {
+		return nil
+	}
+	if err := h.agentRepo.DeleteBulk(ctx, ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	cleanupFailures := make([]string, 0)
+	for _, agent := range agents {
+		if key := strings.TrimSpace(agent.Key); key != "" && h.agentSkillRoot != "" {
+			root := h.agentSkillRoot
+			if agent.Scope == models.AgentScopeProject {
+				root = service.ProjectSkillRootForResolver(ctx, h.projectRepo, agent.ProjectID)
+			}
+			if root != "" {
+				dir := filepath.Join(root, "agents", key)
+				if err := os.RemoveAll(dir); err != nil {
+					cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s package cleanup failed", key))
+				}
+				if _, err := agentlibrary.RemoveAgentIndexEntry(filepath.Join(root, "agents", "AGENTS.md"), key); err != nil {
+					cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s index cleanup failed", key))
+				}
+			}
+		}
+	}
+	if len(cleanupFailures) > 0 {
+		return echo.NewHTTPError(http.StatusInternalServerError, "database agents were deleted; filesystem cleanup incomplete: "+strings.Join(cleanupFailures, "; "))
+	}
+	return nil
 }

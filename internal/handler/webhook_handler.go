@@ -408,25 +408,9 @@ func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 		}
 	}
 
-	form := parseWebhookEndpointForm(c)
-	if err := h.validateWebhookAgentIDs(c.Request().Context(), projectID, form.AgentIDs); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid webhook agent assignment")
-	}
-	w := &models.WebhookEndpoint{ProjectID: projectID}
-	applyWebhookEndpointForm(w, form)
-	if w.Name == "" {
-		w.Name = "New Webhook"
-	}
-
-	if err := h.webhookRepo.Create(c.Request().Context(), w); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create webhook: "+err.Error())
-	}
-
-	// Save agent assignments
-	if len(form.AgentIDs) > 0 {
-		if err := h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, form.AgentIDs); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save webhook agents: "+err.Error())
-		}
+	w, err := actWebhookCreate(h, c.Request().Context(), webhookMutationArgs{ProjectID: projectID, Form: parseWebhookEndpointForm(c)})
+	if err != nil {
+		return err
 	}
 
 	if isHTMX(c) {
@@ -445,27 +429,9 @@ func (h *Handler) HandleWebhookUpdate(c echo.Context) error {
 	if projectErr != nil {
 		return projectErr
 	}
-	w, err := h.webhookRepo.GetByIDForProject(c.Request().Context(), id, projectID)
+	w, err := actWebhookUpdate(h, c.Request().Context(), webhookMutationArgs{ProjectID: projectID, WebhookID: id, Form: parseWebhookEndpointForm(c)})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load webhook")
-	}
-	if w == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
-	}
-
-	form := parseWebhookEndpointForm(c)
-	if err := h.validateWebhookAgentIDs(c.Request().Context(), w.ProjectID, form.AgentIDs); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid webhook agent assignment")
-	}
-	applyWebhookEndpointForm(w, form)
-
-	if err := h.webhookRepo.Update(c.Request().Context(), w); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update webhook")
-	}
-
-	// Update agent assignments
-	if err := h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, form.AgentIDs); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save webhook agents: "+err.Error())
+		return err
 	}
 
 	if isHTMX(c) {
@@ -486,8 +452,8 @@ func (h *Handler) HandleWebhookBulkDelete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.webhookRepo.DeleteBulk(c.Request().Context(), projectID, ids); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "all selected webhooks must belong to the current project")
+	if err := h.runCardBulk(c.Request().Context(), "webhooks", "delete", projectID, ids); err != nil {
+		return err
 	}
 	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
 }
@@ -502,11 +468,15 @@ func (h *Handler) HandleWebhookDelete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.webhookRepo.DeleteForProject(c.Request().Context(), projectID, id); err != nil {
-		if errors.Is(err, persistence.ErrWebhookNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete webhook")
+	endpoint, err := h.webhookRepo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	if endpoint == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
+	}
+	if err := h.runCardBulk(c.Request().Context(), "webhooks", "delete", projectID, []string{id}); err != nil {
+		return err
 	}
 
 	if isHTMX(c) {
@@ -525,16 +495,9 @@ func (h *Handler) HandleWebhookRotateSecret(c echo.Context) error {
 	if projectErr != nil {
 		return projectErr
 	}
-	endpoint, lookupErr := h.webhookRepo.GetByIDForProject(c.Request().Context(), id, projectID)
-	if lookupErr != nil {
-		return lookupErr
-	}
-	if endpoint == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
-	}
-	newSecret, err := h.webhookRepo.RotateSecret(c.Request().Context(), id)
+	newSecret, err := actWebhookRotate(h, c.Request().Context(), webhookMutationArgs{ProjectID: projectID, WebhookID: id})
 	if err != nil {
-		if errors.Is(err, persistence.ErrWebhookNotFound) {
+		if errors.Is(err, persistence.ErrWebhookNotFound) || isActionNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to rotate secret")
@@ -556,16 +519,9 @@ func (h *Handler) HandleWebhookTest(c echo.Context) error {
 	if projectErr != nil {
 		return projectErr
 	}
-	endpoint, err := h.webhookRepo.GetByIDForProject(c.Request().Context(), id, projectID)
-	if err != nil || endpoint == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
-	}
-
-	// Create a synthetic test task
-	testPayload := `{"event_type":"test","summary":"Test webhook event","source":"openvibely_test"}`
-	task, err := h.createWebhookTaskFromEndpoint(c.Request().Context(), endpoint, "test", "Test webhook event", testPayload)
+	task, err := actWebhookTest(h, c.Request().Context(), webhookMutationArgs{ProjectID: projectID, WebhookID: id})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create test task: "+err.Error())
+		return err
 	}
 
 	if isHTMX(c) {

@@ -78,13 +78,20 @@
   submit.disabled=true;root.hidden=false;root.textContent='Reading dependency declarations…';
   try {
    if (!file) throw new Error('Select a package containing SKILL.md.');
-   const response=await fetch('/skills/dependency-preview',{method:'POST',headers:{'Content-Type':'text/plain'},body:await file.text()});
+   const response=await fetch('/skills/dependency-preview?' + new URLSearchParams({scope:document.getElementById('skill_import_scope')?.value || 'project',project_id:document.getElementById('skill_import_project_owner')?.value || document.getElementById('project-selector')?.value || new URLSearchParams(location.search).get('project_id') || ''}),{method:'POST',headers:{'Content-Type':'text/plain'},body:await file.text()});
    if (!response.ok) throw new Error(await response.text());
    const manifest=await response.json();
    if (generation!==importGeneration || !root.isConnected) return;
    window.renderSkillDependencyDetails(root,manifest);submit.disabled=false;
   } catch(error) {if(generation===importGeneration)root.textContent=error.message;}
  };
+
+ document.addEventListener('change', event => {
+  if (event.target?.id === 'skill_import_project_owner') {
+   const input = document.getElementById('skill_import_files');
+   if (input?.files?.length) window.previewImportedSkillDependencies(input);
+  }
+ });
 
  // The same server-rendered question card is used on Chat and task threads.
  window.submitChatInputAnswers = function(card, answers) {

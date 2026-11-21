@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"net/http"
 	"net/url"
 
@@ -16,6 +17,9 @@ func pluginThreadSurface(instanceID, projectID string) components.ThreadSurface 
 // Resolve the owning page before delegating to the proven task-thread readers.
 // Client-supplied task IDs never select a conversation here.
 func (h *Handler) pluginThreadContext(c echo.Context) error {
+	if _, ok := remoteid.ServerOf(c.Param("instanceId")); ok {
+		return h.remotePluginThreadContext(c)
+	}
 	r, err := h.resolvePluginForRequest(c, false)
 	if err != nil {
 		return err

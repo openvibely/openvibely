@@ -189,7 +189,7 @@ func outboundTargetSaveErrorMessage(err error) string {
 }
 
 func (h *Handler) saveOutboundTargetsDraft(c echo.Context, projectID string) error {
-	if projectID == models.AllProjectsID {
+	if models.IsAggregateProject(projectID) {
 		return echo.NewHTTPError(http.StatusBadRequest, "Choose a project for outbound targets")
 	}
 	if err := c.Request().ParseForm(); err != nil {

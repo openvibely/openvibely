@@ -1,6 +1,7 @@
 package update
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -238,5 +239,57 @@ func TestDrainSignalLifecycle(t *testing.T) {
 	case <-next:
 	default:
 		t.Fatal("second drain not notified")
+	}
+}
+
+func TestLocalGateRemainsClosedWhenUpdateDrainReopens(t *testing.T) {
+	tracker := NewWorkTracker()
+	allowed := true
+	tracker.SetAdmissionGate(func() bool { return allowed })
+	done, err := tracker.Start(WorkTask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed = false
+	tracker.Close()
+	tracker.Open()
+	if tracker.Admit() {
+		t.Fatal("update reopened Local execution")
+	}
+	if _, err := tracker.Start(WorkChat); err == nil {
+		t.Fatal("paused Local accepted chat")
+	}
+	if tracker.Active().Total() != 1 {
+		t.Fatal("active task was interrupted")
+	}
+	done()
+	if tracker.Active().Total() != 0 {
+		t.Fatal("active task did not finish")
+	}
+	allowed = true
+	if !tracker.Admit() {
+		t.Fatal("Local did not resume")
+	}
+}
+
+func TestLocalPauseAllowsAlreadyAdmittedWorkToFinishNestedCalls(t *testing.T) {
+	tracker := NewWorkTracker()
+	done, err := tracker.Start(WorkTask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	ctx := tracker.AdmittedContext(context.Background())
+	tracker.SetAdmissionGate(func() bool { return false })
+	nestedDone, err := tracker.StartWithin(ctx, WorkChat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nestedDone()
+	if _, err := tracker.StartWithin(context.Background(), WorkChat); err == nil {
+		t.Fatal("new execution admitted while paused")
+	}
+	if tracker.Active().Total() != 1 {
+		t.Fatal("lost active parent")
 	}
 }

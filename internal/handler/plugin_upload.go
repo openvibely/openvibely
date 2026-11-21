@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/pageplugins"
+	"github.com/openvibely/openvibely/internal/remoteid"
 )
 
 func (h *Handler) PluginSettingsUpload(c echo.Context) error {
@@ -37,6 +38,13 @@ func (h *Handler) PluginSettingsUpload(c echo.Context) error {
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
+	if _, remote := remoteid.ServerOf(destination); remote {
+		pkg, err := h.uploadRemotePlugin(c.Request().Context(), destination, files, paths, models.IsAggregateProject(projectID))
+		if err != nil {
+			return h.renderPluginSettings(c, projectID, "", err)
+		}
+		return h.renderPluginSettings(c, projectID, fmt.Sprintf("Installed %s %s", pkg.Name, pkg.Version), nil)
+	}
 	root := filepath.Join(work, "package")
 	if err = os.Mkdir(root, 0700); err != nil {
 		return err
@@ -48,7 +56,7 @@ func (h *Handler) PluginSettingsUpload(c echo.Context) error {
 	if err != nil {
 		return h.renderPluginSettings(c, projectID, "", err)
 	}
-	if projectID == models.AllProjectsID {
+	if models.IsAggregateProject(projectID) {
 		if err := h.addInstalledPluginPages(c.Request().Context(), destination, pkg); err != nil {
 			return h.renderPluginSettings(c, projectID, "", err)
 		}

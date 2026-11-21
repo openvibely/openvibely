@@ -1,0 +1,277 @@
+package pages
+
+import (
+	"strings"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+const (
+	ServerStatusConnected = "connected"
+	ServerStatusOffline   = "offline"
+	ServerStatusSignedOut = "signed_out"
+	ServerStatusExpired   = "expired"
+	ServerStatusDisabled  = "disabled"
+)
+
+// SavedServer is a remote OpenVibely server. Passwords are never stored.
+type SavedServer struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	Username   string `json:"username"`
+	Enabled    bool   `json:"enabled"`
+	Status     string `json:"-"`
+	SignedInAs string `json:"-"`
+	Version    string `json:"-"`
+}
+
+type RemoteProject = layout.RemoteProject
+
+type ServersPageData struct {
+	Servers             []SavedServer
+	Search              string
+	Reconnect           string
+	DesktopMode         bool
+	LocalBackend        string
+}
+
+func serverStatusLabel(s SavedServer) string {
+	switch s.Status {
+	case ServerStatusConnected:
+		return "Connected"
+	case ServerStatusOffline:
+		return "Offline"
+	case ServerStatusExpired:
+		return "Session expired"
+	case ServerStatusDisabled:
+		return "Disabled"
+	default:
+		return "Signed out"
+	}
+}
+
+func serverStatusClass(s SavedServer) string {
+	switch s.Status {
+	case ServerStatusConnected:
+		return "badge-success"
+	case ServerStatusOffline:
+		return "badge-error"
+	case ServerStatusExpired:
+		return "badge-warning"
+	default:
+		return "badge-ghost"
+	}
+}
+
+func serverSearchText(s SavedServer) string {
+	return strings.Join([]string{s.Name, s.URL, s.Username, serverStatusLabel(s)}, " ")
+}
+
+func serverEnabledString(s SavedServer) string {
+	if s.Enabled {
+		return "true"
+	}
+	return "false"
+}
+
+templ Servers(projects []models.Project, currentProjectID string, data ServersPageData) {
+	@layout.Base("Servers", projects, currentProjectID) {
+		@ServersContent(data)
+	}
+}
+
+templ ServersContent(data ServersPageData) {
+	<div id="servers-container" data-search-container hx-history="false" data-servers-reconnect={ data.Reconnect }>
+		@layout.PageTitle("Servers")
+		<div data-page-header class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">Servers</h2>
+			<button class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Add Server" data-tooltip-disabled onclick="openServerModal()">
+				@pageCreateIcon()
+			</button>
+		</div>
+		@CardSearchInput("servers", "Search servers...")
+		@ServersCardList(data)
+		<dialog id="server_modal" class="modal">
+			<div class="modal-box">
+				@ModalCloseButton("server_modal", "Close server settings")
+				<h3 id="server_modal_title" class="font-bold text-lg mb-1 pr-10">Add Server</h3>
+				<p class="text-sm opacity-60 mb-4">Sign in with your account on that server. Your password is used once and never saved.</p>
+				<form id="server_form" hx-post="/servers" hx-target="#servers-card-list" hx-swap="outerHTML" autocomplete="off">
+					<div class="form-control mb-3">
+						<label class="label" for="server_name"><span class="label-text">Name</span></label>
+						<input type="text" id="server_name" name="name" class="input input-bordered" maxlength="80" placeholder="Team server"/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label" for="server_url"><span class="label-text">URL</span></label>
+						<input type="text" id="server_url" name="url" class="input input-bordered" required placeholder="https://ov.example.com" inputmode="url" spellcheck="false"/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label" for="server_username"><span class="label-text">Username</span></label>
+						<input type="text" id="server_username" name="username" class="input input-bordered" maxlength="200" autocomplete="username" spellcheck="false"/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label" for="server_password"><span class="label-text">Password</span></label>
+						<input type="password" id="server_password" name="password" class="input input-bordered" maxlength="1024" autocomplete="current-password" placeholder="Leave blank to save without signing in"/>
+					</div>
+					<label class="label cursor-pointer justify-start gap-3 mb-2">
+						<input type="hidden" name="enabled" value="false" id="server_enabled_hidden" disabled/>
+						<input type="checkbox" id="server_enabled" class="toggle toggle-sm toggle-primary" checked onchange="document.getElementById('server_enabled_hidden').disabled = this.checked"/>
+						<span class="label-text">Enabled</span>
+					</label>
+					<p class="text-xs opacity-60 mb-4">
+						Server uses single sign-on?
+						<a id="server_sso_link" class="link hidden" target="_blank" rel="noopener" href="#">Sign in with SSO</a>
+						<span id="server_sso_hint">Save it first, then sign in with SSO.</span>
+					</p>
+					<div class="modal-action">
+						<button type="button" class="btn btn-ghost" onclick="server_modal.close()">Cancel</button>
+						<button type="submit" id="server_submit" class="btn btn-primary">Save &amp; connect</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button aria-label="Close">close</button></form>
+		</dialog>
+		<script>
+			(function() {
+				function field(id) { return document.getElementById(id); }
+				function setFormTarget(id) {
+					var form = field('server_form');
+					var path = id ? '/servers/' + id : '/servers';
+					form.setAttribute('hx-post', path);
+					form.dataset.serverId = id || '';
+					if (window.htmx) htmx.process(form);
+					var sso = field('server_sso_link');
+					sso.classList.toggle('hidden', !id);
+					field('server_sso_hint').classList.toggle('hidden', !!id);
+					sso.href = id ? '/servers/' + id + '/sso' : '#';
+				}
+				window.openServerModal = function(card) {
+					var d = card ? card.dataset : {};
+					var id = d.serverId || '';
+					field('server_modal_title').textContent = id ? (d.serverStatus === 'connected' ? 'Edit Server' : 'Reconnect ' + d.serverName) : 'Add Server';
+					field('server_name').value = d.serverName || '';
+					field('server_url').value = d.serverUrl || '';
+					field('server_username').value = d.serverUsername || '';
+					field('server_password').value = '';
+					var enabled = d.serverEnabled !== 'false';
+					field('server_enabled').checked = enabled;
+					field('server_enabled_hidden').disabled = enabled;
+					field('server_submit').textContent = id && d.serverStatus !== 'connected' ? 'Reconnect' : 'Save & connect';
+					setFormTarget(id);
+					server_modal.showModal();
+					(id ? field('server_password') : field('server_url')).focus();
+				};
+				window.disconnectServer = function(button) {
+					var card = button.closest('[data-server-id]');
+					htmx.ajax('POST', '/servers/' + card.dataset.serverId + '/disconnect', { target: '#servers-card-list', swap: 'outerHTML' });
+				};
+				window.deleteServer = async function(button) {
+					var card = button.closest('[data-server-id]');
+					if (!await window.openVibelyConfirm('Delete server "' + card.dataset.serverName + '"? Data on that server is not affected.')) return;
+					htmx.ajax('DELETE', '/servers/' + card.dataset.serverId, { target: '#servers-card-list', swap: 'outerHTML' });
+				};
+				if (!window.__ovServersListeners) {
+					window.__ovServersListeners = true;
+					document.body.addEventListener('servers-saved', function() {
+						var modal = document.getElementById('server_modal');
+						if (modal && modal.open) modal.close();
+					});
+					document.body.addEventListener('server-saved-id', function(e) {
+						var form = document.getElementById('server_form');
+						if (form && e.detail && e.detail.value && !form.dataset.serverId) setFormTarget(e.detail.value);
+					});
+				}
+				var root = field('servers-container');
+				var reconnect = root && root.dataset.serversReconnect;
+				if (reconnect) {
+					var card = root.querySelector('[data-server-id="' + CSS.escape(reconnect) + '"]');
+					if (card) setTimeout(function() { openServerModal(card); }, 0);
+				}
+			})();
+		</script>
+	</div>
+}
+
+templ ServersCardList(data ServersPageData) {
+	<div id="servers-card-list">
+ if data.LocalBackend == "stopping" {
+  <p role="status" hx-get="/servers" hx-trigger="every 2s" hx-select="#servers-card-list" hx-target="#servers-card-list" hx-swap="outerHTML">Stopping Local services… Waiting for Local work and listeners to stop.</p>
+ }
+		if data.DesktopMode && data.LocalBackend != "" {
+			<div class="card bg-base-100 shadow-sm border border-base-300 mb-4">
+				<div class="card-body py-4"><div class="flex items-center justify-between gap-4">
+					<div>
+						<h3 class="font-bold">Run Local services</h3>
+						<p class="text-sm opacity-60">
+							Run Local tasks, schedules, automations, and channel listeners. Turning off lets active work finish; remote servers stay connected.
+						</p>
+					</div>
+					<input
+						type="checkbox"
+						name="enabled"
+						value="true"
+						class="toggle toggle-primary"
+						aria-label="Run Local services"
+						checked?={ data.LocalBackend == "on" }
+						hx-post="/servers/local-backend"
+						hx-trigger="change"
+						hx-target="#servers-card-list"
+						hx-swap="outerHTML"
+					/>
+				</div></div>
+			</div>
+		}
+		if len(data.Servers) == 0 {
+			<div class="text-center py-12" data-search-empty-state>
+				<p class="opacity-50 mb-4">No servers yet. Add a remote OpenVibely server to work with its projects here.</p>
+				<button class="btn btn-primary" onclick="openServerModal()">Add Server</button>
+			</div>
+		} else {
+			<div class="grid gap-4">
+				for _, server := range data.Servers {
+					<div
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						data-server-id={ server.ID }
+						data-server-name={ server.Name }
+						data-server-url={ server.URL }
+						data-server-username={ server.Username }
+						data-server-enabled={ serverEnabledString(server) }
+						data-server-status={ server.Status }
+						data-search-card
+						data-search-text={ serverSearchText(server) }
+						onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openServerModal(this)"
+					>
+						<div class="card-body relative">
+							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + server.Name}) {
+									<li><button onclick="event.stopPropagation(); openServerModal(this.closest('[data-server-id]'))">Edit</button></li>
+									if server.Status == ServerStatusConnected || server.Status == ServerStatusOffline || server.Status == ServerStatusExpired {
+										<li><button onclick="event.stopPropagation(); disconnectServer(this)">Disconnect</button></li>
+									}
+									<li><button class="text-error" onclick="event.stopPropagation(); deleteServer(this)">Delete</button></li>
+								}
+							</div>
+							<div class="pr-12">
+								<h3 class="font-bold flex items-center gap-2">
+									{ server.Name }
+									<span class={ "badge badge-sm", serverStatusClass(server) }>{ serverStatusLabel(server) }</span>
+								</h3>
+								<p class="text-sm opacity-60 break-all">{ server.URL }</p>
+								if server.SignedInAs != "" {
+									<p class="text-sm opacity-60">Signed in as { server.SignedInAs }</p>
+								} else if server.Username != "" {
+									<p class="text-sm opacity-60">Username: { server.Username }</p>
+								}
+								if server.Version != "" {
+									<p class="text-sm opacity-60">Version { server.Version }</p>
+								}
+							</div>
+						</div>
+					</div>
+				}
+			</div>
+		}
+	</div>
+}

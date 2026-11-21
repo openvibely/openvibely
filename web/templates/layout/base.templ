@@ -113,6 +113,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=2"/>
 			<title>{ documentTitle(title) }</title>
 			<meta id="ov-theme-catalog" data-catalog={ themes.RuntimeCatalogJSON() }/>
+			@AggregateProjectHelpers()
 			<script id="file-drop-navigation-guard">
 				// Every full page load needs this guard, including pages without a composer.
 				// Bubble after local drop handlers so upload targets keep handling their files.
@@ -4332,6 +4333,35 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 const trigger = dropdown?.querySelector(':scope > label, :scope > button, :scope > [role="button"]');
                 return trigger?.contains(target) && dropdown.querySelector(':scope > .dropdown-content:not([popover])') ? trigger : null;
             }
+            // Remote text keeps its server's bare IDs; tag a clicked link with the
+            // server of the remote item or page it appears in.
+            (function() {
+                const remotePrefix = /(?:^|[^A-Za-z0-9_])(r-[0-9a-f]{16}-)/;
+                const bareRef = /((?:\/files|\/tasks|\/projects|\/attachments|\/chat\/attachments)\/|[?&]project_id=)([0-9a-f]{32})(?![0-9a-f])/g;
+                function remoteServerPrefix(el) {
+                    for (let node = el; node && node.attributes; node = node.parentElement) {
+                        for (const attr of node.attributes) {
+                            if (!attr.name.startsWith('data-') || !attr.name.endsWith('id')) continue;
+                            const m = attr.value.match(remotePrefix);
+                            if (m) return m[1];
+                        }
+                    }
+                    const m = decodeURIComponent(location.pathname + location.search).match(remotePrefix);
+                    return m ? m[1] : '';
+                }
+                document.addEventListener('click', function(event) {
+                    const link = event.target.closest?.('a[href]');
+                    if (!link) return;
+                    const url = new URL(link.getAttribute('href'), location.href);
+                    if (url.origin !== location.origin) return;
+                    const target = url.pathname + url.search;
+                    if (!bareRef.test(target)) return;
+                    bareRef.lastIndex = 0;
+                    const prefix = remoteServerPrefix(link);
+                    if (!prefix) return;
+                    link.setAttribute('href', target.replace(bareRef, '$1' + prefix + '$2') + url.hash);
+                }, true);
+            })();
             document.addEventListener('click', function(event) {
                 const trigger = dropdownTrigger(event.target);
                 if (trigger) { event.preventDefault(); dropdownController(trigger.closest('.dropdown')).toggle(event); return; }
@@ -6476,7 +6506,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						function querySignature(root) {
 							var url;
 							try { url = new URL(root.getAttribute('data-card-pagination-url') || window.location.href, window.location.href); } catch (_) { return ''; }
-							['card_page', 'card_window', 'page', 'page_size', 'offset'].forEach(function(key) { url.searchParams.delete(key); });
+							['card_page', 'card_window', 'page', 'page_size', 'offset', 'cursor'].forEach(function(key) { url.searchParams.delete(key); });
 							return url.pathname + '?' + url.searchParams.toString();
 						}
 
@@ -6513,7 +6543,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									if (!control.name || control.disabled) return;
 									var value = (control.value || '').trim(); if (value) target.searchParams.set(control.name, value); else target.searchParams.delete(control.name);
 								});
-								target.searchParams.delete('page'); target.searchParams.delete('page_size'); target.searchParams.delete('offset'); target.searchParams.delete('card_page'); target.searchParams.delete('card_window');
+								target.searchParams.delete('page'); target.searchParams.delete('page_size'); target.searchParams.delete('offset'); target.searchParams.delete('cursor'); target.searchParams.delete('card_page'); target.searchParams.delete('card_window');
 								state.ids = Object.create(null); state.last = '';
 								var path = target.pathname + target.search + target.hash;
 								var requestPath = key === 'models' && root.getAttribute('data-card-sort-navigation') === 'true' && window.cardPaginationRefreshURL ? window.cardPaginationRefreshURL(root, path) : path;
@@ -7103,7 +7133,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								try {
 									var currentURL = new URL(window.location.href);
 									if (term) currentURL.searchParams.set('search', term); else currentURL.searchParams.delete('search');
-									currentURL.searchParams.delete('page'); currentURL.searchParams.delete('offset');
+									currentURL.searchParams.delete('page'); currentURL.searchParams.delete('offset'); currentURL.searchParams.delete('cursor');
 									window.history.replaceState(window.history.state, '', currentURL.pathname + currentURL.search + currentURL.hash);
 									var toolbar = state.root.querySelector('[data-card-list-toolbar]');
 									if (toolbar) { var selection = window._openVibelyCardSelections && window._openVibelyCardSelections[toolbar.getAttribute('data-card-list-toolbar')]; if (selection) { selection.ids = Object.create(null); selection.last = ''; } }
@@ -7113,7 +7143,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							state.loading = false;
 							state.hasMore = true;
 							state.nextPage = 0;
-							state.nextOffset = 0;
+							state.nextOffset = 0; state.cursor = '';
 							state.requestedPages = Object.create(null);
 							state.keys = Object.create(null);
 							state.failedPage = null;
@@ -7237,11 +7267,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								try {
 									var currentURL = new URL(window.location.href);
 									currentURL.searchParams.forEach(function(value, key) {
-										if (['card_page', 'card_window', 'page', 'page_size', 'offset'].indexOf(key) === -1) url.searchParams.set(key, value);
+										if (['card_page', 'card_window', 'page', 'page_size', 'offset', 'cursor'].indexOf(key) === -1) url.searchParams.set(key, value);
 									});
 								} catch (_) {}
 								url.searchParams.set('page', String(page));							url.searchParams.set('page_size', String(state.pageSize));
-							url.searchParams.set('offset', String(replace ? 0 : state.nextOffset));
+							url.searchParams.delete('offset');
+ url.searchParams.delete('cursor');
+ if (!replace && state.cursor) url.searchParams.set('cursor', state.cursor);
 							url.searchParams.set('card_page', '1');
 							if (state.search) url.searchParams.set('search', state.search);
 							else url.searchParams.delete('search');
@@ -7254,7 +7286,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							window.fetch(url.toString(), options).then(function(response) {
 								if (!response.ok) throw new Error('paged card request failed');
 								var header = response.headers.get(pageHeader);
-								return response.text().then(function(html) { return {html: html, header: header}; });
+								return response.text().then(function(html) { return {html: html, header: header, cursor: response.headers.get('X-OpenVibely-Card-Cursor') || ''}; });
 							}).then(function(payload) {
 								if (!isCurrent(state) || state.generation !== generation) return;
 								var selector = state.root.getAttribute('data-card-pagination-list');
@@ -7274,7 +7306,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									if (typeof state.root._openVibelyInstallSelectionCards === 'function') state.root._openVibelyInstallSelectionCards();
 									state.nextPage = page + 1;
 									state.nextOffset = replace ? received : state.nextOffset + received;
+ state.cursor = payload.cursor;
 									state.hasMore = payload.header === null ? received >= state.pageSize : payload.header === 'true';
+ var boundary = state.root.querySelector('[data-card-pagination-status]');
+ if (boundary) {
+ boundary.setAttribute('data-card-pagination-cursor', state.cursor);
+ boundary.setAttribute('data-card-pagination-has-more', String(state.hasMore));
+ }
 									state.loading = false;
 									state.controller = null;
 									delete state.requestedPages[page];
@@ -7310,6 +7348,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								pageSize: pageSize,
 								nextPage: Math.max(1, Math.ceil(initialCardCount / pageSize)),
 								nextOffset: initialCardCount,
+ cursor: status && status.getAttribute('data-card-pagination-cursor') || '',
 								hasMore: hasMore,
 								loading: false,
 								generation: 0,
@@ -7592,4 +7631,38 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 		@TaskCardActionsScript()
 		</body>
 	</html>
+}
+
+// AggregateProjectHelpers lets page scripts recognize All projects and shared projects.
+templ AggregateProjectHelpers() {
+	@templ.JSONScript("shared-projects-data", sharedProjectMembers(ctx))
+	@templ.JSONScript("shared-project-machines-data", sharedProjectMachines(ctx))
+	<script id="aggregate-project-helpers">
+		// All projects and shared projects (one repo on several machines) are both
+		// virtual scopes; a shared one only covers its member copies.
+		(function() {
+			var members = {};
+			try { members = JSON.parse(document.getElementById('shared-projects-data').textContent || '{}') || {}; } catch (_) {}
+			window.openVibelySharedProjects = Object.assign(window.openVibelySharedProjects || {}, members);
+			try { window.openVibelySharedProjectMachines = JSON.parse(document.getElementById('shared-project-machines-data').textContent || '{}') || {}; } catch (_) {}
+			window.openVibelyIsAggregateProject = function(id) {
+				return id === '__all_projects__' || /^__repo_[0-9a-f]{16}$/.test(id || '');
+			};
+			// A repository's tab shows its only copy's pages, or the combined pages for several.
+			window.openVibelyProjectTab = function(id) {
+				var groups = window.openVibelySharedProjects;
+				for (var tab in groups) { if (tab === id || groups[tab].indexOf(id) !== -1) return tab; }
+				return id;
+			};
+			window.openVibelyProjectPage = function(id) {
+				var members = window.openVibelySharedProjects[id];
+				return members && members.length === 1 ? members[0] : id;
+			};
+			window.openVibelyProjectInScope = function(eventProjectID, scopeID) {
+				if (eventProjectID === scopeID || scopeID === '__all_projects__') return true;
+				var ids = window.openVibelySharedProjects[scopeID];
+				return !!ids && ids.indexOf(eventProjectID) !== -1;
+			};
+		})();
+	</script>
 }

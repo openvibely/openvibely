@@ -432,24 +432,35 @@ func (c *liveTestClient) nextAny(t testing.TB) liveFrame {
 	}
 }
 
-func TestLiveWebSocketSlowConsumerIsDisconnected(t *testing.T) {
+func TestLiveWebSocketSlowConsumerResumesWithoutDisconnect(t *testing.T) {
 	if testing.Short() {
-		t.Skip("backpressure timeout regression")
+		t.Skip("backpressure regression")
 	}
 	tc, server := liveTestServer(t)
-	exec := createRunningChatStreamExecution(t, tc, strings.Repeat("x", 32<<20))
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	output := strings.Repeat("x", 8<<20)
+	exec := createRunningChatStreamExecution(t, tc, output)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http", "ws", 1)+"/events/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {server.URL}}})
 	require.NoError(t, err)
 	defer conn.CloseNow()
+	conn.SetReadLimit(-1)
 	var ready liveFrame
 	require.NoError(t, wsjson.Read(ctx, conn, &ready))
 	require.NoError(t, wsjson.Write(ctx, conn, executionCommand("slow", exec, 0)))
-	waitForExecutionStreamSubscribers(t, tc.handler.executionStreamHub, 1)
-	// Deliberately stop reading. The writer and bounded queue must release all
-	// execution subscriptions instead of retaining this window indefinitely.
-	require.Eventually(t, func() bool { return tc.handler.executionStreamHub.SubscriberCount() == 0 }, 12*time.Second, 20*time.Millisecond)
+	// Stall long enough to fill every queue; backpressure must not end the socket.
+	time.Sleep(3 * time.Second)
+	received := 0
+	for received < len(output) {
+		var f liveFrame
+		require.NoError(t, wsjson.Read(ctx, conn, &f))
+		if f.ID != "slow" || f.Event != "message" {
+			continue
+		}
+		require.Equal(t, received, f.Start)
+		received += len(f.Data.(string))
+	}
+	require.Equal(t, len(output), received)
 }
 
 func TestLiveWebSocketTerminalReplayResetsUnpersistedTail(t *testing.T) {

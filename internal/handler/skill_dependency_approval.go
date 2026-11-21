@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
-	"runtime"
 	"strings"
 	"time"
 
@@ -150,10 +149,7 @@ func installationAnswerResult(raw string) error {
 	return nil
 }
 
-func (h *Handler) answerSkillInstallation(c echo.Context, record *persistence.ChatInputRequestRecord, payload chatInputRequestAnswerPayload) error {
-	if err := h.requireDependencyHuman(c); err != nil {
-		return err
-	}
+func (h *Handler) answerSkillInstallationLocal(ctx context.Context, record *persistence.ChatInputRequestRecord, payload chatInputRequestAnswerPayload) error {
 	if record.ProjectID != payload.ProjectID {
 		return echo.NewHTTPError(http.StatusForbidden, "question belongs to another project")
 	}
@@ -171,7 +167,7 @@ func (h *Handler) answerSkillInstallation(c echo.Context, record *persistence.Ch
 	if err != nil {
 		return err
 	}
-	record, err = h.chatInputRequestRepo.Resolve(c.Request().Context(), record.ID, record.ProjectID, string(raw))
+	record, err = h.chatInputRequestRepo.Resolve(ctx, record.ID, record.ProjectID, string(raw))
 	if err != nil {
 		return err
 	}
@@ -190,9 +186,9 @@ func (h *Handler) answerSkillInstallation(c echo.Context, record *persistence.Ch
 	if h.chatBroadcaster != nil {
 		h.publishChatEvent(events.ChatEvent{Type: events.ChatUserInputResolved, ProjectID: req.ProjectID, ExecID: req.ExecID, InputRequest: chatInputRequestForEvent(req)})
 	}
-	execution, e := h.execRepo.GetByID(persistence.WithExecutionMetadata(c.Request().Context()), req.ExecID)
+	execution, e := h.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), req.ExecID)
 	if e == nil && execution != nil {
-		if task, e := h.taskRepo.GetByID(c.Request().Context(), execution.TaskID); e == nil && task != nil {
+		if task, e := h.taskRepo.GetByID(ctx, execution.TaskID); e == nil && task != nil {
 			if h.broadcaster != nil {
 				h.broadcaster.Publish(events.TaskEvent{Type: events.SkillDependencyApproval, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: req.ExecID, PendingInputID: req.ID, Status: "resolved"})
 			}
@@ -201,15 +197,15 @@ func (h *Handler) answerSkillInstallation(c echo.Context, record *persistence.Ch
 				// created before this broker. An expired wait in this process
 				// must not terminate a model loop that is still running.
 				if req.ExpiresAt.Add(-chatInputRequestTTL).Before(h.chatInputRequests.startedAt) {
-					h.completeRecoveredChatInputExecution(c.Request().Context(), req)
+					h.completeRecoveredChatInputExecution(ctx, req)
 				}
-				h.startInstallationContinuations(context.WithoutCancel(c.Request().Context()), task.ProjectID, "")
+				h.startInstallationContinuations(context.WithoutCancel(ctx), task.ProjectID, "")
 			} else {
-				h.startInstallationContinuations(context.WithoutCancel(c.Request().Context()), task.ProjectID, task.ID)
+				h.startInstallationContinuations(context.WithoutCancel(ctx), task.ProjectID, task.ID)
 			}
 		}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"ok": true})
+	return nil
 }
 
 func (h *Handler) OpenChatInputRequest(c echo.Context) error {
@@ -261,11 +257,18 @@ func (h *Handler) PreviewSkillDependencies(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "skill preview exceeds size limit")
 	}
-	deps, err := skilldeps.Parse(raw)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	projectID := ""
+	if c.QueryParam("scope") != "global" {
+		projectID, err = h.getCurrentProjectID(c)
+		if err != nil {
+			return err
+		}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"dependencies": deps, "platform": runtime.GOOS + "/" + runtime.GOARCH})
+	out, err := actSkillPreview(h, c.Request().Context(), skillPreviewArgs{ProjectID: projectID, Content: raw})
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // Complete the original read before the continuation's first model request.

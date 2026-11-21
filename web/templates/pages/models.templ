@@ -123,7 +123,7 @@ func oauthStatusText(agent models.LLMConfig) string {
 	if agent.OAuthNeedsReauth {
 		return "Reconnect Required"
 	}
-	if agent.HasValidOAuthToken() {
+	if modelOAuthConnected(agent) {
 		return "Connected"
 	}
 	if agent.OAuthAccessToken != "" {
@@ -139,7 +139,7 @@ func oauthStatusClass(agent models.LLMConfig) string {
 	if agent.OAuthNeedsReauth {
 		return "badge-error"
 	}
-	if agent.HasValidOAuthToken() {
+	if modelOAuthConnected(agent) {
 		return "badge-success"
 	}
 	if agent.OAuthAccessToken != "" {
@@ -154,13 +154,18 @@ func modelSearchText(agent models.LLMConfig) string {
 		status = "default"
 	}
 	if agent.IsOAuth() {
-		if agent.HasValidOAuthToken() {
+		if modelOAuthConnected(agent) {
 			status += " connected"
 		} else {
 			status += " not connected"
 		}
 	}
 	return agent.Name + " " + string(agent.Provider) + " " + agent.Model + " " + agent.OAuthConnectionName + " " + status
+}
+
+func modelOAuthConnected(config models.LLMConfig) bool {
+ if config.RemoteOAuthConnected != nil { return *config.RemoteOAuthConnected }
+ return config.HasValidOAuthToken()
 }
 
 func modelWorkerRunning(stats map[string]int, id string) int {
@@ -430,7 +435,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 											<span class={ "badge badge-sm", oauthStatusClass(agent) }>
 												{ oauthStatusText(agent) }
 											</span>
-											if !agent.HasValidOAuthToken() {
+											if !modelOAuthConnected(agent) {
 												<a
 													href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) }
 													data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) }
@@ -1726,7 +1731,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                         document.getElementById('model_id').value === model &&
                         document.getElementById('model_ollama_base_url').value === endpoint;
                 }
-                fetch('/models/ollama/context?' + new URLSearchParams({base_url:endpoint, model:model}), {signal:controller.signal})
+                fetch('/models/ollama/context?' + new URLSearchParams({base_url:endpoint, model:model, config_id:document.getElementById("model_config_id")?.value || "", project_id:new URLSearchParams(location.search).get("project_id") || ""}), {signal:controller.signal})
                     .then(function(response) { if (!response.ok) throw Error('Discovery failed'); return response.json(); })
                     .then(function(data) {
                         if (!current()) return;
@@ -1759,7 +1764,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				status.classList.remove('text-error');
 				status.textContent = 'Loading models…';
 				setModelDiscoveryLoading(true);
-				fetch('/models/ollama/available?' + new URLSearchParams({base_url:baseURL}), {signal:controller.signal})
+				fetch('/models/ollama/available?' + new URLSearchParams({base_url:baseURL, project_id:new URLSearchParams(location.search).get("project_id") || "", config_id:document.getElementById("model_config_id")?.value || ""}), {signal:controller.signal})
 					.then(function(response) {return response.json().then(function(data) {
 						if (!response.ok) throw Error(data.error || 'Could not load Ollama models.');
 						return data || [];

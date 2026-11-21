@@ -832,7 +832,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
 					<h3 class="font-bold text-lg mb-2">Configure X (formerly Twitter)</h3>
 					<div class="alert alert-info text-sm mb-4"><span>Requires an X developer app with OAuth 1.0a user authentication and read/write permissions. Mention polling and posting remain subject to your X API access tier. OpenVibely cannot create or upgrade provider credentials.</span></div>
-					<form method="post" action="/channels/x/configure" hx-post="/channels/x/configure" hx-swap="none" class="space-y-3">
+					<form method="post" action={ "/channels/x/configure?project_id=" + view.CurrentProjectID } hx-post={ "/channels/x/configure?project_id=" + view.CurrentProjectID } hx-swap="none" class="space-y-3">
 						<input type="hidden" name="project_id" value={ view.CurrentProjectID }/>
 						<div class="grid md:grid-cols-2 gap-3">
 							<label class="form-control"><span class="label-text">Consumer key</span><input class="input input-bordered" type="password" name="x_consumer_key" autocomplete="off" placeholder="Leave blank to preserve existing"/></label>
@@ -855,7 +855,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div class="divider">Authorized mention authors for this project</div>
 <p class="text-sm opacity-70">An administrator must verify the numeric X account ID before binding it to an application user. Authenticated runs use that user’s project permissions. Existing unbound entries must be replaced.</p>
 					<form method="post" action="/channels/x/authorized-users" hx-post="/channels/x/authorized-users" hx-swap="none" class="flex gap-2">
-						if view.CurrentProjectID == models.AllProjectsID {
+						if models.IsAggregateProject(view.CurrentProjectID) {
  <select name="project_id" class="select select-bordered" required aria-label="Project">
  <option value="">Choose project</option>
  for _, project := range templateui.ProjectOptions(ctx) {
@@ -899,7 +899,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 				<h3 id="channel_modal_title" class="font-bold text-lg mb-4 pr-10">Configure Telegram Bot</h3>
-				<form id="channel_form" method="post" action="/channels/telegram" hx-post="/channels/telegram" hx-swap="none">
+				<form id="channel_form" method="post" action={ "/channels/telegram?project_id=" + view.CurrentProjectID } hx-post={ "/channels/telegram?project_id=" + view.CurrentProjectID } hx-swap="none">
 					<div class="form-control mb-4">
 						<label class="label">
 							<span class="label-text">Bot Token</span>
@@ -969,7 +969,7 @@ templ settingsContent(view ChannelsSettingsView) {
 								if view.SendResponses {
 									checked
 								}
-								hx-post="/channels/telegram/send-responses"
+								hx-post={ "/channels/telegram/send-responses?project_id=" + view.CurrentProjectID }
 								hx-swap="none"
 								hx-trigger="change"
 								hx-include="this"
@@ -1020,7 +1020,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure GitHub</h3>
-				<form id="github_config_form" method="post" action="/channels/github/configure" hx-post="/channels/github/configure" hx-swap="none">
+				<form id="github_config_form" method="post" action={ "/channels/github/configure?project_id=" + view.CurrentProjectID } hx-post={ "/channels/github/configure?project_id=" + view.CurrentProjectID } hx-swap="none">
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text">Authentication</span></label>
 						<select id="github_auth_mode" name="github_auth_mode" class="select select-bordered w-full" onchange="toggleGitHubAuthMode(this.value)">
@@ -1153,7 +1153,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Slack</h3>
-				<form id="slack_config_form" method="post" action="/channels/slack/configure" hx-post="/channels/slack/configure" hx-swap="none">
+				<form id="slack_config_form" method="post" action={ "/channels/slack/configure?project_id=" + view.CurrentProjectID } hx-post={ "/channels/slack/configure?project_id=" + view.CurrentProjectID } hx-swap="none">
 					<div class="alert alert-info mb-4 text-sm">
 						<div>
 							<p class="font-semibold">Use OAuth + Socket Mode</p>
@@ -1280,7 +1280,7 @@ templ settingsContent(view ChannelsSettingsView) {
 			<div class="modal-box max-w-2xl">
 				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelConfigModal('discord_config_modal')" aria-label="Close Discord configuration"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Discord</h3>
-					<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none">
+					<form id="discord_config_form" method="post" action={ "/channels/discord/configure?project_id=" + view.CurrentProjectID } hx-post={ "/channels/discord/configure?project_id=" + view.CurrentProjectID } hx-swap="none">
 						<div class="alert alert-info mb-4 text-sm">
 						<div>
 							<p class="font-semibold">Use a Discord bot token</p>
@@ -1333,7 +1333,7 @@ templ settingsContent(view ChannelsSettingsView) {
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 					</button>
 					<h3 class="font-bold text-lg mb-4 pr-10">Configure Email</h3>
-					<form id="email_config_form" method="post" action="/channels/email/configure" hx-post="/channels/email/configure" hx-swap="none">
+					<form id="email_config_form" method="post" action={ "/channels/email/configure?project_id=" + view.CurrentProjectID } hx-post={ "/channels/email/configure?project_id=" + view.CurrentProjectID } hx-swap="none">
 						<div class="alert alert-info mb-4 text-sm">
 							<div>
 								<p class="font-semibold">Use a dedicated inbox</p>
@@ -1451,7 +1451,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<form method="dialog" class="modal-backdrop"><button>close</button></form>
 			</dialog>
 		<!-- Webhook Configuration Modal -->
-		<dialog id="webhook_modal" class="modal">
+		<dialog id="webhook_modal" class="modal" data-webhook-base-url={ view.WebhookBaseURL }>
 			<div class="modal-box max-w-4xl p-0 overflow-hidden">
 				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeWebhookModal()" aria-label="Close webhook configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -1469,7 +1469,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 					<div class="flex-1 min-h-0 px-6 py-3">
 						<div data-webhook-section-panel="config" class="h-full overflow-y-auto pr-4">
- if view.CurrentProjectID == models.AllProjectsID {
+ if models.IsAggregateProject(view.CurrentProjectID) {
 								<label class="form-control mb-3">
 									<span class="label-text">Project</span>
  <select id="webhook_project_owner" class="select select-bordered" required onchange="var f=this.form;f.querySelector('[name=project_id]').value=this.value;if(f.dataset.webhookMode==='create'){f.setAttribute('hx-post','/channels/webhooks?project_id='+encodeURIComponent(this.value));htmx.process(f);}syncWebhookProjectAgents()">
@@ -1589,7 +1589,12 @@ templ settingsContent(view ChannelsSettingsView) {
 				var pendingDeleteChannelMethod = 'POST';
 
 				function openDeleteChannelConfirm(name, url, method) {
-					pendingDeleteChannelURL = url || '';
+					var target = new URL(url || '', location.href);
+                    if (!target.searchParams.has('project_id')) {
+                        var project = new URLSearchParams(location.search).get('project_id');
+                        if (project) target.searchParams.set('project_id', project);
+                    }
+                    pendingDeleteChannelURL = target.pathname + target.search;
 					pendingDeleteChannelMethod = method || 'POST';
 					var nameEl = document.getElementById('delete_channel_name');
 					if (nameEl) nameEl.textContent = name || 'this channel';
@@ -1849,7 +1854,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					document.getElementById('webhook_secret_display').value = '';
 					resetSecretInputVisibility('webhook_secret_display');
 					var token = card ? (card.getAttribute('data-webhook-token') || '') : '';
-					document.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Loading...)';
+					document.getElementById('webhook_url_display').textContent = token ? (webhookInboundBase() + '/webhooks/inbound/' + token) : '(Loading...)';
 					selectedWebhookAgentIDs = [];
 
 					var secretRow = document.getElementById('webhook_secret_row');
@@ -1886,7 +1891,7 @@ templ settingsContent(view ChannelsSettingsView) {
 						document.getElementById('webhook_secret_display').value = detail.secret || '';
 						resetSecretInputVisibility('webhook_secret_display');
 						var detailToken = detail.path_token || '';
-						document.getElementById('webhook_url_display').textContent = detailToken ? (window.location.origin + '/webhooks/inbound/' + detailToken) : '(Not available)';
+						document.getElementById('webhook_url_display').textContent = detailToken ? (webhookInboundBase() + '/webhooks/inbound/' + detailToken) : '(Not available)';
 						selectedWebhookAgentIDs = Array.isArray(detail.agent_ids) ? detail.agent_ids.slice() : [];
 						renderWebhookAgentList();
 					}).catch(function() {
@@ -1974,8 +1979,13 @@ templ settingsContent(view ChannelsSettingsView) {
 						if (window.showToast) window.showToast('Webhook URL not available', 'failed');
 						return;
 					}
-					var url = window.location.origin + '/webhooks/inbound/' + token;
+					var url = webhookInboundBase() + '/webhooks/inbound/' + token;
 					writeToClipboardWithFeedback(url, button, 'Webhook URL copied', 'Failed to copy webhook URL');
+				}
+
+				function webhookInboundBase() {
+					var modal = document.getElementById('webhook_modal');
+					return (modal && modal.getAttribute('data-webhook-base-url')) || window.location.origin;
 				}
 
 				function copyWebhookAbsoluteUrl(elementId, button) {
@@ -2542,7 +2552,7 @@ templ OutboundTargetsCard(currentProjectID string, summary persistence.ChannelTa
 					<span class="badge badge-sm badge-ghost">{ outboundTargetProjectSummaryText(summary) }</span>
 					if explicitAllowed {
 						<span class="badge badge-sm badge-warning">Explicit targets allowed</span>
-					} else if currentProjectID != models.AllProjectsID {
+					} else if !models.IsAggregateProject(currentProjectID) {
 						<span class="badge badge-sm badge-success">Saved targets only</span>
 					}
 				</div>
@@ -2593,7 +2603,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 				if notice != "" {
 					<div class="alert alert-success py-2 text-sm mt-3">{ notice }</div>
 				}
-                if currentProjectID == models.AllProjectsID {
+                if models.IsAggregateProject(currentProjectID) {
  <div class="mt-4 space-y-2">
 					<label class="form-control">
 						<span class="label-text">Project for new targets or policy settings</span>
@@ -2674,13 +2684,13 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 										}
 									</td>
 									<td class="text-right whitespace-nowrap">
-										if currentProjectID == models.AllProjectsID {
+										if models.IsAggregateProject(currentProjectID) {
  <button type="button" class="btn btn-xs mr-1" hx-get={ "/channels/outbound-targets?project_id=" + target.ProjectID } hx-target="#outbound-targets-section" hx-swap="outerHTML">Edit</button>
  } else {
  <button type="button" class="btn btn-xs mr-1" onclick="editOutboundTargetDraft(this)">Edit</button>
  }
 										<button type="button" class="btn btn-xs mr-1" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + target.ProjectID } hx-target={ "#outbound-target-test-label-" + target.ID } hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id={ "outbound-target-test-label-" + target.ID } data-outbound-target-test-label aria-live="polite">Test</span></button>
-										if currentProjectID != models.AllProjectsID {
+										if !models.IsAggregateProject(currentProjectID) {
  <button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button>
  }
 									</td>
@@ -2689,7 +2699,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 						</tbody>
 					</table>
 				</div>
-						if currentProjectID != models.AllProjectsID {
+						if !models.IsAggregateProject(currentProjectID) {
  <form id="outbound-targets-policy-form" method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="modal-action flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" onclick="event.stopPropagation()">
 							<input type="hidden" name="project_id" value={ currentProjectID }/>
 								<div id="outbound-targets-draft-fields" class="hidden">

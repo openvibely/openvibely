@@ -109,3 +109,11 @@ func (s *ProjectAccessService) ChatResourceAllowed(ctx context.Context, kind, id
 func (s *ProjectAccessService) ChatResourceOwner(ctx context.Context, kind, id string) (string, error) {
 	return s.store.ChatResourceOwner(ctx, kind, id)
 }
+
+// RecordInstanceAction records an instance-wide operation without attaching it
+// to a selected project. The caller must authorize the instance administrator
+// before calling this method; project roles cannot authorize instance actions.
+func (s *ProjectAccessService) RecordInstanceAction(ctx context.Context, action, details string) error {
+	actor, _ := models.PrincipalFromContext(ctx)
+	return s.store.Record(ctx, "", actor.UserID, action, "instance", details)
+}

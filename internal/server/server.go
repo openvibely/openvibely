@@ -36,6 +36,7 @@ import (
 	"github.com/openvibely/openvibely/internal/pageplugins"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/remote"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/internal/update"
@@ -527,7 +528,14 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	}
 
 	// Stores
-	stores := backend.Stores()
+	localStores := backend.Stores()
+	remoteHub := &remote.Hub{OnTask: broadcaster.Publish, OnChat: chatBroadcaster.Publish}
+	stores := remote.Wrap(localStores, &remote.Router{Hub: remoteHub})
+	remoteExecutor := &remote.Executor{
+		Stores:     localStores,
+		Projects:   authz.NewProjectStore(localStores.Projects, &authz.Authorizer{Store: localStores.ProjectAccess}),
+		Authorizer: &authz.Authorizer{Store: localStores.ProjectAccess},
+	}
 	organizationSvc := service.NewOrganizationService(stores.Organizations, authCfg.SessionSecret)
 	if err := organizationSvc.ConfigureTrustedProxies(cfg.AuthTrustedProxies); err != nil {
 		closeDatabase()
@@ -594,7 +602,11 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	}
 	workerSvc.SetUpdateWorkTracker(updateTracker)
 	llmSvc.SetUpdateWorkTracker(updateTracker)
-	workerSvc.SetAdmissionGate(updateDrain.Admit)
+	local := &localBackend{worker: workerSvc}
+	local.enabled.Store(cfg.Mode != config.ModeDesktop || localBackendEnabledFromEnv())
+	workerSvc.SetAdmissionGate(func() bool { return updateDrain.Admit() && local.Enabled() })
+	updateTracker.SetAdmissionGate(local.Enabled)
+	local.active = func() int { return updateTracker.Active().Total() }
 	updateKeys, err := update.DecodePublicKeys(buildinfo.ReleaseKeyID, buildinfo.ReleasePublicKey, cfg.UpdatePublicKeyFile)
 	if err != nil {
 		closeDatabase()
@@ -1147,8 +1159,6 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	backend.StartMaintenance(srvCtx)
 	updateDrain.StartExpirySupervisor(srvCtx)
 	workerSvc.Start(srvCtx)
-	automationReconciler.Start(srvCtx)
-	automationDispatcher.Start(srvCtx)
 	startUpdateCoordinator(srvCtx, updateCoordinator)
 	if hostedUpdateController != nil {
 		hostedUpdateController.Start(srvCtx)
@@ -1248,13 +1258,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	discordSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	discordSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
 	xSvc.SetRuntime(agentRepo, customPersonalityRepo, chatBroadcaster, executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, channelMessageRouter)
-	if xCredentials.Ready() {
-		if err := xSvc.Start(); err != nil {
-			applog.Infof("warning: failed to start X mention polling: %v", err)
-		} else {
-			channelMessageRouter.SetXService(xSvc)
-		}
-	}
+
 	if telegramSvc != nil {
 		telegramSvc.SetChannelMessageRouter(channelMessageRouter)
 		channelMessageRouter.SetTelegramService(telegramSvc)
@@ -1266,19 +1270,41 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		telegramSvc.SetExecutionStreamHub(executionStreamHub)
 		telegramSvc.SetAgentRepo(agentRepo)
 	}
-	if err := slackSvc.Start(); err != nil {
-		applog.Infof("warning: failed to start slack socket mode: %v", err)
-	}
-	if err := emailSvc.Start(); err != nil {
-		applog.Infof("warning: failed to start email polling: %v", err)
-	}
-	if err := discordSvc.Start(); err != nil {
-		applog.Infof("warning: failed to start discord gateway: %v", err)
-	}
-	// Start Telegram bot if configured after the shared channel runner is wired.
+	h.SetLocalServicesGate(local.Enabled)
+	local.resumeWork = func() { h.RecoverQueuedInputs(srvCtx) }
+	slackSvc.SetStartGate(local.Enabled)
+	emailSvc.SetStartGate(local.Enabled)
+	discordSvc.SetStartGate(local.Enabled)
+	xSvc.SetStartGate(local.Enabled)
 	if telegramSvc != nil {
-		telegramSvc.Start()
+		telegramSvc.SetStartGate(local.Enabled)
 	}
+	local.resumeServices = func() {
+		if err := slackSvc.Start(); err != nil {
+			applog.Infof("warning: failed to start Slack: %v", err)
+		}
+		if err := emailSvc.Start(); err != nil {
+			applog.Infof("warning: failed to start Email: %v", err)
+		}
+		if err := discordSvc.Start(); err != nil {
+			applog.Infof("warning: failed to start Discord: %v", err)
+		}
+		h.StartDynamicLocalChannels()
+	}
+	local.startServices = func() {
+		automationReconciler.Start(srvCtx)
+		automationDispatcher.Start(srvCtx)
+		local.resumeServices()
+	}
+	local.stopServices = func() {
+		automationDispatcher.Stop()
+		automationReconciler.Stop()
+		slackSvc.Stop()
+		emailSvc.Stop()
+		discordSvc.Stop()
+		h.StopDynamicLocalChannels()
+	}
+
 	h.SetWebhookRepo(webhookRepo)
 	if memorySvc != nil {
 		h.SetMemoryService(memorySvc)
@@ -1297,6 +1323,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	}
 	h.SetOrganizationService(organizationSvc)
 	h.SetProjectAccessService(projectAccessSvc)
+	h.SetRemote(remoteHub, remoteExecutor)
+	h.StartRemoteRestore(srvCtx)
 	h.SetRunIdentityStore(stores.RunIdentities)
 	e.Use(h.AuthMiddleware())
 	llmSvc.SetAgentRepo(agentRepo)
@@ -1334,7 +1362,12 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	// Start scheduler scans only after durable queued Chat and task-thread inputs
 	// have been offered for promotion. Repository admission guards remain authoritative
 	// if recovery and a later scan overlap.
-	schedulerSvc.Start(srvCtx)
+	local.ctx, local.scheduler = srvCtx, schedulerSvc
+	if cfg.Mode == config.ModeDesktop {
+		local.persist = persistDesktopLocalBackend
+		h.SetLocalBackendController(local)
+	}
+	local.start()
 	h.RegisterRoutes(e)
 
 	// Bind listener explicitly so we know the actual port before serving.
@@ -1390,24 +1423,12 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		if hostedPendingStore != nil {
 			hostedPendingStore.Close()
 		}
-		schedulerSvc.Stop()
-		automationDispatcher.Stop()
-		automationReconciler.Stop()
+		local.shutdown()
 		workerSvc.Stop()
 		pagePluginMgr.StopAll()
-		if telegramSvc != nil {
-			telegramSvc.Stop()
-		}
-		if slackSvc != nil {
-			slackSvc.Stop()
-		}
-		if emailSvc != nil {
-			emailSvc.Stop()
-		}
-		if discordSvc != nil {
-			discordSvc.Stop()
-		}
+
 		h.StopXService()
+		remoteHub.Shutdown()
 		e.Close()
 		agenttools.ShutdownProcesses()
 		knowledgecache.CloseShared()

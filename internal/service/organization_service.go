@@ -251,6 +251,20 @@ func (s *OrganizationService) Session(ctx context.Context, token string) (*model
 	}
 	return s.Store.SessionUser(ctx, s.tokenHash(token), time.Now().Unix())
 }
+
+// RenewSession extends an in-use local session to now+ttl once less than half
+// of ttl remains. It reports whether the session was extended.
+func (s *OrganizationService) RenewSession(ctx context.Context, token string, user *models.OrgUser, now time.Time, ttl time.Duration) (bool, error) {
+	if user == nil || ttl <= 0 || time.Unix(user.SessionExpiresAt, 0).Sub(now) > ttl/2 {
+		return false, nil
+	}
+	expires := now.Add(ttl).Unix()
+	if err := s.Store.ExtendSession(ctx, s.tokenHash(token), now.Unix(), expires); err != nil {
+		return false, err
+	}
+	user.SessionExpiresAt = expires
+	return true, nil
+}
 func (s *OrganizationService) Logout(ctx context.Context, token string) error {
 	hash := s.tokenHash(token)
 	user, err := s.Store.SessionUser(ctx, hash, time.Now().Unix())

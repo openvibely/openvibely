@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -127,7 +126,7 @@ func (h *Handler) requireTaskInRequestProject(ctx context.Context, taskID, proje
 	if task == nil {
 		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	if projectID != "" && projectID != models.AllProjectsID && task.ProjectID != projectID {
+	if projectID != "" && !models.IsAggregateProject(projectID) && task.ProjectID != projectID {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "task does not belong to the active project")
 	}
 	return task, nil
@@ -240,7 +239,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		return err
 	}
 
-	result, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).CreateAbsoluteForTask(c.Request().Context(), service.CreateAbsoluteScheduleForTaskRequest{
+	result, err := actCreateSchedule(h, c.Request().Context(), service.CreateAbsoluteScheduleForTaskRequest{
 		ProjectID:              h.mutationProjectID(c),
 		TaskID:                 taskID,
 		RunAt:                  formValues.runAt,
@@ -313,7 +312,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		clearContextOnStart = &clearContext
 	}
 
-	result, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).ModifyAbsolute(c.Request().Context(), service.ModifyAbsoluteScheduleRequest{
+	result, err := actModifySchedule(h, c.Request().Context(), service.ModifyAbsoluteScheduleRequest{
 		ProjectID:              h.mutationProjectID(c),
 		ScheduleID:             schedule.ID,
 		RunAt:                  formValues.runAt,
@@ -372,9 +371,7 @@ func (h *Handler) renderScheduleContentForProject(c echo.Context, projectID stri
 		projectID = projects[0].ID
 	}
 	var currentProject *models.Project
-	if projectID == models.AllProjectsID {
-		currentProject = &models.Project{ID: projectID, Name: "All projects"}
-	}
+	currentProject = h.virtualProject(c.Request().Context(), projectID)
 	for i := range projects {
 		if projects[i].ID == projectID {
 			currentProject = &projects[i]
@@ -416,7 +413,7 @@ func scheduleToggleHTTPError(err error) error {
 
 // toggleScheduleEnabled performs the schedule state transition shared by the
 // browser and JSON API transports.
-func (h *Handler) toggleScheduleEnabled(ctx context.Context, id, projectID string) (scheduleToggleResult, error) {
+func (h *Handler) toggleScheduleLocal(ctx context.Context, id, projectID string) (scheduleToggleResult, error) {
 	var result scheduleToggleResult
 	if schedule, task, err := h.requireScheduleInRequestProject(ctx, id, projectID); err != nil {
 		result.errorOperation = "lookup"
@@ -520,19 +517,8 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteSchedule id=%s", id)
 
-	_, task, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.mutationProjectID(c))
+	task, err := actDeleteSchedule(h, c.Request().Context(), scheduleRef{ScheduleID: id, ProjectID: h.mutationProjectID(c)})
 	if err != nil {
-		applog.Infof("[handler] DeleteSchedule error getting schedule: %v", err)
-		return err
-	}
-
-	// Browser delete intentionally removes only the schedule row. Runtime
-	// delete_schedule uses ScheduleActionService.Delete, which moves a scheduled
-	// task back to Backlog when the last schedule is removed. The browser route
-	// preserves its historical category behavior because callers remain on the
-	// current page and may manage the task category separately.
-	if err := h.scheduleRepo.Delete(c.Request().Context(), id); err != nil {
-		applog.Infof("[handler] DeleteSchedule error: %v", err)
 		return err
 	}
 	applog.Infof("[handler] DeleteSchedule success id=%s", id)
@@ -765,52 +751,8 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 	}
 	projectID := h.mutationProjectID(c)
 
-	// Preserve the established exact-target behavior for ordinary single-card drags.
-	if len(ids) == 1 {
-		schedule, task, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, projectID)
-		if err != nil {
-			return err
-		}
-		runAtLocal := schedule.RunAt.Local()
-		newScheduleTime := time.Date(newDate.Year(), newDate.Month(), newDate.Day(), hour, runAtLocal.Minute(), runAtLocal.Second(), 0, time.Local).UTC()
-		updateScheduleAfterMove(schedule, func(time.Time) time.Time { return newScheduleTime }, time.Now())
-		if err := h.scheduleRepo.UpdateForTask(c.Request().Context(), schedule, task.ID); err != nil {
-			applog.Infof("[handler] RescheduleTask error updating schedule: %v", err)
-			return err
-		}
-	} else {
-		if projectID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for grouped rescheduling")
-		}
-		sourceDate, err := time.Parse("2006-01-02", c.FormValue("source_date"))
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid source date format")
-		}
-		sourceHour, err := strconv.Atoi(c.FormValue("source_hour"))
-		if err != nil || sourceHour < 0 || sourceHour > 23 {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid source hour")
-		}
-		calendarDayDelta := int(time.Date(newDate.Year(), newDate.Month(), newDate.Day(), 0, 0, 0, 0, time.UTC).
-			Sub(time.Date(sourceDate.Year(), sourceDate.Month(), sourceDate.Day(), 0, 0, 0, 0, time.UTC)).Hours() / 24)
-		hourDelta := hour - sourceHour
-		move := func(value time.Time) time.Time {
-			local := value.Local().AddDate(0, 0, calendarDayDelta)
-			moved := time.Date(local.Year(), local.Month(), local.Day(), local.Hour()+hourDelta,
-				local.Minute(), local.Second(), local.Nanosecond(), time.Local)
-			return moved.UTC()
-		}
-		for _, id := range ids {
-			if _, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, projectID); err != nil {
-				return err
-			}
-		}
-		now := time.Now()
-		if err := h.scheduleRepo.UpdateBatchForProject(c.Request().Context(), projectID, ids, func(schedule *models.Schedule) error {
-			updateScheduleAfterMove(schedule, move, now)
-			return nil
-		}); err != nil {
-			return err
-		}
+	if _, err := actReschedule(h, c.Request().Context(), rescheduleArgs{ScheduleID: scheduleID, ProjectID: projectID, ScheduleIDs: ids, Date: newDate, Hour: hour, SourceDate: c.FormValue("source_date"), SourceHour: c.FormValue("source_hour")}); err != nil {
+		return err
 	}
 
 	applog.Infof("[handler] RescheduleTask success schedule=%s selected=%d", scheduleID, len(ids))
@@ -866,57 +808,14 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 
 	applog.Infof("[handler] UpdateProjectWorkerLimit project=%s max_workers=%d", projectID, maxWorkers)
 
-	// Get the project
-	project, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
+	out, err := actProjectWorkerLimit(h, c.Request().Context(), projectWorkerLimitArgs{ProjectID: projectID, Limit: maxWorkers})
 	if err != nil {
-		applog.Infof("[handler] UpdateProjectWorkerLimit error getting project: %v", err)
 		return err
 	}
-	if project == nil {
-		applog.Infof("[handler] UpdateProjectWorkerLimit project not found id=%s", projectID)
-		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	if out.ValidationError != "" {
+		return h.workerLimitErrorResponse(c, out.ValidationError)
 	}
-
-	if maxWorkers > 0 {
-		globalMaxWorkers, err := h.configuredGlobalWorkerLimit(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		if err := models.ValidateProjectWorkerLimit(&maxWorkers, globalMaxWorkers); err != nil {
-			return h.workerLimitErrorResponse(c, fmt.Sprintf("Max concurrent workers %s", strings.TrimPrefix(err.Error(), "project max_workers ")))
-		}
-	}
-
-	// Update max_workers (0 or empty means no project limit)
-	if maxWorkers == 0 {
-		project.MaxWorkers = nil
-	} else {
-		project.MaxWorkers = &maxWorkers
-	}
-
-	if err := h.projectSvc.Update(c.Request().Context(), project); err != nil {
-		applog.Infof("[handler] UpdateProjectWorkerLimit error updating project: %v", err)
-		return err
-	}
-
-	applog.Infof("[handler] UpdateProjectWorkerLimit success project=%s max_workers=%v", projectID, project.MaxWorkers)
-
-	// Trigger dispatch check — if the limit was increased and there are queued
-	// tasks for this project, they should start immediately. Reconcile durable
-	// active tasks as well so a missed submission does not remain pending.
-	h.workerSvc.ReconcilePendingTasks(c.Request().Context())
-	h.workerSvc.DispatchNext()
-
-	// Return the updated worker settings content for HTMX
-	maxGlobalWorkers, _ := h.workerRepo.GetMaxWorkers(c.Request().Context())
-	queueSize := h.workerSvc.QueueSize()
-	runningWorkers := h.workerSvc.NumWorkers()
-	totalRunning := h.workerSvc.TotalRunning()
-
-	projectStats, projectStatsAvailable := h.buildProjectWorkerStats(c.Request().Context())
-
-	modelStats, modelStatsAvailable := h.buildModelWorkerStatsList(c.Request().Context())
-	return render(c, http.StatusOK, pages.WorkerSettingsContentWithAvailability(maxGlobalWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, projectStatsAvailable, modelStatsAvailable))
+	return render(c, http.StatusOK, pages.WorkerSettingsContentWithAvailability(out.Max, out.Running, out.Total, out.Queue, out.Projects, out.Models, out.ProjectsAvailable, out.ModelsAvailable))
 }
 
 // API endpoints for capacity information
@@ -1098,13 +997,12 @@ func (h *Handler) GetProjectCapacity(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
-	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
+	pending, err := h.taskRepo.CountPendingForProject(c.Request().Context(), project.ID)
 	if err != nil {
 		applog.Infof("[handler] GetProjectCapacity error counting pending tasks: %v", err)
-		pendingCounts = make(map[string]int)
 	}
 
-	resp := h.projectCapacityResponse(project, pendingCounts[project.ID])
+	resp := h.projectCapacityResponse(project, pending)
 
 	return c.JSON(http.StatusOK, resp)
 }

@@ -15,12 +15,12 @@ import (
 
 func (r *ScheduleRepo) CalendarState(ctx context.Context, projectID string) (models.ScheduleCalendarState, error) {
 	state := models.ScheduleCalendarState{Skips: []models.ScheduleSkip{}}
-	if projectID == models.AllProjectsID {
-		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_project_pauses WHERE `+accessibleProjectPredicate(ctx, "project_id", false)+`) AND NOT EXISTS(SELECT 1 FROM projects p WHERE p.id != ? AND `+accessibleProjectPredicate(ctx, "p.id", false)+` AND NOT EXISTS(SELECT 1 FROM schedule_project_pauses paused WHERE paused.project_id=p.id))`, projectID).Scan(&state.Paused); err != nil {
+	if models.IsAggregateProject(projectID) {
+		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_project_pauses WHERE `+aggregateProjectPredicate(ctx, "project_id", projectID, false)+`) AND NOT EXISTS(SELECT 1 FROM projects p WHERE p.id != ? AND `+aggregateProjectPredicate(ctx, "p.id", projectID, false)+` AND NOT EXISTS(SELECT 1 FROM schedule_project_pauses paused WHERE paused.project_id=p.id))`, projectID).Scan(&state.Paused); err != nil {
 			return state, err
 		}
-		rows, err := r.db.QueryContext(ctx, `SELECT s.id,k.start_at,k.end_at,k.restored,0 FROM schedule_skips k JOIN tasks t ON t.project_id=k.project_id JOIN schedules s ON s.task_id=t.id WHERE (k.schedule_id='' OR k.schedule_id=s.id) AND `+accessibleProjectPredicate(ctx, "t.project_id", false)+`
- UNION ALL SELECT s.id,p.started_at,253402300799,0,1 FROM schedule_project_pauses p JOIN tasks t ON t.project_id=p.project_id JOIN schedules s ON s.task_id=t.id WHERE `+accessibleProjectPredicate(ctx, "t.project_id", false))
+		rows, err := r.db.QueryContext(ctx, `SELECT s.id,k.start_at,k.end_at,k.restored,0 FROM schedule_skips k JOIN tasks t ON t.project_id=k.project_id JOIN schedules s ON s.task_id=t.id WHERE (k.schedule_id='' OR k.schedule_id=s.id) AND `+aggregateProjectPredicate(ctx, "t.project_id", projectID, false)+`
+ UNION ALL SELECT s.id,p.started_at,253402300799,0,1 FROM schedule_project_pauses p JOIN tasks t ON t.project_id=p.project_id JOIN schedules s ON s.task_id=t.id WHERE `+aggregateProjectPredicate(ctx, "t.project_id", projectID, false))
 		if err != nil {
 			return state, err
 		}
@@ -66,8 +66,8 @@ func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string
 	var inverse models.ScheduleCalendarAction
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		var err error
-		if projectID == models.AllProjectsID {
-			inverse, err = applyAllProjectsCalendarAction(ctx, exec, action, now)
+		if models.IsAggregateProject(projectID) {
+			inverse, err = applyAllProjectsCalendarAction(ctx, exec, projectID, action, now)
 		} else {
 			inverse, err = applyCalendarAction(ctx, exec, projectID, action, now)
 		}

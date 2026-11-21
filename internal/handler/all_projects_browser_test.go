@@ -140,11 +140,17 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','project label did not update');
  assert(new FormData(document.getElementById('task-thread-form')).get('destination_project')==='` + project.ID + `','destination not submitted');
  assert(document.getElementById('project-selector').value==='__all_projects__','project picker switched tabs');
- // A blocked Send resumes once the destination is selected, exactly once.
+ // The composer project picker mirrors the Details choice.
+ const composerProject=document.getElementById('task-thread-form-project-select');
+ assert(composerProject,'composer project picker missing');
+ assert(composerProject.textContent.trim()==='Second browser project','composer picker did not follow Details');
+ // A blocked Send opens the composer picker and resumes once the project is chosen, exactly once.
  const draftForm=document.getElementById('task-thread-form');
  const destination=document.getElementById('new-task-project');
- destination.value='';
- document.getElementById('task-message-input').value='Run after choosing the project';
+ destination.value='';destination.dispatchEvent(new Event('change',{bubbles:true}));
+ assert(composerProject.textContent.trim()==='Choose a project','composer picker kept cleared project');
+ const message=document.getElementById('task-message-input');
+ message.value='Run after choosing the project';message.dispatchEvent(new Event('input',{bubbles:true}));
  let resumedRequests=[];
  const captureSend=function(event){
   if(event.detail.elt!==draftForm)return;
@@ -152,25 +158,29 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
   resumedRequests.push(event.detail.requestConfig.parameters);
  };
  draftForm.addEventListener('htmx:beforeRequest',captureSend);
- draftForm.requestSubmit();
- await wait(()=>projectOption.getClientRects().length>0);
+ const composerOption=()=>document.querySelector('#chat-custom-select-panel li[data-value="` + project.ID + `"]');
+ message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ await wait(()=>composerOption() && composerOption().getClientRects().length>0);
  assert(resumedRequests.length===0,'request sent before choosing owner');
- projectOption.click();
+ composerOption().click();
  await wait(()=>resumedRequests.length===1);
  assert(resumedRequests[0].destination_project==='` + project.ID + `','resumed send lost project');
  assert(resumedRequests[0].category==='active','resumed send lost Active category');
  assert(resumedRequests[0].message==='Run after choosing the project','resumed send lost message');
+ assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','Details did not follow composer picker');
  destination.dispatchEvent(new Event('change',{bubbles:true}));
  await new Promise(resolve=>setTimeout(resolve,80));
  assert(resumedRequests.length===1,'selection sent twice');
- // Cancelling the picker cancels the pending Send, not the draft.
- destination.value='';
- draftForm.requestSubmit();
- await wait(()=>projectOption.getClientRects().length>0);
- projectOption.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
- projectRow.click();
- await wait(()=>projectOption.getClientRects().length>0);
- projectOption.click();
+ // Closing the picker cancels the pending Send, not the draft.
+ destination.value='';destination.dispatchEvent(new Event('change',{bubbles:true}));
+ message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ await wait(()=>composerOption() && composerOption().getClientRects().length>0);
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+ await wait(()=>!composerOption());
+ assert(message.value==='Run after choosing the project','cancel lost the draft');
+ composerProject.click();
+ await wait(()=>composerOption() && composerOption().getClientRects().length>0);
+ composerOption().click();
  await new Promise(resolve=>setTimeout(resolve,80));
  assert(resumedRequests.length===1,'cancelled send resumed on later selection');
  draftForm.removeEventListener('htmx:beforeRequest',captureSend);
