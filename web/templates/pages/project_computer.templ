@@ -5,6 +5,7 @@ import (
  "github.com/openvibely/openvibely/web/templates/layout"
  "github.com/openvibely/openvibely/web/templates/components"
  "github.com/openvibely/openvibely/web/static"
+ templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 templ ProjectComputer(projects []models.Project, projectID string, taskIDs ...string) {
@@ -524,7 +525,7 @@ templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  </button>
  }
  @components.InspectorPicker("computer-grants-picker") {
- <div data-options="import" class="ov-menu-create-row"><button type="button" class="ov-menu-option w-full" data-value="import" data-computer-manual-import hidden>Import Chrome sign-ins</button></div>
+ <div data-options="import" class="ov-menu-create-row"><button type="button" class="ov-menu-option w-full" data-value="import" data-computer-manual-import hidden>@templateui.SearchableSelectorCreateIcon()<span>Import Chrome sign-ins</span></button></div>
  <div data-options="grants" data-computer-grant-list></div>
  }
  <script>
