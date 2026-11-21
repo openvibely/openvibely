@@ -2,12 +2,14 @@
 package repokey
 
 import (
-	"bufio"
+	"context"
 	"errors"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Normalize reduces a git remote to host/path, e.g. github.com/acme/foo.
@@ -50,7 +52,7 @@ func For(repoURL, repoPath string) string {
 	return Normalize(remotes["origin"])
 }
 
-// gitRemotes reads remote URLs from the repository's config without running git.
+// gitRemotes uses Git to honor quoting, includes, and worktree configuration.
 func gitRemotes(repoPath string) map[string]string {
 	remotes, _ := readGitRemotes(repoPath)
 	return remotes
@@ -70,52 +72,40 @@ func resolveIdentity(repoURL, repoPath string) (string, error) {
 	return Normalize(remotes["origin"]), nil
 }
 
+// readGitRemotes bounds both config reads together. Missing repositories and unset
+// remotes are empty results; malformed or inaccessible config remains an error
+// so the background cache retains its previous identity and retries.
 func readGitRemotes(repoPath string) (map[string]string, error) {
-	dir := filepath.Join(repoPath, ".git")
-	if data, err := os.ReadFile(dir); err == nil {
-		// A worktree's .git file points at its gitdir, whose commondir holds the config.
-		gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
-		if !ok {
-			return nil, nil
-		}
-		dir = strings.TrimSpace(gitdir)
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(repoPath, dir)
-		}
-		if common, err := os.ReadFile(filepath.Join(dir, "commondir")); err == nil {
-			c := strings.TrimSpace(string(common))
-			if !filepath.IsAbs(c) {
-				c = filepath.Join(dir, c)
-			}
-			dir = c
-		}
+	if repoPath == "" {
+		return nil, nil
 	}
-	f, err := os.Open(filepath.Join(dir, "config"))
-	if err != nil {
+	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	defer f.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	out := map[string]string{}
-	section := ""
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if strings.HasPrefix(line, "[") {
-			section = ""
-			if name, ok := strings.CutPrefix(strings.TrimSuffix(line, "]"), "[remote "); ok {
-				section = strings.Trim(strings.TrimSpace(name), `"`)
-			}
-			continue
+	for _, name := range []string{"upstream", "origin"} {
+		cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "config", "--includes", "--get", "remote."+name+".url")
+		cmd.WaitDelay = time.Second
+		data, err := cmd.Output()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if section != "" && ok && strings.EqualFold(strings.TrimSpace(key), "url") {
-			if _, seen := out[section]; !seen {
-				out[section] = strings.TrimSpace(value)
+		if err != nil {
+			var exit *exec.ExitError
+			if errors.As(err, &exit) && exit.ExitCode() == 1 {
+				continue
 			}
+			return nil, err
+		}
+		out[name] = strings.TrimSpace(string(data))
+		if Normalize(out[name]) != "" {
+			break
 		}
 	}
-	return out, sc.Err()
+	return out, nil
 }

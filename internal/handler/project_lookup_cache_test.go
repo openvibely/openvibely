@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -99,7 +100,8 @@ func TestRemoteRepositoryIdentityPushUpdatesCachedProjects(t *testing.T) {
 	require.Eventually(t, func() bool { return has("example.com/team/changed") }, 5*time.Second, 10*time.Millisecond)
 	// Removing the saved URL starts a background disk lookup on the OWNER.
 	root := t.TempDir()
-	require.NoError(t, os.Mkdir(filepath.Join(root, ".git"), 0700))
+	output, initErr := exec.Command("git", "init", "-q", root).CombinedOutput()
+	require.NoError(t, initErr, string(output))
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte("[remote \"origin\"]\n url = https://example.com/team/from-disk.git\n"), 0600))
 	p, err := owner.projectSvc.GetByID(context.Background(), project.ID)
 	require.NoError(t, err)

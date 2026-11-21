@@ -67,3 +67,46 @@ func TestForPrefersSavedURLThenUpstreamThenOrigin(t *testing.T) {
 	}
 	_ = os.RemoveAll(wt)
 }
+
+func TestIdentityUsesGitConfigSyntax(t *testing.T) {
+	for _, mode := range []string{"quoted", "include", "invalid", "no-remote"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil {
+				t.Fatalf("git init: %v %s", err, out)
+			}
+			config := "[remote \"origin\"]\n url = \"https://github.com/team/repo.git\"\n"
+			switch mode {
+			case "include":
+				if err := os.WriteFile(filepath.Join(dir, ".git", "remotes.conf"), []byte(config), 0600); err != nil {
+					t.Fatal(err)
+				}
+				config = "[include]\n path = remotes.conf\n"
+			case "invalid":
+				config = "[broken\n"
+			case "no-remote":
+				config = "[core]\n bare = false\n"
+			}
+			if err := os.WriteFile(filepath.Join(dir, ".git", "config"), []byte(config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := resolveIdentity("", dir)
+			if mode == "invalid" {
+				if err == nil {
+					t.Fatal("invalid config must return an error for cache retry")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "github.com/team/repo"
+			if mode == "no-remote" {
+				want = ""
+			}
+			if got != want {
+				t.Fatalf("identity = %q, want %q", got, want)
+			}
+		})
+	}
+}
