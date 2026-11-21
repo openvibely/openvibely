@@ -1,15 +1,11 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"github.com/openvibely/openvibely/internal/models"
-	"golang.org/x/crypto/pbkdf2"
-	"os/exec"
 	"sort"
 	"sync"
 	"time"
@@ -18,7 +14,7 @@ import (
 // Cookie metadata is safe for the consent UI. Values are never queried here.
 func (s *ProjectComputerService) ChromeCookieChoices(ctx context.Context, profile string) ([]models.ChromeCookieSelection, error) {
 	if !s.ChromeImportAvailable() {
-		return nil, errors.New("Chrome import requires local macOS")
+		return nil, errors.New("Chrome import requires local macOS or Linux")
 	}
 	root, err := chromeRoot()
 	if err != nil {
@@ -122,13 +118,8 @@ func (s *ProjectComputerService) installChromeGrant(ctx context.Context, id stri
 	if err != nil {
 		return 0, err
 	}
-	secret, err := exec.CommandContext(ctx, "/usr/bin/security", "find-generic-password", "-w", "-s", "Chrome Safe Storage", "-a", "Chrome").Output()
-	if err != nil {
-		return 0, errors.New("Chrome Keychain access was not granted")
-	}
-	defer clear(secret)
-	key := pbkdf2.Key(bytes.TrimSpace(secret), []byte("saltysalt"), 1003, 16, sha1.New)
-	defer clear(key)
+	decrypt, clearKeys := chromeDecryptor(ctx)
+	defer clearKeys()
 	byProfile := map[string][]models.ChromeCookieSelection{}
 	for _, c := range g.Selections {
 		byProfile[c.Profile] = append(byProfile[c.Profile], c)
@@ -144,7 +135,7 @@ func (s *ProjectComputerService) installChromeGrant(ctx context.Context, id stri
 		for _, pick := range picks {
 			sites = append(sites, pick.Domain)
 		}
-		return selectedChromeCookies(ctx, db, key, sites, picks...)
+		return selectedChromeCookiesWithDecrypt(ctx, db, decrypt, sites, picks...)
 	})
 }
 func (s *ProjectComputerService) installChromeProfiles(ctx context.Context, id string, g *models.ComputerChromeGrant, progress map[string]int, used bool, load func(string) ([]map[string]any, error)) (int, error) {
@@ -183,7 +174,7 @@ func (s *ProjectComputerService) installChromeProfiles(ctx context.Context, id s
 		}
 		cookies, err := load(profile)
 		if err != nil || len(cookies) == 0 {
-			return total, &ChromeImportIncomplete{GrantID: g.ID}
+			return total, &ChromeImportIncomplete{GrantID: g.ID, Cause: err}
 		}
 		for _, cookie := range cookies {
 			expiry, ok := cookie["expires"].(int64)
@@ -205,9 +196,15 @@ func (s *ProjectComputerService) installChromeProfiles(ctx context.Context, id s
 	return total, nil
 }
 
-type ChromeImportIncomplete struct{ GrantID string }
+type ChromeImportIncomplete struct {
+	GrantID string
+	Cause   error
+}
 
 func (e *ChromeImportIncomplete) Error() string {
+	if e.Cause != nil {
+		return "Chrome import is incomplete: " + e.Cause.Error() + ". Retry to resume the remaining profiles."
+	}
 	return "Chrome import is incomplete. Retry to resume the remaining profiles."
 }
 func (s *ProjectComputerService) ResumeChromeImport(ctx context.Context, id, grantID string) (int, error) {
@@ -224,8 +221,8 @@ func (s *ProjectComputerService) ResumeChromeImport(ctx context.Context, id, gra
 	if err != nil {
 		return 0, err
 	}
-	if !state.Held || state.HandoffKind != "request_chrome_login" {
-		return 0, errors.New("no Chrome import awaiting consent")
+	if !state.Enabled || (state.HandoffKind != "" && !state.Held) {
+		return 0, errors.New("Enable the task computer and finish any in-progress sign-in verification before importing")
 	}
 	g, err := s.repo.ChromeGrant(ctx, id, grantID)
 	if err != nil {

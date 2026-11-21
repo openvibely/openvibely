@@ -20,8 +20,8 @@ func (h *Handler) ProjectComputerChrome(c echo.Context) error {
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	state, err := h.computerService(c).Get(c.Request().Context(), c.Param("id"))
-	if err != nil || !state.Held || state.HandoffKind != "request_chrome_login" {
-		return echo.NewHTTPError(409, "No Chrome import awaiting approval")
+	if err != nil || c.QueryParam("task_id") == "" || !state.Enabled {
+		return echo.NewHTTPError(409, "Enable the task computer before importing Chrome sign-ins")
 	}
 	if profile := c.QueryParam("profile"); profile != "" {
 		sites, err := h.computerService(c).ChromeCookieChoices(c.Request().Context(), profile)
@@ -105,5 +105,5 @@ func (h *Handler) ProjectComputerChromeGrants(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(200, map[string]any{"grants": grants, "offset": offset, "has_more": more, "next_offset": offset + len(grants)})
+	return c.JSON(200, map[string]any{"grants": grants, "offset": offset, "has_more": more, "next_offset": offset + len(grants), "chrome_available": c.QueryParam("task_id") != "" && h.computerService(c).ChromeImportAvailable()})
 }

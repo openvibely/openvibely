@@ -26,10 +26,12 @@ func TestComputerGrantPagesAndRevocation(t *testing.T) {
 	project := createProject(t, h, "Grant pages")
 	task := createTask(t, h, project.ID, "Desktop")
 	h.computerSvc = service.NewProjectComputerService(h.projectRepo, liveComputerFixture{})
-	_, err := h.computerSvc.ForTask(t.Context(), project.ID, task.ID)
+	scoped, err := h.computerSvc.ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
 	repo, err := h.projectRepo.Computers().ForTask(t.Context(), project.ID, task.ID)
 	require.NoError(t, err)
+	require.NoError(t, h.projectRepo.Computers().SetEnabled(t.Context(), project.ID, true))
+	require.NoError(t, scoped.SetTaskEnabled(t.Context(), project.ID, true))
 	require.NoError(t, repo.RequestHandoff(t.Context(), project.ID, "request_chrome_login", "https://example.test", "", ""))
 	choices := []models.ChromeCookieSelection{{Profile: "Default", Domain: "example.test", Name: "session", Path: "/"}}
 	old, err := repo.CreateChromeGrant(t.Context(), project.ID, "task", choices, 0)

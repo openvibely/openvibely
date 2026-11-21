@@ -26,11 +26,11 @@ func (r *ProjectComputerRepo) CreateChromeGrant(ctx context.Context, id, scope s
 	grant := &models.ComputerChromeGrant{ID: persistence.NewID(), ProjectID: id, TaskID: r.taskID, Scope: scope, Selections: selections, ExpiresAt: expires, OneTime: oneTime}
 	err = withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		var valid bool
-		if err := tx.QueryRowContext(ctx, `SELECT held=1 AND handoff_kind='request_chrome_login' FROM task_computer_sessions WHERE project_id=? AND task_id=?`, id, r.taskID).Scan(&valid); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT s.enabled=1 AND p.enabled=1 AND (s.handoff_kind='' OR s.held=1) FROM task_computer_sessions s JOIN project_computers p ON p.project_id=s.project_id WHERE s.project_id=? AND s.task_id=?`, id, r.taskID).Scan(&valid); err != nil {
 			return err
 		}
 		if !valid {
-			return errors.New("Chrome import is not awaiting consent")
+			return errors.New("Enable the task computer and finish any in-progress sign-in verification before importing")
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO computer_chrome_grants(id,project_id,task_id,scope,selections,expires_at,one_time) VALUES (?,?,?,?,?,?,?)`, grant.ID, id, r.taskID, scope, string(data), expires, oneTime)
 		return err

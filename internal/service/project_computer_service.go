@@ -633,7 +633,7 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 				return "", true, true, errors.New("provide an HTTP website URL")
 			}
 			if name == "request_chrome_login" && !s.ChromeImportAvailable() {
-				return "", true, true, errors.New("Chrome import requires local macOS; use request_browser_login")
+				return "", true, true, errors.New("Chrome import requires local macOS or Linux; use request_browser_login")
 			}
 			if strings.TrimSpace(args.Expected) == "" {
 				return "", true, true, errors.New("provide specific expected_text proving access to the protected page")

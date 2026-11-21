@@ -13,6 +13,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gen2brain/webp v0.6.4
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/labstack/echo/v4 v4.16.5
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
@@ -50,7 +51,6 @@ require (
 	github.com/go-openapi/swag/stringutils v0.29.2 // indirect
 	github.com/go-openapi/swag/typeutils v0.29.2 // indirect
 	github.com/go-openapi/swag/yamlutils v0.29.2 // indirect
-	github.com/godbus/dbus/v5 v5.2.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
