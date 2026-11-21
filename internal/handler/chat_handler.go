@@ -1028,6 +1028,8 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 	return len(published), nil
 }
 
+// uniqueAttachmentName reserves a filename within a batch. An empty directory
+// skips disk checks, for a new remote staging directory owned by another server.
 func uniqueAttachmentName(dir, requested string, used map[string]bool) string {
 	if requested == "." || requested == "" {
 		requested = "attachment"
@@ -1042,8 +1044,10 @@ func uniqueAttachmentName(dir, requested string, used map[string]bool) string {
 		if used[name] {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil || !os.IsNotExist(err) {
-			continue
+		if dir != "" {
+			if _, err := os.Stat(filepath.Join(dir, name)); err == nil || !os.IsNotExist(err) {
+				continue
+			}
 		}
 		used[name] = true
 		return name

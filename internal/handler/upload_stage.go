@@ -172,7 +172,9 @@ func (h *Handler) stageUploads(ctx context.Context, taskID, projectID string, fi
 	token := generateSessionID()
 	buf := make([]byte, remoteFileChunk)
 	staged := make([]uploadFile, len(files))
+	usedNames := make(map[string]bool, len(files))
 	for i, f := range files {
+		f.Name = uniqueAttachmentName("", filepath.Base(f.Name), usedNames)
 		if err := h.stageUpload(ctx, taskID, projectID, token, f, buf); err != nil {
 			applog.Infof("[handler] staging upload %s failed: %v", f.Name, err)
 			return nil, err
