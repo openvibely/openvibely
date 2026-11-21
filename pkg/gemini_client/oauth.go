@@ -3,6 +3,8 @@ package geminiclient
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,28 +170,42 @@ func postToken(ctx context.Context, client OAuthClient, values url.Values, fallb
 	}, nil
 }
 
-// FetchUserEmail returns the Google account email for display.
-func FetchUserEmail(ctx context.Context, accessToken string) (string, error) {
+// UserInfo is the signed-in Google account. ID is Google's stable user ID.
+type UserInfo struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+}
+
+func FetchUserInfo(ctx context.Context, accessToken string) (UserInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, UserInfoURL, nil)
 	if err != nil {
-		return "", err
+		return UserInfo{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	resp, err := httpretry.DoRequest(oauthHTTPClient, req)
 	if err != nil {
-		return "", err
+		return UserInfo{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("gemini userinfo failed with HTTP %d", resp.StatusCode)
+		return UserInfo{}, fmt.Errorf("gemini userinfo failed with HTTP %d", resp.StatusCode)
 	}
-	var info struct {
-		Email string `json:"email"`
-	}
+	var info UserInfo
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&info); err != nil {
-		return "", err
+		return UserInfo{}, err
 	}
-	return info.Email, nil
+	info.ID, info.Email = strings.TrimSpace(info.ID), strings.TrimSpace(info.Email)
+	return info, nil
+}
+
+// PrincipalHash identifies one Google user within one Code Assist project
+// without storing the raw Google user ID.
+func PrincipalHash(project, userID string) string {
+	if project == "" || userID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("gemini\x00" + project + "\x00" + userID))
+	return hex.EncodeToString(sum[:])
 }
 
 var codeAssistMetadata = map[string]string{

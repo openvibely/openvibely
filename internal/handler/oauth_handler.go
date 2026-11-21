@@ -823,24 +823,25 @@ func (h *Handler) finishGeminiOAuth(ctx context.Context, flow *oauthPendingFlow,
 	if err != nil {
 		return 0, err
 	}
-	emailCtx, cancelEmail := context.WithTimeout(ctx, 10*time.Second)
-	email, emailErr := geminiclient.FetchUserEmail(emailCtx, tokens.AccessToken)
-	cancelEmail()
-	if emailErr != nil {
+	infoCtx, cancelInfo := context.WithTimeout(ctx, 10*time.Second)
+	user, infoErr := geminiclient.FetchUserInfo(infoCtx, tokens.AccessToken)
+	cancelInfo()
+	if infoErr != nil {
 		applog.Infof("[handler] Gemini OAuth profile unavailable after authorization")
 	}
+	email, principalHash := user.Email, geminiclient.PrincipalHash(project, user.ID)
 	if err := h.requireOAuthActor(ctx, flow.ActorUserID); err != nil {
 		return 0, err
 	}
 	if flow.SetupID != "" {
-		return tokens.ExpiresAt, h.finishModelOAuthSetup(flow.SetupID, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, "", project, email, "")
+		return tokens.ExpiresAt, h.finishModelOAuthSetup(flow.SetupID, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, "", project, email, principalHash)
 	}
 	bgCtx := oauthActorContext(context.Background(), flow.ActorUserID)
 	var updated bool
 	if flow.ConnectionID != "" {
 		updated, err = h.llmConfigRepo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(
 			bgCtx, flow.ConfigID, flow.ConnectionID, flow.ConfigRevision, flow.Provider,
-			tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, project, email, "",
+			tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, project, email, principalHash,
 		)
 	} else {
 		updated, err = h.llmConfigRepo.UpdateStandardOAuthConnectionIfRevision(

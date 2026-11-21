@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ func fakeGoogle(t *testing.T, loadCodeAssist http.HandlerFunc) {
 		case r.URL.Path == "/token":
 			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access", "refresh_token": "refresh", "expires_in": 3600})
 		case r.URL.Path == "/userinfo":
-			_ = json.NewEncoder(w).Encode(map[string]string{"email": "dev@example.com"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"id": "google-user-1", "email": "dev@example.com"})
 		case strings.HasSuffix(r.URL.Path, ":loadCodeAssist"):
 			loadCodeAssist(w, r)
 		default:
@@ -111,4 +112,60 @@ func TestGeminiModelSetupRunsAccountSetupInBackground(t *testing.T) {
 			return err != nil && strings.Contains(err.Error(), "not eligible for Code Assist")
 		}, 5*time.Second, 20*time.Millisecond)
 	})
+}
+
+func TestGeminiModelSetupMergesSameGoogleUser(t *testing.T) {
+	t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
+	fakeGoogle(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"currentTier": map[string]string{"id": "standard-tier"}, "cloudaicompanionProject": "proj-1"})
+	})
+	h, e, repo := setupTestHandler(t)
+	addModel := func(name string) *models.LLMConfig {
+		form := url.Values{"provider": {"gemini"}, "gemini_auth_type": {"oauth"}, "auth_method": {"oauth"}, "oauth_connection_id": {"new"}}
+		send := func(path string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Accept", "application/json")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			return rec
+		}
+		rec := send("/models/oauth/setup")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var flow struct {
+			Session string `json:"session_id"`
+			URL     string `json:"authorization_url"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &flow))
+		t.Cleanup(func() { removeModelOAuthSetup(flow.Session) })
+		authURL, err := url.Parse(flow.URL)
+		require.NoError(t, err)
+		require.Equal(t, oauthCompletionSucceeded, h.completeOAuthFlow(authURL.Query().Get("state"), "code").Outcome)
+		require.Eventually(t, func() bool {
+			_, err := h.modelOAuthSetupConfig(flow.Session, true)
+			return err == nil
+		}, 5*time.Second, 20*time.Millisecond)
+		form.Set("oauth_setup_session", flow.Session)
+		form.Set("name", name)
+		form.Set("model", "gemini-2.5-pro")
+		rec = send("/models")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var saved map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &saved))
+		cfg, err := repo.GetByID(context.Background(), saved["id"])
+		require.NoError(t, err)
+		return cfg
+	}
+
+	first := addModel("Gemini one")
+	connection, err := repo.GetOAuthConnectionByID(context.Background(), first.OAuthConnectionID)
+	require.NoError(t, err)
+	require.True(t, connection.PrincipalVerified)
+	require.Equal(t, geminiclient.PrincipalHash("proj-1", "google-user-1"), connection.PrincipalHash)
+	require.Equal(t, "dev@example.com", connection.ProviderDisplayName)
+
+	addModel("Gemini two")
+	connections, err := repo.ListOAuthConnections(context.Background(), models.ProviderGemini)
+	require.NoError(t, err)
+	require.Len(t, connections, 1, "same Google user must share one saved account")
 }
