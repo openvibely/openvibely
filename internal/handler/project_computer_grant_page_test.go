@@ -88,7 +88,17 @@ func TestComputerGrantPaginationBrowser(t *testing.T) {
  q('[data-computer-grants-open]').click();await wait(()=>q('[data-computer-grant-list]').textContent.includes('old.example'),'all permissions loaded');
  if(!q('#computer-grants-picker').matches(':popover-open'))throw Error('Permissions dropdown closed');
  if(q('[data-computer-grants-next]'))throw Error('Obsolete pagination controls');
- q('[data-computer-grant-list] button').click();await wait(()=>q('[data-computer-grant-list]').textContent.includes('Revoked'),'permission revoked');
+ const searchInput=q('#computer-grants-picker input');
+ const grantButton=q('[data-computer-grant-list] button');let activations=0;
+ grantButton.addEventListener('click',()=>activations++);
+ if(grantButton.hasAttribute('data-active'))throw Error('Unexpected default highlight');
+ searchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+ if(activations!==0)throw Error('Enter activated an unhighlighted permission');
+ searchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
+ if(!grantButton.hasAttribute('data-active'))throw Error('ArrowDown did not highlight permission');
+ grantButton.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+ if(activations!==1)throw Error('Enter did not activate highlighted permission');
+ await wait(()=>q('[data-computer-grant-list]').textContent.includes('Revoked'),'permission revoked');
  const search=q('#computer-grants-picker input');search.value='missing.example';search.dispatchEvent(new Event('input'));if(!q('[data-computer-grant-list] button').hidden)throw Error('Search did not filter grant');
  search.value='old.example';search.dispatchEvent(new Event('input'));if(q('[data-computer-grant-list] button').hidden)throw Error('Matching grant hidden');
 

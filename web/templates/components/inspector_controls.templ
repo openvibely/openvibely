@@ -121,7 +121,7 @@ templ InspectorPickerScript() {
   on(picker,'pointermove',function(e){var b=e.target.closest('button[data-value]');if(b&&!b.disabled)highlight(b);});
   on(picker,'focusin',function(e){if(e.target.matches('button[data-value]'))highlight(e.target);});
   on(picker, 'keydown', function(e) {
-   if(e.defaultPrevented||e.isComposing||e.keyCode===229)return;if((isBusy&&isBusy())||e.altKey||e.ctrlKey||e.metaKey||!['ArrowDown','ArrowUp','Enter'].includes(e.key))return;var items=options();if(!items.length)return;e.preventDefault();var i=items.indexOf(active);if(e.key==='Enter'){(items[i]||items[0]).click();return;}i=i<0?(e.key==='ArrowDown'?0:items.length-1):(i+(e.key==='ArrowDown'?1:items.length-1))%items.length;items[i].focus({preventScroll:true});window.openVibelyScrollIntoPanel(items[i]);
+   if(e.defaultPrevented||e.isComposing||e.keyCode===229)return;if((isBusy&&isBusy())||e.altKey||e.ctrlKey||e.metaKey||!['ArrowDown','ArrowUp','Enter'].includes(e.key))return;var items=options();if(!items.length)return;e.preventDefault();var i=items.indexOf(active);if(e.key==='Enter'){if(i<0&&picker.hasAttribute('data-picker-no-default-highlight'))return;(items[i]||items[0]).click();return;}i=i<0?(e.key==='ArrowDown'?0:items.length-1):(i+(e.key==='ArrowDown'?1:items.length-1))%items.length;items[i].focus({preventScroll:true});window.openVibelyScrollIntoPanel(items[i]);
   });
   on(root,'htmx:beforeCleanupElement',function(e){if(e.target===root){hide();abort.abort();}});
   return {open:open,close:close,isOpen:isOpen,returnFocus:returnFocus,searchPattern:searchPattern};
