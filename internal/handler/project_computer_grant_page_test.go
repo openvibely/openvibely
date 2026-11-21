@@ -96,6 +96,10 @@ func TestComputerGrantPaginationBrowser(t *testing.T) {
  if(activations!==0)throw Error('Enter activated an unhighlighted permission');
  searchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
  if(!grantButton.hasAttribute('data-selector-active'))throw Error('ArrowDown did not highlight permission');
+ const menu=q('#computer-grants-picker-dialog');
+ const reference=document.createElement('span');reference.style.background='oklch(var(--bc) / .06)';menu.append(reference);
+ for(const color of ['0.9 0 0','0.2 0 0']){menu.style.setProperty('--bc',color);if(getComputedStyle(grantButton).backgroundColor!==getComputedStyle(reference).backgroundColor)throw Error('Permission highlight differs from shared selector styling');}
+ reference.remove();menu.style.removeProperty('--bc');
  grantButton.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
  if(activations!==1)throw Error('Enter did not activate highlighted permission');
  await wait(()=>q('[data-computer-grant-list]').textContent.includes('Revoked'),'permission revoked');
