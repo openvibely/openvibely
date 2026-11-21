@@ -68,9 +68,12 @@ func BuildAgentSystemPrompt(projectInstructions string, workDir ...string) strin
 	return buildAgentSystemPrompt(AgentSystemPrompt, projectInstructions, workDir...)
 }
 
+const recurringTaskInstructions = "\n\nFor recurring-work requests, reuse the current task unless the user asks for another. Update its stored prompt to describe the recurring work and set its schedule; do not use a goal instead of the prompt.\n"
+
 func buildAgentSystemPrompt(base, projectInstructions string, workDir ...string) string {
 	var sb strings.Builder
 	sb.WriteString(base)
+	sb.WriteString(recurringTaskInstructions)
 
 	if projectInstructions != "" {
 		sb.WriteString("\n# Project Instructions\n\n")

@@ -57,7 +57,7 @@ func TestCodexPromptContextAndModes(t *testing.T) {
 		}
 	}
 	followup := BuildCodexChatSystemPrompt("gpt-6-astra", true, models.ChatModeOrchestrate, "FOLLOWUP_CONTEXT", false)
-	if followup != base+taskFollowupConstraints+"\nFOLLOWUP_CONTEXT" {
+	if followup != base+taskFollowupConstraints+recurringTaskInstructions+"\nFOLLOWUP_CONTEXT" {
 		t.Fatal("follow-up lost base or application context")
 	}
 	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
@@ -65,7 +65,7 @@ func TestCodexPromptContextAndModes(t *testing.T) {
 			t.Fatalf("ordinary chat changed for %s", mode)
 		}
 	}
-	if BuildAgentSystemPrompt("") != AgentSystemPrompt {
+	if BuildAgentSystemPrompt("") != AgentSystemPrompt+recurringTaskInstructions {
 		t.Fatal("other providers changed")
 	}
 }

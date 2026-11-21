@@ -27,7 +27,7 @@ func TestAnthropicAgentSystemPrompt(t *testing.T) {
 			t.Errorf("unexpected legacy or CLI-only instruction %q", unwanted)
 		}
 	}
-	if got := BuildAgentSystemPrompt(""); got != AgentSystemPrompt {
+	if got := BuildAgentSystemPrompt(""); got != AgentSystemPrompt+recurringTaskInstructions {
 		t.Fatal("provider-neutral base prompt changed")
 	}
 }
@@ -48,7 +48,7 @@ func TestEveryCatalogAnthropicPromptProfileIsEmbedded(t *testing.T) {
 
 func TestAnthropicChatSystemPrompt(t *testing.T) {
 	got := BuildAnthropicChatSystemPrompt("claude-sonnet-5", true, models.ChatModeOrchestrate, "FOLLOWUP_CONTEXT", false)
-	want := AnthropicAgentSystemPrompt + taskFollowupConstraints + "\nFOLLOWUP_CONTEXT"
+	want := AnthropicAgentSystemPrompt + taskFollowupConstraints + recurringTaskInstructions + "\nFOLLOWUP_CONTEXT"
 	if got != want {
 		t.Fatal("follow-up must use Anthropic base and preserve application constraints and context")
 	}

@@ -105,3 +105,19 @@ func TestBuildChatSystemPrompt_TaskFollowupIncludesSelectedMemoryContext(t *test
 		}
 	}
 }
+
+func TestRecurringTaskInstructionsOnlyInTaskExecutions(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"initial task":   BuildAgentSystemPrompt(""),
+		"task follow-up": BuildChatSystemPrompt(true, models.ChatModeOrchestrate, "", false),
+	} {
+		if strings.Count(prompt, recurringTaskInstructions) != 1 {
+			t.Errorf("%s must include recurring-task guidance exactly once", name)
+		}
+	}
+	for _, mode := range []models.ChatMode{models.ChatModeOrchestrate, models.ChatModePlan} {
+		if strings.Contains(BuildChatSystemPrompt(false, mode, "", false), recurringTaskInstructions) {
+			t.Errorf("project Chat mode %s must not receive current-task recurring guidance", mode)
+		}
+	}
+}

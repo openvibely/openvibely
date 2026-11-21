@@ -98,6 +98,7 @@ func buildChatSystemPrompt(base string, isTaskFollowup bool, chatMode models.Cha
 	if isTaskFollowup {
 		sb.WriteString(base)
 		sb.WriteString(taskFollowupConstraints)
+		sb.WriteString(recurringTaskInstructions)
 	} else if chatMode == models.ChatModePlan {
 		sb.WriteString(ChatPlanModeSystemPrompt)
 	} else {
