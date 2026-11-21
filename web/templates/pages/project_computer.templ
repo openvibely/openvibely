@@ -54,7 +54,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <label class="import-row">Allow access for <select class="select select-bordered" data-computer-grant-scope><option value="task">This task</option><option value="project">This project</option></select></label>
  <label class="import-row">Expires <select class="select select-bordered" data-computer-grant-hours><option value="-1">One import for this task (1 hour)</option><option value="1" selected>1 hour</option><option value="24">1 day</option><option value="168">7 days</option><option value="720">30 days</option><option value="0">Until revoked</option></select></label>
  <h4>Cookies</h4><input type="search" class="input input-bordered" data-computer-cookie-search placeholder="Search sites or cookies…" aria-label="Search sites or cookies"/>
- <div data-computer-sites></div><p class="import-muted" data-computer-selection-count></p>
+ <div data-computer-sites></div>
  <p class="import-muted">Your computer may ask you to unlock Chrome’s saved cookies.</p>
  <div class="import-actions"><button type="button" class="btn" data-computer-import-cancel>Cancel</button><button type="button" class="btn btn-primary" data-computer-import>Import selected</button></div>
  </div><form method="dialog" class="modal-backdrop"><button type="submit">close</button></form>
@@ -420,7 +420,7 @@ currentState=state;if(state.handoff_kind){pauseTeaching();recording=false;render
 
  const selectedCookies=new Map();let pendingImport="",importBusy=false;
  const cookieKey=c=>JSON.stringify([c.profile,c.domain,c.name,c.path]);
- const updateSelection=()=>{find('[data-computer-selection-count]').textContent=selectedCookies.size?selectedCookies.size+' cookies selected across profiles':'No cookies selected';find('[data-computer-import]').disabled=importBusy||(!pendingImport&&!selectedCookies.size);};
+ const updateSelection=()=>{find('[data-computer-import]').disabled=importBusy||(!pendingImport&&!selectedCookies.size);};
  const importDialog=find('[data-computer-import-dialog]'),cookieSearch=find('[data-computer-cookie-search]');
  let loadedCookies=[],cookieLoad=0;
  function renderCookies(){sites.replaceChildren();const groups=new Map(),query=cookieSearch.value.toLowerCase();for(const cookie of loadedCookies){if(!(cookie.domain+' '+cookie.name+' '+cookie.path).toLowerCase().includes(query))continue;if(!groups.has(cookie.domain))groups.set(cookie.domain,[]);groups.get(cookie.domain).push(cookie);}
