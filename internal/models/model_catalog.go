@@ -75,6 +75,8 @@ type ModelSpec struct {
 const (
 	standardOpenAIContext    = 272000
 	standardAnthropicContext = 200000
+	standardGeminiContext    = 1048576
+	standardGeminiOutput     = 65536
 	anthropicCompaction      = "compact_20260112"
 )
 
@@ -121,6 +123,17 @@ var modelCatalog = []ModelSpec{
 	{Provider: ProviderAnthropic, ID: "claude-sonnet-4-6", ImageResizeProfile: ImageResize1568, Label: "Claude Sonnet 4.6", ReasoningEfforts: efforts("low", "medium", "high", "max"), ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, NativeCompactionStrategy: anthropicCompaction, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
 	{Provider: ProviderAnthropic, ID: "claude-haiku-4-5-20251001", ImageResizeProfile: ImageResize1568, Label: "Claude Haiku 4.5", ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
 	{Provider: ProviderAnthropic, ID: "claude-sonnet-4-5-20250929", ImageResizeProfile: ImageResize1568, Label: "Claude Sonnet 4.5", Default: true, VisionDefault: true, ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
+	// Google Gemini models.
+	{Provider: ProviderGemini, ID: "gemini-3.1-pro-preview", ImageResizeProfile: ImageResize2000, Label: "Gemini 3.1 Pro Preview", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-3-pro-preview", ImageResizeProfile: ImageResize2000, Label: "Gemini 3 Pro Preview", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-3-flash-preview", ImageResizeProfile: ImageResize2000, Label: "Gemini 3 Flash Preview", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-3.8-flash", ImageResizeProfile: ImageResize2000, Label: "Gemini 3.8 Flash", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-3.5-flash", ImageResizeProfile: ImageResize2000, Label: "Gemini 3.5 Flash", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-3-flash", ImageResizeProfile: ImageResize2000, Label: "Gemini 3 Flash", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-3.5-flash-lite", ImageResizeProfile: ImageResize2000, Label: "Gemini 3.5 Flash-Lite", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-3.1-flash-lite", ImageResizeProfile: ImageResize2000, Label: "Gemini 3.1 Flash-Lite", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-2.5-pro", ImageResizeProfile: ImageResize2000, Label: "Gemini 2.5 Pro", Default: true, VisionDefault: true, ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gemini-2.5-flash", ImageResizeProfile: ImageResize2000, Label: "Gemini 2.5 Flash", ContextWindow: standardGeminiContext, SupportsTemperature: true, SupportsOAuth: true, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
 }
 
 func efforts(values ...string) []string { return values }
@@ -171,7 +184,7 @@ func ProviderModels(provider LLMProvider) []ModelSpec {
 // current catalog. Other providers manage their own model identifiers.
 func BuiltInModelSupported(provider LLMProvider, id string) bool {
 	switch provider {
-	case ProviderOpenAI, ProviderAnthropic:
+	case ProviderOpenAI, ProviderAnthropic, ProviderGemini:
 		_, ok := LookupModel(provider, id)
 		return ok
 	default:
@@ -184,7 +197,7 @@ func BuiltInModelSupportedForAuth(provider LLMProvider, id string, auth AuthMeth
 	if !BuiltInModelSupported(provider, id) {
 		return false
 	}
-	if (provider == ProviderOpenAI || provider == ProviderAnthropic) && auth == AuthMethodOAuth {
+	if (provider == ProviderOpenAI || provider == ProviderAnthropic || provider == ProviderGemini) && auth == AuthMethodOAuth {
 		spec, _ := LookupModel(provider, id)
 		return spec.SupportsOAuth
 	}

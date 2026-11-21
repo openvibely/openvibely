@@ -19,6 +19,8 @@ func pickerProvider(c models.LLMConfig) string {
 		return "Anthropic"
 	case models.ProviderOpenAI:
 		return "OpenAI"
+	case models.ProviderGemini:
+		return "Google Gemini"
 	case models.ProviderOllama:
 		return "Ollama"
 	case models.ProviderMixture:

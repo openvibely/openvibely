@@ -7,6 +7,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	geminiclient "github.com/openvibely/openvibely/pkg/gemini_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -37,5 +38,18 @@ func OpenAIRefreshFunc() RefreshFunc {
 			accountID = openaiclient.ExtractChatGPTAccountID(auth.Token)
 		}
 		return TokenSet{AccessToken: auth.Token, RefreshToken: auth.RefreshToken, ExpiresAt: auth.ExpiresAt, AccountID: accountID}, nil
+	}
+}
+
+func GeminiRefreshFunc() RefreshFunc {
+	return func(ctx context.Context, cfg models.LLMConfig) (TokenSet, error) {
+		tokens, err := geminiclient.RefreshTokenContext(ctx, cfg.OAuthRefreshToken)
+		if err != nil {
+			if errors.Is(err, geminiclient.ErrOAuthReauthenticationRequired) {
+				return TokenSet{}, ErrReauthenticationRequired
+			}
+			return TokenSet{}, err
+		}
+		return TokenSet{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresAt: tokens.ExpiresAt}, nil
 	}
 }

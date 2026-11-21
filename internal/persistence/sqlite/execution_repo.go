@@ -1899,6 +1899,11 @@ func (r *ExecutionRepo) ListTaskAnthropicHistory(ctx context.Context, taskID str
 	return r.listTaskNativeHistory(ctx, taskID, limit, "envelope", "messages")
 }
 
+// ListTaskGeminiHistory omits display text for completed native Gemini turns.
+func (r *ExecutionRepo) ListTaskGeminiHistory(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
+	return r.listTaskNativeHistory(ctx, taskID, limit, "envelope", "contents")
+}
+
 // ListTaskCompletionsHistory omits display text only for completed turns with
 // nonempty native Chat Completions replay. Preserve failed and fallback history.
 func (r *ExecutionRepo) ListTaskCompletionsHistory(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
@@ -1912,6 +1917,9 @@ func (r *ExecutionRepo) listTaskNativeHistory(ctx context.Context, taskID string
 	}
 	if itemsKey == "messages" {
 		provider = models.ProviderAnthropic
+	}
+	if itemsKey == "contents" {
+		provider = models.ProviderGemini
 	}
 	return r.listTaskExecutionPage(persistence.WithModelHistory(ctx, provider), taskID, "", limit)
 }

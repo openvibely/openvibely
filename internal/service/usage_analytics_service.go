@@ -2340,6 +2340,8 @@ func shouldPersistUsageForProvider(agent models.LLMConfig) bool {
 		return agent.AuthMethod == models.AuthMethodOAuth || agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != ""
 	case models.ProviderOpenAICompatible:
 		return agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != ""
+	case models.ProviderGemini:
+		return agent.AuthMethod == models.AuthMethodOAuth || agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != ""
 	default:
 		return false
 	}

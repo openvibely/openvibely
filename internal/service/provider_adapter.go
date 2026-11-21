@@ -24,6 +24,7 @@ import (
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"github.com/openvibely/openvibely/internal/llm/contextlimits"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmgemini "github.com/openvibely/openvibely/internal/llm/gemini"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
@@ -56,11 +57,13 @@ func (s *LLMService) initProviderAdapters() {
 	openaiAdapter := llmopenai.New(s.llmConfigRepo, s.execRepo, s.openAIAsyncToolCallRepo, s.executionStreamHub)
 	openaiCompatibleAdapter := llmopenai_compatible.NewWithConfigRepo(s.llmConfigRepo, s.execRepo, s.executionStreamHub)
 	ollamaAdapter := llmollama.New(s.execRepo, s.executionStreamHub)
+	geminiAdapter := llmgemini.New(s.llmConfigRepo, s.execRepo, s.executionStreamHub)
 	s.providerAdapters = map[models.LLMProvider]ProviderAdapter{
 		models.ProviderAnthropic:        &anthropicProviderAdapter{svc: s, adapter: anthropicAdapter},
 		models.ProviderOpenAI:           &openAIProviderAdapter{svc: s, adapter: openaiAdapter},
 		models.ProviderOpenAICompatible: &openAICompatibleProviderAdapter{svc: s, adapter: openaiCompatibleAdapter},
 		models.ProviderOllama:           &ollamaProviderAdapter{svc: s, adapter: ollamaAdapter},
+		models.ProviderGemini:           &geminiProviderAdapter{svc: s, adapter: geminiAdapter},
 		models.ProviderMixture:          &mixtureProviderAdapter{svc: s},
 		models.ProviderTest:             &testProviderAdapter{svc: s},
 	}
@@ -360,6 +363,8 @@ func providerTransport(req llmcontracts.AgentRequest) string {
 		return "anthropic_messages_http"
 	case models.ProviderOllama:
 		return "chat_completions"
+	case models.ProviderGemini:
+		return "gemini_generate_content"
 	case models.ProviderTest:
 		return "test"
 	default:
@@ -473,7 +478,7 @@ func estimateDefaultProviderToolTokens(provider models.LLMProvider) int {
 	switch provider {
 	case models.ProviderAnthropic:
 		return anthropicDefaultToolTokens()
-	case models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
+	case models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini:
 		return openAIDefaultToolTokens()
 	default:
 		return 0
@@ -620,7 +625,7 @@ func providerSupportsArtifactReader(req llmcontracts.AgentRequest) bool {
 		return false
 	}
 	switch req.Agent.Provider {
-	case models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama:
+	case models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini:
 		return true
 	default:
 		return false
@@ -1667,7 +1672,7 @@ func (s *LLMService) callCompactedRetry(adapter ProviderAdapter, originalReq, co
 
 // Hydrate once at the budget boundary, never after history has been trimmed.
 func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
-	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOpenAICompatible && req.Agent.Provider != models.ProviderOllama) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
+	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOpenAICompatible && req.Agent.Provider != models.ProviderOllama && req.Agent.Provider != models.ProviderGemini) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
 		return req, nil
 	}
 	ids := make([]string, 0, len(req.ChatHistory))
@@ -2132,6 +2137,24 @@ func (a *openAICompatibleProviderAdapter) Call(req llmcontracts.AgentRequest) (l
 		if req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
 			req.Agent.Model = req.AgentDefinition.Model
 		}
+	}
+	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
+		return a.adapter.Call(req.Ctx, req, req.WorkDir)
+	})
+}
+
+type geminiProviderAdapter struct {
+	svc     *LLMService
+	adapter *llmgemini.Adapter
+}
+
+func (a *geminiProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	req = prepareAgentRuntimeRequest(req)
+	if req.AgentDefinition != nil && req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
+		req.Agent.Model = req.AgentDefinition.Model
+	}
+	if err := unsupportedCatalogModel(req.Agent); err != nil {
+		return llmcontracts.AgentResult{}, err
 	}
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		return a.adapter.Call(req.Ctx, req, req.WorkDir)

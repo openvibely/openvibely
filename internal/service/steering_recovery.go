@@ -25,7 +25,7 @@ type steeringRecovery struct {
 // Track successful commits from this invocation, not an older database snapshot
 // that cannot prove the current prompt was consumed.
 func trackSteeringRecovery(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
-	if req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOllama && req.Agent.Provider != models.ProviderOpenAICompatible {
+	if req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOllama && req.Agent.Provider != models.ProviderOpenAICompatible && req.Agent.Provider != models.ProviderGemini {
 		return req
 	}
 	if req.Ctx == nil {
@@ -38,7 +38,7 @@ func trackSteeringRecovery(req llmcontracts.AgentRequest) llmcontracts.AgentRequ
 		state.responsesSet = true
 		state.mu.Unlock()
 	})
-	if req.Agent.Provider == models.ProviderAnthropic || req.Agent.Provider == models.ProviderOllama || req.Agent.Provider == models.ProviderOpenAICompatible {
+	if req.Agent.Provider == models.ProviderAnthropic || req.Agent.Provider == models.ProviderOllama || req.Agent.Provider == models.ProviderOpenAICompatible || req.Agent.Provider == models.ProviderGemini {
 		req.Ctx = context.WithValue(req.Ctx, steeringRecoveryKey{}, state)
 		return req
 	}

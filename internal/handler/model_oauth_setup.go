@@ -77,11 +77,11 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 	}
 
 	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 1<<20)
-	provider, auth := resolveProviderAndAuth(c.FormValue("provider"), c.FormValue("anthropic_auth_type"), c.FormValue("openai_auth_type"), c.FormValue("auth_method"))
+	provider, auth := resolveFormProviderAndAuth(c)
 	if provider == models.ProviderOpenAICompatible {
 		auth = models.AuthMethod(c.FormValue("custom_auth_method"))
 	}
-	if auth != models.AuthMethodOAuth || (provider != models.ProviderOpenAI && provider != models.ProviderAnthropic && provider != models.ProviderOpenAICompatible) {
+	if auth != models.AuthMethodOAuth || (provider != models.ProviderOpenAI && provider != models.ProviderAnthropic && provider != models.ProviderGemini && provider != models.ProviderOpenAICompatible) {
 		return echo.NewHTTPError(http.StatusBadRequest, "Select an OAuth provider first.")
 	}
 	config := &models.LLMConfig{Provider: provider, AuthMethod: auth}
@@ -112,7 +112,7 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "This sign-in is for custom OAuth endpoints.")
 		}
 	}
-	if provider == models.ProviderOpenAI || provider == models.ProviderAnthropic {
+	if provider == models.ProviderOpenAI || provider == models.ProviderAnthropic || provider == models.ProviderGemini {
 		revisions, err := h.llmConfigRepo.OAuthConnectionSnapshots(c.Request().Context(), provider)
 		if err != nil {
 			return err
@@ -193,7 +193,7 @@ func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig
 		oauthSecurityConfigChanged(*signedIn, *config) || signedIn.ExtraHeadersJSON != config.ExtraHeadersJSON {
 		return "", echo.NewHTTPError(http.StatusConflict, "Connection settings changed. Connect OAuth again before saving the model.")
 	}
-	if config.Provider == models.ProviderOpenAI || config.Provider == models.ProviderAnthropic {
+	if config.Provider == models.ProviderOpenAI || config.Provider == models.ProviderAnthropic || config.Provider == models.ProviderGemini {
 		draft := signedIn.PendingOAuthConnection
 		if draft == nil || draft.ID != config.OAuthConnectionID {
 			return "", echo.NewHTTPError(http.StatusConflict, "Account selection changed. Connect OAuth again.")

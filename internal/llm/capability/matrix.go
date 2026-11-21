@@ -23,6 +23,8 @@ func ForAgent(agent models.LLMConfig) Features {
 	case models.ProviderOpenAI:
 		// Direct OpenAI API/OAuth supports multimodal attachments.
 		f.Vision = agent.IsOpenAIAPIKey() || agent.IsOpenAIOAuth()
+	case models.ProviderGemini:
+		f.Vision = true
 	case models.ProviderOllama:
 		// Image attachments use the shared Chat Completions content parts.
 		f.Vision = true

@@ -143,7 +143,7 @@ func normalizeLLMConfigName(name string) (string, error) {
 
 func validateLLMConfigModel(a *models.LLMConfig) error {
 	switch a.Provider {
-	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
+	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini:
 		if strings.TrimSpace(a.Model) == "" {
 			return persistence.ErrLLMConfigModelRequired
 		}
@@ -219,10 +219,10 @@ func (r *LLMConfigRepo) ListRefreshableOAuth(ctx context.Context) ([]models.LLMC
 		   WHERE linked.oauth_connection_id = c.id AND linked.auth_method = ? AND linked.provider = c.provider
 		   ORDER BY linked.id LIMIT 1
 		 )
-		 WHERE c.provider IN (?, ?)
+		 WHERE c.provider IN (?, ?, ?)
 		   AND c.oauth_access_token != '' AND c.oauth_refresh_token != '' AND c.oauth_needs_reauth = 0
 		 ORDER BY c.oauth_expires_at ASC, c.id ASC`,
-		models.AuthMethodOAuth, models.ProviderOpenAI, models.ProviderAnthropic)
+		models.AuthMethodOAuth, models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderGemini)
 	if err != nil {
 		return nil, fmt.Errorf("listing refreshable OAuth connections: %w", err)
 	}
@@ -289,11 +289,11 @@ func (r *LLMConfigRepo) HasAny(ctx context.Context) (bool, error) {
 func (r *LLMConfigRepo) OAuthProviderPresence(ctx context.Context) (persistence.OAuthProviderPresence, error) {
 	var presence persistence.OAuthProviderPresence
 	err := r.db.QueryRowContext(ctx, `SELECT
-		COALESCE(MAX(auth_method = ? AND provider IN (?, ?, ?)), 0),
+		COALESCE(MAX(auth_method = ? AND provider IN (?, ?, ?, ?)), 0),
 		COALESCE(MAX(auth_method = ? AND provider = ?), 0),
 		COALESCE(MAX(auth_method = ? AND provider = ?), 0)
 		FROM agent_configs`,
-		models.AuthMethodOAuth, models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible,
+		models.AuthMethodOAuth, models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderGemini,
 		models.AuthMethodOAuth, models.ProviderAnthropic,
 		models.AuthMethodOAuth, models.ProviderOpenAI,
 	).Scan(&presence.AnyOAuth, &presence.AnthropicOAuth, &presence.OpenAIOAuth)
@@ -355,7 +355,7 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 			COALESCE((SELECT ` + oauthConnectionAccountLabelSQL + ` FROM oauth_connections c WHERE c.id = oauth_connection_id), '') || ' ' ||
 			CASE WHEN is_default = 1 THEN 'default' ELSE 'active' END || ' ' ||
 				CASE WHEN auth_method = 'oauth' AND (
-					(provider IN ('anthropic', 'openai') AND EXISTS(
+					(provider IN ('anthropic', 'openai', 'gemini') AND EXISTS(
 						SELECT 1 FROM oauth_connections c WHERE c.id = oauth_connection_id
 						AND c.provider = configs.provider AND c.oauth_needs_reauth = 0 AND c.oauth_access_token != ''
 						AND c.oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000
@@ -364,7 +364,7 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 						COALESCE(oauth_expires_at, 0) = 0 OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000
 					))
 				) THEN 'connected'
-				ELSE CASE WHEN auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') THEN 'not connected' ELSE '' END END
+				ELSE CASE WHEN auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible', 'gemini') THEN 'not connected' ELSE '' END END
 		), ?) > 0`
 		args = append(args, strings.ToLower(search))
 	}
@@ -379,7 +379,7 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 	switch filter.AuthStatus {
 	case "connected":
 		query += ` AND auth_method = 'oauth' AND (
-			(provider IN ('anthropic', 'openai') AND EXISTS(
+			(provider IN ('anthropic', 'openai', 'gemini') AND EXISTS(
 				SELECT 1 FROM oauth_connections c WHERE c.id = oauth_connection_id
 				AND c.provider = configs.provider AND c.oauth_needs_reauth = 0 AND c.oauth_access_token != ''
 				AND c.oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000
@@ -388,8 +388,8 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 				AND (COALESCE(oauth_expires_at, 0) = 0 OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000))
 		)`
 	case "not_connected":
-		query += ` AND auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') AND NOT (
-			(provider IN ('anthropic', 'openai') AND EXISTS(
+		query += ` AND auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible', 'gemini') AND NOT (
+			(provider IN ('anthropic', 'openai', 'gemini') AND EXISTS(
 				SELECT 1 FROM oauth_connections c WHERE c.id = oauth_connection_id
 				AND c.provider = configs.provider AND c.oauth_needs_reauth = 0 AND c.oauth_access_token != ''
 				AND c.oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000
@@ -398,7 +398,7 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 				AND (COALESCE(oauth_expires_at, 0) = 0 OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000))
 		)`
 	case "not_required":
-		query += ` AND (auth_method != 'oauth' OR provider NOT IN ('anthropic', 'openai', 'openai_compatible'))`
+		query += ` AND (auth_method != 'oauth' OR provider NOT IN ('anthropic', 'openai', 'openai_compatible', 'gemini'))`
 	}
 	if filter.Kind == "mixture" {
 		query += ` AND provider = 'mixture'`
@@ -892,7 +892,7 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 	if a.AuthMethod == "" {
 		a.AuthMethod = models.AuthMethodAPIKey
 	}
-	if a.AuthMethod == models.AuthMethodOAuth && (a.Provider == models.ProviderOpenAI || a.Provider == models.ProviderAnthropic) {
+	if a.AuthMethod == models.AuthMethodOAuth && (a.Provider == models.ProviderOpenAI || a.Provider == models.ProviderAnthropic || a.Provider == models.ProviderGemini) {
 		if a.OAuthConnectionID == "" {
 			if err := createPrivateOAuthConnectionTx(ctx, tx, a); err != nil {
 				return fmt.Errorf("creating private OAuth connection: %w", err)
@@ -963,7 +963,7 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 	if a.AuthMethod == "" {
 		a.AuthMethod = models.AuthMethodAPIKey
 	}
-	if a.AuthMethod == models.AuthMethodOAuth && (a.Provider == models.ProviderOpenAI || a.Provider == models.ProviderAnthropic) {
+	if a.AuthMethod == models.AuthMethodOAuth && (a.Provider == models.ProviderOpenAI || a.Provider == models.ProviderAnthropic || a.Provider == models.ProviderGemini) {
 		if a.OAuthConnectionID != "" {
 			var currentProvider models.LLMProvider
 			var currentConnectionID string
