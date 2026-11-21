@@ -786,19 +786,6 @@ func (h *Handler) handleTelegramTest(c echo.Context) error {
 
 // handleTelegramSendResponses toggles the "send task responses to Telegram" setting
 func (h *Handler) handleTelegramSendResponses(c echo.Context) error {
-	if h.projectSvc != nil {
-		project, err := h.getCurrentProjectID(c)
-		if err != nil {
-			return err
-		}
-		if _, remote := remoteid.ServerOf(project); remote {
-			_, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: project, Provider: "telegram-responses", Values: url.Values{"enabled": {c.FormValue("enabled")}}})
-			if err != nil {
-				return err
-			}
-			return c.String(http.StatusOK, "Setting saved")
-		}
-	}
 	// Checkbox sends "true" when checked, nothing when unchecked
 	enabled := c.FormValue("enabled")
 	value := "false"
@@ -853,19 +840,11 @@ func (h *Handler) handleGitHubConnect(c echo.Context) error {
 }
 
 func (h *Handler) handleGitHubConfigure(c echo.Context) error {
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil {
-		return err
-	}
 	values, err := c.FormParams()
 	if err != nil {
 		return err
 	}
-	if _, remote := remoteid.ServerOf(projectID); !remote {
-		if err := h.configureGitHubOnOwner(c.Request().Context(), values); err != nil {
-			return err
-		}
-	} else if _, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: projectID, Provider: "github", Values: values}); err != nil {
+	if err := h.configureGitHubOnOwner(c.Request().Context(), values); err != nil {
 		return err
 	}
 	return returnToChannels(c)

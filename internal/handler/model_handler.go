@@ -158,12 +158,6 @@ func (h *Handler) GetModelEditDetails(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "model configuration not found")
 	}
 	connected := config.HasValidOAuthToken()
-	if _, remote := remoteid.ServerOf(config.ID); remote {
-		connected, err = actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: config.ID, Operation: "status"})
-		if err != nil {
-			return err
-		}
-	}
 	details := modelEditDetails{
 		ID: config.ID, Name: config.Name, Provider: config.Provider, Model: config.Model,
 		ReasoningEffort: config.ReasoningEffort, ServiceTier: config.EffectiveServiceTier(), Temperature: config.Temperature,
@@ -1004,9 +998,6 @@ func (h *Handler) mixturesUsingModel(ctx context.Context, modelID string) ([]str
 }
 
 func (h *Handler) CreateModel(c echo.Context) error {
-	if handled, err := h.saveRemoteModel(c, strings.TrimSpace(c.FormValue("model_config_id"))); handled {
-		return err
-	}
 
 	if id := strings.TrimSpace(c.FormValue("model_config_id")); id != "" {
 		applog.Infof("[handler] CreateModel received existing model_config_id=%s; updating instead", id)
@@ -1066,9 +1057,6 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 }
 
 func (h *Handler) updateModelByID(c echo.Context, id string) error {
-	if handled, err := h.saveRemoteModel(c, id); handled {
-		return err
-	}
 
 	applog.Infof("[handler] UpdateModel id=%s", id)
 
@@ -1179,12 +1167,6 @@ func (h *Handler) RenameOAuthConnection(c echo.Context) error {
 	if len(name) > 200 {
 		return echo.NewHTTPError(http.StatusBadRequest, "OAuth account name must be at most 200 characters")
 	}
-	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
-		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "rename", Name: name}); err != nil {
-			return err
-		}
-		return h.oauthConnectionActionResponse(c)
-	}
 	if err := h.llmConfigRepo.RenameOAuthConnection(c.Request().Context(), c.Param("id"), name); err != nil {
 		if errors.Is(err, persistence.ErrOAuthConnectionNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "OAuth account not found")
@@ -1222,12 +1204,6 @@ func (h *Handler) MoveModelsToOAuthConnection(c echo.Context) error {
 	if len(modelIDs) > bulkDeleteMaxItems {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("at most %d models may be moved at once", bulkDeleteMaxItems))
 	}
-	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
-		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "move", ModelIDs: modelIDs}); err != nil {
-			return err
-		}
-		return h.oauthConnectionActionResponse(c)
-	}
 	if err := h.llmConfigRepo.MoveModelsToOAuthConnection(c.Request().Context(), modelIDs, c.Param("id")); err != nil {
 		switch {
 		case errors.Is(err, persistence.ErrOAuthConnectionNotFound):
@@ -1243,16 +1219,6 @@ func (h *Handler) MoveModelsToOAuthConnection(c echo.Context) error {
 }
 
 func (h *Handler) DeleteOAuthConnection(c echo.Context) error {
-	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
-		replacement := c.QueryParam("new_default_id")
-		if replacement == "" {
-			replacement = c.FormValue("new_default_id")
-		}
-		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "delete-account", ReplacementID: replacement}); err != nil {
-			return err
-		}
-		return h.oauthConnectionActionResponse(c)
-	}
 
 	connection, err := h.llmConfigRepo.GetOAuthConnectionByID(c.Request().Context(), c.Param("id"))
 	if err != nil {
@@ -1274,19 +1240,6 @@ func (h *Handler) DeleteOAuthConnection(c echo.Context) error {
 }
 
 func (h *Handler) DisconnectModelOAuthConnection(c echo.Context) error {
-	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
-		replacement := c.QueryParam("new_default_id")
-		if replacement == "" {
-			replacement = c.FormValue("new_default_id")
-		}
-		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "disconnect", ReplacementID: replacement}); err != nil {
-			return err
-		}
-		if isHTMX(c) {
-			return h.renderRefreshedModels(c)
-		}
-		return c.Redirect(http.StatusSeeOther, "/models")
-	}
 
 	cfg, err := h.llmConfigRepo.GetByID(c.Request().Context(), c.Param("id"))
 	if err != nil {
@@ -1313,19 +1266,6 @@ func (h *Handler) DisconnectModelOAuthConnection(c echo.Context) error {
 }
 
 func (h *Handler) SetDefaultModel(c echo.Context) error {
-	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
-		replacement := c.QueryParam("new_default_id")
-		if replacement == "" {
-			replacement = c.FormValue("new_default_id")
-		}
-		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "default", ReplacementID: replacement}); err != nil {
-			return err
-		}
-		if isHTMX(c) {
-			return h.renderRefreshedModels(c)
-		}
-		return c.Redirect(http.StatusSeeOther, "/models")
-	}
 
 	id := c.Param("id")
 	applog.Infof("[handler] SetDefaultModel id=%s", id)
@@ -1381,19 +1321,6 @@ func (h *Handler) DeleteModelsBulk(c echo.Context) error {
 }
 
 func (h *Handler) DeleteModel(c echo.Context) error {
-	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
-		replacement := c.QueryParam("new_default_id")
-		if replacement == "" {
-			replacement = c.FormValue("new_default_id")
-		}
-		if _, err := actModelAccount(h, c.Request().Context(), modelAccountArgs{ID: c.Param("id"), Operation: "delete", ReplacementID: replacement}); err != nil {
-			return err
-		}
-		if isHTMX(c) {
-			return h.renderRefreshedModels(c)
-		}
-		return c.Redirect(http.StatusSeeOther, "/models")
-	}
 
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteModel id=%s", id)

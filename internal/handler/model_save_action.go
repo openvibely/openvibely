@@ -6,13 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"strings"
 
-	"github.com/labstack/echo/v4"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
@@ -107,41 +104,3 @@ var actModelSave = defineAction("model.save", func(h *Handler, ctx context.Conte
 	}
 	return modelSaveResult{ID: cfg.ID, OAuthConnectionID: cfg.OAuthConnectionID}, nil
 })
-
-func (h *Handler) saveRemoteModel(c echo.Context, id string) (bool, error) {
-	if _, remoteID := remoteid.ServerOf(id); !remoteID {
-		return false, nil
-	}
-	project := c.QueryParam("project_id")
-	if project == "" && h.projectSvc != nil {
-		var err error
-		project, err = h.getCurrentProjectID(c)
-		if err != nil {
-			return true, err
-		}
-	}
-	values, err := c.FormParams()
-	if err != nil {
-		return true, err
-	}
-	a := modelSaveArgs{ProjectID: project, ID: id, OAuthConnectionID: strings.TrimSpace(values.Get("oauth_connection_id")), Values: values}
-	if models.LLMProvider(values.Get("provider")) == models.ProviderMixture {
-		mixture, err := parseMixtureConfigForm(c)
-		if err != nil {
-			return true, err
-		}
-		a.Mixture = &mixture
-	}
-	out, err := actModelSave(h, c.Request().Context(), a)
-	if err != nil {
-		return true, err
-	}
-	if c.Request().Header.Get("Accept") == "application/json" {
-		c.Response().Header().Set("Cache-Control", "no-store")
-		return true, c.JSON(http.StatusOK, map[string]string{"id": out.ID, "oauth_connection_id": out.OAuthConnectionID})
-	}
-	if isHTMX(c) {
-		return true, h.renderRefreshedModels(c)
-	}
-	return true, c.Redirect(http.StatusSeeOther, "/models?project_id="+url.QueryEscape(project))
-}
