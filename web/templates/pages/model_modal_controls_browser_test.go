@@ -96,7 +96,17 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   assert(field('model_api_key').placeholder.indexOf('sk-ant-')===0,'Anthropic hint restored');
   field('model_anthropic_auth_type').value='oauth';toggleAnthropicAuthFields();
   assert(hidden('api_key_field'),'Anthropic OAuth hides key');
+  await selectProvider('gemini');
+  assert(!hidden('gemini_auth_type_field') && hidden('anthropic_auth_type_field') && hidden('openai_auth_type_field'),'Gemini shows its own sign-in choice');
+  field('model_gemini_auth_type').value='api_key';toggleGeminiAuthFields();
+  assert(!hidden('api_key_field') && field('model_api_key').required && hidden('gemini_subscription_info_oauth'),'Gemini API key required, project hidden');
+  field('model_gemini_auth_type').value='oauth';toggleGeminiAuthFields();
+  assert(hidden('api_key_field') && !field('model_api_key').required,'Gemini OAuth hides key');
+  assert(!hidden('gemini_subscription_info_oauth') && !field('model_gemini_cloud_project').required,'Gemini OAuth shows optional project');
+  input('model_gemini_cloud_project','my-proj');
+  assert(new FormData(field('model_form')).get('gemini_cloud_project')==='my-proj','Gemini project submitted');
   await selectProvider('ollama');
+  assert(hidden('gemini_auth_type_field') && hidden('gemini_subscription_info_oauth'),'Gemini fields hidden after provider switch');
   assert(!hidden('model_refresh') && hidden('api_key_field') && !field('model_ollama_custom_model'),'Ollama uses one discovered dropdown');
   assert(field('model_id').value==='installed:latest','Ollama selects installed model');
   assert(!hidden('model_ollama_base_url_field') && !!(field('model_ollama_base_url').compareDocumentPosition(field('model_id')) & Node.DOCUMENT_POSITION_FOLLOWING),'Ollama URL precedes model selection');
@@ -531,13 +541,16 @@ func TestBrowserFunctional_BuiltInOAuthInsideModelModal(t *testing.T) {
 	}
 	fixture := `<main id="reconnect-result"></main><script>
  window.htmx={process:function(){}};
- var requests=[], connected=false;
+ var requests=[], connected=false, geminiSetup='';
  window.open=function(){return {location:{href:''},close:function(){}};};
  window.fetch=function(url,options){
   options=options||{};requests.push({url:url,options:options});var data={};
   if(url==='/models/oauth/setup' && options.method==='DELETE') return Promise.resolve({ok:true});
   if(url==='/models/oauth/setup'){connected=false;data={session_id:'draft',authorization_url:'https://auth.example/authorize'};}
-  else if(url.includes('/setup/status'))data={connected:connected};
+  else if(url.includes('/setup/status')){
+   if(geminiSetup==='failed')return Promise.resolve({ok:false,json:function(){return Promise.resolve({message:'Google account setup failed: not eligible'});}});
+   data={connected:connected,progress:geminiSetup==='running'?'Finishing Google account setup. This can take a minute.':''};
+  }
   else if(url.includes('/manual-complete'))connected=true;
   else return Promise.reject(Error('Unexpected persistence request '+url));
   return Promise.resolve({ok:true,json:function(){return Promise.resolve(data);}});
@@ -573,6 +586,25 @@ func TestBrowserFunctional_BuiltInOAuthInsideModelModal(t *testing.T) {
   f('model_oauth_stop_waiting').click();await cancelled;
   assert(!f('model_oauth_setup_session').value && !f('model_submit_btn').disabled,'cancel discards authorization and unlocks draft');
   assert(f('model_oauth_connection_badge').textContent==='Not connected','cancel resets badge');
+  closeModelModal();
+  openNewModelModal();f('model_provider').value='gemini';toggleProviderFields();
+  f('model_gemini_auth_type').value='oauth';toggleGeminiAuthFields();
+  f('model_gemini_cloud_project').value='my-proj';
+  assert(!f('model_oauth_connection_action').classList.contains('hidden'),'Gemini offers same modal connection flow');
+  geminiSetup='running';
+  var gemini=connectModelOAuth(f('model_oauth_connect_action'));await wait(50);
+  setup=requests.filter(function(r){return r.url==='/models/oauth/setup' && r.options.method==='POST';}).pop();
+  assert(setup.options.body.get('provider')==='gemini' && setup.options.body.get('gemini_cloud_project')==='my-proj','Gemini setup sends provider and project');
+  await wait(1100);
+  assert(f('model_oauth_connection_status').textContent==='Finishing Google account setup. This can take a minute.','Gemini setup progress shown');
+  assert(f('model_oauth_connection_badge').textContent==='Connecting','still connecting during account setup');
+  geminiSetup='failed';await gemini;
+  assert(f('model_oauth_connection_status').textContent==='Google account setup failed: not eligible','Gemini setup error shown');
+  assert(f('model_oauth_connection_badge').textContent==='Not connected','failed setup resets badge');
+  geminiSetup='';
+  gemini=connectModelOAuth(f('model_oauth_connect_action'));await wait(50);
+  connected=true;await gemini;
+  assert(f('model_oauth_connection_status').textContent.startsWith('Connected.'),'Gemini connected in modal');
   f('reconnect-result').setAttribute('data-test-result','pass');
  }catch(e){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(e.stack));}
  })();</script>`
