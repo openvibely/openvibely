@@ -515,46 +515,46 @@ templ ProjectComputerToggle(projectID string) {
 
 templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  @ComputerErrorReporter()
- <div data-computer-grants data-grants-project={projectID} data-grants-task={taskID}>
+ <div data-computer-grants data-grants-project={projectID} data-grants-task={taskID} data-searchable-selector data-searchable-selector-local data-searchable-selector-left-anchor data-searchable-selector-no-default-highlight data-searchable-selector-kind="Chrome permission">
+ <input type="hidden" data-searchable-selector-value/>
  <style>.ov-menu [data-computer-grant-list] > .ov-menu-option{align-items:flex-start;text-align:left}</style>
  if len(compact)>0 && compact[0] {
- <button type="button" class="btn btn-ghost permissions-button" data-computer-grants-open data-picker-align="end" aria-haspopup="dialog">Manage <span aria-hidden="true">›</span></button>
+ <button type="button" class="btn btn-ghost permissions-button" data-computer-grants-open data-searchable-selector-trigger aria-haspopup="dialog">Manage <span aria-hidden="true">›</span></button>
  } else {
- <button type="button" class="inspector-property-row" data-computer-grants-open aria-haspopup="dialog">
+ <button type="button" class="inspector-property-row" data-computer-grants-open data-searchable-selector-trigger aria-haspopup="dialog">
  @components.InspectorPropertyContent("Chrome permissions", "")
  </button>
  }
- @components.InspectorPicker("computer-grants-picker") {
- <div data-options="import" class="ov-menu-create-row"><button type="button" class="ov-menu-option w-full" data-value="import" data-computer-manual-import hidden>@templateui.SearchableSelectorCreateIcon()<span>Import Chrome sign-ins</span></button></div>
- <div data-options="grants" data-computer-grant-list></div>
+ @templateui.SearchableSelector(templateui.SearchableSelectorConfig{ID:"computer-grants-picker",Kind:"Chrome permission",Local:true,CreateButtonID:"computer-manual-import",CreateLabel:"Import Chrome sign-ins"}) {
+ <div data-computer-grant-list></div>
  }
  <script>
  (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{
  if(root.dataset.bound)return;root.dataset.bound='true';
- const trigger=root.querySelector('[data-computer-grants-open]'),picker=root.querySelector('.inspector-picker'),list=root.querySelector('[data-computer-grant-list]');
- picker.setAttribute('aria-label','Chrome permissions');picker.setAttribute('data-picker-no-default-highlight','');
+ const picker=root.querySelector('[data-searchable-selector-dialog]'),list=root.querySelector('[data-computer-grant-list]');
+ picker.setAttribute('aria-label','Chrome permissions');
  const search=picker.querySelector('input');search.setAttribute('aria-label','Search Chrome permissions');
  let importAvailable=false;
- const ui=window.createInspectorPicker(root,picker,()=>busy,option=>!option.hasAttribute('data-computer-manual-import')||(importAvailable&&!!root.closest('[data-computer-task]')));
+ const refresh=()=>{importButton.hidden=!importAvailable||!root.closest('[data-computer-task]');importButton.parentElement.hidden=importButton.hidden;window.openVibelySearchableSelector.filter(root);};
  const base='/projects/'+encodeURIComponent(root.dataset.grantsProject)+'/computer/chrome-grants';
  const computerToast=(...args)=>window.computerErrorToast(root.dataset.grantsProject,root.dataset.grantsTask,...args);
  const url=offset=>base+'?offset='+offset+(root.dataset.grantsTask?'&task_id='+encodeURIComponent(root.dataset.grantsTask):'');
- const importButton=root.querySelector('[data-computer-manual-import]');
- importButton.onclick=()=>{ui.close();root.closest('[data-computer-task]')?.dispatchEvent(new CustomEvent('computer:import-chrome'));};
+ const importButton=root.querySelector('#computer-manual-import');importButton.setAttribute('data-computer-manual-import','');importButton.hidden=true;importButton.parentElement.hidden=true;
+ importButton.onclick=()=>{window.openVibelySearchableSelector.close(root,false);root.closest('[data-computer-task]')?.dispatchEvent(new CustomEvent('computer:import-chrome'));};
  let busy=false,version=0;
- async function load(){const current=++version;importAvailable=false;search.dispatchEvent(new Event('input'));list.textContent='Loading permissions…';try{
+ async function load(){const current=++version;importAvailable=false;refresh();list.textContent='Loading permissions…';try{
  let grants=[],offset=0;
  for(;;){const res=await fetch(url(offset),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Permissions unavailable');if(current!==version)return;importAvailable=data.chrome_available===true;grants.push(...data.grants);if(!data.has_more)break;if(data.next_offset<=offset)throw Error('Could not load remaining permissions');offset=data.next_offset;}
  list.replaceChildren();if(!grants.length){const empty=document.createElement('p');empty.className='p-3 text-sm opacity-60';empty.textContent='No Chrome permissions';list.append(empty);}
- for(const grant of grants){const button=document.createElement('button');button.type='button';button.dataset.value=grant.id;button.className='ov-menu-option w-full flex flex-col items-start gap-1';
+ for(const grant of grants){const button=document.createElement('button');button.type='button';button.dataset.value=grant.id;button.setAttribute('data-searchable-selector-option','');button.setAttribute('data-searchable-selector-id',grant.id);button.className='ov-menu-option w-full max-w-full overflow-hidden flex flex-col items-start gap-1';
  const title=document.createElement('span');title.className='text-sm';title.textContent=grant.selections.map(c=>c.profile+': '+c.domain+' / '+c.name).join(', ');
  const detail=document.createElement('span');detail.className='text-xs opacity-60';detail.textContent=(grant.scope==='project'?'This project':'This task')+' · '+(grant.revoked?'Revoked':(grant.one_time?'One import · ':'')+(grant.expires_at?'Expires '+new Date(grant.expires_at*1000).toLocaleString():'Until revoked'));
- const action=document.createElement('span');action.className='text-xs text-error';action.textContent=grant.revoked?'Retry clearing cookies':'Revoke';button.append(title,detail,action);
- button.onclick=async()=>{if(busy)return;busy=true;button.disabled=true;try{const res=await fetch(url(0),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:grant.id})});const data=await res.json();if(!res.ok)throw Error(data.message||'Could not revoke');await load();}catch(e){computerToast(e.message,'error');}finally{busy=false;button.disabled=false;}};list.append(button);}
- search.dispatchEvent(new Event('input'));
+ const action=document.createElement('span');action.className='text-xs text-error';action.textContent=grant.revoked?'Retry clearing cookies':'Revoke';button.append(title,detail,action);button.setAttribute('data-searchable-selector-name',button.textContent);
+ button.onclick=async event=>{event.stopPropagation();if(busy)return;busy=true;button.disabled=true;try{const res=await fetch(url(0),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:grant.id})});const data=await res.json();if(!res.ok)throw Error(data.message||'Could not revoke');await load();}catch(e){computerToast(e.message,'error');}finally{busy=false;button.disabled=false;}};list.append(button);}
+ refresh();
  }catch(e){if(current!==version)return;list.textContent='Could not load permissions. Close and reopen to retry.';computerToast(e.message,'error');}}
- trigger.onclick=()=>{ui.open(trigger);if(ui.isOpen())load();};
- root.addEventListener('htmx:beforeCleanupElement',e=>{if(e.target===root)version++;});
+ const observer=new MutationObserver(records=>{if(picker.open&&records.some(r=>r.attributeName==='open'))load();});observer.observe(picker,{attributes:true,attributeFilter:['open']});
+ root.addEventListener('htmx:beforeCleanupElement',e=>{if(e.target===root){version++;observer.disconnect();}});
  });})();
  </script>
  </div>

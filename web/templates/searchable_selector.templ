@@ -94,7 +94,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 30;
+			var controllerVersion = 31;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -128,7 +128,7 @@ templ searchableSelectorScript() {
 				};
 			}
 			function options(root) { return root ? Array.prototype.slice.call(root.querySelectorAll('[data-searchable-selector-option]')) : []; }
-			function visibleOptions(root) { return options(root).filter(function(option) { return !option.hidden && !option.classList.contains('hidden'); }); }
+			function visibleOptions(root) { return options(root).filter(function(option) { return !option.disabled && !option.hidden && !option.classList.contains('hidden'); }); }
             function highlight(root, option) {
                 if (root.__selectorActive === option && (!option || option.hasAttribute('data-selector-active'))) return;
                 root.__selectorActive = option;
@@ -139,7 +139,7 @@ templ searchableSelectorScript() {
                 var list = visibleOptions(root);
                 if (!reset && list.includes(root.__selectorActive)) return;
                 var key = !reset && optionKey(root.__selectorActive);
-                highlight(root, (key && list.find(function(item) { return optionKey(item) === key; })) || list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || list.find(function(item) { return !item.hasAttribute('data-searchable-selector-action'); }));
+                highlight(root, (key && list.find(function(item) { return optionKey(item) === key; })) || list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || (root.hasAttribute('data-searchable-selector-no-default-highlight') ? null : list.find(function(item) { return !item.hasAttribute('data-searchable-selector-action'); })));
             }
 			function position(root) {
 				var state = nodes(root), dialog = state.dialog, button = state.button;
@@ -372,7 +372,7 @@ templ searchableSelectorScript() {
                 var index = list.indexOf(root.__selectorActive);
                 if (event.key === 'Enter' || (event.key === ' ' && event.target !== state.search)) {
                     event.preventDefault();
-                    if (list.length) (list[index < 0 ? 0 : index]).click();
+                    if (list.length && (index >= 0 || !root.hasAttribute('data-searchable-selector-no-default-highlight'))) (list[index < 0 ? 0 : index]).click();
                     return;
                 }
                 if (list.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
