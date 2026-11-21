@@ -83,10 +83,13 @@ const click = b => b.click({preventDefault(){},stopPropagation(){}});
  const cloned=button(); cloned.span.textContent='Copied'; first.appendChild(cloned);
  addCodeCopyButtons(host); assert.notEqual(first.btn,cloned); assert.equal(first.btn.span.textContent,'Copy');
  await click(first.btn); assert.equal(first.btn.span.textContent,'Copied');
- let finish;
- navigator.clipboard={writeText:()=>new Promise(resolve=>{finish=resolve;})};
- const pending=click(second.btn); assert.equal(second.btn.disabled,true);
- await click(second.btn); finish(); await pending; assert.equal(second.btn.disabled,false);
+ let finish, pendingWrites=0;
+ navigator.clipboard={writeText:()=>{pendingWrites++;return new Promise(resolve=>{finish=resolve;});}};
+ const pending=click(second.btn); assert.equal(second.btn.disabled,false,'pending copy must remain focusable');
+ await click(second.btn); assert.equal(pendingWrites,1,'ignore duplicate clicks while copying');
+ finish(); await pending; assert.equal(second.btn.disabled,false);
+ const retry=click(second.btn); assert.equal(pendingWrites,2,'allow copying again after completion');
+ finish(); await retry;
  resetTimers(); assert.equal(second.btn.span.textContent,'Copy');
 })().catch(err=>{console.error(err);process.exit(1);});`
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {

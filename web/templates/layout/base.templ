@@ -4011,13 +4011,14 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="' + copyPath + '"></path></svg><span class="sr-only" aria-live="polite">Copy</span>';
 						btn._codeCopyBound = true;
 						var resetTimer;
+						var copying = false;
 						var feedback = btn.querySelector('span');
 						var icon = btn.querySelector('path');
 						btn.addEventListener('click', async function(event) {
 							event.preventDefault(); event.stopPropagation();
-							if (btn.disabled) return;
+							if (copying) return;
 							clearTimeout(resetTimer);
-							btn.disabled = true;
+							copying = true;
 							try {
 								var code = pre.querySelector('code');
 								var content = code || pre.cloneNode(true);
@@ -4029,7 +4030,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								feedback.textContent = 'Copy failed';
 								icon.setAttribute('d', 'M6 18L18 6M6 6l12 12');
 							} finally {
-								btn.disabled = false;
+								copying = false;
 								resetTimer = setTimeout(function() {
 									feedback.textContent = 'Copy';
 									icon.setAttribute('d', copyPath);
