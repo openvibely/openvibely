@@ -3293,6 +3293,36 @@ paths:
       summary: Get project task status counts
       tags:
       - tasks
+  /api/tasks/tags:
+    get:
+      description: Returns sorted, case-insensitively unique custom tags, excluding
+        built-in tags and chat tasks. Uses the current project when project_id is
+        omitted.
+      parameters:
+      - description: Project ID or __all_projects__ for all accessible projects
+        in: query
+        name: project_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Custom task tags (empty array when none exist)
+          schema:
+            items:
+              type: string
+            type: array
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: List custom task tags
+      tags:
+      - tasks
 schemes:
 - http
 - https

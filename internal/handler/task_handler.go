@@ -397,6 +397,16 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
 }
 
+// GetTaskTags returns reusable custom task tags for the current project scope.
+// @Summary List custom task tags
+// @Description Returns sorted, case-insensitively unique custom tags, excluding built-in tags and chat tasks. Uses the current project when project_id is omitted.
+// @Tags tasks
+// @Produce json
+// @Param project_id query string false "Project ID or __all_projects__ for all accessible projects"
+// @Success 200 {array} string "Custom task tags (empty array when none exist)"
+// @Failure 404 {object} ErrorResponse "Project not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/tasks/tags [get]
 func (h *Handler) GetTaskTags(c echo.Context) error {
 	projectID, err := h.getCurrentProjectID(c)
 	if err != nil {

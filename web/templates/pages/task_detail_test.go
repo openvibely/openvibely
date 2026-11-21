@@ -567,14 +567,14 @@ func TestTaskDetailMetrics_ShowsMissingTagModelAndAgentClearly(t *testing.T) {
 		t.Fatalf("render failed: %v", err)
 	}
 	output := buf.String()
-	for _, required := range []string{"Tag:", "None", "Model:", "Auto", "Agent:", "No agent", "Priority:", "Normal"} {
+	for _, required := range []string{"Tag:", "No tag", "Model:", "Auto", "Agent:", "No agent", "Priority:", "Normal"} {
 		if !strings.Contains(output, required) {
 			t.Fatalf("expected metrics to include %q, got: %s", required, output)
 		}
 	}
 	for _, requiredClass := range []string{
 		`<span data-property-label>backlog</span>`,
-		`<span data-property-label>None</span>`,
+		`<span data-property-label>No tag</span>`,
 	} {
 		if !strings.Contains(output, requiredClass) {
 			t.Fatalf("expected neutral metadata badge class %q, got: %s", requiredClass, output)
