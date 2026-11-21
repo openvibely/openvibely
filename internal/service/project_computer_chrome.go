@@ -23,11 +23,30 @@ import (
 var chromeProfileID = regexp.MustCompile(`^(Default|Profile [0-9]+)$`)
 
 func (s *ProjectComputerService) ChromeImportAvailable() bool {
-	return runtime.GOOS == "darwin" && s.provisioner.Provider() == "local"
+	return (runtime.GOOS == "darwin" || runtime.GOOS == "linux") && s.provisioner.Provider() == "local"
 }
 func chromeRoot() (string, error) {
 	home, err := os.UserHomeDir()
-	return filepath.Join(home, "Library/Application Support/Google/Chrome"), err
+	if err != nil {
+		return "", err
+	}
+	return chromeProfileRoot(runtime.GOOS, home, os.Getenv), nil
+}
+func chromeProfileRoot(goos, home string, getenv func(string) string) string {
+	if goos == "linux" {
+		if path := getenv("CHROME_USER_DATA_DIR"); filepath.IsAbs(path) {
+			return path
+		}
+		config := getenv("CHROME_CONFIG_HOME")
+		if !filepath.IsAbs(config) {
+			config = getenv("XDG_CONFIG_HOME")
+		}
+		if !filepath.IsAbs(config) {
+			config = filepath.Join(home, ".config")
+		}
+		return filepath.Join(config, "google-chrome")
+	}
+	return filepath.Join(home, "Library/Application Support/Google/Chrome")
 }
 func chromeDB(root, profile string) (*sql.DB, error) {
 	if !chromeProfileID.MatchString(profile) {
@@ -44,15 +63,19 @@ func chromeDB(root, profile string) (*sql.DB, error) {
 // Only names and domains leave this metadata API. No cookie values are selected.
 func (s *ProjectComputerService) ChromeProfiles() ([]string, error) {
 	if !s.ChromeImportAvailable() {
-		return nil, errors.New("Chrome import requires local macOS")
+		return nil, errors.New("Chrome import requires local macOS or Linux")
 	}
 	root, err := chromeRoot()
 	if err != nil {
 		return nil, err
 	}
+	return chromeProfilesAt(root)
+}
+
+func chromeProfilesAt(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return nil, errors.New("Chrome profiles unavailable")
+		return nil, chromeProfileReadError(runtime.GOOS, err)
 	}
 	profiles := []string{}
 	for _, e := range entries {
@@ -60,10 +83,13 @@ func (s *ProjectComputerService) ChromeProfiles() ([]string, error) {
 			profiles = append(profiles, e.Name())
 		}
 	}
+	if len(profiles) == 0 {
+		return nil, errors.New("No local Chrome profiles were found. Open Chrome and create a profile, then try importing again.")
+	}
 	return profiles, nil
 }
 func decryptChromeCookie(encrypted, key []byte, host string, version int) (string, error) {
-	if len(encrypted) < 19 || string(encrypted[:3]) != "v10" || (len(encrypted)-3)%aes.BlockSize != 0 {
+	if len(encrypted) < 19 || (string(encrypted[:3]) != "v10" && string(encrypted[:3]) != "v11") || (len(encrypted)-3)%aes.BlockSize != 0 {
 		return "", fmt.Errorf("unsupported cookie encryption")
 	}
 	block, err := aes.NewCipher(key)
@@ -94,6 +120,12 @@ func decryptChromeCookie(encrypted, key []byte, host string, version int) (strin
 }
 
 func selectedChromeCookies(ctx context.Context, db *sql.DB, key []byte, sites []string, selections ...models.ChromeCookieSelection) ([]map[string]any, error) {
+	return selectedChromeCookiesWithDecrypt(ctx, db, func(data []byte, host string, version int) (string, error) {
+		return decryptChromeCookie(data, key, host, version)
+	}, sites, selections...)
+}
+
+func selectedChromeCookiesWithDecrypt(ctx context.Context, db *sql.DB, decrypt chromeCookieDecrypt, sites []string, selections ...models.ChromeCookieSelection) ([]map[string]any, error) {
 	if len(sites) == 0 || len(sites) > 100 {
 		return nil, errors.New("select sites to import")
 	}
@@ -154,9 +186,9 @@ func selectedChromeCookies(ctx context.Context, db *sql.DB, key []byte, sites []
 			continue
 		}
 		if len(encrypted) > 0 {
-			value, err = decryptChromeCookie(encrypted, key, host, version)
+			value, err = decrypt(encrypted, host, version)
 			if err != nil {
-				continue
+				return nil, err
 			}
 		}
 		c := map[string]any{"name": name, "value": value, "domain": host, "path": path, "secure": secure, "httpOnly": httpOnly}
@@ -198,4 +230,19 @@ func chromeHasPartitionKey(ctx context.Context, db *sql.DB) (bool, error) {
 	}
 	columns.Close()
 	return partition, columns.Err()
+}
+
+// Classify filesystem failures before presenting OS-specific advice. Do not
+// mistake missing profiles or an unrelated I/O failure for a privacy denial.
+func chromeProfileReadError(goos string, err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return errors.New("No local Chrome profiles were found. Open Chrome and create a profile, then try importing again.")
+	}
+	if errors.Is(err, os.ErrPermission) {
+		if goos == "darwin" {
+			return errors.New("macOS denied access to Chrome profiles. In System Settings → Privacy & Security → Full Disk Access, enable the app running OpenVibely (OpenVibely for the desktop app, or your terminal for a server started there). Quit and reopen that app, then try importing again.")
+		}
+		return errors.New("Access to the local Chrome profile folder was denied. Check that the account running OpenVibely has permission to read it, then try importing again.")
+	}
+	return fmt.Errorf("Could not read local Chrome profiles: %w", err)
 }

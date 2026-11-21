@@ -86,3 +86,25 @@ func TestComputerChromeImportResumesProfiles(t *testing.T) {
 	_, err = svc.installChromeGrant(t.Context(), p.ID, g)
 	require.Error(t, err)
 }
+
+func TestManualChromeImportDoesNotResumeTask(t *testing.T) {
+	db, svc, p, task := computerParityFixture(t, func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) })
+	picks := []models.ChromeCookieSelection{{Profile: "Default", Domain: "example.test", Name: "session", Path: "/"}}
+	// Manual consent creates a grant without synthesizing an agent handoff.
+	grant, err := svc.repo.CreateChromeGrant(t.Context(), p.ID, "task", picks, -1)
+	require.NoError(t, err)
+	count, err := svc.installChromeProfiles(t.Context(), p.ID, grant, map[string]int{}, false, func(string) ([]map[string]any, error) {
+		return []map[string]any{{"name": "session", "value": "fixture"}}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	state, err := svc.Get(t.Context(), p.ID)
+	require.NoError(t, err)
+	require.Empty(t, state.HandoffKind)
+	input, err := db.ThreadInputs.FindOldestQueuedForTask(t.Context(), task.ID)
+	require.NoError(t, err)
+	require.Nil(t, input)
+	require.NoError(t, svc.SetTaskEnabled(t.Context(), p.ID, false))
+	_, err = svc.repo.CreateChromeGrant(t.Context(), p.ID, "task", picks, -1)
+	require.Error(t, err)
+}
