@@ -46,16 +46,35 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
  <button type="button" class="btn" data-computer-action="login-done">Done — resume task</button>
  <button type="button" class="btn" data-computer-action="login-cancel">Decline request</button>
  </div>
- <div data-computer-chrome-form data-fullscreen-interactive hidden class="p-3 bg-base-200 rounded-lg">
- <p class="text-sm">Choose individual cookies from one or more profiles. Your desktop may ask to unlock its keyring or allow Keychain access. Task grants stay with this task; project grants can be used by other tasks in this project.</p>
- <label>Chrome profile <select class="select select-bordered" data-computer-profile></select></label>
- <label>Access <select class="select select-bordered" data-computer-grant-scope><option value="task">This task</option><option value="project">This project</option></select></label>
- <label>Expires <select class="select select-bordered" data-computer-grant-hours><option value="-1">One import for this task (1 hour)</option><option value="1" selected>1 hour</option><option value="24">1 day</option><option value="168">7 days</option><option value="720">30 days</option><option value="0">Until revoked</option></select></label>
- <p data-computer-selection-count></p>
- <div data-computer-sites style="max-height:180px;overflow:auto"></div>
- <button type="button" class="btn btn-primary" data-computer-import>Approve selected sign-ins</button>
- <button type="button" class="btn btn-ghost" data-computer-import-close>Cancel</button>
- </div>
+ <dialog class="modal computer-import-modal" data-computer-import-dialog data-fullscreen-interactive aria-label="Import Chrome sign-ins">
+ <div class="modal-box" data-computer-chrome-form hidden>
+ <button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" data-computer-import-close aria-label="Close"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+ <h3>Import Chrome sign-ins</h3><p class="import-muted">Choose which cookies to share with this computer.</p>
+ <label class="import-row">Chrome profile <select class="select select-bordered" data-computer-profile></select></label>
+ <label class="import-row">Allow access for <select class="select select-bordered" data-computer-grant-scope><option value="task">This task</option><option value="project">This project</option></select></label>
+ <label class="import-row">Expires <select class="select select-bordered" data-computer-grant-hours><option value="-1">One import for this task (1 hour)</option><option value="1" selected>1 hour</option><option value="24">1 day</option><option value="168">7 days</option><option value="720">30 days</option><option value="0">Until revoked</option></select></label>
+ <h4>Cookies</h4><input type="search" class="input input-bordered" data-computer-cookie-search placeholder="Search sites or cookies…" aria-label="Search sites or cookies"/>
+ <div data-computer-sites></div><p class="import-muted" data-computer-selection-count></p>
+ <p class="import-muted">Your computer may ask you to unlock Chrome’s saved cookies.</p>
+ <div class="import-actions"><button type="button" class="btn" data-computer-import-cancel>Cancel</button><button type="button" class="btn btn-primary" data-computer-import>Import selected</button></div>
+ </div><form method="dialog" class="modal-backdrop"><button type="submit">close</button></form>
+ </dialog>
+ <style>
+ .computer-import-modal > .modal-box{width:540px;max-width:calc(100vw - 2rem);font-size:13px}
+ .computer-import-modal h3{font-size:18px;font-weight:500;margin:0 32px 12px 0}
+ .computer-import-modal .import-muted{opacity:.55;font-size:12px;line-height:1.5;margin-top:8px}
+ .computer-import-modal .import-row{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:58px;border-bottom:1px solid oklch(var(--bc)/.07);padding:10px 0}
+ .computer-import-modal .select,.computer-import-modal .input{font-size:13px;height:34px;min-height:34px;border-radius:7px}
+ .computer-import-modal .select{width:190px}.computer-import-modal .input{width:100%;margin:8px 0}
+ .computer-import-modal h4{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.5;margin:24px 0 6px}
+ .computer-import-modal [data-computer-sites]{max-height:220px;overflow:auto}
+ .computer-import-modal .cookie-group{padding:8px 0;border-bottom:1px solid oklch(var(--bc)/.07)}
+ .computer-import-modal .cookie-heading,.computer-import-modal .cookie-row{display:flex;align-items:center;gap:10px;padding:6px 0}
+ .computer-import-modal .cookie-row{padding-left:26px;font-size:12px}.computer-import-modal .cookie-row span{overflow-wrap:anywhere}
+ .computer-import-modal .import-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
+ .computer-import-modal .import-actions .btn{font-size:12px;height:32px;min-height:32px;font-weight:500;border-radius:7px;padding:0 14px;margin:0}
+ @media(max-width:560px){.computer-import-modal .import-row{gap:12px}.computer-import-modal .select{width:150px}}
+ </style>
    @layout.FullscreenViewer(templ.Attributes{"data-computer-dialog": true, "aria-label": "Live computer screen"}) {
    @layout.FullscreenViewerHeader(templ.Attributes{"aria-label": "Close computer preview"}) {
     <span data-fullscreen-title></span><button type="button" class="btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal" data-teach-open>Teach a task</button>
@@ -111,7 +130,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const dialog=find('[data-computer-dialog]');
      const homes=[];
      const expand=find('[data-computer-preview-open]');
-     function openViewer(){if(closing)return;if(dialog.open){refresh();return;}for(const node of [find('[data-computer-login]'),find('[data-computer-chrome-form]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();if(rfb)rfb.background='transparent';screen.focus({preventScroll:true});refresh();recoverTeaching();}
+     function openViewer(){if(closing)return;if(dialog.open){refresh();return;}for(const node of [find('[data-computer-login]'),find('[data-computer-import-dialog]'),screen].filter(Boolean)){const mark=document.createComment('computer-home');node.before(mark);homes.push([mark,node]);dialog.querySelector('[data-computer-expanded]').append(node);}screen.style.height='70vh';dialog.showModal();if(rfb)rfb.background='transparent';screen.focus({preventScroll:true});refresh();recoverTeaching();}
      find('[data-computer-preview-open]').onclick=openViewer;
      dialog.addEventListener('close',finishViewer);
      async function finishViewer(){if(dialog.open)return;pauseTeaching();if(closing || !homes.length)return;closing=true;recording=false;renderDemo();syncViewerInput();for(const [mark,node] of homes)mark.replaceWith(node);homes.length=0;screen.style.height='';if(rfb)rfb.background='var(--shell-card,var(--fallback-b1,oklch(var(--b1))))';expand.focus();closing=false;await refresh();return true;}
@@ -399,16 +418,23 @@ currentState=state;if(state.handoff_kind){pauseTeaching();recording=false;render
  const profile=find('[data-computer-profile]');
  const sites=find('[data-computer-sites]');
 
- const selectedCookies=new Map();let pendingImport="";
+ const selectedCookies=new Map();let pendingImport="",importBusy=false;
  const cookieKey=c=>JSON.stringify([c.profile,c.domain,c.name,c.path]);
- const updateSelection=()=>find('[data-computer-selection-count]').textContent=selectedCookies.size+' cookies selected across profiles';
- async function chromeSites(){sites.replaceChildren();const url=new URL(scoped('/chrome'),location.href);url.searchParams.set('profile',profile.value);const res=await fetch(url,{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Could not load Chrome cookies');for(const cookie of data.cookies){const label=document.createElement('label');label.style.display='block';const check=document.createElement('input');check.type='checkbox';const key=cookieKey(cookie);check.checked=selectedCookies.has(key);check.onchange=()=>{if(check.checked)selectedCookies.set(key,cookie);else selectedCookies.delete(key);updateSelection();};label.append(check,document.createTextNode(' '+cookie.domain+' — '+cookie.name+' ('+cookie.path+')'));sites.append(label);}}
+ const updateSelection=()=>{find('[data-computer-selection-count]').textContent=selectedCookies.size?selectedCookies.size+' cookies selected across profiles':'No cookies selected';find('[data-computer-import]').disabled=importBusy||(!pendingImport&&!selectedCookies.size);};
+ const importDialog=find('[data-computer-import-dialog]'),cookieSearch=find('[data-computer-cookie-search]');
+ let loadedCookies=[],cookieLoad=0;
+ function renderCookies(){sites.replaceChildren();const groups=new Map(),query=cookieSearch.value.toLowerCase();for(const cookie of loadedCookies){if(!(cookie.domain+' '+cookie.name+' '+cookie.path).toLowerCase().includes(query))continue;if(!groups.has(cookie.domain))groups.set(cookie.domain,[]);groups.get(cookie.domain).push(cookie);}
+ const checkbox=()=>{const c=document.createElement('input');c.type='checkbox';c.className='checkbox checkbox-primary checkbox-sm';return c;};
+ for(const [domain,cookies] of groups){const group=document.createElement('div');group.className='cookie-group';const heading=document.createElement('label');heading.className='cookie-heading';const all=checkbox();const sync=()=>{all.checked=cookies.every(c=>selectedCookies.has(cookieKey(c)));all.indeterminate=!all.checked&&cookies.some(c=>selectedCookies.has(cookieKey(c)));};sync();heading.append(all,document.createTextNode(domain));group.append(heading);all.onchange=()=>{for(const cookie of cookies){if(all.checked)selectedCookies.set(cookieKey(cookie),cookie);else selectedCookies.delete(cookieKey(cookie));}updateSelection();renderCookies();};for(const cookie of cookies){const label=document.createElement('label');label.className='cookie-row';const check=checkbox();check.checked=selectedCookies.has(cookieKey(cookie));check.onchange=()=>{if(check.checked)selectedCookies.set(cookieKey(cookie),cookie);else selectedCookies.delete(cookieKey(cookie));sync();updateSelection();};const text=document.createElement('span');text.textContent=cookie.name+' ('+cookie.path+')';label.append(check,text);group.append(label);}sites.append(group);}if(!groups.size)sites.textContent=query?'No matching cookies':'No cookies available';}
+ cookieSearch.oninput=renderCookies;
+ const closeImport=()=>{importDialog.close();find('[data-computer-chrome-form]').hidden=true;selectedCookies.clear();updateSelection();};find('[data-computer-import-close]').onclick=closeImport;find('[data-computer-import-cancel]').onclick=closeImport;
+ importDialog.addEventListener('close',()=>{if(!importDialog.open){find('[data-computer-chrome-form]').hidden=true;selectedCookies.clear();updateSelection();}});
+ async function chromeSites(){const version=++cookieLoad;loadedCookies=[];sites.textContent='Loading cookies…';const url=new URL(scoped('/chrome'),location.href);url.searchParams.set('profile',profile.value);try{const res=await fetch(url,{cache:'no-store'});const data=await res.json();if(version!==cookieLoad)return;if(!res.ok)throw Error(data.message||'Could not load Chrome cookies');loadedCookies=data.cookies;renderCookies();}catch(e){if(version!==cookieLoad)return;sites.textContent='Could not load cookies';throw e;}}
  profile.onchange=()=>chromeSites().catch(e=>computerToast(e.message,'error'));
- async function openChromeImport(){if(pending)return;try{const res=await fetch(scoped('/chrome'),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Chrome profiles unavailable');pendingImport=data.pending_import?.id||'';find('[data-computer-import]').textContent=pendingImport?'Resume approved import':'Approve selected sign-ins';if(pendingImport){computerToast('An approved import is incomplete. Retry to resume remaining profiles.','info');find('[data-computer-import]').textContent='Resume approved import';}profile.replaceChildren();for(const name of data.profiles){profile.add(new Option(name,name));}find('[data-computer-chrome-form]').hidden=false;updateSelection();if(profile.value)await chromeSites();}catch(e){computerToast(e.message,'error');}};
+ async function openChromeImport(){if(pending)return;try{const res=await fetch(scoped('/chrome'),{cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.message||'Chrome profiles unavailable');pendingImport=data.pending_import?.id||'';find('[data-computer-import]').textContent=pendingImport?'Resume approved import':'Import selected';if(pendingImport){computerToast('An approved import is incomplete. Retry to resume remaining profiles.','info');find('[data-computer-import]').textContent='Resume approved import';}profile.replaceChildren();for(const name of data.profiles){profile.add(new Option(name,name));}find('[data-computer-chrome-form]').hidden=false;if(!importDialog.open)importDialog.showModal();cookieSearch.value='';loadedCookies=[];renderCookies();updateSelection();if(profile.value)await chromeSites();}catch(e){computerToast(e.message,'error');}};
  find('[data-computer-chrome]').onclick=openChromeImport;
  root.addEventListener('computer:import-chrome',openChromeImport);
- find('[data-computer-import-close]').onclick=()=>{find('[data-computer-chrome-form]').hidden=true;selectedCookies.clear();updateSelection();};
- find('[data-computer-import]').onclick=async event=>{if(!pendingImport&&!selectedCookies.size){computerToast('Select at least one cookie.','error');return;}event.target.disabled=true;pending=true;try{const res=await fetch(scoped('/chrome-import'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:pendingImport,scope:find('[data-computer-grant-scope]').value,hours:Number(find('[data-computer-grant-hours]').value),selections:[...selectedCookies.values()]})});const data=await res.json();if(!res.ok){if(data.grant_id){pendingImport=data.grant_id;find('[data-computer-import]').textContent='Resume approved import';}throw Error(data.message||'Import failed');}pendingImport='';find('[data-computer-import]').textContent='Approve selected sign-ins';computerToast('Imported '+data.imported+' cookies.'+(currentState?.handoff_kind==='request_chrome_login'?' Check your sign-in, then select Done.':''),'success');find('[data-computer-chrome-form]').hidden=true;selectedCookies.clear();updateSelection();}catch(e){computerToast(e.message,'error');}finally{event.target.disabled=false;pending=false;}};
+ find('[data-computer-import]').onclick=async event=>{if(importBusy)return;if(!pendingImport&&!selectedCookies.size){computerToast('Select at least one cookie.','error');return;}event.target.disabled=true;importBusy=true;pending=true;try{const res=await fetch(scoped('/chrome-import'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_id:pendingImport,scope:find('[data-computer-grant-scope]').value,hours:Number(find('[data-computer-grant-hours]').value),selections:[...selectedCookies.values()]})});const data=await res.json();if(!res.ok){if(data.grant_id){pendingImport=data.grant_id;find('[data-computer-import]').textContent='Resume approved import';}throw Error(data.message||'Import failed');}pendingImport='';find('[data-computer-import]').textContent='Import selected';computerToast('Imported '+data.imported+' cookies.'+(currentState?.handoff_kind==='request_chrome_login'?' Check your sign-in, then select Done.':''),'success');closeImport();selectedCookies.clear();updateSelection();}catch(e){computerToast(e.message,'error');}finally{importBusy=false;pending=false;updateSelection();}};
  const target=find('[data-computer-target]'), targetPicker=find('#computer-target-picker');
  const targetPickerUI=window.createInspectorPicker(root,targetPicker,()=>target.disabled);
  target.onclick=()=>targetPickerUI.open(target);
