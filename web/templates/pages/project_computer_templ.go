@@ -201,7 +201,7 @@ func ProjectComputerContent(projectID string, taskIDs ...string) templ.Component
 						}()
 					}
 					ctx = templ.InitializeContext(ctx)
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<span data-fullscreen-title></span><button type=\"button\" class=\"btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal\" data-teach-open>Teach a task</button>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<span data-fullscreen-title></span><button type=\"button\" class=\"btn btn-ghost btn-sm rounded-md px-2 text-sm font-normal\" data-teach-open>Teach a skill</button>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
