@@ -524,8 +524,8 @@ templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  </button>
  }
  @components.InspectorPicker("computer-grants-picker") {
- <div data-options="grants" data-computer-grant-list></div>
  <div data-options="import" class="ov-menu-create-row"><button type="button" class="ov-menu-option w-full" data-value="import" data-computer-manual-import hidden>Import Chrome sign-ins</button></div>
+ <div data-options="grants" data-computer-grant-list></div>
  }
  <script>
  (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{

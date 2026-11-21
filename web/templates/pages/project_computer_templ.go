@@ -350,7 +350,7 @@ func ProjectComputerPermissions(projectID, taskID string, compact ...bool) templ
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div data-options=\"grants\" data-computer-grant-list></div><div data-options=\"import\" class=\"ov-menu-create-row\"><button type=\"button\" class=\"ov-menu-option w-full\" data-value=\"import\" data-computer-manual-import hidden>Import Chrome sign-ins</button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div data-options=\"import\" class=\"ov-menu-create-row\"><button type=\"button\" class=\"ov-menu-option w-full\" data-value=\"import\" data-computer-manual-import hidden>Import Chrome sign-ins</button></div><div data-options=\"grants\" data-computer-grant-list></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
