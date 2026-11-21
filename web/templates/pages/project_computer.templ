@@ -184,8 +184,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
      const previewKey=JSON.stringify([root.dataset.computerProject,root.dataset.computerTask]);
      const teach=find('[data-computer-teach]');
      const teachNote=find('[data-teach-status]');
-     let previousCapture=null;
-     let connected=false, currentState=null, inViewport=true, ime=null, composing=false, pasteShift=false, recording=false, steps=[], images=[];
+     let connected=false, currentState=null, inViewport=true, ime=null, composing=false, pasteShift=false, recording=false;
      function inputActive(){return connected && frameReady && !retained && mode==='control' && dialog.open && !document.hidden && !closing;}
 
      function viewerShown(){return !root.closest('[data-computer-permission-pending]') && (dialog.open || root.getClientRects().length>0);}
@@ -198,7 +197,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       rfb.sendKey(key,code,true);rfb.sendKey(key,code,false);
       for(const [sym,name] of mods.reverse())rfb.sendKey(sym,name,false);
      }
-     function commitText(text){if(!inputActive()||!text)return;for(const char of text){const point=char.codePointAt(0);rfb.sendKey(point<=255?point:0x01000000+point,null,true);rfb.sendKey(point<=255?point:0x01000000+point,null,false);}addStep('Type [user-provided value] into the focused field.');}
+     function commitText(text){if(!inputActive()||!text)return;for(const char of text){const point=char.codePointAt(0);rfb.sendKey(point<=255?point:0x01000000+point,null,true);rfb.sendKey(point<=255?point:0x01000000+point,null,false);}}
      function focusKeyboard(){if(inputActive())ime?.focus({preventScroll:true});}
      function installKeyboard(){
       ime?.remove();ime=document.createElement('textarea');ime.setAttribute('aria-label','Remote computer keyboard');ime.autocomplete='off';ime.spellcheck=false;ime.setAttribute('autocapitalize','off');ime.style.cssText='position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;resize:none';screen.append(ime);
@@ -214,84 +213,58 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       const command=e.ctrlKey||(['Mac','iPhone','iPad'].some(name=>navigator.platform.includes(name))&&e.metaKey),letter=e.key.toLowerCase();
       if(command&&letter==='v'){pasteShift=e.shiftKey;e.stopImmediatePropagation();focusKeyboard();return;}
       const symbol=specialKeys[e.key]||(['F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12'].includes(e.key)?0xffbd+Number(e.key.slice(1)):null);
-      if(symbol||command||e.altKey){e.preventDefault();e.stopImmediatePropagation();const key=symbol||(e.key.length===1?e.key.codePointAt(0):null);if(key)chord(key,e.code,{ctrl:command,shift:e.shiftKey,alt:e.altKey});addStep(symbol?'Press '+e.key+'.':'Use a keyboard shortcut.');return;}
+      if(symbol||command||e.altKey){e.preventDefault();e.stopImmediatePropagation();const key=symbol||(e.key.length===1?e.key.codePointAt(0):null);if(key)chord(key,e.code,{ctrl:command,shift:e.shiftKey,alt:e.altKey});return;}
       if(e.target===ime)e.stopImmediatePropagation();
      },true);
-     screen.addEventListener('paste',e=>{if(!inputActive())return;e.preventDefault();e.stopImmediatePropagation();const text=e.clipboardData?.getData('text/plain');if(text){rfb.clipboardPasteFrom(text);chord(0x76,'KeyV',{ctrl:true,shift:pasteShift});addStep('Paste [user-provided value] into the focused field.');}pasteShift=false;if(ime)ime.value='';},true);
+     screen.addEventListener('paste',e=>{if(!inputActive())return;e.preventDefault();e.stopImmediatePropagation();const text=e.clipboardData?.getData('text/plain');if(text){rfb.clipboardPasteFrom(text);chord(0x76,'KeyV',{ctrl:true,shift:pasteShift});}pasteShift=false;if(ime)ime.value='';},true);
      screen.addEventListener('focusin',e=>{if(e.target.tagName==='CANVAS')queueMicrotask(focusKeyboard)});
-     screen.addEventListener('pointerup',e=>{if(e.target.tagName!=='CANVAS'||!inputActive())return;const r=e.target.getBoundingClientRect();addStep((e.button===2?'Right-click':'Click')+' at '+Math.round((e.clientX-r.left)*e.target.width/r.width)+', '+Math.round((e.clientY-r.top)*e.target.height/r.height)+' (locate the current semantic target).');queueMicrotask(focusKeyboard);},true);
-     screen.addEventListener('wheel',e=>{if(inputActive())addStep('Scroll '+(e.deltaY<0?'up':'down')+'.')},{passive:true,capture:true});
-     let teachState=null,teachSteps=0,teachImages=0,teachBusy=false,teachChain=Promise.resolve(),pendingTeachBatch=null;
+     screen.addEventListener('pointerup',e=>{if(e.target.tagName!=='CANVAS'||!inputActive())return;queueMicrotask(focusKeyboard);},true);
+     let teachState=null,teachSteps=0,teachImages=0,teachBusy=false,teachChain=Promise.resolve();
      function renderDemo(){
       find('[data-teach-record]').hidden=recording||teachBusy;
       find('[data-teach-record]').textContent=teachState?.state==='stopped'?'Resume recording':'Start recording';
-      find('[data-teach-stop]').hidden=!teachState||!['recording','stopped'].includes(teachState.state);
+      find('[data-teach-stop]').hidden=!teachState||!['recording','stopped','finished'].includes(teachState.state);
       find('[data-teach-stop]').disabled=teachBusy;
       find('[data-teach-discard]').disabled=teachBusy;
-      find('[data-teach-timer]').hidden=!teachState||!['recording','stopped'].includes(teachState.state);
+      find('[data-teach-timer]').hidden=!teachState||!['recording','stopped','finished'].includes(teachState.state);
       find('[data-teach-label]').textContent=recording?'Watching and learning':teachBusy?'Saving recording…':'Recording stopped';
       find('[data-teach-open]').hidden=recording||teachBusy||!!currentState?.handoff_kind;
       updateRecordingTimer();
      }
      function updateRecordingTimer(){const elapsed=teachState?Math.min(600,Math.max(0,Math.floor((Date.now()-Date.parse(teachState.started_at))/1000))):0;find('[data-teach-timer]').textContent=Math.floor(elapsed/60)+':'+String(elapsed%60).padStart(2,'0');}
      async function teachRequest(body){const response=await fetch(scoped('/recording'),body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'});const data=await response.json();if(!response.ok)throw Error(data.message||'Could not update recording');return data;}
-     function acceptTeach(data){teachState=data.recording;teachSteps=data.step_count;teachImages=data.image_count;recording=teachState.state==='recording'&&inputActive()&&!currentState?.handoff_kind;renderDemo();}
+     function acceptTeach(data){const previousError=teachState?.error;teachState=data.recording;if(teachState.error)teachNote.textContent=teachState.error;else if(previousError)teachNote.textContent="";teachSteps=data.step_count;teachImages=data.image_count;recording=teachState.state==='recording'&&inputActive()&&!currentState?.handoff_kind;renderDemo();}
      function queueTeach(action){const next=teachChain.then(action);teachChain=next.catch(()=>{});return next;}
-     async function flushTeach(){
-      // Bound each upload, not the recording. Drain all buffered captures before save.
-      while(teachState&&(steps.length||images.length||pendingTeachBatch)){
-       if(!pendingTeachBatch){
-        const batchSteps=steps.slice(0,256),batchImages=[];let bytes=0;
-        for(const image of images){if(batchImages.length&&bytes+image.length>8*1024*1024)break;batchImages.push(image);bytes+=image.length;}
-        pendingTeachBatch={action:'append',id:teachState.id,requestID:computerUUID(),revision:teachState.revision,steps:batchSteps,images:batchImages};
-       }
-       const batch=pendingTeachBatch,data=await teachRequest(batch);
-       steps.splice(0,batch.steps.length);images.splice(0,batch.images.length);pendingTeachBatch=null;
-       // Saving/pausing may already have stopped local capture while this request was in flight.
-       const wasRecording=recording;acceptTeach(data);recording=wasRecording;renderDemo();
-      }
-     }
      function teachError(error){recording=false;teachNote.textContent=error.message+' Your recording is preserved; retry saving or discard it.';renderDemo();}
      async function startTeaching(){
       if(!inputActive()||currentState?.handoff_kind||teachBusy)return;
       teach.hidden=false;teachBusy=true;renderDemo();
-      try{await queueTeach(async()=>{await flushTeach();acceptTeach(await teachRequest({action:'start'}));});previousCapture=null;teachNote.textContent='Screen changes are recorded. Stop before entering private information.';}
+      try{await queueTeach(async()=>{acceptTeach(await teachRequest({action:'start'}));});if(!teachState.error)teachNote.textContent='The project computer is recording your screen and actions. Stop before entering private information.';}
       catch(error){teachError(error)}finally{teachBusy=false;renderDemo();}
      }
      find('[data-teach-open]').onclick=startTeaching;
      find('[data-teach-record]').onclick=startTeaching;
      find('[data-teach-stop]').onclick=async()=>{
       if(teachBusy||!teachState)return;recording=false;teachBusy=true;renderDemo();
-      try{await queueTeach(async()=>{await flushTeach();acceptTeach(await teachRequest({action:'save',id:teachState.id}));});steps=[];images=[];teach.hidden=true;teachNote.textContent='';if(root.isConnected){dialog.close();await finishViewer();document.getElementById('task-message-input')?.focus();}computerToast('Recording sent to the task to learn.','success');}
+      try{await queueTeach(async()=>{acceptTeach(await teachRequest({action:'save',id:teachState.id}));});teach.hidden=true;teachNote.textContent='';if(root.isConnected){dialog.close();await finishViewer();document.getElementById('task-message-input')?.focus();}computerToast('Recording sent to the task to learn.','success');}
       catch(error){teachError(error)}finally{teachBusy=false;renderDemo();}
      };
      find('[data-teach-discard]').onclick=async()=>{
       if(teachBusy||!teachState)return;recording=false;teachBusy=true;renderDemo();
-      try{await queueTeach(async()=>{acceptTeach(await teachRequest({action:'discard',id:teachState.id}));});steps=[];images=[];pendingTeachBatch=null;previousCapture=null;teach.hidden=true;teachNote.textContent='';}
+      try{await queueTeach(async()=>{acceptTeach(await teachRequest({action:'discard',id:teachState.id}));});teach.hidden=true;teachNote.textContent='';}
       catch(error){teachError(error)}finally{teachBusy=false;renderDemo();}
      };
      function pauseTeaching(){
       if(teachBusy||!teachState||teachState.state!=='recording')return;
-      recording=false;renderDemo();queueTeach(async()=>{await flushTeach();acceptTeach(await teachRequest({action:'pause',id:teachState.id}));}).catch(teachError);
+      recording=false;renderDemo();queueTeach(async()=>{acceptTeach(await teachRequest({action:'pause',id:teachState.id}));}).catch(teachError);
      }
-     function addStep(text){if(!recording||!inputActive()||currentState?.handoff_kind||teachBusy)return;if(steps.at(-1)===text)return;steps.push(text);}
-     function captureScreen(note){
-      if(!recording||!inputActive()||currentState?.handoff_kind||teachBusy)return false;
-      const source=screen.querySelector('canvas:not([data-retained-frame])');if(!source?.width||retained)return false;
-      const canvas=document.createElement('canvas'),scale=Math.min(1,1280/Math.max(source.width,source.height));canvas.width=Math.round(source.width*scale);canvas.height=Math.round(source.height*scale);canvas.getContext('2d').drawImage(source,0,0,canvas.width,canvas.height);images.push(canvas.toDataURL('image/jpeg',.72).split(',')[1]);addStep('Capture: '+note);return true;
-     }
-     let teachFlushing=false;
-     const autoCaptureTimer=setInterval(()=>{
-      if(!recording||!inputActive()||currentState?.handoff_kind||teachBusy||retained)return;
-      if(Date.now()>=Date.parse(teachState.deadline)){pauseTeaching();teachNote.textContent='Ten-minute limit reached. Save or discard this recording.';return;}
-      const source=screen.querySelector('canvas:not([data-retained-frame])');if(!source?.width)return;
-      const thumbnail=document.createElement('canvas');thumbnail.width=32;thumbnail.height=18;const ctx=thumbnail.getContext('2d');ctx.drawImage(source,0,0,32,18);const pixels=ctx.getImageData(0,0,32,18).data;let delta=0;
-      if(previousCapture)for(let i=0;i<pixels.length;i+=4)delta+=Math.abs(pixels[i]-previousCapture[i])+Math.abs(pixels[i+1]-previousCapture[i+1])+Math.abs(pixels[i+2]-previousCapture[i+2]);
-      if(!previousCapture||delta>=32*18*3*12){if(captureScreen('Screen changed'))previousCapture=pixels.slice();}
-      if(!teachFlushing){teachFlushing=true;queueTeach(flushTeach).catch(teachError).finally(()=>{teachFlushing=false});}
-     },1200);
+     let teachPolling=false;
+     const recordingStatusTimer=setInterval(()=>{
+      if(teachBusy||teachPolling||!teachState||!['recording','stopped','finished'].includes(teachState.state)||document.hidden)return;
+      teachPolling=true;queueTeach(async()=>acceptTeach(await teachRequest())).catch(teachError).finally(()=>{teachPolling=false});
+     },2000);
      const recordingTimer=setInterval(updateRecordingTimer,1000);
-     function recoverTeaching(){if(teachBusy||pendingTeachBatch||steps.length||images.length)return;queueTeach(async()=>{acceptTeach(await teachRequest());teach.hidden=!['recording','stopped'].includes(teachState.state);}).catch(error=>{teachNote.textContent=error.message});}
+     function recoverTeaching(){if(teachBusy)return;queueTeach(async()=>{acceptTeach(await teachRequest());teach.hidden=!['recording','stopped','finished'].includes(teachState.state);}).catch(error=>{teachNote.textContent=error.message});}
      function suspendViewer(){
       pauseTeaching();recording=false;renderDemo();syncViewerInput();
       // Brief app switches keep the stream alive, but release keyboard and mouse input.
@@ -454,7 +427,7 @@ currentState=state;if(state.handoff_kind){pauseTeaching();recording=false;render
  function dispose(){
   if(closed)return;
   pauseTeaching();closed=true;statusStream?.close();statusStream=null;
-  clearTimeout(statusTimer);clearInterval(connectionTimer);screenRetry.dispose();clearInterval(autoCaptureTimer);clearInterval(recordingTimer);
+  clearTimeout(statusTimer);clearInterval(connectionTimer);screenRetry.dispose();clearInterval(recordingStatusTimer);clearInterval(recordingTimer);
   viewportObserver.disconnect();
   window.removeEventListener('live-transport-disconnected',statusDisconnected);
   window.removeEventListener('computer-preview-deleted',previewWasDeleted);

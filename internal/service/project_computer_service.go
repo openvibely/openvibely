@@ -357,11 +357,15 @@ func (s *ProjectComputerService) request(ctx context.Context, conn ComputerConne
 		return nil, errors.New("project computer is unavailable")
 	}
 	defer res.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(res.Body, 12_000_001))
+	limit := int64(12_000_000)
+	if path == "/recording" {
+		limit = 64 << 20
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > 12_000_000 {
+	if int64(len(b)) > limit {
 		return nil, errors.New("computer response too large")
 	}
 	if res.StatusCode != http.StatusOK {
@@ -610,6 +614,9 @@ func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, ow
 			}
 			if len(args.Reason) > 2000 || len(args.Expected) > 500 {
 				return "", true, true, errors.New("computer request is too long")
+			}
+			if _, err := s.RecordingCommand(call, projectID, "pause", "", 0); err != nil {
+				return "", true, true, err
 			}
 			if name == "request_computer_help" {
 				if err := s.cancelJobs(call, projectID, ""); err != nil {

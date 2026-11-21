@@ -143,13 +143,14 @@ func desktopJobsIdle(name string) (bool, time.Time) {
 	}
 	defer res.Body.Close()
 	var state struct {
-		ShellProcesses bool `json:"shell_processes_running"`
-		Jobs           *[]struct {
+		RecordingPending bool `json:"recording_pending"`
+		ShellProcesses   bool `json:"shell_processes_running"`
+		Jobs             *[]struct {
 			Running  bool      `json:"running"`
 			Finished time.Time `json:"finished_at"`
 		} `json:"jobs"`
 	}
-	if res.StatusCode != 200 || json.NewDecoder(res.Body).Decode(&state) != nil || state.Jobs == nil || state.ShellProcesses {
+	if res.StatusCode != 200 || json.NewDecoder(res.Body).Decode(&state) != nil || state.Jobs == nil || state.ShellProcesses || state.RecordingPending {
 		return false, time.Time{}
 	}
 	var finished time.Time

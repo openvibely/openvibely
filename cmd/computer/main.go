@@ -244,10 +244,10 @@ func computerPort(offset int) string {
 }
 func desktopServer() http.Handler {
 	mux := http.NewServeMux()
-	workspaceRoutes(mux)
+	recorder := recordingRoutes(mux)
+	workspaceRoutes(mux, func() bool { return recorder.recording.Status().ID != "" })
 	browserRoutes(mux)
-
-	viewers := &viewerConnections{}
+	viewers := &viewerConnections{recorder: recorder}
 	for route, port := range map[string]string{"/rfb-view": computerPort(4), "/rfb-control": computerPort(5)} {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
 			viewers.proxy(w, r, "ws://127.0.0.1:"+port+"/websockify")

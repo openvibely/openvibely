@@ -53,7 +53,7 @@ func homePath(path string) (string, error) {
 	}
 	return path, nil
 }
-func workspaceRoutes(mux *http.ServeMux) {
+func workspaceRoutes(mux *http.ServeMux, recordingBusy ...func() bool) {
 	mux.HandleFunc("POST /native-files", func(w http.ResponseWriter, r *http.Request) {
 		var p nativeFileRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&p); err != nil {
@@ -165,7 +165,7 @@ func workspaceRoutes(mux *http.ServeMux) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"path": filepath.Join(computerHome(), path), "bytes": len(data)})
 	})
-	shellRoutes(mux)
+	shellRoutes(mux, recordingBusy...)
 }
 
 type nativeFileRequest struct {

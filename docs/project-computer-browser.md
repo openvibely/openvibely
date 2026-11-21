@@ -152,3 +152,43 @@ docker run --rm --network none --entrypoint /suite/computer.test \
 Rebuild the OV server and project-computer image together: the action schema,
 server allowlist, helper worker and browser script form one interface. These
 fixture tests do not establish compatibility with every external website.
+
+## Teach a task recording
+
+The desktop helper captures JPEGs locally, starting at 250 ms. It keeps a bounded
+buffer (720 frames or 64 MiB), retaining alternate frames and doubling the capture
+interval when full. Recording stops after ten minutes. Input events and captures
+use the helper's elapsed clock; events are observed when forwarded to VNC, not
+when the application acknowledges them. Typed text and clipboard values are
+omitted from the action log; screenshots can still contain private information.
+
+The UI sends start/pause/save/discard commands and polls status. It does not
+capture or upload preview frames. The existing preview WebSocket stays unchanged.
+OV supplies a model-dependent image budget, and the helper selects up to 30
+frames, including the first and last. OV fetches those frames through its existing
+authenticated HTTP helper connection, then queues the timeline and image
+attachments in the task thread for skill creation. Normal provider admission
+checks still apply; the budget estimate is not a guarantee for every model or a
+later model switch.
+
+Save retries reuse the recording and queue ID. The helper retains raw captures
+until OV acknowledges durable queue admission. Unsaved recordings protect the
+desktop from idle cleanup and expire after one hour. Preview reconnects retain
+them; restarting the desktop helper loses this in-memory recording and reports an
+expired recording rather than submitting an empty demonstration.
+
+Reproduce the isolated capture regression (choose the architecture matching IMAGE):
+
+```sh
+go test ./internal/computerrecording
+go test ./internal/handler ./internal/service ./web/templates/pages -run 'Test(Computer|ProjectComputer|SavedTaskComputer|Recording)'
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -o /tmp/ov-computer.test ./cmd/computer
+docker run --rm --network none --entrypoint /suite/computer.test \
+  -e OV_RECORDING_LIVE_TEST=1 \
+  -v /tmp/ov-computer.test:/suite/computer.test:ro IMAGE \
+  -test.run 'Test(Recording|Viewer|DesktopIdle)' -test.v
+```
+
+The capture test starts its own Xvfb display and captures actual JPEGs. Its input
+peer is a synthetic WebSocket fixture, and the handler tests use a fake helper;
+these tests do not verify a live model's generated skill or a user's desktop.

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-func shellRoutes(mux *http.ServeMux) {
+func shellRoutes(mux *http.ServeMux, recordingBusy ...func() bool) {
 	manager := agenttools.NewProcessManager(shellCommand)
 	processRoutes(mux, manager)
 	mux.HandleFunc("GET /jobs", func(w http.ResponseWriter, r *http.Request) {
@@ -18,7 +18,8 @@ func shellRoutes(mux *http.ServeMux) {
 			values = append(values, j.Snapshot())
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"jobs": values, "shell_processes_running": shellProcessesRunning()})
+		busy := len(recordingBusy) > 0 && recordingBusy[0]()
+		json.NewEncoder(w).Encode(map[string]any{"jobs": values, "shell_processes_running": shellProcessesRunning(), "recording_pending": busy})
 	})
 	mux.HandleFunc("POST /jobs/cancel", func(w http.ResponseWriter, r *http.Request) {
 		var args struct {

@@ -4,8 +4,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"github.com/openvibely/openvibely/internal/computerrecording"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/coder/websocket"
@@ -15,6 +18,7 @@ import (
 type viewerConnections struct {
 	sync.Mutex
 	sessions map[string]bool
+	recorder *desktopRecorder
 }
 
 // Only the trusted app can reach this proxy.
@@ -52,6 +56,13 @@ func (v *viewerConnections) proxy(w http.ResponseWriter, r *http.Request, target
 	upstream.SetReadLimit(16 << 20)
 	downstream.SetReadLimit(1 << 20)
 	done := make(chan struct{}, 2)
+	observer := &computerrecording.Input{}
+	if v.recorder != nil && strings.HasSuffix(r.URL.Path, "rfb-control") {
+		observer.Action = v.recorder.recording.Action
+		observer.Unsupported = func() { v.recorder.recording.Fail(errors.New("unsupported desktop input protocol; recording stopped")) }
+	} else {
+		observer.Action = func(string) {}
+	}
 	copyFrames := func(dst, src *websocket.Conn) {
 		defer func() { done <- struct{}{} }()
 		for {
@@ -62,6 +73,7 @@ func (v *viewerConnections) proxy(w http.ResponseWriter, r *http.Request, target
 			if dst.Write(ctx, kind, data) != nil {
 				return
 			}
+			observer.Feed(data)
 		}
 	}
 	go func() {

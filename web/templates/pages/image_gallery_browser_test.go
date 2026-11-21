@@ -94,8 +94,10 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.evaluate(`const canvas=document.createElement('canvas');canvas.id='test-desktop-canvas';canvas.style.cssText='width:200px;height:150px';document.querySelector('[data-computer-screen]').append(canvas);document.querySelector('[data-computer-connection]').style.setProperty('display','none','important');'canvas'`)
 		b.click("#test-desktop-canvas")
 		b.waitFor("desktop clicks do not dismiss", `String(document.querySelector('[data-computer-dialog]').open)`, "true")
-		b.click("[data-teach-open]")
-		b.click("[data-teach-goal]")
+		// This gallery fixture has no connected VNC control session. Expose the
+		// toolbar to test its fullscreen dismissal boundary independently.
+		b.evaluate(`document.querySelector("[data-computer-teach]").hidden=false;"teaching toolbar"`)
+		b.click("[data-teach-label]")
 		b.waitFor("teaching controls do not dismiss", `String(document.querySelector('[data-computer-dialog]').open)`, "true")
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": 5, "y": 5, "button": "left", "clickCount": 1}, nil)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 5, "y": 5, "button": "left", "clickCount": 1}, nil)

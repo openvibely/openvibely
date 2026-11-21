@@ -76,59 +76,28 @@ func TestComputerVisibilityReconnectsWithoutTakeover(t *testing.T) {
 	}
 }
 
-func TestComputerRecordingUploadsAllCapturesInBatches(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node unavailable")
-	}
+// The production UI now sends commands only: image capture lives in the helper.
+func TestComputerRecordingSaveRetriesWithoutUploadingImages(t *testing.T) {
 	source, err := os.ReadFile("project_computer.templ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	extract := func(start, end string) string {
-		_, rest, ok := strings.Cut(string(source), start)
-		if !ok {
-			t.Fatalf("missing %s", start)
-		}
-		body, _, ok := strings.Cut(rest, end)
-		if !ok {
-			t.Fatalf("missing %s", end)
-		}
-		return start + body
+	_, body, ok := strings.Cut(string(source), "find('[data-teach-stop]').onclick=async()=>{")
+	if !ok {
+		t.Fatal("save handler missing")
 	}
-	script := `const assert=require('node:assert/strict');
- let recording=true,teachBusy=false,currentState={},teachSteps=100,teachImages=32;
- let steps=[],images=[],pendingTeachBatch=null,teachState={id:'demo',revision:0};
- const inputActive=()=>true,renderDemo=()=>{},computerUUID=()=>String(++uuid);let uuid=0;
- const retained=false,screen={querySelector:()=>({width:1280,height:720})};
- const document={createElement:()=>({getContext:()=>({drawImage(){}}),toDataURL:()=> 'data:image/jpeg;base64,'+'A'.repeat(1024*1024)})};
- let attempts=[],savedSteps=[],savedImages=[],fail=true;
- async function teachRequest(batch){
-  attempts.push(JSON.parse(JSON.stringify(batch)));
-  assert.ok(JSON.stringify(batch).length<28*1024*1024);
-  if(fail){fail=false;throw Error('network interruption')}
-  assert.equal(batch.revision,teachState.revision);
-  savedSteps.push(...batch.steps);savedImages.push(...batch.images);
-  return {recording:{id:'demo',revision:batch.revision+1}};
- }
- function acceptTeach(data){teachState=data.recording}
- ` + extract("function addStep(text)", "     let teachFlushing") + extract("async function flushTeach(){", "     function teachError") + `
- (async()=>{
- for(let i=0;i<120;i++)addStep('Action '+i);
- for(let i=0;i<40;i++)assert.equal(captureScreen('Frame '+i),true);
- assert.equal(recording,true);assert.equal(steps.length,160);assert.equal(images.length,40);
- await assert.rejects(flushTeach(),/network interruption/);
- assert.equal(steps.length,160);assert.equal(images.length,40);
- const retry=JSON.stringify(pendingTeachBatch);
- recording=false;await flushTeach();
- assert.equal(JSON.stringify(attempts[1]),retry);
- assert.equal(savedSteps.length,160);assert.equal(savedImages.length,40);
- assert.equal(steps.length,0);assert.equal(images.length,0);assert.equal(pendingTeachBatch,null);
- assert.equal(recording,false);assert.ok(attempts.length>2);
- })().catch(error=>{console.error(error);process.exit(1)});
- `
-	cmd := exec.Command(node, "-e", script)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("recording batching: %v\n%s", err, out)
+	body, _, ok = strings.Cut(body, "     find('[data-teach-discard]')")
+	if !ok {
+		t.Fatal("save end missing")
+	}
+	script := `const assert=require('node:assert/strict');let teachBusy=false,teachState={id:'demo'},recording=true,failed=false,calls=[];
+ const root={isConnected:false},teach={},teachNote={},renderDemo=()=>{},acceptTeach=()=>{},computerToast=()=>{};
+ const queueTeach=fn=>fn();const teachError=()=>{failed=true};let fail=true;
+ async function teachRequest(body){calls.push(body);if(fail){fail=false;throw Error('network')};return {recording:{id:'demo',state:'saved'}}}
+ const save=async()=>{` + body + `
+ (async()=>{await save();assert.equal(failed,true);assert.equal(teachBusy,false);await save();assert.deepEqual(calls,[{action:'save',id:'demo'},{action:'save',id:'demo'}]);assert.equal(teach.hidden,true)})().catch(e=>{console.error(e);process.exit(1)});`
+	out, err := exec.Command("node", "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
 	}
 }

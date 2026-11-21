@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -236,6 +237,10 @@ func TestComputerCleanupDoesNotLockOtherCandidates(t *testing.T) {
 			case <-release:
 			case <-r.Context().Done():
 			}
+		}
+		if strings.HasSuffix(r.URL.Path, "/recording") {
+			w.Write([]byte(`{}`))
+			return
 		}
 		w.Write([]byte(`[]`))
 	}))

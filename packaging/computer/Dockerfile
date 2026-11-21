@@ -1,6 +1,7 @@
 FROM golang:1.27.4 AS builder
 WORKDIR /src
 COPY cmd/computer/ ./cmd/computer/
+COPY internal/computerrecording/ ./internal/computerrecording/
 COPY pkg/agenttools/ ./pkg/agenttools/
 COPY pkg/executionenv/ ./pkg/executionenv/
 COPY pkg/gitidentity/ ./pkg/gitidentity/

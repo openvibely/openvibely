@@ -143,10 +143,9 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if(window.fixtureRFB.pasted!=='private-paste')throw Error('Paste not bridged');
  if(q('[data-computer-clipboard]'))throw Error('Manual clipboard control remains');window.fixtureRFB.listeners.clipboard({detail:{text:'remote-copy'}});await wait(()=>window.copiedRemote==='remote-copy','clipboard');
  const recordingStatus=async()=>await(await fetch('/projects/project/computer/recording?task_id=task')).json();
- await new Promise(r=>setTimeout(r,1500));const first=await recordingStatus();if(first.image_count!==1)throw Error('Initial capture not persisted');
- await new Promise(r=>setTimeout(r,1400));if((await recordingStatus()).image_count!==1)throw Error('Unchanged screen captured twice');
- window.fixtureRFB.canvas.getContext('2d').fillStyle='white';window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
- await new Promise(r=>setTimeout(r,1500));if((await recordingStatus()).image_count!==2)throw Error('Changed screen not recorded');
+ await new Promise(r=>setTimeout(r,3000));
+ if((await recordingStatus()).recording.state!=='recording')throw Error('Recording status not retained');
+ window.fixtureRFB.canvas.getContext('2d').fillRect(0,0,300,150);
  await fetch('/fixture-private');await window.pushComputer();await new Promise(r=>setTimeout(r,1500));
  if((await recordingStatus()).recording.state!=='stopped')throw Error('Private handoff did not stop recording');
  await fetch('/fixture-public');await window.pushComputer();q('[data-teach-open]').click();await wait(()=>!q('[data-teach-stop]').disabled&&!q('[data-teach-stop]').hidden);
@@ -270,6 +269,8 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 					Steps, Images         []string
 				}
 				require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+				require.Empty(t, input.Images, "UI must not upload captures")
+				require.Empty(t, input.Steps, "helper records input")
 				switch input.Action {
 				case "start":
 					if fixtureRecording.State != "stopped" && fixtureRecording.State != "recording" {
@@ -277,9 +278,7 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 					}
 					fixtureRecording.State = "recording"
 				case "append":
-					fixtureRecording.Steps = append(fixtureRecording.Steps, input.Steps...)
-					fixtureRecording.Images = append(fixtureRecording.Images, input.Images...)
-					fixtureRecording.Revision++
+					t.Error("UI attempted obsolete screenshot upload")
 				case "pause":
 					fixtureRecording.State = "stopped"
 				case "discard":
@@ -325,8 +324,8 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 
 	require.True(t, enabled) // Removing the preview must not disable the computer.
 	require.Equal(t, 1, saveCount)
-	require.GreaterOrEqual(t, len(demonstration.Images), 2)
+	require.Empty(t, demonstration.Images, "capture now belongs to the helper")
 	require.NotContains(t, strings.Join(demonstration.Steps, " "), "private-value")
 	require.NotContains(t, strings.Join(demonstration.Steps, " "), "private-paste")
-	require.Contains(t, strings.Join(demonstration.Steps, " "), "Capture:")
+	require.Empty(t, demonstration.Steps, "UI sends commands only")
 }
