@@ -181,9 +181,9 @@ func TestComputerManualChromeConsentAcrossProfilesInPanel(t *testing.T) {
  q('[data-computer-grants-open]').click();await wait(()=>!q('[data-computer-manual-import]').hidden);
  q('[data-computer-manual-import]').click();await wait(()=>q('[data-computer-sites] input'));
  if(q('[data-computer-chrome-form]').closest('[data-computer-login]'))throw Error('Manual picker hidden in handoff');
- q('[data-computer-sites] input').click();
+ q('[data-computer-sites] .cookie-row input').click();
  q('[data-computer-profile]').value='Profile 1';q('[data-computer-profile]').dispatchEvent(new Event('change'));
- await wait(()=>q('[data-computer-sites]').textContent.includes('second-session'));q('[data-computer-sites] input').click();
+ await wait(()=>q('[data-computer-sites]').textContent.includes('second-session'));q('[data-computer-sites] .cookie-row input').click();
  q('[data-computer-grant-scope]').value='project';q('[data-computer-grant-hours]').value='24';q('[data-computer-import]').click();
  await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-chrome-form]').hidden && toastMessages.some(t=>t.message.includes('Imported 2')));
  if(toastMessages.some(t=>t.type==='success'&&t.message.includes('Done')))throw Error('Manual import asked to resume');
