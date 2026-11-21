@@ -68,8 +68,7 @@ func TestComputerGrantPagesAndRevocation(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	require.Equal(t, 200, rec.Code, rec.Body.String())
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page))
-	require.Len(t, page.Grants, 1)
-	require.True(t, page.Grants[0].Revoked)
+	require.Empty(t, page.Grants, "fully revoked permissions should disappear after cleanup")
 }
 
 func TestComputerGrantPaginationBrowser(t *testing.T) {

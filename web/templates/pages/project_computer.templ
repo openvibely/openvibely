@@ -515,6 +515,7 @@ templ ProjectComputerToggle(projectID string) {
 templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  @ComputerErrorReporter()
  <div data-computer-grants data-grants-project={projectID} data-grants-task={taskID}>
+ <style>.ov-menu [data-computer-grant-list] > .ov-menu-option{align-items:flex-start;text-align:left}</style>
  if len(compact)>0 && compact[0] {
  <button type="button" class="btn btn-ghost permissions-button" data-computer-grants-open data-picker-align="end" aria-haspopup="dialog">Manage <span aria-hidden="true">›</span></button>
  } else {
