@@ -85,21 +85,25 @@ func TestComputerGrantPaginationBrowser(t *testing.T) {
  const q=s=>document.querySelector(s);const wait=async(f,label)=>{for(let n=0;n<200;n++){if(f())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out '+label);};
  const result=document.createElement('div');result.id='grant-result';
  try {
- q('[data-computer-grants-open]').click();await wait(()=>q('[data-computer-grant-list]').textContent.includes('old.example'),'all permissions loaded');
- if(!q('#computer-grants-picker').matches(':popover-open'))throw Error('Permissions dropdown closed');
+ q('[data-computer-grants-open]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await wait(()=>q('[data-computer-grant-list]').textContent.includes('old.example'),'all permissions loaded');
+ if(!q('#computer-grants-picker-dialog').open)throw Error('Permissions dropdown closed');
  if(q('[data-computer-grants-next]'))throw Error('Obsolete pagination controls');
- const searchInput=q('#computer-grants-picker input');
+ const searchInput=q('#computer-grants-picker-dialog input');
  const grantButton=q('[data-computer-grant-list] button');let activations=0;
  grantButton.addEventListener('click',()=>activations++);
- if(grantButton.hasAttribute('data-active'))throw Error('Unexpected default highlight');
+ if(grantButton.hasAttribute('data-selector-active'))throw Error('Unexpected default highlight');
  searchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
  if(activations!==0)throw Error('Enter activated an unhighlighted permission');
  searchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
- if(!grantButton.hasAttribute('data-active'))throw Error('ArrowDown did not highlight permission');
+ if(!grantButton.hasAttribute('data-selector-active'))throw Error('ArrowDown did not highlight permission');
+ const menu=q('#computer-grants-picker-dialog');
+ const reference=document.createElement('span');reference.style.background='oklch(var(--bc) / .06)';menu.append(reference);
+ for(const color of ['0.9 0 0','0.2 0 0']){menu.style.setProperty('--bc',color);if(getComputedStyle(grantButton).backgroundColor!==getComputedStyle(reference).backgroundColor)throw Error('Permission highlight differs from shared selector styling');}
+ reference.remove();menu.style.removeProperty('--bc');
  grantButton.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
  if(activations!==1)throw Error('Enter did not activate highlighted permission');
  await wait(()=>q('[data-computer-grant-list]').textContent.includes('Revoked'),'permission revoked');
- const search=q('#computer-grants-picker input');search.value='missing.example';search.dispatchEvent(new Event('input'));if(!q('[data-computer-grant-list] button').hidden)throw Error('Search did not filter grant');
+ const search=q('#computer-grants-picker-dialog input');search.value='missing.example';search.dispatchEvent(new Event('input'));if(!q('[data-computer-grant-list] button').hidden)throw Error('Search did not filter grant');
  search.value='old.example';search.dispatchEvent(new Event('input'));if(q('[data-computer-grant-list] button').hidden)throw Error('Matching grant hidden');
 
  result.dataset.status='pass';
