@@ -1772,14 +1772,14 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "</select> <button id=\"model_refresh\" type=\"button\" class=\"btn btn-square btn-outline hidden\" aria-label=\"Refresh models\" data-tooltip-disabled onclick=\"refreshModelDiscovery()\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5\"></path></svg> <span class=\"loading loading-spinner loading-sm hidden\" aria-hidden=\"true\"></span></button></div><p id=\"openai_compatible_discovery_status\" class=\"text-sm mt-2 hidden\" role=\"status\" aria-live=\"polite\"></p></div><!-- Connection method selector for Anthropic OAuth (CLI option removed) --><div id=\"auth_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_auth_method\" class=\"select select-bordered\" onchange=\"toggleSubscriptionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option></select></div><div id=\"subscription_info_oauth\" class=\"text-sm opacity-70 mb-3 hidden\">Uses your Anthropic subscription through OAuth.</div><div id=\"openai_subscription_info_oauth\" class=\"text-sm opacity-70 mb-3 hidden\">Uses your OpenAI subscription through OAuth.</div><div id=\"gemini_subscription_info_oauth\" class=\"text-sm opacity-70 mb-3 hidden\">Uses your Google account through Gemini Code Assist OAuth.</div><div id=\"ollama_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Local Ollama Instance</p><p class=\"text-sm\">Uses Ollama’s OpenAI-compatible Chat Completions API. The editable request budget controls OpenVibely’s budgeting and compaction; it does not set the server context window. Configure the actual window on the Ollama server. Native <code>num_ctx</code> is no longer sent; max output uses <code>max_tokens</code>. Native-only options such as <code>keep_alive</code>, <code>top_k</code>, <code>min_p</code>, and <code>repeat_penalty</code> are not carried over.</p></div></div></div><div id=\"openai_compatible_fields\" class=\"hidden\"><input type=\"hidden\" id=\"model_openai_compatible_preset\" name=\"preset_slug\" value=\"custom\"> <input type=\"hidden\" id=\"model_openai_compatible_transport\" name=\"transport\" value=\"chat_completions\"><div id=\"model_manual_id_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model ID</span></label> <input type=\"text\" id=\"model_openai_compatible_custom_model\" class=\"input input-bordered\" placeholder=\"provider/model-id\" oninput=\"syncOpenAICompatibleModel()\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Stored exactly as entered, after trimming whitespace.</span></label></div></div><div id=\"mixture_fields\" class=\"hidden\" data-options=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "</select> <button id=\"model_refresh\" type=\"button\" class=\"btn btn-square btn-outline hidden\" aria-label=\"Refresh models\" data-tooltip-disabled onclick=\"refreshModelDiscovery()\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5\"></path></svg> <span class=\"loading loading-spinner loading-sm hidden\" aria-hidden=\"true\"></span></button></div><p id=\"openai_compatible_discovery_status\" class=\"text-sm mt-2 hidden\" role=\"status\" aria-live=\"polite\"></p></div><!-- Connection method selector for Anthropic OAuth (CLI option removed) --><div id=\"auth_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_auth_method\" class=\"select select-bordered\" onchange=\"toggleSubscriptionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option></select></div><div id=\"subscription_info_oauth\" class=\"text-sm opacity-70 mb-3 hidden\">Uses your Anthropic subscription through OAuth.</div><div id=\"openai_subscription_info_oauth\" class=\"text-sm opacity-70 mb-3 hidden\">Uses your OpenAI subscription through OAuth.</div><div id=\"gemini_subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"text-sm opacity-70 mb-3\">Uses your Google account through Gemini Code Assist OAuth.</div><div class=\"form-control\"><label class=\"label\" for=\"model_gemini_cloud_project\"><span class=\"label-text\">Google Cloud project (optional)</span></label> <input type=\"text\" name=\"gemini_cloud_project\" id=\"model_gemini_cloud_project\" class=\"input input-bordered\" autocomplete=\"off\" placeholder=\"Required for Workspace or paid Code Assist accounts\"></div></div><div id=\"ollama_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Local Ollama Instance</p><p class=\"text-sm\">Uses Ollama’s OpenAI-compatible Chat Completions API. The editable request budget controls OpenVibely’s budgeting and compaction; it does not set the server context window. Configure the actual window on the Ollama server. Native <code>num_ctx</code> is no longer sent; max output uses <code>max_tokens</code>. Native-only options such as <code>keep_alive</code>, <code>top_k</code>, <code>min_p</code>, and <code>repeat_penalty</code> are not carried over.</p></div></div></div><div id=\"openai_compatible_fields\" class=\"hidden\"><input type=\"hidden\" id=\"model_openai_compatible_preset\" name=\"preset_slug\" value=\"custom\"> <input type=\"hidden\" id=\"model_openai_compatible_transport\" name=\"transport\" value=\"chat_completions\"><div id=\"model_manual_id_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model ID</span></label> <input type=\"text\" id=\"model_openai_compatible_custom_model\" class=\"input input-bordered\" placeholder=\"provider/model-id\" oninput=\"syncOpenAICompatibleModel()\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Stored exactly as entered, after trimming whitespace.</span></label></div></div><div id=\"mixture_fields\" class=\"hidden\" data-options=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var74 string
 		templ_7745c5c3_Var74, templ_7745c5c3_Err = templruntime.NewAttributeExpression(mixtureModelOptionsJSON(modelOptions)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 820, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 826, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 		if templ_7745c5c3_Err != nil {
@@ -1797,7 +1797,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var75 string
 			templ_7745c5c3_Var75, templ_7745c5c3_Err = templruntime.NewAttributeExpression(option.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 833, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 839, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 			if templ_7745c5c3_Err != nil {
@@ -1810,7 +1810,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var76 string
 			templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(option.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 833, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 839, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 			if templ_7745c5c3_Err != nil {
@@ -1823,7 +1823,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var77 string
 			templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinStringErrs(string(option.Provider))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 833, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 839, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
 			if templ_7745c5c3_Err != nil {
@@ -1836,7 +1836,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var78 string
 			templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(option.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 833, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 839, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
 			if templ_7745c5c3_Err != nil {
@@ -1859,7 +1859,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var79 string
 			templ_7745c5c3_Var79, templ_7745c5c3_Err = templruntime.NewAttributeExpression(option.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 844, Col: 38}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 850, Col: 38}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var79)
 			if templ_7745c5c3_Err != nil {
@@ -1872,7 +1872,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var80 string
 			templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(option.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 844, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 850, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 			if templ_7745c5c3_Err != nil {
@@ -1885,7 +1885,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var81 string
 			templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(string(option.Provider))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 844, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 850, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
 			if templ_7745c5c3_Err != nil {
@@ -1898,7 +1898,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var82 string
 			templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinStringErrs(option.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 844, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 850, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 			if templ_7745c5c3_Err != nil {
@@ -2013,7 +2013,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var84 string
 		templ_7745c5c3_Var84, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fieldID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3177, Col: 22}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3183, Col: 22}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84)
 		if templ_7745c5c3_Err != nil {
@@ -2026,7 +2026,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var85 string
 		templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3177, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3183, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var85))
 		if templ_7745c5c3_Err != nil {
@@ -2039,7 +2039,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var86 string
 		templ_7745c5c3_Var86, templ_7745c5c3_Err = templruntime.NewAttributeExpression(helpID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3178, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3184, Col: 35}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 		if templ_7745c5c3_Err != nil {
@@ -2052,7 +2052,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var87 string
 		templ_7745c5c3_Var87, templ_7745c5c3_Err = templruntime.NewAttributeExpression(help).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3178, Col: 136}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3184, Col: 136}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var87)
 		if templ_7745c5c3_Err != nil {
@@ -2065,7 +2065,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var88 string
 		templ_7745c5c3_Var88, templ_7745c5c3_Err = templruntime.NewAttributeExpression(help).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3178, Col: 156}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3184, Col: 156}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
 		if templ_7745c5c3_Err != nil {

@@ -796,7 +796,13 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					</div>
 					<div id="subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your Anthropic subscription through OAuth.</div>
 						<div id="openai_subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your OpenAI subscription through OAuth.</div>
-						<div id="gemini_subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your Google account through Gemini Code Assist OAuth.</div>
+						<div id="gemini_subscription_info_oauth" class="mb-3 hidden">
+							<div class="text-sm opacity-70 mb-3">Uses your Google account through Gemini Code Assist OAuth.</div>
+							<div class="form-control">
+								<label class="label" for="model_gemini_cloud_project"><span class="label-text">Google Cloud project (optional)</span></label>
+								<input type="text" name="gemini_cloud_project" id="model_gemini_cloud_project" class="input input-bordered" autocomplete="off" placeholder="Required for Workspace or paid Code Assist accounts"/>
+							</div>
+						</div>
 					<div id="ollama_info" class="mb-3 hidden">
 						<div class="alert alert-info">
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>

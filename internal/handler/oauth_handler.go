@@ -70,6 +70,7 @@ type oauthPendingFlow struct {
 	ClientSecret   string // Only used for OpenAI OAuth
 	TokenURL       string // From model config (OpenAI) or hardcoded (Claude Max)
 	ProjectID      string
+	CloudProject   string
 	CustomConfig   string
 	ConfigRevision int64
 }
@@ -387,6 +388,7 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		ClientSecret:   clientSecret,
 		TokenURL:       tokenEndpoint,
 		ProjectID:      c.QueryParam("project_id"),
+		CloudProject:   strings.TrimSpace(c.FormValue("gemini_cloud_project")),
 		CustomConfig:   agent.CustomAuthConfigJSON,
 		ConfigRevision: agent.OAuthConfigRevision,
 	}
@@ -801,7 +803,7 @@ func (h *Handler) exchangeGeminiOAuthCodeAndSaveTokens(ctx context.Context, flow
 		return 0, err
 	}
 	setupCtx, cancelSetup := context.WithTimeout(ctx, 90*time.Second)
-	project, err := geminiclient.SetupCodeAssist(setupCtx, tokens.AccessToken, strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_PROJECT")))
+	project, err := geminiclient.SetupCodeAssist(setupCtx, tokens.AccessToken, firstNonEmpty(flow.CloudProject, strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_PROJECT"))))
 	cancelSetup()
 	if err != nil {
 		return 0, err

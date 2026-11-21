@@ -182,6 +182,7 @@ Pending SSO transactions are bounded and process-local. Run exactly one OpenVibe
 | `OPENAI_OAUTH_SCOPES` | OpenAI scopes override | Optional | Space-delimited scope string | `openid profile email offline_access api.connectors.read api.connectors.invoke` | Not secret; grant least privilege needed | unset \| provider-specific scopes |
 | `GEMINI_OAUTH_CLIENT_ID` | Hosted Gemini OAuth client ID | Required for hosted Gemini OAuth | Google OAuth "Web application" client ID with `APP_BASE_URL/oauth2callback` as an authorized redirect URI | Unset keeps Gemini OAuth on localhost callbacks (built-in client accepts only loopback redirects) | Client ID is not secret | unset \| `123-abc.apps.googleusercontent.com` |
 | `GEMINI_OAUTH_CLIENT_SECRET` | Hosted Gemini OAuth client secret | Required with `GEMINI_OAUTH_CLIENT_ID` | String | Used for hosted Gemini code exchange and token refresh | Secret: store in env/secret manager, never in git | unset \| `__REPLACE_WITH_GEMINI_OAUTH_CLIENT_SECRET__` |
+| `GOOGLE_CLOUD_PROJECT` | Default Google Cloud project for Gemini Code Assist sign-in | Optional | String | Used when the model form's "Google Cloud project" field is blank; needed for Workspace or paid Code Assist accounts | Not secret | unset \| `my-gcp-project` |
 
 Auth-secret values should always be supplied as environment variables (or secret manager injection), not hardcoded in source, Compose YAML, or committed `.env` files.
 

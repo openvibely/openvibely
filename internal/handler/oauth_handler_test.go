@@ -1327,6 +1327,28 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		require.Contains(t, location, "redirect_uri=http%3A%2F%2Flocalhost%3A53692%2Foauth2callback")
 	})
 
+	t.Run("stores gemini cloud project from form", func(t *testing.T) {
+		t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
+		h, e, llmConfigRepo := setupTestHandler(t)
+		model := &models.LLMConfig{Name: "Workspace Gemini", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-2.5-pro"}
+		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
+
+		req := httptest.NewRequest(http.MethodPost, "/models/"+model.ID+"/oauth/initiate", strings.NewReader("gemini_cloud_project=+my-proj+"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(model.ID)
+		require.NoError(t, h.OAuthInitiate(c))
+		state, err := url.Parse(rec.Header().Get("Location"))
+		require.NoError(t, err)
+		oauthFlowsMu.Lock()
+		flow := oauthFlows[state.Query().Get("state")]
+		oauthFlowsMu.Unlock()
+		require.NotNil(t, flow)
+		require.Equal(t, "my-proj", flow.CloudProject)
+	})
+
 	t.Run("uses built-in openai client when hosted client id is not provided", func(t *testing.T) {
 		t.Setenv("APP_BASE_URL", "https://dubee.org")
 		t.Setenv("OPENAI_OAUTH_CLIENT_ID", "")
