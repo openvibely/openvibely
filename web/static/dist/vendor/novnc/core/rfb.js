@@ -46,7 +46,7 @@ const DEFAULT_BACKGROUND = 'rgb(40, 40, 40)';
 const MOUSE_MOVE_DELAY = 17;
 
 // Wheel thresholds
-const WHEEL_STEP = 50; // Pixels needed for one step
+const WHEEL_STEP = 35; // OV: lower threshold for slow trackpad scrolling
 const WHEEL_LINE_HEIGHT = 19; // Assumed pixels for one line step
 
 // Gesture thresholds

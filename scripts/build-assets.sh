@@ -109,6 +109,12 @@ novnc=$(fetch "https://codeload.github.com/novnc/noVNC/tar.gz/refs/tags/v${NOVNC
 mkdir -p "$cache/novnc" "$dist/vendor/novnc"
 tar -xzf "$novnc" -C "$cache/novnc" --strip-components=1 "noVNC-${NOVNC_VERSION}/core" "noVNC-${NOVNC_VERSION}/vendor" "noVNC-${NOVNC_VERSION}/LICENSE.txt" "noVNC-${NOVNC_VERSION}/docs/LICENSE.MPL-2.0" "noVNC-${NOVNC_VERSION}/docs/LICENSE.BSD-3-Clause"
 cp -R "$cache/novnc/core" "$cache/novnc/vendor" "$dist/vendor/novnc/"
+# Reduce slow-trackpad batching; retain VNC wheel input for all desktop apps.
+# Fail on upstream changes rather than silently dropping this adjustment.
+rfb="$dist/vendor/novnc/core/rfb.js"
+grep -q '^const WHEEL_STEP = 50; // Pixels needed for one step$' "$rfb"
+sed 's/^const WHEEL_STEP = 50; \/\/ Pixels needed for one step$/const WHEEL_STEP = 35; \/\/ OV: lower threshold for slow trackpad scrolling/' "$rfb" > "$rfb.tmp"
+mv "$rfb.tmp" "$rfb"
 cp "$cache/novnc/LICENSE.txt" "$cache/novnc/docs/LICENSE.MPL-2.0" "$cache/novnc/docs/LICENSE.BSD-3-Clause" "$dist/vendor/novnc/"
 
 cp "$assets/kanban.js" "$dist/kanban.js"
