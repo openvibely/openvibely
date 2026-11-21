@@ -43,10 +43,18 @@ func testComputerChromeConsent(t *testing.T, expanded bool) {
  if(EXPANDED)q('[data-computer-preview-open]').click();
  q('[data-computer-chrome]').click();await wait(()=>q('[data-computer-sites] input'));
  if(!q('[data-computer-import-dialog]').open)throw Error('Importer is not modal');
+ const cookieText=q('[data-computer-sites] .cookie-row span');
+ cookieText.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));cookieText.click();
+ if(EXPANDED&&!q('[data-computer-dialog]').open)throw Error('Cookie text closed computer viewer');
+ const modalTitle=q('[data-computer-chrome-form]');
+ modalTitle.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));modalTitle.click();
+ if(EXPANDED&&!q('[data-computer-dialog]').open)throw Error('Modal padding closed computer viewer');
+ q('[data-computer-sites] .cookie-row input').checked=true;q('[data-computer-sites] .cookie-row input').dispatchEvent(new Event('change'));
  q('[data-computer-import-cancel]').click();
  if(q('[data-computer-import-dialog]').open)throw Error('Cancel did not close importer');
  if(EXPANDED&&!q('[data-computer-dialog]').open)throw Error('Cancel closed computer viewer');
  q('[data-computer-chrome]').click();await wait(()=>q('[data-computer-import-dialog]').open&&q('[data-computer-sites] .cookie-row input'));
+ if(q('[data-computer-sites] .cookie-row input').checked||!q('[data-computer-import]').disabled)throw Error('Cancel retained cookie selections');
  const search=q('[data-computer-cookie-search]');search.value='first-session';search.dispatchEvent(new Event('input'));
  if(q('[data-computer-sites]').textContent.includes('unselected'))throw Error('Search did not filter');
  search.value='';search.dispatchEvent(new Event('input'));
