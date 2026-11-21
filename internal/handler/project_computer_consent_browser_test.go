@@ -20,6 +20,12 @@ import (
 )
 
 func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
+	for _, expanded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expanded=%t", expanded), func(t *testing.T) { testComputerChromeConsent(t, expanded) })
+	}
+}
+
+func testComputerChromeConsent(t *testing.T, expanded bool) {
 	if testing.Short() {
 		t.Skip("browser test")
 	}
@@ -30,14 +36,23 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
 	var fragment bytes.Buffer
 	require.NoError(t, pages.ProjectComputerContent("project", "task").Render(t.Context(), &fragment))
 	runner := `<script>(async()=>{
- const wait=async check=>{for(let n=0;n<100;n++){if(check())return;await new Promise(r=>setTimeout(r,20));}throw Error('Timed out');};
+ const wait=async check=>{for(let n=0;n<100;n++){if(check())return;await new Promise(r=>setTimeout(r,20));}throw Error('Timed out: '+check.toString()+' toasts='+JSON.stringify(window.toastMessages));};
  const q=s=>document.querySelector(s);const finish=(status,message)=>{const node=document.createElement('div');node.id='browser-result';node.dataset.status=status;node.textContent=message;document.body.append(node);};
  try{
  await wait(()=>!q('[data-computer-login]').hidden);
+ if(EXPANDED)q('[data-computer-preview-open]').click();
  q('[data-computer-chrome]').click();await wait(()=>q('[data-computer-sites] input'));
- q('[data-computer-sites] input').click();
+ if(!q('[data-computer-import-dialog]').open)throw Error('Importer is not modal');
+ q('[data-computer-import-cancel]').click();
+ if(q('[data-computer-import-dialog]').open)throw Error('Cancel did not close importer');
+ if(EXPANDED&&!q('[data-computer-dialog]').open)throw Error('Cancel closed computer viewer');
+ q('[data-computer-chrome]').click();await wait(()=>q('[data-computer-import-dialog]').open&&q('[data-computer-sites] .cookie-row input'));
+ const search=q('[data-computer-cookie-search]');search.value='first-session';search.dispatchEvent(new Event('input'));
+ if(q('[data-computer-sites]').textContent.includes('unselected'))throw Error('Search did not filter');
+ search.value='';search.dispatchEvent(new Event('input'));
+ q('[data-computer-sites] .cookie-row input').click();
  q('[data-computer-profile]').value='Profile 1';q('[data-computer-profile]').dispatchEvent(new Event('change'));
- await wait(()=>q('[data-computer-sites]').textContent.includes('second-session'));q('[data-computer-sites] input').click();
+ await wait(()=>q('[data-computer-sites]').textContent.includes('second-session'));q('[data-computer-sites] .cookie-row input').click();
  q('[data-computer-grant-scope]').value='project';q('[data-computer-grant-hours]').value='24';q('[data-computer-import]').click();
  await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-chrome-form]').hidden && toastMessages.some(t=>t.message.includes('Imported 2')));
  q('[data-computer-target]').click();q('#computer-target-picker button[data-value=computer]').click();
@@ -47,6 +62,7 @@ func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
  finish('pass','Selected cookies across two profiles and tool destination saved');
  }catch(error){finish('fail',error.message);}
  })();</script>`
+	runner = strings.ReplaceAll(runner, "EXPANDED", fmt.Sprint(expanded))
 	live := `<script>
  window.openVibelyLive={computer:(project,task,options,handlers)=>{
   const emit=reason=>handlers.listeners.computer_status({data:JSON.stringify({project_id:project,task_id:task,viewer_mode:options.viewer_mode,enabled:false,ready:false,held:true,handoff_kind:'request_chrome_login',handoff_reason:reason,handoff_url:'https://example.test',chrome_available:true,tool_target:'worktree'})});
