@@ -24,6 +24,7 @@ type modelOAuthSetup struct {
 	config      models.LLMConfig
 	expires     time.Time
 	failure     string
+	progress    string
 }
 
 var modelOAuthSetups = struct {
@@ -162,15 +163,15 @@ func (h *Handler) ModelOAuthSetupStatus(c echo.Context) error {
 	}
 	modelOAuthSetups.Lock()
 	session := modelOAuthSetups.sessions[c.Request().Header.Get(modelOAuthSetupHeader)]
-	failure := ""
+	failure, progress := "", ""
 	if session != nil {
-		failure = session.failure
+		failure, progress = session.failure, session.progress
 	}
 	modelOAuthSetups.Unlock()
 	if failure != "" {
 		return echo.NewHTTPError(http.StatusBadRequest, failure)
 	}
-	return c.JSON(http.StatusOK, map[string]bool{"connected": config.OAuthAccessToken != ""})
+	return c.JSON(http.StatusOK, map[string]any{"connected": config.OAuthAccessToken != "", "progress": progress})
 }
 
 func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig) (string, error) {
@@ -221,6 +222,7 @@ func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int
 	if err := h.requireOAuthActor(context.Background(), session.actorUserID); err != nil {
 		return err
 	}
+	session.progress = ""
 	session.config.OAuthAccessToken = access
 	session.config.OAuthRefreshToken = refresh
 	session.config.OAuthExpiresAt = expires
@@ -248,12 +250,24 @@ func (h *Handler) CancelModelOAuthSetup(c echo.Context) error {
 }
 
 func failModelOAuthSetup(key string) {
+	failModelOAuthSetupWith(key, "Sign-in failed or was cancelled. Connect OAuth again.")
+}
+
+func failModelOAuthSetupWith(key, message string) {
 	if key == "" {
 		return
 	}
 	modelOAuthSetups.Lock()
 	defer modelOAuthSetups.Unlock()
 	if session := modelOAuthSetups.sessions[key]; session != nil {
-		session.failure = "Sign-in failed or was cancelled. Connect OAuth again."
+		session.failure, session.progress = message, ""
+	}
+}
+
+func setModelOAuthSetupProgress(key, message string) {
+	modelOAuthSetups.Lock()
+	defer modelOAuthSetups.Unlock()
+	if session := modelOAuthSetups.sessions[key]; session != nil {
+		session.progress = message
 	}
 }

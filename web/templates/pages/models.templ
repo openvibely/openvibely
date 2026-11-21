@@ -1670,6 +1670,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 										if (generation !== modelOAuthSetupGeneration) return;
 										if (!result.ok) throw Error(state.message || state.error || 'Sign-in expired. Connect OAuth again.');
 										if (state.connected) {status.textContent='Connected';discoverOpenAICompatibleModels();return;}
+										if (state.progress) status.textContent=state.progress;
 										if (Date.now() >= deadline) throw Error('Sign-in expired. Connect OAuth again.');
 										setTimeout(poll,1000);
 									} catch(error) {if(generation === modelOAuthSetupGeneration){sessionInput.value='';status.textContent=error.message;}}
@@ -2836,6 +2837,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                                 button.textContent = 'Reconnect';
                                 return;
                             }
+                            if (state.progress) status.textContent = state.progress;
                             if (Date.now() >= deadline) throw Error('Sign-in timed out. Connect OAuth again to retry.');
                             await new Promise(function(resolve) {setTimeout(resolve, 1000);});
                         }

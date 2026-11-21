@@ -802,6 +802,21 @@ func (h *Handler) exchangeGeminiOAuthCodeAndSaveTokens(ctx context.Context, flow
 	if err != nil {
 		return 0, err
 	}
+	if flow.SetupID != "" {
+
+		setModelOAuthSetupProgress(flow.SetupID, "Finishing Google account setup. This can take a minute.")
+		go func() {
+			if _, err := h.finishGeminiOAuth(context.Background(), flow, tokens); err != nil {
+				applog.Infof("[handler] Gemini account setup failed: %v", err)
+				failModelOAuthSetupWith(flow.SetupID, "Google account setup failed: "+err.Error())
+			}
+		}()
+		return tokens.ExpiresAt, nil
+	}
+	return h.finishGeminiOAuth(ctx, flow, tokens)
+}
+
+func (h *Handler) finishGeminiOAuth(ctx context.Context, flow *oauthPendingFlow, tokens *geminiclient.Tokens) (int64, error) {
 	setupCtx, cancelSetup := context.WithTimeout(ctx, 90*time.Second)
 	project, err := geminiclient.SetupCodeAssist(setupCtx, tokens.AccessToken, firstNonEmpty(flow.CloudProject, strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_PROJECT"))))
 	cancelSetup()
