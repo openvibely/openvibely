@@ -41,7 +41,7 @@ func TestComputerPermissionsAvailableWithoutTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Check rendered controls, not their selectors in the embedded script.
-	for _, control := range []string{"<div data-computer-grants data-grants-project=\"project\"", "data-computer-grants-open data-picker-align=\"end\" aria-haspopup=\"dialog\"", "id=\"computer-grants-picker\"", "<div data-options=\"grants\" data-computer-grant-list>"} {
+	for _, control := range []string{"<div data-computer-grants data-grants-project=\"project\"", "data-computer-grants-open data-searchable-selector-trigger aria-haspopup=\"dialog\"", "id=\"computer-grants-picker-dialog\"", "<div data-computer-grant-list>"} {
 		if !strings.Contains(out.String(), control) {
 			t.Fatalf("project page missing %s", control)
 		}

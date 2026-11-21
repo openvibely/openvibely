@@ -61,14 +61,14 @@
 }
 /* Shared selector and model choices match the task list: selection remains
    distinct from pointer/keyboard navigation, including on the selected row. */
-.ov-menu [data-searchable-selector-option]:is(:hover, [data-selector-active]),
+.ov-menu :is([data-searchable-selector-option], [data-breadcrumb-selector-option], [data-project-selector-option]):is(:hover, [data-selector-active]),
 .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
 .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]),
 .ov-menu.ov-menu-actions > li > .ov-menu-choice:not(:disabled):is(:hover, :focus-visible) {
   background: var(--ov-menu-active);
 }
 @supports (color: oklch(0 0 0)) {
-  .ov-menu [data-searchable-selector-option]:is(:hover, [data-selector-active]),
+  .ov-menu :is([data-searchable-selector-option], [data-breadcrumb-selector-option], [data-project-selector-option]):is(:hover, [data-selector-active]),
   .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
   .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]),
   .ov-menu.ov-menu-actions > li > .ov-menu-choice:not(:disabled):is(:hover, :focus-visible) {

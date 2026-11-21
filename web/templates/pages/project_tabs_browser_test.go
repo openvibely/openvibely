@@ -225,8 +225,10 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				// Compare rendered sRGB pixels, since equivalent CSS colors can serialize
 				// as either oklch() or color(srgb ...) depending on their source.
 				browser.evaluate(`window.menuColor = function(selector) { const ctx = document.createElement('canvas').getContext('2d'); ctx.fillStyle = getComputedStyle(document.querySelector(selector)).backgroundColor; ctx.fillRect(0, 0, 1, 1); return Array.from(ctx.getImageData(0, 0, 1, 1).data).join(','); }; 'ready'`)
-				activeColor := browser.evaluate(`window.menuColor('#project-selector-dialog [data-selector-active]')`)
-				for _, selector := range []string{"#new-project-btn", "[data-project-selector-option]", "#new-project-btn"} {
+				// The current project has a distinct selection color. Compare hover
+				// against an unselected option, not whichever row opens active.
+				activeColor := browser.evaluate(`(function(){const row=document.querySelector('[data-project-selector-option][aria-selected="false"]');row.setAttribute('data-selector-active','');const color=window.menuColor('[data-project-selector-option][aria-selected="false"]');row.removeAttribute('data-selector-active');return color;})()`)
+				for _, selector := range []string{"#new-project-btn", "[data-project-selector-option][aria-selected=\"false\"]", "#new-project-btn"} {
 					var hoverPoint struct{ X, Y float64 }
 					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('`+selector+`').getBoundingClientRect();return {X:r.x+r.width/2,Y:r.y+r.height/2};})())`)), &hoverPoint); err != nil {
 						t.Fatal(err)
