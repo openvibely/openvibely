@@ -1017,6 +1017,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/models/oauth/manual-complete", h.OAuthManualComplete)
 	e.GET("/callback", h.OAuthCallback)              // Anthropic public-mode callback
 	e.GET("/auth/callback", h.OAuthCallback)         // OpenAI public-mode callback
+	e.GET("/oauth2callback", h.OAuthCallback)        // Gemini public-mode callback
 	e.GET("/models/oauth/callback", h.OAuthCallback) // Legacy/fallback
 	e.GET("/models/:id/oauth/status", h.OAuthStatus)
 

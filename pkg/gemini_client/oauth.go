@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -36,6 +37,27 @@ var ErrOAuthReauthenticationRequired = errors.New("gemini OAuth reauthentication
 
 var oauthHTTPClient = httpclient.New(httpclient.OAuthTimeout)
 
+// OAuthClient identifies the Google OAuth client that issued a token.
+type OAuthClient struct {
+	ID     string
+	Secret string
+}
+
+// BuiltInOAuthClient only accepts loopback redirect URIs.
+func BuiltInOAuthClient() OAuthClient {
+	return OAuthClient{ID: OAuthClientID, Secret: OAuthClientSecret}
+}
+
+// HostedOAuthClient returns the operator-registered web client used for
+// public callbacks, if GEMINI_OAUTH_CLIENT_ID is set.
+func HostedOAuthClient() (OAuthClient, bool) {
+	id := strings.TrimSpace(os.Getenv("GEMINI_OAUTH_CLIENT_ID"))
+	if id == "" {
+		return OAuthClient{}, false
+	}
+	return OAuthClient{ID: id, Secret: strings.TrimSpace(os.Getenv("GEMINI_OAUTH_CLIENT_SECRET"))}, true
+}
+
 type Tokens struct {
 	AccessToken  string
 	RefreshToken string
@@ -43,9 +65,9 @@ type Tokens struct {
 }
 
 // AuthorizationURL builds a PKCE consent URL that returns a refresh token.
-func AuthorizationURL(redirectURI, state, codeChallenge string) string {
+func AuthorizationURL(clientID, redirectURI, state, codeChallenge string) string {
 	q := url.Values{}
-	q.Set("client_id", OAuthClientID)
+	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_type", "code")
 	q.Set("scope", OAuthScopes)
@@ -57,28 +79,45 @@ func AuthorizationURL(redirectURI, state, codeChallenge string) string {
 	return OAuthAuthorizeURL + "?" + q.Encode()
 }
 
-func ExchangeCode(ctx context.Context, code, redirectURI, codeVerifier string) (*Tokens, error) {
+func ExchangeCode(ctx context.Context, client OAuthClient, code, redirectURI, codeVerifier string) (*Tokens, error) {
 	values := url.Values{}
 	values.Set("grant_type", "authorization_code")
 	values.Set("code", code)
 	values.Set("redirect_uri", redirectURI)
 	values.Set("code_verifier", codeVerifier)
-	return postToken(ctx, values, "")
+	return postToken(ctx, client, values, "")
 }
 
+// RefreshTokenContext refreshes with the hosted client first, then the
+// built-in client, because Google binds refresh tokens to the issuing client.
 func RefreshTokenContext(ctx context.Context, refreshToken string) (*Tokens, error) {
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, fmt.Errorf("%w: missing refresh token", ErrOAuthReauthenticationRequired)
 	}
-	values := url.Values{}
-	values.Set("grant_type", "refresh_token")
-	values.Set("refresh_token", refreshToken)
-	return postToken(ctx, values, refreshToken)
+	clients := []OAuthClient{BuiltInOAuthClient()}
+	if hosted, ok := HostedOAuthClient(); ok && hosted.ID != OAuthClientID {
+		clients = append([]OAuthClient{hosted}, clients...)
+	}
+	var err error
+	for _, client := range clients {
+		values := url.Values{}
+		values.Set("grant_type", "refresh_token")
+		values.Set("refresh_token", refreshToken)
+		var tokens *Tokens
+		if tokens, err = postToken(ctx, client, values, refreshToken); err == nil || !errors.Is(err, errWrongClient) {
+			return tokens, err
+		}
+	}
+	return nil, fmt.Errorf("%w: refresh token not accepted by any configured client", ErrOAuthReauthenticationRequired)
 }
 
-func postToken(ctx context.Context, values url.Values, fallbackRefresh string) (*Tokens, error) {
-	values.Set("client_id", OAuthClientID)
-	values.Set("client_secret", OAuthClientSecret)
+var errWrongClient = errors.New("gemini OAuth client does not own this token")
+
+func postToken(ctx context.Context, client OAuthClient, values url.Values, fallbackRefresh string) (*Tokens, error) {
+	values.Set("client_id", client.ID)
+	if client.Secret != "" {
+		values.Set("client_secret", client.Secret)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, OAuthTokenURL, strings.NewReader(values.Encode()))
 	if err != nil {
 		return nil, err
@@ -95,8 +134,13 @@ func postToken(ctx context.Context, values url.Values, fallbackRefresh string) (
 		var providerError struct {
 			Error string `json:"error"`
 		}
-		if json.Unmarshal(body, &providerError) == nil && providerError.Error == "invalid_grant" {
-			return nil, fmt.Errorf("%w: OAuth token request failed with HTTP %d", ErrOAuthReauthenticationRequired, resp.StatusCode)
+		if json.Unmarshal(body, &providerError) == nil {
+			switch providerError.Error {
+			case "invalid_grant":
+				return nil, fmt.Errorf("%w: OAuth token request failed with HTTP %d", ErrOAuthReauthenticationRequired, resp.StatusCode)
+			case "unauthorized_client", "invalid_client":
+				return nil, fmt.Errorf("%w: HTTP %d %s", errWrongClient, resp.StatusCode, providerError.Error)
+			}
 		}
 		return nil, fmt.Errorf("gemini OAuth token request failed with HTTP %d", resp.StatusCode)
 	}

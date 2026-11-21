@@ -581,7 +581,7 @@ func TestAuthPublicPathAllowlistPreserved(t *testing.T) {
 	paths := []string{
 		"/login", "/logout", "/auth/me", "/auth/sso/start", "/auth/sso/callback", "/logged-out",
 		"/favicon.png", "/favicon.ico",
-		"/swagger/doc.json", "/webhooks/inbound", "/webhooks/inbound/token", "/callback", "/auth/callback",
+		"/swagger/doc.json", "/webhooks/inbound", "/webhooks/inbound/token", "/callback", "/auth/callback", "/oauth2callback",
 		"/models/oauth/callback", "/channels/github/callback", "/channels/slack/callback",
 	}
 	for _, mode := range []auth.AuthMode{auth.AuthModeHostedSSO, auth.AuthModeLocal, auth.AuthModeDisabled} {
@@ -859,7 +859,7 @@ func TestAuthPublicPathsReachHandlersInEveryRuntimeMode(t *testing.T) {
 	paths := []string{
 		"/login", "/logout", "/auth/me", "/logged-out", "/swagger/doc.json",
 		"/favicon.png", "/favicon.ico",
-		"/webhooks/inbound", "/webhooks/inbound/token", "/callback", "/auth/callback",
+		"/webhooks/inbound", "/webhooks/inbound/token", "/callback", "/auth/callback", "/oauth2callback",
 		"/models/oauth/callback", "/channels/github/callback", "/channels/slack/callback",
 	}
 	modes := []struct {

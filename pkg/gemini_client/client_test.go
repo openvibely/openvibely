@@ -241,3 +241,30 @@ func TestSetupCodeAssistFreeTier(t *testing.T) {
 		t.Fatalf("project=%q err=%v", project, err)
 	}
 }
+
+func TestRefreshFallsBackToBuiltInClient(t *testing.T) {
+	t.Setenv("GEMINI_OAUTH_CLIENT_ID", "hosted-id")
+	t.Setenv("GEMINI_OAUTH_CLIENT_SECRET", "hosted-secret")
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		seen = append(seen, r.Form.Get("client_id"))
+		if r.Form.Get("client_id") == "hosted-id" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized_client"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"access_token":"a","expires_in":3600}`))
+	}))
+	defer server.Close()
+	old := OAuthTokenURL
+	OAuthTokenURL = server.URL
+	defer func() { OAuthTokenURL = old }()
+	tokens, err := RefreshTokenContext(context.Background(), "r")
+	if err != nil || tokens.AccessToken != "a" {
+		t.Fatalf("tokens=%+v err=%v", tokens, err)
+	}
+	if len(seen) != 2 || seen[0] != "hosted-id" || seen[1] != OAuthClientID {
+		t.Fatalf("clients tried = %v", seen)
+	}
+}

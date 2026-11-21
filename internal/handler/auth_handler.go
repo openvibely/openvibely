@@ -71,6 +71,7 @@ func (h *Handler) isAuthPublicPath(path string) bool {
 	}
 	return path == "/callback" ||
 		path == "/auth/callback" ||
+		path == "/oauth2callback" ||
 		path == "/models/oauth/callback" ||
 		path == "/channels/github/callback" ||
 		path == "/channels/slack/callback"

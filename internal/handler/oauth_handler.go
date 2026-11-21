@@ -176,9 +176,14 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		return echo.NewHTTPError(http.StatusBadRequest, "OAUTH_REDIRECT_MODE=hosted requires APP_BASE_URL")
 	}
 	usePublicCallback := shouldUsePublicOAuthCallback(redirectMode, publicBaseURL)
+	geminiClient := geminiclient.BuiltInOAuthClient()
 	if agent.Provider == models.ProviderGemini {
-		// Google's installed-app client only accepts loopback redirect URIs.
-		usePublicCallback = false
+		if hosted, ok := geminiclient.HostedOAuthClient(); ok && usePublicCallback {
+			geminiClient = hosted
+		} else {
+			// The built-in installed-app client only accepts loopback redirect URIs.
+			usePublicCallback = false
+		}
 	}
 	useLocalManualMode := isLocalManualOAuthMode(redirectMode)
 
@@ -212,8 +217,8 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid custom OAuth token URL: "+validateErr.Error())
 		}
 	} else if agent.Provider == models.ProviderGemini {
-		clientID = geminiclient.OAuthClientID
-		clientSecret = geminiclient.OAuthClientSecret
+		clientID = geminiClient.ID
+		clientSecret = geminiClient.Secret
 		tokenEndpoint = geminiclient.OAuthTokenURL
 		scope = geminiclient.OAuthScopes
 	} else if agent.Provider == models.ProviderOpenAI {
@@ -424,7 +429,7 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		u.RawQuery = q.Encode()
 		authURLFull = u.String()
 	} else if agent.Provider == models.ProviderGemini {
-		authURLFull = geminiclient.AuthorizationURL(redirectURI, state, challenge)
+		authURLFull = geminiclient.AuthorizationURL(clientID, redirectURI, state, challenge)
 	} else {
 		authURLFull = authURL +
 			"?response_type=code" +
@@ -791,7 +796,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokensContext(ctx context.Context, flo
 }
 
 func (h *Handler) exchangeGeminiOAuthCodeAndSaveTokens(ctx context.Context, flow *oauthPendingFlow, code string) (int64, error) {
-	tokens, err := geminiclient.ExchangeCode(ctx, code, flow.RedirectURI, flow.Verifier)
+	tokens, err := geminiclient.ExchangeCode(ctx, geminiclient.OAuthClient{ID: flow.ClientID, Secret: flow.ClientSecret}, code, flow.RedirectURI, flow.Verifier)
 	if err != nil {
 		return 0, err
 	}
