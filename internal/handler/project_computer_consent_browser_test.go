@@ -317,7 +317,7 @@ func TestComputerChromeImportVisibility(t *testing.T) {
  const q=s=>document.querySelector(s),wait=async check=>{for(let n=0;n<100;n++){if(check())return;await new Promise(r=>setTimeout(r,20));}throw Error('Timed out');};
  const result=document.createElement('div');result.id='browser-result';document.body.append(result);
  try{
- const button=q('[data-computer-manual-import]'),trigger=q('[data-computer-grants-open]'),search=q('.inspector-picker input');
+ const button=q('[data-computer-manual-import]'),trigger=q('[data-computer-grants-open]'),search=q('[data-searchable-selector-search]');
  trigger.click();await wait(()=>q('[data-computer-grant-list]').textContent.includes('No Chrome permissions'));
  if(!button.hidden)throw Error('Unsupported import visible after load');
  search.value='Chrome';search.dispatchEvent(new Event('input'));
