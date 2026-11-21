@@ -194,6 +194,8 @@ func TestComputerManualChromeConsentAcrossProfilesInPanel(t *testing.T) {
  await wait(()=>q('[data-computer-sites]').textContent.includes('second-session'));q('[data-computer-sites] .cookie-row input').click();
  q('[data-computer-grant-scope]').value='project';q('[data-computer-grant-hours]').value='24';q('[data-computer-import]').click();
  await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-chrome-form]').hidden && toastMessages.some(t=>t.message.includes('Imported 2')));
+ const returnedTrigger=q('[data-computer-grants-open]');
+ if(document.activeElement===returnedTrigger&&getComputedStyle(returnedTrigger).outlineStyle!=='none')throw Error('Import left a focus outline on Chrome permissions');
  if(toastMessages.some(t=>t.type==='success'&&t.message.includes('Done')))throw Error('Manual import asked to resume');
  finish('pass','Selected cookies across two profiles and tool destination saved');
  }catch(error){finish('fail',error.message);}
