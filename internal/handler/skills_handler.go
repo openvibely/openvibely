@@ -779,10 +779,6 @@ func (h *Handler) dialogStandaloneSkillScope(c echo.Context, requested string) s
 	return "global"
 }
 
-func (h *Handler) scopeForStandaloneSkillPath(c echo.Context, path string) string {
-	return standaloneSkillPathScope(h.agentSkillRoot, h.currentProjectSkillRoot(c), path)
-}
-
 func (h *Handler) writeStandaloneSkill(ctx context.Context, req skillSaveRequest, requireExisting bool, scope, projectRoot string) (*agentlibrary.ImportResult, error) {
 	handle := strings.TrimSpace(req.Handle)
 	if !validDialogSkillKey(handle) {

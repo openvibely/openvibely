@@ -15,13 +15,6 @@ import (
 
 func (h *Handler) SetPersonalGitHubService(s *service.GitHubService) { h.personalGitHub = s }
 
-func (h *Handler) savePersonalGitHub(c echo.Context) error {
-	if err := h.savePersonalGitHubOnOwner(c.Request().Context(), c); err != nil {
-		return projectAccessResponse(c, err)
-	}
-	return returnToChannels(c)
-}
-
 func (h *Handler) savePersonalGitHubOnOwner(ctx context.Context, form ownerForm) error {
 	ctx = h.projectRuntimePrincipalContext(ctx)
 	personalMode, err := h.personalGitHub.UsesPersonalPAT(ctx)

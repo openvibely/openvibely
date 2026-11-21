@@ -570,10 +570,6 @@ func (h *Handler) usedAgentKeys(agents []models.Agent, projectRoot string) map[s
 	return used
 }
 
-func (h *Handler) agentRootDeclarationFromModel(c echo.Context, agent *models.Agent, scope string) *agentlibrary.SkillDeclaration {
-	return h.agentRootDeclarationOnOwner(contextFromEcho(c), agent, scope)
-}
-
 func (h *Handler) agentRootDeclarationOnOwner(ctx context.Context, agent *models.Agent, scope string) *agentlibrary.SkillDeclaration {
 	enabled := agent.Enabled
 	decl := &agentlibrary.SkillDeclaration{

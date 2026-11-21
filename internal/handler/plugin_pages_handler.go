@@ -420,14 +420,6 @@ func bridgeError(c echo.Context, status int, msg string) error {
 	return c.JSON(status, pluginBridgeResponse{OK: false, Error: msg})
 }
 
-func bridgeResult(c echo.Context, v any) error {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return c.JSON(http.StatusOK, pluginBridgeResponse{OK: true, Result: raw})
-}
-
 // PluginBridge executes one validated v1 bridge message relayed by the host page.
 // @Summary Run a plugin page bridge call
 // @Description Executes one validated v1 bridge message relayed by the host page. Body is the bridge envelope including the page-load handle.
