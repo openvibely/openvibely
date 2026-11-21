@@ -54,6 +54,13 @@ func testComputerChromeConsent(t *testing.T, expanded bool) {
  q('[data-computer-profile]').value='Profile 1';q('[data-computer-profile]').dispatchEvent(new Event('change'));
  await wait(()=>q('[data-computer-sites]').textContent.includes('second-session'));q('[data-computer-sites] .cookie-row input').click();
  q('[data-computer-grant-scope]').value='project';q('[data-computer-grant-hours]').value='24';q('[data-computer-import]').click();
+ const importButton=q('[data-computer-import]');
+ const cookie=q('[data-computer-sites] .cookie-row input');cookie.click();
+ if(!importButton.disabled)throw Error('Changing selection enabled an active import');
+ cookie.click();
+ if(!importButton.disabled)throw Error('Restoring selection enabled an active import');
+ importButton.click();
+ await importButton.onclick({target:importButton});
  await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-chrome-form]').hidden && toastMessages.some(t=>t.message.includes('Imported 2')));
  q('[data-computer-target]').click();q('#computer-target-picker button[data-value=computer]').click();
  // Observe the queued snapshot being applied before checking the saved destination.
@@ -141,6 +148,7 @@ func testComputerChromeConsent(t *testing.T, expanded bool) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	require.Equal(t, 2, attempts, "Only the initial import and explicit retry should be sent")
 	require.Equal(t, "computer", target)
 	require.Equal(t, "project", imported.Scope)
 	require.Equal(t, 24, imported.Hours)
