@@ -523,14 +523,14 @@ templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  </button>
  }
  @components.InspectorPicker("computer-grants-picker") {
- <div data-options="import"><button type="button" class="ov-menu-option w-full" data-value="import" data-computer-manual-import hidden>Import Chrome sign-ins</button></div>
  <div data-options="grants" data-computer-grant-list></div>
+ <div data-options="import" class="ov-menu-create-row"><button type="button" class="ov-menu-option w-full" data-value="import" data-computer-manual-import hidden>Import Chrome sign-ins</button></div>
  }
  <script>
  (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{
  if(root.dataset.bound)return;root.dataset.bound='true';
  const trigger=root.querySelector('[data-computer-grants-open]'),picker=root.querySelector('.inspector-picker'),list=root.querySelector('[data-computer-grant-list]');
- picker.setAttribute('aria-label','Chrome permissions');
+ picker.setAttribute('aria-label','Chrome permissions');picker.setAttribute('data-picker-no-default-highlight','');
  const search=picker.querySelector('input');search.setAttribute('aria-label','Search Chrome permissions');
  let importAvailable=false;
  const ui=window.createInspectorPicker(root,picker,()=>busy,option=>!option.hasAttribute('data-computer-manual-import')||(importAvailable&&!!root.closest('[data-computer-task]')));
