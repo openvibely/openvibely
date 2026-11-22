@@ -222,6 +222,18 @@ func (c *Coordinator) SetPersistence(path string) error {
 			return err
 		}
 	}
+	// A retry download or background check may be interrupted before acceptance.
+	// Keep an already-attempted release manually retryable instead of leaving it
+	// idle/checking forever behind the automatic-attempt guard.
+	if !c.accepted && (c.state == StateStaging || c.state == StateChecking) &&
+		c.release != nil && c.autoAttemptedVersion == c.release.Metadata.Version &&
+		c.releaseIsNewerThanCurrent(c.release) && c.releaseIsUnexpired(c.release) &&
+		c.drain != nil && c.drain.Status().State == DrainStateIdle {
+		c.state, c.lastError, c.operationGeneration = StateFailed, "Update preparation was interrupted. Retry the update.", ""
+		if err := c.persistLocked(); err != nil {
+			return err
+		}
+	}
 	if c.accepted {
 		if c.release == nil || c.acceptanceLease <= 0 {
 			return errors.New("persisted update acceptance is incomplete")

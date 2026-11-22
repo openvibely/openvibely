@@ -132,3 +132,92 @@ func TestManualRetryAfterAutomaticFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestInterruptedManualRetryRemainsRetryableAfterRestart(t *testing.T) {
+	for _, checkpoint := range []string{StateStaging, StateChecking} {
+		for _, artifact := range []string{"intact", "missing", "corrupt", "unstaged"} {
+			t.Run(checkpoint+"/"+artifact, func(t *testing.T) {
+				now := time.Now().UTC()
+				root := t.TempDir()
+				client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json")})
+				target := Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64", URL: "https://example.test/app.tar.gz", Filetype: "tar.gz", Size: 3, SHA256: strings.Repeat("0", 64)}
+				release := cachedReleaseFixture(now, target, "download")
+				if err := client.saveState(persistedClientState{LastSuccessfulCheck: now, Cached: release}); err != nil {
+					t.Fatal(err)
+				}
+				installer := &retryLocalInstaller{path: filepath.Join(root, "staged")}
+				current := CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: "binary"}
+				newCoordinator := func() *Coordinator {
+					return NewCoordinator(client, current, "stable", NewDrainManager(nil, nil, 0, nil), installer, false, "", nil)
+				}
+				c := newCoordinator()
+				statePath := filepath.Join(root, "coordinator.json")
+				if err := c.SetPersistence(statePath); err != nil {
+					t.Fatal(err)
+				}
+				c.release, c.state = release, StateAvailable
+				if err := c.Stage(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				switch artifact {
+				case "missing", "unstaged":
+					if err := os.Remove(installer.path); err != nil {
+						t.Fatal(err)
+					}
+					if artifact == "unstaged" {
+						c.staged = nil
+					}
+				case "corrupt":
+					if err := os.WriteFile(installer.path, []byte("partial"), 0755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// Simulate the durable checkpoint of an interrupted retry download
+				// or background check, before any new acceptance is persisted.
+				c.state, c.autoAttemptedVersion = checkpoint, release.Metadata.Version
+				if err := c.persistLocked(); err != nil {
+					t.Fatal(err)
+				}
+				for restart := 0; restart < 2; restart++ {
+					c = newCoordinator()
+					if err := c.SetPersistence(statePath); err != nil {
+						t.Fatal(err)
+					}
+					snapshot := c.Snapshot()
+					if snapshot.State != StateFailed || snapshot.Release == nil || snapshot.Error == "" {
+						t.Fatalf("restart %d lost interrupted retry: %#v", restart, snapshot)
+					}
+					if c.autoAttemptedVersion != release.Metadata.Version || c.accepted {
+						t.Fatal("restart changed automatic-attempt guard or accepted update")
+					}
+					for check := 0; check < 3; check++ {
+						if err := c.checkAndAutoUpdate(context.Background()); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if c.Snapshot().State != StateFailed || installer.stages.Load() != 1 || installer.applies.Load() != 0 {
+						t.Fatal("restart/check resumed update without approval")
+					}
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				c.StartRecovery(ctx)
+				if err := c.Accept(ctx, time.Minute); err != nil {
+					t.Fatal(err)
+				}
+				waitForCoordinatorState(t, c, StateSucceeded)
+				wantStages := int32(2)
+				if artifact == "intact" {
+					wantStages = 1
+				}
+				if installer.stages.Load() != wantStages || installer.applies.Load() != 1 {
+					t.Fatalf("stages=%d applies=%d", installer.stages.Load(), installer.applies.Load())
+				}
+				data, err := os.ReadFile(installer.path)
+				if err != nil || string(data) != "new binary" {
+					t.Fatalf("invalid replacement %q: %v", data, err)
+				}
+			})
+		}
+	}
+}
