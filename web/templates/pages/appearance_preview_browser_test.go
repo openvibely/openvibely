@@ -309,7 +309,7 @@ func TestBrowserFunctional_UsageMeterAppearance(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "usage-meter-appearance", func(b *composerFocusCDP) {
-		b.waitFor("meter and previews ready", `String(document.querySelectorAll('[data-meter-preview] svg').length===8&&document.querySelectorAll('.rail-account').length===1)`, "true")
+		b.waitFor("meter and previews ready", `String(document.querySelectorAll('[data-meter-preview] svg').length===12&&document.querySelectorAll('.rail-account').length===1)`, "true")
 		b.waitFor("default logo rings", `String(document.documentElement.dataset.usageMeterStyle==='logos'&&!!document.querySelector('.rail-account svg path'))`, "true")
 		for _, style := range []string{"letters", "logos", "fill", "bars"} {
 			b.evaluate(`selectOpenVibelyDisplay('meters','` + style + `'); 'selected'`)

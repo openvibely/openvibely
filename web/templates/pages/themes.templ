@@ -132,7 +132,7 @@ templ ThemesContent(catalog []themes.Theme) {
 					});
                     document.querySelectorAll('[data-meter-preview]').forEach(function(preview) {
                         if (!window.openVibelyUsageMeterPreview) return;
-                        preview.replaceChildren(...['openai','anthropic'].map(function(provider) {
+                        preview.replaceChildren(...['openai','anthropic','gemini'].map(function(provider) {
                             const svg = window.openVibelyUsageMeterPreview(provider, preview.dataset.meterPreview);
                             svg.style.width='28px';svg.style.height='28px';return svg;
                         }));

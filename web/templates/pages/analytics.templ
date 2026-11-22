@@ -1744,7 +1744,7 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
 											}).join('');
 											const error = account.error ? `\x3cdiv class="alert alert-warning py-2 text-xs mt-2">${escapeHTML(account.error)}\x3c/div>` : '';
 											const providerName = (account.provider || '').toLowerCase();
-											const providerTitle = providerName === 'openai' ? 'OpenAI' : (providerName === 'anthropic' ? 'Anthropic' : 'OAuth account');
+											const providerTitle = providerName === 'openai' ? 'OpenAI' : (providerName === 'anthropic' ? 'Anthropic' : (providerName === 'gemini' ? 'Gemini' : 'OAuth account'));
 											const identity = failed ? '' : (account.account_identity || '');
 											const identityHtml = identity ? '\x3cdiv class="text-xs opacity-70">Account: ' + escapeHTML(identity) + '\x3c/div>' : '';
 											const subscription = account.plan_type || '';

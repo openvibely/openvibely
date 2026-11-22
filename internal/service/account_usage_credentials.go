@@ -27,7 +27,7 @@ func (c *accountUsageCredentials) next() (models.LLMConfig, bool) {
 		if cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" {
 			continue
 		}
-		if cfg.Provider != models.ProviderOpenAI && cfg.Provider != models.ProviderAnthropic {
+		if cfg.Provider != models.ProviderOpenAI && cfg.Provider != models.ProviderAnthropic && cfg.Provider != models.ProviderGemini {
 			continue
 		}
 		if c.provider != "" && string(cfg.Provider) != c.provider {

@@ -104,7 +104,7 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 	}
 	fingerprints := map[string]string{}
 	identities := map[string]string{}
-	for _, provider := range []string{"openai", "anthropic"} {
+	for _, provider := range []string{"openai", "anthropic", "gemini"} {
 		for _, group := range accountUsageGroups(configs, provider) {
 			parts := []string{}
 			for _, cfg := range group {
