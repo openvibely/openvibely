@@ -45,6 +45,7 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				if isSearch {
+					require.NotContains(t, req, "generationConfig", "search should use the provider's generation defaults")
 					searches++
 					if oauth && !refreshed {
 						w.WriteHeader(401)
