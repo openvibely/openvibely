@@ -301,8 +301,8 @@ func (a *Adapter) prepareHistory(ctx context.Context, history []models.Execution
 func DecodeContents(rows []json.RawMessage) ([]geminiclient.Content, error) {
 	out := make([]geminiclient.Content, 0, len(rows))
 	for _, raw := range rows {
-		var c geminiclient.Content
-		if err := json.Unmarshal(raw, &c); err != nil {
+		c, err := geminiclient.DecodeReplayContent(raw)
+		if err != nil {
 			return nil, err
 		}
 		if c.Role == "" || len(c.Parts) == 0 {

@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"strings"
 
 	geminiclient "github.com/openvibely/openvibely/pkg/gemini_client"
@@ -179,12 +180,16 @@ func itoa(n int) string {
 }
 
 func functionResponseText(response map[string]any) string {
-	if output, ok := response["output"].(string); ok {
-		return output
+	for _, key := range []string{"output", "error"} {
+		if view, ok := response[key].(jsonview.Value); ok {
+			if text, err := view.Text(); err == nil {
+				return text
+			}
+		} else if text, ok := response[key].(string); ok {
+			return text
+		}
 	}
-	if errText, ok := response["error"].(string); ok {
-		return errText
-	}
+
 	raw, _ := json.Marshal(response)
 	return string(raw)
 }

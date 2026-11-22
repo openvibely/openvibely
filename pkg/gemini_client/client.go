@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/transcript"
@@ -222,6 +223,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 
 	result := &Response{Model: opts.Model}
 	var allText strings.Builder
+	preparedRequest := &requestPreparation{}
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		currentTranscript := exchange.Items()[environmentCount:]
 		beforeContext := len(currentTranscript)
@@ -233,12 +235,12 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 			exchange.ReplaceTail(environmentCount+max(0, beforeContext-1), currentTranscript[max(0, beforeContext-1):]...)
 		}
 
-		body, err := c.buildRequestBody(contents, toolDefs, opts)
+		body, tokens, err := c.prepareRequest(contents, toolDefs, opts, preparedRequest)
 		if err != nil {
 			return nil, err
 		}
 		if _, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx); !summarizing {
-			if err := ensureRequestFits(body, opts); err != nil {
+			if err := ensureTokensFit(tokens, opts); err != nil {
 				return nil, err
 			}
 		}
@@ -502,52 +504,12 @@ type generateRequest struct {
 	GenerationConfig  map[string]any   `json:"generationConfig,omitempty"`
 }
 
-func (c *Client) buildRequestBody(contents []Content, toolDefs []ToolDefinition, opts *Options) ([]byte, error) {
-	req := generateRequest{Contents: wireContents(contents)}
-	if strings.TrimSpace(opts.System) != "" {
-		req.SystemInstruction = &Content{Parts: []Part{{Text: opts.System}}}
-	}
-	var decls []functionDeclaration
-	for _, def := range toolDefs {
-		if opts.ToolFilter != nil && !opts.ToolFilter(def.Name) {
-			continue
-		}
-		decls = append(decls, functionDeclaration{Name: def.Name, Description: def.Description, ParametersJSONSchema: def.parameterSchema(), ResponseJSONSchema: def.ResponseJSONSchema})
-	}
-	if len(decls) > 0 {
-		req.Tools = []map[string]any{{"functionDeclarations": decls}}
-		req.ToolConfig = map[string]any{"functionCallingConfig": map[string]any{"mode": "AUTO"}}
-	}
-	gen := map[string]any{"maxOutputTokens": opts.MaxOutputTokens}
-	if opts.Temperature != nil {
-		gen["temperature"] = *opts.Temperature
-	}
-	if opts.ReasoningEffort != "" {
-		level, err := thinkingLevel(opts.Model, opts.ReasoningEffort)
-		if err != nil {
-			return nil, err
-		}
-		gen["thinkingConfig"] = map[string]any{"thinkingLevel": level}
-	}
-	req.GenerationConfig = gen
-	if !c.isOAuth() {
-		return json.Marshal(req)
-	}
-	model := opts.Model
-	if c.legacyOAuth {
-		return json.Marshal(map[string]any{"model": model, "project": c.project, "request": req})
-	}
-	return json.Marshal(map[string]any{"model": model, "project": c.project, "request": req,
-		"requestId": newRequestID(), "userAgent": "\x61\x6e\x74\x69\x67\x72\x61\x76\x69\x74\x79", "requestType": "agent"})
-}
-
-func ensureRequestFits(body []byte, opts *Options) error {
+func ensureTokensFit(tokens int, opts *Options) error {
 	window := opts.ContextWindow
 	if window <= 0 {
 		window = 1048576
 	}
 	safe := window - opts.MaxOutputTokens - max(1024, window/50)
-	tokens := estimateRequestTokens(body)
 	if tokens <= safe {
 		return nil
 	}
@@ -753,10 +715,6 @@ type streamChunk struct {
 	} `json:"error"`
 }
 
-type codeAssistChunk struct {
-	Response *streamChunk `json:"response"`
-}
-
 func parseStreamInto(body io.Reader, onText func(string), partial *strings.Builder, result *turnResult, assembler *callAssembler) error {
 	scanner := streamdecode.Scanner(body, 32*1024*1024)
 	result.continuationToken = ""
@@ -778,12 +736,19 @@ func parseStreamInto(body io.Reader, onText func(string), partial *strings.Build
 			continue
 		}
 		var chunk streamChunk
-		var wrapped codeAssistChunk
-		if json.Unmarshal(data, &wrapped) == nil && wrapped.Response != nil {
-			chunk = *wrapped.Response
-		} else if err := json.Unmarshal(data, &chunk); err != nil {
+		payload := data
+		if err := jsonview.Object(data, func(key string, value json.RawMessage) error {
+			if strings.EqualFold(key, "response") && !bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+				payload = value
+			}
+			return nil
+		}); err != nil {
 			return fmt.Errorf("invalid Gemini stream JSON: %w", err)
 		}
+		if err := json.Unmarshal(payload, &chunk); err != nil {
+			return fmt.Errorf("invalid Gemini stream JSON: %w", err)
+		}
+
 		if chunk.Error != nil {
 			return &APIError{StatusCode: chunk.Error.Code, Message: chunk.Error.Message}
 		}

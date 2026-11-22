@@ -2,7 +2,7 @@ package geminiclient
 
 import (
 	"encoding/base64"
-	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -15,48 +15,27 @@ import (
 
 const fallbackImageTokens = 1122
 
-// estimateRequestTokens counts image inputs separately from serialized text.
-// Only protocol media fields are discounted; tool arguments and results remain text.
-func estimateRequestTokens(body []byte) int {
-	var envelope struct {
-		Request json.RawMessage `json:"request"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return tokenestimate.FromByteCount(len(body))
-	}
-	payload := body
-	if len(envelope.Request) != 0 {
-		payload = envelope.Request
-	}
-	var req struct {
-		Contents          []Content `json:"contents"`
-		SystemInstruction *Content  `json:"systemInstruction"`
-	}
-	if err := json.Unmarshal(payload, &req); err != nil {
-		return tokenestimate.FromByteCount(len(body))
-	}
-	contents := req.Contents
-	if req.SystemInstruction != nil {
-		contents = append(contents, *req.SystemInstruction)
-	}
-	return estimateContentTokens(len(body), contents)
-}
-
 // EstimateContentsTokens budgets replay contents using the request image estimates.
 func EstimateContentsTokens(contents []Content) (int, error) {
-	body, err := json.Marshal(contents)
+	var values []any
+	if contents != nil {
+		values = make([]any, len(contents))
+	}
+	for i, c := range contents {
+		values[i] = contentValue(c)
+	}
+	size, err := requestjson.Size(values)
 	if err != nil {
 		return 0, err
 	}
-	return estimateContentTokens(len(body), contents), nil
+	return estimateContentTokens(size, contents), nil
 }
 
 func estimateContentTokens(textBytes int, contents []Content) int {
 	mediaTokens := 0
 	addMedia := func(inline *InlineData, file *FileData) {
 		if inline != nil && strings.HasPrefix(strings.ToLower(inline.MimeType), "image/") {
-			encoded, _ := json.Marshal(inline.Data)
-			textBytes -= len(encoded) - 2
+			textBytes -= requestjson.StringSize(inline.Data) - 2
 			mediaTokens += estimateInlineImageTokens(inline.Data)
 		}
 		if file != nil && (file.MimeType == "" || strings.HasPrefix(strings.ToLower(file.MimeType), "image/")) {
