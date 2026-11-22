@@ -523,7 +523,7 @@ func ensureRequestFits(body []byte, opts *Options) error {
 		window = 1048576
 	}
 	safe := window - opts.MaxOutputTokens - max(1024, window/50)
-	tokens := tokenestimate.FromByteCount(len(body))
+	tokens := estimateRequestTokens(body)
 	if tokens <= safe {
 		return nil
 	}
