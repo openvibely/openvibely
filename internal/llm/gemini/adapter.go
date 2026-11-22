@@ -64,6 +64,10 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		ctx = context.WithValue(ctx, conversationRecorderKey{}, recorder)
 	}
 
+	req.Ctx = ctx
+	ctx = a.PreparePrompt(req)
+	req.Ctx = ctx
+
 	switch req.Operation {
 	case llmcontracts.OperationDirect:
 		output, usage, err := a.callDirect(ctx, req, workDir)
@@ -141,6 +145,9 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	case req.LifecycleHookCall:
 		systemPrompt = req.ProjectInstructions
 	default:
+		systemPrompt = llmprompt.BuildGoogleAgentSystemPrompt(BaseSystemPrompt(req), req.ProjectInstructions, effectiveWorkDir(workDir))
+	}
+	if req.SummaryInput != nil {
 		systemPrompt = llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir))
 	}
 	if preserved, ok := llmcontracts.SummarySystemPromptFromContext(ctx); ok {
@@ -183,7 +190,7 @@ func (a *Adapter) callStreaming(ctx context.Context, req llmcontracts.AgentReque
 	prompt := req.Message
 	if chat {
 		rt := llmcontracts.RuntimeToolsFromContext(ctx)
-		opts.System = llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
+		opts.System = llmprompt.BuildGoogleChatSystemPrompt(BaseSystemPrompt(req), req.Followup, req.ChatMode, req.ChatSystemContext, false)
 		if req.ChatMode == models.ChatModeOrchestrate && !req.Followup {
 			opts.System = llmprompt.ApplyChatActionToolMode(opts.System, rt.DefinitionNames())
 		}
@@ -191,7 +198,7 @@ func (a *Adapter) callStreaming(ctx context.Context, req llmcontracts.AgentReque
 		opts.SkipDefaultTools = chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition)
 		opts.ToolFilter = toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition)
 	} else {
-		opts.System = llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)) + llmprompt.BuildTaskStatusInstructions()
+		opts.System = llmprompt.BuildGoogleAgentSystemPrompt(BaseSystemPrompt(req), req.ProjectInstructions, effectiveWorkDir(workDir)) + llmprompt.BuildTaskStatusInstructions()
 		opts.OmitExecutionEnvironment = req.RawDirectPrompt || req.LifecycleHookCall
 		opts.DisableTools = req.DisableTools
 		opts.SkipDefaultTools = taskSkipDefaultTools(ctx, req.AgentDefinition)
