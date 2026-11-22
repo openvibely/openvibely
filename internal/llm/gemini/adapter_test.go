@@ -53,7 +53,7 @@ func (rs *recordingServer) adapter() *Adapter {
 }
 
 func geminiAgent() models.LLMConfig {
-	return models.LLMConfig{Name: "Gemini", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodAPIKey, APIKey: "g-key", Model: "gemini-2.5-pro"}
+	return models.LLMConfig{Name: "Gemini", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodAPIKey, APIKey: "g-key", Model: "gemini-3.8-flash"}
 }
 
 const doneChunk = `{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}`
@@ -85,7 +85,7 @@ func TestAdapterDirectAPIKey(t *testing.T) {
 	if res.Output != "Hello" || res.Usage.InputTokens != 8 || res.Usage.OutputTokens != 2 || res.Usage.TotalTokens != 10 {
 		t.Fatalf("result %+v", res)
 	}
-	if rs.paths[0] != "/models/gemini-2.5-pro:streamGenerateContent" || rs.keys[0] != "g-key" {
+	if rs.paths[0] != "/models/gemini-3.8-flash:streamGenerateContent" || rs.keys[0] != "g-key" {
 		t.Fatalf("path=%q key=%q", rs.paths[0], rs.keys[0])
 	}
 	if len(toolNames(rs.bodies[0])) == 0 {

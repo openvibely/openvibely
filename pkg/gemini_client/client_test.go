@@ -32,7 +32,7 @@ func TestSendAPIKeyToolLoop(t *testing.T) {
 		if r.Header.Get("x-goog-api-key") != "key" {
 			t.Errorf("missing api key header")
 		}
-		if !strings.HasSuffix(r.URL.Path, "/models/gemini-2.5-pro:streamGenerateContent") || r.URL.Query().Get("alt") != "sse" {
+		if !strings.HasSuffix(r.URL.Path, "/models/gemini-3.8-flash:streamGenerateContent") || r.URL.Query().Get("alt") != "sse" {
 			t.Errorf("unexpected path %s?%s", r.URL.Path, r.URL.RawQuery)
 		}
 		raw, _ := io.ReadAll(r.Body)
@@ -48,7 +48,7 @@ func TestSendAPIKeyToolLoop(t *testing.T) {
 				`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read_file","args":{"file_path":"hello.txt"}},"thoughtSignature":"sig-1"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}`)
 			return
 		}
-		sse(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"Done."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":2,"thoughtsTokenCount":3,"totalTokenCount":25},"modelVersion":"gemini-2.5-pro"}`)
+		sse(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"Done."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":2,"thoughtsTokenCount":3,"totalTokenCount":25},"modelVersion":"gemini-3.8-flash"}`)
 	}))
 	defer server.Close()
 
@@ -57,7 +57,7 @@ func TestSendAPIKeyToolLoop(t *testing.T) {
 	var streamed strings.Builder
 	var saved [][]Content
 	resp, err := client.Send(context.Background(), "read hello", &Options{
-		Model: "gemini-2.5-pro", System: "be brief", WorkDir: dir, OnText: func(s string) { streamed.WriteString(s) },
+		Model: "gemini-3.8-flash", System: "be brief", WorkDir: dir, OnText: func(s string) { streamed.WriteString(s) },
 		OnReplayChanged: func(_ context.Context, items []Content, _ int) error { saved = append(saved, items); return nil },
 	})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestSendOAuthCodeAssistWrapperAndUnauthorizedRecovery(t *testing.T) {
 			Request json.RawMessage `json:"request"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Model != "gemini-2.5-flash" || body.Project != "proj-1" || !strings.Contains(string(body.Request), `"contents"`) {
+		if body.Model != "gemini-3.5-flash" || body.Project != "proj-1" || !strings.Contains(string(body.Request), `"contents"`) {
 			t.Errorf("wrapper %+v", body)
 		}
 		sse(w, `{"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}}`)
@@ -137,7 +137,7 @@ func TestSendOAuthCodeAssistWrapperAndUnauthorizedRecovery(t *testing.T) {
 		}
 		return "new", true, nil
 	})
-	resp, err := client.Send(context.Background(), "hi", &Options{Model: "gemini-2.5-flash", DisableTools: true, OmitExecutionEnvironment: true})
+	resp, err := client.Send(context.Background(), "hi", &Options{Model: "gemini-3.5-flash", DisableTools: true, OmitExecutionEnvironment: true})
 	if err != nil {
 		t.Fatal(err)
 	}

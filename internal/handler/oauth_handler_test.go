@@ -1283,7 +1283,7 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		t.Setenv("GEMINI_OAUTH_CLIENT_ID", "gemini-hosted-client")
 		t.Setenv("GEMINI_OAUTH_CLIENT_SECRET", "gemini-hosted-secret")
 		h, e, llmConfigRepo := setupTestHandler(t)
-		model := &models.LLMConfig{Name: "Hosted Gemini OAuth", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-2.5-pro"}
+		model := &models.LLMConfig{Name: "Hosted Gemini OAuth", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
 		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
 
 		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
@@ -1313,7 +1313,7 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		t.Setenv("GEMINI_OAUTH_CLIENT_ID", "")
 		t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
 		h, e, llmConfigRepo := setupTestHandler(t)
-		model := &models.LLMConfig{Name: "Local Gemini OAuth", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-2.5-pro"}
+		model := &models.LLMConfig{Name: "Local Gemini OAuth", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
 		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
 
 		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
@@ -1330,7 +1330,7 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 	t.Run("stores gemini cloud project from form", func(t *testing.T) {
 		t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
 		h, e, llmConfigRepo := setupTestHandler(t)
-		model := &models.LLMConfig{Name: "Workspace Gemini", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-2.5-pro"}
+		model := &models.LLMConfig{Name: "Workspace Gemini", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
 		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
 
 		req := httptest.NewRequest(http.MethodPost, "/models/"+model.ID+"/oauth/initiate", strings.NewReader("gemini_cloud_project=+my-proj+"))

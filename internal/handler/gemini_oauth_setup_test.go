@@ -147,7 +147,7 @@ func TestGeminiModelSetupMergesSameGoogleUser(t *testing.T) {
 		}, 5*time.Second, 20*time.Millisecond)
 		form.Set("oauth_setup_session", flow.Session)
 		form.Set("name", name)
-		form.Set("model", "gemini-2.5-pro")
+		form.Set("model", "gemini-3.8-flash")
 		rec = send("/models")
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		var saved map[string]string

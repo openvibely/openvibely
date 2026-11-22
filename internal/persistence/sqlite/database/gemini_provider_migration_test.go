@@ -18,7 +18,7 @@ func TestGeminiProviderMigrationRoundTrip(t *testing.T) {
 
 	_, err := db.Exec(`INSERT INTO agent_configs(id,name,provider,model) VALUES('gemini-like','G','openai','gpt-5')`)
 	require.Error(t, func() error {
-		_, err := db.Exec(`INSERT INTO agent_configs(id,name,provider,model) VALUES('bad','B','gemini','gemini-2.5-pro')`)
+		_, err := db.Exec(`INSERT INTO agent_configs(id,name,provider,model) VALUES('bad','B','gemini','gemini-3.8-flash')`)
 		return err
 	}())
 	require.NoError(t, err)
@@ -26,7 +26,7 @@ func TestGeminiProviderMigrationRoundTrip(t *testing.T) {
 	require.NoError(t, goose.UpTo(db, ".", 239))
 	_, err = db.Exec(`
  INSERT INTO oauth_connections(id,provider,name,oauth_account_id) VALUES('gc','gemini','Google','proj-1');
- INSERT INTO agent_configs(id,name,provider,model,oauth_connection_id) VALUES('g','Gemini','gemini','gemini-2.5-pro','gc');`)
+ INSERT INTO agent_configs(id,name,provider,model,oauth_connection_id) VALUES('g','Gemini','gemini','gemini-3.8-flash','gc');`)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO oauth_connections(id,provider,name) VALUES('bad','other','x')`)
 	require.Error(t, err)
