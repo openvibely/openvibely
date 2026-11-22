@@ -457,6 +457,9 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	defer unlockParent()
 	unlock := persistence.LockTaskLifecycle(e.TaskID)
 	defer unlock()
+	if err := persistence.CheckTaskActivation(ctx, e.TaskID); err != nil {
+		return false, err
+	}
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
 	err = withImmediateTx(ctx, r.db, func(dbexec sqlExecutor) error {

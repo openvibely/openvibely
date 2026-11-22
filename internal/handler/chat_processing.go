@@ -2030,22 +2030,28 @@ func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyC
 	}
 }
 
+// Check the existing turn under the same gate used by Stop. Admissions that
+// follow this read check again in their own transaction before writing.
+func (h *Handler) taskThreadActiveForActivation(ctx context.Context, taskID string) (bool, error) {
+	unlock := persistence.LockTaskLifecycle(taskID)
+	defer unlock()
+	if err := persistence.CheckTaskActivation(ctx, taskID); err != nil {
+		return false, err
+	}
+	return h.execRepo.HasActiveTaskThreadExecution(ctx, taskID, "")
+}
+
 func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID string) (bool, error) {
 	if h.threadInputRepo == nil || h.execRepo == nil || taskID == "" {
 		return false, nil
 	}
-	active, err := h.execRepo.HasActiveTaskThreadExecution(ctx, taskID, "")
+	ctx = h.workerSvc.TaskActivationContext(ctx)
+	active, err := h.taskThreadActiveForActivation(ctx, taskID)
 	if err != nil {
 		applog.Infof("[handler] startPendingTaskThreadFollowup task=%s active check error: %v", taskID, err)
 		return false, err
 	}
 	if active {
-		if h.workerSvc.IsTaskStopping(taskID) {
-			return false, service.ErrTaskStillStopping
-		}
-		if h.workerSvc != nil {
-			h.workerSvc.ClearCancellationRequested(taskID)
-		}
 		return true, nil
 	}
 	queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, taskID)
@@ -2066,17 +2072,12 @@ func (h *Handler) RetryLatestFailedTaskThreadFollowup(ctx context.Context, taskI
 	if h.execRepo == nil || h.taskRepo == nil || taskID == "" {
 		return false, nil
 	}
-	active, err := h.execRepo.HasActiveTaskThreadExecution(ctx, taskID, "")
+	ctx = h.workerSvc.TaskActivationContext(ctx)
+	active, err := h.taskThreadActiveForActivation(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
 	if active {
-		if h.workerSvc.IsTaskStopping(taskID) {
-			return false, service.ErrTaskStillStopping
-		}
-		if h.workerSvc != nil {
-			h.workerSvc.ClearCancellationRequested(taskID)
-		}
 		return true, nil
 	}
 	failed, err := h.execRepo.GetLatestFailedFollowupByTask(ctx, taskID)

@@ -1139,6 +1139,17 @@ func (w *WorkerService) IsCancellationRequested(taskID string) bool {
 	return requested
 }
 
+// TaskActivationContext carries the stopping check to the owner of each
+// activation transaction, where it can run under the task lifecycle lock.
+func (w *WorkerService) TaskActivationContext(ctx context.Context) context.Context {
+	return persistence.WithTaskActivationCheck(ctx, func(taskID string) error {
+		if w.IsTaskStopping(taskID) {
+			return ErrTaskStillStopping
+		}
+		return nil
+	})
+}
+
 // IsTaskStopping keeps manual restarts out until the cancelled run has
 // deregistered after cleanup. A stale stop marker alone must not block a retry.
 func (w *WorkerService) IsTaskStopping(taskID string) bool {

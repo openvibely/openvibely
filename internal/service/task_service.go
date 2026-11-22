@@ -540,12 +540,19 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	if err := s.requireBoardTask(ctx, id); err != nil {
 		return err
 	}
-	if category != models.CategoryActive {
-		// A demotion may cancel the observed run after its board update. Keep
-		// direct follow-ups and manual worker submissions out until that older
-		// cancellation has finished.
-		unlock := persistence.LockTaskLifecycle(id)
-		defer unlock()
+	ctx = s.workerSvc.TaskActivationContext(ctx)
+	unlock := persistence.LockTaskLifecycle(id)
+	release := func() {
+		if unlock != nil {
+			unlock()
+			unlock = nil
+		}
+	}
+	defer release()
+	if category == models.CategoryActive {
+		if err := persistence.CheckTaskActivation(ctx, id); err != nil {
+			return err
+		}
 	}
 	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
 	var previousTask *models.Task
@@ -554,9 +561,6 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	if err != nil {
 		applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
 		return err
-	}
-	if category == models.CategoryActive && s.workerSvc.IsTaskStopping(id) {
-		return ErrTaskStillStopping
 	}
 	if category != models.CategoryActive && previousTask != nil && previousTask.SwarmRole == models.SwarmRoleParent && s.swarmSvc != nil {
 		// Keep child callbacks out from the board write through cancellation.
@@ -570,6 +574,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		}
 	}
 	if _, guarded := persistence.ActiveLaneExpectedState(ctx, id); guarded && category == models.CategoryActive {
+		release()
 		if previousTask == nil {
 			return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 		}
@@ -603,8 +608,15 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 	}
 	rollbackActivation := func(activationErr error) error {
-		if category != models.CategoryActive || previousTask == nil {
+		if category != models.CategoryActive || previousTask == nil || errors.Is(activationErr, ErrTaskStillStopping) {
 			return activationErr
+		}
+		// Never restore an old snapshot over a Stop that won admission.
+		if unlock == nil {
+			unlock = persistence.LockTaskLifecycle(id)
+		}
+		if err := persistence.CheckTaskActivation(ctx, id); err != nil {
+			return errors.Join(activationErr, err)
 		}
 		rollbackCtx := context.WithoutCancel(ctx)
 		if err := s.repo.RestoreBoardState(rollbackCtx, *previousTask); err != nil {
@@ -673,6 +685,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	// If moved to Active, prefer a pending task-thread follow-up over rerunning the original prompt.
 	// ClaimTask provides atomic guard against double execution for normal task runs.
 	if category == models.CategoryActive {
+		release()
 		s.resumeGoalStoppedByUser(ctx, id, "user")
 		if s.queuedTaskThreadFollowupHook != nil {
 			handled, err := s.queuedTaskThreadFollowupHook(ctx, id)
@@ -703,8 +716,10 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			}
 		}
 		applog.Infof("[task-svc] UpdateCategory resetting status to pending and activating id=%s (was %s)", id, task.Status)
-		unlock := persistence.LockTaskLifecycle(id)
-		defer unlock()
+		unlock = persistence.LockTaskLifecycle(id)
+		if err := persistence.CheckTaskActivation(ctx, id); err != nil {
+			return err
+		}
 		// Category editing and follow-up hooks ran outside the gate. A Stop may
 		// have completed meanwhile, so restore Active from current durable state
 		// before submitting this deliberate manual activation.
@@ -906,6 +921,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 	if err := s.requireBoardTask(ctx, id); err != nil {
 		return err
 	}
+	ctx = s.workerSvc.TaskActivationContext(ctx)
 	applog.Infof("[task-svc] RunTask id=%s", id)
 	task, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -915,9 +931,6 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 	if task == nil {
 		applog.Infof("[task-svc] RunTask not found id=%s", id)
 		return fmt.Errorf("task not found: %s", id)
-	}
-	if s.workerSvc.IsTaskStopping(id) {
-		return ErrTaskStillStopping
 	}
 	if _, guarded := persistence.ActiveLaneExpectedState(ctx, id); guarded {
 		if s.queuedTaskThreadFollowupHook != nil {
@@ -984,6 +997,9 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 	// This must happen before submission so the UI reflects the move immediately.
 	unlock := persistence.LockTaskLifecycle(id)
 	defer unlock()
+	if err := persistence.CheckTaskActivation(ctx, id); err != nil {
+		return err
+	}
 	// The task may have changed while the hook and model selection ran. Reload it
 	// under the same gate that protects cancellation's callback and queue purge.
 	task, err = s.repo.GetByID(ctx, id)

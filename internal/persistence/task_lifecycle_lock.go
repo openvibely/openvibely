@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"sync"
 )
 
@@ -39,4 +40,21 @@ func LockTaskLifecycle(taskID string) func() {
 		}
 		taskLifecycleLocks.Unlock()
 	}
+}
+
+// WithTaskActivationCheck carries the runtime admission check to repositories
+// that own the lifecycle lock. The callback must not acquire that lock itself.
+func WithTaskActivationCheck(ctx context.Context, check func(string) error) context.Context {
+	return context.WithValue(ctx, taskActivationCheckKey{}, check)
+}
+
+type taskActivationCheckKey struct{}
+
+// CheckTaskActivation must be called while holding the task lifecycle lock,
+// before changing board state or admitting an execution.
+func CheckTaskActivation(ctx context.Context, taskID string) error {
+	if check, ok := ctx.Value(taskActivationCheckKey{}).(func(string) error); ok {
+		return check(taskID)
+	}
+	return nil
 }
