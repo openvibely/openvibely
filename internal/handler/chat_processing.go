@@ -2040,6 +2040,9 @@ func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID str
 		return false, err
 	}
 	if active {
+		if h.workerSvc.IsTaskStopping(taskID) {
+			return false, service.ErrTaskStillStopping
+		}
 		if h.workerSvc != nil {
 			h.workerSvc.ClearCancellationRequested(taskID)
 		}
@@ -2068,6 +2071,9 @@ func (h *Handler) RetryLatestFailedTaskThreadFollowup(ctx context.Context, taskI
 		return false, err
 	}
 	if active {
+		if h.workerSvc.IsTaskStopping(taskID) {
+			return false, service.ErrTaskStillStopping
+		}
 		if h.workerSvc != nil {
 			h.workerSvc.ClearCancellationRequested(taskID)
 		}

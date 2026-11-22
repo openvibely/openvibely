@@ -1139,6 +1139,18 @@ func (w *WorkerService) IsCancellationRequested(taskID string) bool {
 	return requested
 }
 
+// IsTaskStopping keeps manual restarts out until the cancelled run has
+// deregistered after cleanup. A stale stop marker alone must not block a retry.
+func (w *WorkerService) IsTaskStopping(taskID string) bool {
+	if w == nil {
+		return false
+	}
+	w.cancelMu.Lock()
+	defer w.cancelMu.Unlock()
+	_, registered := w.cancelRegistrationIDs[taskID]
+	return registered && w.cancellationRequested[taskID]
+}
+
 // RegisterCancel stores a cancel function for a running task so it can be
 // cancelled later via CancelRunningTask. This is also used by chat tasks
 // that bypass the worker pool.

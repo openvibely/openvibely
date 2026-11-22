@@ -2431,7 +2431,7 @@ func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testin
 	}
 }
 
-func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T) {
+func TestTaskService_CancelTaskRejectsRestartUntilCleanupFinishes(t *testing.T) {
 	env := teststores.New(t)
 	taskRepo := env.Tasks
 	worker := newTestWorkerService(t)
@@ -2445,7 +2445,7 @@ func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T
 	require.NoError(t, err)
 	stopEntered := make(chan struct{})
 	releaseStop := make(chan struct{})
-	worker.RegisterCancel(task.ID, func() {
+	registration := worker.RegisterCancelOwned(task.ID, func() {
 		close(stopEntered)
 		<-releaseStop
 	})
@@ -2460,7 +2460,10 @@ func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T
 	go func() { rerunDone <- svc.RunTask(ctx, task.ID) }()
 	close(releaseStop)
 	require.NoError(t, <-stopDone)
-	require.NoError(t, <-rerunDone)
+	require.ErrorIs(t, <-rerunDone, ErrTaskStillStopping)
+	require.True(t, worker.IsTaskStopping(task.ID))
+	worker.DeregisterCancelOwned(task.ID, registration)
+	require.NoError(t, svc.RunTask(ctx, task.ID))
 	current, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusPending, current.Status)

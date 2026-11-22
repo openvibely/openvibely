@@ -22,6 +22,8 @@ var ErrTaskPromptRequired = errors.New("task prompt is required")
 var ErrInvalidTaskPriority = errors.New("task priority must be between 1 and 4")
 var ErrTaskNotFoundInProject = errors.New("task not found in project")
 var ErrTaskProjectScopeRequired = errors.New("project_id is required")
+var ErrTaskStillStopping = errors.New("Task is still stopping. Try again in a moment.")
+
 var ErrActiveLaneLifecycleRouted = errors.New("task activation was routed to its lifecycle owner")
 var ErrTaskCancellationSuperseded = errors.New("task cancellation was superseded by a newer run")
 
@@ -492,6 +494,11 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 		unlocks = nil
 	}
 	defer release()
+	for _, move := range moves {
+		if s.workerSvc.IsTaskStopping(move.ID) {
+			return ErrTaskStillStopping
+		}
+	}
 	admissions, err := s.repo.MoveTasksToActiveLane(ctx, projectID, moves, status)
 	if errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) && len(moves) == 1 {
 		release() // lifecycle routing can reenter RunTask for this task
@@ -547,6 +554,9 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	if err != nil {
 		applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
 		return err
+	}
+	if category == models.CategoryActive && s.workerSvc.IsTaskStopping(id) {
+		return ErrTaskStillStopping
 	}
 	if category != models.CategoryActive && previousTask != nil && previousTask.SwarmRole == models.SwarmRoleParent && s.swarmSvc != nil {
 		// Keep child callbacks out from the board write through cancellation.
@@ -732,6 +742,9 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 	if status == models.StatusPending {
 		unlock := persistence.LockTaskLifecycle(id)
 		defer unlock()
+		if s.workerSvc.IsTaskStopping(id) {
+			return ErrTaskStillStopping
+		}
 	}
 	if err := s.repo.UpdateStatus(ctx, id, status); err != nil {
 		applog.Infof("[task-svc] UpdateStatus error: %v", err)
@@ -902,6 +915,9 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 	if task == nil {
 		applog.Infof("[task-svc] RunTask not found id=%s", id)
 		return fmt.Errorf("task not found: %s", id)
+	}
+	if s.workerSvc.IsTaskStopping(id) {
+		return ErrTaskStillStopping
 	}
 	if _, guarded := persistence.ActiveLaneExpectedState(ctx, id); guarded {
 		if s.queuedTaskThreadFollowupHook != nil {
