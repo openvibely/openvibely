@@ -133,36 +133,37 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var root = document.documentElement;
 					var desktop = root.getAttribute('data-openvibely-runtime') === 'desktop';
 					var wide = window.matchMedia('(min-width: 1024px)');
-					function apply() {
-						var prefs = {};
-						try { prefs = { output: localStorage.getItem('openvibely.outputDetail'), surfaces: localStorage.getItem('openvibely.surfaceStyle'), layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle'), meters: localStorage.getItem('openvibely.usageMeterStyle') }; } catch (_) {}
-						root.setAttribute('data-output-detail', prefs.output === 'full' ? 'full' : 'compact');
-						root.setAttribute('data-surface-style', prefs.surfaces === 'layered' ? 'layered' : 'default');
-						root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
-						root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
-						root.setAttribute('data-usage-meter-style', ['letters', 'logos', 'fill', 'bars'].includes(prefs.meters) ? prefs.meters : 'logos');
-						root.setAttribute('data-tab-style', prefs.tabs === 'attached' ? 'attached' : 'detached');
-						root.setAttribute('data-thread-width', prefs.thread === 'full' ? 'full' : 'focused');
-						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'on' ? 'on' : 'off');
-						root.setAttribute('data-board-columns', ['filled', 'inset', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'tint');
-						var active = desktop || wide.matches;
-						if (active === root.hasAttribute('data-shell-frame')) return;
-						root.toggleAttribute('data-shell-frame', active);
-						document.dispatchEvent(new CustomEvent('openvibely:shell-frame-change', { detail: { active: active } }));
-					}
-					apply();
-					var displayPrefs = {
-                        output: { key: 'openvibely.outputDetail', attr: 'data-output-detail', values: ['compact', 'full'] },
- surfaces: { key: 'openvibely.surfaceStyle', attr: 'data-surface-style', values: ['default', 'layered'] },
-						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
-						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['focused', 'full'] },
-						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['off', 'on'] },
-						meters: { key: 'openvibely.usageMeterStyle', attr: 'data-usage-meter-style', values: ['logos', 'letters', 'fill', 'bars'] },
-						tabs: { key: 'openvibely.tabStyle', attr: 'data-tab-style', values: ['detached', 'attached'] },
-						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['off', 'on'] },
-						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['tint', 'filled', 'inset', 'tintstrip'] }
-					};
-					window.openVibelyDisplay = {
+						function apply() {
+							var prefs = {};
+							try { prefs = { output: localStorage.getItem('openvibely.outputDetail'), surfaces: localStorage.getItem('openvibely.surfaceStyle'), layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), headerFade: localStorage.getItem('openvibely.headerFade'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle'), meters: localStorage.getItem('openvibely.usageMeterStyle') }; } catch (_) {}
+							root.setAttribute('data-output-detail', prefs.output === 'full' ? 'full' : 'compact');
+							root.setAttribute('data-surface-style', prefs.surfaces === 'layered' ? 'layered' : 'default');
+							root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
+							root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
+							root.setAttribute('data-usage-meter-style', ['letters', 'logos', 'fill', 'bars'].includes(prefs.meters) ? prefs.meters : 'logos');
+							root.setAttribute('data-tab-style', prefs.tabs === 'attached' ? 'attached' : 'detached');
+							root.setAttribute('data-thread-width', prefs.thread === 'full' ? 'full' : 'focused');
+							root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'on' ? 'on' : 'off');
+							root.setAttribute('data-header-fade', ['soft-edge', 'translucent', 'off'].includes(prefs.headerFade) ? prefs.headerFade : 'soft-edge');
+							root.setAttribute('data-board-columns', ['filled', 'inset', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'tint');
+							var active = desktop || wide.matches;
+							if (active === root.hasAttribute('data-shell-frame')) return;
+							root.toggleAttribute('data-shell-frame', active);
+							document.dispatchEvent(new CustomEvent('openvibely:shell-frame-change', { detail: { active: active } }));
+						}
+						apply();
+						var displayPrefs = {
+	                        output: { key: 'openvibely.outputDetail', attr: 'data-output-detail', values: ['compact', 'full'] },
+	 surfaces: { key: 'openvibely.surfaceStyle', attr: 'data-surface-style', values: ['default', 'layered'] },
+							layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
+							thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['focused', 'full'] },
+							step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['off', 'on'] },
+							meters: { key: 'openvibely.usageMeterStyle', attr: 'data-usage-meter-style', values: ['logos', 'letters', 'fill', 'bars'] },
+							tabs: { key: 'openvibely.tabStyle', attr: 'data-tab-style', values: ['detached', 'attached'] },
+							bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['off', 'on'] },
+							headerFade: { key: 'openvibely.headerFade', attr: 'data-header-fade', values: ['soft-edge', 'translucent', 'off'] },
+							columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['tint', 'filled', 'inset', 'tintstrip'] }
+						};					window.openVibelyDisplay = {
 						get: function(name) { var p = displayPrefs[name]; return p ? root.getAttribute(p.attr) : null; },
 						set: function(name, value) {
 							var p = displayPrefs[name];
@@ -3385,10 +3386,98 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html { --conversation-card-base: var(--board-card-bg); --conversation-card-raised: color-mix(in srgb, var(--board-card-bg) 94%, oklch(var(--bc))); }
 				html[data-ov-theme-layer="custom"] { --conversation-card-base: var(--board-card-bg); --conversation-card-raised: color-mix(in srgb, var(--board-card-bg) 94%, var(--ov-text, oklch(var(--bc)))); }
 				html[data-surface-step="off"] { --shell-card: var(--conversation-card-base) !important; }
-				html[data-surface-step="on"] { --shell-card: var(--conversation-card-raised) !important; }
-				html[data-ov-theme-layer="custom"] .queued-input-row { background-color: color-mix(in srgb, var(--ov-content-bg) 45%, transparent) !important; }
-			</style>
-			<script>
+					html[data-surface-step="on"] { --shell-card: var(--conversation-card-raised) !important; }
+					html[data-ov-theme-layer="custom"] .queued-input-row { background-color: color-mix(in srgb, var(--ov-content-bg) 45%, transparent) !important; }
+
+					/* Conversation top header fade: Soft edge (default), Translucent (74px + blur), or Off. */
+					html { --header-fade-bg: var(--shell-page, oklch(var(--b2))); }
+					html[data-header-fade="soft-edge"] :is(#chat-page-root, #task-detail-content:has(#tab-chat:not(.hidden))) .relative:has(> [data-chat-transcript])::after {
+						content: "";
+						position: absolute;
+						top: 0;
+						left: -24px;
+						right: -24px;
+						height: 26px;
+						pointer-events: none;
+						z-index: 10;
+						background: linear-gradient(
+							to bottom,
+							var(--header-fade-bg) 0%,
+							color-mix(in srgb, var(--header-fade-bg) 78%, transparent) 24%,
+							color-mix(in srgb, var(--header-fade-bg) 42%, transparent) 52%,
+							color-mix(in srgb, var(--header-fade-bg) 14%, transparent) 78%,
+							transparent 100%
+						);
+					}
+					html[data-header-fade="soft-edge"] :is(#chat-page-root, #task-detail-content:has(#tab-chat:not(.hidden))) .relative:has(> [data-chat-transcript]) > [data-chat-transcript] {
+						padding-top: 24px;
+					}
+					html[data-header-fade="translucent"] :is(#chat-page-root, #task-detail-content:has(#tab-chat:not(.hidden))) > [data-page-header] {
+						pointer-events: none;
+					}
+					html[data-header-fade="translucent"] :is(#chat-page-root, #task-detail-content:has(#tab-chat:not(.hidden))) > [data-page-header] > :not(#task-details-opener):not(.flex-1),
+					html[data-header-fade="translucent"] #task-detail-content:has(#tab-chat:not(.hidden)):not([data-inspector-overlay="true"]) > [data-page-header] > #task-details-opener {
+						position: relative;
+						z-index: 1;
+						pointer-events: auto;
+					}
+					html[data-header-fade="translucent"] #task-detail-content[data-inspector-overlay="true"] > [data-page-header] > #task-details-opener {
+						pointer-events: auto;
+					}
+					html[data-header-fade="translucent"] #task-detail-content:has(#tab-chat:not(.hidden)) > [data-page-header] > div.flex-1 {
+						position: relative;
+						z-index: 1;
+						pointer-events: none;
+					}
+					html[data-header-fade="translucent"] #task-detail-content:has(#tab-chat:not(.hidden)) > [data-page-header] > div.flex-1 > * {
+						pointer-events: auto;
+					}
+					html[data-header-fade="translucent"] :is(#chat-page-root, #task-detail-content:has(#tab-chat:not(.hidden))) .relative:has(> [data-chat-transcript]) {
+						margin-top: -48px;
+						z-index: 0;
+					}
+					html[data-header-fade="translucent"] :is(#chat-page-root, #task-detail-content:has(#tab-chat:not(.hidden))) .relative:has(> [data-chat-transcript])::before {
+						content: "";
+						position: absolute;
+						top: 0;
+						left: -24px;
+						right: -24px;
+						height: 74px;
+						pointer-events: none;
+						z-index: 10;
+						backdrop-filter: blur(6px);
+						-webkit-backdrop-filter: blur(6px);
+						mask-image: linear-gradient(to bottom, #000 0%, #000 36%, rgba(0, 0, 0, 0.45) 60%, transparent 90%);
+						-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 36%, rgba(0, 0, 0, 0.45) 60%, transparent 90%);
+					}
+					html[data-header-fade="translucent"] :is(#chat-page-root, #task-detail-content:has(#tab-chat:not(.hidden))) .relative:has(> [data-chat-transcript])::after {
+						content: "";
+						position: absolute;
+						top: 0;
+						left: -24px;
+						right: -24px;
+						height: 74px;
+						pointer-events: none;
+						z-index: 11;
+						background: linear-gradient(
+							to bottom,
+							color-mix(in srgb, var(--header-fade-bg) 97%, transparent) 0%,
+							color-mix(in srgb, var(--header-fade-bg) 90%, transparent) 24%,
+							color-mix(in srgb, var(--header-fade-bg) 74%, transparent) 44%,
+							color-mix(in srgb, var(--header-fade-bg) 46%, transparent) 62%,
+							color-mix(in srgb, var(--header-fade-bg) 20%, transparent) 78%,
+							color-mix(in srgb, var(--header-fade-bg) 5%, transparent) 91%,
+							transparent 100%
+						);
+					}
+					html[data-header-fade="translucent"] :is(#chat-page-root, #task-detail-content:has(#tab-chat:not(.hidden))) .relative:has(> [data-chat-transcript]) > [data-chat-transcript] {
+						padding-top: 66px;
+					}
+					html:is([data-header-fade="soft-edge"], [data-header-fade="translucent"]) #task-detail-content[data-inspector-docked="true"]:has(#tab-chat:not(.hidden)) .relative:has(> [data-chat-transcript])::before,
+					html:is([data-header-fade="soft-edge"], [data-header-fade="translucent"]) #task-detail-content[data-inspector-docked="true"]:has(#tab-chat:not(.hidden)) .relative:has(> [data-chat-transcript])::after {
+						right: 0;
+					}
+				</style>			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a
 				// dependency that becomes available after initial page load is configured
 				// before any model output reaches an innerHTML sink.

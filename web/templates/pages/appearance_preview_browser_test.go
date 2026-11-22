@@ -8,6 +8,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/themes"
 	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
@@ -322,6 +323,129 @@ func TestBrowserFunctional_UsageMeterAppearance(t *testing.T) {
 			b.evaluate(`openVibelyThemes.apply('` + theme.ID + `'); 'theme'`)
 			b.waitFor("theme remaining allowance prominence", `(()=>{const light=document.documentElement.dataset.theme==='light';const svg=document.querySelector('.rail-account svg');const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');function brightness(token){const rect=document.createElementNS(svg.namespaceURI,'rect');rect.setAttribute('fill','var('+token+')');svg.append(rect);const color=getComputedStyle(rect).fill;rect.remove();ctx.fillStyle=light?'white':'black';ctx.fillRect(0,0,1,1);ctx.fillStyle=color;ctx.fillRect(0,0,1,1);const p=ctx.getImageData(0,0,1,1).data;return p[0]+p[1]+p[2]};const left=brightness('--ov-usage-remaining'),used=brightness('--ov-usage-used');return String(light?left<used:left>used)})()`, "true")
 		}
-		b.evaluate(`selectOpenVibelyDisplay('meters','letters');'reset'`)
-	})
-}
+			b.evaluate(`selectOpenVibelyDisplay('meters','letters');'reset'`)
+		})
+	}
+
+	func TestBrowserFunctional_HeaderFadePreference(t *testing.T) {
+		chrome := chatNavigationChromePath(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if static.ServeAsset(w, r) {
+				return
+			}
+			switch r.URL.Path {
+			case "/":
+				if err := Themes([]models.Project{{ID: "project", Name: "Project"}}, "project", nil).Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+			case "/chat":
+				if err := Chat([]models.Project{{ID: "project", Name: "Project"}}, "project", nil, nil, nil, nil, nil, false, false, 30).Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+			case "/task":
+				task := &models.Task{ID: "task-1", ProjectID: "project", Title: "Investigate header fade", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+				thread := components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
+				if err := TaskDetailPage([]models.Project{{ID: "project", Name: "Project"}}, task, nil, nil, nil, nil, nil, nil, "chat", nil, thread).Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+			default:
+				w.WriteHeader(http.StatusNoContent)
+			}
+		}))
+		defer server.Close()
+		runComposerFocusCDP(t, chrome, server.URL+"/?section=chat", "header-fade-pref", func(b *composerFocusCDP) {
+			b.waitFor("appearance chat ready", `String(!!window.selectOpenVibelyDisplay && document.readyState==='complete')`, "true")
+			b.waitFor("default soft-edge selected", `String(openVibelyDisplay.get('headerFade')==='soft-edge' && document.documentElement.getAttribute('data-header-fade')==='soft-edge' && document.querySelector('[data-display-pref="headerFade"][data-display-option="soft-edge"]').getAttribute('aria-pressed')==='true')`, "true")
+			b.waitFor("three distinct header fade previews", `(()=>{
+				const off = document.querySelector('[data-kind="headerFade"][data-variant="off"] .dp-header-fade');
+				const soft = document.querySelector('[data-kind="headerFade"][data-variant="soft-edge"] .dp-header-fade');
+				const trans = document.querySelector('[data-kind="headerFade"][data-variant="translucent"] .dp-header-fade');
+				const offAfter = getComputedStyle(off, '::after').content;
+				const softAfter = getComputedStyle(soft, '::after').height;
+				const transBefore = getComputedStyle(trans, '::before').height;
+				const transAfter = getComputedStyle(trans, '::after').height;
+				const transBarBg = getComputedStyle(trans.querySelector('.dp-hf-bar')).backgroundColor;
+				return String(offAfter==='none' && softAfter==='24px' && transBefore==='44px' && transAfter==='44px' && transBarBg==='rgba(0, 0, 0, 0)');
+			})()`, "true")
+
+			b.evaluate(`document.querySelector('[data-display-pref="headerFade"][data-display-option="translucent"]').click(); 'selected'`)
+			b.waitFor("translucent saved and selected", `String(openVibelyDisplay.get('headerFade')==='translucent' && localStorage.getItem('openvibely.headerFade')==='translucent' && document.querySelector('[data-display-pref="headerFade"][data-display-option="translucent"]').getAttribute('aria-pressed')==='true')`, "true")
+			b.call("Page.navigate", map[string]any{"url": server.URL + "/?section=chat&reload=1"}, nil)
+			b.waitFor("translucent survives reload", `String(location.search.includes('reload=1') && document.readyState==='complete' && !!window.selectOpenVibelyDisplay && openVibelyDisplay.get('headerFade')==='translucent')`, "true")
+
+			b.call("Page.navigate", map[string]any{"url": server.URL + "/chat"}, nil)
+			b.waitFor("chat page ready", `String(location.pathname==='/chat' && document.readyState==='complete' && !!document.getElementById('chat-messages'))`, "true")
+			b.waitFor("translucent fade geometry on chat", `(()=>{
+				const host = document.getElementById('chat-messages').parentElement;
+				const transcript = document.getElementById('chat-messages');
+				const header = document.querySelector('#chat-page-root > [data-page-header]');
+				const actionBtn = header.querySelector('.header-action-btn');
+				return JSON.stringify({
+					marginTop: getComputedStyle(host).marginTop,
+					beforeH: getComputedStyle(host, '::before').height,
+					afterH: getComputedStyle(host, '::after').height,
+					padTop: getComputedStyle(transcript).paddingTop,
+					headerH: Math.round(header.getBoundingClientRect().height),
+					headerPtr: getComputedStyle(header).pointerEvents,
+					btnPtr: getComputedStyle(actionBtn).pointerEvents,
+				});
+			})()`, `{"marginTop":"-48px","beforeH":"74px","afterH":"74px","padTop":"66px","headerH":48,"headerPtr":"none","btnPtr":"auto"}`)
+
+			b.evaluate(`openVibelyDisplay.set('headerFade', 'soft-edge'); 'soft-edge'`)
+			b.waitFor("soft-edge fade geometry on chat", `(()=>{
+				const host = document.getElementById('chat-messages').parentElement;
+				const transcript = document.getElementById('chat-messages');
+				return JSON.stringify({
+					marginTop: getComputedStyle(host).marginTop,
+					beforeContent: getComputedStyle(host, '::before').content,
+					afterH: getComputedStyle(host, '::after').height,
+					padTop: getComputedStyle(transcript).paddingTop,
+				});
+			})()`, `{"marginTop":"0px","beforeContent":"none","afterH":"26px","padTop":"24px"}`)
+
+			b.evaluate(`openVibelyDisplay.set('headerFade', 'off'); 'off'`)
+			b.waitFor("off disables fade on chat", `(()=>{
+				const host = document.getElementById('chat-messages').parentElement;
+				const transcript = document.getElementById('chat-messages');
+				return JSON.stringify({
+					marginTop: getComputedStyle(host).marginTop,
+					beforeContent: getComputedStyle(host, '::before').content,
+					afterContent: getComputedStyle(host, '::after').content,
+					padTop: getComputedStyle(transcript).paddingTop,
+				});
+			})()`, `{"marginTop":"0px","beforeContent":"none","afterContent":"none","padTop":"16px"}`)
+
+			b.call("Page.navigate", map[string]any{"url": server.URL + "/task"}, nil)
+			b.waitFor("task thread ready", `String(location.pathname==='/task' && document.readyState==='complete' && !!document.getElementById('task-thread-messages'))`, "true")
+			b.evaluate(`openVibelyDisplay.set('headerFade', 'translucent'); 'translucent'`)
+			b.waitFor("translucent fade geometry on task thread", `(()=>{
+				const host = document.getElementById('task-thread-messages').parentElement;
+				const transcript = document.getElementById('task-thread-messages');
+				const header = document.getElementById('task-breadcrumb-toolbar');
+				const toggle = document.getElementById('task-details-opener');
+				const back = document.getElementById('task-back-btn');
+				const titleWrap = document.getElementById('task-breadcrumb-title').parentElement;
+				return JSON.stringify({
+					marginTop: getComputedStyle(host).marginTop,
+					beforeH: getComputedStyle(host, '::before').height,
+					afterH: getComputedStyle(host, '::after').height,
+					padTop: getComputedStyle(transcript).paddingTop,
+					headerH: Math.round(header.getBoundingClientRect().height),
+					headerPtr: getComputedStyle(header).pointerEvents,
+					wrapPtr: getComputedStyle(titleWrap).pointerEvents,
+					backPtr: getComputedStyle(back).pointerEvents,
+					togglePtr: getComputedStyle(toggle).pointerEvents,
+				});
+			})()`, `{"marginTop":"-48px","beforeH":"74px","afterH":"74px","padTop":"66px","headerH":48,"headerPtr":"none","wrapPtr":"none","backPtr":"auto","togglePtr":"auto"}`)
+
+			b.evaluate(`document.getElementById('task-details-opener').click(); 'open panel'`)
+			b.waitFor("docked panel trims fade scrim right edge", `(()=>{
+				const root = document.getElementById('task-detail-content');
+				const host = document.getElementById('task-thread-messages').parentElement;
+				return String(root.dataset.inspectorDocked==='true' && getComputedStyle(host, '::after').right==='0px' && getComputedStyle(host, '::before').right==='0px');
+			})()`, "true")
+
+			b.evaluate(`document.getElementById('tab-chat').classList.add('hidden'); 'switch to changes'`)
+			b.waitFor("hiding thread tab clears translucent header pointer override", `getComputedStyle(document.getElementById('task-breadcrumb-toolbar')).pointerEvents`, "auto")
+		})
+	}
