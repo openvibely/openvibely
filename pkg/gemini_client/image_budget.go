@@ -59,7 +59,7 @@ func estimateContentTokens(textBytes int, contents []Content) int {
 			textBytes -= len(encoded) - 2
 			mediaTokens += estimateInlineImageTokens(inline.Data)
 		}
-		if file != nil && strings.HasPrefix(strings.ToLower(file.MimeType), "image/") {
+		if file != nil && (file.MimeType == "" || strings.HasPrefix(strings.ToLower(file.MimeType), "image/")) {
 			mediaTokens += fallbackImageTokens
 		}
 	}

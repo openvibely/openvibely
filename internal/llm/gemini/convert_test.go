@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	geminiclient "github.com/openvibely/openvibely/pkg/gemini_client"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 func TestReplayPreservesToolImages(t *testing.T) {
@@ -77,5 +78,57 @@ func TestReplayPreservesImagesAtIncompleteToolRound(t *testing.T) {
 	url := messages[2].ImageContent[0]["image_url"].(map[string]interface{})["url"]
 	if url != "https://example.com/image.jpg" {
 		t.Fatalf("image URI: %v", url)
+	}
+}
+
+func TestReplayImageURLsRoundTrip(t *testing.T) {
+	for _, uri := range []string{"https://example.com/image.png", "https://example.com/download?signature=abc%2Fdef&expires=123", "gs://bucket/image.webp"} {
+		for _, nested := range []bool{false, true} {
+			part := geminiclient.Part{FileData: &geminiclient.FileData{MimeType: "image/png", FileURI: uri}}
+			contents := []geminiclient.Content{{Role: "user", Parts: []geminiclient.Part{{Text: "look"}, part}}}
+			if nested {
+				contents = []geminiclient.Content{
+					{Role: "model", Parts: []geminiclient.Part{{FunctionCall: &geminiclient.FunctionCall{ID: "image", Name: "view_image", Args: json.RawMessage(`{}`)}}}},
+					{Role: "user", Parts: []geminiclient.Part{{FunctionResponse: &geminiclient.FunctionResponse{ID: "image", Name: "view_image", Response: map[string]any{"output": "look"}, Parts: []geminiclient.FunctionResponsePart{{FileData: part.FileData}}}}}},
+				}
+			}
+			messages := CompletionsFromContents(contents)
+			back := ContentsFromCompletions(messages)
+			// Shared image messages carry URLs without MIME metadata. They must
+			// survive another conversion without acquiring an invented MIME type.
+			again := CompletionsFromContents(back)
+			for _, converted := range [][]openaiclient.CompletionsHistoryMessage{messages, again} {
+				var urls []string
+				for _, m := range converted {
+					for _, p := range m.ImageContent {
+						if image, ok := p["image_url"].(map[string]interface{}); ok {
+							urls = append(urls, image["url"].(string))
+						}
+					}
+				}
+				if !reflect.DeepEqual(urls, []string{uri}) {
+					t.Fatalf("nested=%v: URLs=%v want %s", nested, urls, uri)
+				}
+			}
+			if nested && (messages[1].Role != "tool" || messages[1].ToolCallID != "image" || messages[1].Content != "look") {
+				t.Fatal("tool result changed")
+			}
+		}
+	}
+}
+
+func TestReplayMixedInlineAndURLImages(t *testing.T) {
+	messages := []openaiclient.CompletionsHistoryMessage{{Role: "user", ImageContent: []map[string]interface{}{
+		{"type": "text", "text": "compare images"},
+		{"type": "image_url", "image_url": map[string]interface{}{"url": "https://example.com/image"}},
+		{"type": "image_url", "image_url": map[string]interface{}{"url": "data:image/png;base64,YWJj"}},
+	}}}
+	contents := ContentsFromCompletions(messages)
+	if len(contents) != 1 || len(contents[0].Parts) != 3 {
+		t.Fatalf("lost parts: %+v", contents)
+	}
+	parts := contents[0].Parts
+	if parts[0].Text != "compare images" || parts[1].FileData == nil || parts[1].FileData.FileURI != "https://example.com/image" || parts[2].InlineData == nil || parts[2].InlineData.Data != "YWJj" {
+		t.Fatalf("wrong conversion: %+v", parts)
 	}
 }

@@ -83,3 +83,13 @@ func TestRemoteAndMultipleImageBudget(t *testing.T) {
 		t.Fatalf("two-image budget: %d", got)
 	}
 }
+
+func TestImageURLWithoutMimeBudget(t *testing.T) {
+	tokens, err := EstimateContentsTokens([]Content{{Role: "user", Parts: []Part{{FileData: &FileData{FileURI: "https://example.com/image"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens < 1122 || tokens > 1250 {
+		t.Fatalf("URL image estimate: %d", tokens)
+	}
+}

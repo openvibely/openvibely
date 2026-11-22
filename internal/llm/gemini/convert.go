@@ -60,7 +60,7 @@ func CompletionsFromContents(contents []geminiclient.Content) []openaiclient.Com
 					var url string
 					if media.InlineData != nil && strings.HasPrefix(strings.ToLower(media.InlineData.MimeType), "image/") {
 						url = "data:" + media.InlineData.MimeType + ";base64," + media.InlineData.Data
-					} else if media.FileData != nil && strings.HasPrefix(strings.ToLower(media.FileData.MimeType), "image/") {
+					} else if media.FileData != nil && (media.FileData.MimeType == "" || strings.HasPrefix(strings.ToLower(media.FileData.MimeType), "image/")) {
 						url = media.FileData.FileURI
 					}
 					if url != "" {
@@ -71,6 +71,11 @@ func CompletionsFromContents(contents []geminiclient.Content) []openaiclient.Com
 				images = append(images, map[string]interface{}{
 					"type":      "image_url",
 					"image_url": map[string]interface{}{"url": "data:" + p.InlineData.MimeType + ";base64," + p.InlineData.Data},
+				})
+			case p.FileData != nil && p.FileData.FileURI != "" && (p.FileData.MimeType == "" || strings.HasPrefix(strings.ToLower(p.FileData.MimeType), "image/")):
+				images = append(images, map[string]interface{}{
+					"type":      "image_url",
+					"image_url": map[string]interface{}{"url": p.FileData.FileURI},
 				})
 			default:
 				text.WriteString(p.Text)
@@ -188,9 +193,14 @@ func imagePart(image map[string]interface{}) (geminiclient.Part, bool) {
 	if nested, ok := image["image_url"].(map[string]interface{}); ok {
 		url, _ = nested["url"].(string)
 	}
+	if url == "" {
+		return geminiclient.Part{}, false
+	}
 	rest, ok := strings.CutPrefix(url, "data:")
 	if !ok {
-		return geminiclient.Part{}, false
+		// Shared image URLs do not carry a MIME type. Leave it unspecified
+		// rather than guessing from a possibly extensionless or signed URL.
+		return geminiclient.Part{FileData: &geminiclient.FileData{FileURI: url}}, true
 	}
 	mime, data, ok := strings.Cut(rest, ";base64,")
 	if !ok {
