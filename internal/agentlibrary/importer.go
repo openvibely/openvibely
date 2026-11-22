@@ -127,10 +127,11 @@ func NormalizeStandaloneSkillPackage(content, packageName, scope string) (*Skill
 		}, content, nil
 	}
 	var standard struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
-		Kind        string `yaml:"kind"`
-		Enabled     *bool  `yaml:"enabled"`
+		Name         string                  `yaml:"name"`
+		Description  string                  `yaml:"description"`
+		Kind         string                  `yaml:"kind"`
+		Enabled      *bool                   `yaml:"enabled"`
+		Dependencies []skilldeps.Dependency `yaml:"dependencies"`
 	}
 	if yamlErr := yaml.Unmarshal([]byte(front), &standard); yamlErr != nil {
 		return nil, body, fmt.Errorf("standard skill frontmatter: invalid YAML: %w", yamlErr)
@@ -149,9 +150,13 @@ func NormalizeStandaloneSkillPackage(content, packageName, scope string) (*Skill
 	if !isSlug(handle) {
 		return nil, body, fmt.Errorf("standard skill frontmatter name %q is not a valid skill key", name)
 	}
+	if err := skilldeps.Validate(standard.Dependencies); err != nil {
+		return nil, body, fmt.Errorf("standard skill frontmatter dependencies: %w", err)
+	}
 	decl = &SkillDeclaration{
-		Kind:    "openvibely.agent_skill",
-		Version: 1,
+		Kind:         "openvibely.agent_skill",
+		Version:      1,
+		Dependencies: standard.Dependencies,
 		Skill: SkillBlock{
 			Key:         handle,
 			Name:        name,
