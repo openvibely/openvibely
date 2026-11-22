@@ -228,19 +228,23 @@ func TestLegacyOAuthEnvelope(t *testing.T) {
 	}
 }
 
-func TestBrokenStreamDoesNotReplayOutput(t *testing.T) {
+func TestBrokenStreamRetriesTurn(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		fmt.Fprint(w, `data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}`+"\n\n")
+		if requests == 1 {
+			sse(w, `{"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}`)
+			return
+		}
+		sse(w, `{"candidates":[{"content":{"parts":[{"text":"complete"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 	c := NewWithAPIKey("key")
 	c.SetBaseURL(server.URL)
 	var output strings.Builder
-	_, err := c.Send(context.Background(), "hello", &Options{Model: "gemini-4-neon", DisableTools: true, OmitExecutionEnvironment: true, OnText: func(s string) { output.WriteString(s) }})
-	if err == nil || requests != 1 || output.String() != "partial" {
-		t.Fatalf("err=%v requests=%d output=%q", err, requests, output.String())
+	resp, err := c.Send(context.Background(), "hello", &Options{Model: "gemini-4-neon", DisableTools: true, OmitExecutionEnvironment: true, OnText: func(s string) { output.WriteString(s) }})
+	if err != nil || requests != 2 || resp.Text != "complete" || output.String() != "partialcomplete" {
+		t.Fatalf("err=%v requests=%d response=%+v output=%q", err, requests, resp, output.String())
 	}
 }
 

@@ -246,16 +246,17 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 		}
 
 		var partial streamdecode.Text
-		turnResult, err := httpretry.DoStream(ctx, httpretry.Policy{
-			AllowReplay: true,
-			MaxRetries:  httpretry.DefaultMaxRetries,
+		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			OnRetry: func(event httpretry.RetryEvent) {
 				applog.Infof("[gemini] retrying turn %d, attempt %d/%d in %v: %v", turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
-		}, func(attemptCtx context.Context) (*turnResult, bool, error) {
-			partial = streamdecode.Text{}
-			result, err := c.sendTurn(attemptCtx, body, opts, &partial)
-			return result, result != nil, err
+		}, func(attemptCtx context.Context) (*turnResult, error) {
+			var attemptText streamdecode.Text
+			result, err := c.sendTurn(attemptCtx, body, opts, &attemptText)
+			if attemptText.String() != "" {
+				partial = attemptText
+			}
+			return result, err
 		})
 		if err != nil {
 			if text := partial.String(); text != "" {
