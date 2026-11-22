@@ -180,6 +180,10 @@ func functionResponseText(response map[string]any) string {
 }
 
 func imagePart(image map[string]interface{}) (geminiclient.Part, bool) {
+	if image["type"] == "text" {
+		text, ok := image["text"].(string)
+		return geminiclient.Part{Text: text}, ok
+	}
 	var url string
 	if nested, ok := image["image_url"].(map[string]interface{}); ok {
 		url, _ = nested["url"].(string)

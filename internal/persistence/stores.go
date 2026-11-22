@@ -356,6 +356,8 @@ type ExecutionStore interface {
 	RecoverStaleRunningTaskExecutions(ctx context.Context) (int64, error)
 	ReplaceReasoningReplay(ctx context.Context, id string, reasoningContent string, messages []models.ExecutionReplayMessage) error
 	ReplayMessagesByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error)
+	ReplayRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error)
+	ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error)
 	SaveChatContextUsage(ctx context.Context, scopeType string, scopeID string, modelKey string, usage models.ChatContextUsage) error
 	SetAgentConfigIfEmpty(ctx context.Context, id string, agentConfigID string) error
 	SuccessCompletionReadiness(ctx context.Context, id string) (CompleteSuccessOutcome, error)

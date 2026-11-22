@@ -1688,19 +1688,7 @@ func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (l
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var replays map[string][]models.ExecutionReplayMessage
-	var err error
-	if reader, ok := s.execRepo.(interface {
-		ReplayContinuationRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
-	}); ok {
-		replays, err = reader.ReplayContinuationRowsByExecutionIDs(ctx, ids)
-	} else if reader, ok := s.execRepo.(interface {
-		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
-	}); ok {
-		replays, err = reader.ReplayRowsByExecutionIDs(ctx, ids)
-	} else {
-		replays, err = s.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
-	}
+	replays, err := s.execRepo.ReplayContinuationRowsByExecutionIDs(ctx, ids)
 	if err != nil {
 		return req, err
 	}

@@ -347,11 +347,9 @@ func BuildHistory(history []models.Execution) []geminiclient.Content {
 					out = append(out, contents...)
 					continue
 				}
-				if turn.Rows != nil && turn.Rows.Format == "array" && turn.TranscriptJSON == "" {
-					if messages, err := openaiclient.DecodeCompletionsHistory(turn); err == nil && len(messages) > 0 {
-						out = append(out, ContentsFromCompletions(messages)...)
-						continue
-					}
+				if messages, err := openaiclient.DecodeCompletionsHistory(turn); err == nil && len(messages) > 0 {
+					out = append(out, ContentsFromCompletions(messages)...)
+					continue
 				}
 				if turn.UserContent != "" {
 					out = append(out, geminiclient.TextContent("user", turn.UserContent))
