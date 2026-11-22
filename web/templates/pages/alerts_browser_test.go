@@ -594,6 +594,12 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 		"manualReady": `{"current_version":"0.3.0","state":"available","distribution":"docker","channel":"stable","manual":true,"staged":false,"release":{"metadata":{"version":"0.5.0"},"target":{"image_ref":"openvibely:0.5.0"},"apply_supported":true},"drain":{"active":{}}}`,
 		"manualBusy":  `{"current_version":"0.3.0","state":"waiting_for_idle","distribution":"docker","channel":"stable","manual":true,"staged":false,"release":{"metadata":{"version":"0.5.1"},"target":{"image_ref":"openvibely:0.5.1"},"apply_supported":true},"drain":{"active":{"task_executions":1,"chat_executions":2,"automation_activities":3}}}`,
 	}
+	// Retry must remain reachable after rollback and after a failed retry download.
+	for _, state := range []string{"rolled_back", "failed"} {
+		snapshot := strings.Replace(currentSnapshot, `"state":"available"`, `"state":"`+state+`"`, 1)
+		snapshot = strings.Replace(snapshot, `"staged":true`, `"staged":false`, 1)
+		snapshots[state] = snapshot
+	}
 	var mu sync.Mutex
 
 	setSnapshot := func(name string) string {
@@ -630,6 +636,8 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 	    if (typeof window.openVibelyNormalizeSystemUpdateSnapshot !== 'function') fail('missing shared system update normalizer');
 	    var cases = [
 	      {name:'actionable', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true, acceptText:'Update OpenVibely'},
+          {name:'rolled_back', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true},
+          {name:'failed', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true},
 	      {name:'succeeded', hidden:true, actionable:false, card:false, accept:false, badge:false, toast:false},
 	      {name:'uptodate', hidden:true, actionable:false, card:false, accept:false, badge:false, toast:false},
 	      {name:'hosted', hidden:false, actionable:false, card:true, accept:false, badge:false, toast:false},

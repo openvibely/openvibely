@@ -6051,8 +6051,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					var available = metadata.version || '';
 					var hidden = !!(!data || data.state === 'succeeded' || (available && data.current_version === available));
 					var applySupported = release.apply_supported !== false;
-					var readyForLocalApply = !!data && (data.distribution === 'docker' || data.manual || data.staged);
-					var stateAllowsApply = !!data && (data.state === 'available' || data.state === 'failed');
+					var retryable = !!data && (data.state === 'failed' || data.state === 'rolled_back');
+					var readyForLocalApply = !!data && (data.distribution === 'docker' || data.manual || data.staged || retryable);
+					var stateAllowsApply = !!data && (data.state === 'available' || retryable);
 					var actionable = !hidden && !!available && applySupported && data.distribution !== 'hosted' && readyForLocalApply && stateAllowsApply;
 					var active = data && data.drain && data.drain.active ? data.drain.active : {};
 					var activeTotal = (active.task_executions || 0) + (active.chat_executions || 0) + (active.automation_activities || 0);
@@ -6289,6 +6290,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					}
 					setSystemUpdateIndicators(view.actionable);
 					if (typeof window.openVibelyRenderSystemUpdateCard === 'function') window.openVibelyRenderSystemUpdateCard(data);
+					if (view.state === 'failed' || view.state === 'rolled_back') clearSystemUpdatePendingSuccess();
 					if (view.actionable) showSystemUpdateNotice(data);
 					else {
 						dismissSystemUpdateNotice('');

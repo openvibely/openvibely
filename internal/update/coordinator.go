@@ -570,7 +570,7 @@ func (c *Coordinator) releaseIsNewerThanCurrent(release *VerifiedRelease) bool {
 }
 func (c *Coordinator) Stage(ctx context.Context) error {
 	c.mu.Lock()
-	if c.state != StateAvailable && c.state != StateFailed {
+	if c.state != StateAvailable && c.state != StateFailed && c.state != StateRolledBack {
 		state := c.state
 		c.mu.Unlock()
 		return errors.New("cannot stage update while coordinator is " + state)
@@ -669,7 +669,7 @@ func (c *Coordinator) accept(ctx context.Context, lease time.Duration, automatic
 				c.mu.Unlock()
 				return errors.New("cannot accept update while another drain is active")
 			}
-			if c.state != StateAvailable && c.state != StateFailed {
+			if c.state != StateAvailable && c.state != StateFailed && c.state != StateRolledBack {
 				state := c.state
 				c.mu.Unlock()
 				return errors.New("cannot accept update while coordinator is " + state)
@@ -695,7 +695,7 @@ func (c *Coordinator) accept(ctx context.Context, lease time.Duration, automatic
 			// staged files before acceptance. Stage reuses intact files and repairs
 			// missing/corrupt ones. Recheck all acceptance conditions after unlocking.
 			_, localStage := c.staged.(LocalStagedUpdate)
-			if !automatic && !prepared && (c.state == StateFailed || localStage || (c.current.Distribution == "docker" && !c.manual && c.staged == nil)) {
+			if !automatic && !prepared && (c.state == StateFailed || c.state == StateRolledBack || localStage || (c.current.Distribution == "docker" && !c.manual && c.staged == nil)) {
 				c.mu.Unlock()
 				if err := c.Stage(ctx); err != nil {
 					return err
