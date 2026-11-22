@@ -132,7 +132,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		}
 		client.SetHistory(history)
 	}
-	attachments, err := convertAttachments(ctx, req.Attachments)
+	attachments, err := convertAttachments(ctx, req.Attachments, req.Agent.Model)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -171,7 +171,7 @@ func (a *Adapter) callStreaming(ctx context.Context, req llmcontracts.AgentReque
 	if chat || llmcontracts.HistoryContinuationFromContext(ctx) {
 		client.SetHistory(a.prepareHistory(ctx, req.ChatHistory))
 	}
-	attachments, err := convertAttachments(ctx, req.Attachments)
+	attachments, err := convertAttachments(ctx, req.Attachments, req.Agent.Model)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
@@ -478,8 +478,9 @@ func toolExecutor(ctx context.Context, workDir string) func(context.Context, str
 	}
 }
 
-func convertAttachments(ctx context.Context, attachments []models.Attachment) ([]geminiclient.Attachment, error) {
-	inputs, err := llmattachment.ModelInputs(ctx, attachments)
+func convertAttachments(ctx context.Context, attachments []models.Attachment, model string) ([]geminiclient.Attachment, error) {
+	spec, _ := models.LookupModel(models.ProviderGemini, model)
+	inputs, err := llmattachment.ModelInputsWithProfile(ctx, attachments, spec.ImageResizeProfile)
 	if err != nil {
 		return nil, err
 	}
