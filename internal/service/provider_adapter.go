@@ -63,7 +63,7 @@ func (s *LLMService) initProviderAdapters() {
 		models.ProviderOpenAI:           &openAIProviderAdapter{svc: s, adapter: openaiAdapter},
 		models.ProviderOpenAICompatible: &openAICompatibleProviderAdapter{svc: s, adapter: openaiCompatibleAdapter},
 		models.ProviderOllama:           &ollamaProviderAdapter{svc: s, adapter: ollamaAdapter},
-		models.ProviderGemini:           &geminiProviderAdapter{svc: s, adapter: geminiAdapter},
+		models.ProviderGemini:           &geminiProviderAdapter{adapter: geminiAdapter},
 		models.ProviderMixture:          &mixtureProviderAdapter{svc: s},
 		models.ProviderTest:             &testProviderAdapter{svc: s},
 	}
@@ -2135,7 +2135,6 @@ func (a *openAICompatibleProviderAdapter) Call(req llmcontracts.AgentRequest) (l
 }
 
 type geminiProviderAdapter struct {
-	svc     *LLMService
 	adapter *llmgemini.Adapter
 }
 

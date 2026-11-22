@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -240,4 +241,16 @@ func TestBrokenStreamDoesNotReplayOutput(t *testing.T) {
 	if err == nil || requests != 1 || output.String() != "partial" {
 		t.Fatalf("err=%v requests=%d output=%q", err, requests, output.String())
 	}
+}
+
+func parseStream(body io.Reader, onText func(string), partial *strings.Builder) (*turnResult, error) {
+	result := &turnResult{}
+	assembler := &callAssembler{}
+	if err := parseStreamInto(body, onText, partial, result, assembler); err != nil {
+		return nil, err
+	}
+	if len(assembler.pending) > 0 {
+		return nil, fmt.Errorf("gemini incomplete streamed function arguments")
+	}
+	return result, nil
 }

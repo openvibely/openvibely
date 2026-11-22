@@ -757,18 +757,6 @@ type codeAssistChunk struct {
 	Response *streamChunk `json:"response"`
 }
 
-func parseStream(body io.Reader, onText func(string), partial *strings.Builder) (*turnResult, error) {
-	result := &turnResult{}
-	assembler := &callAssembler{}
-	if err := parseStreamInto(body, onText, partial, result, assembler); err != nil {
-		return nil, err
-	}
-	if len(assembler.pending) > 0 {
-		return nil, fmt.Errorf("gemini incomplete streamed function arguments")
-	}
-	return result, nil
-}
-
 func parseStreamInto(body io.Reader, onText func(string), partial *strings.Builder, result *turnResult, assembler *callAssembler) error {
 	scanner := streamdecode.Scanner(body, 32*1024*1024)
 	result.continuationToken = ""
