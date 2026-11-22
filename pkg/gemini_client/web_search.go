@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/httpretry"
-	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 // Search uses a separate grounded request so coding tools and conversation
@@ -15,7 +16,7 @@ import (
 const webSearchModel = "gemini-3.1-flash-lite"
 
 func webSearchDefinition() ToolDefinition {
-	return ToolDefinition{Name: "web_search", Description: "Search the web using Google. Returns a grounded answer and source/citation metadata. Cite the returned source URLs in your answer.", Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"The web search query"}},"required":["query"],"additionalProperties":false}`)}
+	return ToolDefinition{Name: "web_search", Description: "Search the web using Google. Returns a grounded answer with numbered citations and source links. Cite the returned source URLs in your answer.", Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"The web search query"}},"required":["query"],"additionalProperties":false}`)}
 }
 
 type webSearchResult struct {
@@ -69,73 +70,118 @@ func (c *Client) webSearch(ctx context.Context, input json.RawMessage) (*webSear
 	if strings.TrimSpace(result.text) == "" {
 		return nil, fmt.Errorf("Google web search returned no answer")
 	}
-	// Keep the provider's source indices, text spans, queries, and search entry
-	// point together; flattening them would break citation references.
-	output, err := json.Marshal(struct {
-		Answer    string          `json:"answer"`
-		Grounding json.RawMessage `json:"groundingMetadata,omitempty"`
-		Truncated bool            `json:"truncated,omitempty"`
-	}{result.text, result.grounding, result.finishReason == "MAX_TOKENS"})
-	if err != nil {
-		return nil, err
-	}
-	return &webSearchResult{output: string(output), usage: result}, nil
+	return &webSearchResult{output: formatWebSearchResult(result.text, result.grounding), usage: result}, nil
 }
 
-// Bound the encoded result, not its JSON text: cutting JSON can lose source
-// URLs and leave an unreadable tool result. Keep full output for display.
-func webSearchOutputForModel(output string, tokenLimit int) string {
-	if tokenLimit <= 0 {
-		tokenLimit = tokenestimate.DefaultToolOutputTokenLimit
+type searchSegment struct {
+	Start int    `json:"startIndex"`
+	End   int    `json:"endIndex"`
+	Text  string `json:"text"`
+}
+
+func formatWebSearchResult(answer string, grounding json.RawMessage) string {
+	var metadata struct {
+		Chunks []struct {
+			Web struct {
+				URI   string `json:"uri"`
+				Title string `json:"title"`
+			} `json:"web"`
+		} `json:"groundingChunks"`
+		Supports []struct {
+			Segment searchSegment `json:"segment"`
+			Indices []int         `json:"groundingChunkIndices"`
+		} `json:"groundingSupports"`
 	}
-	budget := tokenestimate.ByteBudget(tokenLimit)
-	if len(output) <= budget {
-		return output
+	if json.Unmarshal(grounding, &metadata) != nil {
+		return answer
 	}
-	var result struct {
-		Answer    string                     `json:"answer"`
-		Grounding map[string]json.RawMessage `json:"groundingMetadata,omitempty"`
-		Truncated bool                       `json:"truncated,omitempty"`
-	}
-	fallback := `{"answer":"Search result omitted: sources exceed the output budget. Retry with a narrower query.","truncated":true}`
-	if len(fallback) > budget {
-		fallback = `{}`
-	}
-	if json.Unmarshal([]byte(output), &result) != nil {
-		return fallback
-	}
-	result.Truncated = true
-	// Rendering HTML and query suggestions are not needed for citations.
-	for key := range result.Grounding {
-		if key != "groundingChunks" && key != "groundingSupports" {
-			delete(result.Grounding, key)
+	citations := map[int][]int{}
+	for _, support := range metadata.Supports {
+		offset := searchCitationOffset(answer, support.Segment)
+		if offset < 0 {
+			continue
+		}
+		for _, index := range support.Indices {
+			if index < 0 || index >= len(metadata.Chunks) {
+				continue
+			}
+			duplicate := false
+			for _, existing := range citations[offset] {
+				if existing == index {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				citations[offset] = append(citations[offset], index)
+			}
 		}
 	}
-	encode := func() string { b, _ := json.Marshal(result); return string(b) }
-	if compact := encode(); len(compact) <= budget {
-		return compact
+	offsets := make([]int, 0, len(citations))
+	for offset := range citations {
+		offsets = append(offsets, offset)
 	}
-	// Drop duplicated answer spans before shortening the answer. Preserve every
-	// source and its original index; do not retain stale offsets after shortening.
-	delete(result.Grounding, "groundingSupports")
-	if compact := encode(); len(compact) <= budget {
-		return compact
+	sort.Ints(offsets)
+	var out strings.Builder
+	previous := 0
+	for _, offset := range offsets {
+		out.WriteString(answer[previous:offset])
+		for _, index := range citations[offset] {
+			fmt.Fprintf(&out, "[%d]", index+1)
+		}
+		previous = offset
 	}
-	answer := []rune(result.Answer)
-	result.Answer = ""
-	if len(encode()) > budget {
-		return fallback
+	out.WriteString(answer[previous:])
+	if len(metadata.Chunks) > 0 {
+		out.WriteString("\n\nSources:\n")
 	}
-	low, high := 0, len(answer)
-	for low < high {
-		mid := low + (high-low+1)/2
-		result.Answer = string(answer[:mid])
-		if len(encode()) <= budget {
-			low = mid
+	escapeTitle := strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]")
+	for i, chunk := range metadata.Chunks {
+		title := strings.Join(strings.Fields(chunk.Web.Title), " ")
+		if title == "" {
+			title = "Untitled"
+		}
+		title = escapeTitle.Replace(title)
+		uri := escapeSearchURL(chunk.Web.URI)
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		if uri == "" {
+			fmt.Fprintf(&out, "[%d] %s", i+1, title)
 		} else {
-			high = mid - 1
+			fmt.Fprintf(&out, "[%d] [%s](%s)", i+1, title, uri)
 		}
 	}
-	result.Answer = string(answer[:low])
-	return encode()
+	return out.String()
+}
+
+func searchCitationOffset(answer string, segment searchSegment) int {
+	// Prefer byte offsets, then character offsets, then the quoted segment.
+	if segment.Start >= 0 && segment.End > segment.Start && segment.End <= len(answer) && utf8.ValidString(answer[:segment.Start]) && utf8.ValidString(answer[:segment.End]) {
+		if segment.Text == "" || answer[segment.Start:segment.End] == segment.Text {
+			return segment.End
+		}
+	}
+	runes := []rune(answer)
+	if segment.Start >= 0 && segment.End > segment.Start && segment.End <= len(runes) && segment.Text != "" && string(runes[segment.Start:segment.End]) == segment.Text {
+		return len(string(runes[:segment.End]))
+	}
+	if segment.Text != "" {
+		if index := strings.Index(answer, segment.Text); index >= 0 {
+			return index + len(segment.Text)
+		}
+	}
+	return -1
+}
+
+func escapeSearchURL(uri string) string {
+	var out strings.Builder
+	for _, b := range []byte(strings.TrimSpace(uri)) {
+		if b <= ' ' || b == 127 || strings.ContainsRune("()<>\\", rune(b)) {
+			fmt.Fprintf(&out, "%%%02X", b)
+		} else {
+			out.WriteByte(b)
+		}
+	}
+	return out.String()
 }

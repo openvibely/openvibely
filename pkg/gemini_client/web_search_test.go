@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,7 +72,7 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 				} else {
 					require.Contains(t, string(raw), "https://example.com/weather")
 					if !tc.oversized {
-						require.Contains(t, string(raw), "groundingChunkIndices")
+						require.Contains(t, string(raw), "Sunny.[1]")
 					}
 					contentsJSON, _ := json.Marshal(req["contents"])
 					var contents []Content
@@ -98,7 +99,7 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 				callbacks++
 				require.Equal(t, "web_search", name)
 				require.False(t, isError)
-				require.Contains(t, output, "groundingMetadata")
+				require.Contains(t, output, "[1] [Weather](https://example.com/weather)")
 			}})
 			require.NoError(t, err)
 			require.Equal(t, 2, calls)
@@ -241,62 +242,46 @@ func assertSearchReplay(t *testing.T, contents []Content, truncated bool) {
 			output, ok := part.FunctionResponse.Response["output"].(string)
 			require.True(t, ok)
 			require.LessOrEqual(t, len(output), 40000)
-			var decoded map[string]any
-			require.NoError(t, json.Unmarshal([]byte(output), &decoded))
 			require.Contains(t, output, "https://example.com/weather")
+			require.NotContains(t, output, "groundingMetadata")
 			if truncated {
-				require.Equal(t, true, decoded["truncated"])
+				require.Contains(t, output, "Tool output truncated")
+			} else {
+				require.Contains(t, output, "Sunny.[1]")
 			}
 		}
 	}
 	require.True(t, found)
 }
 
-func TestWebSearchOutputBudget(t *testing.T) {
-	for _, answer := range []string{strings.Repeat("quoted \"text\" <>&\n", 10000), strings.Repeat("世界🌎", 10000)} {
-		original, err := json.Marshal(map[string]any{
-			"answer": answer,
-			"groundingMetadata": map[string]any{
-				"groundingChunks":   []any{map[string]any{"web": map[string]string{"uri": "https://example.com/source", "title": "Source"}}},
-				"groundingSupports": []any{map[string]any{"segment": map[string]any{"text": answer}, "groundingChunkIndices": []int{0}}},
-				"searchEntryPoint":  map[string]string{"renderedContent": strings.Repeat("HTML", 20000)},
-			},
-		})
-		require.NoError(t, err)
-		for _, limit := range []int{0, -1, 200, 1} {
-			output := webSearchOutputForModel(string(original), limit)
-			budget := 40000
-			if limit > 0 {
-				budget = limit * 4
-			}
-			require.LessOrEqual(t, len(output), budget)
-			var decoded struct {
-				Answer    string
-				Grounding json.RawMessage `json:"groundingMetadata"`
-				Truncated bool
-			}
-			require.NoError(t, json.Unmarshal([]byte(output), &decoded))
-			if limit == 1 {
-				require.Equal(t, "{}", output)
-				continue
-			}
-			require.True(t, decoded.Truncated)
-			require.NotEmpty(t, decoded.Answer)
-			require.True(t, strings.HasPrefix(answer, decoded.Answer))
-			require.Contains(t, string(decoded.Grounding), "https://example.com/source")
-			require.NotContains(t, string(decoded.Grounding), "groundingSupports")
-		}
+func TestFormatWebSearchResult(t *testing.T) {
+	metadata := json.RawMessage(`{"groundingChunks":[{"web":{"uri":"https://example.com/a(b) c","title":" A  [title]\n here "}},{"web":{"uri":"https://example.com/2","title":"Two"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":6,"text":"First."},"groundingChunkIndices":[0,0,1,-1,99]},{"segment":{"text":"Second."},"groundingChunkIndices":[1]}],"searchEntryPoint":{"renderedContent":"UNUSED_HTML"}}`)
+	output := formatWebSearchResult("First. Second.", metadata)
+	require.Equal(t, "First.[1][2] Second.[2]\n\nSources:\n[1] [A \\[title\\] here](https://example.com/a%28b%29%20c)\n[2] [Two](https://example.com/2)", output)
+	require.Equal(t, "Answer", formatWebSearchResult("Answer", nil))
+	require.Equal(t, "Answer", formatWebSearchResult("Answer", json.RawMessage(`{broken`)))
+}
+
+func TestSearchCitationOffset(t *testing.T) {
+	for _, tc := range []struct {
+		segment searchSegment
+		want    int
+	}{
+		{searchSegment{0, 6, "世界"}, 6},
+		{searchSegment{0, 2, "世界"}, 6},
+		{searchSegment{99, 100, "world"}, 12},
+		{searchSegment{-1, 99, "absent"}, -1},
+		{searchSegment{0, 1, ""}, -1},
+	} {
+		require.Equal(t, tc.want, searchCitationOffset("世界 world", tc.segment))
 	}
-	t.Run("sources cannot fit", func(t *testing.T) {
-		input, _ := json.Marshal(map[string]any{"answer": "Claim", "groundingMetadata": map[string]any{"groundingChunks": []any{map[string]any{"web": map[string]string{"uri": "https://example.com/" + strings.Repeat("x", 1000)}}}}})
-		output := webSearchOutputForModel(string(input), 100)
-		require.True(t, json.Valid([]byte(output)))
-		require.LessOrEqual(t, len(output), 400)
-		require.NotContains(t, output, "Claim")
-		require.Contains(t, output, "Retry with a narrower query")
-	})
-	t.Run("small result unchanged", func(t *testing.T) {
-		input := `{"answer":"Short","groundingMetadata":{"groundingChunks":[]}}`
-		require.Equal(t, input, webSearchOutputForModel(input, 0))
-	})
+}
+
+func TestWebSearchUsesGenericOutputLimit(t *testing.T) {
+	output := formatWebSearchResult(strings.Repeat("Answer ", 10000), json.RawMessage(`{"groundingChunks":[{"web":{"uri":"https://example.com/source","title":"Source"}}]}`))
+	for _, limit := range []int{0, 200, 1} {
+		got, images := toolOutputForModel(output, limit)
+		require.Equal(t, tokenestimate.ToolOutputForModelInput(output, limit), got)
+		require.Empty(t, images)
+	}
 }

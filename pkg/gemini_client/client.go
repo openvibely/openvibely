@@ -347,13 +347,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 			_ = json.Unmarshal(normalized, &inputMap)
 			result.ToolCalls = append(result.ToolCalls, ToolCall{Name: call.Name, Input: inputMap, Output: output, Error: isError})
 
-			var modelOutput string
-			var outputImages []Part
-			if call.Name == "web_search" && nativeSearch && !isError {
-				modelOutput = webSearchOutputForModel(output, opts.ToolOutputTokenLimit)
-			} else {
-				modelOutput, outputImages = toolOutputForModel(output, opts.ToolOutputTokenLimit)
-			}
+			modelOutput, outputImages := toolOutputForModel(output, opts.ToolOutputTokenLimit)
 			var responseMedia []FunctionResponsePart
 			for _, part := range outputImages {
 				if part.InlineData != nil {
