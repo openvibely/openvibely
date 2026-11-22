@@ -1750,11 +1750,17 @@ func TestCoordinatorRestartAfterAcceptedDockerCancellationReopensDrain(t *testin
 
 	coordinator.StartRecovery(context.Background())
 	deadline := time.Now().Add(time.Second)
-	for coordinator.Snapshot().State != StateIdle && time.Now().Before(deadline) {
+	for coordinator.Snapshot().State != StateAvailable && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if snapshot := coordinator.Snapshot(); snapshot.State != StateIdle || snapshot.Drain.State != DrainStateIdle {
+	if snapshot := coordinator.Snapshot(); snapshot.State != StateAvailable || snapshot.Drain.State != DrainStateIdle {
 		t.Fatalf("snapshot=%#v", snapshot)
+	}
+	coordinator.mu.RLock()
+	attempted := coordinator.autoAttemptedVersion
+	coordinator.mu.RUnlock()
+	if attempted != "0.6.0" {
+		t.Fatal("cancelled Docker release can be retried automatically")
 	}
 }
 

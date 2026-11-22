@@ -158,7 +158,7 @@ func TestAcceptedUpdateRestartAfterLeaseExpiry(t *testing.T) {
 				if err := again.SetPersistence(coordinatorPath); err != nil {
 					t.Fatal(err)
 				}
-				if again.accepted || again.state != StateIdle {
+				if again.accepted || again.state != StateAvailable {
 					t.Fatal("cancel was not durable")
 				}
 			}
@@ -166,7 +166,7 @@ func TestAcceptedUpdateRestartAfterLeaseExpiry(t *testing.T) {
 			defer cancel()
 			restored.StartRecovery(ctx)
 			if cancelBeforeRecovery {
-				if restored.Snapshot().State != StateIdle {
+				if restored.Snapshot().State != StateAvailable {
 					t.Fatal("cancelled update restarted")
 				}
 			} else {

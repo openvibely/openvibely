@@ -221,3 +221,94 @@ func TestInterruptedManualRetryRemainsRetryableAfterRestart(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelledUpdateRemainsAvailableForManualRetry(t *testing.T) {
+	for _, automatic := range []bool{true, false} {
+		t.Run(map[bool]string{true: "automatic", false: "manual"}[automatic], func(t *testing.T) {
+			now := time.Now().UTC()
+			root := t.TempDir()
+			client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json")})
+			target := Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64", URL: "https://example.test/app.tar.gz", Filetype: "tar.gz", Size: 3, SHA256: strings.Repeat("0", 64)}
+			release := cachedReleaseFixture(now, target, "download")
+			if err := client.saveState(persistedClientState{LastSuccessfulCheck: now, Cached: release}); err != nil {
+				t.Fatal(err)
+			}
+			tracker := NewWorkTracker()
+			done, err := tracker.Start(WorkTask)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer done()
+			installer := &retryLocalInstaller{path: filepath.Join(root, "staged")}
+			current := CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: "binary"}
+			newCoordinator := func() *Coordinator {
+				drain := NewDrainManager(tracker.Active, nil, 0, nil)
+				drain.SetWorkTracker(tracker)
+				return NewCoordinator(client, current, "stable", drain, installer, false, "", nil)
+			}
+			c := newCoordinator()
+			statePath := filepath.Join(root, "coordinator.json")
+			if err := c.SetPersistence(statePath); err != nil {
+				t.Fatal(err)
+			}
+			ctx, stop := context.WithCancel(context.Background())
+			defer stop()
+			c.StartRecovery(ctx)
+			if automatic {
+				if err := c.checkAndAutoUpdate(ctx); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := c.Check(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.Accept(ctx, time.Minute); err != nil {
+					t.Fatal(err)
+				}
+			}
+			waitForCoordinatorState(t, c, StateWaitingForIdle)
+			if err := c.Cancel(); err != nil {
+				t.Fatal(err)
+			}
+			if c.Snapshot().State != StateAvailable || c.drain.Status().State != DrainStateIdle || !tracker.Admit() {
+				t.Fatal("cancellation did not restore admission and manual update availability")
+			}
+			for n := 0; n < 3; n++ {
+				if err := c.checkAndAutoUpdate(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if installer.stages.Load() != 1 || installer.applies.Load() != 0 {
+				t.Fatal("cancelled release automatically prepared/applied again")
+			}
+			stop()
+			// Reopening the app must retain both the update action and its automatic block.
+			c = newCoordinator()
+			if err := c.SetPersistence(statePath); err != nil {
+				t.Fatal(err)
+			}
+			if c.accepted || c.autoAttemptedVersion != release.Metadata.Version || c.Snapshot().State != StateAvailable || !c.Snapshot().Staged {
+				t.Fatal("cancellation did not survive restart")
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c.StartRecovery(ctx)
+			for n := 0; n < 3; n++ {
+				if err := c.checkAndAutoUpdate(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if installer.stages.Load() != 1 || installer.applies.Load() != 0 {
+				t.Fatal("restart automatically retried cancelled update")
+			}
+			done()
+			if err := c.Accept(ctx, time.Minute); err != nil {
+				t.Fatal(err)
+			}
+			waitForCoordinatorState(t, c, StateSucceeded)
+			if installer.stages.Load() != 1 || installer.applies.Load() != 1 {
+				t.Fatalf("manual retry: stages=%d applies=%d", installer.stages.Load(), installer.applies.Load())
+			}
+		})
+	}
+}

@@ -1049,7 +1049,8 @@ func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease,
 						c.resumeInstallerUntilSettled(ctx, resumable, installer, staged, generation, release.Metadata)
 					}
 				case errors.Is(err, ErrUpdateCancelled):
-					c.completeGenerationWithRetry(ctx, generation, StateIdle, "")
+					state := c.prepareCancellationOutcome(generation)
+					c.completeGenerationWithRetry(ctx, generation, state, "")
 				case errors.Is(err, ErrUpdateRolledBack):
 					c.completeGenerationWithRetry(ctx, generation, StateRolledBack, err.Error())
 				case restartValidation:
@@ -1299,6 +1300,18 @@ func (c *Coordinator) abortGeneration(generation string, cause error) {
 	c.completeGenerationWithRetry(context.Background(), generation, StateFailed, message)
 }
 
+// The following generation completion persists this guard with the cancelled
+// outcome. It also retains it in memory if terminal persistence needs retrying.
+func (c *Coordinator) prepareCancellationOutcome(generation string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if generation != "" && c.operationGeneration == generation && c.release != nil {
+		c.autoAttemptedVersion = c.release.Metadata.Version
+		return StateAvailable
+	}
+	return StateIdle
+}
+
 func (c *Coordinator) Cancel() error {
 	c.mu.RLock()
 	installer, state, generation, managedProvider := c.installer, c.state, c.operationGeneration, c.managedStateProvider
@@ -1309,11 +1322,15 @@ func (c *Coordinator) Cancel() error {
 	if generation == "" {
 		c.mu.Lock()
 		if c.accepted && c.operationGeneration == "" && (c.state == StateAvailable || c.state == StateFailed) {
-			oldState, oldError, lease := c.state, c.lastError, c.acceptanceLease
+			oldState, oldError, lease, oldAttempt := c.state, c.lastError, c.acceptanceLease, c.autoAttemptedVersion
 			c.state, c.lastError = StateIdle, ""
+			if c.release != nil {
+				c.state = StateAvailable
+				c.autoAttemptedVersion = c.release.Metadata.Version
+			}
 			c.clearAcceptanceLocked()
 			if err := c.persistLocked(); err != nil {
-				c.state, c.lastError = oldState, oldError
+				c.state, c.lastError, c.autoAttemptedVersion = oldState, oldError, oldAttempt
 				c.accepted, c.acceptanceLease = true, lease
 				c.mu.Unlock()
 				return err
@@ -1357,13 +1374,16 @@ func (c *Coordinator) Cancel() error {
 		}
 		return errors.New(message)
 	}
-	err := c.completeGeneration(generation, StateIdle, "")
+	// Cancellation leaves the release available for an explicit manual retry.
+	// Suppress automatic acceptance even if the cancelled attempt was manual.
+	outcome := c.prepareCancellationOutcome(generation)
+	err := c.completeGeneration(generation, outcome, "")
 	if err != nil {
 		c.mu.RLock()
 		cleanupActive := c.cleanupGeneration == generation
 		c.mu.RUnlock()
 		if !cleanupActive {
-			c.startCompletionSupervisor(generation, StateIdle, "")
+			c.startCompletionSupervisor(generation, outcome, "")
 		}
 	}
 	return err
@@ -1413,7 +1433,8 @@ func (c *Coordinator) resumeInstallerUntilSettled(ctx context.Context, resumable
 			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 				return
 			case errors.Is(err, ErrUpdateCancelled):
-				c.completeGenerationWithRetry(ctx, generation, StateIdle, "")
+				state := c.prepareCancellationOutcome(generation)
+				c.completeGenerationWithRetry(ctx, generation, state, "")
 			case errors.Is(err, ErrUpdateRolledBack):
 				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, err.Error())
 			default:
