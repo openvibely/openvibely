@@ -100,6 +100,7 @@ func (a *automaticAppE2E) start() {
 	a.wait(func(s CoordinatorSnapshot) bool { return s.CurrentVersion == "0.5.0" }, "initial version")
 }
 func (a *automaticAppE2E) stop() {
+	a.t.Logf("stopping test app at %s (%s)", a.baseURL, a.installed)
 	if a.cmd != nil {
 		_ = a.cmd.Process.Kill()
 		<-a.exited
@@ -265,6 +266,8 @@ func runAutomaticPackagedScenario(t *testing.T, distribution string, builds map[
 				}
 			}
 			if failDownload.Load() {
+				// Exceed the HTTP retry budget so this is one failed staging attempt.
+				w.Header().Set("Retry-After", "121")
 				http.Error(w, "injected download outage", 503)
 				return true
 			}
