@@ -649,65 +649,80 @@ func (c *Coordinator) Accept(ctx context.Context, lease time.Duration) error {
 }
 
 func (c *Coordinator) accept(ctx context.Context, lease time.Duration, automatic bool) error {
-	c.mu.Lock()
-	if automatic && (ctx.Err() != nil || c.disableAutomaticUpdates || !c.automaticUpdatesSupportedLocked() || c.accepted || c.state != StateAvailable || c.release == nil || c.autoAttemptedVersion == c.release.Metadata.Version) {
+	prepared := false
+	for {
+		c.mu.Lock()
+		if automatic && (ctx.Err() != nil || c.disableAutomaticUpdates || !c.automaticUpdatesSupportedLocked() || c.accepted || c.state != StateAvailable || c.release == nil || c.autoAttemptedVersion == c.release.Metadata.Version) {
+			c.mu.Unlock()
+			return nil
+		}
+		if !c.accepted {
+			if lease <= 0 {
+				c.mu.Unlock()
+				return errors.New("update acceptance lease must be positive")
+			}
+			if c.drain == nil {
+				c.mu.Unlock()
+				return errors.New("drain manager unavailable")
+			}
+			if c.drain.Status().State != DrainStateIdle {
+				c.mu.Unlock()
+				return errors.New("cannot accept update while another drain is active")
+			}
+			if c.state != StateAvailable && c.state != StateFailed {
+				state := c.state
+				c.mu.Unlock()
+				return errors.New("cannot accept update while coordinator is " + state)
+			}
+			if c.release == nil {
+				c.mu.Unlock()
+				return errors.New("no verified release available")
+			}
+			if c.installer == nil && !c.manual {
+				c.mu.Unlock()
+				return errors.New("installer unavailable")
+			}
+			if c.configError != "" {
+				err := errors.New(c.configError)
+				c.mu.Unlock()
+				return err
+			}
+			if err := c.client.ValidateForInstall(*c.release, c.current); err != nil {
+				c.mu.Unlock()
+				return err
+			}
+			// An explicit retry must recover a failed state and verify any local
+			// staged files before acceptance. Stage reuses intact files and repairs
+			// missing/corrupt ones. Recheck all acceptance conditions after unlocking.
+			_, localStage := c.staged.(LocalStagedUpdate)
+			if !automatic && !prepared && (c.state == StateFailed || localStage || (c.current.Distribution == "docker" && !c.manual && c.staged == nil)) {
+				c.mu.Unlock()
+				if err := c.Stage(ctx); err != nil {
+					return err
+				}
+				prepared = true
+				continue
+			}
+			if !c.manual && c.staged == nil {
+				c.mu.Unlock()
+				return errors.New("update replacement is not staged")
+			}
+			previousAttempt := c.autoAttemptedVersion
+			if automatic {
+				c.autoAttemptedVersion = c.release.Metadata.Version
+			}
+			c.accepted, c.acceptanceLease = true, lease
+			if err := c.persistLocked(); err != nil {
+				c.clearAcceptanceLocked()
+				c.autoAttemptedVersion = previousAttempt
+				c.mu.Unlock()
+				return err
+			}
+		}
 		c.mu.Unlock()
+		c.startAcceptedUpdateSupervisor()
 		return nil
 	}
-	if !c.accepted {
-		if lease <= 0 {
-			c.mu.Unlock()
-			return errors.New("update acceptance lease must be positive")
-		}
-		if c.drain == nil {
-			c.mu.Unlock()
-			return errors.New("drain manager unavailable")
-		}
-		if c.drain.Status().State != DrainStateIdle {
-			c.mu.Unlock()
-			return errors.New("cannot accept update while another drain is active")
-		}
-		if c.state != StateAvailable && c.state != StateFailed {
-			state := c.state
-			c.mu.Unlock()
-			return errors.New("cannot accept update while coordinator is " + state)
-		}
-		if c.release == nil {
-			c.mu.Unlock()
-			return errors.New("no verified release available")
-		}
-		if c.installer == nil && !c.manual {
-			c.mu.Unlock()
-			return errors.New("installer unavailable")
-		}
-		if !c.manual && c.current.Distribution != "docker" && c.staged == nil {
-			c.mu.Unlock()
-			return errors.New("update replacement is not staged")
-		}
-		if c.configError != "" {
-			err := errors.New(c.configError)
-			c.mu.Unlock()
-			return err
-		}
-		if err := c.client.ValidateForInstall(*c.release, c.current); err != nil {
-			c.mu.Unlock()
-			return err
-		}
-		previousAttempt := c.autoAttemptedVersion
-		if automatic {
-			c.autoAttemptedVersion = c.release.Metadata.Version
-		}
-		c.accepted, c.acceptanceLease = true, lease
-		if err := c.persistLocked(); err != nil {
-			c.clearAcceptanceLocked()
-			c.autoAttemptedVersion = previousAttempt
-			c.mu.Unlock()
-			return err
-		}
-	}
-	c.mu.Unlock()
-	c.startAcceptedUpdateSupervisor()
-	return nil
 }
 
 func (c *Coordinator) startAcceptedUpdateSupervisor() {
