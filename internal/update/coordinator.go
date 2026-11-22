@@ -395,7 +395,7 @@ func (c *Coordinator) BindWailsUpdater(updater *wailsupdater.Updater) error {
 		}
 	}
 	c.installer = installer
-	needsStage := c.state == StateAvailable && c.release != nil && c.staged == nil
+	needsStage := c.state == StateAvailable && c.release != nil && c.staged == nil && c.autoAttemptedVersion != c.release.Metadata.Version
 	stageCtx := c.recoveryCtx
 	if stageCtx == nil {
 		stageCtx = context.Background()
@@ -508,17 +508,21 @@ func (c *Coordinator) check(ctx context.Context, background bool) error {
 		c.mu.Unlock()
 		return nil
 	}
-	if checked {
-		c.release = release
-		c.staged = nil
-	} else if release != nil && c.release == nil {
+	sameRelease := sameStagedRelease(c.release, release)
+	if checked || release != nil {
+		if !sameRelease {
+			c.staged = nil
+		}
 		c.release = release
 	} else if c.release != nil && (!c.releaseIsNewerThanCurrent(c.release) || !c.releaseIsUnexpired(c.release)) {
 		c.release = nil
 		c.staged = nil
 		c.lastError = ""
 	}
-	if c.release != nil {
+	skipAttempted := background && c.release != nil && c.autoAttemptedVersion == c.release.Metadata.Version
+	if skipAttempted && sameRelease {
+		c.state, c.lastError = previousState, previousError
+	} else if c.release != nil {
 		c.state = StateAvailable
 	} else {
 		c.state = StateIdle
@@ -527,7 +531,7 @@ func (c *Coordinator) check(ctx context.Context, background bool) error {
 		c.mu.Unlock()
 		return err
 	}
-	shouldStage := c.release != nil && c.installer != nil && !c.manual && (c.current.Distribution == "binary" || c.current.Distribution == "desktop")
+	shouldStage := !skipAttempted && c.release != nil && c.installer != nil && !c.manual && (c.current.Distribution == "binary" || c.current.Distribution == "desktop" || c.current.Distribution == "docker")
 	c.mu.Unlock()
 	if shouldStage {
 		return c.Stage(ctx)
@@ -592,6 +596,7 @@ func (c *Coordinator) Stage(ctx context.Context) error {
 		return err
 	}
 	previousState := c.state
+	previousStaged := c.staged
 	c.state = StateStaging
 	if err := c.persistLocked(); err != nil {
 		c.state = previousState
@@ -606,10 +611,27 @@ func (c *Coordinator) Stage(ctx context.Context) error {
 		}
 		return errors.New("installer unavailable")
 	}
-	staged, err := installer.Stage(ctx, release)
-	if err != nil {
-		c.setState(StateFailed, err.Error())
-		return err
+	staged := previousStaged
+	if !stagedUpdateReusable(ctx, staged, release) {
+		var err error
+		staged, err = installer.Stage(ctx, release)
+		if err == nil {
+			if local, ok := staged.(LocalStagedUpdate); ok {
+				local.ContentDigest, err = stagedContentDigest(ctx, local.ArtifactPath)
+				staged = local
+			}
+		}
+		if err != nil {
+			c.mu.Lock()
+			c.staged = nil
+			c.mu.Unlock()
+			c.setState(StateFailed, err.Error())
+			return err
+		}
+	} else if _, ok := staged.(VerifiedRelease); ok {
+		// Docker staging stores metadata, not downloaded bytes. Keep renewed
+		// signatures/expiry from the newly verified release for installation.
+		staged = release
 	}
 	c.mu.Lock()
 	c.staged = staged
