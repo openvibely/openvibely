@@ -937,7 +937,7 @@ func publishStagedBinary(current, staged string) error {
 		return closeErr
 	}
 	if err := atomicReplace(staged, current); err != nil {
-		return err
+		return fmt.Errorf("replace executable %q with %q: %w", current, staged, err)
 	}
 	return syncDirectory(filepath.Dir(current))
 }
