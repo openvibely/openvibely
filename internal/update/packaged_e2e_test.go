@@ -157,6 +157,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 
 	port := freeTCPPort(t)
 	appData := filepath.Join(root, "app-data")
+	disableAutomaticUpdatesForE2E(t, appData)
 	var approval *pendingApprovalE2E
 	if len(pendingApproval) > 0 && pendingApproval[0] {
 		approval = preparePendingApprovalE2E(t, appData)
@@ -364,6 +365,7 @@ func preparePackagedRecoveryPersistence(t *testing.T, appData string, staged Loc
 		t.Fatalf("prepare recovery drain: status=%#v err=%v", status, err)
 	}
 	coordinator.mu.Lock()
+	coordinator.disableAutomaticUpdates = true
 	coordinator.state = StateRestarting
 	coordinator.staged = staged
 	coordinator.operationGeneration = status.Generation
@@ -594,6 +596,7 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 		t.Fatal("real desktop update check did not return a release")
 	}
 	dataRoot := filepath.Join(root, "real-desktop-data")
+	disableAutomaticUpdatesForE2E(t, dataRoot)
 	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -767,6 +770,7 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 	defer updateServer.Close()
 
 	appData := filepath.Join(root, "desktop-data")
+	disableAutomaticUpdatesForE2E(t, appData)
 	stdoutLog, stderrLog, readLogs := openCommandLogs(t, root, "desktop-current")
 	helperLogPath := filepath.Join(root, "desktop-update-helper.log")
 	readDiagnostics := func() string {
@@ -1360,9 +1364,17 @@ func serveSignedBinaryRelease(t *testing.T, artifact []byte, filetype, filename,
 
 func serveSignedRelease(t *testing.T, artifact []byte, filetype, filename, kind, version string, private ed25519.PrivateKey) *httptest.Server {
 	t.Helper()
+	return serveControlledSignedRelease(t, artifact, filetype, filename, kind, version, private, nil, nil)
+}
+
+func serveControlledSignedRelease(t *testing.T, artifact []byte, filetype, filename, kind, version string, private ed25519.PrivateKey, intercept func(http.ResponseWriter, *http.Request) bool, amend func(*ReleaseMetadata)) *httptest.Server {
+	t.Helper()
 	digest := sha256.Sum256(artifact)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if intercept != nil && intercept(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/api/updates/check":
 			target := Target{
@@ -1385,6 +1397,9 @@ func serveSignedRelease(t *testing.T, artifact []byte, filetype, filename, kind,
 				ExpiresAt:       time.Now().Add(time.Hour).UTC(),
 				ReleaseNotesURL: "https://openvibely.ai/releases/" + version,
 				Targets:         []Target{target},
+			}
+			if amend != nil {
+				amend(&metadata)
 			}
 			raw, err := json.Marshal(metadata)
 			if err != nil {
