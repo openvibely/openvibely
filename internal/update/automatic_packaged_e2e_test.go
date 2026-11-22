@@ -170,11 +170,10 @@ func (a *automaticAppE2E) wait(check func(CoordinatorSnapshot) bool, label strin
 		if err == nil && check(s) {
 			return s
 		}
-		// Startup/UI checks can stage before the desktop installer is ready.
-		// Drive its next scheduled check instead of waiting a real minute.
-		if err == nil && s.State == StateAvailable && s.Staged && s.AutomaticUpdates {
-			a.advance(time.Minute)
-		}
+		// Observe only: advancing the clock here races manual requests with
+		// background checks and can expire metadata while waiting for a result.
+		// Startup waits for desktop installer registration before publishing;
+		// scenarios that need scheduled checks advance the clock explicitly.
 		time.Sleep(200 * time.Millisecond)
 	}
 	a.t.Fatalf("waiting for %s: snapshot=%+v err=%v\n%s", label, s, err, a.logs())
@@ -485,16 +484,26 @@ func runAutomaticPackagedScenario(t *testing.T, distribution string, builds map[
 	if scenario == "interrupted_retry_download" {
 		gate := make(chan struct{})
 		downloadGate.Store(&gate)
-		completed := make(chan struct{})
+		completed := make(chan string, 1)
 		go func() {
-			defer close(completed)
 			client := &http.Client{Timeout: 150 * time.Second}
-			resp, _ := client.Post(a.baseURL+"/api/system/update/apply", "application/json", nil)
-			if resp != nil {
-				resp.Body.Close()
+			resp, err := client.Post(a.baseURL+"/api/system/update/apply", "application/json", nil)
+			if err != nil {
+				completed <- err.Error()
+				return
 			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			completed <- fmt.Sprintf("HTTP %d: %s", resp.StatusCode, body)
 		}()
-		a.wait(func(s CoordinatorSnapshot) bool { return s.State == StateStaging && downloads.Load() == 2 }, "blocked retry download")
+		a.wait(func(s CoordinatorSnapshot) bool {
+			select {
+			case result := <-completed:
+				t.Fatalf("retry returned before download was interrupted: %s\n%s", result, a.logs())
+			default:
+			}
+			return s.State == StateStaging && downloads.Load() == 2
+		}, "blocked retry download")
 		a.stop()
 		close(gate)
 		downloadGate.Store(nil)
