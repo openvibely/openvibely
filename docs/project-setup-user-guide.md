@@ -35,14 +35,14 @@ Why this matters:
 Project computers provide Linux desktops and Chromium for browser and desktop work. They are optional and disabled by default. Existing projects without a saved computer setting also remain disabled.
 
 1. Make the `docker` command available to OpenVibely and start the Docker daemon.
-2. Enable **Project computer** in project settings. This permits computer use; it does not enable every task.
+2. Open **Settings → Project Computer**, select the project, enable its computer, and save. This permits computer use; it does not enable every task.
 3. Open a task's **Computer** tab and enable **Use computer for this task**. See [task computer controls](tasks-user-guide.md#using-a-task-computer).
 
-The local provisioner creates one container per project, with separate task desktops, files, and browser profiles. The first use builds a missing image from source bundled with the app; this can take several minutes and requires network access. After an app update, the next computer start checks the expected image and replaces an outdated container while preserving its volume. Set `OPENVIBELY_COMPUTER_IMAGE` to use a prebuilt image instead; see [configuration](environment.md#project-computers).
+The local provisioner creates one container per project, with separate task desktops, files, and browser profiles. The first use builds a missing image from source bundled with the app; this can take several minutes and requires network access. Startup and settings reconciliation check the expected image and replace outdated containers while preserving their volumes. Set `OPENVIBELY_COMPUTER_IMAGE` to use a prebuilt image instead; see [configuration](environment.md#project-computers).
 
 The current local implementation invokes Docker directly. Podman and rootless engines have not been validated. The computer container runs its controller as root with `SYS_ADMIN`, `NET_ADMIN`, `/dev/net/tun`, and AppArmor confinement disabled; task processes use restricted users. It is not launched with `--privileged`. Hosting OpenVibely inside a container does not automatically give it access to a computer provisioner; do not mount the Docker socket to work around this.
 
-Project computer controls also configure desktop time zone and idle shutdown. Idle shutdown keeps stored files and browser profiles but closes applications and loses unsaved work. Deleting a provisioned project removes its container and volume before deleting project records. If Docker cleanup fails, start Docker or resolve the reported problem and retry deletion.
+Project Computer settings also configure desktop time zone, idle shutdown, CPU, memory, process/thread limits, and preview quality. Resource limits are shared by the project’s task desktops. Saving applies settings and may restart the computer; save work in desktop applications first. Idle shutdown keeps stored files and browser profiles but closes applications and loses unsaved work. Deleting a provisioned project removes its container and volume before deleting project records. If Docker cleanup fails, start Docker or resolve the reported problem and retry deletion.
 
 ### Container Setup by Operating System
 

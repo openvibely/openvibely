@@ -64,9 +64,9 @@ Explicit `computer_shell`, `computer_job`, and `computer_files` tools always use
 
 Known limitation: an agent configured with Scoped Files can still route file operations to the host despite selecting Task computer. Do not rely on this combination to confine those operations to the computer.
 
-**Chrome permissions** lists approved Chrome-cookie imports with their task/project scope and expiration. Selecting a permission revokes it. Imports require explicit approval on supported local macOS setups; enabling the computer does not automatically import logins. Project-scoped grants survive deletion of the task that created them. Revocation keeps tracking for unavailable desktops so cleanup can be retried.
+**Chrome permissions** lists approved Chrome-cookie imports with their task/project scope and expiration. Selecting a permission revokes it. Choose **Import Chrome sign-ins** to select cookies from local Chrome on macOS or Linux and explicitly approve access. Linux requires an unlocked supported keyring when Chrome uses encrypted cookies. Enabling the computer does not automatically import logins. Project-scoped grants survive deletion of the task that created them. Revocation keeps tracking for unavailable desktops so cleanup can be retried.
 
-The larger preview's **Teach a task** control records a demonstration for review, then generates editable workflow instructions with the configured model. Review captures before saving; pause recording before entering private information.
+The larger preview's **Teach a skill** control records a demonstration. Start recording, demonstrate the workflow, then pause and save or discard it. Saving sends selected screenshots and an action timeline into the task thread for the agent to create a reusable skill. Recordings stop after ten minutes. Pause before entering private information: screenshots can contain sensitive data even though typed text and clipboard values are omitted from the action log. Reconnecting the preview preserves the recording, but restarting its computer loses an unsaved recording.
 
 Disabling task computer use preserves saved files and browser profiles. Use the composer for file uploads and ask the agent to copy or share files as needed; see [computer attachments](chat-user-guide.md#files-in-computer-enabled-tasks).
 

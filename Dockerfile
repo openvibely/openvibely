@@ -33,6 +33,7 @@ ARG BUILD_TIME=1970-01-01T00:00:00Z
 ARG RELEASE_TRUST_ID=
 ARG RELEASE_TRUST_VALUE=
 RUN CGO_ENABLED=0 GOOS=linux go build \
+    -tags nodynamic \
     -ldflags="-s -w -X github.com/openvibely/openvibely/internal/buildinfo.Version=${VERSION} -X github.com/openvibely/openvibely/internal/buildinfo.Commit=${COMMIT} -X github.com/openvibely/openvibely/internal/buildinfo.BuildTime=${BUILD_TIME} -X github.com/openvibely/openvibely/internal/buildinfo.Artifact=container -X github.com/openvibely/openvibely/internal/buildinfo.ReleaseKeyID=${RELEASE_TRUST_ID} -X github.com/openvibely/openvibely/internal/buildinfo.ReleasePublicKey=${RELEASE_TRUST_VALUE}" \
     -o /out/openvibely \
     ./cmd/server
