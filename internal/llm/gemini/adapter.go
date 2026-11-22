@@ -34,7 +34,6 @@ var errMaxTokens = llmcontracts.NewCategorizedError(
 )
 
 type Adapter struct {
-	configRepo    persistence.LLMConfigStore
 	execRepo      persistence.ExecutionStore
 	streamHub     llmstream.ExecutionStreamPublisher
 	oauthRecovery *llmoauth.Manager
@@ -42,7 +41,7 @@ type Adapter struct {
 }
 
 func New(configRepo persistence.LLMConfigStore, execRepo persistence.ExecutionStore, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
-	return &Adapter{configRepo: configRepo, execRepo: execRepo, streamHub: streamHub, oauthRecovery: llmoauth.NewManager(configRepo)}
+	return &Adapter{execRepo: execRepo, streamHub: streamHub, oauthRecovery: llmoauth.NewManager(configRepo)}
 }
 
 // SetClientConfigurer lets tests point the client at a local server.
