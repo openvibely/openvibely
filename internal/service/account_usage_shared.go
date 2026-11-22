@@ -41,12 +41,15 @@ type SharedAccountUsage struct {
 	usage       *UsageAnalyticsService
 	ctx         context.Context
 	cancel      context.CancelFunc
+	readMu      sync.Mutex
 	mu          sync.Mutex
 	entries     map[string]*accountUsageEntry
 	accountKeys map[string]string
 	slots       chan struct{}
 	wg          sync.WaitGroup
 	stopped     bool
+	syncing     bool
+	syncPending bool
 	updated     func()
 	evaluate    func(context.Context, string, *models.AnalyticsUsageAccountLimitsViewModel, map[string]any) error
 }
@@ -87,6 +90,41 @@ func (c *SharedAccountUsage) refreshAll() {
 	}
 }
 
+// SyncInventory reconciles OAuth account inventory asynchronously so newly
+// added, re-authorized, moved, or removed OAuth models update usage promptly.
+func (c *SharedAccountUsage) SyncInventory() {
+	c.mu.Lock()
+	if c.stopped {
+		c.mu.Unlock()
+		return
+	}
+	if c.syncing {
+		c.syncPending = true
+		c.mu.Unlock()
+		return
+	}
+	c.syncing = true
+	c.wg.Add(1)
+	c.mu.Unlock()
+	go func() {
+		defer c.wg.Done()
+		for {
+			if _, err := c.Read(c.ctx, "", false); err != nil && c.ctx.Err() == nil {
+				applog.Infof("[account-usage] inventory sync: %v", err)
+			}
+			c.mu.Lock()
+			if c.stopped || !c.syncPending {
+				c.syncing = false
+				c.syncPending = false
+				c.mu.Unlock()
+				return
+			}
+			c.syncPending = false
+			c.mu.Unlock()
+		}
+	}()
+}
+
 // Read validates inventory on every call, evicts disconnected accounts and starts
 // missing reads. Refresh replaces existing work; ordinary reads only read memory.
 func (c *SharedAccountUsage) Read(ctx context.Context, key string, refresh bool) (map[string]AccountUsageSnapshot, error) {
@@ -94,13 +132,27 @@ func (c *SharedAccountUsage) Read(ctx context.Context, key string, refresh bool)
 }
 
 func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, refresh bool) (map[string]AccountUsageSnapshot, error) {
-	accounts, err := c.usage.ListUsageAccounts(ctx)
+	result, changed, err := c.readLocked(ctx, key, provider, refresh)
 	if err != nil {
 		return nil, err
 	}
+	if changed && c.updated != nil {
+		c.updated()
+	}
+	return result, nil
+}
+
+func (c *SharedAccountUsage) readLocked(ctx context.Context, key, provider string, refresh bool) (map[string]AccountUsageSnapshot, bool, error) {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+
+	accounts, err := c.usage.ListUsageAccounts(ctx)
+	if err != nil {
+		return nil, false, err
+	}
 	configs, err := c.usage.llmConfigRepo.List(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	fingerprints := map[string]string{}
 	identities := map[string]string{}
@@ -120,12 +172,12 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 		valid[a.Key] = true
 	}
 	if key != "" && !valid[key] {
-		return nil, fmt.Errorf("account configuration changed; reload accounts")
+		return nil, false, fmt.Errorf("account configuration changed; reload accounts")
 	}
 	c.mu.Lock()
 	if c.stopped {
 		c.mu.Unlock()
-		return nil, context.Canceled
+		return nil, false, context.Canceled
 	}
 	changed := false
 	validIdentities := map[string]bool{}
@@ -169,10 +221,7 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 		result[a.Key] = e.snapshot
 	}
 	c.mu.Unlock()
-	if changed && c.updated != nil {
-		c.updated()
-	}
-	return result, nil
+	return result, changed, nil
 }
 func (c *SharedAccountUsage) startLocked(key string, e *accountUsageEntry) {
 	previous := e.done
@@ -330,6 +379,13 @@ func (s *UsageAnalyticsService) SharedAccountUsage(ctx context.Context, key stri
 }
 
 func (s *UsageAnalyticsService) HasSharedAccountUsage() bool { return s.sharedUsage != nil }
+
+func (s *UsageAnalyticsService) SyncSharedAccountUsage() {
+	if s == nil || s.sharedUsage == nil {
+		return
+	}
+	s.sharedUsage.SyncInventory()
+}
 
 // freshLimits serves synchronous reporting callers through the same scheduler.
 // If another refresh replaces our generation, wait for its result instead.

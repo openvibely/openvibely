@@ -30,7 +30,7 @@ type pendingApprovalE2E struct {
 	requests atomic.Int32
 }
 
-func preparePendingApprovalE2E(t *testing.T, appData string) *pendingApprovalE2E {
+func preparePendingApprovalE2E(t *testing.T, appData string, workGate ...<-chan struct{}) *pendingApprovalE2E {
 	t.Helper()
 	if err := os.MkdirAll(appData, 0700); err != nil {
 		t.Fatal(err)
@@ -51,6 +51,16 @@ func preparePendingApprovalE2E(t *testing.T, appData string) *pendingApprovalE2E
 			return
 		}
 		n := f.requests.Add(1)
+		if len(workGate) != 0 {
+			select {
+			case <-workGate[0]:
+			case <-r.Context().Done():
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Work complete\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			return
+		}
 		if !input.Stream {
 			http.Error(w, "fixture expects streaming task calls", 400)
 			return

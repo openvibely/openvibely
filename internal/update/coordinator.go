@@ -74,16 +74,18 @@ var (
 )
 
 type CoordinatorSnapshot struct {
-	State              string           `json:"state"`
-	CurrentVersion     string           `json:"current_version"`
-	Distribution       string           `json:"distribution"`
-	Channel            string           `json:"channel"`
-	Release            *VerifiedRelease `json:"release,omitempty"`
-	Drain              DrainStatus      `json:"drain"`
-	ConfigurationError string           `json:"configuration_error,omitempty"`
-	Error              string           `json:"error,omitempty"`
-	Manual             bool             `json:"manual"`
-	Staged             bool             `json:"staged"`
+	AutomaticUpdates          bool             `json:"automatic_updates"`
+	AutomaticUpdatesSupported bool             `json:"automatic_updates_supported"`
+	State                     string           `json:"state"`
+	CurrentVersion            string           `json:"current_version"`
+	Distribution              string           `json:"distribution"`
+	Channel                   string           `json:"channel"`
+	Release                   *VerifiedRelease `json:"release,omitempty"`
+	Drain                     DrainStatus      `json:"drain"`
+	ConfigurationError        string           `json:"configuration_error,omitempty"`
+	Error                     string           `json:"error,omitempty"`
+	Manual                    bool             `json:"manual"`
+	Staged                    bool             `json:"staged"`
 }
 type Coordinator struct {
 	mu                              sync.RWMutex
@@ -120,6 +122,8 @@ type Coordinator struct {
 	checksCancel                    context.CancelFunc
 	checksWG                        sync.WaitGroup
 	updateNotificationsEnabled      bool
+	disableAutomaticUpdates         bool
+	autoAttemptedVersion            string
 }
 
 func NewCoordinator(client *Client, current CurrentBuild, channel string, drain *DrainManager, installer Installer, manual bool, configError string, wakeDispatch func()) *Coordinator {
@@ -158,20 +162,23 @@ func (c *Coordinator) SetPersistence(path string) error {
 		return err
 	}
 	var persisted struct {
-		State               string             `json:"state"`
-		Release             *VerifiedRelease   `json:"release"`
-		StagedLocal         *LocalStagedUpdate `json:"staged_local,omitempty"`
-		StagedRelease       *VerifiedRelease   `json:"staged_release,omitempty"`
-		Error               string             `json:"error,omitempty"`
-		OperationGeneration string             `json:"operation_generation,omitempty"`
-		Accepted            bool               `json:"accepted,omitempty"`
-		AcceptanceLease     time.Duration      `json:"acceptance_lease,omitempty"`
+		DisableAutomaticUpdates bool               `json:"disable_automatic_updates,omitempty"`
+		AutoAttemptedVersion    string             `json:"auto_attempted_version,omitempty"`
+		State                   string             `json:"state"`
+		Release                 *VerifiedRelease   `json:"release"`
+		StagedLocal             *LocalStagedUpdate `json:"staged_local,omitempty"`
+		StagedRelease           *VerifiedRelease   `json:"staged_release,omitempty"`
+		Error                   string             `json:"error,omitempty"`
+		OperationGeneration     string             `json:"operation_generation,omitempty"`
+		Accepted                bool               `json:"accepted,omitempty"`
+		AcceptanceLease         time.Duration      `json:"acceptance_lease,omitempty"`
 	}
 	if err := json.Unmarshal(data, &persisted); err != nil {
 		return err
 	}
 	c.state, c.release, c.lastError, c.operationGeneration = persisted.State, persisted.Release, persisted.Error, persisted.OperationGeneration
 	c.accepted, c.acceptanceLease = persisted.Accepted, persisted.AcceptanceLease
+	c.disableAutomaticUpdates, c.autoAttemptedVersion = persisted.DisableAutomaticUpdates, persisted.AutoAttemptedVersion
 	if persisted.StagedLocal != nil {
 		c.staged = *persisted.StagedLocal
 	}
@@ -211,6 +218,18 @@ func (c *Coordinator) SetPersistence(path string) error {
 		if c.state == StateAvailable || c.state == StateFailed || c.state == StateChecking {
 			c.state, c.lastError = StateIdle, ""
 		}
+		if err := c.persistLocked(); err != nil {
+			return err
+		}
+	}
+	// A retry download or background check may be interrupted before acceptance.
+	// Keep an already-attempted release manually retryable instead of leaving it
+	// idle/checking forever behind the automatic-attempt guard.
+	if !c.accepted && (c.state == StateStaging || c.state == StateChecking) &&
+		c.release != nil && c.autoAttemptedVersion == c.release.Metadata.Version &&
+		c.releaseIsNewerThanCurrent(c.release) && c.releaseIsUnexpired(c.release) &&
+		c.drain != nil && c.drain.Status().State == DrainStateIdle {
+		c.state, c.lastError, c.operationGeneration = StateFailed, "Update preparation was interrupted. Retry the update.", ""
 		if err := c.persistLocked(); err != nil {
 			return err
 		}
@@ -323,15 +342,17 @@ func (c *Coordinator) persistLocked() error {
 		return nil
 	}
 	payload := struct {
-		State               string             `json:"state"`
-		Release             *VerifiedRelease   `json:"release,omitempty"`
-		StagedLocal         *LocalStagedUpdate `json:"staged_local,omitempty"`
-		StagedRelease       *VerifiedRelease   `json:"staged_release,omitempty"`
-		Error               string             `json:"error,omitempty"`
-		OperationGeneration string             `json:"operation_generation,omitempty"`
-		Accepted            bool               `json:"accepted,omitempty"`
-		AcceptanceLease     time.Duration      `json:"acceptance_lease,omitempty"`
-	}{State: c.state, Release: c.release, Error: c.lastError, OperationGeneration: c.operationGeneration, Accepted: c.accepted, AcceptanceLease: c.acceptanceLease}
+		DisableAutomaticUpdates bool               `json:"disable_automatic_updates,omitempty"`
+		AutoAttemptedVersion    string             `json:"auto_attempted_version,omitempty"`
+		State                   string             `json:"state"`
+		Release                 *VerifiedRelease   `json:"release,omitempty"`
+		StagedLocal             *LocalStagedUpdate `json:"staged_local,omitempty"`
+		StagedRelease           *VerifiedRelease   `json:"staged_release,omitempty"`
+		Error                   string             `json:"error,omitempty"`
+		OperationGeneration     string             `json:"operation_generation,omitempty"`
+		Accepted                bool               `json:"accepted,omitempty"`
+		AcceptanceLease         time.Duration      `json:"acceptance_lease,omitempty"`
+	}{DisableAutomaticUpdates: c.disableAutomaticUpdates, AutoAttemptedVersion: c.autoAttemptedVersion, State: c.state, Release: c.release, Error: c.lastError, OperationGeneration: c.operationGeneration, Accepted: c.accepted, AcceptanceLease: c.acceptanceLease}
 	switch staged := c.staged.(type) {
 	case LocalStagedUpdate:
 		payload.StagedLocal = &staged
@@ -386,12 +407,13 @@ func (c *Coordinator) BindWailsUpdater(updater *wailsupdater.Updater) error {
 		}
 	}
 	c.installer = installer
-	needsStage := c.state == StateAvailable && c.release != nil && c.staged == nil
+	needsStage := c.state == StateAvailable && c.release != nil && c.staged == nil && c.autoAttemptedVersion != c.release.Metadata.Version
 	stageCtx := c.recoveryCtx
 	if stageCtx == nil {
 		stageCtx = context.Background()
 	}
 	c.mu.Unlock()
+	acknowledgeDesktopInstaller()
 	c.StartRecovery(nil)
 	if needsStage {
 		go func() { _ = c.Stage(stageCtx) }()
@@ -439,7 +461,7 @@ func (c *Coordinator) Snapshot() CoordinatorSnapshot {
 			lastError = ""
 		}
 	}
-	snapshot := CoordinatorSnapshot{State: state, CurrentVersion: c.current.Version, Distribution: c.current.Distribution, Channel: c.channel, Release: release, ConfigurationError: c.configError, Error: lastError, Manual: c.manual, Staged: staged}
+	snapshot := CoordinatorSnapshot{AutomaticUpdates: !c.disableAutomaticUpdates, AutomaticUpdatesSupported: c.automaticUpdatesSupportedLocked(), State: state, CurrentVersion: c.current.Version, Distribution: c.current.Distribution, Channel: c.channel, Release: release, ConfigurationError: c.configError, Error: lastError, Manual: c.manual, Staged: staged}
 	provider := c.managedStateProvider
 	c.mu.RUnlock()
 	if c.drain != nil {
@@ -459,7 +481,12 @@ func (c *Coordinator) Snapshot() CoordinatorSnapshot {
 	return snapshot
 }
 func (c *Coordinator) Check(ctx context.Context) error {
-	if !c.Visible() {
+	return c.check(ctx, false)
+}
+
+func (c *Coordinator) check(ctx context.Context, background bool) error {
+	snapshot := c.Snapshot()
+	if !c.Visible() && !(background && snapshot.AutomaticUpdates && snapshot.AutomaticUpdatesSupported) {
 		_, _, err := c.client.CheckIfDue(ctx, c.current)
 		return err
 	}
@@ -494,17 +521,21 @@ func (c *Coordinator) Check(ctx context.Context) error {
 		c.mu.Unlock()
 		return nil
 	}
-	if checked {
-		c.release = release
-		c.staged = nil
-	} else if release != nil && c.release == nil {
+	sameRelease := sameStagedRelease(c.release, release)
+	if checked || release != nil {
+		if !sameRelease {
+			c.staged = nil
+		}
 		c.release = release
 	} else if c.release != nil && (!c.releaseIsNewerThanCurrent(c.release) || !c.releaseIsUnexpired(c.release)) {
 		c.release = nil
 		c.staged = nil
 		c.lastError = ""
 	}
-	if c.release != nil {
+	skipAttempted := background && c.release != nil && c.autoAttemptedVersion == c.release.Metadata.Version
+	if skipAttempted && sameRelease {
+		c.state, c.lastError = previousState, previousError
+	} else if c.release != nil {
 		c.state = StateAvailable
 	} else {
 		c.state = StateIdle
@@ -513,7 +544,7 @@ func (c *Coordinator) Check(ctx context.Context) error {
 		c.mu.Unlock()
 		return err
 	}
-	shouldStage := c.release != nil && c.installer != nil && !c.manual && (c.current.Distribution == "binary" || c.current.Distribution == "desktop")
+	shouldStage := !skipAttempted && c.release != nil && c.installer != nil && !c.manual && (c.current.Distribution == "binary" || c.current.Distribution == "desktop" || c.current.Distribution == "docker")
 	c.mu.Unlock()
 	if shouldStage {
 		return c.Stage(ctx)
@@ -552,7 +583,7 @@ func (c *Coordinator) releaseIsNewerThanCurrent(release *VerifiedRelease) bool {
 }
 func (c *Coordinator) Stage(ctx context.Context) error {
 	c.mu.Lock()
-	if c.state != StateAvailable && c.state != StateFailed {
+	if c.state != StateAvailable && c.state != StateFailed && c.state != StateRolledBack {
 		state := c.state
 		c.mu.Unlock()
 		return errors.New("cannot stage update while coordinator is " + state)
@@ -578,6 +609,7 @@ func (c *Coordinator) Stage(ctx context.Context) error {
 		return err
 	}
 	previousState := c.state
+	previousStaged := c.staged
 	c.state = StateStaging
 	if err := c.persistLocked(); err != nil {
 		c.state = previousState
@@ -592,10 +624,27 @@ func (c *Coordinator) Stage(ctx context.Context) error {
 		}
 		return errors.New("installer unavailable")
 	}
-	staged, err := installer.Stage(ctx, release)
-	if err != nil {
-		c.setState(StateFailed, err.Error())
-		return err
+	staged := previousStaged
+	if !stagedUpdateReusable(ctx, staged, release) {
+		var err error
+		staged, err = installer.Stage(ctx, release)
+		if err == nil {
+			if local, ok := staged.(LocalStagedUpdate); ok {
+				local.ContentDigest, err = stagedContentDigest(ctx, local.ArtifactPath)
+				staged = local
+			}
+		}
+		if err != nil {
+			c.mu.Lock()
+			c.staged = nil
+			c.mu.Unlock()
+			c.setState(StateFailed, err.Error())
+			return err
+		}
+	} else if _, ok := staged.(VerifiedRelease); ok {
+		// Docker staging stores metadata, not downloaded bytes. Keep renewed
+		// signatures/expiry from the newly verified release for installation.
+		staged = release
 	}
 	c.mu.Lock()
 	c.staged = staged
@@ -608,57 +657,85 @@ func (c *Coordinator) Stage(ctx context.Context) error {
 	c.mu.Unlock()
 	return nil
 }
-func (c *Coordinator) Accept(_ context.Context, lease time.Duration) error {
-	c.mu.Lock()
-	if !c.accepted {
-		if lease <= 0 {
+func (c *Coordinator) Accept(ctx context.Context, lease time.Duration) error {
+	return c.accept(ctx, lease, false)
+}
+
+func (c *Coordinator) accept(ctx context.Context, lease time.Duration, automatic bool) error {
+	prepared := false
+	for {
+		c.mu.Lock()
+		if automatic && (ctx.Err() != nil || c.disableAutomaticUpdates || !c.automaticUpdatesSupportedLocked() || c.accepted || c.state != StateAvailable || c.release == nil || c.autoAttemptedVersion == c.release.Metadata.Version) {
 			c.mu.Unlock()
-			return errors.New("update acceptance lease must be positive")
+			return nil
 		}
-		if c.drain == nil {
-			c.mu.Unlock()
-			return errors.New("drain manager unavailable")
+		if !c.accepted {
+			if lease <= 0 {
+				c.mu.Unlock()
+				return errors.New("update acceptance lease must be positive")
+			}
+			if c.drain == nil {
+				c.mu.Unlock()
+				return errors.New("drain manager unavailable")
+			}
+			if c.drain.Status().State != DrainStateIdle {
+				c.mu.Unlock()
+				return errors.New("cannot accept update while another drain is active")
+			}
+			if c.state != StateAvailable && c.state != StateFailed && c.state != StateRolledBack {
+				state := c.state
+				c.mu.Unlock()
+				return errors.New("cannot accept update while coordinator is " + state)
+			}
+			if c.release == nil {
+				c.mu.Unlock()
+				return errors.New("no verified release available")
+			}
+			if c.installer == nil && !c.manual {
+				c.mu.Unlock()
+				return errors.New("installer unavailable")
+			}
+			if c.configError != "" {
+				err := errors.New(c.configError)
+				c.mu.Unlock()
+				return err
+			}
+			if err := c.client.ValidateForInstall(*c.release, c.current); err != nil {
+				c.mu.Unlock()
+				return err
+			}
+			// An explicit retry must recover a failed state and verify any local
+			// staged files before acceptance. Stage reuses intact files and repairs
+			// missing/corrupt ones. Recheck all acceptance conditions after unlocking.
+			_, localStage := c.staged.(LocalStagedUpdate)
+			if !automatic && !prepared && (c.state == StateFailed || c.state == StateRolledBack || localStage || (!c.manual && c.staged == nil)) {
+				c.mu.Unlock()
+				if err := c.Stage(ctx); err != nil {
+					return err
+				}
+				prepared = true
+				continue
+			}
+			if !c.manual && c.staged == nil {
+				c.mu.Unlock()
+				return errors.New("update replacement is not staged")
+			}
+			previousAttempt := c.autoAttemptedVersion
+			if automatic {
+				c.autoAttemptedVersion = c.release.Metadata.Version
+			}
+			c.accepted, c.acceptanceLease = true, lease
+			if err := c.persistLocked(); err != nil {
+				c.clearAcceptanceLocked()
+				c.autoAttemptedVersion = previousAttempt
+				c.mu.Unlock()
+				return err
+			}
 		}
-		if c.drain.Status().State != DrainStateIdle {
-			c.mu.Unlock()
-			return errors.New("cannot accept update while another drain is active")
-		}
-		if c.state != StateAvailable && c.state != StateFailed {
-			state := c.state
-			c.mu.Unlock()
-			return errors.New("cannot accept update while coordinator is " + state)
-		}
-		if c.release == nil {
-			c.mu.Unlock()
-			return errors.New("no verified release available")
-		}
-		if c.installer == nil && !c.manual {
-			c.mu.Unlock()
-			return errors.New("installer unavailable")
-		}
-		if !c.manual && c.current.Distribution != "docker" && c.staged == nil {
-			c.mu.Unlock()
-			return errors.New("update replacement is not staged")
-		}
-		if c.configError != "" {
-			err := errors.New(c.configError)
-			c.mu.Unlock()
-			return err
-		}
-		if err := c.client.ValidateForInstall(*c.release, c.current); err != nil {
-			c.mu.Unlock()
-			return err
-		}
-		c.accepted, c.acceptanceLease = true, lease
-		if err := c.persistLocked(); err != nil {
-			c.clearAcceptanceLocked()
-			c.mu.Unlock()
-			return err
-		}
+		c.mu.Unlock()
+		c.startAcceptedUpdateSupervisor()
+		return nil
 	}
-	c.mu.Unlock()
-	c.startAcceptedUpdateSupervisor()
-	return nil
 }
 
 func (c *Coordinator) startAcceptedUpdateSupervisor() {
@@ -973,7 +1050,8 @@ func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease,
 						c.resumeInstallerUntilSettled(ctx, resumable, installer, staged, generation, release.Metadata)
 					}
 				case errors.Is(err, ErrUpdateCancelled):
-					c.completeGenerationWithRetry(ctx, generation, StateIdle, "")
+					state := c.prepareCancellationOutcome(generation)
+					c.completeGenerationWithRetry(ctx, generation, state, "")
 				case errors.Is(err, ErrUpdateRolledBack):
 					c.completeGenerationWithRetry(ctx, generation, StateRolledBack, err.Error())
 				case restartValidation:
@@ -1223,6 +1301,18 @@ func (c *Coordinator) abortGeneration(generation string, cause error) {
 	c.completeGenerationWithRetry(context.Background(), generation, StateFailed, message)
 }
 
+// The following generation completion persists this guard with the cancelled
+// outcome. It also retains it in memory if terminal persistence needs retrying.
+func (c *Coordinator) prepareCancellationOutcome(generation string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if generation != "" && c.operationGeneration == generation && c.release != nil {
+		c.autoAttemptedVersion = c.release.Metadata.Version
+		return StateAvailable
+	}
+	return StateIdle
+}
+
 func (c *Coordinator) Cancel() error {
 	c.mu.RLock()
 	installer, state, generation, managedProvider := c.installer, c.state, c.operationGeneration, c.managedStateProvider
@@ -1233,11 +1323,15 @@ func (c *Coordinator) Cancel() error {
 	if generation == "" {
 		c.mu.Lock()
 		if c.accepted && c.operationGeneration == "" && (c.state == StateAvailable || c.state == StateFailed) {
-			oldState, oldError, lease := c.state, c.lastError, c.acceptanceLease
+			oldState, oldError, lease, oldAttempt := c.state, c.lastError, c.acceptanceLease, c.autoAttemptedVersion
 			c.state, c.lastError = StateIdle, ""
+			if c.release != nil {
+				c.state = StateAvailable
+				c.autoAttemptedVersion = c.release.Metadata.Version
+			}
 			c.clearAcceptanceLocked()
 			if err := c.persistLocked(); err != nil {
-				c.state, c.lastError = oldState, oldError
+				c.state, c.lastError, c.autoAttemptedVersion = oldState, oldError, oldAttempt
 				c.accepted, c.acceptanceLease = true, lease
 				c.mu.Unlock()
 				return err
@@ -1281,13 +1375,16 @@ func (c *Coordinator) Cancel() error {
 		}
 		return errors.New(message)
 	}
-	err := c.completeGeneration(generation, StateIdle, "")
+	// Cancellation leaves the release available for an explicit manual retry.
+	// Suppress automatic acceptance even if the cancelled attempt was manual.
+	outcome := c.prepareCancellationOutcome(generation)
+	err := c.completeGeneration(generation, outcome, "")
 	if err != nil {
 		c.mu.RLock()
 		cleanupActive := c.cleanupGeneration == generation
 		c.mu.RUnlock()
 		if !cleanupActive {
-			c.startCompletionSupervisor(generation, StateIdle, "")
+			c.startCompletionSupervisor(generation, outcome, "")
 		}
 	}
 	return err
@@ -1337,7 +1434,8 @@ func (c *Coordinator) resumeInstallerUntilSettled(ctx context.Context, resumable
 			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 				return
 			case errors.Is(err, ErrUpdateCancelled):
-				c.completeGenerationWithRetry(ctx, generation, StateIdle, "")
+				state := c.prepareCancellationOutcome(generation)
+				c.completeGenerationWithRetry(ctx, generation, state, "")
 			case errors.Is(err, ErrUpdateRolledBack):
 				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, err.Error())
 			default:
@@ -1615,16 +1713,17 @@ func (c *Coordinator) StartChecks(ctx context.Context) {
 		go func() {
 			defer c.checksWG.Done()
 			if initialCheck {
-				_ = c.Check(checkCtx)
+				_ = c.checkAndAutoUpdate(checkCtx)
 			}
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
+			ticks, stopTicks := updateCheckTicks()
+			defer stopTicks()
 			for {
 				select {
 				case <-checkCtx.Done():
 					return
-				case <-ticker.C:
-					_ = c.Check(checkCtx)
+				case tick := <-ticks:
+					_ = c.checkAndAutoUpdate(checkCtx)
+					acknowledgeUpdateTick(tick)
 				}
 			}
 		}()
@@ -1650,4 +1749,30 @@ func (c *Coordinator) StopChecks() {
 func (c *Coordinator) Start(ctx context.Context) {
 	c.StartRecovery(ctx)
 	c.StartChecks(ctx)
+}
+
+// SetAutomaticUpdates saves the instance-wide preference before changing behavior.
+// Disabling prevents new automatic acceptance; an update already in progress finishes.
+func (c *Coordinator) SetAutomaticUpdates(enabled bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	previous := c.disableAutomaticUpdates
+	c.disableAutomaticUpdates = !enabled
+	if err := c.persistLocked(); err != nil {
+		c.disableAutomaticUpdates = previous
+		return err
+	}
+	return nil
+}
+
+func (c *Coordinator) automaticUpdatesSupportedLocked() bool {
+	return !c.manual && c.managedStateProvider == nil && c.configError == "" &&
+		(c.current.Distribution == "binary" || c.current.Distribution == "desktop" || (c.current.Distribution == "docker" && c.installer != nil))
+}
+
+func (c *Coordinator) checkAndAutoUpdate(ctx context.Context) error {
+	if err := c.check(ctx, true); err != nil {
+		return err
+	}
+	return c.accept(ctx, 10*time.Minute, true)
 }

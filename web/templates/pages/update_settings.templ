@@ -1,0 +1,62 @@
+package pages
+
+import (
+ "net/url"
+ "github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/internal/update"
+ "github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ UpdateSettingsPage(projects []models.Project, projectID string, snapshot update.CoordinatorSnapshot, canManage, saved bool, message string) {
+ @layout.Base("App updates", projects, projectID) {
+  @UpdateSettingsContent(projectID, snapshot, canManage, saved, message)
+ }
+}
+
+templ UpdateSettingsContent(projectID string, snapshot update.CoordinatorSnapshot, canManage, saved bool, message string) {
+ <div id="update-settings-content">
+ <style>
+ #update-settings-content{max-width:760px;padding:12px 0 32px;font-size:13px}
+ #update-settings-content h1{font-size:18px;font-weight:500;margin:0 0 24px}
+ #update-settings-content .muted{opacity:.55;font-size:12px;line-height:1.5;margin-top:5px}
+ #update-settings-content .setting-row{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:58px;border-bottom:1px solid oklch(var(--bc)/.07);padding:10px 0}
+ #update-settings-content .label-copy{line-height:1.5}
+ #update-settings-content .settings-footer{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-top:24px}
+ #update-settings-content .settings-footer .btn{font-size:12px;height:32px;min-height:32px;font-weight:500;border-radius:7px;padding:0 14px}
+ </style>
+ <h1 style="margin-bottom:5px">App updates</h1>
+ <p class="muted" style="margin-bottom:24px">Version { snapshot.CurrentVersion }</p>
+ <form method="post" action={ templ.SafeURL("/settings/updates?project_id=" + url.QueryEscape(projectID)) } hx-post={ "/settings/updates?project_id=" + url.QueryEscape(projectID) } hx-target="#update-settings-content" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+  <div class="setting-row">
+   <div class="label-copy"><label for="automatic-updates">Automatic updates</label><div class="muted">Download and install new versions automatically.</div></div>
+   <input id="automatic-updates" name="automatic_updates" value="true" type="checkbox" class="toggle toggle-sm" checked?={ snapshot.AutomaticUpdates } disabled?={ !canManage }/>
+  </div>
+  if !snapshot.AutomaticUpdatesSupported {
+   <p class="muted" role="status">Automatic installation is unavailable for this installation.</p>
+  }
+  if snapshot.ConfigurationError != "" {
+   <p class="text-error">{ snapshot.ConfigurationError }</p>
+  }
+  if !canManage {
+   <p class="muted">An administrator can change update settings.</p>
+  }
+  if message != "" {
+   <span hidden data-update-settings-error>{ message }</span>
+  }
+  if canManage {
+   <div class="settings-footer">
+    if saved {
+     <span class="text-xs opacity-60" role="status">Update settings saved.</span>
+    }
+    <button class="btn btn-primary" type="submit">Save changes</button>
+   </div>
+  }
+ </form>
+ <script>
+ (()=>{
+  const root=document.getElementById('update-settings-content');if(!root||root.dataset.bound)return;root.dataset.bound='true';
+  const error=root.querySelector('[data-update-settings-error]');if(error)window.showToast?.(error.textContent,'error');
+ })();
+ </script>
+ </div>
+}

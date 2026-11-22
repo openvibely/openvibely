@@ -30,6 +30,7 @@ type LocalStagedUpdate struct {
 	Version         string `json:"version"`
 	PreviousVersion string `json:"previous_version,omitempty"`
 	OutcomeID       string `json:"outcome_id,omitempty"`
+	ContentDigest   string `json:"content_digest,omitempty"`
 }
 
 const (

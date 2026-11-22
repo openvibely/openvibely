@@ -21,6 +21,12 @@ func (h *Handler) projectAccessBoundary(next echo.HandlerFunc) echo.HandlerFunc 
 		}
 		if h.projectAccessSvc != nil {
 			switch c.Path() {
+			case "/settings/updates":
+				if c.Request().Method == http.MethodPost {
+					if err := h.requireCurrentOrgAdmin(c); err != nil {
+						return projectAccessResponse(c, err)
+					}
+				}
 			case "/api/system/update/apply", "/api/system/update/cancel":
 				if err := h.requireCurrentOrgAdmin(c); err != nil {
 					return projectAccessResponse(c, err)

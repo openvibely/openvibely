@@ -474,3 +474,94 @@ func TestSharedUsageModelChangesPreserveCoordination(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedUsageSyncInventoryDetectsAddAndDelete(t *testing.T) {
+	svc, initialAccounts := sharedUsageFixture(t, 1)
+	ctx := context.Background()
+
+	var mu sync.Mutex
+	callsByAccount := map[string]int{}
+	svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
+		mu.Lock()
+		callsByAccount[cfg.OAuthAccountID]++
+		mu.Unlock()
+		p := 25.0
+		return &models.AccountUsageResult{PrimaryLabel: "Weekly", PrimaryUsedPercent: &p}, nil
+	})
+
+	var updatedCount atomic.Int32
+	c := svc.EnableSharedAccountUsage(ctx, func() { updatedCount.Add(1) }, nil)
+	defer c.Stop()
+
+	cachedSnapshot := func(key string) (AccountUsageSnapshot, bool) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		identity, ok := c.accountKeys[key]
+		if !ok {
+			return AccountUsageSnapshot{}, false
+		}
+		e, ok := c.entries[identity]
+		if !ok {
+			return AccountUsageSnapshot{}, false
+		}
+		return e.snapshot, true
+	}
+
+	// Prime initial account without calling c.Read in the wait loop.
+	svc.SyncSharedAccountUsage()
+	waitShared(t, func() bool { return updatedCount.Load() >= 1 })
+	if s, ok := cachedSnapshot(initialAccounts[0].Key); !ok || s.Refreshing || len(s.AccountLimits) != 1 {
+		t.Fatalf("initial account not cached after SyncSharedAccountUsage: ok=%v snap=%+v", ok, s)
+	}
+
+	// Add a second OAuth model on a new account and sync inventory.
+	added := &models.LLMConfig{
+		Name:             "Added OAuth",
+		Provider:         models.ProviderOpenAI,
+		Model:            "test",
+		AuthMethod:       models.AuthMethodOAuth,
+		OAuthAccessToken: "fixture-2",
+		OAuthAccountID:   "acct-2",
+		OAuthExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+	}
+	if err := svc.llmConfigRepo.Create(ctx, added); err != nil {
+		t.Fatal(err)
+	}
+	beforeAddUpdates := updatedCount.Load()
+	svc.SyncSharedAccountUsage()
+	waitShared(t, func() bool { return updatedCount.Load() > beforeAddUpdates })
+
+	accounts, err := svc.ListUsageAccounts(ctx)
+	if err != nil || len(accounts) != 2 {
+		t.Fatalf("expected 2 usage accounts, got %+v err=%v", accounts, err)
+	}
+	var addedKey string
+	for _, a := range accounts {
+		if a.Key != initialAccounts[0].Key {
+			addedKey = a.Key
+		}
+	}
+	if s, ok := cachedSnapshot(addedKey); !ok || s.Refreshing || len(s.AccountLimits) != 1 {
+		t.Fatalf("added account not cached after SyncSharedAccountUsage: ok=%v snap=%+v", ok, s)
+	}
+
+	// Existing unchanged account must not have been re-fetched.
+	mu.Lock()
+	firstCalls := callsByAccount["0"]
+	secondCalls := callsByAccount["acct-2"]
+	mu.Unlock()
+	if firstCalls != 1 || secondCalls != 1 {
+		t.Fatalf("unexpected fetch counts: first=%d second=%d", firstCalls, secondCalls)
+	}
+
+	// Deleting the added OAuth model should evict it and broadcast an update.
+	beforeDeleteUpdates := updatedCount.Load()
+	if err := svc.llmConfigRepo.Delete(ctx, added.ID); err != nil {
+		t.Fatal(err)
+	}
+	svc.SyncSharedAccountUsage()
+	waitShared(t, func() bool { return updatedCount.Load() > beforeDeleteUpdates })
+	if _, stillPresent := cachedSnapshot(addedKey); stillPresent {
+		t.Fatalf("deleted account %q still present in shared cache after SyncSharedAccountUsage", addedKey)
+	}
+}

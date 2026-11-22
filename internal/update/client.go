@@ -181,7 +181,7 @@ func NewClient(cfg ClientConfig) *Client {
 		cfg.HTTPClient = httpclient.New(httpclient.UpdateTimeout)
 	}
 	if cfg.Now == nil {
-		cfg.Now = time.Now
+		cfg.Now = updateClockNow
 	}
 	if cfg.Random == nil {
 		cfg.Random = func(max time.Duration) time.Duration {

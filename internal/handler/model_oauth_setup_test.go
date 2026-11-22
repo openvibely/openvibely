@@ -8,11 +8,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 func TestModelOAuthSetupSignsInAndDiscoversBeforeCreate(t *testing.T) {
@@ -412,5 +415,318 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 				form.Del("oauth_setup_session")
 			}
 		})
+	}
+}
+
+func TestOAuthModelLifecycleTriggersSharedAccountUsageSync(t *testing.T) {
+	t.Setenv("OAUTH_REDIRECT_MODE", "hosted")
+	t.Setenv("APP_BASE_URL", "https://app.example.com")
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/backend-api/codex/") {
+			_, _ = w.Write([]byte(`{"available_count":0,"credits":[]}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "live-oauth-access",
+			"refresh_token": "live-oauth-refresh",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	oldCodexBase := openaiclient.OpenAIChatGPTAPIBaseURL
+	openaiclient.OpenAIChatGPTAPIBaseURL = tokenServer.URL + "/backend-api/codex/"
+	t.Cleanup(func() { openaiclient.OpenAIChatGPTAPIBaseURL = oldCodexBase })
+	t.Setenv("OPENAI_OAUTH_TOKEN_URL", tokenServer.URL+"/oauth/token")
+
+	h, e, repo, env := setupTestHandlerWithStores(t)
+	h.broadcaster = events.NewBroadcaster()
+	h.openAIIdentityResolver = func(context.Context, string) (service.OpenAIOAuthIdentity, error) {
+		return service.OpenAIOAuthIdentity{
+			AccountID:     "acct-usage-sync",
+			DisplayName:   "Usage Sync User",
+			PrincipalHash: "principal-usage-sync",
+		}, nil
+	}
+
+	usageSvc := service.NewUsageAnalyticsService(env.Usage, repo)
+	var fetchCalls atomic.Int32
+	usageSvc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
+		fetchCalls.Add(1)
+		pct := 42.0
+		return &models.AccountUsageResult{
+			PrimaryLabel:       "5-hour session",
+			PrimaryUsedPercent: &pct,
+		}, nil
+	})
+	shared := usageSvc.EnableSharedAccountUsage(context.Background(), func() {
+		h.broadcaster.Publish(events.TaskEvent{Type: events.AccountUsageUpdated})
+	}, nil)
+	defer shared.Stop()
+	h.SetUsageAnalyticsService(usageSvc)
+
+	sub, _ := h.broadcaster.Subscribe()
+	defer h.broadcaster.Unsubscribe(sub)
+
+	drainUsageUpdated := func() {
+		for {
+			select {
+			case <-sub:
+			default:
+				return
+			}
+		}
+	}
+
+	waitUsageUpdated := func(step string) {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		for {
+			select {
+			case ev := <-sub:
+				if ev.Type == events.AccountUsageUpdated {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("timed out waiting for AccountUsageUpdated after %s", step)
+			}
+		}
+	}
+
+	waitFetchCount := func(step string, want int32) {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if fetchCalls.Load() >= want {
+				return
+			}
+			select {
+			case <-deadline:
+				t.Fatalf("timed out waiting for %d usage fetches after %s (got %d)", want, step, fetchCalls.Load())
+			case <-ticker.C:
+			}
+		}
+	}
+
+	// 1. Complete OAuth setup in modal, then create the OAuth model via POST /models.
+	setupForm := url.Values{
+		"provider":            {"openai"},
+		"openai_auth_type":    {"oauth"},
+		"auth_method":         {"oauth"},
+		"oauth_connection_id": {"new"},
+	}
+	setupReq := httptest.NewRequest(http.MethodPost, "/models/oauth/setup", strings.NewReader(setupForm.Encode()))
+	setupReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setupRec := httptest.NewRecorder()
+	e.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("begin oauth setup: %d %s", setupRec.Code, setupRec.Body.String())
+	}
+	var flow struct {
+		Session string `json:"session_id"`
+		URL     string `json:"authorization_url"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &flow); err != nil {
+		t.Fatal(err)
+	}
+	defer removeModelOAuthSetup(flow.Session)
+	authURL, err := url.Parse(flow.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := h.completeOAuthFlow(authURL.Query().Get("state"), "code"); result.Outcome != oauthCompletionSucceeded {
+		t.Fatalf("complete setup oauth: %v", result.Err)
+	}
+
+	createForm := url.Values{
+		"name":                {"Synced OAuth Model"},
+		"provider":            {"openai"},
+		"model":               {"gpt-6.1-sol"},
+		"openai_auth_type":    {"oauth"},
+		"auth_method":         {"oauth"},
+		"oauth_connection_id": {"new"},
+		"oauth_setup_session": {flow.Session},
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createReq.Header.Set("HX-Request", "true")
+	createRec := httptest.NewRecorder()
+	e.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create oauth model: %d %s", createRec.Code, createRec.Body.String())
+	}
+
+	waitUsageUpdated("CreateModel")
+	if fetchCalls.Load() != 1 {
+		t.Fatalf("expected 1 usage fetch after CreateModel, got %d", fetchCalls.Load())
+	}
+
+	accounts, err := usageSvc.ListUsageAccounts(context.Background())
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("expected 1 usage account, got %+v err=%v", accounts, err)
+	}
+	snapshots, err := usageSvc.SharedAccountUsage(context.Background(), "", false)
+	if err != nil || len(snapshots[accounts[0].Key].AccountLimits) != 1 {
+		t.Fatalf("expected cached usage snapshot after CreateModel, got %+v err=%v", snapshots, err)
+	}
+
+	configs, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "Synced OAuth Model" {
+			created = &configs[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatal("created model not found")
+	}
+
+	// 2. Disconnect OAuth evicts snapshot and broadcasts immediately.
+	disconnectReq := httptest.NewRequest(http.MethodPost, "/models/"+created.ID+"/oauth/disconnect", nil)
+	disconnectRec := httptest.NewRecorder()
+	e.ServeHTTP(disconnectRec, disconnectReq)
+	if disconnectRec.Code != http.StatusSeeOther {
+		t.Fatalf("disconnect oauth: %d %s", disconnectRec.Code, disconnectRec.Body.String())
+	}
+	waitUsageUpdated("DisconnectModelOAuthConnection")
+	snapshots, err = usageSvc.SharedAccountUsage(context.Background(), "", false)
+	if err != nil || len(snapshots) != 0 {
+		t.Fatalf("expected empty snapshots after disconnect, got %+v err=%v", snapshots, err)
+	}
+
+	// 3. Reconnect via existing-model OAuth flow fetches usage and broadcasts immediately.
+	initReq := httptest.NewRequest(http.MethodGet, "/models/"+created.ID+"/oauth/initiate", nil)
+	initRec := httptest.NewRecorder()
+	e.ServeHTTP(initRec, initReq)
+	if initRec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("initiate oauth: %d %s", initRec.Code, initRec.Body.String())
+	}
+	reauthURL, err := url.Parse(initRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := h.completeOAuthFlow(reauthURL.Query().Get("state"), "code-2"); result.Outcome != oauthCompletionSucceeded {
+		t.Fatalf("complete reconnect oauth: %v", result.Err)
+	}
+	waitUsageUpdated("completeOAuthFlow")
+	if fetchCalls.Load() != 2 {
+		t.Fatalf("expected 2 usage fetches after reconnect, got %d", fetchCalls.Load())
+	}
+
+	// 4. MoveModelsToOAuthConnection syncs and broadcasts immediately.
+	second := &models.LLMConfig{
+		Name:       "Second OAuth Model",
+		Provider:   models.ProviderOpenAI,
+		Model:      "gpt-6.1-sol",
+		AuthMethod: models.AuthMethodOAuth,
+	}
+	if err := repo.Create(context.Background(), second); err != nil {
+		t.Fatalf("create second model: %v", err)
+	}
+	drainUsageUpdated()
+	moveForm := url.Values{"model_ids": {second.ID}}
+	moveReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+created.OAuthConnectionID+"/models", strings.NewReader(moveForm.Encode()))
+	moveReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	moveRec := httptest.NewRecorder()
+	e.ServeHTTP(moveRec, moveReq)
+	if moveRec.Code != http.StatusSeeOther {
+		t.Fatalf("move models to oauth connection: %d %s", moveRec.Code, moveRec.Body.String())
+	}
+	waitUsageUpdated("MoveModelsToOAuthConnection")
+	waitFetchCount("MoveModelsToOAuthConnection", 3)
+	waitUsageUpdated("MoveModelsToOAuthConnection fetch")
+
+	// 5. UpdateModel switching an OAuth model to API key syncs and broadcasts immediately.
+	drainUsageUpdated()
+	updateForm := url.Values{
+		"name":             {created.Name},
+		"provider":         {"openai"},
+		"model":            {"gpt-6.1-sol"},
+		"openai_auth_type": {"api_key"},
+		"auth_method":      {"api_key"},
+		"api_key":          {"sk-switched"},
+	}
+	updateReq := httptest.NewRequest(http.MethodPut, "/models/"+created.ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateRec := httptest.NewRecorder()
+	e.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusSeeOther {
+		t.Fatalf("update model: %d %s", updateRec.Code, updateRec.Body.String())
+	}
+	waitUsageUpdated("UpdateModel")
+	waitFetchCount("UpdateModel", 4)
+	waitUsageUpdated("UpdateModel fetch")
+
+	// 6. DeleteModelsBulk evicts the removed OAuth account and broadcasts immediately.
+	drainUsageUpdated()
+	bulkBody, err := json.Marshal(map[string][]string{"ids": {second.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bulkReq := httptest.NewRequest(http.MethodDelete, "/models/bulk", strings.NewReader(string(bulkBody)))
+	bulkReq.Header.Set("Content-Type", "application/json")
+	bulkRec := httptest.NewRecorder()
+	e.ServeHTTP(bulkRec, bulkReq)
+	if bulkRec.Code != http.StatusOK {
+		t.Fatalf("bulk delete models: %d %s", bulkRec.Code, bulkRec.Body.String())
+	}
+	waitUsageUpdated("DeleteModelsBulk")
+	snapshots, err = usageSvc.SharedAccountUsage(context.Background(), "", false)
+	if err != nil || len(snapshots) != 0 {
+		t.Fatalf("expected empty snapshots after bulk delete, got %+v err=%v", snapshots, err)
+	}
+
+	// 7. finishGeminiOAuth syncs usage and broadcasts immediately.
+	fakeGoogle(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"currentTier":             map[string]string{"id": "standard-tier"},
+			"cloudaicompanionProject": "proj-sync-1",
+		})
+	})
+	geminiModel := &models.LLMConfig{
+		Name:       "Synced Gemini OAuth",
+		Provider:   models.ProviderGemini,
+		Model:      "gemini-2.5-pro",
+		AuthMethod: models.AuthMethodOAuth,
+	}
+	if err := repo.Create(context.Background(), geminiModel); err != nil {
+		t.Fatalf("create gemini model: %v", err)
+	}
+	drainUsageUpdated()
+	if _, err := h.exchangeGeminiOAuthCodeAndSaveTokens(context.Background(), &oauthPendingFlow{
+		ConfigID:       geminiModel.ID,
+		ConnectionID:   geminiModel.OAuthConnectionID,
+		ConfigRevision: geminiModel.OAuthConfigRevision,
+		Provider:       models.ProviderGemini,
+	}, "gemini-code"); err != nil {
+		t.Fatalf("finish gemini oauth: %v", err)
+	}
+	waitUsageUpdated("finishGeminiOAuth")
+	waitFetchCount("finishGeminiOAuth", 5)
+	geminiAccounts, err := usageSvc.ListUsageAccounts(context.Background())
+	if err != nil || len(geminiAccounts) != 1 || geminiAccounts[0].Provider != "gemini" {
+		t.Fatalf("expected 1 gemini usage account, got %+v err=%v", geminiAccounts, err)
+	}
+
+	// 8. DeleteModel evicts snapshot and broadcasts immediately.
+	drainUsageUpdated()
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/models/"+geminiModel.ID, nil)
+	deleteRec := httptest.NewRecorder()
+	e.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusSeeOther {
+		t.Fatalf("delete model: %d %s", deleteRec.Code, deleteRec.Body.String())
+	}
+	waitUsageUpdated("DeleteModel")
+	snapshots, err = usageSvc.SharedAccountUsage(context.Background(), "", false)
+	if err != nil || len(snapshots) != 0 {
+		t.Fatalf("expected empty snapshots after delete, got %+v err=%v", snapshots, err)
 	}
 }

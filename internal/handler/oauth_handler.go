@@ -812,6 +812,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokensContext(ctx context.Context, flo
 		return 0, fmt.Errorf("OAuth configuration changed while authorization was in progress; reconnect using the current configuration")
 	}
 
+	h.syncAccountUsage()
 	return expiresAt, nil
 }
 
@@ -877,6 +878,7 @@ func (h *Handler) finishGeminiOAuth(ctx context.Context, flow *oauthPendingFlow,
 	if !updated {
 		return 0, fmt.Errorf("OAuth configuration changed while authorization was in progress; reconnect using the current configuration")
 	}
+	h.syncAccountUsage()
 	return tokens.ExpiresAt, nil
 }
 

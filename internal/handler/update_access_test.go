@@ -28,7 +28,7 @@ func TestSystemUpdateMutationsRequireCurrentOrgAdmin(t *testing.T) {
 	e := echo.New()
 	e.Use(h.projectAccessBoundary)
 	calls := 0
-	for _, path := range []string{"/api/system/update/apply", "/api/system/update/cancel"} {
+	for _, path := range []string{"/api/system/update/apply", "/api/system/update/cancel", "/settings/updates"} {
 		e.POST(path, func(c echo.Context) error { calls++; return c.NoContent(http.StatusAccepted) })
 	}
 	e.GET("/api/system/update", h.SystemUpdate)
@@ -52,7 +52,7 @@ func TestSystemUpdateMutationsRequireCurrentOrgAdmin(t *testing.T) {
 	principal.Role = "owner" // Untrusted/stale claims must not grant instance control.
 	check := func(p models.Principal, want int) {
 		t.Helper()
-		for _, path := range []string{"/api/system/update/apply", "/api/system/update/cancel"} {
+		for _, path := range []string{"/api/system/update/apply", "/api/system/update/cancel", "/settings/updates"} {
 			require.Equal(t, want, request(http.MethodPost, path, p))
 		}
 	}
@@ -64,11 +64,11 @@ func TestSystemUpdateMutationsRequireCurrentOrgAdmin(t *testing.T) {
 	require.NoError(t, tc.stores.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "admin", false))
 	check(principal, http.StatusAccepted)
 	require.Equal(t, "true", header(principal))
-	require.Equal(t, 2, calls)
+	require.Equal(t, 3, calls)
 	require.NoError(t, tc.stores.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "member", false))
 	check(principal, http.StatusNotFound)
 	require.Equal(t, "false", header(principal))
-	require.Equal(t, 2, calls, "demotion must stop calls before reaching the coordinator")
+	require.Equal(t, 3, calls, "demotion must stop calls before reaching the coordinator")
 	check(models.Principal{UserID: models.BootstrapUserID}, http.StatusAccepted)
 	h.authMode = auth.AuthModeDisabled
 	check(models.Principal{}, http.StatusAccepted)
