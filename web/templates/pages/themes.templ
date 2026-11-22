@@ -66,74 +66,75 @@ templ ThemesContent(catalog []themes.Theme) {
 			.display-preview[data-preview-tabs="attached"] .dp-tabs span:first-child::after { content: ""; position: absolute; width: 6px; height: 6px; right: -6px; bottom: 0; background: radial-gradient(circle at 100% 0, transparent 6px, var(--dp-page) 6px); }
 			.display-preview[data-preview-tabs="attached"] .dp-tabs span:first-child::before { content: ""; position: absolute; width: 6px; height: 6px; left: -6px; bottom: 0; background: radial-gradient(circle at 0 0, transparent 6px, var(--dp-page) 6px); }
 			.dp-conversation { height: 100%; background: var(--dp-page); padding: 6px; }
-				.dp-user, .dp-assistant, .dp-composer { padding: 6px; border-radius: 5px; }
-				.dp-user { margin-left: 45%; background: var(--dp-card); margin-bottom: 4px; }
-				.dp-composer { background: var(--dp-card); margin-top: 4px; }
-				.display-preview[data-preview-thread="focused"] .dp-conversation { padding-left: 22%; padding-right: 22%; }
-				.display-preview[data-preview-bubbles="on"] .dp-assistant { background: var(--dp-card); }
-				.display-preview[data-preview-step="on"] { --dp-card: var(--conversation-card-raised); }
-				.header-fade-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
-				@media (max-width: 639px) { .header-fade-grid { grid-template-columns: minmax(0, 1fr); } }
-				.dp-header-fade { position: relative; height: 100%; background: var(--dp-page); overflow: hidden; }
-				.dp-hf-bar { position: relative; z-index: 3; height: 22px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: var(--dp-page); }
-				.dp-hf-crumb { width: 46%; height: 4px; border-radius: 2px; background: currentColor; opacity: .5; }
-				.dp-hf-toggle { width: 9px; height: 9px; border-radius: 2px; border: 1px solid currentColor; opacity: .45; }
-				.dp-hf-scroll { position: absolute; left: 0; right: 0; top: 22px; padding: 2px 6px 6px; display: flex; flex-direction: column; gap: 4px; }
-				.display-preview[data-preview-thread="focused"] .dp-hf-scroll { padding-left: 16%; padding-right: 16%; }
-				.dp-hf-scroll .dp-user { margin-bottom: 0; }
-				.dp-hf-top-msg { margin-top: -6px; }
-				.display-preview[data-kind="headerFade"][data-variant="soft-edge"] .dp-header-fade::after {
-					content: "";
-					position: absolute;
-					top: 22px;
-					left: 0;
-					right: 0;
-					height: 24px;
-					z-index: 2;
-					pointer-events: none;
-					background: linear-gradient(
-						to bottom,
-						var(--dp-page) 0%,
-						color-mix(in srgb, var(--dp-page) 78%, transparent) 28%,
-						color-mix(in srgb, var(--dp-page) 36%, transparent) 60%,
-						transparent 100%
-					);
-				}
-				.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-hf-bar { background: transparent; }
-				.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-hf-scroll { top: 4px; }
-				.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-hf-top-msg { margin-top: 0; }
-				.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-header-fade::before {
-					content: "";
-					position: absolute;
-					top: 0;
-					left: 0;
-					right: 0;
-					height: 44px;
-					z-index: 1;
-					pointer-events: none;
-					backdrop-filter: blur(2.5px);
-					-webkit-backdrop-filter: blur(2.5px);
-					mask-image: linear-gradient(to bottom, #000 0%, #000 40%, transparent 92%);
-					-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 40%, transparent 92%);
-				}
-				.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-header-fade::after {
-					content: "";
-					position: absolute;
-					top: 0;
-					left: 0;
-					right: 0;
-					height: 44px;
-					z-index: 2;
-					pointer-events: none;
-					background: linear-gradient(
-						to bottom,
-						color-mix(in srgb, var(--dp-page) 92%, transparent) 0%,
-						color-mix(in srgb, var(--dp-page) 74%, transparent) 42%,
-						color-mix(in srgb, var(--dp-page) 34%, transparent) 72%,
-						transparent 100%
-					);
-				}
-			</style>		<section class="mb-8" data-display-prefs data-settings-section="layout" hidden>
+			.dp-user, .dp-assistant, .dp-composer { padding: 6px; border-radius: 5px; }
+			.dp-user { margin-left: 45%; background: var(--dp-card); margin-bottom: 4px; }
+			.dp-composer { background: var(--dp-card); margin-top: 4px; }
+			.display-preview[data-preview-thread="focused"] .dp-conversation { padding-left: 22%; padding-right: 22%; }
+			.display-preview[data-preview-bubbles="on"] .dp-assistant { background: var(--dp-card); }
+			.display-preview[data-preview-step="on"] { --dp-card: var(--conversation-card-raised); }
+			.header-fade-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
+			@media (max-width: 639px) { .header-fade-grid { grid-template-columns: minmax(0, 1fr); } }
+			.dp-header-fade { position: relative; height: 100%; background: var(--dp-page); overflow: hidden; }
+			.dp-hf-bar { position: relative; z-index: 3; height: 22px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: var(--dp-page); }
+			.dp-hf-crumb { width: 46%; height: 4px; border-radius: 2px; background: currentColor; opacity: .5; }
+			.dp-hf-toggle { width: 9px; height: 9px; border-radius: 2px; border: 1px solid currentColor; opacity: .45; }
+			.dp-hf-scroll { position: absolute; left: 0; right: 0; top: 22px; padding: 2px 6px 6px; display: flex; flex-direction: column; gap: 4px; }
+			.display-preview[data-preview-thread="focused"] .dp-hf-scroll { padding-left: 16%; padding-right: 16%; }
+			.dp-hf-scroll .dp-user { margin-bottom: 0; }
+			.dp-hf-top-msg { margin-top: -6px; }
+			.display-preview[data-kind="headerFade"][data-variant="soft-edge"] .dp-header-fade::after {
+				content: "";
+				position: absolute;
+				top: 22px;
+				left: 0;
+				right: 0;
+				height: 24px;
+				z-index: 2;
+				pointer-events: none;
+				background: linear-gradient(
+					to bottom,
+					var(--dp-page) 0%,
+					color-mix(in srgb, var(--dp-page) 78%, transparent) 28%,
+					color-mix(in srgb, var(--dp-page) 36%, transparent) 60%,
+					transparent 100%
+				);
+			}
+			.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-hf-bar { background: transparent; }
+			.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-hf-scroll { top: 4px; }
+			.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-hf-top-msg { margin-top: 0; }
+			.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-header-fade::before {
+				content: "";
+				position: absolute;
+				top: 0;
+				left: 0;
+				right: 0;
+				height: 44px;
+				z-index: 1;
+				pointer-events: none;
+				backdrop-filter: blur(2.5px);
+				-webkit-backdrop-filter: blur(2.5px);
+				mask-image: linear-gradient(to bottom, #000 0%, #000 40%, transparent 92%);
+				-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 40%, transparent 92%);
+			}
+			.display-preview[data-kind="headerFade"][data-variant="translucent"] .dp-header-fade::after {
+				content: "";
+				position: absolute;
+				top: 0;
+				left: 0;
+				right: 0;
+				height: 44px;
+				z-index: 2;
+				pointer-events: none;
+				background: linear-gradient(
+					to bottom,
+					color-mix(in srgb, var(--dp-page) 92%, transparent) 0%,
+					color-mix(in srgb, var(--dp-page) 74%, transparent) 42%,
+					color-mix(in srgb, var(--dp-page) 34%, transparent) 72%,
+					transparent 100%
+				);
+			}
+		</style>
+		<section class="mb-8" data-display-prefs data-settings-section="layout" hidden>
 			<div class="flex flex-col gap-3 max-w-2xl mb-6">
 				@displayToggle("surfaces", "Surfaces", "Choose the background colors used for the outer frame, page and cards.", "default", "Default", "layered", "Layered", "Use the theme’s standard backgrounds for the frame, page and cards.", "Separate the frame, page and cards with distinct background shades.")
 				@displayToggle("layout", "Task list", "Float the task list beside the page with a gap, or join them into one surface.", "floating", "Floating", "unified", "Unified", "Keep a gap between the task list and the main page.", "Join the task list and main page into one continuous surface.")
@@ -156,15 +157,16 @@ templ ThemesContent(catalog []themes.Theme) {
 				@boardColumnsCard("tintstrip", "Tint + header strip", "Faint tint columns with the frame color behind the heading.")
 			</div>
 		</section>
-			<section data-display-prefs data-settings-section="chat" hidden>
-				<div class="flex flex-col gap-3 max-w-2xl">
-					@displayToggle("output", "Tool output", "Compact folds consecutive tool activity into a single expandable row. Assistant messages stay visible.", "full", "Full", "compact", "Compact", "Show tool calls and their results directly in the conversation.", "Fold consecutive tools and thinking into expandable groups. Assistant text stays visible.")
-					@displayToggle("thread", "Width", "Use the available width for conversations, or center them in a narrower column for easier reading.", "full", "Full width", "focused", "Focused", "Let conversations fill the available page width.", "Center conversations in a narrower column for easier reading.")
-					@displayToggle("bubbles", "Assistant bubbles", "Show assistant messages directly on the page, or give them a filled bubble background.", "off", "Off", "on", "On", "Show assistant messages directly on the page.", "Place assistant messages inside filled bubbles.")
-					@displayToggle("step", "Bubble and composer color step", "Lift chat bubbles and the composer one shade above cards.", "off", "Off", "on", "On", "Use the card background shade for bubbles and the composer.", "Lift bubbles and the composer one shade above cards.")
-					@headerFadePicker()
-				</div>
-			</section>		<section data-settings-section="themes">
+		<section data-display-prefs data-settings-section="chat" hidden>
+			<div class="flex flex-col gap-3 max-w-2xl">
+				@displayToggle("output", "Tool output", "Compact folds consecutive tool activity into a single expandable row. Assistant messages stay visible.", "full", "Full", "compact", "Compact", "Show tool calls and their results directly in the conversation.", "Fold consecutive tools and thinking into expandable groups. Assistant text stays visible.")
+				@displayToggle("thread", "Width", "Use the available width for conversations, or center them in a narrower column for easier reading.", "full", "Full width", "focused", "Focused", "Let conversations fill the available page width.", "Center conversations in a narrower column for easier reading.")
+				@displayToggle("bubbles", "Assistant bubbles", "Show assistant messages directly on the page, or give them a filled bubble background.", "off", "Off", "on", "On", "Show assistant messages directly on the page.", "Place assistant messages inside filled bubbles.")
+				@displayToggle("step", "Bubble and composer color step", "Lift chat bubbles and the composer one shade above cards.", "off", "Off", "on", "On", "Use the card background shade for bubbles and the composer.", "Lift bubbles and the composer one shade above cards.")
+				@headerFadePicker()
+			</div>
+		</section>
+		<section data-settings-section="themes">
 			@CardSearchInput("themes", "Search themes...")
 			<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-themes-grid>
 				for _, theme := range catalog {
@@ -179,11 +181,12 @@ templ ThemesContent(catalog []themes.Theme) {
 				function refreshDisplayPrefs() {
 					var display = window.openVibelyDisplay;
 					if (!display) return;
-						document.querySelectorAll('.display-preview').forEach(function(preview) {
-							['surfaces', 'layout', 'tabs', 'thread', 'bubbles', 'step', 'headerFade'].forEach(function(pref) {
-								preview.setAttribute('data-preview-' + pref, preview.dataset.kind === pref ? preview.dataset.variant : display.get(pref));
-							});
-						});					document.querySelectorAll('[data-board-columns-card]').forEach(function(card) {
+					document.querySelectorAll('.display-preview').forEach(function(preview) {
+						['surfaces', 'layout', 'tabs', 'thread', 'bubbles', 'step'].forEach(function(pref) {
+							preview.setAttribute('data-preview-' + pref, preview.dataset.kind === pref ? preview.dataset.variant : display.get(pref));
+						});
+					});
+					document.querySelectorAll('[data-board-columns-card]').forEach(function(card) {
 						var active = card.getAttribute('data-board-columns-id') === display.get('columns');
 						card.setAttribute('aria-pressed', active ? 'true' : 'false');
 						card.classList.toggle('border-primary', active);
@@ -422,37 +425,38 @@ templ displayToggle(pref, label, description, firstValue, firstLabel, secondValu
 				</button>
 			}
 		</div>
-		</fieldset>
-	}
+	</fieldset>
+}
 
-	templ headerFadePicker() {
-		<fieldset>
-			<legend class="text-sm font-medium mb-2">Header fade</legend>
-			<p class="text-xs opacity-60 mb-2">Choose how messages fade out at the top of a conversation.</p>
-			<div class="header-fade-grid">
-				for _, opt := range [][3]string{
-					{"off", "Off", "Clip messages cleanly below the header."},
-					{"soft-edge", "Soft edge", "Keep the header solid and fade messages just below it."},
-					{"translucent", "Translucent", "Fade messages softly behind the header with a light blur."},
-				} {
-					<button type="button" class="display-option card bg-base-100 border border-base-300 p-3 text-left hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" data-display-pref="headerFade" data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">
-						<span class="flex justify-between items-center gap-2 mb-3"><span class="text-sm font-medium">{ opt[1] }</span><span class="badge badge-primary badge-sm hidden" data-display-active>Active</span></span>
-						<div class="display-preview" data-kind="headerFade" data-variant={ opt[0] } aria-hidden="true">
-							<div class="dp-header-fade">
-								<div class="dp-hf-bar"><span class="dp-hf-crumb"></span><span class="dp-hf-toggle"></span></div>
-								<div class="dp-hf-scroll">
-									<div class="dp-assistant dp-hf-top-msg"><i></i><i></i></div>
-									<div class="dp-user"><i></i></div>
-									<div class="dp-assistant"><i></i><i></i></div>
-								</div>
+templ headerFadePicker() {
+	<fieldset>
+		<legend class="text-sm font-medium mb-2">Header fade</legend>
+		<p class="text-xs opacity-60 mb-2">Choose how messages fade out at the top of a conversation.</p>
+		<div class="header-fade-grid">
+			for _, opt := range [][3]string{
+				{"off", "Off", "Clip messages cleanly below the header."},
+				{"soft-edge", "Soft edge", "Keep the header solid and fade messages just below it."},
+				{"translucent", "Translucent", "Fade messages softly behind the header with a light blur."},
+			} {
+				<button type="button" class="display-option card bg-base-100 border border-base-300 p-3 text-left hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" data-display-pref="headerFade" data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">
+					<span class="flex justify-between items-center gap-2 mb-3"><span class="text-sm font-medium">{ opt[1] }</span><span class="badge badge-primary badge-sm hidden" data-display-active>Active</span></span>
+					<div class="display-preview" data-kind="headerFade" data-variant={ opt[0] } aria-hidden="true">
+						<div class="dp-header-fade">
+							<div class="dp-hf-bar"><span class="dp-hf-crumb"></span><span class="dp-hf-toggle"></span></div>
+							<div class="dp-hf-scroll">
+								<div class="dp-assistant dp-hf-top-msg"><i></i><i></i></div>
+								<div class="dp-user"><i></i></div>
+								<div class="dp-assistant"><i></i><i></i></div>
 							</div>
 						</div>
-						<p class="text-xs opacity-70 mt-3">{ opt[2] }</p>
-					</button>
-				}
-			</div>
-		</fieldset>
-	}
+					</div>
+					<p class="text-xs opacity-70 mt-3">{ opt[2] }</p>
+				</button>
+			}
+		</div>
+	</fieldset>
+}
+
 templ boardColumnsCard(id, name, description string) {
 	<button
 		type="button"
