@@ -21,7 +21,10 @@ func TestTaskRestartWhileStopping(t *testing.T) {
 	for _, stop := range []string{"stop", "move to backlog"} {
 		for _, action := range []string{"run", "category", "active lane", "batch active lane", "status"} {
 			t.Run(stop+"/"+action, func(t *testing.T) {
-				h, e, configs := setupTestHandler(t)
+				h, e, configs, stores := setupTestHandlerWithStores(t)
+				goals := service.NewTaskGoalService(stores.TaskGoals, stores.Tasks, nil)
+				h.SetTaskGoalService(goals)
+				h.taskSvc.SetTaskGoalService(goals)
 				ctx := context.Background()
 				agent := createAgent(t, configs)
 				task := createTask(t, h, "default", "Stopping follow-up", func(task *models.Task) {
@@ -35,6 +38,8 @@ func TestTaskRestartWhileStopping(t *testing.T) {
 					ex.IsFollowup = true
 					ex.PromptSent = "latest follow-up"
 				})
+				_, err := h.taskGoalSvc.SetGoal(ctx, task.ID, "Finish the latest follow-up", service.GoalOptions{})
+				require.NoError(t, err)
 				runningCtx, cancel := context.WithCancel(ctx)
 				defer cancel()
 				registration := h.workerSvc.RegisterCancelOwned(task.ID, cancel)
@@ -86,6 +91,10 @@ func TestTaskRestartWhileStopping(t *testing.T) {
 					require.Equal(t, "failed", triggers["openvibelyToast"].Status)
 					require.Equal(t, "none", rec.Header().Get("HX-Reswap"))
 					require.True(t, h.workerSvc.IsTaskStopping(task.ID))
+					goal, err := h.taskGoalSvc.GetGoal(ctx, task.ID)
+					require.NoError(t, err)
+					require.Equal(t, models.TaskGoalStatusPaused, goal.Status)
+					require.Equal(t, service.TaskGoalStoppedByUserReason, goal.Reason)
 					stored, err := h.taskRepo.GetByID(ctx, task.ID)
 					require.NoError(t, err)
 					require.Equal(t, models.CategoryBacklog, stored.Category)
@@ -110,6 +119,9 @@ func TestTaskRestartWhileStopping(t *testing.T) {
 				}, 3*time.Second, 10*time.Millisecond)
 				require.Equal(t, 1, mock.CallCount())
 				require.Equal(t, "latest follow-up", mock.LastCall().Prompt)
+				goal, err := h.taskGoalSvc.GetGoal(ctx, task.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.TaskGoalStatusActive, goal.Status)
 			})
 		}
 	}

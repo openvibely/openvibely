@@ -686,7 +686,6 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	// ClaimTask provides atomic guard against double execution for normal task runs.
 	if category == models.CategoryActive {
 		release()
-		s.resumeGoalStoppedByUser(ctx, id, "user")
 		if s.queuedTaskThreadFollowupHook != nil {
 			handled, err := s.queuedTaskThreadFollowupHook(ctx, id)
 			if err != nil {
@@ -694,6 +693,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return rollbackActivation(err)
 			}
 			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
 				if s.workerSvc != nil {
 					s.workerSvc.ClearCancellationRequested(id)
 				}
@@ -708,6 +708,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return rollbackActivation(err)
 			}
 			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
 				if s.workerSvc != nil {
 					s.workerSvc.ClearCancellationRequested(id)
 				}
@@ -962,8 +963,6 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 		}
 		return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 	}
-	s.resumeGoalStoppedByUser(ctx, id, "user")
-
 	if s.queuedTaskThreadFollowupHook != nil {
 		handled, err := s.queuedTaskThreadFollowupHook(ctx, id)
 		if err != nil {
@@ -971,6 +970,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			return err
 		}
 		if handled {
+			s.resumeGoalStoppedByUser(ctx, id, "user")
 			if s.workerSvc != nil {
 				s.workerSvc.ClearCancellationRequested(id)
 			}
@@ -985,6 +985,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			return err
 		}
 		if handled {
+			s.resumeGoalStoppedByUser(ctx, id, "user")
 			if s.workerSvc != nil {
 				s.workerSvc.ClearCancellationRequested(id)
 			}

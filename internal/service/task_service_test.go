@@ -4415,3 +4415,31 @@ func TestTaskService_ConcurrentStopRejectsActivation(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskService_RunTask_StoppingRejectionKeepsGoalPaused(t *testing.T) {
+	env := teststores.New(t)
+	worker := newTestWorkerService(t)
+	svc := NewTaskService(env.Tasks, env.Attachments, worker)
+	goals := NewTaskGoalService(env.TaskGoals, env.Tasks, nil)
+	svc.SetTaskGoalService(goals)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Stopped goal", Prompt: "continue", Category: models.CategoryActive, Status: models.StatusRunning}
+	require.NoError(t, env.Tasks.Create(ctx, task))
+	_, err := goals.SetGoal(ctx, task.ID, "Finish the work", GoalOptions{})
+	require.NoError(t, err)
+	registration := worker.RegisterCancelOwned(task.ID, func() {})
+	defer worker.DeregisterCancelOwned(task.ID, registration)
+	require.NoError(t, svc.CancelTask(ctx, task.ID))
+	for i := 0; i < 2; i++ {
+		require.ErrorIs(t, svc.RunTask(ctx, task.ID), ErrTaskStillStopping)
+		goal, err := goals.GetGoal(ctx, task.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.TaskGoalStatusPaused, goal.Status)
+		require.Equal(t, TaskGoalStoppedByUserReason, goal.Reason)
+	}
+	worker.DeregisterCancelOwned(task.ID, registration)
+	require.NoError(t, svc.RunTask(ctx, task.ID))
+	goal, err := goals.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskGoalStatusActive, goal.Status)
+}
