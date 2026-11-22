@@ -57,3 +57,75 @@ func TestOAuthCredentialMetadataCleared(t *testing.T) {
 		t.Fatal("stale authentication metadata")
 	}
 }
+
+func TestOAuthEndpointSelection(t *testing.T) {
+	for _, tc := range []struct{ name, credential, want string }{
+		{"personal", encodeRefreshCredential(OAuthClientID, "refresh"), "https://daily-cloudcode-pa.googleapis.com/v1internal"},
+		{"business", encodeRefreshCredential(BusinessOAuthClientID, "refresh"), CodeAssistBaseURL},
+		{"legacy", "refresh", CodeAssistBaseURL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewWithOAuth("access", "project")
+			c.SetOAuthCredential(tc.credential)
+			if c.codeAssistURL != tc.want || OAuthBaseURL(tc.credential) != tc.want {
+				t.Fatalf("wrong endpoint: %s", c.codeAssistURL)
+			}
+			c.SetCodeAssistURL("https://custom.example/v1internal")
+			c.SetOAuthCredential(tc.credential)
+			if c.codeAssistURL != "https://custom.example/v1internal" {
+				t.Fatal("override lost")
+			}
+		})
+	}
+	c := NewWithOAuth("access", "project")
+	c.SetOAuthCredential(encodeRefreshCredential(OAuthClientID, "refresh"))
+	c.SetOAuthCredential("legacy")
+	if c.codeAssistURL != CodeAssistBaseURL {
+		t.Fatal("stale personal endpoint")
+	}
+}
+
+func TestGoogleAccountSetupCredentialRouting(t *testing.T) {
+	oldURL, oldClient := CodeAssistBaseURL, oauthHTTPClient
+	defer func() { CodeAssistBaseURL, oauthHTTPClient = oldURL, oldClient }()
+	for _, id := range []string{OAuthClientID, BusinessOAuthClientID} {
+		credential := encodeRefreshCredential(id, "refresh")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("User-Agent") != OAuthUserAgent(credential) {
+				t.Error("missing account authentication metadata")
+			}
+			if r.URL.Path != "/v1internal:loadCodeAssist" {
+				t.Error(r.URL.Path)
+			}
+			io.WriteString(w, `{"currentTier":{"id":"free-tier"},"cloudaicompanionProject":"project"}`)
+		}))
+		CodeAssistBaseURL = server.URL + "/v1internal"
+		project, err := SetupGoogleAccountWithCredential(context.Background(), "access", "", credential)
+		server.Close()
+		if err != nil || project != "project" {
+			t.Fatalf("project=%s err=%v", project, err)
+		}
+	}
+}
+
+func TestOAuthModelEffortMapping(t *testing.T) {
+	c := NewWithOAuth("access", "project")
+	for _, tc := range []struct{ model, effort, want string }{
+		{"gemini-4-argon", "medium", "gemini-4-argon-medium"},
+		{"gemini-4-neon", "xhigh", "gemini-4-neon-xhigh"},
+		{"gemini-4-argon", "", "gemini-4-argon-medium"},
+		{"gemini-4-argon-high", "", "gemini-4-argon-high"},
+		{"gemini-3.8-flash", "", "gemini-3.8-flash"},
+	} {
+		if got := c.oauthModel(tc.model, tc.effort); got != tc.want {
+			t.Errorf("%s: got %s want %s", tc.model, got, tc.want)
+		}
+	}
+	c.SetLegacyOAuth(true)
+	if c.oauthModel("gemini-4-argon", "high") != "gemini-4-argon" {
+		t.Fatal("legacy model changed")
+	}
+	if NewWithAPIKey("key").searchModel("gemini-4-argon", "high") != "gemini-4-argon" {
+		t.Fatal("API-key model changed")
+	}
+}

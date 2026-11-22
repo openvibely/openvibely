@@ -41,7 +41,7 @@ func (c *Client) webSearch(ctx context.Context, model string, input json.RawMess
 	}
 	var payload any = request
 	if c.isOAuth() {
-		envelope := map[string]any{"model": model, "project": c.project, "request": request}
+		envelope := map[string]any{"model": c.oauthModel(model, ""), "project": c.project, "request": request}
 		if !c.legacyOAuth {
 			envelope["requestId"] = newRequestID()
 			envelope["userAgent"] = "\x61\x6e\x74\x69\x67\x72\x61\x76\x69\x74\x79"
@@ -182,4 +182,11 @@ func escapeSearchURL(uri string) string {
 		}
 	}
 	return out.String()
+}
+
+func (c *Client) searchModel(model, effort string) string {
+	if c.isOAuth() {
+		return c.oauthModel(model, effort)
+	}
+	return model
 }

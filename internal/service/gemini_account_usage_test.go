@@ -25,6 +25,9 @@ func TestGeminiLiveAccountQuota(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
+		if r.Header.Get("User-Agent") != geminiclient.OAuthUserAgent(cfg.OAuthRefreshToken) {
+			t.Error("quota request missing client metadata")
+		}
 		var body map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)

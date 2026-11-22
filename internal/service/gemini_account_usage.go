@@ -20,7 +20,7 @@ func (s *UsageAnalyticsService) fetchGeminiOAuthUsage(ctx context.Context, cfg m
 	if err != nil {
 		return nil, err
 	}
-	raw, err := s.doAccountUsageRequestWithOAuthRecovery(ctx, fresh, geminiclient.CodeAssistBaseURL+":retrieveUserQuotaSummary", func(ctx context.Context, endpoint string, cfg models.LLMConfig) (*http.Request, error) {
+	raw, err := s.doAccountUsageRequestWithOAuthRecovery(ctx, fresh, geminiclient.OAuthBaseURL(fresh.OAuthRefreshToken)+":retrieveUserQuotaSummary", func(ctx context.Context, endpoint string, cfg models.LLMConfig) (*http.Request, error) {
 		body, err := json.Marshal(map[string]string{"project": cfg.OAuthAccountID})
 		if err != nil {
 			return nil, err
@@ -32,6 +32,7 @@ func (s *UsageAnalyticsService) fetchGeminiOAuthUsage(ctx context.Context, cfg m
 		req.Header.Set("Authorization", "Bearer "+cfg.OAuthAccessToken)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", geminiclient.OAuthUserAgent(cfg.OAuthRefreshToken))
 		return req, nil
 	}, refresh)
 	if err != nil {

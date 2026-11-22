@@ -54,7 +54,11 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 					if oauth {
 						require.Equal(t, "Bearer fresh", r.Header.Get("Authorization"))
 						require.Equal(t, "web_search", body["requestType"])
-						require.Equal(t, tc.model, body["model"])
+						wantModel := tc.model
+						if tc.model == "gemini-4-neon" {
+							wantModel = "gemini-4-neon-medium"
+						}
+						require.Equal(t, wantModel, body["model"])
 					} else {
 						require.Contains(t, r.URL.Path, tc.model)
 					}

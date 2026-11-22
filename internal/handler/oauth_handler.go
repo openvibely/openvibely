@@ -828,7 +828,9 @@ func (h *Handler) exchangeGeminiOAuthCodeAndSaveTokens(ctx context.Context, flow
 
 func (h *Handler) finishGeminiOAuth(ctx context.Context, flow *oauthPendingFlow, tokens *geminiclient.Tokens) (int64, error) {
 	setupCtx, cancelSetup := context.WithTimeout(ctx, 90*time.Second)
-	setup := geminiclient.SetupGoogleAccount
+	setup := func(ctx context.Context, token, project string) (string, error) {
+		return geminiclient.SetupGoogleAccountWithCredential(ctx, token, project, tokens.RefreshToken)
+	}
 	if flow.ClientID == "" || flow.ClientID == geminiclient.LegacyOAuthClientID {
 		setup = geminiclient.SetupCodeAssist
 	}

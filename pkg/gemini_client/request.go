@@ -84,7 +84,7 @@ func (c *Client) prepareRequest(contents []Content, defs []ToolDefinition, opts 
 	}
 	var envelope map[string]any
 	if c.isOAuth() {
-		envelope = map[string]any{"model": opts.Model, "project": c.project}
+		envelope = map[string]any{"model": c.oauthModel(opts.Model, opts.ReasoningEffort), "project": c.project}
 		if !c.legacyOAuth {
 			envelope["requestId"] = newRequestID()
 			envelope["userAgent"] = "\x61\x6e\x74\x69\x67\x72\x61\x76\x69\x74\x79"
@@ -234,4 +234,19 @@ func partValue(p Part) map[string]any {
 		out["functionResponse"] = v
 	}
 	return out
+}
+
+// oauthModel maps catalog names to the service's effort-specific model names.
+func (c *Client) oauthModel(model, effort string) string {
+	if c.legacyOAuth {
+		return model
+	}
+	switch model {
+	case "gemini-4-argon", "gemini-4-carbon", "gemini-4-neon", "gemini-4-hydrogen":
+		if effort == "" {
+			effort = "medium"
+		}
+		return model + "-" + effort
+	}
+	return model
 }

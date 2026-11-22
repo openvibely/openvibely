@@ -144,25 +144,47 @@ func UsesLegacyOAuth(token string) bool {
 	return err != nil || json.Unmarshal(raw, &credential) != nil || credential.ClientID == LegacyOAuthClientID
 }
 
-// SetOAuthCredential selects protocol authentication metadata from the client
-// that issued the refresh credential. It does not retain the credential.
-func (c *Client) SetOAuthCredential(token string) {
-	c.legacyOAuth = UsesLegacyOAuth(token)
-	c.oauthAuthMethod = ""
+// OAuthBaseURL selects the service for the credential's account type.
+// A configured base URL remains authoritative for custom deployments and tests.
+func OAuthBaseURL(token string) string {
+	if CodeAssistBaseURL != "https://cloudcode-pa.googleapis.com/v1internal" {
+		return CodeAssistBaseURL
+	}
+	if OAuthAuthMethod(token) == "consumer" {
+		return "https://daily-cloudcode-pa.googleapis.com/v1internal"
+	}
+	return CodeAssistBaseURL
+}
+
+// OAuthUserAgent returns the client metadata used by model and account requests.
+func OAuthUserAgent(token string) string { return codeAssistUserAgent(OAuthAuthMethod(token)) }
+
+func OAuthAuthMethod(token string) string {
 	encoded, ok := strings.CutPrefix(token, refreshCredentialPrefix)
 	if !ok {
-		return
+		return ""
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)
 	var credential refreshCredential
 	if err != nil || json.Unmarshal(raw, &credential) != nil {
-		return
+		return ""
 	}
 	switch credential.ClientID {
 	case OAuthClientID:
-		c.oauthAuthMethod = "consumer"
+		return "consumer"
 	case BusinessOAuthClientID:
-		c.oauthAuthMethod = "gcp"
+		return "gcp"
+	}
+	return ""
+}
+
+// SetOAuthCredential selects protocol authentication metadata from the client
+// that issued the refresh credential. It does not retain the credential.
+func (c *Client) SetOAuthCredential(token string) {
+	c.legacyOAuth = UsesLegacyOAuth(token)
+	c.oauthAuthMethod = OAuthAuthMethod(token)
+	if !c.codeAssistURLOverride {
+		c.codeAssistURL = OAuthBaseURL(token)
 	}
 }
 
@@ -312,16 +334,20 @@ var codeAssistMetadata = map[string]string{
 // onboarding to the default tier when the account has none yet. projectHint
 // is required for workspace/standard tiers and ignored by the free tier.
 func SetupCodeAssist(ctx context.Context, accessToken, projectHint string) (string, error) {
-	return setupCodeAssist(ctx, accessToken, projectHint, codeAssistMetadata)
+	return setupCodeAssist(ctx, accessToken, projectHint, codeAssistMetadata, "")
 }
 
 func SetupGoogleAccount(ctx context.Context, accessToken, projectHint string) (string, error) {
-	return setupCodeAssist(ctx, accessToken, projectHint, map[string]string{
-		"ideType": "\x41\x4e\x54\x49\x47\x52\x41\x56\x49\x54\x59", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI",
-	})
+	return SetupGoogleAccountWithCredential(ctx, accessToken, projectHint, "")
 }
 
-func setupCodeAssist(ctx context.Context, accessToken, projectHint string, metadata map[string]string) (string, error) {
+func SetupGoogleAccountWithCredential(ctx context.Context, accessToken, projectHint, credential string) (string, error) {
+	return setupCodeAssist(ctx, accessToken, projectHint, map[string]string{
+		"ideType": "\x41\x4e\x54\x49\x47\x52\x41\x56\x49\x54\x59", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI",
+	}, credential)
+}
+
+func setupCodeAssist(ctx context.Context, accessToken, projectHint string, metadata map[string]string, credential string) (string, error) {
 	load := map[string]any{"metadata": withProject(metadata, projectHint)}
 	if projectHint != "" {
 		load["cloudaicompanionProject"] = projectHint
@@ -340,7 +366,7 @@ func setupCodeAssist(ctx context.Context, accessToken, projectHint string, metad
 		} `json:"allowedTiers"`
 		Project string `json:"cloudaicompanionProject"`
 	}
-	if err := codeAssistPost(ctx, accessToken, "loadCodeAssist", load, &loaded); err != nil {
+	if err := codeAssistPost(ctx, accessToken, "loadCodeAssist", load, &loaded, credential); err != nil {
 		return "", err
 	}
 	if loaded.CurrentTier != nil || loaded.PaidTier != nil {
@@ -378,7 +404,7 @@ func setupCodeAssist(ctx context.Context, accessToken, projectHint string, metad
 				} `json:"cloudaicompanionProject"`
 			} `json:"response"`
 		}
-		if err := codeAssistPost(ctx, accessToken, "onboardUser", onboard, &op); err != nil {
+		if err := codeAssistPost(ctx, accessToken, "onboardUser", onboard, &op, credential); err != nil {
 			return "", err
 		}
 		if op.Done {
@@ -408,17 +434,17 @@ func withProject(metadata map[string]string, project string) map[string]string {
 	return out
 }
 
-func codeAssistPost(ctx context.Context, accessToken, method string, payload, out any) error {
+func codeAssistPost(ctx context.Context, accessToken, method string, payload, out any, credential string) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, CodeAssistBaseURL+":"+method, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, OAuthBaseURL(credential)+":"+method, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("User-Agent", codeAssistUserAgent())
+	req.Header.Set("User-Agent", OAuthUserAgent(credential))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpretry.DoRequest(oauthHTTPClient, req)
 	if err != nil {

@@ -41,17 +41,18 @@ const SkipThoughtSignature = "skip_thought_signature_validator"
 type UnauthorizedHandler func(ctx context.Context, tokenUsed string) (newToken string, recovered bool, err error)
 
 type Client struct {
-	legacyOAuth     bool
-	oauthAuthMethod string
-	httpClient      *http.Client
-	apiKey          string
-	accessToken     string
-	project         string
-	baseURL         string
-	codeAssistURL   string
-	unauthorized    UnauthorizedHandler
-	history         []Content
-	lastExchange    []Content
+	legacyOAuth           bool
+	oauthAuthMethod       string
+	httpClient            *http.Client
+	apiKey                string
+	accessToken           string
+	project               string
+	codeAssistURLOverride bool
+	baseURL               string
+	codeAssistURL         string
+	unauthorized          UnauthorizedHandler
+	history               []Content
+	lastExchange          []Content
 }
 
 // NewWithAPIKey uses the public Gemini API.
@@ -66,9 +67,12 @@ func NewWithOAuth(accessToken, project string) *Client {
 
 func (c *Client) SetLegacyOAuth(legacy bool) { c.legacyOAuth = legacy }
 
-func (c *Client) SetHTTPClient(client *http.Client)            { c.httpClient = client }
-func (c *Client) SetBaseURL(url string)                        { c.baseURL = strings.TrimRight(url, "/") }
-func (c *Client) SetCodeAssistURL(url string)                  { c.codeAssistURL = strings.TrimRight(url, "/") }
+func (c *Client) SetHTTPClient(client *http.Client) { c.httpClient = client }
+func (c *Client) SetBaseURL(url string)             { c.baseURL = strings.TrimRight(url, "/") }
+func (c *Client) SetCodeAssistURL(url string) {
+	c.codeAssistURL = strings.TrimRight(url, "/")
+	c.codeAssistURLOverride = true
+}
 func (c *Client) SetUnauthorizedHandler(h UnauthorizedHandler) { c.unauthorized = h }
 func (c *Client) SetHistory(history []Content)                 { c.history = CloneContents(history) }
 func (c *Client) History() []Content                           { return CloneContents(c.history) }
@@ -320,7 +324,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 			case opts.ToolFilter != nil && !opts.ToolFilter(call.Name):
 				output, isError = fmt.Sprintf("tool %s is not allowed by this agent", call.Name), true
 			case call.Name == "web_search" && nativeSearch:
-				search, searchErr := c.webSearch(ctx, opts.Model, normalized)
+				search, searchErr := c.webSearch(ctx, c.searchModel(opts.Model, opts.ReasoningEffort), normalized)
 				if searchErr != nil {
 					output, isError = searchErr.Error(), true
 				} else {
