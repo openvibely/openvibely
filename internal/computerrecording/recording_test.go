@@ -267,7 +267,6 @@ func TestInputRecordsFunctionKeysAndRedactsText(t *testing.T) {
 	}
 }
 
-
 func TestCaptureStateAppliesLifecycleWithoutSnapshottingEvents(t *testing.T) {
 	var r Recorder
 	if err := r.Start("demo"); err != nil {
@@ -428,6 +427,37 @@ func BenchmarkTicket(b *testing.B) {
 					r.Ticket()
 				}
 			})
+		}
+	}
+}
+
+func TestRepeatedNavigationKeysWithinWindowAreAllRecorded(t *testing.T) {
+	var r Recorder
+	if err := r.Start("audit"); err != nil {
+		t.Fatal(err)
+	}
+	p := Input{Action: r.Action, Unsupported: func() { t.Fatal("unsupported input") }}
+	p.Feed(append([]byte("RFB 003.008\n"), 1, 1))
+	send := func(key uint32, down bool) {
+		packet := make([]byte, 8)
+		packet[0] = 4
+		if down {
+			packet[1] = 1
+		}
+		binary.BigEndian.PutUint32(packet[4:8], key)
+		p.Feed(packet)
+	}
+	for i := 0; i < 3; i++ {
+		send(0xff54, true)
+		send(0xff54, false)
+	}
+	events := r.Status().Events
+	if len(events) != 3 {
+		t.Fatalf("saved events=%d, want 3: %v", len(events), events)
+	}
+	for _, e := range events {
+		if e.Text != "Press Down" {
+			t.Fatalf("event text=%q, want Press Down", e.Text)
 		}
 	}
 }
