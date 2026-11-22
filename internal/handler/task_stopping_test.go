@@ -130,66 +130,80 @@ func TestTaskRestartWhileStopping(t *testing.T) {
 func TestTaskActivationDoesNotClearNewerStop(t *testing.T) {
 	for _, action := range []string{"run", "category"} {
 		for _, hookName := range []string{"queued", "retry"} {
-			t.Run(action+"/"+hookName, func(t *testing.T) {
-				h, _, configs := setupTestHandler(t)
-				ctx := context.Background()
-				agent := createAgent(t, configs)
-				task := createTask(t, h, "default", "Stop after follow-up check", func(task *models.Task) {
-					task.Category = models.CategoryBacklog
-					if action == "run" {
-						task.Category = models.CategoryActive
+			for _, cleanupFinished := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/cleanup=%t", action, hookName, cleanupFinished), func(t *testing.T) {
+					h, _, configs, stores := setupTestHandlerWithStores(t)
+					goals := service.NewTaskGoalService(stores.TaskGoals, stores.Tasks, nil)
+					h.taskSvc.SetTaskGoalService(goals)
+					ctx := context.Background()
+					agent := createAgent(t, configs)
+					task := createTask(t, h, "default", "Stop after follow-up check", func(task *models.Task) {
+						task.Category = models.CategoryBacklog
+						if action == "run" {
+							task.Category = models.CategoryActive
+						}
+						task.Status = models.StatusRunning
+						task.AgentID = &agent.ID
+					})
+					createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+						exec.Status = models.ExecRunning
+						exec.IsFollowup = true
+						exec.PromptSent = "latest follow-up"
+					})
+					_, err := goals.SetGoal(ctx, task.ID, "Finish the follow-up", service.GoalOptions{})
+					require.NoError(t, err)
+					runningCtx, cancel := context.WithCancel(ctx)
+					defer cancel()
+					registration := h.workerSvc.RegisterCancelOwned(task.ID, cancel)
+					defer h.workerSvc.DeregisterCancelOwned(task.ID, registration)
+					entered, release := make(chan struct{}), make(chan struct{})
+					hook := h.StartPendingTaskThreadFollowup
+					if hookName == "retry" {
+						hook = h.RetryLatestFailedTaskThreadFollowup
 					}
-					task.Status = models.StatusRunning
-					task.AgentID = &agent.ID
-				})
-				createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
-					exec.Status = models.ExecRunning
-					exec.IsFollowup = true
-					exec.PromptSent = "latest follow-up"
-				})
-				runningCtx, cancel := context.WithCancel(ctx)
-				defer cancel()
-				registration := h.workerSvc.RegisterCancelOwned(task.ID, cancel)
-				defer h.workerSvc.DeregisterCancelOwned(task.ID, registration)
-				entered, release := make(chan struct{}), make(chan struct{})
-				hook := h.StartPendingTaskThreadFollowup
-				if hookName == "retry" {
-					hook = h.RetryLatestFailedTaskThreadFollowup
-				}
-				pausedHook := func(ctx context.Context, id string) (bool, error) {
-					handled, err := hook(ctx, id)
-					close(entered)
-					<-release
-					return handled, err
-				}
-				if hookName == "queued" {
-					h.taskSvc.SetQueuedTaskThreadFollowupHook(pausedHook)
-				} else {
-					h.taskSvc.SetQueuedTaskThreadFollowupHook(nil)
-					h.taskSvc.SetFailedTaskThreadFollowupRetryHook(pausedHook)
-				}
-				done := make(chan error, 1)
-				go func() {
-					if action == "run" {
-						done <- h.taskSvc.RunTask(ctx, task.ID)
+					pausedHook := func(ctx context.Context, id string) (bool, error) {
+						handled, err := hook(ctx, id)
+						close(entered)
+						<-release
+						return handled, err
+					}
+					if hookName == "queued" {
+						h.taskSvc.SetQueuedTaskThreadFollowupHook(pausedHook)
 					} else {
-						done <- h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive)
+						h.taskSvc.SetQueuedTaskThreadFollowupHook(nil)
+						h.taskSvc.SetFailedTaskThreadFollowupRetryHook(pausedHook)
 					}
-				}()
-				select {
-				case <-entered:
-				case <-time.After(time.Second):
-					t.Fatal("activation did not finish its follow-up check")
-				}
-				require.NoError(t, h.taskSvc.CancelTask(ctx, task.ID))
-				require.ErrorIs(t, runningCtx.Err(), context.Canceled)
-				require.True(t, h.workerSvc.IsTaskStopping(task.ID))
-				close(release)
-				require.NoError(t, <-done)
-				require.True(t, h.workerSvc.IsTaskStopping(task.ID), "an older activation must not clear a newer Stop")
-				_, err := h.StartPendingTaskThreadFollowup(ctx, task.ID)
-				require.ErrorIs(t, err, service.ErrTaskStillStopping)
-			})
+					done := make(chan error, 1)
+					go func() {
+						if action == "run" {
+							done <- h.taskSvc.RunTask(ctx, task.ID)
+						} else {
+							done <- h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive)
+						}
+					}()
+					select {
+					case <-entered:
+					case <-time.After(time.Second):
+						t.Fatal("activation did not finish its follow-up check")
+					}
+					require.NoError(t, h.taskSvc.CancelTask(ctx, task.ID))
+					require.ErrorIs(t, runningCtx.Err(), context.Canceled)
+					require.True(t, h.workerSvc.IsTaskStopping(task.ID))
+					if cleanupFinished {
+						h.workerSvc.DeregisterCancelOwned(task.ID, registration)
+					}
+					close(release)
+					require.NoError(t, <-done)
+					require.True(t, h.workerSvc.IsCancellationRequested(task.ID), "an older activation must not clear a newer Stop")
+					goal, err := goals.GetGoal(ctx, task.ID)
+					require.NoError(t, err)
+					require.Equal(t, models.TaskGoalStatusPaused, goal.Status, "an older activation must not undo a newer Stop's goal pause")
+					if !cleanupFinished {
+						_, err = h.StartPendingTaskThreadFollowup(ctx, task.ID)
+						require.ErrorIs(t, err, service.ErrTaskStillStopping)
+					}
+				})
+			}
 		}
 	}
 }

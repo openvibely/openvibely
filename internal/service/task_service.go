@@ -87,6 +87,21 @@ func (s *TaskService) resumeGoalStoppedByUser(ctx context.Context, taskID string
 	}
 }
 
+// resumeGoalAfterFollowup handles hooks that release the admission lock before
+// returning. A newer Stop must keep its goal pause, even after cleanup finishes.
+func (s *TaskService) resumeGoalAfterFollowup(ctx context.Context, taskID string) {
+	unlock := persistence.LockTaskLifecycle(taskID)
+	defer unlock()
+	if s.workerSvc.IsCancellationRequested(taskID) {
+		return
+	}
+	task, err := s.repo.GetByID(ctx, taskID)
+	if err != nil || task == nil || task.Status == models.StatusCancelled {
+		return
+	}
+	s.resumeGoalStoppedByUser(ctx, taskID, "user")
+}
+
 func (s *TaskService) submitActivatedTask(ctx context.Context, task models.Task, actor string) error {
 	if s.workerSvc != nil {
 		s.workerSvc.ClearCancellationRequested(task.ID)
@@ -584,7 +599,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return hookErr
 			}
 			if handled {
-				s.resumeGoalStoppedByUser(ctx, id, "user")
+				s.resumeGoalAfterFollowup(ctx, id)
 				return nil
 			}
 		}
@@ -594,7 +609,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return hookErr
 			}
 			if handled {
-				s.resumeGoalStoppedByUser(ctx, id, "user")
+				s.resumeGoalAfterFollowup(ctx, id)
 				return nil
 			}
 		}
@@ -602,7 +617,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			if startErr := s.swarmSvc.StartPlanner(ctx, id); startErr != nil {
 				return startErr
 			}
-			s.resumeGoalStoppedByUser(ctx, id, "user")
+			s.resumeGoalAfterFollowup(ctx, id)
 			return nil
 		}
 		return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
@@ -693,7 +708,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return rollbackActivation(err)
 			}
 			if handled {
-				s.resumeGoalStoppedByUser(ctx, id, "user")
+				s.resumeGoalAfterFollowup(ctx, id)
 				applog.Infof("[task-svc] UpdateCategory promoted queued task-thread follow-up id=%s", id)
 				return nil
 			}
@@ -705,7 +720,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return rollbackActivation(err)
 			}
 			if handled {
-				s.resumeGoalStoppedByUser(ctx, id, "user")
+				s.resumeGoalAfterFollowup(ctx, id)
 				applog.Infof("[task-svc] UpdateCategory retried failed task-thread follow-up id=%s", id)
 				return nil
 			}
@@ -934,7 +949,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 				return hookErr
 			}
 			if handled {
-				s.resumeGoalStoppedByUser(ctx, id, "user")
+				s.resumeGoalAfterFollowup(ctx, id)
 				return nil
 			}
 		}
@@ -944,7 +959,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 				return hookErr
 			}
 			if handled {
-				s.resumeGoalStoppedByUser(ctx, id, "user")
+				s.resumeGoalAfterFollowup(ctx, id)
 				return nil
 			}
 		}
@@ -952,7 +967,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			if startErr := s.swarmSvc.StartPlanner(ctx, id); startErr != nil {
 				return startErr
 			}
-			s.resumeGoalStoppedByUser(ctx, id, "user")
+			s.resumeGoalAfterFollowup(ctx, id)
 			return nil
 		}
 		return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
@@ -964,7 +979,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			return err
 		}
 		if handled {
-			s.resumeGoalStoppedByUser(ctx, id, "user")
+			s.resumeGoalAfterFollowup(ctx, id)
 			applog.Infof("[task-svc] RunTask promoted queued task-thread follow-up id=%s", id)
 			return nil
 		}
@@ -976,7 +991,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			return err
 		}
 		if handled {
-			s.resumeGoalStoppedByUser(ctx, id, "user")
+			s.resumeGoalAfterFollowup(ctx, id)
 			applog.Infof("[task-svc] RunTask retried failed task-thread follow-up id=%s", id)
 			return nil
 		}
