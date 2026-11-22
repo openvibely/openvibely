@@ -13,9 +13,17 @@ import (
 func CompletionsFromContents(contents []geminiclient.Content) []openaiclient.CompletionsHistoryMessage {
 	var out []openaiclient.CompletionsHistoryMessage
 	pending := map[string][]string{}
+	var toolImages []map[string]interface{}
+	flushToolImages := func() {
+		if len(toolImages) > 0 {
+			out = append(out, openaiclient.CompletionsHistoryMessage{Role: "user", ImageContent: toolImages})
+			toolImages = nil
+		}
+	}
 	for ci, c := range contents {
 		role := "user"
 		if c.Role == "model" {
+			flushToolImages()
 			role = "assistant"
 		}
 		var text strings.Builder
@@ -48,6 +56,17 @@ func CompletionsFromContents(contents []geminiclient.Content) []openaiclient.Com
 					pending[p.FunctionResponse.Name] = queue[1:]
 				}
 				results = append(results, openaiclient.CompletionsHistoryMessage{Role: "tool", ToolCallID: id, Content: functionResponseText(p.FunctionResponse.Response)})
+				for _, media := range p.FunctionResponse.Parts {
+					var url string
+					if media.InlineData != nil && strings.HasPrefix(strings.ToLower(media.InlineData.MimeType), "image/") {
+						url = "data:" + media.InlineData.MimeType + ";base64," + media.InlineData.Data
+					} else if media.FileData != nil && strings.HasPrefix(strings.ToLower(media.FileData.MimeType), "image/") {
+						url = media.FileData.FileURI
+					}
+					if url != "" {
+						toolImages = append(toolImages, map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": url}})
+					}
+				}
 			case p.InlineData != nil:
 				images = append(images, map[string]interface{}{
 					"type":      "image_url",
@@ -58,6 +77,15 @@ func CompletionsFromContents(contents []geminiclient.Content) []openaiclient.Com
 			}
 		}
 		out = append(out, results...)
+		// Parallel tool results must precede their image messages, even when
+		// the results occupy separate replay rows.
+		hasPending := false
+		for _, ids := range pending {
+			hasPending = hasPending || len(ids) > 0
+		}
+		if !hasPending {
+			flushToolImages()
+		}
 		if text.Len() > 0 || len(calls) > 0 {
 			out = append(out, openaiclient.CompletionsHistoryMessage{Role: role, Content: text.String(), ToolCalls: calls})
 		}
@@ -65,6 +93,7 @@ func CompletionsFromContents(contents []geminiclient.Content) []openaiclient.Com
 			out = append(out, openaiclient.CompletionsHistoryMessage{Role: "user", ImageContent: images})
 		}
 	}
+	flushToolImages()
 	return out
 }
 
