@@ -77,6 +77,9 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 }
 
 func (a *Adapter) client(ctx context.Context, agent models.LLMConfig) (*geminiclient.Client, error) {
+	if !models.BuiltInModelSupportedForAuth(models.ProviderGemini, agent.Model, agent.AuthMethod) {
+		return nil, fmt.Errorf("Gemini model %q is not available with this authentication method", agent.Model)
+	}
 	var client *geminiclient.Client
 	switch agent.AuthMethod {
 	case models.AuthMethodAPIKey, "":

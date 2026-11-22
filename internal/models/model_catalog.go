@@ -58,6 +58,7 @@ type ModelSpec struct {
 	SupportsWebSearch          bool
 	SupportsResponsesWebSearch bool
 	SupportsOAuth              bool
+	OAuthOnly                  bool
 	SupportsNativeCompaction   bool
 	NativeCompactionStrategy   string
 	RequiresAdaptiveThinking   bool
@@ -124,6 +125,13 @@ var modelCatalog = []ModelSpec{
 	{Provider: ProviderAnthropic, ID: "claude-haiku-4-5-20251001", ImageResizeProfile: ImageResize1568, Label: "Claude Haiku 4.5", ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
 	{Provider: ProviderAnthropic, ID: "claude-sonnet-4-5-20250929", ImageResizeProfile: ImageResize1568, Label: "Claude Sonnet 4.5", Default: true, VisionDefault: true, ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
 	// Google Gemini models. Gemini 4 ignores sampling parameters; Code Assist sign-in for it is unverified.
+	{Provider: ProviderGemini, ID: "claude-sonnet-5-5-low", Label: "Claude Sonnet 5.5 (Low)", SupportsOAuth: true, OAuthOnly: true, ImageResizeProfile: ImageResize2000, ContextWindow: 1000000, DefaultOutputTokens: 64000, MaxOutputTokens: 128000, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "claude-sonnet-5-5-medium", Label: "Claude Sonnet 5.5 (Medium)", SupportsOAuth: true, OAuthOnly: true, ImageResizeProfile: ImageResize2000, ContextWindow: 1000000, DefaultOutputTokens: 64000, MaxOutputTokens: 128000, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "claude-sonnet-5-5-high", Label: "Claude Sonnet 5.5 (High)", SupportsOAuth: true, OAuthOnly: true, ImageResizeProfile: ImageResize2000, ContextWindow: 1000000, DefaultOutputTokens: 64000, MaxOutputTokens: 128000, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "claude-opus-5-5-low", Label: "Claude Opus 5.5 (Low)", SupportsOAuth: true, OAuthOnly: true, ImageResizeProfile: ImageResize2000, ContextWindow: 1000000, DefaultOutputTokens: 64000, MaxOutputTokens: 128000, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "claude-opus-5-5-medium", Label: "Claude Opus 5.5 (Medium)", SupportsOAuth: true, OAuthOnly: true, ImageResizeProfile: ImageResize2000, ContextWindow: 1000000, DefaultOutputTokens: 64000, MaxOutputTokens: 128000, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "claude-opus-5-5-high", Label: "Claude Opus 5.5 (High)", SupportsOAuth: true, OAuthOnly: true, ImageResizeProfile: ImageResize2000, ContextWindow: 1000000, DefaultOutputTokens: 64000, MaxOutputTokens: 128000, Transport: "gemini_generate_content"},
+	{Provider: ProviderGemini, ID: "gpt-oss-120b-medium", Label: "GPT-OSS 120B (Medium)", SupportsOAuth: true, OAuthOnly: true, ContextWindow: 131072, DefaultOutputTokens: 32768, MaxOutputTokens: 32768, Transport: "gemini_generate_content"},
 	{Provider: ProviderGemini, SupportsWebSearch: true, ID: "gemini-4-carbon", ImageResizeProfile: ImageResize2000, Label: "Gemini 4 Carbon", SupportsOAuth: true, ReasoningEfforts: efforts("low", "medium", "high"), DefaultReasoningEffort: "medium", ContextWindow: standardGeminiContext, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
 	{Provider: ProviderGemini, SupportsWebSearch: true, ID: "gemini-4-neon", ImageResizeProfile: ImageResize2000, Label: "Gemini 4 Neon", SupportsOAuth: true, ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardGeminiContext, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
 	{Provider: ProviderGemini, SupportsWebSearch: true, ID: "gemini-4-hydrogen", ImageResizeProfile: ImageResize2000, Label: "Gemini 4 Hydrogen", SupportsOAuth: true, ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardGeminiContext, DefaultOutputTokens: standardGeminiOutput, MaxOutputTokens: standardGeminiOutput, Transport: "gemini_generate_content"},
@@ -197,6 +205,9 @@ func BuiltInModelSupported(provider LLMProvider, id string) bool {
 // BuiltInModelSupportedForAuth additionally checks availability for ChatGPT sign-in.
 func BuiltInModelSupportedForAuth(provider LLMProvider, id string, auth AuthMethod) bool {
 	if !BuiltInModelSupported(provider, id) {
+		return false
+	}
+	if spec, ok := LookupModel(provider, id); ok && spec.OAuthOnly && auth != AuthMethodOAuth {
 		return false
 	}
 	if (provider == ProviderOpenAI || provider == ProviderAnthropic || provider == ProviderGemini) && auth == AuthMethodOAuth {

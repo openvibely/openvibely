@@ -207,6 +207,7 @@ func builtInModelOptionsJSON() string {
 		Temperature bool     `json:"temperature"`
  FastMode bool `json:"fastMode"`
 		OAuth       bool     `json:"oauth"`
+ OAuthOnly bool `json:"oauthOnly"`
 		DefaultEffort string `json:"defaultEffort"`
 		ContextWindow int `json:"context_length"`
 		MaxOutputTokens int `json:"max_output_tokens"`
@@ -216,7 +217,7 @@ func builtInModelOptionsJSON() string {
 		for _, spec := range models.ProviderModels(provider) {
 			data[string(provider)] = append(data[string(provider)], modelOption{
 				Value: spec.ID, Label: spec.Label, Efforts: spec.ReasoningEfforts,
-				Temperature: spec.SupportsTemperature, FastMode: spec.SupportsFastMode, OAuth: spec.SupportsOAuth,
+				Temperature: spec.SupportsTemperature, FastMode: spec.SupportsFastMode, OAuth: spec.SupportsOAuth, OAuthOnly: spec.OAuthOnly,
 				DefaultEffort: spec.DefaultReasoningEffort,
 				ContextWindow: spec.ContextWindow, MaxOutputTokens: spec.MaxOutputTokens,
 			})
@@ -1384,7 +1385,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					if (oauthSelected) {
 						return options.filter(function(option) { return option.oauth === true; });
 					}
-					return options;
+					return options.filter(function(option) { return option.oauthOnly !== true; });
 				}
 
 				function selectedModelOption(provider, model) {				var options = modelOptionsForProvider(provider);
