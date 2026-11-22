@@ -155,8 +155,13 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
  if((await recordingStatus()).recording.state!=='saved')throw Error('Save did not submit recording');
  await wait(()=>document.activeElement===q('#task-message-input'),'save returns focus to chat');
  const originalFetch=window.fetch;
- q('[data-computer-preview-open]').click();await wait(()=>!window.fixtureRFB.viewOnly);
- q('[data-teach-open]').click();await wait(()=>!q('[data-teach-stop]').disabled&&!q('[data-teach-stop]').hidden);
+ let releaseRecovery;const recoveryGate=new Promise(resolve=>{releaseRecovery=resolve;});let recoveryWaiting=false;
+ window.fetch=async(url,options)=>{const response=await originalFetch(url,options);if(String(url).includes('/recording')&&options?.method!=='POST'){recoveryWaiting=true;await recoveryGate;}return response;};
+ q('[data-computer-preview-open]').click();await wait(()=>!window.fixtureRFB.viewOnly&&recoveryWaiting);
+ q('[data-teach-open]').click();releaseRecovery();
+ await wait(()=>!q('[data-teach-stop]').disabled&&!q('[data-teach-stop]').hidden);
+ window.fetch=originalFetch;
+ if(q('[data-computer-teach]').hidden)throw Error('Recovery hid the new recording controls');
  q('[data-teach-discard]').click();await wait(()=>q('[data-computer-teach]').hidden,'discard');
  if((await recordingStatus()).recording.state!=='discarded')throw Error('Discard was not persisted');
  const dropped=window.fixtureRFB;dropped.disconnect();dropped.listeners.disconnect({});
@@ -243,6 +248,8 @@ Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{windo
 		defer mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/changes/summary"):
+			fmt.Fprint(w, `{"files":0,"insertions":0,"deletions":0}`)
 		case strings.HasSuffix(r.URL.Path, "/thread"):
 			w.Header().Set("Content-Type", "text/html")
 			require.NoError(t, components.TaskThreadView(&models.Task{ID: "task", ProjectID: "project", Title: "Preview", Category: models.CategoryActive, Status: models.StatusPending}, nil, nil, nil, nil, nil, false, 50).Render(r.Context(), w))

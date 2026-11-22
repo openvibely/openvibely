@@ -285,7 +285,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
       teachPolling=true;queueTeach(async()=>acceptTeach(await teachRequest())).catch(teachError).finally(()=>{teachPolling=false});
      },2000);
      const recordingTimer=setInterval(updateRecordingTimer,1000);
-     function recoverTeaching(){if(teachBusy)return;queueTeach(async()=>{acceptTeach(await teachRequest());teach.hidden=!['recording','stopped','finished'].includes(teachState.state);}).catch(error=>{teachNote.textContent=error.message});}
+     function recoverTeaching(){if(teachBusy)return;queueTeach(async()=>{acceptTeach(await teachRequest());if(!teachBusy)teach.hidden=!['recording','stopped','finished'].includes(teachState.state);}).catch(error=>{teachNote.textContent=error.message});}
      function suspendViewer(){
       pauseTeaching();recording=false;renderDemo();syncViewerInput();
       // Brief app switches keep the stream alive, but release keyboard and mouse input.
