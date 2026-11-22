@@ -226,8 +226,11 @@ func (a *Adapter) callStreaming(ctx context.Context, req llmcontracts.AgentReque
 
 func (a *Adapter) baseOptions(ctx context.Context, req llmcontracts.AgentRequest, workDir string) *geminiclient.Options {
 	resolved := contextlimits.Resolve(req.Agent)
+	spec, _ := models.LookupModel(models.ProviderGemini, req.Agent.Model)
+	_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
 	opts := &geminiclient.Options{
 		Model:                  strings.TrimSpace(req.Agent.Model),
+		WebSearchEnabled:       spec.SupportsWebSearch && !req.RawDirectPrompt && !req.LifecycleHookCall && req.SummaryInput == nil && !summarizing,
 		ReasoningEffort:        models.NormalizeModelEffort(req.Agent.Provider, req.Agent.Model, req.Agent.ReasoningEffort),
 		MaxOutputTokens:        resolved.EffectiveOutputCap,
 		ContextWindow:          resolved.EffectiveInputWindow,
@@ -426,6 +429,8 @@ func mapBuiltInToolName(name string) string {
 		return "Glob"
 	case "grep_search":
 		return "Grep"
+	case "web_search":
+		return "WebSearch"
 	default:
 		return ""
 	}
@@ -545,6 +550,8 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		return get("command")
 	case "grep_search":
 		return get("pattern")
+	case "web_search":
+		return get("query")
 	case "list_files":
 		if path := get("path"); path != "" {
 			return path

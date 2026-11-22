@@ -201,3 +201,42 @@ func TestCompletionsRoundTripPreservesToolPairs(t *testing.T) {
 		t.Fatalf("back=%+v", back)
 	}
 }
+
+func TestWebSearchAdapterPolicy(t *testing.T) {
+	for _, mode := range []string{"task", "plan", "orchestrate", "disabled", "raw", "hook", "restricted", "summary"} {
+		t.Run(mode, func(t *testing.T) {
+			rs := newRecordingServer(t, func(int) []string { return []string{doneChunk} })
+			req := llmcontracts.AgentRequest{Operation: llmcontracts.OperationDirect, Agent: geminiAgent(), Message: "hello"}
+			switch mode {
+			case "plan":
+				req.Operation = llmcontracts.OperationStreaming
+				req.ChatMode = models.ChatModePlan
+			case "orchestrate":
+				req.Operation = llmcontracts.OperationStreaming
+				req.ChatMode = models.ChatModeOrchestrate
+			case "disabled":
+				req.DisableTools = true
+			case "raw":
+				req.RawDirectPrompt = true
+			case "hook":
+				req.LifecycleHookCall = true
+			case "restricted":
+				req.AgentDefinition = &models.Agent{Tools: []string{"Read"}}
+			case "summary":
+				req.SummaryInput = []json.RawMessage{json.RawMessage(`{"role":"user","content":"summarize"}`)}
+			}
+			_, err := rs.adapter().Call(context.Background(), req, ".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, name := range toolNames(rs.bodies[0]) {
+				found = found || name == "web_search"
+			}
+			want := mode == "task" || mode == "plan"
+			if found != want {
+				t.Fatalf("web_search present=%v want=%v", found, want)
+			}
+		})
+	}
+}

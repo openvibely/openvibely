@@ -92,6 +92,7 @@ type Options struct {
 	ContinueFromHistory      bool
 	OmitExecutionEnvironment bool
 	DisableTools             bool
+	WebSearchEnabled         bool
 	SkipDefaultTools         bool
 	ToolOutputTokenLimit     int
 	Attachments              []Attachment
@@ -156,6 +157,16 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 			toolDefs = append(toolDefs, DefaultTools()...)
 		}
 		toolDefs = append(toolDefs, opts.ExtraTools...)
+	}
+
+	nativeSearch := opts.WebSearchEnabled && !opts.DisableTools && !opts.SkipDefaultTools && (opts.ToolFilter == nil || opts.ToolFilter("web_search"))
+	for _, def := range toolDefs {
+		if def.Name == "web_search" {
+			nativeSearch = false
+		}
+	}
+	if nativeSearch {
+		toolDefs = append(toolDefs, webSearchDefinition())
 	}
 
 	history := CloneContents(c.history)
@@ -304,6 +315,18 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 				output, isError = "tool call rejected: request_user_input must complete in its own model turn", true
 			case opts.ToolFilter != nil && !opts.ToolFilter(call.Name):
 				output, isError = fmt.Sprintf("tool %s is not allowed by this agent", call.Name), true
+			case call.Name == "web_search" && nativeSearch:
+				search, searchErr := c.webSearch(ctx, normalized)
+				if searchErr != nil {
+					output, isError = searchErr.Error(), true
+				} else {
+					output = search.output
+					result.InputTokens += search.usage.inputTokens
+					result.OutputTokens += search.usage.outputTokens
+					result.TotalTokens += search.usage.totalTokens
+					result.CachedInputTokens += search.usage.cachedTokens
+					result.ReasoningTokens += search.usage.thoughtTokens
+				}
 			case opts.ToolExecutor != nil:
 				var execErr error
 				output, isError, execErr = opts.ToolExecutor(llmcontracts.WithToolCallID(ctx, call.ID), call.Name, normalized)
@@ -684,6 +707,7 @@ type turnResult struct {
 	lastContextTokens int
 	observed          bool
 	continuationToken string
+	grounding         json.RawMessage
 	parts             []Part
 	text              string
 	finishReason      string
@@ -707,9 +731,10 @@ func (r *turnResult) calls() []FunctionCall {
 
 type streamChunk struct {
 	Candidates []struct {
-		Content           *Content `json:"content"`
-		FinishReason      string   `json:"finishReason"`
-		ContinuationToken string   `json:"continuationToken"`
+		Content           *Content        `json:"content"`
+		FinishReason      string          `json:"finishReason"`
+		ContinuationToken string          `json:"continuationToken"`
+		GroundingMetadata json.RawMessage `json:"groundingMetadata"`
 	} `json:"candidates"`
 	UsageMetadata *struct {
 		PromptTokenCount        int `json:"promptTokenCount"`
@@ -791,6 +816,9 @@ func parseStreamInto(body io.Reader, onText func(string), partial *strings.Build
 			continue
 		}
 		cand := chunk.Candidates[0]
+		if len(cand.GroundingMetadata) > 0 {
+			result.grounding = append(json.RawMessage(nil), cand.GroundingMetadata...)
+		}
 		if cand.Content != nil {
 			for _, p := range cand.Content.Parts {
 				result.observed = true
