@@ -215,6 +215,44 @@ func TestMaxTokensFinishReasonAndAPIError(t *testing.T) {
 	}
 }
 
+func TestEarlyStopFinishReasons(t *testing.T) {
+	cases := []struct {
+		name, event, wantText, wantErr string
+	}{
+		{"safety with text keeps text and notes reason",
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]},"finishReason":"SAFETY"}]}`,
+			"partial\n\n[Gemini stopped the response early: SAFETY]", ""},
+		{"safety without text errors",
+			`{"candidates":[{"finishReason":"SAFETY"}]}`, "", "SAFETY"},
+		{"thought-only safety errors",
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"hmm","thought":true}]},"finishReason":"SAFETY"}]}`, "", "SAFETY"},
+		{"malformed call with text errors",
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]},"finishReason":"MALFORMED_FUNCTION_CALL"}]}`, "", "MALFORMED_FUNCTION_CALL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				sse(w, tc.event)
+			}))
+			defer server.Close()
+			client := NewWithAPIKey("key")
+			client.SetBaseURL(server.URL)
+			var streamed strings.Builder
+			resp, err := client.Send(context.Background(), "x", &Options{Model: "m", DisableTools: true, OmitExecutionEnvironment: true, OnText: func(s string) { streamed.WriteString(s) }})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err=%v resp=%+v", err, resp)
+				}
+				return
+			}
+			if err != nil || resp.Text != tc.wantText || streamed.String() != tc.wantText {
+				t.Fatalf("err=%v text=%q streamed=%q", err, resp.Text, streamed.String())
+			}
+		})
+	}
+}
+
 func TestRefreshInvalidGrant(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()

@@ -267,6 +267,12 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 
 		calls := turnResult.calls()
 		if len(calls) == 0 {
+			if note := earlyStopNote(turnResult.finishReason); note != "" {
+				allText.WriteString(note)
+				if opts.OnText != nil {
+					opts.OnText(note)
+				}
+			}
 			break
 		}
 
@@ -361,6 +367,15 @@ func assignMissingCallIDs(parts []Part, turn int) {
 		}
 		index++
 	}
+}
+
+// Shown to the user only; not added to the model's history.
+func earlyStopNote(reason string) string {
+	switch reason {
+	case "STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED", "":
+		return ""
+	}
+	return fmt.Sprintf("\n\n[Gemini stopped the response early: %s]", reason)
 }
 
 func exclusiveRequestUserInput(calls []FunctionCall) int {
@@ -732,8 +747,12 @@ func parseStream(body io.Reader, onText func(string), partial *strings.Builder) 
 	}
 	switch result.finishReason {
 	case "STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED", "":
+	case "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL":
+		if len(result.calls()) == 0 {
+			return nil, fmt.Errorf("gemini response stopped: %s", result.finishReason)
+		}
 	default:
-		if len(result.parts) == 0 {
+		if len(result.calls()) == 0 && text.Len() == 0 {
 			return nil, fmt.Errorf("gemini response stopped: %s", result.finishReason)
 		}
 	}
