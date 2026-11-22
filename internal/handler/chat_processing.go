@@ -2129,16 +2129,13 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		IsFollowup:    true,
 	}
 	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: failed.PromptSent, Source: models.TaskOriginWeb, RetrySourceExecutionID: failed.ID}
-	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(h.workerSvc.TaskAdmissionContext(ctx), exec, queued)
 	if err != nil {
 		return err
 	}
 	if !started {
 		go h.PromoteQueuedTaskThreadInput(taskID)
 		return nil
-	}
-	if h.workerSvc != nil {
-		h.workerSvc.ClearCancellationRequested(taskID)
 	}
 	if err := h.applySwarmChildFollowupRetryStart(ctx, task, failed.PromptSent); err != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
@@ -2288,7 +2285,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			AuthorUserID:  input.AuthorUserID, AuthorName: input.AuthorName,
 			IsFollowup: true,
 		}
-		err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(ctx, input.ID, exec, task.AgentID, agent)
+		err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(h.workerSvc.TaskAdmissionContext(ctx), input.ID, exec, task.AgentID, agent)
 		if errors.Is(err, persistence.ErrTaskModelChanged) {
 			continue
 		}
@@ -2301,9 +2298,6 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		break
 	}
 	input.Content = exec.PromptSent
-	if h.workerSvc != nil {
-		h.workerSvc.ClearCancellationRequested(input.TaskID)
-	}
 	if err := h.applySwarmChildFollowupStart(ctx, task, input.Content); err != nil {
 		applog.Infof("[handler] startQueuedTaskThreadInput input=%s swarm child follow-up routing failed: %v", input.ID, err)
 		h.completeWithFailure(ctx, exec.ID, exec.TaskID, err.Error(), 0, channelReplyFromThreadInput(input))
@@ -4572,7 +4566,7 @@ func (h *Handler) admitTaskFollowup(ctx context.Context, req taskFollowupAdmissi
 		IsFollowup:    true,
 	}
 	queued := h.buildTaskFollowupQueuedInput(task, req.Agent.ID, req.Message, req.Source, req.AttachmentSessionID, "")
-	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(h.workerSvc.TaskAdmissionContext(ctx), exec, queued)
 	if err != nil {
 		return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpDirectAdmission, Err: err}
 	}
@@ -4585,9 +4579,6 @@ func (h *Handler) admitTaskFollowup(ctx context.Context, req taskFollowupAdmissi
 		}
 		go h.PromoteQueuedTaskThreadInput(task.ID)
 		return &taskFollowupAdmissionResult{Queued: queued, Task: task}, nil
-	}
-	if h.workerSvc != nil {
-		h.workerSvc.ClearCancellationRequested(task.ID)
 	}
 	if err := h.applySwarmChildFollowupStart(ctx, task, req.Message); err != nil {
 		h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)

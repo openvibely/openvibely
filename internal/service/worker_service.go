@@ -1139,10 +1139,16 @@ func (w *WorkerService) IsCancellationRequested(taskID string) bool {
 	return requested
 }
 
+// TaskAdmissionContext clears stale cancellation intent only after a new
+// execution is committed while its admission still holds the lifecycle lock.
+func (w *WorkerService) TaskAdmissionContext(ctx context.Context) context.Context {
+	return persistence.WithTaskAdmissionCallback(ctx, w.ClearCancellationRequested)
+}
+
 // TaskActivationContext carries the stopping check to the owner of each
 // activation transaction, where it can run under the task lifecycle lock.
 func (w *WorkerService) TaskActivationContext(ctx context.Context) context.Context {
-	return persistence.WithTaskActivationCheck(ctx, func(taskID string) error {
+	return persistence.WithTaskActivationCheck(w.TaskAdmissionContext(ctx), func(taskID string) error {
 		if w.IsTaskStopping(taskID) {
 			return ErrTaskStillStopping
 		}

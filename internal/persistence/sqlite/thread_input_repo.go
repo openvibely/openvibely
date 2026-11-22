@@ -1347,6 +1347,9 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 	if err == nil && claimedEffort != "" {
 		agent.ReasoningEffort = claimedEffort
 	}
+	if err == nil {
+		persistence.NotifyTaskAdmitted(ctx, exec.TaskID)
+	}
 	return err
 }
 func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, inputID string, task *models.Task, exec *models.Execution, slackContext *models.SlackTaskContext, emailContext *models.EmailTaskContext, discordContext *models.DiscordTaskContext) error {

@@ -526,6 +526,9 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 		started = true
 		return nil
 	})
+	if err == nil && started {
+		persistence.NotifyTaskAdmitted(ctx, e.TaskID)
+	}
 	return started, err
 }
 

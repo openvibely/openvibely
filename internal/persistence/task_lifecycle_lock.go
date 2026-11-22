@@ -58,3 +58,19 @@ func CheckTaskActivation(ctx context.Context, taskID string) error {
 	}
 	return nil
 }
+
+// WithTaskAdmissionCallback carries the runtime completion of admission to the
+// repository that owns the task lifecycle lock. It must not acquire that lock.
+func WithTaskAdmissionCallback(ctx context.Context, admitted func(string)) context.Context {
+	return context.WithValue(ctx, taskAdmissionCallbackKey{}, admitted)
+}
+
+type taskAdmissionCallbackKey struct{}
+
+// NotifyTaskAdmitted runs after a new execution is committed, before releasing
+// the lifecycle lock. Queuing input behind an existing execution is not admission.
+func NotifyTaskAdmitted(ctx context.Context, taskID string) {
+	if admitted, ok := ctx.Value(taskAdmissionCallbackKey{}).(func(string)); ok {
+		admitted(taskID)
+	}
+}
