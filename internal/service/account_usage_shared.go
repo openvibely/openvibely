@@ -41,6 +41,7 @@ type SharedAccountUsage struct {
 	usage       *UsageAnalyticsService
 	ctx         context.Context
 	cancel      context.CancelFunc
+	readMu      sync.Mutex
 	mu          sync.Mutex
 	entries     map[string]*accountUsageEntry
 	accountKeys map[string]string
@@ -131,13 +132,27 @@ func (c *SharedAccountUsage) Read(ctx context.Context, key string, refresh bool)
 }
 
 func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, refresh bool) (map[string]AccountUsageSnapshot, error) {
-	accounts, err := c.usage.ListUsageAccounts(ctx)
+	result, changed, err := c.readLocked(ctx, key, provider, refresh)
 	if err != nil {
 		return nil, err
 	}
+	if changed && c.updated != nil {
+		c.updated()
+	}
+	return result, nil
+}
+
+func (c *SharedAccountUsage) readLocked(ctx context.Context, key, provider string, refresh bool) (map[string]AccountUsageSnapshot, bool, error) {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+
+	accounts, err := c.usage.ListUsageAccounts(ctx)
+	if err != nil {
+		return nil, false, err
+	}
 	configs, err := c.usage.llmConfigRepo.List(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	fingerprints := map[string]string{}
 	identities := map[string]string{}
@@ -157,12 +172,12 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 		valid[a.Key] = true
 	}
 	if key != "" && !valid[key] {
-		return nil, fmt.Errorf("account configuration changed; reload accounts")
+		return nil, false, fmt.Errorf("account configuration changed; reload accounts")
 	}
 	c.mu.Lock()
 	if c.stopped {
 		c.mu.Unlock()
-		return nil, context.Canceled
+		return nil, false, context.Canceled
 	}
 	changed := false
 	validIdentities := map[string]bool{}
@@ -206,10 +221,7 @@ func (c *SharedAccountUsage) read(ctx context.Context, key, provider string, ref
 		result[a.Key] = e.snapshot
 	}
 	c.mu.Unlock()
-	if changed && c.updated != nil {
-		c.updated()
-	}
-	return result, nil
+	return result, changed, nil
 }
 func (c *SharedAccountUsage) startLocked(key string, e *accountUsageEntry) {
 	previous := e.done
