@@ -1020,6 +1020,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/models/oauth/callback", h.OAuthCallback) // Legacy/fallback
 	e.GET("/models/:id/oauth/status", h.OAuthStatus)
 
+	e.GET("/settings/updates", h.UpdateSettings)
+	e.POST("/settings/updates", h.UpdateSettings)
 	e.GET("/settings/computer", h.ProjectComputerSettings)
 	e.POST("/settings/computer", h.ProjectComputerSettings)
 

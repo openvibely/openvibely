@@ -74,16 +74,18 @@ var (
 )
 
 type CoordinatorSnapshot struct {
-	State              string           `json:"state"`
-	CurrentVersion     string           `json:"current_version"`
-	Distribution       string           `json:"distribution"`
-	Channel            string           `json:"channel"`
-	Release            *VerifiedRelease `json:"release,omitempty"`
-	Drain              DrainStatus      `json:"drain"`
-	ConfigurationError string           `json:"configuration_error,omitempty"`
-	Error              string           `json:"error,omitempty"`
-	Manual             bool             `json:"manual"`
-	Staged             bool             `json:"staged"`
+	AutomaticUpdates          bool             `json:"automatic_updates"`
+	AutomaticUpdatesSupported bool             `json:"automatic_updates_supported"`
+	State                     string           `json:"state"`
+	CurrentVersion            string           `json:"current_version"`
+	Distribution              string           `json:"distribution"`
+	Channel                   string           `json:"channel"`
+	Release                   *VerifiedRelease `json:"release,omitempty"`
+	Drain                     DrainStatus      `json:"drain"`
+	ConfigurationError        string           `json:"configuration_error,omitempty"`
+	Error                     string           `json:"error,omitempty"`
+	Manual                    bool             `json:"manual"`
+	Staged                    bool             `json:"staged"`
 }
 type Coordinator struct {
 	mu                              sync.RWMutex
@@ -120,6 +122,8 @@ type Coordinator struct {
 	checksCancel                    context.CancelFunc
 	checksWG                        sync.WaitGroup
 	updateNotificationsEnabled      bool
+	disableAutomaticUpdates         bool
+	autoAttemptedVersion            string
 }
 
 func NewCoordinator(client *Client, current CurrentBuild, channel string, drain *DrainManager, installer Installer, manual bool, configError string, wakeDispatch func()) *Coordinator {
@@ -158,20 +162,23 @@ func (c *Coordinator) SetPersistence(path string) error {
 		return err
 	}
 	var persisted struct {
-		State               string             `json:"state"`
-		Release             *VerifiedRelease   `json:"release"`
-		StagedLocal         *LocalStagedUpdate `json:"staged_local,omitempty"`
-		StagedRelease       *VerifiedRelease   `json:"staged_release,omitempty"`
-		Error               string             `json:"error,omitempty"`
-		OperationGeneration string             `json:"operation_generation,omitempty"`
-		Accepted            bool               `json:"accepted,omitempty"`
-		AcceptanceLease     time.Duration      `json:"acceptance_lease,omitempty"`
+		DisableAutomaticUpdates bool               `json:"disable_automatic_updates,omitempty"`
+		AutoAttemptedVersion    string             `json:"auto_attempted_version,omitempty"`
+		State                   string             `json:"state"`
+		Release                 *VerifiedRelease   `json:"release"`
+		StagedLocal             *LocalStagedUpdate `json:"staged_local,omitempty"`
+		StagedRelease           *VerifiedRelease   `json:"staged_release,omitempty"`
+		Error                   string             `json:"error,omitempty"`
+		OperationGeneration     string             `json:"operation_generation,omitempty"`
+		Accepted                bool               `json:"accepted,omitempty"`
+		AcceptanceLease         time.Duration      `json:"acceptance_lease,omitempty"`
 	}
 	if err := json.Unmarshal(data, &persisted); err != nil {
 		return err
 	}
 	c.state, c.release, c.lastError, c.operationGeneration = persisted.State, persisted.Release, persisted.Error, persisted.OperationGeneration
 	c.accepted, c.acceptanceLease = persisted.Accepted, persisted.AcceptanceLease
+	c.disableAutomaticUpdates, c.autoAttemptedVersion = persisted.DisableAutomaticUpdates, persisted.AutoAttemptedVersion
 	if persisted.StagedLocal != nil {
 		c.staged = *persisted.StagedLocal
 	}
@@ -323,15 +330,17 @@ func (c *Coordinator) persistLocked() error {
 		return nil
 	}
 	payload := struct {
-		State               string             `json:"state"`
-		Release             *VerifiedRelease   `json:"release,omitempty"`
-		StagedLocal         *LocalStagedUpdate `json:"staged_local,omitempty"`
-		StagedRelease       *VerifiedRelease   `json:"staged_release,omitempty"`
-		Error               string             `json:"error,omitempty"`
-		OperationGeneration string             `json:"operation_generation,omitempty"`
-		Accepted            bool               `json:"accepted,omitempty"`
-		AcceptanceLease     time.Duration      `json:"acceptance_lease,omitempty"`
-	}{State: c.state, Release: c.release, Error: c.lastError, OperationGeneration: c.operationGeneration, Accepted: c.accepted, AcceptanceLease: c.acceptanceLease}
+		DisableAutomaticUpdates bool               `json:"disable_automatic_updates,omitempty"`
+		AutoAttemptedVersion    string             `json:"auto_attempted_version,omitempty"`
+		State                   string             `json:"state"`
+		Release                 *VerifiedRelease   `json:"release,omitempty"`
+		StagedLocal             *LocalStagedUpdate `json:"staged_local,omitempty"`
+		StagedRelease           *VerifiedRelease   `json:"staged_release,omitempty"`
+		Error                   string             `json:"error,omitempty"`
+		OperationGeneration     string             `json:"operation_generation,omitempty"`
+		Accepted                bool               `json:"accepted,omitempty"`
+		AcceptanceLease         time.Duration      `json:"acceptance_lease,omitempty"`
+	}{DisableAutomaticUpdates: c.disableAutomaticUpdates, AutoAttemptedVersion: c.autoAttemptedVersion, State: c.state, Release: c.release, Error: c.lastError, OperationGeneration: c.operationGeneration, Accepted: c.accepted, AcceptanceLease: c.acceptanceLease}
 	switch staged := c.staged.(type) {
 	case LocalStagedUpdate:
 		payload.StagedLocal = &staged
@@ -439,7 +448,7 @@ func (c *Coordinator) Snapshot() CoordinatorSnapshot {
 			lastError = ""
 		}
 	}
-	snapshot := CoordinatorSnapshot{State: state, CurrentVersion: c.current.Version, Distribution: c.current.Distribution, Channel: c.channel, Release: release, ConfigurationError: c.configError, Error: lastError, Manual: c.manual, Staged: staged}
+	snapshot := CoordinatorSnapshot{AutomaticUpdates: !c.disableAutomaticUpdates, AutomaticUpdatesSupported: c.automaticUpdatesSupportedLocked(), State: state, CurrentVersion: c.current.Version, Distribution: c.current.Distribution, Channel: c.channel, Release: release, ConfigurationError: c.configError, Error: lastError, Manual: c.manual, Staged: staged}
 	provider := c.managedStateProvider
 	c.mu.RUnlock()
 	if c.drain != nil {
@@ -459,7 +468,12 @@ func (c *Coordinator) Snapshot() CoordinatorSnapshot {
 	return snapshot
 }
 func (c *Coordinator) Check(ctx context.Context) error {
-	if !c.Visible() {
+	return c.check(ctx, false)
+}
+
+func (c *Coordinator) check(ctx context.Context, background bool) error {
+	snapshot := c.Snapshot()
+	if !c.Visible() && !(background && snapshot.AutomaticUpdates && snapshot.AutomaticUpdatesSupported) {
 		_, _, err := c.client.CheckIfDue(ctx, c.current)
 		return err
 	}
@@ -608,8 +622,16 @@ func (c *Coordinator) Stage(ctx context.Context) error {
 	c.mu.Unlock()
 	return nil
 }
-func (c *Coordinator) Accept(_ context.Context, lease time.Duration) error {
+func (c *Coordinator) Accept(ctx context.Context, lease time.Duration) error {
+	return c.accept(ctx, lease, false)
+}
+
+func (c *Coordinator) accept(ctx context.Context, lease time.Duration, automatic bool) error {
 	c.mu.Lock()
+	if automatic && (ctx.Err() != nil || c.disableAutomaticUpdates || !c.automaticUpdatesSupportedLocked() || c.accepted || c.state != StateAvailable || c.release == nil || c.autoAttemptedVersion == c.release.Metadata.Version) {
+		c.mu.Unlock()
+		return nil
+	}
 	if !c.accepted {
 		if lease <= 0 {
 			c.mu.Unlock()
@@ -649,9 +671,14 @@ func (c *Coordinator) Accept(_ context.Context, lease time.Duration) error {
 			c.mu.Unlock()
 			return err
 		}
+		previousAttempt := c.autoAttemptedVersion
+		if automatic {
+			c.autoAttemptedVersion = c.release.Metadata.Version
+		}
 		c.accepted, c.acceptanceLease = true, lease
 		if err := c.persistLocked(); err != nil {
 			c.clearAcceptanceLocked()
+			c.autoAttemptedVersion = previousAttempt
 			c.mu.Unlock()
 			return err
 		}
@@ -1615,7 +1642,7 @@ func (c *Coordinator) StartChecks(ctx context.Context) {
 		go func() {
 			defer c.checksWG.Done()
 			if initialCheck {
-				_ = c.Check(checkCtx)
+				_ = c.checkAndAutoUpdate(checkCtx)
 			}
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
@@ -1624,7 +1651,7 @@ func (c *Coordinator) StartChecks(ctx context.Context) {
 				case <-checkCtx.Done():
 					return
 				case <-ticker.C:
-					_ = c.Check(checkCtx)
+					_ = c.checkAndAutoUpdate(checkCtx)
 				}
 			}
 		}()
@@ -1650,4 +1677,30 @@ func (c *Coordinator) StopChecks() {
 func (c *Coordinator) Start(ctx context.Context) {
 	c.StartRecovery(ctx)
 	c.StartChecks(ctx)
+}
+
+// SetAutomaticUpdates saves the instance-wide preference before changing behavior.
+// Disabling prevents new automatic acceptance; an update already in progress finishes.
+func (c *Coordinator) SetAutomaticUpdates(enabled bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	previous := c.disableAutomaticUpdates
+	c.disableAutomaticUpdates = !enabled
+	if err := c.persistLocked(); err != nil {
+		c.disableAutomaticUpdates = previous
+		return err
+	}
+	return nil
+}
+
+func (c *Coordinator) automaticUpdatesSupportedLocked() bool {
+	return !c.manual && c.managedStateProvider == nil && c.configError == "" &&
+		(c.current.Distribution == "binary" || c.current.Distribution == "desktop" || (c.current.Distribution == "docker" && c.installer != nil))
+}
+
+func (c *Coordinator) checkAndAutoUpdate(ctx context.Context) error {
+	if err := c.check(ctx, true); err != nil {
+		return err
+	}
+	return c.accept(ctx, 10*time.Minute, true)
 }

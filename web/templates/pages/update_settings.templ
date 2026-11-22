@@ -1,0 +1,49 @@
+package pages
+
+import (
+ "net/url"
+ "github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/internal/update"
+ "github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ UpdateSettingsPage(projects []models.Project, projectID string, snapshot update.CoordinatorSnapshot, canManage, saved bool) {
+ @layout.Base("App updates", projects, projectID) {
+  @UpdateSettingsContent(projectID, snapshot, canManage, saved)
+ }
+}
+
+templ UpdateSettingsContent(projectID string, snapshot update.CoordinatorSnapshot, canManage, saved bool) {
+ <div id="update-settings-content" class="space-y-6">
+  @layout.PageTitle("App updates")
+  <div class="card bg-base-200"><div class="card-body space-y-4">
+   <h2 class="card-title">Automatic updates</h2>
+   <p>Automatically download and install new versions after running work finishes. OpenVibely restarts to complete the update. Enabled by default.</p>
+   <p class="text-sm opacity-70">This setting applies to this entire OpenVibely installation. Disabling it keeps updates manual. Updates already in progress will finish.</p>
+   if !snapshot.AutomaticUpdatesSupported {
+    <p role="status">Automatic installation is unavailable for this installation. Source builds and manually deployed installations must be updated manually; hosted updates are managed by the hosting administrator.</p>
+   }
+   if snapshot.ConfigurationError != "" {
+    <p class="text-error">{ snapshot.ConfigurationError }</p>
+   }
+   <form method="post" action={ templ.SafeURL("/settings/updates?project_id=" + url.QueryEscape(projectID)) } hx-post={ "/settings/updates?project_id=" + url.QueryEscape(projectID) } hx-target="#update-settings-content" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]" class="space-y-4">
+    <label class="form-control">
+     <span class="label-text">Automatic updates</span>
+     <select name="automatic_updates" aria-label="Automatic updates" class="select select-bordered" disabled?={ !canManage }>
+      <option value="true" selected?={ snapshot.AutomaticUpdates }>Enabled (default)</option>
+      <option value="false" selected?={ !snapshot.AutomaticUpdates }>Disabled</option>
+     </select>
+    </label>
+    if canManage {
+     <button type="submit" class="btn btn-primary">Save</button>
+    } else {
+     <p class="text-sm opacity-70">An administrator can change update settings.</p>
+    }
+    if saved {
+     <p role="status" class="text-success">Update settings saved.</p>
+    }
+   </form>
+   <p class="text-sm">Current version: { snapshot.CurrentVersion }</p>
+  </div></div>
+ </div>
+}
