@@ -135,7 +135,8 @@ func TestBrowserFunctional_ProjectRepoRecovery(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "project-recovery", func(b *composerFocusCDP) {
-		b.waitFor("ready", `String(!!document.querySelector('[data-recover-repo]'))`, "true")
+		// The button is parsed before the external permission-error script loads.
+		b.waitFor("recovery controls and permission handler ready", `String(document.readyState === 'complete' && !!document.querySelector('[data-recover-repo]') && typeof window.openVibelyPermissionErrors?.fetch === 'function')`, "true")
 		result := b.evaluateAwait(`(async()=>{
  const button=document.querySelector('[data-recover-repo]');window.deniedRecoveryToasts=[];window.showToast=m=>deniedRecoveryToasts.push(m);window.fetch=async()=>new Response(JSON.stringify({message:'Maintainer access required'}),{status:403,headers:{'X-OpenVibely-Permission-Denied':'true'}});
  button.click();for(let i=0;i<100&&button.disabled;i++)await new Promise(r=>setTimeout(r,10));
