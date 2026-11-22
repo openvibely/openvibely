@@ -20,7 +20,7 @@ import (
 // it when newer runs are included. Exercise real adapters, SQLite, and reloads.
 func TestConnectedSummaryRecompactionBoundaryMatrix(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
-	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
+	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini}
 	for _, from := range providers {
 		for _, to := range providers {
 			for _, newer := range []bool{false, true} {
@@ -100,6 +100,9 @@ func TestConnectedSummaryRecompactionBoundaryMatrix(t *testing.T) {
 							if p == models.ProviderAnthropic {
 								model = "claude-sonnet-4-6"
 							}
+							if p == models.ProviderGemini {
+								model = "gemini-3.8-flash"
+							}
 							return models.LLMConfig{ID: string(p), Provider: p, Model: model, APIKey: "test", AuthMethod: models.AuthMethodAPIKey, BaseURL: server.URL + "/v1", PresetSlug: "vllm", ContextWindow: 80000, DisableNativeCompaction: true}
 						}
 						source := config(from)
@@ -111,6 +114,7 @@ func TestConnectedSummaryRecompactionBoundaryMatrix(t *testing.T) {
 						req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, Agent: config(to), Message: current.PromptSent, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, WorkDir: t.TempDir(), ChatHistory: history, DisableTools: true, DisableNativeCompaction: true}
 						send := func() error {
 							svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+							configureGeminiCompactionServer(svc, server.URL)
 							_, err := svc.callProviderWithCompaction(svc.providerAdapters[to], req)
 							return err
 						}

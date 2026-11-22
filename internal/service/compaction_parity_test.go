@@ -65,7 +65,7 @@ func TestSummaryReplacementPersistsContextAndUserMetadata(t *testing.T) {
 }
 
 func TestSummaryReplacementCountsSavedContextOnce(t *testing.T) {
-	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(provider), func(t *testing.T) {
 			ctx := managedcontext.With(context.Background(), "current index")
 			ctx = attachmentcontext.With(ctx, "/uploads/file")
@@ -99,7 +99,7 @@ func TestSummaryReplacementCountsSavedContextOnce(t *testing.T) {
 }
 
 func TestSummaryReplacementPreservesOversizedSummaryAcrossProviders(t *testing.T) {
-	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(provider), func(t *testing.T) {
 			req := llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: provider, ContextWindow: 10000}, ChatHistory: []models.Execution{{PromptSent: "old", Output: "done", Status: models.ExecCompleted}}}
 			summary := "ALREADY_COMPLETED " + strings.Repeat("large summary ", 10000)
@@ -149,6 +149,7 @@ func TestSummaryFailureStopsCompactionAcrossProviders(t *testing.T) {
 		{Provider: models.ProviderOpenAI, Model: "gpt-6-sol"},
 		{Provider: models.ProviderAnthropic, Model: "claude-opus-5-5"},
 		{Provider: models.ProviderOpenAICompatible, Model: "test"},
+		{Provider: models.ProviderGemini, Model: "gemini-3.8-flash"},
 		{Provider: models.ProviderOllama, Model: "test"},
 	} {
 		agent.AuthMethod = models.AuthMethodAPIKey

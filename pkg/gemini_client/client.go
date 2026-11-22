@@ -235,6 +235,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 		var partial strings.Builder
 		turnResult, err := httpretry.DoStream(ctx, httpretry.Policy{
 			AllowReplay: true,
+			MaxRetries:  httpretry.DefaultMaxRetries,
 			OnRetry: func(event httpretry.RetryEvent) {
 				applog.Infof("[gemini] retrying turn %d, attempt %d/%d in %v: %v", turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},

@@ -15,6 +15,7 @@ import (
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
+	"github.com/openvibely/openvibely/internal/llm/recovery"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
@@ -158,6 +159,9 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	resp, err := client.Send(ctx, appendAttachmentSummary(req.Message, req.Attachments), opts)
 	err = a.persistReplay(ctx, req.ExecID, client, err)
 	if err != nil {
+		err = recovery.WithSnapshot(err, ReplayItemsKey, client.History(), func(c geminiclient.Content) ([]byte, error) { return json.Marshal(c) })
+	}
+	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("gemini generate content: %w", err)
 	}
 	return resp.Text, usageFromResponse(resp), stopError(resp.StopReason)
@@ -205,6 +209,9 @@ func (a *Adapter) callStreaming(ctx context.Context, req llmcontracts.AgentReque
 
 	resp, err := client.Send(ctx, prompt, opts)
 	err = a.persistReplay(ctx, req.ExecID, client, err)
+	if err != nil {
+		err = recovery.WithSnapshot(err, ReplayItemsKey, client.History(), func(c geminiclient.Content) ([]byte, error) { return json.Marshal(c) })
+	}
 	sw.Flush()
 	if err != nil {
 		err = errors.Join(err, sw.PersistenceError())

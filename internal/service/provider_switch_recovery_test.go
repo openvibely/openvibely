@@ -25,7 +25,7 @@ func TestProviderSwitchLoadsExistingTranscriptFromEarlierExecution(t *testing.T)
 	current := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
 	require.NoError(t, stores.Executions.Create(ctx, current))
 	transcript := `{"responses_input":[{"type":"compaction","encrypted_content":"opaque"},{"type":"message","role":"user","content":"recent"},{"type":"message","role":"assistant","content":"recent answer"}]}`
-	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderAnthropic, models.ProviderOllama} {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderAnthropic, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(provider), func(t *testing.T) {
 			s := &LLMService{execRepo: stores.Executions}
 			req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, Followup: true, Message: "next", Agent: models.LLMConfig{Provider: provider, Model: "test", ContextWindow: 200000},
@@ -56,7 +56,7 @@ func TestProviderSwitchLoadsExistingTranscriptFromEarlierExecution(t *testing.T)
 
 func TestProviderSwitchRejectsUnrecoverableCompaction(t *testing.T) {
 	h := []models.Execution{{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"compaction","encrypted_content":"legacy"}]}`}}}}
-	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		_, err := (&LLMService{}).callProviderWithCompaction(providerAdapterFunc(func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 			t.Fatal("must not send history after losing opaque context")
 			return llmcontracts.AgentResult{}, nil
@@ -75,7 +75,7 @@ func TestProviderSwitchRepairsInterruptedParallelCalls(t *testing.T) {
 		{"type":"function_call","call_id":"b","name":"read_file","arguments":"{}"},
 		{"type":"function_call_output","call_id":"b","output":"COMPLETED_RESULT"}
 	]}`
-	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		for _, mode := range []string{"summary", "followup"} {
 			t.Run(string(p)+"/"+mode, func(t *testing.T) {
 				h := []models.Execution{{Status: models.ExecFailed, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
@@ -144,7 +144,7 @@ func TestProviderSwitchTranscriptRecoveryPagesAndRespectsNewContext(t *testing.T
 	latest.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: opaque}}
 	current := create("next", "", false)
 	svc := &LLMService{execRepo: stores.Executions}
-	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini} {
 		recovered, err := svc.recoverPortableProviderHistory(llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, ChatHistory: []models.Execution{*latest}, Agent: models.LLMConfig{Provider: provider}})
 		require.NoError(t, err)
 		require.Len(t, recovered.ChatHistory, 103)
@@ -178,7 +178,7 @@ func TestProviderSwitchPreservesReadableMessagesBeforeCompaction(t *testing.T) {
  {"type":"message","role":"user","content":[{"type":"input_text","text":"PREFIX_MESSAGE"},{"type":"input_image","image_url":"data:image/png;base64,aW1hZ2U="}]},
  {"type":"compaction","encrypted_content":"opaque"},
  {"type":"message","role":"user","content":"SUFFIX_MESSAGE"}]}`
-	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(provider), func(t *testing.T) {
 			history := []models.Execution{{PromptSent: "starting prompt", Output: "older output", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
 			calls := 0
@@ -207,7 +207,7 @@ func TestProviderSwitchPreservesReadableMessagesBeforeCompaction(t *testing.T) {
 }
 
 func TestProviderSwitchReusesRecoveryCheckpoint(t *testing.T) {
-	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(provider), func(t *testing.T) {
 			ctx := context.Background()
 			stores := teststores.New(t).Stores
@@ -271,7 +271,7 @@ func TestPortableAnthropicCheckpoint(t *testing.T) {
 	} {
 		history, err := portableAnthropicCheckpoint(raw)
 		require.NoError(t, err)
-		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini} {
 			converted := normalizeProviderReplay(provider, history, false)
 			encoded, err := json.Marshal(converted[0].ReplayMessages)
 			require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestNativeReplayRowNormalizationMatchesLegacy(t *testing.T) {
 		{Format: "envelope", ItemsKey: "messages", Items: []json.RawMessage{json.RawMessage(`{"role":"user","content":"context"}`)}},
 		{Format: "array", Items: []json.RawMessage{json.RawMessage(`{"role":"user","content":"context"}`)}},
 	} {
-		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini} {
 			t.Run(rows.Format+rows.ItemsKey+string(provider), func(t *testing.T) {
 				replay := models.ExecutionReplayMessage{Rows: rows}
 				legacy := models.ExecutionReplayMessage{TranscriptJSON: replay.FullTranscriptJSON()}

@@ -18,7 +18,7 @@ import (
 )
 
 func TestProviderSwitchWindowFitsBelowTrigger(t *testing.T) {
-	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(p), func(t *testing.T) {
 			req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true, Message: "PENDING", ProjectInstructions: "Keep these instructions", Agent: models.LLMConfig{Provider: p, Model: "test", ContextWindow: 200000, CompactionThreshold: 50000}}
 			raw, _ := json.Marshal([]map[string]any{
@@ -67,7 +67,7 @@ func TestProviderSwitchWindowFitsBelowTrigger(t *testing.T) {
 }
 
 func TestProviderSwitchOverflowTrimsWithoutSummary(t *testing.T) {
-	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(p), func(t *testing.T) {
 			req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true, Message: "PENDING", Agent: models.LLMConfig{Provider: p, Model: "test", ContextWindow: 200000}, ChatHistory: []models.Execution{{Status: models.ExecCompleted, PromptSent: "old", Output: "answer"}, {Status: models.ExecCompleted, PromptSent: "new", Output: "recent"}}}
 			expectedInput, e := summaryHistoryInput(p, req.ChatHistory)
@@ -161,7 +161,7 @@ func TestProviderSwitchDoesNotReplayExecutedTools(t *testing.T) {
 }
 
 func TestProviderSwitchLargeOpaqueHistorySendsFollowupDirectly(t *testing.T) {
-	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(p), func(t *testing.T) {
 			req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true, Message: "PENDING", ContextTokenEstimate: 6000000, ForceNativeCompaction: true, Agent: models.LLMConfig{Provider: p, Model: "test", ContextWindow: 200000, CompactionThreshold: 50000}, ChatHistory: []models.Execution{
 				{PromptSent: "OLD", Output: strings.Repeat("ancient ", 500000)},
@@ -191,7 +191,7 @@ func TestProviderSwitchLargeOpaqueHistorySendsFollowupDirectly(t *testing.T) {
 }
 
 func TestProviderSwitchPersistsOnlySuccessfulWindow(t *testing.T) {
-	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		for _, outcome := range []string{"overflow", "auth", "cancel", "success", "newer_checkpoint"} {
 			t.Run(string(provider)+"/"+outcome, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())

@@ -113,6 +113,11 @@ func ContentsFromCompletions(messages []openaiclient.CompletionsHistoryMessage) 
 			if m.Content != "" {
 				c.Parts = append(c.Parts, geminiclient.Part{Text: m.Content})
 			}
+			for _, block := range m.ImageContent {
+				if part, ok := imagePart(block); ok {
+					c.Parts = append(c.Parts, part)
+				}
+			}
 			for _, call := range m.ToolCalls {
 				names[call.ID] = call.Function.Name
 				args := json.RawMessage(call.Function.Arguments)

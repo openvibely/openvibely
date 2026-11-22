@@ -16,14 +16,14 @@ import (
 // deliberately absent: this test does not authorize replaying opaque state to
 // an incompatible provider.
 func TestPortableCheckpointAcrossSavedModelSelections(t *testing.T) {
-	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
+	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini}
 	for _, strategy := range []string{"local_summary", "provider_recovery"} {
 		for _, from := range providers {
 			// Recovery checkpoints are created after leaving OpenAI, on the destination provider.
 			if strategy == "provider_recovery" && from == models.ProviderOpenAI {
 				continue
 			}
-			destinations := append([]models.LLMProvider{from}, providers...)
+			destinations := append([]models.LLMProvider{from, models.ProviderGemini}, providers...)
 			for index, to := range destinations {
 				name := string(from) + "_to_" + string(to)
 				if index == 0 {
@@ -38,6 +38,8 @@ func TestPortableCheckpointAcrossSavedModelSelections(t *testing.T) {
 						switch p {
 						case models.ProviderOpenAI:
 							return "gpt-5.3-codex"
+						case models.ProviderGemini:
+							return "gemini-3.8-flash"
 						case models.ProviderAnthropic:
 							return "claude-opus-5-5"
 						default:

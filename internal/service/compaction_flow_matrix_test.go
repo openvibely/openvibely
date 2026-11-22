@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"github.com/openvibely/openvibely/internal/llm/recovery"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -20,10 +22,11 @@ func TestCompactionFlowMatrix(t *testing.T) {
 		{Provider: models.ProviderOpenAI, Model: "gpt-6-sol"},
 		{Provider: models.ProviderAnthropic, Model: "claude-opus-5-5"},
 		{Provider: models.ProviderOpenAICompatible, Model: "test"},
+		{Provider: models.ProviderGemini, Model: "gemini-3.8-flash"},
 	} {
 		agent.AuthMethod = models.AuthMethodAPIKey
 		agent.ContextWindow = 200000
-		require.Equal(t, agent.Provider != models.ProviderOpenAICompatible, providerSupportsNativeCompaction(agent), "fixture must exercise the intended native capability")
+		require.Equal(t, agent.Provider == models.ProviderOpenAI || agent.Provider == models.ProviderAnthropic, providerSupportsNativeCompaction(agent), "fixture must exercise the intended native capability")
 		for _, path := range []string{"preturn_summary", "preturn_overflow", "preturn_native_failure", "inturn_overflow", "inturn_native_failure"} {
 			native := providerSupportsNativeCompaction(agent)
 			if path == "inturn_native_failure" && agent.Provider == models.ProviderOpenAI {
@@ -146,6 +149,13 @@ func TestCompactionFlowMatrix(t *testing.T) {
 
 func matrixInturnFailure(req llmcontracts.AgentRequest, cause error) error {
 	switch req.Agent.Provider {
+	case models.ProviderGemini:
+		rows := []json.RawMessage{
+			json.RawMessage(`{"role":"user","parts":[{"text":"CURRENT_REQUEST"}]}`),
+			json.RawMessage(`{"role":"model","parts":[{"functionCall":{"id":"write","name":"write_file","args":{}}}]}`),
+			json.RawMessage(`{"role":"user","parts":[{"functionResponse":{"id":"write","name":"write_file","response":{"output":"TOOL_FINISHED"}}}]}`),
+		}
+		return recovery.WithSnapshot(cause, "contents", rows, func(row json.RawMessage) ([]byte, error) { return row, nil })
 	case models.ProviderOpenAI:
 		llmcontracts.RecordResponsesRecovery(req.Ctx, recoveryItemsForTest(`{"responses_input":[{"type":"message","role":"user","content":"CURRENT_REQUEST"},{"type":"function_call","call_id":"write","name":"write_file","arguments":"{}"},{"type":"function_call_output","call_id":"write","output":"TOOL_FINISHED"}]}`))
 		return cause

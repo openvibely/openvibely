@@ -21,7 +21,7 @@ import (
 // Old checkpoints must stay excluded even after the boundary leaves loaded history.
 func TestConnectedFreshContextCheckpointMatrix(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
-	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
+	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini}
 	for _, source := range providers {
 		for _, target := range providers {
 			kinds := []string{"summary"}
@@ -64,6 +64,9 @@ func TestConnectedFreshContextCheckpointMatrix(t *testing.T) {
 						if provider == models.ProviderAnthropic {
 							model = "claude-opus-5-5"
 						}
+						if provider == models.ProviderGemini {
+							model = "gemini-3.8-flash"
+						}
 						return models.LLMConfig{ID: string(provider), Provider: provider, Model: model, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1", PresetSlug: "vllm", ContextWindow: 200000, DisableNativeCompaction: true}
 					}
 					create := func(prompt string, reset bool) *models.Execution {
@@ -92,6 +95,7 @@ func TestConnectedFreshContextCheckpointMatrix(t *testing.T) {
 					request := llmcontracts.AgentRequest{Ctx: ctx, ProjectID: "default", ExecID: fresh.ID, Agent: config(target), Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, WorkDir: t.TempDir(), Message: fresh.PromptSent, ChatHistory: []models.Execution{}, DisableNativeCompaction: true}
 					send := func() {
 						svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+						configureGeminiCompactionServer(svc, server.URL)
 						result, err := svc.callProviderWithCompaction(svc.providerAdapters[target], request)
 						require.NoError(t, err)
 						require.Contains(t, result.Output, "NEW_ANSWER")

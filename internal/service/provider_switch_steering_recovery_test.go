@@ -13,7 +13,7 @@ import (
 )
 
 func TestProviderSwitchRecoversSteeringAndPreservesReadableTail(t *testing.T) {
-	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, p := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(p), func(t *testing.T) {
 			ctx := context.Background()
 			stores := teststores.New(t).Stores

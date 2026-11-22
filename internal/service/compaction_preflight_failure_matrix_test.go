@@ -20,7 +20,7 @@ import (
 
 func TestConnectedSummaryPreflightFailureSwitchMatrix(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
-	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
+	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini}
 	for _, p := range providers {
 		for _, target := range providers {
 			t.Run(string(p)+"/"+string(target), func(t *testing.T) {
@@ -77,8 +77,12 @@ func TestConnectedSummaryPreflightFailureSwitchMatrix(t *testing.T) {
 				if p == models.ProviderAnthropic {
 					model = "claude-opus-5-5"
 				}
+				if p == models.ProviderGemini {
+					model = "gemini-3.8-flash"
+				}
 				req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, Agent: models.LLMConfig{ID: "config", Provider: p, Model: model, APIKey: "test", AuthMethod: models.AuthMethodAPIKey, BaseURL: server.URL + "/v1", PresetSlug: "vllm", ContextWindow: 200000, DisableNativeCompaction: true}, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, WorkDir: dir, Message: current.PromptSent, ChatHistory: []models.Execution{{PromptSent: "old request", Output: "old answer", Status: models.ExecCompleted}}, DisableNativeCompaction: true}
 				svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+				configureGeminiCompactionServer(svc, server.URL)
 				_, err := svc.callProviderWithCompaction(svc.providerAdapters[p], req)
 				require.Error(t, err)
 				require.True(t, recognizedContextLengthError(err))
@@ -107,12 +111,16 @@ func TestConnectedSummaryPreflightFailureSwitchMatrix(t *testing.T) {
 				if target == models.ProviderAnthropic {
 					req.Agent.Model = "claude-opus-5-5"
 				}
+				if target == models.ProviderGemini {
+					req.Agent.Model = "gemini-3.8-flash"
+				}
 				req.ExecID = next.ID
 				req.ChatHistory = []models.Execution{*current}
 				req.Message = "followup"
 				req.Agent.ContextWindow = 1000000
 				reload = true
 				svc = NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+				configureGeminiCompactionServer(svc, server.URL)
 				_, err = svc.callProviderWithCompaction(svc.providerAdapters[target], req)
 				require.NoError(t, err)
 			})
