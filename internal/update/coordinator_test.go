@@ -1340,19 +1340,19 @@ func TestCoordinatorManualAcceptanceWithoutStagedArtifactReachesReady(t *testing
 	}
 }
 
-func TestCoordinatorAcceptedPackagedUpdateWithoutStagedArtifactFails(t *testing.T) {
+func TestCoordinatorManualAcceptanceFailsWhenMissingArtifactCannotBeStaged(t *testing.T) {
 	now := time.Unix(1000, 0).UTC()
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
 	drain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
-	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, &countingInstaller{}, false, "", nil)
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, &countingInstaller{stageErr: errors.New("download unavailable")}, false, "", nil)
 	coordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}}
 	coordinator.state = StateAvailable
 
 	if err := coordinator.Accept(context.Background(), 10*time.Minute); err == nil {
 		t.Fatal("accepted packaged update without staged artifact")
 	}
-	if snapshot := coordinator.Snapshot(); snapshot.State != StateAvailable || snapshot.Drain.State != DrainStateIdle {
-		t.Fatalf("packaged unstaged update changed state: %#v", snapshot)
+	if snapshot := coordinator.Snapshot(); snapshot.State != StateFailed || snapshot.Drain.State != DrainStateIdle {
+		t.Fatalf("failed staging did not leave the drain idle: %#v", snapshot)
 	}
 }
 

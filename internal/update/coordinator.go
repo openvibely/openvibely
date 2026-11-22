@@ -707,7 +707,7 @@ func (c *Coordinator) accept(ctx context.Context, lease time.Duration, automatic
 			// staged files before acceptance. Stage reuses intact files and repairs
 			// missing/corrupt ones. Recheck all acceptance conditions after unlocking.
 			_, localStage := c.staged.(LocalStagedUpdate)
-			if !automatic && !prepared && (c.state == StateFailed || c.state == StateRolledBack || localStage || (c.current.Distribution == "docker" && !c.manual && c.staged == nil)) {
+			if !automatic && !prepared && (c.state == StateFailed || c.state == StateRolledBack || localStage || (!c.manual && c.staged == nil)) {
 				c.mu.Unlock()
 				if err := c.Stage(ctx); err != nil {
 					return err

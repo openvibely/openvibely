@@ -595,7 +595,7 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 		"manualBusy":  `{"current_version":"0.3.0","state":"waiting_for_idle","distribution":"docker","channel":"stable","manual":true,"staged":false,"release":{"metadata":{"version":"0.5.1"},"target":{"image_ref":"openvibely:0.5.1"},"apply_supported":true},"drain":{"active":{"task_executions":1,"chat_executions":2,"automation_activities":3}}}`,
 	}
 	// Retry must remain reachable after rollback and after a failed retry download.
-	for _, state := range []string{"rolled_back", "failed"} {
+	for _, state := range []string{"rolled_back", "failed", "available"} {
 		snapshot := strings.Replace(currentSnapshot, `"state":"available"`, `"state":"`+state+`"`, 1)
 		snapshot = strings.Replace(snapshot, `"staged":true`, `"staged":false`, 1)
 		snapshots[state] = snapshot
@@ -636,6 +636,7 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 	    if (typeof window.openVibelyNormalizeSystemUpdateSnapshot !== 'function') fail('missing shared system update normalizer');
 	    var cases = [
 	      {name:'actionable', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true, acceptText:'Update OpenVibely'},
+          {name:'available', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true},
           {name:'rolled_back', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true},
           {name:'failed', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true},
 	      {name:'succeeded', hidden:true, actionable:false, card:false, accept:false, badge:false, toast:false},

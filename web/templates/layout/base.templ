@@ -6052,7 +6052,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					var hidden = !!(!data || data.state === 'succeeded' || (available && data.current_version === available));
 					var applySupported = release.apply_supported !== false;
 					var retryable = !!data && (data.state === 'failed' || data.state === 'rolled_back');
-					var readyForLocalApply = !!data && (data.distribution === 'docker' || data.manual || data.staged || retryable);
+					var readyForLocalApply = !!data && (data.distribution === 'docker' || data.manual || data.staged || retryable || data.state === 'available');
 					var stateAllowsApply = !!data && (data.state === 'available' || retryable);
 					var actionable = !hidden && !!available && applySupported && data.distribution !== 'hosted' && readyForLocalApply && stateAllowsApply;
 					var active = data && data.drain && data.drain.active ? data.drain.active : {};

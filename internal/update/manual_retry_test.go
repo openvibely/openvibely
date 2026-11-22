@@ -312,3 +312,70 @@ func TestCancelledUpdateRemainsAvailableForManualRetry(t *testing.T) {
 		})
 	}
 }
+
+func TestExpiredAttemptRecoversAfterMetadataRenewal(t *testing.T) {
+	now := time.Now().UTC()
+	root := t.TempDir()
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
+	target := Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64", URL: "https://example.test/app.tar.gz", Filetype: "tar.gz", Size: 3, SHA256: strings.Repeat("0", 64)}
+	release := cachedReleaseFixture(now, target, "download")
+	installer := &retryLocalInstaller{path: filepath.Join(root, "staged")}
+	makeCoordinator := func() *Coordinator {
+		return NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: "binary"}, "stable", NewDrainManager(nil, nil, 0, nil), installer, false, "", nil)
+	}
+	c := makeCoordinator()
+	statePath := filepath.Join(root, "coordinator.json")
+	if err := c.SetPersistence(statePath); err != nil {
+		t.Fatal(err)
+	}
+	c.release, c.state = release, StateAvailable
+	if err := c.Stage(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c.state, c.autoAttemptedVersion = StateFailed, release.Metadata.Version
+	if err := c.persistLocked(); err != nil {
+		t.Fatal(err)
+	}
+	now = release.Metadata.ExpiresAt.Add(time.Second)
+	c = makeCoordinator()
+	if err := c.SetPersistence(statePath); err != nil {
+		t.Fatal(err)
+	}
+	renewed := *release
+	renewed.Metadata.ExpiresAt = now.Add(24 * time.Hour)
+	if err := client.saveState(persistedClientState{LastSuccessfulCheck: now, Cached: &renewed}); err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 3; n++ {
+		if err := c.checkAndAutoUpdate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if installer.stages.Load() != 1 || installer.applies.Load() != 0 {
+		t.Fatal("metadata renewal retried automatically")
+	}
+	if c.Snapshot().State != StateAvailable || c.Snapshot().Staged {
+		t.Fatal("expected available release without staged files")
+	}
+	if c.autoAttemptedVersion != release.Metadata.Version {
+		t.Fatal("automatic attempt guard lost")
+	}
+
+	t.Logf("unchanged target=%v state=%s staged=%v", release.Target == renewed.Target, c.Snapshot().State, c.Snapshot().Staged)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.StartRecovery(ctx)
+	if err := c.Accept(ctx, time.Minute); err != nil {
+		t.Fatalf("explicit retry rejected: %v", err)
+	}
+	waitForCoordinatorState(t, c, StateSucceeded)
+	if installer.stages.Load() != 2 || installer.applies.Load() != 1 {
+		t.Fatalf("stages=%d applies=%d", installer.stages.Load(), installer.applies.Load())
+	}
+	if err := c.checkAndAutoUpdate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if installer.applies.Load() != 1 {
+		t.Fatal("manual retry reenabled automatic attempts")
+	}
+}
