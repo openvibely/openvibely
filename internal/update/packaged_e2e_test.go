@@ -398,7 +398,9 @@ func desktopTestEnvironment() []string {
 
 func packagedE2EValidationTimeoutEnv(wantOutcome string) string {
 	timeout := 15 * time.Second
-	if runtime.GOOS == "darwin" && wantOutcome == packagedUpdateOutcomeSucceeded {
+	// Successful launches need startup headroom on busy native CI runners.
+	// Deliberately unhealthy replacements retain the short rollback deadline.
+	if wantOutcome == packagedUpdateOutcomeSucceeded {
 		timeout = 60 * time.Second
 	}
 	return "OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=" + strconv.FormatInt(timeout.Milliseconds(), 10)

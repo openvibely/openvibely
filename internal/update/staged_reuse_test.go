@@ -33,7 +33,9 @@ func TestStagedBundleIntegrity(t *testing.T) {
 			case "content":
 				err = os.WriteFile(binary, []byte("modified"), 0755)
 			case "mode":
-				err = os.Chmod(binary, 0644)
+				// Windows represents the writable/read-only bit, not Unix execute bits.
+				t.Cleanup(func() { _ = os.Chmod(binary, 0755) })
+				err = os.Chmod(binary, 0444)
 			case "symlink":
 				if err = os.Remove(link); err == nil {
 					err = os.Symlink("elsewhere", link)
