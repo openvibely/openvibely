@@ -34,7 +34,7 @@ func (s *UsageAnalyticsService) fetchLiveAccountUsage(ctx context.Context, confi
 		errors    map[string]string
 	}
 	var pending []chan result
-	for _, name := range []string{"openai", "anthropic"} {
+	for _, name := range []string{"openai", "anthropic", "gemini"} {
 		if provider != "" && provider != name {
 			continue
 		}

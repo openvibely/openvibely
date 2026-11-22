@@ -125,6 +125,8 @@ func accountUsageProviderFallbackIdentity(provider models.LLMProvider) string {
 		return "OpenAI account"
 	case models.ProviderAnthropic:
 		return "Anthropic account"
+	case models.ProviderGemini:
+		return "Google account"
 	default:
 		return "Connected account"
 	}
@@ -229,7 +231,7 @@ func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageA
 	for _, connection := range connections {
 		labelsByConnectionID[connection.ID] = connection.Name
 	}
-	for _, provider := range []string{"openai", "anthropic"} {
+	for _, provider := range []string{"openai", "anthropic", "gemini"} {
 		for _, group := range accountUsageGroups(configs, provider) {
 			result = append(result, UsageAccountDescriptor{
 				Key:       usageAccountGroupKey(group),
@@ -257,7 +259,7 @@ func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Conte
 		} else {
 			if filter.AccountGroupKey != "" {
 				var selected []models.LLMConfig
-				for _, provider := range []string{"openai", "anthropic"} {
+				for _, provider := range []string{"openai", "anthropic", "gemini"} {
 					for _, group := range accountUsageGroups(configs, provider) {
 						if usageAccountGroupKey(group) == filter.AccountGroupKey {
 							selected = group
@@ -755,7 +757,7 @@ func accountUsageGroups(configs []models.LLMConfig, provider string) [][]models.
 
 func (s *UsageAnalyticsService) oauthAccountPlaceholders(configs []models.LLMConfig, provider string) []models.AccountUsageView {
 	var accounts []models.AccountUsageView
-	for _, providerName := range []string{string(models.ProviderOpenAI), string(models.ProviderAnthropic)} {
+	for _, providerName := range []string{string(models.ProviderOpenAI), string(models.ProviderAnthropic), string(models.ProviderGemini)} {
 		if provider != "" && provider != providerName {
 			continue
 		}
@@ -1483,6 +1485,8 @@ func abandonAccountUsageOAuthCandidate(cfg models.LLMConfig) models.LLMConfig {
 
 func (s *UsageAnalyticsService) fetchOAuthAccountUsage(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
 	switch cfg.Provider {
+	case models.ProviderGemini:
+		return s.fetchGeminiOAuthUsage(ctx, cfg)
 	case models.ProviderAnthropic:
 		fresh, err := s.ensureFreshAccountUsageOAuth(ctx, cfg, s.anthropicAccountUsageRefreshFunc())
 		if err != nil {
@@ -1692,12 +1696,21 @@ func (s *UsageAnalyticsService) doAccountUsageRequest(req *http.Request) (map[st
 	if client == nil {
 		client = httpclient.New(httpclient.UsageTimeout)
 	}
-	// Usage/profile GETs use shared retries within the existing overall deadline.
+	// Google quota queries are read-only POSTs; reset-redemption POSTs must not replay.
 	ctx, cancel := context.WithTimeout(req.Context(), 16*time.Second)
 	defer cancel()
 	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, ":retrieveUserQuotaSummary")
 	resp, err := httpretry.Do(ctx, client, func() (*http.Request, error) {
-		return req.Clone(ctx), nil
+		clone := req.Clone(ctx)
+		if req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			clone.Body = body
+		}
+		return clone, nil
 	}, policy)
 	if err != nil {
 		return nil, err
@@ -2340,6 +2353,8 @@ func shouldPersistUsageForProvider(agent models.LLMConfig) bool {
 		return agent.AuthMethod == models.AuthMethodOAuth || agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != ""
 	case models.ProviderOpenAICompatible:
 		return agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != ""
+	case models.ProviderGemini:
+		return agent.AuthMethod == models.AuthMethodOAuth || agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != ""
 	default:
 		return false
 	}

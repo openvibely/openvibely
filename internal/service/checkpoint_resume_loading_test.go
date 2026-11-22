@@ -21,11 +21,9 @@ type resumeReadStore struct {
 	checkpointError bool
 }
 
-func (r *resumeReadStore) ReplayRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+func (r *resumeReadStore) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
 	r.reads = append(r.reads, ids...)
-	return r.ExecutionStore.(interface {
-		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
-	}).ReplayRowsByExecutionIDs(ctx, ids)
+	return r.ExecutionStore.ReplayContinuationRowsByExecutionIDs(ctx, ids)
 }
 func (r *resumeReadStore) GetChatCompactionCheckpoint(ctx context.Context, typ, id string) (*models.ChatCompactionCheckpoint, error) {
 	if r.checkpointError {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmgemini "github.com/openvibely/openvibely/internal/llm/gemini"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"testing"
@@ -15,6 +16,14 @@ import (
 
 func TestSummaryParallelToolConversionMatrix(t *testing.T) {
 	sources := map[string]string{
+		"gemini": `{"contents":[
+{"role":"model","parts":[{"functionCall":{"id":"a","name":"read_file","args":{}}},{"functionCall":{"id":"b","name":"read_file","args":{}}}]},
+{"role":"user","parts":[{"functionResponse":{"id":"b","name":"read_file","response":{"output":"file B"}}}]},
+{"role":"user","parts":[{"functionResponse":{"id":"a","name":"read_file","response":{"output":"file A"}}}]},
+{"role":"user","parts":[{"text":"continue"}]},
+{"role":"model","parts":[{"functionCall":{"id":"c","name":"read_file","args":{}}}]},
+{"role":"user","parts":[{"functionResponse":{"id":"c","name":"read_file","response":{"output":"file C"}}}]}
+]}`,
 		"responses": `{"responses_input":[
 			{"type":"function_call","call_id":"a","name":"read_file","arguments":"{}"},
 			{"type":"function_call","call_id":"b","name":"read_file","arguments":"{}"},
@@ -41,7 +50,7 @@ func TestSummaryParallelToolConversionMatrix(t *testing.T) {
 		]}`,
 	}
 	for source, transcript := range sources {
-		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 			for _, mode := range []string{"summary", "followup"} {
 				t.Run(source+"_to_"+string(provider)+"/"+mode, func(t *testing.T) {
 					history := []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
@@ -58,6 +67,8 @@ func TestSummaryParallelToolConversionMatrix(t *testing.T) {
 							require.Equal(t, "new follow-up", req.Message)
 							var outgoing any
 							switch provider {
+							case models.ProviderGemini:
+								outgoing = llmgemini.BuildHistory(req.ChatHistory)
 							case models.ProviderOpenAI:
 								outgoing = llmopenai.HistoryInputItems(req.ChatHistory)
 							case models.ProviderAnthropic:
@@ -80,6 +91,9 @@ func TestSummaryParallelToolConversionMatrix(t *testing.T) {
 					if provider == models.ProviderAnthropic {
 						target = "anthropic"
 					}
+					if provider == models.ProviderGemini && mode == "followup" {
+						target = "gemini"
+					}
 					// The independently specified destination fixture defines exact
 					// message boundaries, call arguments, IDs, and result ordering.
 					var expected []json.RawMessage
@@ -87,11 +101,15 @@ func TestSummaryParallelToolConversionMatrix(t *testing.T) {
 						require.NoError(t, json.Unmarshal([]byte(sources[target]), &expected))
 					} else {
 						var envelope struct {
+							Contents []json.RawMessage `json:"contents"`
 							Input    []json.RawMessage `json:"responses_input"`
 							Messages []json.RawMessage `json:"messages"`
 						}
 						require.NoError(t, json.Unmarshal([]byte(sources[target]), &envelope))
 						expected = envelope.Input
+						if target == "gemini" {
+							expected = envelope.Contents
+						}
 						if target == "anthropic" {
 							expected = envelope.Messages
 						}

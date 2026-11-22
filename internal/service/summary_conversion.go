@@ -7,6 +7,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 
+	llmgemini "github.com/openvibely/openvibely/internal/llm/gemini"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
@@ -35,7 +36,7 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 			// merely to discover their format before the client decodes them.
 			if replay.TranscriptJSON == "" && replay.Rows != nil {
 				r := replay.Rows
-				if (r.Format == "envelope" && len(r.Items) > 0 && (((r.ItemsKey == "responses_input" || r.ItemsKey == "responses_delta") && provider == models.ProviderOpenAI) || (r.ItemsKey == "messages" && provider == models.ProviderAnthropic))) || (r.Format == "array" && provider != models.ProviderAnthropic) {
+				if (r.Format == "envelope" && len(r.Items) > 0 && (((r.ItemsKey == "responses_input" || r.ItemsKey == "responses_delta") && provider == models.ProviderOpenAI) || (r.ItemsKey == "messages" && provider == models.ProviderAnthropic) || (r.ItemsKey == llmgemini.ReplayItemsKey && provider == models.ProviderGemini && !forSummary))) || (r.Format == "array" && provider != models.ProviderAnthropic) {
 					continue
 				}
 			}
@@ -53,8 +54,18 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 				_ = replay.DecodeTranscript(&metadata)
 				envelope.Environment = metadata.Environment
 			}
+			geminiRows, _ := replay.ReplayArray(llmgemini.ReplayItemsKey)
 			var messages []openaiclient.CompletionsHistoryMessage
 			switch {
+			case len(geminiRows) > 0:
+				if provider == models.ProviderGemini && !forSummary {
+					continue
+				}
+				contents, err := llmgemini.DecodeContents(geminiRows)
+				if err != nil {
+					continue
+				}
+				messages = llmgemini.CompletionsFromContents(contents)
 			case len(envelope.Input) > 0:
 				if provider == models.ProviderOpenAI {
 					continue

@@ -151,7 +151,7 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 		return replay, false, nil
 	}
 	key := rows.ItemsKey
-	if rows.Format == "envelope" && key != "responses_input" && key != "responses_delta" && key != "messages" {
+	if rows.Format == "envelope" && key != "responses_input" && key != "responses_delta" && key != "messages" && key != "contents" {
 		return replay, false, nil
 	}
 	items := make([]any, len(rows.Items))
@@ -179,6 +179,14 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 	asMap := func(v any) map[string]any { m, _ := v.(map[string]any); return m }
 	str := func(v any) string { s, _ := v.(string); return s }
 	blocks := func(m map[string]any) []any { a, _ := m["content_blocks"].([]any); return a }
+	parts := func(m map[string]any) []any { a, _ := m["parts"].([]any); return a }
+	callNames := map[string]string{}
+	responseText := func(response map[string]any) string {
+		if text, ok := response["error"].(string); ok {
+			return text
+		}
+		return str(response["output"])
+	}
 	for i, item := range items {
 		m := asMap(item)
 		if m["type"] == "function_call" && m["name"] == "skill_view" {
@@ -196,6 +204,20 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 			f := asMap(t["function"])
 			if f["name"] == "skill_view" {
 				calls = append(calls, call{str(t["id"]), i, f["arguments"]})
+			}
+		}
+		if key == "contents" {
+			for _, part := range parts(m) {
+				part := asMap(part)
+				if f := asMap(part["functionCall"]); f != nil {
+					callNames[str(f["id"])] = str(f["name"])
+					if f["name"] == "skill_view" {
+						calls = append(calls, call{str(f["id"]), i, f["args"]})
+					}
+				}
+				if f := asMap(part["functionResponse"]); f != nil && responseText(asMap(f["response"])) == contracts.PendingSkillInputPrefix+question {
+					markerID = str(f["id"])
+				}
 			}
 		}
 		for _, b := range blocks(m) {
@@ -269,6 +291,32 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 				callOrder = append(callOrder, str(b["id"]))
 			}
 		}
+		if key == "contents" {
+			for _, part := range parts(m) {
+				part := asMap(part)
+				if f := asMap(part["functionCall"]); f != nil {
+					id := str(f["id"])
+					pending[id] = i
+					callOrder = append(callOrder, id)
+				}
+				if f := asMap(part["functionResponse"]); f != nil {
+					id := str(f["id"])
+					if id != target.id && strings.HasPrefix(responseText(asMap(f["response"])), contracts.PendingSkillInputPrefix) {
+						awaitingSibling = true
+					}
+					delete(pending, id)
+					if id == target.id {
+						mark(m)
+						field := "output"
+						if isError {
+							field = "error"
+						}
+						f["response"] = map[string]any{field: output}
+						replaced = true
+					}
+				}
+			}
+		}
 		if m["type"] == "function_call_output" {
 			id := str(m["call_id"])
 			if id != target.id && strings.HasPrefix(str(m["output"]), contracts.PendingSkillInputPrefix) {
@@ -319,6 +367,21 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 		switch key {
 		case "responses_input", "responses_delta":
 			result = map[string]any{"type": "function_call_output", "call_id": id, "output": text}
+		case "contents":
+			field := "output"
+			if failed {
+				field = "error"
+			}
+			part := map[string]any{"functionResponse": map[string]any{"id": id, "name": callNames[id], "response": map[string]any{field: text}}}
+			if callIndex+1 < len(items) {
+				next := asMap(items[callIndex+1])
+				if next["role"] == "user" && next["parts"] != nil {
+					mark(next)
+					next["parts"] = append([]any{part}, parts(next)...)
+					return
+				}
+			}
+			result = map[string]any{"role": "user", "parts": []any{part}}
 		case "messages":
 			block := map[string]any{"type": "tool_result", "tool_use_id": id, "content": text, "is_error": failed}
 			// Anthropic groups tool replies in the user message immediately
@@ -338,7 +401,7 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 		at := len(items)
 		for i := callIndex + 1; i < len(items); i++ {
 			m := asMap(items[i])
-			if m["role"] == "assistant" || m["role"] == "user" || m["type"] == "message" || m["type"] == "reasoning" {
+			if m["role"] == "assistant" || m["role"] == "model" || m["role"] == "user" || m["type"] == "message" || m["type"] == "reasoning" {
 				at = i
 				break
 			}

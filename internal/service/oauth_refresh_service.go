@@ -27,6 +27,7 @@ type OAuthRefreshService struct {
 	manager          *llmoauth.Manager
 	anthropicRefresh llmoauth.RefreshFunc
 	openAIRefresh    llmoauth.RefreshFunc
+	geminiRefresh    llmoauth.RefreshFunc
 	identityResolver func(context.Context, string) (AnthropicOAuthIdentity, error)
 	openAIIdentity   OpenAIOAuthIdentityResolver
 	identityTimeout  time.Duration
@@ -44,6 +45,7 @@ func NewOAuthRefreshService(repo persistence.LLMConfigStore, manager *llmoauth.M
 		manager:          manager,
 		anthropicRefresh: llmoauth.AnthropicRefreshFunc(),
 		openAIRefresh:    llmoauth.OpenAIRefreshFunc(),
+		geminiRefresh:    llmoauth.GeminiRefreshFunc(),
 		openAIIdentity:   ResolveVerifiedOpenAIOAuthIdentity,
 		identityTimeout:  oauthBackgroundIdentityLookupTimeout,
 		interval:         oauthBackgroundRefreshInterval,
@@ -139,6 +141,8 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 			refresh = s.anthropicRefresh
 		case models.ProviderOpenAI:
 			refresh = s.openAIRefresh
+		case models.ProviderGemini:
+			refresh = s.geminiRefresh
 		default:
 			continue
 		}

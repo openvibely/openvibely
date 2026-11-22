@@ -38,7 +38,7 @@ const (
 func modelCardListFilter(c echo.Context, page cardPageRequest) persistence.ModelCardListFilter {
 	return persistence.ModelCardListFilter{
 		Search:     page.Search,
-		Provider:   allowlistedQuery(c, "provider", "", "openai", "anthropic", "ollama", "openai_compatible", "mixture"),
+		Provider:   allowlistedQuery(c, "provider", "", "openai", "anthropic", "gemini", "ollama", "openai_compatible", "mixture"),
 		Default:    optionalBoolQuery(c, "default"),
 		AuthStatus: allowlistedQuery(c, "auth_status", "", "connected", "not_connected", "not_required"),
 		Kind:       allowlistedQuery(c, "kind", "", "direct", "mixture"),
@@ -227,6 +227,16 @@ func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMet
 		return models.ProviderOpenAI, models.AuthMethodAPIKey
 	}
 	return models.LLMProvider(provider), models.AuthMethodAPIKey
+}
+
+func resolveFormProviderAndAuth(c echo.Context) (models.LLMProvider, models.AuthMethod) {
+	if c.FormValue("provider") == string(models.ProviderGemini) {
+		if c.FormValue("gemini_auth_type") == string(models.AuthMethodOAuth) {
+			return models.ProviderGemini, models.AuthMethodOAuth
+		}
+		return models.ProviderGemini, models.AuthMethodAPIKey
+	}
+	return resolveProviderAndAuth(c.FormValue("provider"), c.FormValue("anthropic_auth_type"), c.FormValue("openai_auth_type"), c.FormValue("auth_method"))
 }
 
 func isKnownOpenAICompatibleUIProvider(provider string) bool {
@@ -499,7 +509,7 @@ func syncCatalogProviderLimits(agent *models.LLMConfig, previousModel string) {
 	if agent == nil {
 		return
 	}
-	if agent.Provider != models.ProviderOpenAI && agent.Provider != models.ProviderAnthropic {
+	if agent.Provider != models.ProviderOpenAI && agent.Provider != models.ProviderAnthropic && agent.Provider != models.ProviderGemini {
 		return
 	}
 	if previousModel != "" && strings.EqualFold(strings.TrimSpace(previousModel), strings.TrimSpace(agent.Model)) {
@@ -788,7 +798,7 @@ func isModelValidationError(err error) bool {
 
 func validateBrowserRunnableModelSlug(agent *models.LLMConfig) error {
 	switch agent.Provider {
-	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
+	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderGemini, models.ProviderOpenAICompatible, models.ProviderOllama:
 		if strings.TrimSpace(agent.Model) == "" {
 			return persistence.ErrLLMConfigModelRequired
 		}
@@ -800,12 +810,7 @@ func validateBrowserRunnableModelSlug(agent *models.LLMConfig) error {
 }
 
 func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context, agent *models.LLMConfig, opts modelFormOptions) error {
-	provider, authMethod := resolveProviderAndAuth(
-		c.FormValue("provider"),
-		c.FormValue("anthropic_auth_type"),
-		c.FormValue("openai_auth_type"),
-		c.FormValue("auth_method"),
-	)
+	provider, authMethod := resolveFormProviderAndAuth(c)
 	if provider == models.ProviderOpenAICompatible && c.FormValue("custom_auth_method") == string(models.AuthMethodOAuth) {
 		authMethod = models.AuthMethodOAuth
 	}
@@ -817,7 +822,7 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 	agent.Name = normalizedName
 	agent.Provider = provider
 	agent.AuthMethod = authMethod
-	if agent.AuthMethod == models.AuthMethodOAuth && (agent.Provider == models.ProviderOpenAI || agent.Provider == models.ProviderAnthropic) {
+	if agent.AuthMethod == models.AuthMethodOAuth && (agent.Provider == models.ProviderOpenAI || agent.Provider == models.ProviderAnthropic || agent.Provider == models.ProviderGemini) {
 		if connectionID, ok := formValueIfPresent(c, "oauth_connection_id"); ok {
 			if connectionID == "new" {
 				connectionID = ""
@@ -836,7 +841,7 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 		}
 		agent.Model = normalizeOpenAIModel(agent.Model)
 	}
-	if agent.Provider == models.ProviderAnthropic {
+	if agent.Provider == models.ProviderAnthropic || agent.Provider == models.ProviderGemini {
 		if spec, ok := models.LookupModel(agent.Provider, agent.Model); ok {
 			agent.Model = spec.ID
 		}
@@ -1218,7 +1223,7 @@ func (h *Handler) DisconnectModelOAuthConnection(c echo.Context) error {
 	if cfg == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "model not found")
 	}
-	if cfg.OAuthConnectionID == "" || cfg.AuthMethod != models.AuthMethodOAuth || (cfg.Provider != models.ProviderOpenAI && cfg.Provider != models.ProviderAnthropic) {
+	if cfg.OAuthConnectionID == "" || cfg.AuthMethod != models.AuthMethodOAuth || (cfg.Provider != models.ProviderOpenAI && cfg.Provider != models.ProviderAnthropic && cfg.Provider != models.ProviderGemini) {
 		return echo.NewHTTPError(http.StatusBadRequest, "model does not use a shared OAuth account")
 	}
 	disconnected, err := h.llmConfigRepo.DisconnectLinkedOAuthConnection(c.Request().Context(), cfg.ID, cfg.OAuthConnectionID, cfg.OAuthConfigRevision, cfg.Provider)

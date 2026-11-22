@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	geminiclient "github.com/openvibely/openvibely/pkg/gemini_client"
 	"log"
 	"net"
 	"net/http"
@@ -1275,6 +1276,86 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		require.Contains(t, location, "client_id=anthropic-hosted-client")
 		require.Contains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Fcallback")
 		require.NotContains(t, location, "localhost")
+	})
+
+	t.Run("uses hosted gemini client and public callback when configured", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "https://dubee.org")
+		t.Setenv("GEMINI_OAUTH_CLIENT_ID", "gemini-hosted-client")
+		t.Setenv("GEMINI_OAUTH_CLIENT_SECRET", "gemini-hosted-secret")
+		for _, accountType := range []string{"personal", "business"} {
+			h, e, llmConfigRepo := setupTestHandler(t)
+			model := &models.LLMConfig{Name: "Hosted Gemini OAuth", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
+			require.NoError(t, llmConfigRepo.Create(context.Background(), model))
+
+			req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate?gemini_account_type="+accountType, nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(model.ID)
+			require.NoError(t, h.OAuthInitiate(c))
+			require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+			location := rec.Header().Get("Location")
+			require.Contains(t, location, "client_id=gemini-hosted-client")
+			require.Contains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Foauth2callback")
+			require.NotContains(t, location, "localhost")
+
+			u, err := url.Parse(location)
+			require.NoError(t, err)
+			oauthFlowsMu.Lock()
+			flow := oauthFlows[u.Query().Get("state")]
+			oauthFlowsMu.Unlock()
+			require.NotNil(t, flow)
+			require.Equal(t, "gemini-hosted-client", flow.ClientID)
+			require.Equal(t, "gemini-hosted-secret", flow.ClientSecret)
+			require.Equal(t, accountType, flow.GeminiAccountType)
+			if accountType == "business" {
+				require.Equal(t, geminiclient.BusinessOAuthScopes, u.Query().Get("scope"))
+			} else {
+				require.Equal(t, geminiclient.OAuthScopes, u.Query().Get("scope"))
+			}
+		}
+	})
+
+	t.Run("keeps gemini on localhost without hosted client", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "https://dubee.org")
+		t.Setenv("GEMINI_OAUTH_CLIENT_ID", "")
+		t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
+		h, e, llmConfigRepo := setupTestHandler(t)
+		model := &models.LLMConfig{Name: "Local Gemini OAuth", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
+		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
+
+		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(model.ID)
+		require.NoError(t, h.OAuthInitiate(c))
+		location := rec.Header().Get("Location")
+		require.Contains(t, location, "client_id="+url.QueryEscape(geminiclient.OAuthClientID))
+		require.Contains(t, location, "redirect_uri=http%3A%2F%2Flocalhost%3A53692%2Fauth%2Fcallback")
+	})
+
+	t.Run("stores gemini cloud project from form", func(t *testing.T) {
+		t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
+		h, e, llmConfigRepo := setupTestHandler(t)
+		model := &models.LLMConfig{Name: "Workspace Gemini", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
+		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
+
+		req := httptest.NewRequest(http.MethodPost, "/models/"+model.ID+"/oauth/initiate", strings.NewReader("gemini_cloud_project=+my-proj+&gemini_account_type=business"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(model.ID)
+		require.NoError(t, h.OAuthInitiate(c))
+		require.Contains(t, rec.Header().Get("Location"), "client_id="+url.QueryEscape(geminiclient.BusinessOAuthClientID))
+		state, err := url.Parse(rec.Header().Get("Location"))
+		require.NoError(t, err)
+		oauthFlowsMu.Lock()
+		flow := oauthFlows[state.Query().Get("state")]
+		oauthFlowsMu.Unlock()
+		require.NotNil(t, flow)
+		require.Equal(t, "my-proj", flow.CloudProject)
 	})
 
 	t.Run("uses built-in openai client when hosted client id is not provided", func(t *testing.T) {

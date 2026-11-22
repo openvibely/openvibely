@@ -22,6 +22,7 @@ func TestSharedRecoverySnapshotPreservesCurrentWork(t *testing.T) {
 		{models.ProviderOpenAI, "responses_input", `[{"type":"message","role":"user","content":"NEW_STEERING"},{"type":"function_call","call_id":"done","name":"edit_file","arguments":"{}"},{"type":"function_call_output","call_id":"done","output":"ALREADY_EDITED"}]`},
 		{models.ProviderAnthropic, "messages", `[{"role":"user","content":"NEW_STEERING"},{"role":"assistant","content":[{"type":"tool_use","id":"done","name":"edit_file","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"done","content":"ALREADY_EDITED"}]}]`},
 		{models.ProviderOpenAICompatible, "", `[{"role":"user","content":"NEW_STEERING"},{"role":"assistant","tool_calls":[{"id":"done","type":"function","function":{"name":"edit_file","arguments":"{}"}}]},{"role":"tool","tool_call_id":"done","content":"ALREADY_EDITED"}]`},
+		{models.ProviderGemini, "contents", `[{"role":"user","parts":[{"text":"NEW_STEERING"}]},{"role":"model","parts":[{"functionCall":{"id":"done","name":"edit_file","args":{}}}]},{"role":"user","parts":[{"functionResponse":{"id":"done","name":"edit_file","response":{"output":"ALREADY_EDITED"}}}]}]`},
 		{models.ProviderOllama, "", `[{"role":"user","content":"NEW_STEERING"},{"role":"tool","tool_call_id":"done","content":"ALREADY_EDITED"}]`},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {

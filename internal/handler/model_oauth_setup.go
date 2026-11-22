@@ -24,6 +24,7 @@ type modelOAuthSetup struct {
 	config      models.LLMConfig
 	expires     time.Time
 	failure     string
+	progress    string
 }
 
 var modelOAuthSetups = struct {
@@ -77,11 +78,11 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 	}
 
 	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 1<<20)
-	provider, auth := resolveProviderAndAuth(c.FormValue("provider"), c.FormValue("anthropic_auth_type"), c.FormValue("openai_auth_type"), c.FormValue("auth_method"))
+	provider, auth := resolveFormProviderAndAuth(c)
 	if provider == models.ProviderOpenAICompatible {
 		auth = models.AuthMethod(c.FormValue("custom_auth_method"))
 	}
-	if auth != models.AuthMethodOAuth || (provider != models.ProviderOpenAI && provider != models.ProviderAnthropic && provider != models.ProviderOpenAICompatible) {
+	if auth != models.AuthMethodOAuth || (provider != models.ProviderOpenAI && provider != models.ProviderAnthropic && provider != models.ProviderGemini && provider != models.ProviderOpenAICompatible) {
 		return echo.NewHTTPError(http.StatusBadRequest, "Select an OAuth provider first.")
 	}
 	config := &models.LLMConfig{Provider: provider, AuthMethod: auth}
@@ -112,7 +113,7 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "This sign-in is for custom OAuth endpoints.")
 		}
 	}
-	if provider == models.ProviderOpenAI || provider == models.ProviderAnthropic {
+	if provider == models.ProviderOpenAI || provider == models.ProviderAnthropic || provider == models.ProviderGemini {
 		revisions, err := h.llmConfigRepo.OAuthConnectionSnapshots(c.Request().Context(), provider)
 		if err != nil {
 			return err
@@ -162,15 +163,15 @@ func (h *Handler) ModelOAuthSetupStatus(c echo.Context) error {
 	}
 	modelOAuthSetups.Lock()
 	session := modelOAuthSetups.sessions[c.Request().Header.Get(modelOAuthSetupHeader)]
-	failure := ""
+	failure, progress := "", ""
 	if session != nil {
-		failure = session.failure
+		failure, progress = session.failure, session.progress
 	}
 	modelOAuthSetups.Unlock()
 	if failure != "" {
 		return echo.NewHTTPError(http.StatusBadRequest, failure)
 	}
-	return c.JSON(http.StatusOK, map[string]bool{"connected": config.OAuthAccessToken != ""})
+	return c.JSON(http.StatusOK, map[string]any{"connected": config.OAuthAccessToken != "", "progress": progress})
 }
 
 func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig) (string, error) {
@@ -193,7 +194,7 @@ func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig
 		oauthSecurityConfigChanged(*signedIn, *config) || signedIn.ExtraHeadersJSON != config.ExtraHeadersJSON {
 		return "", echo.NewHTTPError(http.StatusConflict, "Connection settings changed. Connect OAuth again before saving the model.")
 	}
-	if config.Provider == models.ProviderOpenAI || config.Provider == models.ProviderAnthropic {
+	if config.Provider == models.ProviderOpenAI || config.Provider == models.ProviderAnthropic || config.Provider == models.ProviderGemini {
 		draft := signedIn.PendingOAuthConnection
 		if draft == nil || draft.ID != config.OAuthConnectionID {
 			return "", echo.NewHTTPError(http.StatusConflict, "Account selection changed. Connect OAuth again.")
@@ -221,6 +222,7 @@ func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int
 	if err := h.requireOAuthActor(context.Background(), session.actorUserID); err != nil {
 		return err
 	}
+	session.progress = ""
 	session.config.OAuthAccessToken = access
 	session.config.OAuthRefreshToken = refresh
 	session.config.OAuthExpiresAt = expires
@@ -248,12 +250,24 @@ func (h *Handler) CancelModelOAuthSetup(c echo.Context) error {
 }
 
 func failModelOAuthSetup(key string) {
+	failModelOAuthSetupWith(key, "Sign-in failed or was cancelled. Connect OAuth again.")
+}
+
+func failModelOAuthSetupWith(key, message string) {
 	if key == "" {
 		return
 	}
 	modelOAuthSetups.Lock()
 	defer modelOAuthSetups.Unlock()
 	if session := modelOAuthSetups.sessions[key]; session != nil {
-		session.failure = "Sign-in failed or was cancelled. Connect OAuth again."
+		session.failure, session.progress = message, ""
+	}
+}
+
+func setModelOAuthSetupProgress(key, message string) {
+	modelOAuthSetups.Lock()
+	defer modelOAuthSetups.Unlock()
+	if session := modelOAuthSetups.sessions[key]; session != nil {
+		session.progress = message
 	}
 }

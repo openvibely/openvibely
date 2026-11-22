@@ -40,6 +40,7 @@ const oauthConnectionAccountLabelSQL = `COALESCE(
 			CASE c.provider
 				WHEN 'anthropic' THEN 'Anthropic account'
 				WHEN 'openai' THEN 'OpenAI account'
+				WHEN 'gemini' THEN 'Google account'
 				ELSE c.name
 			END
 		)`
@@ -138,7 +139,7 @@ func validateOAuthConnectionLinkTx(ctx context.Context, tx sqlExecutor, connecti
 }
 
 func createPrivateOAuthConnectionTx(ctx context.Context, tx sqlExecutor, cfg *models.LLMConfig) error {
-	if cfg.Provider != models.ProviderOpenAI && cfg.Provider != models.ProviderAnthropic {
+	if cfg.Provider != models.ProviderOpenAI && cfg.Provider != models.ProviderAnthropic && cfg.Provider != models.ProviderGemini {
 		return nil
 	}
 	return tx.QueryRowContext(ctx, `
@@ -162,8 +163,8 @@ func (r *LLMConfigRepo) LinkOAuthConnection(ctx context.Context, modelID, connec
 	if err := tx.QueryRowContext(ctx, `SELECT provider, auth_method FROM agent_configs WHERE id = ?`, modelID).Scan(&provider, &auth); err != nil {
 		return fmt.Errorf("loading model for OAuth link: %w", err)
 	}
-	if auth != models.AuthMethodOAuth || (provider != models.ProviderOpenAI && provider != models.ProviderAnthropic) {
-		return fmt.Errorf("only OpenAI or Anthropic OAuth models can link an OAuth connection")
+	if auth != models.AuthMethodOAuth || (provider != models.ProviderOpenAI && provider != models.ProviderAnthropic && provider != models.ProviderGemini) {
+		return fmt.Errorf("only OpenAI, Anthropic, or Gemini OAuth models can link an OAuth connection")
 	}
 	if err := validateOAuthConnectionLinkTx(ctx, tx, connectionID, provider); err != nil {
 		return err

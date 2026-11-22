@@ -37,6 +37,29 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 
 // Each image case submits one user attachment. Read it from the provider's wire format.
 func compactionUserImage(body map[string]any) (string, []byte, error) {
+	if contents, ok := body["contents"].([]any); ok {
+		for _, item := range contents {
+			message, _ := item.(map[string]any)
+			if message["role"] != "user" {
+				continue
+			}
+			parts, _ := message["parts"].([]any)
+			for _, part := range parts {
+				block, _ := part.(map[string]any)
+				inline, _ := block["inlineData"].(map[string]any)
+				media, _ := inline["mimeType"].(string)
+				data, _ := inline["data"].(string)
+				if !strings.HasPrefix(media, "image/") {
+					continue
+				}
+				decoded, err := base64.StdEncoding.DecodeString(data)
+				if err != nil || len(decoded) == 0 || http.DetectContentType(decoded) != media {
+					return "", nil, fmt.Errorf("invalid Gemini image")
+				}
+				return media, decoded, nil
+			}
+		}
+	}
 	messages, ok := body["messages"].([]any)
 	if !ok {
 		messages, _ = body["input"].([]any)
@@ -77,12 +100,12 @@ func compactionUserImage(body map[string]any) (string, []byte, error) {
 
 func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
-	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini} {
 		if streamError && provider != models.ProviderOpenAICompatible {
 			continue
 		}
 		for _, phase := range []string{"preturn", "inturn", "steering", "preturn_native_failure", "inturn_native_failure", "steering_native_failure"} {
-			if strings.Contains(phase, "native") && (provider == models.ProviderOpenAICompatible || (provider == models.ProviderOpenAI && !strings.HasPrefix(phase, "preturn"))) {
+			if strings.Contains(phase, "native") && (provider == models.ProviderOpenAICompatible || provider == models.ProviderGemini || (provider == models.ProviderOpenAI && !strings.HasPrefix(phase, "preturn"))) {
 				continue
 			}
 			for _, media := range []string{"text", "image", "tool_image"} {
@@ -208,6 +231,8 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 								key := "messages"
 								if provider == models.ProviderOpenAI {
 									key = "input"
+								} else if provider == models.ProviderGemini {
+									key = "contents"
 								}
 								items, _ := body[key].([]any)
 								if summaries == 1 && strings.HasPrefix(phase, "steering") && !strings.Contains(text, "STEER_SUMMARY_739") {
@@ -224,10 +249,19 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 										t.Error("summary lost completed tool result")
 									}
 								}
-								if summaries > 1 && strings.HasPrefix(outcome, "summary_overflow") && len(items) >= lastSummarySize {
+								summarySize := len(items)
+								if provider == models.ProviderGemini {
+									summarySize = 0
+									for _, item := range items {
+										row, _ := item.(map[string]any)
+										parts, _ := row["parts"].([]any)
+										summarySize += len(parts)
+									}
+								}
+								if summaries > 1 && strings.HasPrefix(outcome, "summary_overflow") && summarySize >= lastSummarySize {
 									t.Error("summary retry did not shrink")
 								}
-								lastSummarySize = len(items)
+								lastSummarySize = summarySize
 								if outcome == "summary_overflow_exhausted" || outcome == "summary_overflow_once" && summaries == 1 {
 									compactionMatrixError(w, streamError, 400, "context_length_exceeded", "context length exceeded")
 									return
@@ -364,6 +398,9 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 						if provider == models.ProviderAnthropic {
 							model = "claude-opus-5-5"
 						}
+						if provider == models.ProviderGemini {
+							model = "gemini-3.8-flash"
+						}
 						ctx, cancel := context.WithTimeout(compactionTestContext(), 2*time.Minute)
 						defer cancel()
 						req := llmcontracts.AgentRequest{ProjectID: "default", ExecID: exec.ID, Ctx: ctx, Operation: llmcontracts.OperationStreaming, Followup: true, Message: "CURRENT_REQUEST_739", WorkDir: dir, DisableNativeCompaction: true, ChatHistory: []models.Execution{{PromptSent: "OLDER_REQUEST", Output: "OLDER_ANSWER", Status: models.ExecCompleted}}, Agent: models.LLMConfig{ID: "saved-model-" + string(provider), Provider: provider, Model: model, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1", PresetSlug: "vllm", ContextWindow: 200000, MaxTokens: 1000, DisableNativeCompaction: true}}
@@ -389,6 +426,7 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 						req.ExecID = exec.ID
 						req.ChatHistory = []models.Execution{oldExecution}
 						svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+						configureGeminiCompactionServer(svc, server.URL)
 						if warmup {
 							seed := req
 							seed.ExecID = oldExecution.ID
@@ -512,6 +550,7 @@ func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 							req.ForceNativeCompaction = false
 							req.Agent.ForceNativeCompaction = false
 							fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+							configureGeminiCompactionServer(fresh, server.URL)
 							nextResult, nextErr := fresh.callProviderWithCompaction(fresh.providerAdapters[provider], req)
 							require.NoError(t, nextErr)
 							require.Contains(t, nextResult.Output, "RESTART_FINAL_739")
@@ -586,6 +625,15 @@ func compactionServerReply(w http.ResponseWriter, provider models.LLMProvider, t
 		emit(map[string]any{"type": "response.output_item.done", "output_index": len(items), "item": item})
 		items = append(items, item)
 		emit(map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp739", "status": "completed", "output": items, "usage": map[string]int{"input_tokens": 20, "output_tokens": 5}}})
+	case models.ProviderGemini:
+		parts := []any{}
+		if text != "" {
+			parts = append(parts, map[string]any{"text": text})
+		}
+		if file != "" {
+			parts = append(parts, map[string]any{"functionCall": map[string]any{"id": "read739", "name": "read_file", "args": json.RawMessage(args)}})
+		}
+		emit(map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"role": "model", "parts": parts}, "finishReason": "STOP"}}, "usageMetadata": map[string]int{"promptTokenCount": 20, "candidatesTokenCount": 5, "totalTokenCount": 25}})
 	case models.ProviderAnthropic:
 		index := 0
 		emit(map[string]any{"type": "message_start", "message": map[string]any{"id": "msg739", "usage": map[string]int{"input_tokens": 20}}})
@@ -638,6 +686,8 @@ func compactionServerPartialFailure(w http.ResponseWriter, provider models.LLMPr
 	switch provider {
 	case models.ProviderOpenAI:
 		events = []any{map[string]any{"type": "response.output_text.delta", "delta": "POST_SUMMARY_PARTIAL"}, map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "code": "invalid_request_error", "message": "nonretryable failure"}}}
+	case models.ProviderGemini:
+		events = []any{map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": "POST_SUMMARY_PARTIAL"}}}}}}}
 	case models.ProviderAnthropic:
 		events = []any{
 			map[string]any{"type": "message_start", "message": map[string]any{"id": "partial"}},
@@ -664,6 +714,8 @@ func compactionMatrixSavedSteering(t *testing.T, provider models.LLMProvider, ra
 		key = "responses_input"
 	} else if provider == models.ProviderAnthropic {
 		key = "messages"
+	} else if provider == models.ProviderGemini {
+		key = "contents"
 	}
 	if raw != "" {
 		if key != "" {
@@ -676,10 +728,17 @@ func compactionMatrixSavedSteering(t *testing.T, provider models.LLMProvider, ra
 	if len(messages) == 0 {
 		messages = []any{map[string]any{"role": "user", "content": "OLDER_REQUEST"}, map[string]any{"role": "assistant", "content": "OLDER_ANSWER"}}
 	}
+	if provider == models.ProviderGemini && raw == "" {
+		messages = []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": "OLDER_REQUEST"}}}, map[string]any{"role": "model", "parts": []any{map[string]any{"text": "OLDER_ANSWER"}}}}
+	}
 	steer := map[string]any{"role": "user", "content": "OLDER_STEER_739"}
 	if provider == models.ProviderAnthropic {
 		delete(steer, "content")
 		steer["content_blocks"] = []any{map[string]any{"type": "text", "text": "OLDER_STEER_739"}}
+	}
+	if provider == models.ProviderGemini {
+		delete(steer, "content")
+		steer["parts"] = []any{map[string]any{"text": "OLDER_STEER_739"}}
 	}
 	messages = append(messages, steer)
 	var value any = messages

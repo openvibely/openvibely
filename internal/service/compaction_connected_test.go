@@ -240,6 +240,7 @@ func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 						defer func() { openaiclient.OpenAIAPIBaseURL = oldURL }()
 						req := llmcontracts.AgentRequest{ProjectID: "default", Ctx: ctx, ExecID: active.ID, Agent: agent, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, WorkDir: dir, Message: active.PromptSent, ChatHistory: []models.Execution{old}}
 						svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+						configureGeminiCompactionServer(svc, server.URL)
 						seed := req
 						seed.ExecID = old.ID
 						svc.persistNativeProviderStateCheckpoint(seed, "openai_responses", string(native))
@@ -309,6 +310,7 @@ func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 						mu.Unlock()
 						// Fresh service and provider adapters: no in-memory conversation survives.
 						fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+						configureGeminiCompactionServer(fresh, server.URL)
 						req.Ctx = ctx
 						req.ExecID = next.ID
 						req.Message = next.PromptSent
@@ -565,6 +567,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						})
 					}
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+					configureGeminiCompactionServer(svc, server.URL)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[agent.Provider], req)
 					require.NoError(t, err)
 					if phase == "preturn" && compact {
@@ -627,6 +630,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						req.ContextTokenEstimate = 190000
 					}
 					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+					configureGeminiCompactionServer(fresh, server.URL)
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[agent.Provider], req)
 					if summaryAfterNative {
 						require.Equal(t, 1, reloadNativeCalls)
@@ -662,6 +666,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						req.ChatHistory = history
 						req.ContextTokenEstimate = 0
 						fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+						configureGeminiCompactionServer(fresh, server.URL)
 						_, err = fresh.callProviderWithCompaction(fresh.providerAdapters[agent.Provider], req)
 						require.NoError(t, err)
 						require.Equal(t, 2, nextCalls)
@@ -680,7 +685,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 
 func runConnectedProviderSwitchLifecycle(t *testing.T, streamError bool) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
-	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
+	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini}
 	for _, from := range providers {
 		for _, to := range providers {
 			modes := []string{"below_limit", "summary", "smaller_target", "summary_source", "inturn_summary_source", "steering_summary_source", "tool_image_source", "partial_summary_source", "partial_steering_summary_source", "failed_summary_source", "failed_steering_summary_source"}
@@ -892,8 +897,14 @@ func runConnectedProviderSwitchLifecycle(t *testing.T, streamError bool) {
 						if p == models.ProviderAnthropic {
 							model = "claude-opus-5-5"
 						}
+						if p == models.ProviderGemini {
+							model = "gemini-3.8-flash"
+						}
 						configIndex++
 						a := models.LLMConfig{Name: fmt.Sprintf("saved model %d", configIndex), Provider: p, Model: model, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", ContextWindow: 200000, BaseURL: server.URL + "/v1", PresetSlug: "vllm"}
+						if p == models.ProviderGemini {
+							a.DefaultMaxTokens = 16384
+						}
 						if mode == "smaller_target" && configIndex == 2 {
 							a.ContextWindow = 64000
 						}
@@ -937,6 +948,7 @@ func runConnectedProviderSwitchLifecycle(t *testing.T, streamError bool) {
 						})
 					}
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+					configureGeminiCompactionServer(svc, server.URL)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[from], req)
 					if continuationFailure {
 						require.Error(t, err)
@@ -1018,6 +1030,7 @@ func runConnectedProviderSwitchLifecycle(t *testing.T, streamError bool) {
 						req.ContextTokenEstimate = 190000
 					}
 					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+					configureGeminiCompactionServer(fresh, server.URL)
 					if mode == "smaller_target" {
 						loaded, loadErr := fresh.loadProviderReplayHistory(req)
 						require.NoError(t, loadErr)
@@ -1068,6 +1081,7 @@ func runConnectedProviderSwitchLifecycle(t *testing.T, streamError bool) {
 					}
 					req.ContextTokenEstimate = 0
 					fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+					configureGeminiCompactionServer(fresh, server.URL)
 					before := summaries
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
@@ -1090,7 +1104,7 @@ func runConnectedProviderSwitchLifecycle(t *testing.T, streamError bool) {
 
 func TestConnectedImageFollowupLifecycle(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
-	for _, route := range []string{"openai_http", "openai_websocket", "anthropic", "openai_compatible"} {
+	for _, route := range []string{"openai_http", "openai_websocket", "anthropic", "openai_compatible", "gemini"} {
 		for _, compact := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/summary=%t", route, compact), func(t *testing.T) {
 				provider := models.ProviderOpenAI
@@ -1102,6 +1116,10 @@ func TestConnectedImageFollowupLifecycle(t *testing.T) {
 				case "anthropic":
 					provider = models.ProviderAnthropic
 					model = "claude-opus-5-5"
+				case "gemini":
+					provider = models.ProviderGemini
+					model = "gemini-3.8-flash"
+					transport = "http"
 				case "openai_compatible":
 					provider = models.ProviderOpenAICompatible
 					model = "fixture"
@@ -1138,7 +1156,7 @@ func TestConnectedImageFollowupLifecycle(t *testing.T) {
 						return
 					}
 					expectedMedia := "image/png"
-					if provider == models.ProviderAnthropic {
+					if provider == models.ProviderAnthropic || provider == models.ProviderGemini {
 						expectedMedia = "image/jpeg"
 					}
 					if !strings.Contains(text, expectedMedia) {
@@ -1164,6 +1182,7 @@ func TestConnectedImageFollowupLifecycle(t *testing.T) {
 					req.ContextTokenEstimate = 190000
 				}
 				svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+				configureGeminiCompactionServer(svc, server.URL)
 				result, err := svc.callProviderWithCompaction(svc.providerAdapters[provider], req)
 				require.NoError(t, err)
 				require.NoError(t, stores.Executions.Complete(ctx, active.ID, models.ExecCompleted, result.Output, "", 0, 0))
@@ -1182,6 +1201,7 @@ func TestConnectedImageFollowupLifecycle(t *testing.T) {
 				req.Attachments = nil
 				req.ContextTokenEstimate = 0
 				fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+				configureGeminiCompactionServer(fresh, server.URL)
 				before := summaries
 				result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[provider], req)
 				require.NoError(t, err)
@@ -1218,7 +1238,7 @@ func compactionTestContext() context.Context {
 }
 
 func TestConnectedRepeatedSummaryPreservesSavedReferences(t *testing.T) {
-	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderGemini} {
 		for _, phase := range []string{"preturn", "provider_overflow"} {
 			t.Run(string(provider)+"/"+phase, func(t *testing.T) {
 				t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
@@ -1229,6 +1249,9 @@ func TestConnectedRepeatedSummaryPreservesSavedReferences(t *testing.T) {
 				model := "gpt-5.3-codex"
 				if provider == models.ProviderAnthropic {
 					model = "claude-opus-5-5"
+				}
+				if provider == models.ProviderGemini {
+					model = "gemini-3.8-flash"
 				} else if provider == models.ProviderOpenAICompatible {
 					model = "fixture"
 				}
@@ -1279,6 +1302,7 @@ func TestConnectedRepeatedSummaryPreservesSavedReferences(t *testing.T) {
 						req.ContextTokenEstimate = 190000
 					}
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					configureGeminiCompactionServer(svc, server.URL)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[provider], req)
 					require.NoError(t, err)
 					require.NoError(t, stores.Executions.Complete(ctx, active.ID, models.ExecCompleted, result.Output, "", 0, 0))

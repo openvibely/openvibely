@@ -21,7 +21,7 @@ func TestAnthropicFollowupSwitchSendsToolsWithoutCompaction(t *testing.T) {
 		{"role":"user","content_blocks":[{"type":"tool_result","tool_use_id":"b","content":"file B"},{"type":"tool_result","tool_use_id":"a","content":"file A"}]},
 		{"role":"assistant","content":"Both files checked."}
 	]}`
-	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderGemini} {
 		t.Run(string(provider), func(t *testing.T) {
 			var requests [][]byte
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

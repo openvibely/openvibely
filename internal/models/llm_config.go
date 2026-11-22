@@ -12,6 +12,7 @@ const (
 	ProviderOpenAI           LLMProvider = "openai"
 	ProviderOpenAICompatible LLMProvider = "openai_compatible"
 	ProviderOllama           LLMProvider = "ollama"
+	ProviderGemini           LLMProvider = "gemini"
 	ProviderMixture          LLMProvider = "mixture"
 	ProviderTest             LLMProvider = "test"
 )
@@ -136,7 +137,7 @@ func ModelSupportsTemperature(provider LLMProvider, model string) bool {
 	switch provider {
 	case ProviderMixture:
 		return false
-	case ProviderOpenAI, ProviderAnthropic:
+	case ProviderOpenAI, ProviderAnthropic, ProviderGemini:
 		if spec, ok := LookupModel(provider, normalizedModel); ok {
 			return spec.SupportsTemperature
 		}
@@ -151,7 +152,7 @@ func ModelSupportsTemperature(provider LLMProvider, model string) bool {
 // IsOAuth returns true if this config uses OAuth authentication.
 func (c *LLMConfig) IsOAuth() bool {
 	return c.AuthMethod == AuthMethodOAuth &&
-		(c.Provider == ProviderAnthropic || c.Provider == ProviderOpenAI || c.Provider == ProviderOpenAICompatible)
+		(c.Provider == ProviderAnthropic || c.Provider == ProviderOpenAI || c.Provider == ProviderOpenAICompatible || c.Provider == ProviderGemini)
 }
 
 // IsAnthropicAPIKey returns true if this is an Anthropic config using API key authentication.
@@ -196,6 +197,8 @@ func (c *LLMConfig) IsCallableMixtureSlot() bool {
 		return BuiltInModelSupportedForAuth(c.Provider, c.Model, c.AuthMethod) && (c.IsAnthropicAPIKey() || c.IsOAuth())
 	case ProviderOpenAICompatible:
 		return c.IsOpenAICompatibleAPIKey() || c.IsOAuth()
+	case ProviderGemini:
+		return BuiltInModelSupportedForAuth(c.Provider, c.Model, c.AuthMethod) && (c.AuthMethod == AuthMethodAPIKey || c.IsOAuth())
 	case ProviderOllama, ProviderTest:
 		return true
 	default:

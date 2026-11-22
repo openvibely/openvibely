@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
+	"strings"
 	"testing"
 
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmgemini "github.com/openvibely/openvibely/internal/llm/gemini"
 	compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"github.com/openvibely/openvibely/internal/models"
+	gemini "github.com/openvibely/openvibely/pkg/gemini_client"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +35,7 @@ func TestProviderSwitchParallelImages(t *testing.T) {
 			{"type":"message","role":"assistant","content":"first round done"},
 			{"type":"function_call","call_id":"d","name":"read_file","arguments":"{}"},
 			{"type":"function_call_output","call_id":"d","output":"D"}]}`
-		for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderAnthropic} {
+		for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama, models.ProviderAnthropic, models.ProviderGemini} {
 			for _, mode := range []string{"summary", "followup"} {
 				name := string(provider) + "/" + mode
 				if multiple {
@@ -54,6 +57,9 @@ func TestProviderSwitchParallelImages(t *testing.T) {
 							if provider == models.ProviderAnthropic {
 								outgoing = llmanthropic.SummaryHistory(req.ChatHistory)
 							}
+							if provider == models.ProviderGemini {
+								outgoing = llmgemini.BuildHistory(req.ChatHistory)
+							}
 							raw, err := json.Marshal(outgoing)
 							require.NoError(t, err)
 							require.NoError(t, json.Unmarshal(raw, &input))
@@ -66,6 +72,23 @@ func TestProviderSwitchParallelImages(t *testing.T) {
 					// order, exact image payloads, and the next tool round.
 					var events []string
 					for _, raw := range input {
+						if provider == models.ProviderGemini && mode == "followup" {
+							var c gemini.Content
+							require.NoError(t, json.Unmarshal(raw, &c))
+							for _, p := range c.Parts {
+								switch {
+								case p.FunctionCall != nil:
+									events = append(events, "call:"+p.FunctionCall.ID)
+								case p.FunctionResponse != nil:
+									events = append(events, "result:"+p.FunctionResponse.ID)
+								case p.InlineData != nil:
+									events = append(events, "data:"+p.InlineData.MimeType+";base64,"+p.InlineData.Data)
+								case p.Text != "":
+									events = append(events, p.Text)
+								}
+							}
+							continue
+						}
 						var m struct {
 							ContentBlocks json.RawMessage `json:"content_blocks"`
 							Role          string
@@ -131,6 +154,13 @@ func TestProviderSwitchParallelImages(t *testing.T) {
 func containsStructuredImage(value any) bool {
 	switch v := value.(type) {
 	case map[string]any:
+		for _, key := range []string{"inlineData", "fileData"} {
+			media, _ := v[key].(map[string]any)
+			mime, _ := media["mimeType"].(string)
+			if strings.HasPrefix(mime, "image/") {
+				return true
+			}
+		}
 		if v["type"] == "image" || v["type"] == "image_url" || v["type"] == "input_image" {
 			return true
 		}
@@ -154,7 +184,7 @@ func TestAnthropicToolResultImageConversion(t *testing.T) {
  {"role":"assistant","content_blocks":[{"type":"tool_use","id":"a","name":"view_image","input":{}},{"type":"tool_use","id":"b","name":"view_image","input":{}}]},
  {"role":"user","content_blocks":[{"type":"tool_result","tool_use_id":"a","content":[{"type":"text","text":"image A"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"QQ=="}}]},{"type":"tool_result","tool_use_id":"b","content":[{"type":"text","text":"image B"},{"type":"image","source":{"type":"url","url":"https://example.com/b.png"}}]}]},
  {"role":"assistant","content":"done"}]}`
-	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderOpenAICompatible} {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderGemini} {
 		for _, summary := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/summary=%t", provider, summary), func(t *testing.T) {
 				history := []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}

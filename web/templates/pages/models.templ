@@ -80,6 +80,9 @@ func oauthConnectionAccountLabel(connection models.OAuthConnection) string {
 	if connection.Provider == models.ProviderOpenAI {
 		return "OpenAI account"
 	}
+	if connection.Provider == models.ProviderGemini {
+		return "Google account"
+	}
 	return "OAuth account"
 }
 
@@ -204,16 +207,17 @@ func builtInModelOptionsJSON() string {
 		Temperature bool     `json:"temperature"`
  FastMode bool `json:"fastMode"`
 		OAuth       bool     `json:"oauth"`
+ OAuthOnly bool `json:"oauthOnly"`
 		DefaultEffort string `json:"defaultEffort"`
 		ContextWindow int `json:"context_length"`
 		MaxOutputTokens int `json:"max_output_tokens"`
 	}
 	data := map[string][]modelOption{}
-	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAI} {
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderGemini} {
 		for _, spec := range models.ProviderModels(provider) {
 			data[string(provider)] = append(data[string(provider)], modelOption{
 				Value: spec.ID, Label: spec.Label, Efforts: spec.ReasoningEfforts,
-				Temperature: spec.SupportsTemperature, FastMode: spec.SupportsFastMode, OAuth: spec.SupportsOAuth,
+				Temperature: spec.SupportsTemperature, FastMode: spec.SupportsFastMode, OAuth: spec.SupportsOAuth, OAuthOnly: spec.OAuthOnly,
 				DefaultEffort: spec.DefaultReasoningEffort,
 				ContextWindow: spec.ContextWindow, MaxOutputTokens: spec.MaxOutputTokens,
 			})
@@ -378,6 +382,12 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 											} else {
 												OpenAI (API Key) / { agent.Model }
 											}
+										} else if agent.Provider == models.ProviderGemini {
+											if agent.AuthMethod == models.AuthMethodOAuth {
+												Google Gemini (OAuth) / { agent.Model }
+											} else {
+												Google Gemini (API Key) / { agent.Model }
+											}
 										} else if agent.Provider == models.ProviderOpenAICompatible {
 											OpenAI-Compatible (API Key) / { agent.Model }
 											if agent.BaseURL != "" {
@@ -493,6 +503,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 								<optgroup label="Model Providers">
 									<option value="anthropic">Anthropic</option>
 									<option value="openai">OpenAI</option>
+								<option value="gemini">Google Gemini</option>
 									<option value="openai_compatible_openrouter">OpenRouter</option>
 									<option value="openai_compatible_nvidia_nim">NVIDIA NIM</option>
 									<option value="openai_compatible_vllm">Local vLLM</option>
@@ -536,6 +547,13 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						<select name="anthropic_auth_type" id="model_anthropic_auth_type" class="select select-bordered" onchange="toggleAnthropicAuthFields()">
 							<option value="api_key">API Key</option>
 							<option value="oauth">OAuth</option>
+						</select>
+					</div>
+					<div id="gemini_auth_type_field" class="form-control mb-3 hidden">
+						<label class="label"><span class="label-text">Authentication</span></label>
+						<select name="gemini_auth_type" id="model_gemini_auth_type" class="select select-bordered" onchange="toggleGeminiAuthFields()">
+							<option value="api_key">API Key</option>
+							<option value="oauth">Google account (OAuth)</option>
 						</select>
 					</div>
 					<!-- Auth type selector for OpenAI -->
@@ -779,6 +797,20 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					</div>
 					<div id="subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your Anthropic subscription through OAuth.</div>
 						<div id="openai_subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your OpenAI subscription through OAuth.</div>
+						<div id="gemini_subscription_info_oauth" class="mb-3 hidden">
+							<div class="text-sm opacity-70 mb-3">Uses your Google account through Google sign-in.</div>
+							<div class="form-control mb-3">
+								<label class="label" for="model_gemini_account_type"><span class="label-text">Google account type</span></label>
+								<select name="gemini_account_type" id="model_gemini_account_type" class="select select-bordered">
+									<option value="personal">Personal (Google AI subscription)</option>
+									<option value="business">Business (Google Cloud)</option>
+								</select>
+							</div>
+							<div class="form-control">
+								<label class="label" for="model_gemini_cloud_project"><span class="label-text">Google Cloud project (optional)</span></label>
+								<input type="text" name="gemini_cloud_project" id="model_gemini_cloud_project" class="input input-bordered" autocomplete="off" placeholder="Google Cloud project for business accounts"/>
+							</div>
+						</div>
 					<div id="ollama_info" class="mb-3 hidden">
 						<div class="alert alert-info">
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -972,6 +1004,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
             @media (min-width: 641px) {
                 #model_provider_auth_row:has(> #anthropic_auth_type_field:not(.hidden)),
                 #model_provider_auth_row:has(> #openai_auth_type_field:not(.hidden)),
+                #model_provider_auth_row:has(> #gemini_auth_type_field:not(.hidden)),
                 #model_provider_auth_row:has(> #custom_auth_type_field:not(.hidden)) {
                     grid-template-columns: repeat(2, minmax(0, 1fr));
                 }
@@ -1200,6 +1233,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 			var modelOptionsByProvider = {
 					anthropic: builtInModelOptions.anthropic || [],
 					openai: builtInModelOptions.openai || [],
+					gemini: builtInModelOptions.gemini || [],
 						openai_compatible: [
 							{ value: 'local-model', label: 'Local/custom model', efforts: [] }
 						],
@@ -1346,11 +1380,12 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					var options = modelOptionsByProvider[provider] || modelOptionsByProvider[canonicalProvider(provider)] || [];
 					var normalizedProvider = canonicalProvider(provider);
 					var oauthSelected = (normalizedProvider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth') ||
-						(normalizedProvider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth');
+						(normalizedProvider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth') ||
+						(normalizedProvider === 'gemini' && document.getElementById('model_gemini_auth_type').value === 'oauth');
 					if (oauthSelected) {
 						return options.filter(function(option) { return option.oauth === true; });
 					}
-					return options;
+					return options.filter(function(option) { return option.oauthOnly !== true; });
 				}
 
 				function selectedModelOption(provider, model) {				var options = modelOptionsForProvider(provider);
@@ -1449,7 +1484,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				}
 
 				if (selectedModel && !hasSelected) {
-					var builtInProvider = canonicalProvider(provider) === 'openai' || canonicalProvider(provider) === 'anthropic';
+					var builtInProvider = ['openai', 'anthropic', 'gemini'].indexOf(canonicalProvider(provider)) !== -1;
 					var customOpt = document.createElement('option');
 					customOpt.value = selectedModel;
 					customOpt.textContent = selectedModel + (builtInProvider ? ' (unavailable — select another model)' : ' (custom)');
@@ -1502,7 +1537,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				function modelSupportsTemperature(provider, model) {
 					var normalizedModel = (model || '').trim().toLowerCase();
 					if (provider === 'mixture') return false;
-					if (provider === 'openai' || provider === 'anthropic') {
+					if (provider === 'openai' || provider === 'anthropic' || provider === 'gemini') {
 						var option = selectedModelOption(provider, normalizedModel);
 						return !option || option.temperature !== false;
 					}
@@ -1643,6 +1678,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 										if (generation !== modelOAuthSetupGeneration) return;
 										if (!result.ok) throw Error(state.message || state.error || 'Sign-in expired. Connect OAuth again.');
 										if (state.connected) {status.textContent='Connected';discoverOpenAICompatibleModels();return;}
+										if (state.progress) status.textContent=state.progress;
 										if (Date.now() >= deadline) throw Error('Sign-in expired. Connect OAuth again.');
 										setTimeout(poll,1000);
 									} catch(error) {if(generation === modelOAuthSetupGeneration){sessionInput.value='';status.textContent=error.message;}}
@@ -1974,7 +2010,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 							var provider = document.getElementById('model_provider').value;
 							var oauthConnection = document.getElementById('model_oauth_connection_id');
 							var originalOAuthConnection = form ? (form.dataset.originalOAuthConnectionId || '') : '';
-							if (form && form.dataset.mode === 'edit' && (provider === 'openai' || provider === 'anthropic') &&
+							if (form && form.dataset.mode === 'edit' && (provider === 'openai' || provider === 'anthropic' || provider === 'gemini') &&
 								oauthConnection && oauthConnection.value !== originalOAuthConnection &&
 								form.__confirmedOAuthConnection !== oauthConnection.value) {
 								var selectedConnection = oauthConnection.value;
@@ -2352,6 +2388,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 							document.getElementById('model_base_url_field').classList.add('hidden');
 								document.getElementById('mixture_fields').classList.add('hidden');
 									document.getElementById('openai_api_key_info').classList.add('hidden');					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
+					document.getElementById('gemini_subscription_info_oauth').classList.add('hidden');
 				}
 
 				function selectedProjectIDForModelMutation() {
@@ -2524,6 +2561,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						/* Map DB provider values to UI values. */
 						var uiProvider = dbProvider;				var anthropicAuthType = 'api_key';
 				var openaiAuthType = 'api_key';
+				var geminiAuthType = authMethod === 'oauth' ? 'oauth' : 'api_key';
 				var openaiConnectionMethod = 'oauth';
 					if (dbProvider === 'anthropic') {
 						uiProvider = 'anthropic';
@@ -2570,6 +2608,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					document.getElementById('model_provider').value = uiProvider;
 				document.getElementById('model_anthropic_auth_type').value = anthropicAuthType;
 				document.getElementById('model_openai_auth_type').value = openaiAuthType;
+				document.getElementById('model_gemini_auth_type').value = geminiAuthType;
 				document.getElementById('model_openai_connection_method').value = openaiConnectionMethod;
 				document.getElementById('model_oauth_connection_id').value = oauthConnectionId || 'new';
 					document.getElementById('model_api_key').value = apiKey;
@@ -2633,6 +2672,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				var apiKeyInput = document.getElementById('model_api_key');
 				var anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');
 				var openaiAuthTypeField = document.getElementById('openai_auth_type_field');
+				var geminiAuthTypeField = document.getElementById('gemini_auth_type_field');
 				var openaiConnectionMethodField = document.getElementById('openai_connection_method_field');
 				var authMethodField = document.getElementById('auth_method_field');
 				var ollamaInfo = document.getElementById('ollama_info');
@@ -2650,7 +2690,16 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				document.getElementById('model_output_limit_field').classList.toggle('hidden', !compatibleOutput);
 				document.getElementById('model_default_max_tokens').disabled = !compatibleOutput;
 				if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');
-				if (provider === 'anthropic') {
+				geminiAuthTypeField.classList.toggle('hidden', provider !== 'gemini');
+				if (provider === 'gemini') {
+					anthropicAuthTypeField.classList.add('hidden');
+					openaiAuthTypeField.classList.add('hidden');
+					openaiConnectionMethodField.classList.add('hidden');
+					authMethodField.classList.add('hidden');
+					document.getElementById('model_auth_method').disabled = true;
+					document.getElementById('model_openai_connection_method').disabled = true;
+					toggleGeminiAuthFields();
+				} else if (provider === 'anthropic') {
 					anthropicAuthTypeField.classList.remove('hidden');
 					openaiAuthTypeField.classList.add('hidden');
 					openaiConnectionMethodField.classList.add('hidden');
@@ -2728,7 +2777,8 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                 function updateOAuthConnectionAction() {
                     var provider = canonicalProvider(document.getElementById('model_provider').value);
                     var builtInOAuth = (provider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth') ||
-                        (provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth');
+                        (provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth') ||
+						(provider === 'gemini' && document.getElementById('model_gemini_auth_type').value === 'oauth');
                     document.getElementById('model_oauth_connection_action').classList.toggle('hidden', !builtInOAuth);
                     var selected = document.getElementById('model_oauth_connection_id').selectedOptions[0];
                     document.getElementById('model_oauth_connection_status').textContent = '';
@@ -2795,6 +2845,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                                 button.textContent = 'Reconnect';
                                 return;
                             }
+                            if (state.progress) status.textContent = state.progress;
                             if (Date.now() >= deadline) throw Error('Sign-in timed out. Connect OAuth again to retry.');
                             await new Promise(function(resolve) {setTimeout(resolve, 1000);});
                         }
@@ -2814,8 +2865,9 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					function updateOAuthConnectionField() {
 					var provider = canonicalProvider(document.getElementById('model_provider').value);
 					var oauthSelected = (provider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth') ||
-						(provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth');
-					if ((provider === 'openai' || provider === 'anthropic') && !oauthSelected) resetModelOAuthSetup();
+						(provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth') ||
+						(provider === 'gemini' && document.getElementById('model_gemini_auth_type').value === 'oauth');
+					if ((provider === 'openai' || provider === 'anthropic' || provider === 'gemini') && !oauthSelected) resetModelOAuthSetup();
 					var field = document.getElementById('oauth_connection_field');
 					var select = document.getElementById('model_oauth_connection_id');
 					field.classList.toggle('hidden', !oauthSelected);
@@ -2969,6 +3021,19 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				updateOAuthConnectionField();
 			}
 
+					function toggleGeminiAuthFields() {
+						var oauth = document.getElementById('model_gemini_auth_type').value === 'oauth';
+						var apiKeyField = document.getElementById('api_key_field');
+						var apiKeyInput = document.getElementById('model_api_key');
+						hideAllInfoBoxes();
+						apiKeyField.classList.toggle('hidden', oauth);
+						apiKeyInput.required = !oauth && !isEditingModelForm();
+						document.getElementById('gemini_subscription_info_oauth').classList.toggle('hidden', !oauth);
+						updateOAuthConnectionField();
+						setModelOptions('gemini', document.getElementById('model_id').value);
+						handleModelChange();
+					}
+
 					function toggleOpenAIConnectionMethodFields() {
 						hideAllInfoBoxes();
 						document.getElementById('openai_subscription_info_oauth').classList.remove('hidden');
@@ -3037,6 +3102,8 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					document.getElementById('model_name').value = '';				document.getElementById('model_provider').value = 'anthropic';
 				document.getElementById('model_anthropic_auth_type').value = 'api_key';
 				document.getElementById('model_openai_auth_type').value = 'api_key';
+			document.getElementById('model_gemini_auth_type').value = 'api_key';
+			document.getElementById('model_gemini_account_type').value = 'personal';
 				document.getElementById('model_openai_connection_method').value = 'oauth';
 				document.getElementById('model_api_key').value = '';
 				document.getElementById('model_api_key_submit').value = '';

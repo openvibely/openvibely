@@ -37,34 +37,7 @@ func (s *checkpointUncachedStore) GetChatCompactionCheckpoint(ctx context.Contex
 	return s.ExecutionStore.GetChatCompactionCheckpoint(ctx, typ, id)
 }
 
-// Preserve the production row reader through both instrumentation wrappers.
-// Embedding ExecutionStore alone hides this optional interface and accidentally
-// benchmarks legacy full-transcript materialization instead.
 type checkpointBenchmarkStore struct{ *countingCheckpointStore }
-
-func checkpointBenchmarkRows(ctx context.Context, store persistence.ExecutionStore, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	return store.(interface {
-		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
-	}).ReplayRowsByExecutionIDs(ctx, ids)
-}
-func (s *checkpointBenchmarkStore) ReplayRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	return checkpointBenchmarkRows(ctx, s.ExecutionStore, ids)
-}
-func (s *checkpointUncachedStore) ReplayRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	return checkpointBenchmarkRows(ctx, s.ExecutionStore, ids)
-}
-
-func (s *checkpointBenchmarkStore) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	return checkpointBenchmarkContinuation(ctx, s.ExecutionStore, ids)
-}
-func (s *checkpointUncachedStore) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	return checkpointBenchmarkContinuation(ctx, s.ExecutionStore, ids)
-}
-func checkpointBenchmarkContinuation(ctx context.Context, store persistence.ExecutionStore, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	return store.(interface {
-		ReplayContinuationRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
-	}).ReplayContinuationRowsByExecutionIDs(ctx, ids)
-}
 
 func syntheticImageCheckpoint(t testing.TB, cp *models.ChatCompactionCheckpoint, provider models.LLMProvider, encodedBytes int) {
 	t.Helper()

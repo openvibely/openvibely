@@ -363,6 +363,7 @@ func TestAuthMiddleware_PublicRouteExceptions(t *testing.T) {
 		"/webhooks/inbound/token123",
 		"/callback",
 		"/auth/callback",
+		"/oauth2callback",
 		"/models/oauth/callback",
 		"/channels/github/callback",
 		"/channels/slack/callback",

@@ -114,7 +114,7 @@ func (m *AccountUsageMonitor) RunOnce(ctx context.Context) error {
 	var wg sync.WaitGroup
 	var errsMu sync.Mutex
 	var errs []string
-	for _, provider := range []string{"openai", "anthropic"} {
+	for _, provider := range []string{"openai", "anthropic", "gemini"} {
 		for _, group := range accountUsageGroups(configs, provider) {
 			select {
 			case sem <- struct{}{}:
@@ -178,7 +178,7 @@ func (m *AccountUsageMonitor) EvaluateSnapshot(ctx context.Context, key string, 
 	if err != nil {
 		return err
 	}
-	for _, provider := range []string{"openai", "anthropic"} {
+	for _, provider := range []string{"openai", "anthropic", "gemini"} {
 		for _, group := range accountUsageGroups(configs, provider) {
 			if usageAccountGroupKey(group) == key {
 				return m.evaluateSnapshot(ctx, group, projects, limits, resets)
@@ -253,6 +253,9 @@ func (m *AccountUsageMonitor) evaluateSnapshot(ctx context.Context, group []mode
 // only use a stored identity if the group has a single credential owner.
 func accountMonitorLabel(group []models.LLMConfig, limits *models.AnalyticsUsageAccountLimitsViewModel) string {
 	provider := "OpenAI"
+	if group[0].Provider == models.ProviderGemini {
+		provider = "Gemini"
+	}
 	if group[0].Provider == models.ProviderAnthropic {
 		provider = "Anthropic"
 	}

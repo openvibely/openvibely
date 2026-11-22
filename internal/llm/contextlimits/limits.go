@@ -10,6 +10,7 @@ const (
 	DefaultOpenAICompatibleContextWindow = 128000
 	DefaultAnthropicContextWindow        = 200000
 	DefaultOpenAIContextWindow           = 200000
+	DefaultGeminiContextWindow           = 1048576
 	DefaultReservedOutputTokens          = 16384
 )
 
@@ -56,6 +57,11 @@ func providerInputWindow(agent models.LLMConfig) int {
 			return spec.ContextWindow
 		}
 		return DefaultAnthropicContextWindow
+	case models.ProviderGemini:
+		if spec, ok := models.LookupModel(models.ProviderGemini, agent.Model); ok && spec.ContextWindow > 0 {
+			return spec.ContextWindow
+		}
+		return DefaultGeminiContextWindow
 	case models.ProviderOpenAICompatible:
 		// Without reported metadata, a saved/manual window is authoritative.
 		if agent.ContextWindow > 0 {

@@ -86,7 +86,7 @@ func (s *UsageAnalyticsService) usageResetRequest(ctx context.Context, accountKe
 	}
 	var selected []models.LLMConfig
 	var provider string
-	for _, name := range []string{"openai", "anthropic"} {
+	for _, name := range []string{"openai", "anthropic", "gemini"} {
 		for _, group := range accountUsageGroups(configs, name) {
 			if usageAccountGroupKey(group) == accountKey {
 				selected = group
@@ -97,6 +97,12 @@ func (s *UsageAnalyticsService) usageResetRequest(ctx context.Context, accountKe
 	}
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("account configuration changed; reload accounts")
+	}
+	if provider == "gemini" {
+		if creditID != "" {
+			return nil, fmt.Errorf("Google reset credits are not supported")
+		}
+		return map[string]any{"available_count": 0}, nil
 	}
 	if provider == "anthropic" && creditID != "" && (!anthropicResetGrantID.MatchString(creditID) || !anthropicResetRequestID.MatchString(idempotencyKey)) {
 		return nil, fmt.Errorf("invalid Anthropic grant or request ID")

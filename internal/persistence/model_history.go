@@ -20,6 +20,8 @@ func ModelHistoryFormat(ctx context.Context) (format, itemsKey string, ok bool) 
 		return "envelope", "responses_input", true
 	case models.ProviderAnthropic:
 		return "envelope", "messages", true
+	case models.ProviderGemini:
+		return "envelope", "contents", true
 	case models.ProviderOpenAICompatible, models.ProviderOllama:
 		return "array", "", true
 	default:
