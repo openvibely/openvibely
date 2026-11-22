@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -197,7 +198,10 @@ func (r *Recorder) Action(text string) {
 	}
 	now := time.Since(r.result.Started).Milliseconds()
 	ev := r.result.Events
-	if len(ev) > 0 && ev[len(ev)-1].Text == text && now-ev[len(ev)-1].Millis < 500 {
+	// Only redacted input (typed or clipboard values) is coalesced; discrete
+	// navigation or control keys must each be preserved even when they repeat.
+	const redacted = "[user-provided value omitted]"
+	if len(ev) > 0 && strings.HasSuffix(text, redacted) && ev[len(ev)-1].Text == text && now-ev[len(ev)-1].Millis < 500 {
 		return
 	}
 	if len(ev) >= 20000 {
