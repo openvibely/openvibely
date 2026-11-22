@@ -123,6 +123,13 @@ func plainSizeHint(v any, depth int) (int, bool) {
 		return 0, false
 	}
 	switch x := v.(type) {
+	case jsonview.Value:
+		n, err := x.Size()
+		return n, err == nil
+	case json.RawMessage:
+		n, err := jsonview.EncodedSize(x)
+		return n, err == nil
+
 	case nil:
 		return 4, true
 	case bool:

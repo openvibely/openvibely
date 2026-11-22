@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -73,7 +74,7 @@ func TestGoogleAccountContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var partial strings.Builder
+	var partial streamdecode.Text
 	result, err := c.sendTurn(context.Background(), body, opts, &partial)
 	if err != nil {
 		t.Fatal(err)
@@ -243,7 +244,7 @@ func TestBrokenStreamDoesNotReplayOutput(t *testing.T) {
 	}
 }
 
-func parseStream(body io.Reader, onText func(string), partial *strings.Builder) (*turnResult, error) {
+func parseStream(body io.Reader, onText func(string), partial *streamdecode.Text) (*turnResult, error) {
 	result := &turnResult{}
 	assembler := &callAssembler{}
 	if err := parseStreamInto(body, onText, partial, result, assembler); err != nil {

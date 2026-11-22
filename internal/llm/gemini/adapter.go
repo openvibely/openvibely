@@ -289,7 +289,7 @@ func (a *Adapter) replayChangesSaver(ctx context.Context, execID string) func(co
 // The service hydrates and budgets history first; never reload storage here.
 func (a *Adapter) prepareHistory(ctx context.Context, history []models.Execution) []geminiclient.Content {
 	prepared := preparedhistory.Take(ctx, history, func(h []models.Execution) [][]geminiclient.Content {
-		return [][]geminiclient.Content{BuildHistory(h)}
+		return buildPreparedHistory(ctx, h)
 	})
 	if len(prepared) == 0 {
 		return nil

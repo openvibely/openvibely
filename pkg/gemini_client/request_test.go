@@ -27,14 +27,14 @@ func TestPreparedRequestBudgetAndPermissions(t *testing.T) {
 		if tokens != estimateRequestTokens(first) {
 			t.Fatalf("budget differs: %d != %d", tokens, estimateRequestTokens(first))
 		}
-		oldItem := cache.items[0].(json.RawMessage)
+		oldParts := cache.contents[0].Parts
 		oldTools := cache.tools
 		contents = append(contents, TextContent("model", "answer"))
 		_, _, err = c.prepareRequest(contents, defs, opts, cache)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if &oldItem[0] != &cache.items[0].(json.RawMessage)[0] || oldTools != cache.tools {
+		if &oldParts[0] != &cache.contents[0].Parts[0] || oldTools != cache.tools {
 			t.Fatal("unchanged fields were encoded again")
 		}
 		opts.ToolFilter = func(string) bool { return false }

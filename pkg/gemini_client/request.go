@@ -26,15 +26,10 @@ func (c *Client) prepareRequest(contents []Content, defs []ToolDefinition, opts 
 			items[i] = cache.items[i]
 			snapshots[i] = cache.contents[i]
 		} else {
-			raw, err := requestjson.MarshalValue(contentValue(content))
-			if err != nil {
-				return nil, 0, err
-			}
-			items[i] = json.RawMessage(raw)
+			items[i] = contentValue(content)
 			snapshots[i] = CloneContents([]Content{content})[0]
 		}
 	}
-	cache.contents, cache.items = snapshots, items
 	field, err := requestjson.PrepareItems("contents", items)
 	if err != nil {
 		return nil, 0, err
@@ -110,7 +105,39 @@ func (c *Client) prepareRequest(contents []Content, defs []ToolDefinition, opts 
 		envelope["request"] = json.RawMessage(body)
 		body, err = requestjson.MarshalValue(envelope)
 	}
-	return body, tokens, err
+	if err != nil {
+		return nil, 0, err
+	}
+	// Retain only views into the final request buffer, not per-message buffers
+	// or the previous request. Unchanged rows can be borrowed on the next turn.
+	payload := body
+	if envelope != nil {
+		if err := requestjson.Object(body, func(key string, value json.RawMessage) error {
+			if key == "request" {
+				payload = value
+			}
+			return nil
+		}); err != nil {
+			return nil, 0, err
+		}
+	}
+	var rows []json.RawMessage
+	if err := requestjson.Object(payload, func(key string, value json.RawMessage) error {
+		if key == "contents" {
+			var err error
+			rows, err = requestjson.Array(value)
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, err
+	}
+	cache.contents = snapshots
+	cache.items = make([]any, len(rows))
+	for i, row := range rows {
+		cache.items[i] = row
+	}
+	return body, tokens, nil
 }
 
 // Project provider fields into the shared JSON helpers' supported shapes. Large

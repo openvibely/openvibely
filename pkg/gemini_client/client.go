@@ -245,7 +245,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 			}
 		}
 
-		var partial strings.Builder
+		var partial streamdecode.Text
 		turnResult, err := httpretry.DoStream(ctx, httpretry.Policy{
 			AllowReplay: true,
 			MaxRetries:  httpretry.DefaultMaxRetries,
@@ -253,9 +253,9 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 				applog.Infof("[gemini] retrying turn %d, attempt %d/%d in %v: %v", turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
 		}, func(attemptCtx context.Context) (*turnResult, bool, error) {
-			partial.Reset()
+			partial = streamdecode.Text{}
 			result, err := c.sendTurn(attemptCtx, body, opts, &partial)
-			return result, partial.Len() > 0 || result != nil, err
+			return result, result != nil, err
 		})
 		if err != nil {
 			if text := partial.String(); text != "" {
@@ -524,7 +524,7 @@ func (c *Client) endpoint(model string) string {
 	return c.baseURL + "/models/" + model + ":streamGenerateContent?alt=sse"
 }
 
-func (c *Client) sendTurn(ctx context.Context, body []byte, opts *Options, partial *strings.Builder) (*turnResult, error) {
+func (c *Client) sendTurn(ctx context.Context, body []byte, opts *Options, partial *streamdecode.Text) (*turnResult, error) {
 	limit := opts.MaxContinuationRequests
 	if limit <= 0 {
 		limit = 8
@@ -576,7 +576,7 @@ func (c *Client) sendTurn(ctx context.Context, body []byte, opts *Options, parti
 	}
 }
 
-func (c *Client) sendSegment(ctx context.Context, body []byte, opts *Options, partial *strings.Builder, result *turnResult, assembler *callAssembler) (*turnResult, error) {
+func (c *Client) sendSegment(ctx context.Context, body []byte, opts *Options, partial *streamdecode.Text, result *turnResult, assembler *callAssembler) (*turnResult, error) {
 	endpoint := c.endpoint(opts.Model)
 	tokenUsed := c.accessToken
 	resp, err := c.post(ctx, endpoint, body)
@@ -715,7 +715,7 @@ type streamChunk struct {
 	} `json:"error"`
 }
 
-func parseStreamInto(body io.Reader, onText func(string), partial *strings.Builder, result *turnResult, assembler *callAssembler) error {
+func parseStreamInto(body io.Reader, onText func(string), partial *streamdecode.Text, result *turnResult, assembler *callAssembler) error {
 	scanner := streamdecode.Scanner(body, 32*1024*1024)
 	result.continuationToken = ""
 	result.finishReason = ""
@@ -791,7 +791,7 @@ func parseStreamInto(body io.Reader, onText func(string), partial *strings.Build
 				case p.Text != "":
 					text.WriteString(p.Text)
 					if partial != nil {
-						partial.WriteString(p.Text)
+						partial.View(&text, text.String(), 0)
 					}
 					if onText != nil {
 						onText(p.Text)

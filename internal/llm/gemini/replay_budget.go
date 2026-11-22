@@ -12,7 +12,7 @@ import (
 // EstimateHistoryTokensContext budgets the same contents consumed by the adapter.
 func EstimateHistoryTokensContext(ctx context.Context, history []models.Execution) int {
 	prepared := preparedhistory.Read(ctx, history, func(h []models.Execution) [][]geminiclient.Content {
-		return [][]geminiclient.Content{BuildHistory(h)}
+		return buildPreparedHistory(ctx, h)
 	})
 	total := 0
 	for _, contents := range prepared {
@@ -31,4 +31,18 @@ func EstimateHistoryTokensContext(ctx context.Context, history []models.Executio
 		total += tokens
 	}
 	return total
+}
+
+// checkpointContents gives Gemini its own reusable-state type. The bound
+// checkpoint stays immutable; new exchanges are prepared only for this request.
+type checkpointContents []geminiclient.Content
+
+func buildPreparedHistory(ctx context.Context, history []models.Execution) [][]geminiclient.Content {
+	checkpoint, start, count := preparedhistory.ReadCheckpointHistory(ctx, history, func(saved []models.Execution) checkpointContents {
+		return checkpointContents(BuildHistory(saved))
+	})
+	contents := BuildHistory(history[:start])
+	contents = append(contents, geminiclient.CloneContents(checkpoint)...)
+	contents = append(contents, BuildHistory(history[start+count:])...)
+	return [][]geminiclient.Content{contents}
 }
