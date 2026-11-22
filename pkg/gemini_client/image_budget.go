@@ -35,7 +35,24 @@ func estimateRequestTokens(body []byte) int {
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return tokenestimate.FromByteCount(len(body))
 	}
-	textBytes, mediaTokens := len(body), 0
+	contents := req.Contents
+	if req.SystemInstruction != nil {
+		contents = append(contents, *req.SystemInstruction)
+	}
+	return estimateContentTokens(len(body), contents)
+}
+
+// EstimateContentsTokens budgets replay contents using the request image estimates.
+func EstimateContentsTokens(contents []Content) (int, error) {
+	body, err := json.Marshal(contents)
+	if err != nil {
+		return 0, err
+	}
+	return estimateContentTokens(len(body), contents), nil
+}
+
+func estimateContentTokens(textBytes int, contents []Content) int {
+	mediaTokens := 0
 	addMedia := func(inline *InlineData, file *FileData) {
 		if inline != nil && strings.HasPrefix(strings.ToLower(inline.MimeType), "image/") {
 			encoded, _ := json.Marshal(inline.Data)
@@ -45,10 +62,6 @@ func estimateRequestTokens(body []byte) int {
 		if file != nil && strings.HasPrefix(strings.ToLower(file.MimeType), "image/") {
 			mediaTokens += fallbackImageTokens
 		}
-	}
-	contents := req.Contents
-	if req.SystemInstruction != nil {
-		contents = append(contents, *req.SystemInstruction)
 	}
 	for _, content := range contents {
 		for _, part := range content.Parts {

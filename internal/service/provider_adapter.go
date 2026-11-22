@@ -569,6 +569,9 @@ func estimateHistoryTokensContext(ctx context.Context, provider models.LLMProvid
 	if provider == models.ProviderAnthropic {
 		return llmanthropic.EstimateHistoryTokensContext(ctx, history)
 	}
+	if provider == models.ProviderGemini {
+		return llmgemini.EstimateHistoryTokensContext(ctx, history)
+	}
 	total := 0
 	for _, exec := range history {
 		total += estimateExecutionTokens(exec)
