@@ -413,6 +413,7 @@ func (c *Coordinator) BindWailsUpdater(updater *wailsupdater.Updater) error {
 		stageCtx = context.Background()
 	}
 	c.mu.Unlock()
+	acknowledgeDesktopInstaller()
 	c.StartRecovery(nil)
 	if needsStage {
 		go func() { _ = c.Stage(stageCtx) }()
@@ -1714,14 +1715,15 @@ func (c *Coordinator) StartChecks(ctx context.Context) {
 			if initialCheck {
 				_ = c.checkAndAutoUpdate(checkCtx)
 			}
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
+			ticks, stopTicks := updateCheckTicks()
+			defer stopTicks()
 			for {
 				select {
 				case <-checkCtx.Done():
 					return
-				case <-ticker.C:
+				case tick := <-ticks:
 					_ = c.checkAndAutoUpdate(checkCtx)
+					acknowledgeUpdateTick(tick)
 				}
 			}
 		}()

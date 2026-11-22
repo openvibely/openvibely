@@ -33,11 +33,18 @@ func TestAutomaticPackagedUpdateE2E(t *testing.T) {
 	builds := map[string]string{}
 	for _, version := range []string{"0.5.0", "0.6.0", "0.7.0"} {
 		output := filepath.Join(buildRoot, version, executableName("openvibely"))
+		pkg, artifact := "./cmd/server", "binary"
+		tags := []string{"openvibely_update_testclock"}
 		if distribution == "desktop" {
-			buildDesktopCommand(t, output, version)
-		} else {
-			buildGoCommand(t, "./cmd/server", output, map[string]string{"github.com/openvibely/openvibely/internal/buildinfo.Version": version, "github.com/openvibely/openvibely/internal/buildinfo.Artifact": "binary"})
+			pkg, artifact = "./cmd/desktop", "desktop"
+			if runtime.GOOS == "linux" {
+				tags = append(tags, "gtk3")
+			}
 		}
+		buildGoCommandWithTags(t, pkg, output, map[string]string{
+			"github.com/openvibely/openvibely/internal/buildinfo.Version":  version,
+			"github.com/openvibely/openvibely/internal/buildinfo.Artifact": artifact,
+		}, tags)
 		builds[version] = output
 	}
 	for _, scenario := range []string{"default_on", "disable_enable", "wait_for_work", "cancel_restart_retry", "rollback_no_auto_retry", "failed_install_retry", "missing_stage", "corrupt_stage", "retry_download_failure", "interrupted_retry_download", "expired_metadata_retry", "reuse_stage"} {
@@ -62,16 +69,23 @@ type automaticAppE2E struct {
 	cmd                                                                     *exec.Cmd
 	logs                                                                    func() string
 	sequence                                                                int
+	clockOffset                                                             time.Duration
 }
 
 func (a *automaticAppE2E) start() {
 	a.t.Helper()
+	if err := os.WriteFile(filepath.Join(a.root, "clock"), []byte(fmt.Sprint(int64(a.clockOffset))), 0600); err != nil {
+		a.t.Fatal(err)
+	}
+	_ = os.Remove(filepath.Join(a.root, "clock.ack"))
+	_ = os.Remove(filepath.Join(a.root, "clock.ready"))
 	a.sequence++
 	stdout, stderr, logs := openCommandLogs(a.t, a.root, fmt.Sprintf("app-%d", a.sequence))
 	a.logs = logs
 	cmd := exec.Command(a.installed)
 	cmd.Dir = a.root
 	cmd.Env = append(envWithout("PORT", "OPENVIBELY_DESKTOP_CONFIG_FILE"),
+		"OPENVIBELY_UPDATE_TEST_CLOCK="+filepath.Join(a.root, "clock"),
 		"DATABASE_PATH="+filepath.Join(a.data, "openvibely.db"), "OPENVIBELY_APP_DATA_DIR="+a.data,
 		"PROJECT_REPO_ROOT="+filepath.Join(a.root, "projects"), "OPENVIBELY_PLUGIN_ROOT="+filepath.Join(a.data, "plugins"),
 		"OPENVIBELY_UPDATE_SERVICE_URL="+a.service, "OPENVIBELY_UPDATE_PUBLIC_KEY_FILE="+a.key,
@@ -98,6 +112,16 @@ func (a *automaticAppE2E) start() {
 		a.baseURL = waitForDesktopBaseURLFromLogs(a.t, logs)
 	}
 	a.wait(func(s CoordinatorSnapshot) bool { return s.CurrentVersion == "0.5.0" }, "initial version")
+	if a.distribution == "desktop" {
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(filepath.Join(a.root, "clock.ready")); err == nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		a.t.Fatalf("desktop installer was not registered\n%s", a.logs())
+	}
 }
 func (a *automaticAppE2E) stop() {
 	if a.cmd != nil {
@@ -141,6 +165,11 @@ func (a *automaticAppE2E) wait(check func(CoordinatorSnapshot) bool, label strin
 		s, err = a.snapshot()
 		if err == nil && check(s) {
 			return s
+		}
+		// Startup/UI checks can stage before the desktop installer is ready.
+		// Drive its next scheduled check instead of waiting a real minute.
+		if err == nil && s.State == StateAvailable && s.Staged && s.AutomaticUpdates {
+			a.advance(time.Minute)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -192,12 +221,33 @@ func (a *automaticAppE2E) success() {
 	assertGoBuildInfoVersion(a.t, a.installed, "0.6.0")
 }
 
-// Observe at least one real minute ticker, rather than treating an immediate
-// snapshot as evidence that an automatic retry cannot happen.
+// Advancing the app's update clock also requests a background check. Wait for
+// acknowledgement after that check, not an arbitrary wall-clock sleep.
+func (a *automaticAppE2E) advance(duration time.Duration) {
+	a.t.Helper()
+	a.clockOffset += duration
+	value := fmt.Sprint(int64(a.clockOffset))
+	if err := os.WriteFile(filepath.Join(a.root, "clock.next"), []byte(value), 0600); err != nil {
+		a.t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(a.root, "clock.next"), filepath.Join(a.root, "clock")); err != nil {
+		a.t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(filepath.Join(a.root, "clock.ack"))
+		if err == nil && string(raw) == value {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	a.t.Fatal("update clock advancement was not acknowledged")
+}
+
 func (a *automaticAppE2E) quiet(downloads *atomic.Int32, want int32) {
 	a.t.Helper()
-	deadline := time.Now().Add(65 * time.Second)
-	for time.Now().Before(deadline) {
+	for i := 0; i < 3; i++ {
+		a.advance(time.Minute)
 		s, err := a.snapshot()
 		if err != nil {
 			a.t.Fatal(err)
@@ -208,7 +258,6 @@ func (a *automaticAppE2E) quiet(downloads *atomic.Int32, want int32) {
 		if downloads.Load() != want {
 			a.t.Fatalf("unexpected download count %d, want %d", downloads.Load(), want)
 		}
-		time.Sleep(250 * time.Millisecond)
 	}
 }
 
@@ -329,6 +378,7 @@ func runAutomaticPackagedScenario(t *testing.T, distribution string, builds map[
 		a.quiet(&downloads, 1)
 		if scenario == "disable_enable" {
 			a.settings(true)
+			a.advance(time.Minute)
 		} else {
 			a.post("/api/system/update/apply", "", 202)
 		}
@@ -392,10 +442,8 @@ func runAutomaticPackagedScenario(t *testing.T, distribution string, builds map[
 		}
 	case "expired_metadata_retry":
 		a.stop()
-		// Wait only for the signed test metadata, not the production refresh interval.
-		for time.Now().Unix() <= expiry.Load() {
-			time.Sleep(200 * time.Millisecond)
-		}
+		// Advance expiry while stopped; startup recovery reads this clock.
+		a.clockOffset += 3 * time.Minute
 		expiry.Store(0)
 		// Simulate the daily check becoming due while the app was closed. Preserve
 		// rollback protection, signature metadata and the automatic-attempt guard.
@@ -409,6 +457,7 @@ func runAutomaticPackagedScenario(t *testing.T, distribution string, builds map[
 			t.Fatal(err)
 		}
 		state.LastSuccessfulCheck = time.Now().Add(-25 * time.Hour)
+		state.NextAttempt = time.Now().Add(-time.Hour)
 		raw, err = json.Marshal(state)
 		if err != nil {
 			t.Fatal(err)
