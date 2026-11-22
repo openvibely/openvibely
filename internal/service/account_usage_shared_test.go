@@ -464,13 +464,93 @@ func TestSharedUsageModelChangesPreserveCoordination(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				waitShared(t, func() bool {
-					c.mu.Lock()
-					defer c.mu.Unlock()
-					e := c.entries[c.accountKeys[current[0].Key]]
-					return !e.snapshot.Refreshing && len(e.snapshot.AccountLimits) > 0
+					waitShared(t, func() bool {
+						c.mu.Lock()
+						defer c.mu.Unlock()
+						e := c.entries[c.accountKeys[current[0].Key]]
+						return !e.snapshot.Refreshing && len(e.snapshot.AccountLimits) > 0
+					})
 				})
-			})
+			}
 		}
 	}
-}
+
+	func TestSharedUsageSyncInventoryDetectsAddAndDelete(t *testing.T) {
+		svc, initialAccounts := sharedUsageFixture(t, 1)
+		ctx := context.Background()
+
+		var mu sync.Mutex
+		callsByAccount := map[string]int{}
+		svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
+			mu.Lock()
+			callsByAccount[cfg.OAuthAccountID]++
+			mu.Unlock()
+			p := 25.0
+			return &models.AccountUsageResult{PrimaryLabel: "Weekly", PrimaryUsedPercent: &p}, nil
+		})
+
+		var updatedCount atomic.Int32
+		c := svc.EnableSharedAccountUsage(ctx, func() { updatedCount.Add(1) }, nil)
+		defer c.Stop()
+
+		// Prime initial account.
+		svc.SyncSharedAccountUsage()
+		waitShared(t, func() bool {
+			snap, _ := c.Read(ctx, "", false)
+			s := snap[initialAccounts[0].Key]
+			return !s.Refreshing && len(s.AccountLimits) == 1 && updatedCount.Load() >= 1
+		})
+
+		// Add a second OAuth model on a new account and sync inventory.
+		added := &models.LLMConfig{
+			Name:             "Added OAuth",
+			Provider:         models.ProviderOpenAI,
+			Model:            "test",
+			AuthMethod:       models.AuthMethodOAuth,
+			OAuthAccessToken: "fixture-2",
+			OAuthAccountID:   "acct-2",
+			OAuthExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		}
+		if err := svc.llmConfigRepo.Create(ctx, added); err != nil {
+			t.Fatal(err)
+		}
+		beforeAddUpdates := updatedCount.Load()
+		svc.SyncSharedAccountUsage()
+
+		var addedKey string
+		waitShared(t, func() bool {
+			accounts, err := svc.ListUsageAccounts(ctx)
+			if err != nil || len(accounts) != 2 {
+				return false
+			}
+			for _, a := range accounts {
+				if a.Key != initialAccounts[0].Key {
+					addedKey = a.Key
+				}
+			}
+			snap, _ := c.Read(ctx, "", false)
+			s := snap[addedKey]
+			return !s.Refreshing && len(s.AccountLimits) == 1 && updatedCount.Load() > beforeAddUpdates
+		})
+
+		// Existing unchanged account must not have been re-fetched.
+		mu.Lock()
+		firstCalls := callsByAccount["0"]
+		secondCalls := callsByAccount["acct-2"]
+		mu.Unlock()
+		if firstCalls != 1 || secondCalls != 1 {
+			t.Fatalf("unexpected fetch counts: first=%d second=%d", firstCalls, secondCalls)
+		}
+
+		// Deleting the added OAuth model should evict it and broadcast an update.
+		beforeDeleteUpdates := updatedCount.Load()
+		if err := svc.llmConfigRepo.Delete(ctx, added.ID); err != nil {
+			t.Fatal(err)
+		}
+		svc.SyncSharedAccountUsage()
+		waitShared(t, func() bool {
+			snap, _ := c.Read(ctx, "", false)
+			_, stillPresent := snap[addedKey]
+			return !stillPresent && updatedCount.Load() > beforeDeleteUpdates
+		})
+	}

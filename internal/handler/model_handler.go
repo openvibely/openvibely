@@ -1015,6 +1015,7 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		removeModelOAuthSetup(setupKey)
 	}
 	applog.Infof("[handler] CreateModel success id=%s", a.ID)
+	h.syncAccountUsage()
 	if h.workerSvc != nil {
 		h.workerSvc.DispatchNext()
 	}
@@ -1104,6 +1105,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		removeModelOAuthSetup(setupKey)
 	}
 	applog.Infof("[handler] UpdateModel success id=%s", id)
+	h.syncAccountUsage()
 	if h.workerSvc != nil {
 		h.workerSvc.DispatchNext()
 	}
@@ -1192,6 +1194,7 @@ func (h *Handler) MoveModelsToOAuthConnection(c echo.Context) error {
 			return err
 		}
 	}
+	h.syncAccountUsage()
 	return h.oauthConnectionActionResponse(c)
 }
 
@@ -1233,6 +1236,7 @@ func (h *Handler) DisconnectModelOAuthConnection(c echo.Context) error {
 	if !disconnected {
 		return echo.NewHTTPError(http.StatusConflict, "OAuth account changed; reload and try again")
 	}
+	h.syncAccountUsage()
 	if isHTMX(c) {
 		return h.renderRefreshedModels(c)
 	}
@@ -1300,6 +1304,7 @@ func (h *Handler) DeleteModelsBulk(c echo.Context) error {
 	if err := h.llmConfigRepo.DeleteBulk(c.Request().Context(), ids); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	h.syncAccountUsage()
 	if h.workerSvc != nil {
 		h.workerSvc.DispatchNext()
 	}
@@ -1370,6 +1375,7 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 		applog.Infof("[handler] DeleteModel success id=%s", id)
 	}
 
+	h.syncAccountUsage()
 	if h.workerSvc != nil {
 		h.workerSvc.DispatchNext()
 	}
@@ -1379,6 +1385,13 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 		return h.renderRefreshedModels(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/models")
+}
+
+func (h *Handler) syncAccountUsage() {
+	if h == nil || h.usageAnalyticsSvc == nil {
+		return
+	}
+	h.usageAnalyticsSvc.SyncSharedAccountUsage()
 }
 
 func (h *Handler) renderRefreshedModels(c echo.Context) error {

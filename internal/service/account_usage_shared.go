@@ -47,6 +47,8 @@ type SharedAccountUsage struct {
 	slots       chan struct{}
 	wg          sync.WaitGroup
 	stopped     bool
+	syncing     bool
+	syncPending bool
 	updated     func()
 	evaluate    func(context.Context, string, *models.AnalyticsUsageAccountLimitsViewModel, map[string]any) error
 }
@@ -85,6 +87,41 @@ func (c *SharedAccountUsage) refreshAll() {
 	if _, err := c.Read(c.ctx, "", true); err != nil && c.ctx.Err() == nil {
 		applog.Infof("[account-usage] background refresh: %v", err)
 	}
+}
+
+// SyncInventory reconciles OAuth account inventory asynchronously so newly
+// added, re-authorized, moved, or removed OAuth models update usage promptly.
+func (c *SharedAccountUsage) SyncInventory() {
+	c.mu.Lock()
+	if c.stopped {
+		c.mu.Unlock()
+		return
+	}
+	if c.syncing {
+		c.syncPending = true
+		c.mu.Unlock()
+		return
+	}
+	c.syncing = true
+	c.wg.Add(1)
+	c.mu.Unlock()
+	go func() {
+		defer c.wg.Done()
+		for {
+			if _, err := c.Read(c.ctx, "", false); err != nil && c.ctx.Err() == nil {
+				applog.Infof("[account-usage] inventory sync: %v", err)
+			}
+			c.mu.Lock()
+			if c.stopped || !c.syncPending {
+				c.syncing = false
+				c.syncPending = false
+				c.mu.Unlock()
+				return
+			}
+			c.syncPending = false
+			c.mu.Unlock()
+		}
+	}()
 }
 
 // Read validates inventory on every call, evicts disconnected accounts and starts
@@ -330,6 +367,13 @@ func (s *UsageAnalyticsService) SharedAccountUsage(ctx context.Context, key stri
 }
 
 func (s *UsageAnalyticsService) HasSharedAccountUsage() bool { return s.sharedUsage != nil }
+
+func (s *UsageAnalyticsService) SyncSharedAccountUsage() {
+	if s == nil || s.sharedUsage == nil {
+		return
+	}
+	s.sharedUsage.SyncInventory()
+}
 
 // freshLimits serves synchronous reporting callers through the same scheduler.
 // If another refresh replaces our generation, wait for its result instead.
