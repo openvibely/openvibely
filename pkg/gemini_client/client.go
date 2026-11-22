@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpclient"
@@ -253,6 +254,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 		}
 		allText.WriteString(turnResult.text)
 
+		assignMissingCallIDs(turnResult.parts, turn)
 		modelContent := Content{Role: "model", Parts: turnResult.parts}
 		if len(modelContent.Parts) == 0 {
 			modelContent.Parts = []Part{{Text: ""}}
@@ -290,7 +292,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 				output, isError = fmt.Sprintf("tool %s is not allowed by this agent", call.Name), true
 			case opts.ToolExecutor != nil:
 				var execErr error
-				output, isError, execErr = opts.ToolExecutor(llmcontracts.WithToolCallID(ctx, callID(call, turn, i)), call.Name, normalized)
+				output, isError, execErr = opts.ToolExecutor(llmcontracts.WithToolCallID(ctx, call.ID), call.Name, normalized)
 				if execErr != nil {
 					output, isError = execErr.Error(), true
 				}
@@ -346,11 +348,19 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 	return result, nil
 }
 
-func callID(call FunctionCall, turn, index int) string {
-	if call.ID != "" {
-		return call.ID
+// The ID is stored on the call so its saved result and later replays pair by ID.
+func assignMissingCallIDs(parts []Part, turn int) {
+	now := time.Now().UnixMilli()
+	index := 0
+	for _, p := range parts {
+		if p.FunctionCall == nil {
+			continue
+		}
+		if p.FunctionCall.ID == "" {
+			p.FunctionCall.ID = fmt.Sprintf("gemini_call_%d_%d_%d", now, turn, index)
+		}
+		index++
 	}
-	return fmt.Sprintf("gemini_call_%d_%d", turn, index)
 }
 
 func exclusiveRequestUserInput(calls []FunctionCall) int {

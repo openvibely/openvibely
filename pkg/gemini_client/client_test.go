@@ -87,6 +87,23 @@ func TestSendAPIKeyToolLoop(t *testing.T) {
 	if len(saved) == 0 || len(saved[len(saved)-1]) < 3 {
 		t.Fatalf("replay not saved: %v", saved)
 	}
+	var callID, resultID string
+	for _, c := range saved[len(saved)-1] {
+		for _, p := range c.Parts {
+			if p.FunctionCall != nil {
+				callID = p.FunctionCall.ID
+			}
+			if p.FunctionResponse != nil {
+				resultID = p.FunctionResponse.ID
+			}
+		}
+	}
+	if !strings.HasPrefix(callID, "gemini_call_") || resultID != callID {
+		t.Fatalf("saved call id=%q result id=%q", callID, resultID)
+	}
+	if !strings.Contains(second, `"id":"`+callID+`"`) {
+		t.Fatalf("second request missing call id %q: %s", callID, second)
+	}
 }
 
 func TestSendOAuthCodeAssistWrapperAndUnauthorizedRecovery(t *testing.T) {
