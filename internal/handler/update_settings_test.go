@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +18,8 @@ func TestUpdateSettingsSaveAndRender(t *testing.T) {
 	h := tc.handler
 	project := createProject(t, h, "Updates")
 	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Distribution: "binary"}, "stable", nil, nil, false, "", nil)
-	require.NoError(t, coordinator.SetPersistence(filepath.Join(t.TempDir(), "updates.json")))
+	statePath := filepath.Join(t.TempDir(), "updates.json")
+	require.NoError(t, coordinator.SetPersistence(statePath))
 	h.SetUpdateCoordinator(coordinator)
 	e := echo.New()
 	e.GET("/settings/updates", h.UpdateSettings)
@@ -36,7 +38,11 @@ func TestUpdateSettingsSaveAndRender(t *testing.T) {
 	rec := request(http.MethodGet, "", "")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "App updates")
-	rec = request(http.MethodPost, "automatic_updates=false", "")
+	require.Contains(t, rec.Body.String(), `class="toggle toggle-sm"`)
+	require.NotContains(t, rec.Body.String(), "Unsaved changes")
+	require.NotContains(t, rec.Body.String(), "Enabled by default")
+	require.NotContains(t, rec.Body.String(), "Updates already in progress")
+	rec = request(http.MethodPost, "", "")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "Update settings saved")
 	require.False(t, coordinator.Snapshot().AutomaticUpdates)
@@ -45,4 +51,23 @@ func TestUpdateSettingsSaveAndRender(t *testing.T) {
 	require.False(t, coordinator.Snapshot().AutomaticUpdates)
 	require.Equal(t, http.StatusOK, request(http.MethodPost, "automatic_updates=true", "").Code)
 	require.True(t, coordinator.Snapshot().AutomaticUpdates)
+
+	// An unwritable state destination must preserve the stored preference while
+	// rendering the attempted toggle selection with an error toast and no success.
+	require.NoError(t, os.Remove(statePath))
+	require.NoError(t, os.Mkdir(statePath, 0700))
+	rec = request(http.MethodPost, "", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, coordinator.Snapshot().AutomaticUpdates)
+	require.Contains(t, rec.Body.String(), "data-update-settings-error")
+	require.Contains(t, rec.Body.String(), "Please try again.")
+	require.Contains(t, rec.Body.String(), "window.showToast")
+	require.NotContains(t, rec.Body.String(), "Update settings saved.")
+	require.NotContains(t, rec.Body.String(), " checked")
+	require.NoError(t, os.Remove(statePath))
+	rec = request(http.MethodPost, "", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.False(t, coordinator.Snapshot().AutomaticUpdates)
+	require.Contains(t, rec.Body.String(), "Update settings saved.")
+	require.NotContains(t, rec.Body.String(), "<span hidden data-update-settings-error")
 }

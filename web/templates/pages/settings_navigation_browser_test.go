@@ -34,7 +34,7 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		case "/models", "/agents", "/skills", "/channels", "/personality":
 			content = templ.Raw(`<div id="` + r.URL.Path[1:] + `-container">Configuration</div>`)
 		case "/settings/updates":
-			content = UpdateSettingsContent("project", update.CoordinatorSnapshot{AutomaticUpdates: true, AutomaticUpdatesSupported: true}, true, false)
+			content = UpdateSettingsContent("project", update.CoordinatorSnapshot{AutomaticUpdates: true, AutomaticUpdatesSupported: true}, true, false, "")
 		case "/settings/computer":
 			content = ComputerSettingsContent([]models.Project{{ID: "project", Name: "Project"}}, "project", models.ComputerSettings{Resources: models.DefaultComputerResources(), TimeZone: "UTC", IdleMinutes: 30}, true, false, "")
 		case "/workers", "/settings/workers":
@@ -110,7 +110,7 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 
 		}
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/settings/updates"]').click();'app updates'`)
-		waitFor("updates keep settings tree and default enabled", `String(!!document.getElementById('update-settings-content') && document.documentElement.classList.contains('appearance-settings') && document.querySelector('[name="automatic_updates"]').value === 'true')`, "true")
+		waitFor("updates keep settings tree and default enabled", `String(!!document.getElementById('update-settings-content') && document.documentElement.classList.contains('appearance-settings') && document.querySelector('[name="automatic_updates"]').checked)`, "true")
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/settings/computer"]').click();'computer settings'`)
 		waitFor("computer keeps settings tree", `String(!!document.getElementById('computer-settings-content') && document.documentElement.classList.contains('appearance-settings') && document.getElementById('appearance-settings-nav').getBoundingClientRect().width > 0 && !document.documentElement.classList.contains('task-list-collapsed'))`, "true")
 		waitFor("computer keeps retained workspace", `String(window.originalWorkspace.isConnected && window.originalWorkspace.closest('#settings-retained-workspace').hidden)`, "true")
