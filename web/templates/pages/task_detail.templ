@@ -2276,7 +2276,18 @@ templ SwarmContextPanel(task *models.Task) {
 				<h3 class="font-semibold mb-2">Swarm Context</h3>
 				<div class="space-y-1 text-sm">
 					if task.ParentTaskID != nil {
-						<div>Part of swarm: <a class="link link-primary" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?project_id=%s", *task.ParentTaskID, layout.WorkspaceProjectID(ctx, task.ProjectID))) } hx-get={ fmt.Sprintf("/tasks/%s?project_id=%s", *task.ParentTaskID, layout.WorkspaceProjectID(ctx, task.ProjectID)) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ *task.ParentTaskID }</a></div>
+						if task.SwarmParent != nil {
+							<div class="flex flex-wrap items-center gap-2">
+								<span>Part of swarm:</span>
+								<a class="link link-primary" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?project_id=%s", *task.ParentTaskID, layout.WorkspaceProjectID(ctx, task.ProjectID))) } hx-get={ fmt.Sprintf("/tasks/%s?project_id=%s", *task.ParentTaskID, layout.WorkspaceProjectID(ctx, task.ProjectID)) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ task.SwarmParent.Title }</a>
+								<span class="opacity-60">{ components.StatusLabelForTask(task.SwarmParent.Status, task.SwarmParent.Category) }</span>
+								if task.SwarmParent.SwarmStatus != "" {
+									<span class="opacity-60">{ components.SwarmStatusDisplayName(task.SwarmParent.SwarmStatus) }</span>
+								}
+							</div>
+						} else {
+							<div>Part of swarm: <a class="link link-primary" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?project_id=%s", *task.ParentTaskID, layout.WorkspaceProjectID(ctx, task.ProjectID))) } hx-get={ fmt.Sprintf("/tasks/%s?project_id=%s", *task.ParentTaskID, layout.WorkspaceProjectID(ctx, task.ProjectID)) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ *task.ParentTaskID }</a></div>
+						}
 					}
 					<div>Role: { components.SwarmRoleDisplayName(task.SwarmRole) }</div>
 					if task.WorktreeBranch != "" {
