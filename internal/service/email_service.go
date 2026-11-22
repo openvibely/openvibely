@@ -1167,6 +1167,11 @@ func readEmailParts(mr *messagemail.Reader, skipAttachments bool) (string, []Ema
 		case *messagemail.InlineHeader:
 			contentType, _, _ := h.ContentType()
 			fileName := emailPartFilename(h)
+			// Named inline parts that will be dropped are stream-discarded without buffering.
+			if fileName != "" && (skipAttachments || len(attachments) >= emailMaxAttachments) {
+				_, _ = io.Copy(io.Discard, part.Body)
+				continue
+			}
 			b, _ := io.ReadAll(part.Body)
 			// Inline parts with a filename (e.g. inline images or text files) are attachments.
 			if fileName != "" {

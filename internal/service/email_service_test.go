@@ -12,6 +12,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -3434,6 +3435,41 @@ func TestReadEmailParts_SkipAttachmentsDropsInlineTextAttachment(t *testing.T) {
 
 	require.Empty(t, body, "skipped inline text attachments must not become the email body")
 	require.Empty(t, attachments)
+}
+
+func TestReadEmailParts_SkippedInlineAttachmentIsNotAllocated(t *testing.T) {
+	payload := bytes.Repeat([]byte("A"), 16<<20)
+	var b strings.Builder
+	b.WriteString("From: Alice <alice@example.com>\r\n")
+	b.WriteString("Subject: Big\r\n")
+	b.WriteString("Message-ID: <big@example.com>\r\n")
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: multipart/mixed; boundary=\"BOUND\"\r\n\r\n")
+	b.WriteString("--BOUND\r\n")
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+	b.WriteString("Message body\r\n")
+	b.WriteString("--BOUND\r\n")
+	b.WriteString("Content-Type: application/octet-stream; name=\"large.bin\"\r\n")
+	b.WriteString("Content-Disposition: inline; filename=\"large.bin\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+	b.WriteString(base64.StdEncoding.EncodeToString(payload) + "\r\n")
+	b.WriteString("--BOUND--\r\n")
+	raw := []byte(b.String())
+	payload = nil
+
+	mr, err := messagemail.CreateReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	body, attachments := readEmailParts(mr, true)
+	runtime.ReadMemStats(&after)
+
+	require.Equal(t, "Message body", body)
+	require.Empty(t, attachments)
+	allocated := after.TotalAlloc - before.TotalAlloc
+	require.Less(t, allocated, uint64(8<<20), "skipped inline attachment payload must be stream-discarded, but allocated %d bytes", allocated)
 }
 
 func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T) {
