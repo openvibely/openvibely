@@ -3,6 +3,7 @@ package geminiclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -267,16 +268,16 @@ func TestRefreshInvalidGrant(t *testing.T) {
 	old := OAuthTokenURL
 	OAuthTokenURL = server.URL
 	defer func() { OAuthTokenURL = old }()
-	if _, err := RefreshTokenContext(context.Background(), "dead"); err == nil || !strings.Contains(err.Error(), "reauthentication") {
+	if _, err := RefreshTokenContext(context.Background(), encodeRefreshCredential(OAuthClientID, "dead")); err == nil || !strings.Contains(err.Error(), "reauthentication") {
 		t.Fatalf("err=%v", err)
 	}
-	tokens, err := RefreshTokenContext(context.Background(), "live")
-	if err != nil || tokens.AccessToken != "a" || tokens.RefreshToken != encodeRefreshCredential(LegacyOAuthClientID, "live") {
+	tokens, err := RefreshTokenContext(context.Background(), encodeRefreshCredential(OAuthClientID, "live"))
+	if err != nil || tokens.AccessToken != "a" || tokens.RefreshToken != encodeRefreshCredential(OAuthClientID, "live") {
 		t.Fatalf("tokens=%+v err=%v", tokens, err)
 	}
 }
 
-func TestSetupCodeAssistFreeTier(t *testing.T) {
+func TestSetupGoogleAccountFreeTier(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1internal:loadCodeAssist":
@@ -291,35 +292,16 @@ func TestSetupCodeAssistFreeTier(t *testing.T) {
 	old := CodeAssistBaseURL
 	CodeAssistBaseURL = server.URL + "/v1internal"
 	defer func() { CodeAssistBaseURL = old }()
-	project, err := SetupCodeAssist(context.Background(), "tok", "")
+	project, err := SetupGoogleAccountWithCredential(context.Background(), "tok", "", "")
 	if err != nil || project != "auto-proj" {
 		t.Fatalf("project=%q err=%v", project, err)
 	}
 }
 
-func TestRefreshFallsBackToBuiltInClient(t *testing.T) {
-	t.Setenv("GEMINI_OAUTH_CLIENT_ID", "hosted-id")
-	t.Setenv("GEMINI_OAUTH_CLIENT_SECRET", "hosted-secret")
-	var seen []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		seen = append(seen, r.Form.Get("client_id"))
-		if r.Form.Get("client_id") == "hosted-id" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"unauthorized_client"}`))
-			return
+func TestRefreshRejectsUnsupportedDevelopmentCredential(t *testing.T) {
+	for _, credential := range []string{"raw-token", encodeRefreshCredential("removed-client", "token")} {
+		if _, err := RefreshTokenContext(context.Background(), credential); !errors.Is(err, ErrOAuthReauthenticationRequired) {
+			t.Fatalf("expected reconnect error, got %v", err)
 		}
-		_, _ = w.Write([]byte(`{"access_token":"a","expires_in":3600}`))
-	}))
-	defer server.Close()
-	old := OAuthTokenURL
-	OAuthTokenURL = server.URL
-	defer func() { OAuthTokenURL = old }()
-	tokens, err := RefreshTokenContext(context.Background(), "r")
-	if err != nil || tokens.AccessToken != "a" {
-		t.Fatalf("tokens=%+v err=%v", tokens, err)
-	}
-	if len(seen) != 2 || seen[0] != "hosted-id" || seen[1] != LegacyOAuthClientID {
-		t.Fatalf("clients tried = %v", seen)
 	}
 }

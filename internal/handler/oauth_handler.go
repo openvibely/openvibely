@@ -839,9 +839,7 @@ func (h *Handler) finishGeminiOAuth(ctx context.Context, flow *oauthPendingFlow,
 	setup := func(ctx context.Context, token, project string) (string, error) {
 		return geminiclient.SetupGoogleAccountWithCredential(ctx, token, project, tokens.RefreshToken)
 	}
-	if flow.ClientID == "" || flow.ClientID == geminiclient.LegacyOAuthClientID {
-		setup = geminiclient.SetupCodeAssist
-	}
+
 	project, err := setup(setupCtx, tokens.AccessToken, firstNonEmpty(flow.CloudProject, strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_PROJECT"))))
 	cancelSetup()
 	if err != nil {

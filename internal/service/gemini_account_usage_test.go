@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -96,7 +97,7 @@ func TestGeminiQuotaOAuthRecovery(t *testing.T) {
 			if expired {
 				expiry = time.Now().Add(-time.Hour)
 			}
-			cfg := models.LLMConfig{Name: "Google", Provider: models.ProviderGemini, Model: "gemini-4-neon", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "old", OAuthRefreshToken: "refresh", OAuthAccountID: "project", OAuthExpiresAt: expiry.UnixMilli()}
+			cfg := models.LLMConfig{Name: "Google", Provider: models.ProviderGemini, Model: "gemini-4-neon", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "old", OAuthRefreshToken: "ov-gemini-v1:" + base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"client_id":%q,"token":"refresh","account_type":"personal"}`, geminiclient.OAuthClientID))), OAuthAccountID: "project", OAuthExpiresAt: expiry.UnixMilli()}
 			if err := env.LLMConfigs.Create(ctx, &cfg); err != nil {
 				t.Fatal(err)
 			}

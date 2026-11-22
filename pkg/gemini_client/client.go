@@ -41,7 +41,6 @@ const SkipThoughtSignature = "skip_thought_signature_validator"
 type UnauthorizedHandler func(ctx context.Context, tokenUsed string) (newToken string, recovered bool, err error)
 
 type Client struct {
-	legacyOAuth           bool
 	oauthAuthMethod       string
 	httpClient            *http.Client
 	apiKey                string
@@ -64,8 +63,6 @@ func NewWithAPIKey(apiKey string) *Client {
 func NewWithOAuth(accessToken, project string) *Client {
 	return &Client{httpClient: httpclient.NewModel(nil), accessToken: accessToken, project: project, codeAssistURL: CodeAssistBaseURL}
 }
-
-func (c *Client) SetLegacyOAuth(legacy bool) { c.legacyOAuth = legacy }
 
 func (c *Client) SetHTTPClient(client *http.Client) { c.httpClient = client }
 func (c *Client) SetBaseURL(url string)             { c.baseURL = strings.TrimRight(url, "/") }
@@ -633,9 +630,8 @@ func (c *Client) post(ctx context.Context, endpoint string, body []byte) (*http.
 		req.Header.Set("Accept", "text/event-stream")
 		if c.isOAuth() {
 			req.Header.Set("Authorization", "Bearer "+c.accessToken)
-			if !c.legacyOAuth {
-				req.Header.Set("User-Agent", codeAssistUserAgent(c.oauthAuthMethod))
-			}
+			req.Header.Set("User-Agent", codeAssistUserAgent(c.oauthAuthMethod))
+
 		} else {
 			req.Header.Set("x-goog-api-key", c.apiKey)
 		}

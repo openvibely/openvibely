@@ -97,10 +97,6 @@ func (a *Adapter) client(ctx context.Context, agent models.LLMConfig) (*geminicl
 			return nil, err
 		}
 		agent = fresh
-		legacy := geminiclient.UsesLegacyOAuth(agent.OAuthRefreshToken)
-		if legacy && strings.HasPrefix(agent.Model, "gemini-4-") {
-			return nil, fmt.Errorf("reconnect this Google account on the Models page using Google sign-in before using Gemini 4")
-		}
 		client = geminiclient.NewWithOAuth(agent.OAuthAccessToken, agent.OAuthAccountID)
 		client.SetOAuthCredential(agent.OAuthRefreshToken)
 		client.SetUnauthorizedHandler(func(refreshCtx context.Context, tokenUsed string) (string, bool, error) {

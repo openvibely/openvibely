@@ -21,9 +21,7 @@ import (
 )
 
 const (
-	LegacyOAuthClientID     = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-	LegacyOAuthClientSecret = "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"
-	LegacyOAuthScopes       = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+	baseOAuthScopes = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
 )
 
 const (
@@ -31,7 +29,7 @@ const (
 	OAuthClientSecret         = "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"
 	BusinessOAuthClientID     = "884354919052-36trc1jjb3tguiac32ov6cod268c5blh.apps.googleusercontent.com"
 	BusinessOAuthClientSecret = "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"
-	BusinessOAuthScopes       = LegacyOAuthScopes + " https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs"
+	BusinessOAuthScopes       = baseOAuthScopes + " https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs"
 	OAuthScopes               = BusinessOAuthScopes + " https://www.googleapis.com/auth/aicode openid"
 )
 
@@ -69,8 +67,6 @@ func BusinessOAuthClient() OAuthClient {
 
 func OAuthScopesForClient(id string) string {
 	switch id {
-	case LegacyOAuthClientID:
-		return LegacyOAuthScopes
 	case BusinessOAuthClientID:
 		return BusinessOAuthScopes
 	default:
@@ -143,16 +139,6 @@ func encodeRefreshCredential(id, token string, accountTypes ...string) string {
 	return refreshCredentialPrefix + base64.RawURLEncoding.EncodeToString(b)
 }
 
-func UsesLegacyOAuth(token string) bool {
-	encoded, ok := strings.CutPrefix(token, refreshCredentialPrefix)
-	if !ok {
-		return true
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	var credential refreshCredential
-	return err != nil || json.Unmarshal(raw, &credential) != nil || credential.ClientID == LegacyOAuthClientID
-}
-
 // OAuthBaseURL selects the service for the credential's account type.
 // A configured base URL remains authoritative for custom deployments and tests.
 func OAuthBaseURL(token string) string {
@@ -196,7 +182,6 @@ func OAuthAuthMethod(token string) string {
 // SetOAuthCredential selects protocol authentication metadata from the client
 // that issued the refresh credential. It does not retain the credential.
 func (c *Client) SetOAuthCredential(token string) {
-	c.legacyOAuth = UsesLegacyOAuth(token)
 	c.oauthAuthMethod = OAuthAuthMethod(token)
 	if !c.codeAssistURLOverride {
 		c.codeAssistURL = OAuthBaseURL(token)
@@ -207,46 +192,33 @@ func RefreshTokenContext(ctx context.Context, refreshToken string) (*Tokens, err
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, fmt.Errorf("%w: missing refresh token", ErrOAuthReauthenticationRequired)
 	}
-	accountType := ""
-	clients := []OAuthClient{{ID: LegacyOAuthClientID, Secret: LegacyOAuthClientSecret}}
-	if hosted, ok := HostedOAuthClient(); ok {
-		clients = append([]OAuthClient{hosted}, clients...)
+	encoded, ok := strings.CutPrefix(refreshToken, refreshCredentialPrefix)
+	if !ok {
+		return nil, fmt.Errorf("%w: reconnect Google account to replace an unsupported development credential", ErrOAuthReauthenticationRequired)
 	}
-	if encoded, ok := strings.CutPrefix(refreshToken, refreshCredentialPrefix); ok {
-		raw, err := base64.RawURLEncoding.DecodeString(encoded)
-		var credential refreshCredential
-		if err != nil || json.Unmarshal(raw, &credential) != nil || credential.Token == "" {
-			return nil, fmt.Errorf("%w: invalid Gemini credential", ErrOAuthReauthenticationRequired)
-		}
-		known := append([]OAuthClient{BuiltInOAuthClient(), BusinessOAuthClient()}, clients...)
-		clients = nil
-		for _, client := range known {
-			if client.ID == credential.ClientID {
-				clients = []OAuthClient{client}
-				break
-			}
-		}
-		if len(clients) == 0 {
-			return nil, fmt.Errorf("%w: OAuth client configuration changed", ErrOAuthReauthenticationRequired)
-		}
-		accountType = credential.AccountType
-		refreshToken = credential.Token
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	var credential refreshCredential
+	if err != nil || json.Unmarshal(raw, &credential) != nil || credential.Token == "" {
+		return nil, fmt.Errorf("%w: invalid Gemini credential", ErrOAuthReauthenticationRequired)
+	}
+	clients := []OAuthClient{BuiltInOAuthClient(), BusinessOAuthClient()}
+	if hosted, ok := HostedOAuthClient(); ok {
+		clients = append(clients, hosted)
 	}
 	for _, client := range clients {
-		values := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
-		tokens, err := postToken(ctx, client, values, refreshToken)
-		if err == nil {
-			tokens.RefreshToken = encodeRefreshCredential(client.ID, tokens.RefreshToken, accountType)
-			return tokens, nil
+		if client.ID != credential.ClientID {
+			continue
 		}
-		if !errors.Is(err, errWrongClient) {
+		values := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {credential.Token}}
+		tokens, err := postToken(ctx, client, values, credential.Token)
+		if err != nil {
 			return nil, err
 		}
+		tokens.RefreshToken = encodeRefreshCredential(client.ID, tokens.RefreshToken, credential.AccountType)
+		return tokens, nil
 	}
-	return nil, fmt.Errorf("%w: refresh token not accepted by configured client", ErrOAuthReauthenticationRequired)
+	return nil, fmt.Errorf("%w: OAuth client configuration changed; reconnect Google account", ErrOAuthReauthenticationRequired)
 }
-
-var errWrongClient = errors.New("gemini OAuth client does not own this token")
 
 func postToken(ctx context.Context, client OAuthClient, values url.Values, fallbackRefresh string) (*Tokens, error) {
 	values.Set("client_id", client.ID)
@@ -274,7 +246,7 @@ func postToken(ctx context.Context, client OAuthClient, values url.Values, fallb
 			case "invalid_grant":
 				return nil, fmt.Errorf("%w: OAuth token request failed with HTTP %d", ErrOAuthReauthenticationRequired, resp.StatusCode)
 			case "unauthorized_client", "invalid_client":
-				return nil, fmt.Errorf("%w: HTTP %d %s", errWrongClient, resp.StatusCode, providerError.Error)
+				return nil, fmt.Errorf("%w: HTTP %d %s", ErrOAuthReauthenticationRequired, resp.StatusCode, providerError.Error)
 			}
 		}
 		return nil, fmt.Errorf("gemini OAuth token request failed with HTTP %d", resp.StatusCode)
@@ -339,19 +311,6 @@ func PrincipalHash(project, userID string) string {
 	}
 	sum := sha256.Sum256([]byte("gemini\x00" + project + "\x00" + userID))
 	return hex.EncodeToString(sum[:])
-}
-
-var codeAssistMetadata = map[string]string{
-	"ideType":    "IDE_UNSPECIFIED",
-	"platform":   "PLATFORM_UNSPECIFIED",
-	"pluginType": "GEMINI",
-}
-
-// SetupCodeAssist resolves the Code Assist project for a Google account,
-// onboarding to the default tier when the account has none yet. projectHint
-// is required for workspace/standard tiers and ignored by the free tier.
-func SetupCodeAssist(ctx context.Context, accessToken, projectHint string) (string, error) {
-	return setupCodeAssist(ctx, accessToken, projectHint, codeAssistMetadata, "")
 }
 
 func SetupGoogleAccountWithCredential(ctx context.Context, accessToken, projectHint, credential string) (string, error) {

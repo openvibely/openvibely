@@ -209,25 +209,6 @@ func TestGoogleAccountOnboardingMetadata(t *testing.T) {
 	}
 }
 
-func TestLegacyOAuthEnvelope(t *testing.T) {
-	if !UsesLegacyOAuth("old-refresh") || !UsesLegacyOAuth(encodeRefreshCredential(LegacyOAuthClientID, "old-refresh")) || UsesLegacyOAuth(encodeRefreshCredential(OAuthClientID, "new-refresh")) {
-		t.Fatal("incorrect credential classification")
-	}
-	c := NewWithOAuth("token", "project")
-	c.SetLegacyOAuth(true)
-	body, err := c.buildRequestBody(nil, nil, &Options{Model: "gemini-3.8-flash"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var envelope map[string]any
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if len(envelope) != 3 || envelope["model"] != "gemini-3.8-flash" {
-		t.Fatalf("legacy envelope=%s", body)
-	}
-}
-
 func TestBrokenStreamRetriesTurn(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
