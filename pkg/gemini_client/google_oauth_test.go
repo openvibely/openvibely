@@ -203,7 +203,7 @@ func TestGoogleAccountOnboardingMetadata(t *testing.T) {
 	old := CodeAssistBaseURL
 	CodeAssistBaseURL = server.URL + "/v1internal"
 	defer func() { CodeAssistBaseURL = old }()
-	project, err := SetupGoogleAccount(context.Background(), "token", "")
+	project, err := SetupGoogleAccountWithCredential(context.Background(), "token", "", "")
 	if err != nil || project != "project" {
 		t.Fatalf("project=%q err=%v", project, err)
 	}

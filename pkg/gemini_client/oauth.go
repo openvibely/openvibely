@@ -354,10 +354,6 @@ func SetupCodeAssist(ctx context.Context, accessToken, projectHint string) (stri
 	return setupCodeAssist(ctx, accessToken, projectHint, codeAssistMetadata, "")
 }
 
-func SetupGoogleAccount(ctx context.Context, accessToken, projectHint string) (string, error) {
-	return SetupGoogleAccountWithCredential(ctx, accessToken, projectHint, "")
-}
-
 func SetupGoogleAccountWithCredential(ctx context.Context, accessToken, projectHint, credential string) (string, error) {
 	return setupCodeAssist(ctx, accessToken, projectHint, map[string]string{
 		"ideType": "\x41\x4e\x54\x49\x47\x52\x41\x56\x49\x54\x59", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI",
