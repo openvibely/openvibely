@@ -73,16 +73,7 @@ func parseGeminiAccountUsage(raw map[string]any, cfg models.LLMConfig) (*models.
 		if key == "" {
 			key = fmt.Sprintf("bucket_%d", index)
 		}
-		label := b.Name
-		if label == "" {
-			label = key
-		}
-		if group != "" {
-			label = group + " · " + label
-		}
-		if b.Window != "" {
-			label += " (" + b.Window + ")"
-		}
+		label := geminiQuotaLabel(group, b.Name, b.Window, key)
 		limit := models.AccountUsageExtraLimit{Provider: result.Provider, AccountID: result.AccountID, AgentConfigID: cfg.ID, LimitKey: fmt.Sprintf("google_%s_%s", group, key), Label: label, RawJSON: "{}"}
 		if b.Remaining != nil && *b.Remaining >= 0 && *b.Remaining <= 1 {
 			used := (1 - *b.Remaining) * 100
@@ -111,4 +102,32 @@ func parseGeminiAccountUsage(raw map[string]any, cfg models.LLMConfig) (*models.
 		return nil, fmt.Errorf("Google returned no available quota buckets")
 	}
 	return result, nil
+}
+
+// geminiQuotaLabel normalizes known windows like the other subscription providers.
+// Unknown windows retain Google's description rather than guessing their duration.
+func geminiQuotaLabel(group, name, window, fallback string) string {
+	group, name, window = strings.TrimSpace(group), strings.TrimSpace(name), strings.TrimSpace(window)
+	var label string
+	switch strings.ToLower(window) {
+	case "weekly":
+		label = "weekly limit"
+	case "5h":
+		label = "5-hour session"
+	default:
+		label = name
+		if label == "" {
+			label = fallback
+		}
+		if group != "" && strings.HasPrefix(strings.ToLower(label), strings.ToLower(group)+" ") {
+			label = strings.TrimSpace(label[len(group):])
+		}
+		if window != "" {
+			label += " (" + window + ")"
+		}
+	}
+	if group != "" {
+		return group + " · " + label
+	}
+	return label
 }

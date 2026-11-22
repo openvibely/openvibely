@@ -131,3 +131,31 @@ func TestGeminiQuotaOAuthRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiQuotaLabels(t *testing.T) {
+	cases := []struct{ group, name, window, want string }{
+		{"Gemini Models", "Weekly Limit Remaining", "weekly", "Gemini Models · weekly limit"},
+		{"Gemini Models", "Five Hour Limit Remaining", "5h", "Gemini Models · 5-hour session"},
+		{"Claude and GPT models", "Weekly Limit Remaining", "weekly", "Claude and GPT models · weekly limit"},
+		{"Claude and GPT models", "Five Hour Limit Remaining", "5h", "Claude and GPT models · 5-hour session"},
+		{"Gemini 4 Argon", "Gemini 4 Argon Weekly Limit", "weekly", "Gemini 4 Argon · weekly limit"},
+		{"Advanced models", "Allowance", "ROLLING", "Advanced models · Allowance (ROLLING)"},
+		{"", "", "", "quota"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			raw := map[string]any{"groups": []any{map[string]any{"displayName": tc.group, "buckets": []any{map[string]any{"bucketId": "quota", "displayName": tc.name, "window": tc.window, "remainingFraction": 0.97, "resetTime": "2027-01-01T12:00:00Z"}}}}}
+			result, err := parseGeminiAccountUsage(raw, models.LLMConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			limit := result.ExtraLimits[0]
+			if limit.Label != tc.want {
+				t.Fatalf("got %q, want %q", limit.Label, tc.want)
+			}
+			if limit.UsedPercent == nil || *limit.UsedPercent < 2.99 || *limit.UsedPercent > 3.01 || limit.ResetAt == nil {
+				t.Fatalf("usage changed: %+v", limit)
+			}
+		})
+	}
+}
