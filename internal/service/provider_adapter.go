@@ -798,6 +798,8 @@ func providerSystemPrompt(req llmcontracts.AgentRequest) string {
 		switch req.Agent.Provider {
 		case models.ProviderOpenAI:
 			return llmprompt.BuildCodexAgentSystemPrompt(req.Agent.Model, req.ProjectInstructions, req.WorkDir)
+		case models.ProviderGemini:
+			return llmprompt.BuildGoogleAgentSystemPrompt(llmgemini.BaseSystemPrompt(req), req.ProjectInstructions, req.WorkDir)
 		case models.ProviderAnthropic:
 			return llmprompt.BuildAnthropicAgentSystemPrompt(req.Agent.Model, req.ProjectInstructions, req.WorkDir)
 		default:
@@ -814,6 +816,8 @@ func providerSystemPrompt(req llmcontracts.AgentRequest) string {
 				if !req.Followup && req.Agent.IsOpenAIOAuth() {
 					base = llmprompt.BuildOpenAIOAuthSystemPrompt(base)
 				}
+			case models.ProviderGemini:
+				base = llmprompt.BuildGoogleChatSystemPrompt(llmgemini.BaseSystemPrompt(req), req.Followup, req.ChatMode, req.ChatSystemContext, false)
 			case models.ProviderAnthropic:
 				base = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, req.Followup, req.ChatMode, req.ChatSystemContext, false)
 			}
@@ -970,6 +974,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			definition.Skills = nil
 			req.AgentDefinition = &definition
 		}
+	}
+
+	if google, ok := adapter.(*geminiProviderAdapter); ok {
+		req.Ctx = google.adapter.PreparePrompt(req)
 	}
 
 	installationContinuation := false

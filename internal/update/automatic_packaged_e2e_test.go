@@ -70,6 +70,7 @@ type automaticAppE2E struct {
 	logs                                                                    func() string
 	sequence                                                                int
 	clockOffset                                                             time.Duration
+	validationOutcome                                                       string
 }
 
 func (a *automaticAppE2E) start() {
@@ -81,7 +82,10 @@ func (a *automaticAppE2E) start() {
 	_ = os.Remove(filepath.Join(a.root, "clock.ready"))
 	a.sequence++
 	stdout, stderr, logs := openCommandLogs(a.t, a.root, fmt.Sprintf("app-%d", a.sequence))
-	a.logs = logs
+	a.logs = func() string {
+		helper, err := os.ReadFile(filepath.Join(a.root, "helper.log"))
+		return fmt.Sprintf("%s\nhelper log (read error: %v):\n%s", logs(), err, helper)
+	}
 	cmd := exec.Command(a.installed)
 	cmd.Dir = a.root
 	cmd.Env = append(envWithout("PORT", "OPENVIBELY_DESKTOP_CONFIG_FILE"),
@@ -90,7 +94,7 @@ func (a *automaticAppE2E) start() {
 		"PROJECT_REPO_ROOT="+filepath.Join(a.root, "projects"), "OPENVIBELY_PLUGIN_ROOT="+filepath.Join(a.data, "plugins"),
 		"OPENVIBELY_UPDATE_SERVICE_URL="+a.service, "OPENVIBELY_UPDATE_PUBLIC_KEY_FILE="+a.key,
 		"DISABLE_UPDATE_NOTIFICATIONS=false", "OPENVIBELY_DISABLE_INSTALL_ID=1", "AUTH_ENABLED=false",
-		"OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS=true", packagedE2EValidationTimeoutEnv(packagedUpdateOutcomeRolledBack),
+		"OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS=true", packagedE2EValidationTimeoutEnv(a.validationOutcome),
 		updateIntegrationHelperLogEnv+"="+filepath.Join(a.root, "helper.log"))
 	if a.distribution == "binary" {
 		port := freeTCPPort(a.t)
@@ -263,7 +267,10 @@ func (a *automaticAppE2E) quiet(downloads *atomic.Int32, want int32) {
 
 func runAutomaticPackagedScenario(t *testing.T, distribution string, builds map[string]string, scenario string) {
 	root := t.TempDir()
-	a := &automaticAppE2E{t: t, root: root, data: filepath.Join(root, "data"), distribution: distribution}
+	a := &automaticAppE2E{t: t, root: root, data: filepath.Join(root, "data"), distribution: distribution, validationOutcome: packagedUpdateOutcomeSucceeded}
+	if scenario == "rollback_no_auto_retry" {
+		a.validationOutcome = packagedUpdateOutcomeRolledBack
+	}
 	if distribution == "desktop" && runtime.GOOS == "darwin" {
 		a.installUnit, a.installed, _ = installDesktopUnit(t, root, "OpenVibely.app", builds["0.5.0"])
 	} else {
