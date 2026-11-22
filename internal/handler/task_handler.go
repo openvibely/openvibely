@@ -1876,6 +1876,15 @@ func (h *Handler) DeleteTask(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
 }
 
+func taskActivationError(c echo.Context, err error) error {
+	if errors.Is(err, service.ErrTaskStillStopping) {
+		setHTMXToast(c, err.Error(), "failed")
+		c.Response().Header().Set("HX-Reswap", "none")
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
+	return err
+}
+
 func (h *Handler) RunTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] RunTask task=%s", taskID)
@@ -1912,7 +1921,7 @@ func (h *Handler) RunTask(c echo.Context) error {
 		}
 	} else if err := h.taskSvc.RunTask(c.Request().Context(), taskID); err != nil {
 		applog.Infof("[handler] RunTask error: %v", err)
-		return err
+		return taskActivationError(c, err)
 	}
 	applog.Infof("[handler] RunTask handled task=%s", taskID)
 
@@ -2196,11 +2205,11 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 			if errors.Is(err, persistence.ErrActiveLaneTaskChanged) || errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
 				return echo.NewHTTPError(http.StatusConflict, "task lifecycle changed before the move completed")
 			}
-			return err
+			return taskActivationError(c, err)
 		}
 	} else if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, category); err != nil {
 		applog.Infof("[handler] UpdateTaskCategory error: %v", err)
-		return err
+		return taskActivationError(c, err)
 	}
 	applog.Infof("[handler] UpdateTaskCategory success task=%s -> %s", taskID, category)
 
@@ -2249,7 +2258,7 @@ func (h *Handler) UpdateTaskStatus(c echo.Context) error {
 
 	if err := h.taskSvc.UpdateStatus(c.Request().Context(), taskID, status); err != nil {
 		applog.Infof("[handler] UpdateTaskStatus error: %v", err)
-		return err
+		return taskActivationError(c, err)
 	}
 	applog.Infof("[handler] UpdateTaskStatus success task=%s -> %s", taskID, status)
 
@@ -2333,13 +2342,13 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 			if errors.Is(err, persistence.ErrActiveLaneTaskChanged) || errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
 				return echo.NewHTTPError(http.StatusConflict, "one or more selected tasks changed before the move completed")
 			}
-			return err
+			return taskActivationError(c, err)
 		}
 	} else {
 		for _, id := range taskIDs {
 			if err := h.taskSvc.UpdateCategory(c.Request().Context(), id, category); err != nil {
 				applog.Infof("[handler] BatchUpdateTaskCategory error task=%s: %v", id, err)
-				return err
+				return taskActivationError(c, err)
 			}
 		}
 	}

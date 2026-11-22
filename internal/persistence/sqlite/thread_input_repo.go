@@ -1154,6 +1154,12 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 		return err
 	}
 	defer unlockParent()
+	unlock := persistence.LockTaskLifecycle(exec.TaskID)
+	defer unlock()
+	if err := persistence.CheckTaskActivation(ctx, exec.TaskID); err != nil {
+		return err
+	}
+
 	var claimedEffort string
 	var claimedTier string
 	err = withImmediateTx(ctx, r.db, func(dbexec sqlExecutor) error {
@@ -1340,6 +1346,9 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 	}
 	if err == nil && claimedEffort != "" {
 		agent.ReasoningEffort = claimedEffort
+	}
+	if err == nil {
+		persistence.NotifyTaskAdmitted(ctx, exec.TaskID)
 	}
 	return err
 }

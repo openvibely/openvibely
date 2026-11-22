@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"sync"
 )
 
@@ -38,5 +39,38 @@ func LockTaskLifecycle(taskID string) func() {
 			delete(taskLifecycleLocks.entries, taskID)
 		}
 		taskLifecycleLocks.Unlock()
+	}
+}
+
+// WithTaskActivationCheck carries the runtime admission check to repositories
+// that own the lifecycle lock. The callback must not acquire that lock itself.
+func WithTaskActivationCheck(ctx context.Context, check func(string) error) context.Context {
+	return context.WithValue(ctx, taskActivationCheckKey{}, check)
+}
+
+type taskActivationCheckKey struct{}
+
+// CheckTaskActivation must be called while holding the task lifecycle lock,
+// before changing board state or admitting an execution.
+func CheckTaskActivation(ctx context.Context, taskID string) error {
+	if check, ok := ctx.Value(taskActivationCheckKey{}).(func(string) error); ok {
+		return check(taskID)
+	}
+	return nil
+}
+
+// WithTaskAdmissionCallback carries the runtime completion of admission to the
+// repository that owns the task lifecycle lock. It must not acquire that lock.
+func WithTaskAdmissionCallback(ctx context.Context, admitted func(string)) context.Context {
+	return context.WithValue(ctx, taskAdmissionCallbackKey{}, admitted)
+}
+
+type taskAdmissionCallbackKey struct{}
+
+// NotifyTaskAdmitted runs after a new execution is committed, before releasing
+// the lifecycle lock. Queuing input behind an existing execution is not admission.
+func NotifyTaskAdmitted(ctx context.Context, taskID string) {
+	if admitted, ok := ctx.Value(taskAdmissionCallbackKey{}).(func(string)); ok {
+		admitted(taskID)
 	}
 }

@@ -767,34 +767,38 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupAndReturnsLa
 }
 
 func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupAndReturnsLaneConflict(t *testing.T) {
-	ctx := context.Background()
-	env := teststores.New(t)
-	taskRepo := env.Tasks
-	execRepo := env.Executions
-	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, env.Attachments, worker)
-	task := &models.Task{ProjectID: "default", Title: "Failed followup lane move", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
-	require.NoError(t, taskRepo.Create(ctx, task))
-	require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: task.ID, Status: models.ExecFailed, PromptSent: "failed followup", IsFollowup: true}))
-	called := 0
-	svc.SetFailedTaskThreadFollowupRetryHook(func(ctx context.Context, taskID string) (bool, error) {
-		called++
-		require.Equal(t, task.ID, taskID)
-		require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
-		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
-		return true, nil
-	})
-	err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusFailed}}, models.StatusRunning)
-	require.ErrorIs(t, err, ErrActiveLaneLifecycleRouted)
-	require.Equal(t, 1, called)
-	loaded, err := taskRepo.GetByID(ctx, task.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.CategoryActive, loaded.Category)
-	require.Equal(t, models.StatusQueued, loaded.Status)
-	select {
-	case submitted := <-worker.Submitted():
-		t.Fatalf("original task prompt was submitted instead of preserving failed followup: %s", submitted.ID)
-	default:
+	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			ctx := context.Background()
+			env := teststores.New(t)
+			taskRepo := env.Tasks
+			execRepo := env.Executions
+			worker := newTestWorkerService(t)
+			svc := NewTaskService(taskRepo, env.Attachments, worker)
+			task := &models.Task{ProjectID: "default", Title: "Failed followup lane move", Category: models.CategoryBacklog, Status: models.TaskStatus(status), Prompt: "original prompt"}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: task.ID, Status: status, PromptSent: "failed followup", IsFollowup: true}))
+			called := 0
+			svc.SetFailedTaskThreadFollowupRetryHook(func(ctx context.Context, taskID string) (bool, error) {
+				called++
+				require.Equal(t, task.ID, taskID)
+				require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
+				require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
+				return true, nil
+			})
+			err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.TaskStatus(status)}}, models.StatusRunning)
+			require.ErrorIs(t, err, ErrActiveLaneLifecycleRouted)
+			require.Equal(t, 1, called)
+			loaded, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryActive, loaded.Category)
+			require.Equal(t, models.StatusQueued, loaded.Status)
+			select {
+			case submitted := <-worker.Submitted():
+				t.Fatalf("original task prompt was submitted instead of preserving failed followup: %s", submitted.ID)
+			default:
+			}
+		})
 	}
 }
 
@@ -2427,7 +2431,7 @@ func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testin
 	}
 }
 
-func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T) {
+func TestTaskService_CancelTaskRejectsRestartUntilCleanupFinishes(t *testing.T) {
 	env := teststores.New(t)
 	taskRepo := env.Tasks
 	worker := newTestWorkerService(t)
@@ -2441,7 +2445,7 @@ func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T
 	require.NoError(t, err)
 	stopEntered := make(chan struct{})
 	releaseStop := make(chan struct{})
-	worker.RegisterCancel(task.ID, func() {
+	registration := worker.RegisterCancelOwned(task.ID, func() {
 		close(stopEntered)
 		<-releaseStop
 	})
@@ -2456,7 +2460,10 @@ func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T
 	go func() { rerunDone <- svc.RunTask(ctx, task.ID) }()
 	close(releaseStop)
 	require.NoError(t, <-stopDone)
-	require.NoError(t, <-rerunDone)
+	require.ErrorIs(t, <-rerunDone, ErrTaskStillStopping)
+	require.True(t, worker.IsTaskStopping(task.ID))
+	worker.DeregisterCancelOwned(task.ID, registration)
+	require.NoError(t, svc.RunTask(ctx, task.ID))
 	current, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusPending, current.Status)
@@ -4326,4 +4333,113 @@ func assertPlannerSubmittedForParent(t *testing.T, taskRepo persistence.TaskStor
 		t.Fatalf("unexpected extra submitted task %s", submitted.ID)
 	case <-time.After(100 * time.Millisecond):
 	}
+}
+
+func TestTaskService_ConcurrentStopRejectsActivation(t *testing.T) {
+	for _, action := range []string{"run", "category"} {
+		for _, admission := range []string{"original", "retry", "queued"} {
+			t.Run(action+"/"+admission, func(t *testing.T) {
+				env := teststores.New(t)
+				worker := newTestWorkerService(t)
+				svc := NewTaskService(env.Tasks, env.Attachments, worker)
+				ctx := context.Background()
+				task := &models.Task{ProjectID: "default", Title: "Concurrent stop", Prompt: "original", Category: models.CategoryBacklog, Status: models.StatusRunning}
+				require.NoError(t, env.Tasks.Create(ctx, task))
+				agent, err := env.LLMConfigs.GetDefault(ctx)
+				require.NoError(t, err)
+				require.NotNil(t, agent)
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, Content: "latest follow-up"}
+				if admission == "queued" {
+					require.NoError(t, env.ThreadInputs.CreateQueued(ctx, input))
+				}
+				runningCtx, cancel := context.WithCancel(ctx)
+				defer cancel()
+				registration := worker.RegisterCancelOwned(task.ID, cancel)
+				defer worker.DeregisterCancelOwned(task.ID, registration)
+				entered, release := make(chan struct{}), make(chan struct{})
+				calls := 0
+				hook := func(hookCtx context.Context, taskID string) (bool, error) {
+					calls++
+					if calls == 1 {
+						close(entered)
+						<-release
+					}
+					exec := &models.Execution{TaskID: taskID, AgentConfigID: agent.ID, Status: models.ExecQueued, PromptSent: "latest follow-up", IsFollowup: true}
+					switch admission {
+					case "retry":
+						_, err := env.Executions.CreateDirectTaskFollowupOrQueue(hookCtx, exec, &models.ThreadInput{Content: exec.PromptSent})
+						return true, err
+					case "queued":
+						return true, env.ThreadInputs.ClaimQueuedForTaskExecutionWithModel(hookCtx, input.ID, exec, task.AgentID, agent)
+					default:
+						return false, nil
+					}
+				}
+				if admission == "retry" {
+					svc.SetFailedTaskThreadFollowupRetryHook(hook)
+				} else {
+					svc.SetQueuedTaskThreadFollowupHook(hook)
+				}
+				start := func() error {
+					if action == "category" {
+						return svc.UpdateCategory(ctx, task.ID, models.CategoryActive)
+					}
+					return svc.RunTask(ctx, task.ID)
+				}
+				done := make(chan error, 1)
+				go func() { done <- start() }()
+				select {
+				case <-entered:
+				case <-time.After(time.Second):
+					t.Fatal("activation did not reach admission hook")
+				}
+				require.NoError(t, svc.CancelTask(ctx, task.ID))
+				require.ErrorIs(t, runningCtx.Err(), context.Canceled)
+				require.True(t, worker.IsTaskStopping(task.ID))
+				close(release)
+				require.ErrorIs(t, <-done, ErrTaskStillStopping)
+				stopped, err := env.Tasks.GetByID(ctx, task.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.CategoryBacklog, stopped.Category)
+				require.Equal(t, models.StatusCancelled, stopped.Status)
+				executions, err := env.Executions.ListByTaskChronological(ctx, task.ID)
+				require.NoError(t, err)
+				require.Empty(t, executions)
+				worker.mu.Lock()
+				pending := worker.pending[task.ID]
+				worker.mu.Unlock()
+				require.False(t, pending)
+				worker.DeregisterCancelOwned(task.ID, registration)
+				require.NoError(t, start())
+			})
+		}
+	}
+}
+
+func TestTaskService_RunTask_StoppingRejectionKeepsGoalPaused(t *testing.T) {
+	env := teststores.New(t)
+	worker := newTestWorkerService(t)
+	svc := NewTaskService(env.Tasks, env.Attachments, worker)
+	goals := NewTaskGoalService(env.TaskGoals, env.Tasks, nil)
+	svc.SetTaskGoalService(goals)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Stopped goal", Prompt: "continue", Category: models.CategoryActive, Status: models.StatusRunning}
+	require.NoError(t, env.Tasks.Create(ctx, task))
+	_, err := goals.SetGoal(ctx, task.ID, "Finish the work", GoalOptions{})
+	require.NoError(t, err)
+	registration := worker.RegisterCancelOwned(task.ID, func() {})
+	defer worker.DeregisterCancelOwned(task.ID, registration)
+	require.NoError(t, svc.CancelTask(ctx, task.ID))
+	for i := 0; i < 2; i++ {
+		require.ErrorIs(t, svc.RunTask(ctx, task.ID), ErrTaskStillStopping)
+		goal, err := goals.GetGoal(ctx, task.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.TaskGoalStatusPaused, goal.Status)
+		require.Equal(t, TaskGoalStoppedByUserReason, goal.Reason)
+	}
+	worker.DeregisterCancelOwned(task.ID, registration)
+	require.NoError(t, svc.RunTask(ctx, task.ID))
+	goal, err := goals.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskGoalStatusActive, goal.Status)
 }
