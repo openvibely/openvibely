@@ -109,7 +109,7 @@ func (a *automaticAppE2E) stop() {
 	if a.baseURL != "" {
 		u, _ := url.Parse(a.baseURL)
 		if u != nil {
-			killPort(a.t, u.Port())
+			killPort(a.t, u.Port(), a.installed)
 		}
 	}
 	killExecutable(a.t, a.installed)

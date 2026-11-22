@@ -195,7 +195,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		killExecutable(t, packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand))
-		killPort(t, port)
+		killPort(t, port, current)
 		killExecutable(t, current)
 	})
 
@@ -309,7 +309,7 @@ func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion,
 		_ = parent.Process.Kill()
 		_, _ = parent.Process.Wait()
 		if port != "" {
-			killPort(t, port)
+			killPort(t, port, current)
 		}
 	})
 	if distribution == buildinfo.DistributionDesktop {
@@ -508,7 +508,7 @@ func runAppBundleUpdateHelperE2E(t *testing.T, expectedVersion, replacementVersi
 	port := freeTCPPort(t)
 	t.Cleanup(func() {
 		killExecutable(t, installedExecutable)
-		killPort(t, port)
+		killPort(t, port, installedExecutable)
 	})
 	parentPID := exitedCommandPID(t)
 	helperArgs := []string{
@@ -624,7 +624,7 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 	port := freeTCPPort(t)
 	t.Cleanup(func() {
 		killExecutable(t, installedExecutable)
-		killPort(t, port)
+		killPort(t, port, installedExecutable)
 	})
 	configFile := writeRealDesktopConfig(t, root, dataRoot, updateServer.URL, publicKeyFile)
 	helperPath := packagedUpdateHelperPath(staged.InstallPath, AppBundleUpdateHelperCommand)
@@ -733,7 +733,7 @@ func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, wantOutcome stri
 	t.Cleanup(func() {
 		_ = parent.Process.Kill()
 		killExecutable(t, installedExecutable)
-		killPort(t, port)
+		killPort(t, port, installedExecutable)
 	})
 	if err := waitForCommandExit(parent, 90*time.Second); err != nil {
 		coordinatorState, _ := os.ReadFile(filepath.Join(dataRoot, "update-coordinator.json"))
@@ -809,7 +809,7 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 	if err != nil || parsedBaseURL.Port() == "" {
 		t.Fatalf("parse desktop backend URL %q: %v", baseURL, err)
 	}
-	t.Cleanup(func() { killPort(t, parsedBaseURL.Port()) })
+	t.Cleanup(func() { killPort(t, parsedBaseURL.Port(), current) })
 	waitForHealthVersion(t, baseURL, "0.5.0")
 	waitForStagedUpdate(t, baseURL)
 	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
@@ -1676,7 +1676,7 @@ func assertGoBuildInfoVersion(t *testing.T, executable, version string) {
 	}
 }
 
-func killPort(t *testing.T, port string) {
+func killPort(t *testing.T, port, expectedExecutable string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -1688,7 +1688,9 @@ func killPort(t *testing.T, port string) {
 		for _, line := range strings.Split(string(out), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) >= 5 && strings.HasSuffix(fields[1], ":"+port) && fields[3] == "LISTENING" {
-				_ = exec.CommandContext(ctx, "taskkill", "/PID", fields[4], "/T", "/F").Run()
+				cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", `$p = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $env:OPENVIBELY_E2E_CLEANUP_PID); if ($p.ExecutablePath -eq $env:OPENVIBELY_E2E_CLEANUP_EXECUTABLE) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }`)
+				cmd.Env = append(os.Environ(), "OPENVIBELY_E2E_CLEANUP_PID="+fields[4], "OPENVIBELY_E2E_CLEANUP_EXECUTABLE="+expectedExecutable)
+				_ = cmd.Run()
 			}
 		}
 		return
@@ -1697,7 +1699,33 @@ func killPort(t *testing.T, port string) {
 	if err != nil {
 		return
 	}
-	terminateUnixProcessTrees(ctx, unixProcessTreePIDs(ctx, strings.Fields(string(out))))
+	var owned []string
+	for _, pid := range strings.Fields(string(out)) {
+		text, err := exec.CommandContext(ctx, "lsof", "-a", "-p", pid, "-d", "txt", "-Fn").Output()
+		if err != nil {
+			continue // Fail closed when process ownership cannot be verified.
+		}
+		for _, line := range strings.Split(string(text), "\n") {
+			if strings.HasPrefix(line, "n") && sameCleanupExecutable(strings.TrimPrefix(line, "n"), expectedExecutable) {
+				owned = append(owned, pid)
+				break
+			}
+		}
+	}
+	terminateUnixProcessTrees(ctx, unixProcessTreePIDs(ctx, owned))
+}
+
+// Resolve macOS /var versus /private/var aliases, but never accept basename matches.
+func sameCleanupExecutable(actual, expected string) bool {
+	if !filepath.IsAbs(actual) || !filepath.IsAbs(expected) {
+		return false
+	}
+	a, err := filepath.EvalSymlinks(actual)
+	if err != nil {
+		return false
+	}
+	b, err := filepath.EvalSymlinks(expected)
+	return err == nil && a == b
 }
 
 func killExecutable(t *testing.T, executable string) {
