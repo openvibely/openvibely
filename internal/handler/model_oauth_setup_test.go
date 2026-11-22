@@ -470,6 +470,16 @@ func TestOAuthModelLifecycleTriggersSharedAccountUsageSync(t *testing.T) {
 	sub, _ := h.broadcaster.Subscribe()
 	defer h.broadcaster.Unsubscribe(sub)
 
+	drainUsageUpdated := func() {
+		for {
+			select {
+			case <-sub:
+			default:
+				return
+			}
+		}
+	}
+
 	waitUsageUpdated := func(step string) {
 		t.Helper()
 		deadline := time.After(3 * time.Second)
@@ -481,6 +491,23 @@ func TestOAuthModelLifecycleTriggersSharedAccountUsageSync(t *testing.T) {
 				}
 			case <-deadline:
 				t.Fatalf("timed out waiting for AccountUsageUpdated after %s", step)
+			}
+		}
+	}
+
+	waitFetchCount := func(step string, want int32) {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if fetchCalls.Load() >= want {
+				return
+			}
+			select {
+			case <-deadline:
+				t.Fatalf("timed out waiting for %d usage fetches after %s (got %d)", want, step, fetchCalls.Load())
+			case <-ticker.C:
 			}
 		}
 	}
@@ -594,8 +621,104 @@ func TestOAuthModelLifecycleTriggersSharedAccountUsageSync(t *testing.T) {
 		t.Fatalf("expected 2 usage fetches after reconnect, got %d", fetchCalls.Load())
 	}
 
-	// 4. Delete model evicts snapshot and broadcasts immediately.
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/models/"+created.ID, nil)
+	// 4. MoveModelsToOAuthConnection syncs and broadcasts immediately.
+	second := &models.LLMConfig{
+		Name:       "Second OAuth Model",
+		Provider:   models.ProviderOpenAI,
+		Model:      "gpt-6.1-sol",
+		AuthMethod: models.AuthMethodOAuth,
+	}
+	if err := repo.Create(context.Background(), second); err != nil {
+		t.Fatalf("create second model: %v", err)
+	}
+	drainUsageUpdated()
+	moveForm := url.Values{"model_ids": {second.ID}}
+	moveReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+created.OAuthConnectionID+"/models", strings.NewReader(moveForm.Encode()))
+	moveReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	moveRec := httptest.NewRecorder()
+	e.ServeHTTP(moveRec, moveReq)
+	if moveRec.Code != http.StatusSeeOther {
+		t.Fatalf("move models to oauth connection: %d %s", moveRec.Code, moveRec.Body.String())
+	}
+	waitUsageUpdated("MoveModelsToOAuthConnection")
+	waitFetchCount("MoveModelsToOAuthConnection", 3)
+	waitUsageUpdated("MoveModelsToOAuthConnection fetch")
+
+	// 5. UpdateModel switching an OAuth model to API key syncs and broadcasts immediately.
+	drainUsageUpdated()
+	updateForm := url.Values{
+		"name":             {created.Name},
+		"provider":         {"openai"},
+		"model":            {"gpt-6.1-sol"},
+		"openai_auth_type": {"api_key"},
+		"auth_method":      {"api_key"},
+		"api_key":          {"sk-switched"},
+	}
+	updateReq := httptest.NewRequest(http.MethodPut, "/models/"+created.ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateRec := httptest.NewRecorder()
+	e.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusSeeOther {
+		t.Fatalf("update model: %d %s", updateRec.Code, updateRec.Body.String())
+	}
+	waitUsageUpdated("UpdateModel")
+	waitFetchCount("UpdateModel", 4)
+	waitUsageUpdated("UpdateModel fetch")
+
+	// 6. DeleteModelsBulk evicts the removed OAuth account and broadcasts immediately.
+	drainUsageUpdated()
+	bulkBody, err := json.Marshal(map[string][]string{"ids": {second.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bulkReq := httptest.NewRequest(http.MethodDelete, "/models/bulk", strings.NewReader(string(bulkBody)))
+	bulkReq.Header.Set("Content-Type", "application/json")
+	bulkRec := httptest.NewRecorder()
+	e.ServeHTTP(bulkRec, bulkReq)
+	if bulkRec.Code != http.StatusOK {
+		t.Fatalf("bulk delete models: %d %s", bulkRec.Code, bulkRec.Body.String())
+	}
+	waitUsageUpdated("DeleteModelsBulk")
+	snapshots, err = usageSvc.SharedAccountUsage(context.Background(), "", false)
+	if err != nil || len(snapshots) != 0 {
+		t.Fatalf("expected empty snapshots after bulk delete, got %+v err=%v", snapshots, err)
+	}
+
+	// 7. finishGeminiOAuth syncs usage and broadcasts immediately.
+	fakeGoogle(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"currentTier":             map[string]string{"id": "standard-tier"},
+			"cloudaicompanionProject": "proj-sync-1",
+		})
+	})
+	geminiModel := &models.LLMConfig{
+		Name:       "Synced Gemini OAuth",
+		Provider:   models.ProviderGemini,
+		Model:      "gemini-2.5-pro",
+		AuthMethod: models.AuthMethodOAuth,
+	}
+	if err := repo.Create(context.Background(), geminiModel); err != nil {
+		t.Fatalf("create gemini model: %v", err)
+	}
+	drainUsageUpdated()
+	if _, err := h.exchangeGeminiOAuthCodeAndSaveTokens(context.Background(), &oauthPendingFlow{
+		ConfigID:       geminiModel.ID,
+		ConnectionID:   geminiModel.OAuthConnectionID,
+		ConfigRevision: geminiModel.OAuthConfigRevision,
+		Provider:       models.ProviderGemini,
+	}, "gemini-code"); err != nil {
+		t.Fatalf("finish gemini oauth: %v", err)
+	}
+	waitUsageUpdated("finishGeminiOAuth")
+	waitFetchCount("finishGeminiOAuth", 5)
+	geminiAccounts, err := usageSvc.ListUsageAccounts(context.Background())
+	if err != nil || len(geminiAccounts) != 1 || geminiAccounts[0].Provider != "gemini" {
+		t.Fatalf("expected 1 gemini usage account, got %+v err=%v", geminiAccounts, err)
+	}
+
+	// 8. DeleteModel evicts snapshot and broadcasts immediately.
+	drainUsageUpdated()
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/models/"+geminiModel.ID, nil)
 	deleteRec := httptest.NewRecorder()
 	e.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusSeeOther {
