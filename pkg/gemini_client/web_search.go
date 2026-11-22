@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 // Search uses a separate grounded request so coding tools and conversation
@@ -79,4 +80,62 @@ func (c *Client) webSearch(ctx context.Context, input json.RawMessage) (*webSear
 		return nil, err
 	}
 	return &webSearchResult{output: string(output), usage: result}, nil
+}
+
+// Bound the encoded result, not its JSON text: cutting JSON can lose source
+// URLs and leave an unreadable tool result. Keep full output for display.
+func webSearchOutputForModel(output string, tokenLimit int) string {
+	if tokenLimit <= 0 {
+		tokenLimit = tokenestimate.DefaultToolOutputTokenLimit
+	}
+	budget := tokenestimate.ByteBudget(tokenLimit)
+	if len(output) <= budget {
+		return output
+	}
+	var result struct {
+		Answer    string                     `json:"answer"`
+		Grounding map[string]json.RawMessage `json:"groundingMetadata,omitempty"`
+		Truncated bool                       `json:"truncated,omitempty"`
+	}
+	fallback := `{"answer":"Search result omitted: sources exceed the output budget. Retry with a narrower query.","truncated":true}`
+	if len(fallback) > budget {
+		fallback = `{}`
+	}
+	if json.Unmarshal([]byte(output), &result) != nil {
+		return fallback
+	}
+	result.Truncated = true
+	// Rendering HTML and query suggestions are not needed for citations.
+	for key := range result.Grounding {
+		if key != "groundingChunks" && key != "groundingSupports" {
+			delete(result.Grounding, key)
+		}
+	}
+	encode := func() string { b, _ := json.Marshal(result); return string(b) }
+	if compact := encode(); len(compact) <= budget {
+		return compact
+	}
+	// Drop duplicated answer spans before shortening the answer. Preserve every
+	// source and its original index; do not retain stale offsets after shortening.
+	delete(result.Grounding, "groundingSupports")
+	if compact := encode(); len(compact) <= budget {
+		return compact
+	}
+	answer := []rune(result.Answer)
+	result.Answer = ""
+	if len(encode()) > budget {
+		return fallback
+	}
+	low, high := 0, len(answer)
+	for low < high {
+		mid := low + (high-low+1)/2
+		result.Answer = string(answer[:mid])
+		if len(encode()) <= budget {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	result.Answer = string(answer[:low])
+	return encode()
 }

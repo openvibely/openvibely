@@ -13,8 +13,9 @@ import (
 )
 
 func TestWebSearchToolRoundTrip(t *testing.T) {
-	for _, oauth := range []bool{false, true} {
-		t.Run(fmt.Sprint(oauth), func(t *testing.T) {
+	for _, tc := range []struct{ oauth, oversized bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		oauth := tc.oauth
+		t.Run(fmt.Sprint(tc), func(t *testing.T) {
 			calls, searches, refreshed, callbacks := 0, 0, false, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var body map[string]any
@@ -52,6 +53,10 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 					require.NotContains(t, string(raw), "functionDeclarations")
 					require.Contains(t, string(raw), "weather in Paris")
 					chunk := `{"candidates":[{"content":{"role":"model","parts":[{"text":"Sunny."}]},"finishReason":"STOP","groundingMetadata":{"webSearchQueries":["Paris weather"],"groundingChunks":[{"web":{"uri":"https://example.com/weather","title":"Weather"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":6,"text":"Sunny."},"groundingChunkIndices":[0]}],"searchEntryPoint":{"renderedContent":"<div>Search</div>"}}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}`
+					if tc.oversized {
+						chunk = strings.ReplaceAll(chunk, "Sunny.", strings.Repeat("Sunny. ", 8000))
+						chunk = strings.ReplaceAll(chunk, "<div>Search</div>", strings.Repeat("<div>Search</div>", 8000))
+					}
 					if oauth {
 						chunk = `{"response":` + chunk + `}`
 					}
@@ -65,7 +70,13 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 					fmt.Fprint(w, `data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"search1","name":"web_search","args":{"query":"weather in Paris"}}}]},"finishReason":"STOP"}]}`+"\n\n")
 				} else {
 					require.Contains(t, string(raw), "https://example.com/weather")
-					require.Contains(t, string(raw), "groundingChunkIndices")
+					if !tc.oversized {
+						require.Contains(t, string(raw), "groundingChunkIndices")
+					}
+					contentsJSON, _ := json.Marshal(req["contents"])
+					var contents []Content
+					require.NoError(t, json.Unmarshal(contentsJSON, &contents))
+					assertSearchReplay(t, contents, tc.oversized)
 					fmt.Fprint(w, `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Final answer"}]},"finishReason":"STOP"}]}`+"\n\n")
 				}
 			}))
@@ -98,6 +109,7 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 			raw, err := json.Marshal(c.LastExchange())
 			require.NoError(t, err)
 			require.Contains(t, string(raw), "https://example.com/weather")
+			assertSearchReplay(t, c.LastExchange(), tc.oversized)
 		})
 	}
 }
@@ -215,4 +227,76 @@ func TestWebSearchRetryAndInvalidResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+func assertSearchReplay(t *testing.T, contents []Content, truncated bool) {
+	t.Helper()
+	found := false
+	for _, content := range contents {
+		for _, part := range content.Parts {
+			if part.FunctionResponse == nil || part.FunctionResponse.Name != "web_search" {
+				continue
+			}
+			found = true
+			output, ok := part.FunctionResponse.Response["output"].(string)
+			require.True(t, ok)
+			require.LessOrEqual(t, len(output), 40000)
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal([]byte(output), &decoded))
+			require.Contains(t, output, "https://example.com/weather")
+			if truncated {
+				require.Equal(t, true, decoded["truncated"])
+			}
+		}
+	}
+	require.True(t, found)
+}
+
+func TestWebSearchOutputBudget(t *testing.T) {
+	for _, answer := range []string{strings.Repeat("quoted \"text\" <>&\n", 10000), strings.Repeat("世界🌎", 10000)} {
+		original, err := json.Marshal(map[string]any{
+			"answer": answer,
+			"groundingMetadata": map[string]any{
+				"groundingChunks":   []any{map[string]any{"web": map[string]string{"uri": "https://example.com/source", "title": "Source"}}},
+				"groundingSupports": []any{map[string]any{"segment": map[string]any{"text": answer}, "groundingChunkIndices": []int{0}}},
+				"searchEntryPoint":  map[string]string{"renderedContent": strings.Repeat("HTML", 20000)},
+			},
+		})
+		require.NoError(t, err)
+		for _, limit := range []int{0, -1, 200, 1} {
+			output := webSearchOutputForModel(string(original), limit)
+			budget := 40000
+			if limit > 0 {
+				budget = limit * 4
+			}
+			require.LessOrEqual(t, len(output), budget)
+			var decoded struct {
+				Answer    string
+				Grounding json.RawMessage `json:"groundingMetadata"`
+				Truncated bool
+			}
+			require.NoError(t, json.Unmarshal([]byte(output), &decoded))
+			if limit == 1 {
+				require.Equal(t, "{}", output)
+				continue
+			}
+			require.True(t, decoded.Truncated)
+			require.NotEmpty(t, decoded.Answer)
+			require.True(t, strings.HasPrefix(answer, decoded.Answer))
+			require.Contains(t, string(decoded.Grounding), "https://example.com/source")
+			require.NotContains(t, string(decoded.Grounding), "groundingSupports")
+		}
+	}
+	t.Run("sources cannot fit", func(t *testing.T) {
+		input, _ := json.Marshal(map[string]any{"answer": "Claim", "groundingMetadata": map[string]any{"groundingChunks": []any{map[string]any{"web": map[string]string{"uri": "https://example.com/" + strings.Repeat("x", 1000)}}}}})
+		output := webSearchOutputForModel(string(input), 100)
+		require.True(t, json.Valid([]byte(output)))
+		require.LessOrEqual(t, len(output), 400)
+		require.NotContains(t, output, "Claim")
+		require.Contains(t, output, "Retry with a narrower query")
+	})
+	t.Run("small result unchanged", func(t *testing.T) {
+		input := `{"answer":"Short","groundingMetadata":{"groundingChunks":[]}}`
+		require.Equal(t, input, webSearchOutputForModel(input, 0))
+	})
 }
