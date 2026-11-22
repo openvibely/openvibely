@@ -316,7 +316,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 			case opts.ToolFilter != nil && !opts.ToolFilter(call.Name):
 				output, isError = fmt.Sprintf("tool %s is not allowed by this agent", call.Name), true
 			case call.Name == "web_search" && nativeSearch:
-				search, searchErr := c.webSearch(ctx, normalized)
+				search, searchErr := c.webSearch(ctx, opts.Model, normalized)
 				if searchErr != nil {
 					output, isError = searchErr.Error(), true
 				} else {

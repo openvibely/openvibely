@@ -12,8 +12,7 @@ import (
 )
 
 // Search uses a separate grounded request so coding tools and conversation
-// history are not sent to the search model.
-const webSearchModel = "gemini-3.1-flash-lite"
+// history are not sent to the selected model during search.
 
 func webSearchDefinition() ToolDefinition {
 	return ToolDefinition{Name: "web_search", Description: "Search the web using Google. Returns a grounded answer with numbered citations and source links. Cite the returned source URLs in your answer.", Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"The web search query"}},"required":["query"],"additionalProperties":false}`)}
@@ -24,7 +23,7 @@ type webSearchResult struct {
 	usage  *turnResult
 }
 
-func (c *Client) webSearch(ctx context.Context, input json.RawMessage) (*webSearchResult, error) {
+func (c *Client) webSearch(ctx context.Context, model string, input json.RawMessage) (*webSearchResult, error) {
 	var args struct {
 		Query string `json:"query"`
 	}
@@ -43,7 +42,7 @@ func (c *Client) webSearch(ctx context.Context, input json.RawMessage) (*webSear
 	}
 	var payload any = request
 	if c.isOAuth() {
-		envelope := map[string]any{"model": webSearchModel, "project": c.project, "request": request}
+		envelope := map[string]any{"model": model, "project": c.project, "request": request}
 		if !c.legacyOAuth {
 			envelope["requestId"] = newRequestID()
 			envelope["userAgent"] = "\x61\x6e\x74\x69\x67\x72\x61\x76\x69\x74\x79"
@@ -55,7 +54,7 @@ func (c *Client) webSearch(ctx context.Context, input json.RawMessage) (*webSear
 	if err != nil {
 		return nil, err
 	}
-	opts := &Options{Model: webSearchModel}
+	opts := &Options{Model: model}
 	result, err := httpretry.DoStream(ctx, httpretry.Policy{AllowReplay: true, MaxRetries: httpretry.DefaultMaxRetries}, func(attemptCtx context.Context) (*turnResult, bool, error) {
 		result := &turnResult{}
 		_, err := c.sendSegment(attemptCtx, body, opts, nil, result, &callAssembler{})

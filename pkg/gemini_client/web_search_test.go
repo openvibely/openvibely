@@ -14,7 +14,15 @@ import (
 )
 
 func TestWebSearchToolRoundTrip(t *testing.T) {
-	for _, tc := range []struct{ oauth, oversized bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+	for _, tc := range []struct {
+		oauth, oversized bool
+		model            string
+	}{
+		{false, false, "gemini-3.8-flash"}, {true, false, "gemini-3.8-flash"},
+		{false, true, "gemini-3.8-flash"}, {true, true, "gemini-3.8-flash"},
+		{false, false, "gemini-4-neon"}, {true, false, "gemini-4-neon"},
+		{false, true, "gemini-4-neon"}, {true, true, "gemini-4-neon"},
+	} {
 		oauth := tc.oauth
 		t.Run(fmt.Sprint(tc), func(t *testing.T) {
 			calls, searches, refreshed, callbacks := 0, 0, false, 0
@@ -45,9 +53,9 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 					if oauth {
 						require.Equal(t, "Bearer fresh", r.Header.Get("Authorization"))
 						require.Equal(t, "web_search", body["requestType"])
-						require.Equal(t, webSearchModel, body["model"])
+						require.Equal(t, tc.model, body["model"])
 					} else {
-						require.Contains(t, r.URL.Path, webSearchModel)
+						require.Contains(t, r.URL.Path, tc.model)
 					}
 					raw, _ := json.Marshal(req)
 					require.NotContains(t, string(raw), "PRIVATE_HISTORY")
@@ -95,7 +103,7 @@ func TestWebSearchToolRoundTrip(t *testing.T) {
 			}
 			c.SetHistory([]Content{TextContent("user", "PRIVATE_HISTORY")})
 			var text strings.Builder
-			response, err := c.Send(context.Background(), "Search", &Options{Model: "gemini-3.8-flash", WebSearchEnabled: true, OmitExecutionEnvironment: true, OnText: func(s string) { text.WriteString(s) }, OnToolResult: func(name, output string, isError bool) {
+			response, err := c.Send(context.Background(), "Search", &Options{Model: tc.model, WebSearchEnabled: true, OmitExecutionEnvironment: true, OnText: func(s string) { text.WriteString(s) }, OnToolResult: func(name, output string, isError bool) {
 				callbacks++
 				require.Equal(t, "web_search", name)
 				require.False(t, isError)
@@ -213,7 +221,7 @@ func TestWebSearchRetryAndInvalidResponses(t *testing.T) {
 			if mode == "missing_query" {
 				input = json.RawMessage(`{"query":" "}`)
 			}
-			result, err := c.webSearch(context.Background(), input)
+			result, err := c.webSearch(context.Background(), "gemini-3.8-flash", input)
 			if mode == "transient" {
 				require.NoError(t, err)
 				require.Equal(t, 2, calls)
