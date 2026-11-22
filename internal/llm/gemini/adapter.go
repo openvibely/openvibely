@@ -94,7 +94,12 @@ func (a *Adapter) client(ctx context.Context, agent models.LLMConfig) (*geminicl
 			return nil, err
 		}
 		agent = fresh
+		legacy := geminiclient.UsesLegacyOAuth(agent.OAuthRefreshToken)
+		if legacy && strings.HasPrefix(agent.Model, "gemini-4-") {
+			return nil, fmt.Errorf("reconnect this Google account on the Models page using Google sign-in before using Gemini 4")
+		}
 		client = geminiclient.NewWithOAuth(agent.OAuthAccessToken, agent.OAuthAccountID)
+		client.SetLegacyOAuth(legacy)
 		client.SetUnauthorizedHandler(func(refreshCtx context.Context, tokenUsed string) (string, bool, error) {
 			recovered, ok, err := a.oauthRecovery.RecoverUnauthorized(refreshCtx, agent, tokenUsed, llmoauth.GeminiRefreshFunc())
 			if err != nil || !ok {
@@ -216,6 +221,7 @@ func (a *Adapter) baseOptions(ctx context.Context, req llmcontracts.AgentRequest
 	resolved := contextlimits.Resolve(req.Agent)
 	opts := &geminiclient.Options{
 		Model:                  strings.TrimSpace(req.Agent.Model),
+		ReasoningEffort:        models.NormalizeModelEffort(req.Agent.Provider, req.Agent.Model, req.Agent.ReasoningEffort),
 		MaxOutputTokens:        resolved.EffectiveOutputCap,
 		ContextWindow:          resolved.EffectiveInputWindow,
 		WorkDir:                effectiveWorkDir(workDir),

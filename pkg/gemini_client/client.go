@@ -3,13 +3,16 @@ package geminiclient
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -37,6 +40,7 @@ const SkipThoughtSignature = "skip_thought_signature_validator"
 type UnauthorizedHandler func(ctx context.Context, tokenUsed string) (newToken string, recovered bool, err error)
 
 type Client struct {
+	legacyOAuth   bool
 	httpClient    *http.Client
 	apiKey        string
 	accessToken   string
@@ -58,6 +62,8 @@ func NewWithOAuth(accessToken, project string) *Client {
 	return &Client{httpClient: httpclient.NewModel(nil), accessToken: accessToken, project: project, codeAssistURL: CodeAssistBaseURL}
 }
 
+func (c *Client) SetLegacyOAuth(legacy bool) { c.legacyOAuth = legacy }
+
 func (c *Client) SetHTTPClient(client *http.Client)            { c.httpClient = client }
 func (c *Client) SetBaseURL(url string)                        { c.baseURL = strings.TrimRight(url, "/") }
 func (c *Client) SetCodeAssistURL(url string)                  { c.codeAssistURL = strings.TrimRight(url, "/") }
@@ -73,9 +79,12 @@ func (c *Client) setLastExchange(items []Content, prefix []Content) {
 // Options configures one agentic exchange.
 type Options struct {
 	Model           string
-	System          string
-	MaxOutputTokens int
-	ContextWindow   int
+	ReasoningEffort string
+	// MaxContinuationRequests bounds automatic continuation; zero defaults to eight.
+	MaxContinuationRequests int
+	System                  string
+	MaxOutputTokens         int
+	ContextWindow           int
 	// Temperature is omitted when nil.
 	Temperature              *float64
 	WorkDir                  string
@@ -224,13 +233,15 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 		}
 
 		var partial strings.Builder
-		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		turnResult, err := httpretry.DoStream(ctx, httpretry.Policy{
+			AllowReplay: true,
 			OnRetry: func(event httpretry.RetryEvent) {
 				applog.Infof("[gemini] retrying turn %d, attempt %d/%d in %v: %v", turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
-		}, func(attemptCtx context.Context) (*turnResult, error) {
+		}, func(attemptCtx context.Context) (*turnResult, bool, error) {
 			partial.Reset()
-			return c.sendTurn(attemptCtx, body, opts, &partial)
+			result, err := c.sendTurn(attemptCtx, body, opts, &partial)
+			return result, partial.Len() > 0 || result != nil, err
 		})
 		if err != nil {
 			if text := partial.String(); text != "" {
@@ -244,10 +255,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 		result.TotalTokens += turnResult.totalTokens
 		result.CachedInputTokens += turnResult.cachedTokens
 		result.ReasoningTokens += turnResult.thoughtTokens
-		result.LastContextTokens = 0
-		if turnResult.inputTokens > 0 {
-			result.LastContextTokens = turnResult.inputTokens + turnResult.outputTokens
-		}
+		result.LastContextTokens = turnResult.lastContextTokens
 		result.StopReason = turnResult.finishReason
 		if turnResult.model != "" {
 			result.Model = turnResult.model
@@ -278,7 +286,6 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 
 		requestInputIndex := exclusiveRequestUserInput(calls)
 		response := Content{Role: "user"}
-		var images []Part
 		for i, call := range calls {
 			input := call.Args
 			if len(input) == 0 || bytes.Equal(bytes.TrimSpace(input), []byte("null")) {
@@ -317,20 +324,23 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *Options) (*Respo
 			result.ToolCalls = append(result.ToolCalls, ToolCall{Name: call.Name, Input: inputMap, Output: output, Error: isError})
 
 			modelOutput, outputImages := toolOutputForModel(output, opts.ToolOutputTokenLimit)
-			images = append(images, outputImages...)
+			var responseMedia []FunctionResponsePart
+			for _, part := range outputImages {
+				if part.InlineData != nil {
+					responseMedia = append(responseMedia, FunctionResponsePart{InlineData: part.InlineData})
+				}
+			}
 			key := "output"
 			if isError {
 				key = "error"
 			}
 			response.Parts = append(response.Parts, Part{FunctionResponse: &FunctionResponse{
-				ID: call.ID, Name: call.Name, Response: map[string]any{key: modelOutput},
+				ID: call.ID, Name: call.Name, Response: map[string]any{key: modelOutput}, Parts: responseMedia,
 			}})
 			if image, ok := attachment.TakeToolImage(ctx, output); ok && !isError {
-				images = append(images, Part{Text: "Image returned by view_image: " + image.Name},
-					Part{InlineData: &InlineData{MimeType: image.MediaType, Data: base64.StdEncoding.EncodeToString(image.Data)}})
+				response.Parts[len(response.Parts)-1].FunctionResponse.Parts = append(response.Parts[len(response.Parts)-1].FunctionResponse.Parts, FunctionResponsePart{InlineData: &InlineData{MimeType: image.MediaType, Data: base64.StdEncoding.EncodeToString(image.Data)}})
 			}
 		}
-		response.Parts = append(response.Parts, images...)
 		contents = append(contents, response)
 		exchange.Append(response)
 		if opts.OnReplayChanged != nil {
@@ -457,6 +467,7 @@ type functionDeclaration struct {
 	Name                 string          `json:"name"`
 	Description          string          `json:"description,omitempty"`
 	ParametersJSONSchema json.RawMessage `json:"parametersJsonSchema,omitempty"`
+	ResponseJSONSchema   json.RawMessage `json:"responseJsonSchema,omitempty"`
 }
 
 type generateRequest struct {
@@ -477,7 +488,7 @@ func (c *Client) buildRequestBody(contents []Content, toolDefs []ToolDefinition,
 		if opts.ToolFilter != nil && !opts.ToolFilter(def.Name) {
 			continue
 		}
-		decls = append(decls, functionDeclaration{Name: def.Name, Description: def.Description, ParametersJSONSchema: def.parameterSchema()})
+		decls = append(decls, functionDeclaration{Name: def.Name, Description: def.Description, ParametersJSONSchema: def.parameterSchema(), ResponseJSONSchema: def.ResponseJSONSchema})
 	}
 	if len(decls) > 0 {
 		req.Tools = []map[string]any{{"functionDeclarations": decls}}
@@ -487,11 +498,23 @@ func (c *Client) buildRequestBody(contents []Content, toolDefs []ToolDefinition,
 	if opts.Temperature != nil {
 		gen["temperature"] = *opts.Temperature
 	}
+	if opts.ReasoningEffort != "" {
+		level, err := thinkingLevel(opts.Model, opts.ReasoningEffort)
+		if err != nil {
+			return nil, err
+		}
+		gen["thinkingConfig"] = map[string]any{"thinkingLevel": level}
+	}
 	req.GenerationConfig = gen
 	if !c.isOAuth() {
 		return json.Marshal(req)
 	}
-	return json.Marshal(map[string]any{"model": opts.Model, "project": c.project, "request": req})
+	model := opts.Model
+	if c.legacyOAuth {
+		return json.Marshal(map[string]any{"model": model, "project": c.project, "request": req})
+	}
+	return json.Marshal(map[string]any{"model": model, "project": c.project, "request": req,
+		"requestId": newRequestID(), "userAgent": "\x61\x6e\x74\x69\x67\x72\x61\x76\x69\x74\x79", "requestType": "agent"})
 }
 
 func ensureRequestFits(body []byte, opts *Options) error {
@@ -516,6 +539,58 @@ func (c *Client) endpoint(model string) string {
 }
 
 func (c *Client) sendTurn(ctx context.Context, body []byte, opts *Options, partial *strings.Builder) (*turnResult, error) {
+	limit := opts.MaxContinuationRequests
+	if limit <= 0 {
+		limit = 8
+	}
+	combined := &turnResult{}
+	seen := map[string]bool{}
+	assembler := &callAssembler{}
+	for step := 0; ; step++ {
+		segment, err := c.sendSegment(ctx, body, opts, partial, combined, assembler)
+		if err != nil {
+			if !combined.observed && step == 0 {
+				return nil, err
+			}
+			return combined, err
+		}
+
+		token := segment.continuationToken
+		if token == "" || segment.finishReason != "MAX_TOKENS" {
+			if len(assembler.pending) > 0 {
+				return combined, fmt.Errorf("gemini incomplete streamed function arguments")
+			}
+			return combined, nil
+		}
+		if step >= limit || seen[token] {
+			return combined, fmt.Errorf("gemini continuation limit or repeated token")
+		}
+		seen[token] = true
+		var envelope map[string]any
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			return combined, err
+		}
+		request := envelope
+		if c.isOAuth() {
+			var ok bool
+			request, ok = envelope["request"].(map[string]any)
+			if !ok {
+				return combined, fmt.Errorf("gemini missing continuation request envelope")
+			}
+			envelope["requestId"] = newRequestID()
+		}
+		for _, key := range []string{"contents", "tools", "systemInstruction", "generationConfig"} {
+			delete(request, key)
+		}
+		request["continuationToken"] = token
+		body, err = json.Marshal(envelope)
+		if err != nil {
+			return combined, err
+		}
+	}
+}
+
+func (c *Client) sendSegment(ctx context.Context, body []byte, opts *Options, partial *strings.Builder, result *turnResult, assembler *callAssembler) (*turnResult, error) {
 	endpoint := c.endpoint(opts.Model)
 	tokenUsed := c.accessToken
 	resp, err := c.post(ctx, endpoint, body)
@@ -541,7 +616,7 @@ func (c *Client) sendTurn(ctx context.Context, body []byte, opts *Options, parti
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return nil, httpretry.NewResponseError(resp, &APIError{StatusCode: resp.StatusCode, Message: boundedErrorText(raw)})
 	}
-	result, err := parseStream(resp.Body, opts.OnText, partial)
+	err = parseStreamInto(resp.Body, opts.OnText, partial, result, assembler)
 	if err != nil {
 		return nil, httpretry.NewStreamError(err)
 	}
@@ -566,6 +641,9 @@ func (c *Client) post(ctx context.Context, endpoint string, body []byte) (*http.
 		req.Header.Set("Accept", "text/event-stream")
 		if c.isOAuth() {
 			req.Header.Set("Authorization", "Bearer "+c.accessToken)
+			if !c.legacyOAuth {
+				req.Header.Set("User-Agent", codeAssistUserAgent())
+			}
 		} else {
 			req.Header.Set("x-goog-api-key", c.apiKey)
 		}
@@ -602,15 +680,18 @@ func categorizeError(err error) error {
 }
 
 type turnResult struct {
-	parts         []Part
-	text          string
-	finishReason  string
-	model         string
-	inputTokens   int
-	outputTokens  int
-	totalTokens   int
-	cachedTokens  int
-	thoughtTokens int
+	lastContextTokens int
+	observed          bool
+	continuationToken string
+	parts             []Part
+	text              string
+	finishReason      string
+	model             string
+	inputTokens       int
+	outputTokens      int
+	totalTokens       int
+	cachedTokens      int
+	thoughtTokens     int
 }
 
 func (r *turnResult) calls() []FunctionCall {
@@ -625,8 +706,9 @@ func (r *turnResult) calls() []FunctionCall {
 
 type streamChunk struct {
 	Candidates []struct {
-		Content      *Content `json:"content"`
-		FinishReason string   `json:"finishReason"`
+		Content           *Content `json:"content"`
+		FinishReason      string   `json:"finishReason"`
+		ContinuationToken string   `json:"continuationToken"`
 	} `json:"candidates"`
 	UsageMetadata *struct {
 		PromptTokenCount        int `json:"promptTokenCount"`
@@ -650,8 +732,22 @@ type codeAssistChunk struct {
 }
 
 func parseStream(body io.Reader, onText func(string), partial *strings.Builder) (*turnResult, error) {
-	scanner := streamdecode.Scanner(body, 32*1024*1024)
 	result := &turnResult{}
+	assembler := &callAssembler{}
+	if err := parseStreamInto(body, onText, partial, result, assembler); err != nil {
+		return nil, err
+	}
+	if len(assembler.pending) > 0 {
+		return nil, fmt.Errorf("gemini incomplete streamed function arguments")
+	}
+	return result, nil
+}
+
+func parseStreamInto(body io.Reader, onText func(string), partial *strings.Builder, result *turnResult, assembler *callAssembler) error {
+	scanner := streamdecode.Scanner(body, 32*1024*1024)
+	result.continuationToken = ""
+	result.finishReason = ""
+	usage := &turnResult{}
 	var text strings.Builder
 	pendingSignature := ""
 	terminal := false
@@ -672,23 +768,23 @@ func parseStream(body io.Reader, onText func(string), partial *strings.Builder) 
 		if json.Unmarshal(data, &wrapped) == nil && wrapped.Response != nil {
 			chunk = *wrapped.Response
 		} else if err := json.Unmarshal(data, &chunk); err != nil {
-			continue
+			return fmt.Errorf("invalid Gemini stream JSON: %w", err)
 		}
 		if chunk.Error != nil {
-			return nil, &APIError{StatusCode: chunk.Error.Code, Message: chunk.Error.Message}
+			return &APIError{StatusCode: chunk.Error.Code, Message: chunk.Error.Message}
 		}
 		if chunk.PromptFeedback != nil && chunk.PromptFeedback.BlockReason != "" && len(chunk.Candidates) == 0 {
-			return nil, fmt.Errorf("gemini blocked the prompt: %s", chunk.PromptFeedback.BlockReason)
+			return fmt.Errorf("gemini blocked the prompt: %s", chunk.PromptFeedback.BlockReason)
 		}
 		if chunk.ModelVersion != "" {
 			result.model = chunk.ModelVersion
 		}
 		if u := chunk.UsageMetadata; u != nil {
-			result.inputTokens = u.PromptTokenCount
-			result.outputTokens = u.CandidatesTokenCount + u.ThoughtsTokenCount
-			result.thoughtTokens = u.ThoughtsTokenCount
-			result.cachedTokens = u.CachedContentTokenCount
-			result.totalTokens = u.TotalTokenCount
+			usage.inputTokens = u.PromptTokenCount
+			usage.outputTokens = u.CandidatesTokenCount + u.ThoughtsTokenCount
+			usage.thoughtTokens = u.ThoughtsTokenCount
+			usage.cachedTokens = u.CachedContentTokenCount
+			usage.totalTokens = u.TotalTokenCount
 		}
 		if len(chunk.Candidates) == 0 {
 			continue
@@ -696,13 +792,20 @@ func parseStream(body io.Reader, onText func(string), partial *strings.Builder) 
 		cand := chunk.Candidates[0]
 		if cand.Content != nil {
 			for _, p := range cand.Content.Parts {
+				result.observed = true
 				switch {
 				case p.Thought:
 					if p.ThoughtSignature != "" {
 						pendingSignature = p.ThoughtSignature
 					}
 				case p.FunctionCall != nil:
-					appendPart(Part{FunctionCall: p.FunctionCall, ThoughtSignature: p.ThoughtSignature})
+					if p.ThoughtSignature == "" {
+						p.ThoughtSignature = pendingSignature
+						pendingSignature = ""
+					}
+					if err := assembler.add(result, p); err != nil {
+						return err
+					}
 				case p.Text != "":
 					text.WriteString(p.Text)
 					if partial != nil {
@@ -711,12 +814,14 @@ func parseStream(body io.Reader, onText func(string), partial *strings.Builder) 
 					if onText != nil {
 						onText(p.Text)
 					}
-					if n := len(result.parts); n > 0 && result.parts[n-1].FunctionCall == nil && result.parts[n-1].InlineData == nil && result.parts[n-1].ThoughtSignature == "" {
+					if n := len(result.parts); n > 0 && result.parts[n-1].FunctionCall == nil && result.parts[n-1].Text != "" && result.parts[n-1].ThoughtSignature == "" && p.ThoughtSignature == "" && pendingSignature == "" {
 						result.parts[n-1].Text += p.Text
 						result.parts[n-1].ThoughtSignature = p.ThoughtSignature
 					} else {
 						appendPart(Part{Text: p.Text, ThoughtSignature: p.ThoughtSignature})
 					}
+				case p.InlineData != nil || p.FileData != nil || len(p.ExecutableCode) > 0 || len(p.CodeExecutionResult) > 0:
+					appendPart(p)
 				case p.ThoughtSignature != "":
 					if n := len(result.parts); n > 0 && result.parts[n-1].ThoughtSignature == "" {
 						result.parts[n-1].ThoughtSignature = p.ThoughtSignature
@@ -726,16 +831,19 @@ func parseStream(body io.Reader, onText func(string), partial *strings.Builder) 
 				}
 			}
 		}
+		if cand.ContinuationToken != "" {
+			result.continuationToken = cand.ContinuationToken
+		}
 		if cand.FinishReason != "" {
 			result.finishReason = cand.FinishReason
 			terminal = true
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return err
 	}
 	if !terminal {
-		return nil, io.ErrUnexpectedEOF
+		return io.ErrUnexpectedEOF
 	}
 	if pendingSignature != "" {
 		for i := len(result.parts) - 1; i >= 0; i-- {
@@ -749,13 +857,46 @@ func parseStream(body io.Reader, onText func(string), partial *strings.Builder) 
 	case "STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED", "":
 	case "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL":
 		if len(result.calls()) == 0 {
-			return nil, fmt.Errorf("gemini response stopped: %s", result.finishReason)
+			return fmt.Errorf("gemini response stopped: %s", result.finishReason)
 		}
 	default:
 		if len(result.calls()) == 0 && text.Len() == 0 {
-			return nil, fmt.Errorf("gemini response stopped: %s", result.finishReason)
+			return fmt.Errorf("gemini response stopped: %s", result.finishReason)
 		}
 	}
-	result.text = text.String()
-	return result, nil
+	result.text += text.String()
+	// Each stream leg reports its own usage; repeated metadata within a leg replaces it.
+	result.inputTokens += usage.inputTokens
+	result.outputTokens += usage.outputTokens
+	result.thoughtTokens += usage.thoughtTokens
+	result.cachedTokens += usage.cachedTokens
+	result.totalTokens += usage.totalTokens
+	if usage.inputTokens > 0 {
+		result.lastContextTokens = usage.inputTokens + usage.outputTokens
+	}
+	return nil
+}
+
+func newRequestID() string {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		panic(err)
+	}
+	return "ov-" + hex.EncodeToString(id[:])
+}
+
+func codeAssistUserAgent() string {
+	return "\x61\x6e\x74\x69\x67\x72\x61\x76\x69\x74\x79/1.5.14 (" + runtime.GOOS + "; " + runtime.GOARCH + ") OpenVibely"
+}
+
+func thinkingLevel(model, effort string) (string, error) {
+	switch effort {
+	case "low", "medium", "high":
+		return strings.ToUpper(effort), nil
+	case "xhigh":
+		if model == "gemini-4-neon" || model == "gemini-4-hydrogen" {
+			return "XHIGH", nil
+		}
+	}
+	return "", fmt.Errorf("unsupported Gemini reasoning effort %q for %s", effort, model)
 }

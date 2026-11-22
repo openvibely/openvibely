@@ -1324,7 +1324,7 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		require.NoError(t, h.OAuthInitiate(c))
 		location := rec.Header().Get("Location")
 		require.Contains(t, location, "client_id="+url.QueryEscape(geminiclient.OAuthClientID))
-		require.Contains(t, location, "redirect_uri=http%3A%2F%2Flocalhost%3A53692%2Foauth2callback")
+		require.Contains(t, location, "redirect_uri=http%3A%2F%2Flocalhost%3A53692%2Fauth%2Fcallback")
 	})
 
 	t.Run("stores gemini cloud project from form", func(t *testing.T) {
@@ -1333,13 +1333,14 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		model := &models.LLMConfig{Name: "Workspace Gemini", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
 		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
 
-		req := httptest.NewRequest(http.MethodPost, "/models/"+model.ID+"/oauth/initiate", strings.NewReader("gemini_cloud_project=+my-proj+"))
+		req := httptest.NewRequest(http.MethodPost, "/models/"+model.ID+"/oauth/initiate", strings.NewReader("gemini_cloud_project=+my-proj+&gemini_account_type=business"))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("id")
 		c.SetParamValues(model.ID)
 		require.NoError(t, h.OAuthInitiate(c))
+		require.Contains(t, rec.Header().Get("Location"), "client_id="+url.QueryEscape(geminiclient.BusinessOAuthClientID))
 		state, err := url.Parse(rec.Header().Get("Location"))
 		require.NoError(t, err)
 		oauthFlowsMu.Lock()

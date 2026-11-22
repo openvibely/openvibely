@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,9 +21,18 @@ import (
 )
 
 const (
-	OAuthClientID     = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-	OAuthClientSecret = "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"
-	OAuthScopes       = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+	LegacyOAuthClientID     = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+	LegacyOAuthClientSecret = "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"
+	LegacyOAuthScopes       = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+)
+
+const (
+	OAuthClientID             = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+	OAuthClientSecret         = "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"
+	BusinessOAuthClientID     = "884354919052-36trc1jjb3tguiac32ov6cod268c5blh.apps.googleusercontent.com"
+	BusinessOAuthClientSecret = "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"
+	BusinessOAuthScopes       = LegacyOAuthScopes + " https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs"
+	OAuthScopes               = BusinessOAuthScopes + " https://www.googleapis.com/auth/aicode openid"
 )
 
 // Endpoints are variables so tests can use local servers.
@@ -52,6 +62,21 @@ func BuiltInOAuthClient() OAuthClient {
 
 // HostedOAuthClient returns the operator-registered web client used for
 // public callbacks, if GEMINI_OAUTH_CLIENT_ID is set.
+func BusinessOAuthClient() OAuthClient {
+	return OAuthClient{ID: BusinessOAuthClientID, Secret: BusinessOAuthClientSecret}
+}
+
+func OAuthScopesForClient(id string) string {
+	switch id {
+	case LegacyOAuthClientID:
+		return LegacyOAuthScopes
+	case BusinessOAuthClientID:
+		return BusinessOAuthScopes
+	default:
+		return OAuthScopes
+	}
+}
+
 func HostedOAuthClient() (OAuthClient, bool) {
 	id := strings.TrimSpace(os.Getenv("GEMINI_OAUTH_CLIENT_ID"))
 	if id == "" {
@@ -72,7 +97,7 @@ func AuthorizationURL(clientID, redirectURI, state, codeChallenge string) string
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_type", "code")
-	q.Set("scope", OAuthScopes)
+	q.Set("scope", OAuthScopesForClient(clientID))
 	q.Set("access_type", "offline")
 	q.Set("prompt", "consent")
 	q.Set("state", state)
@@ -87,30 +112,77 @@ func ExchangeCode(ctx context.Context, client OAuthClient, code, redirectURI, co
 	values.Set("code", code)
 	values.Set("redirect_uri", redirectURI)
 	values.Set("code_verifier", codeVerifier)
-	return postToken(ctx, client, values, "")
+	tokens, err := postToken(ctx, client, values, "")
+	if err == nil {
+		tokens.RefreshToken = encodeRefreshCredential(client.ID, tokens.RefreshToken)
+	}
+	return tokens, err
 }
 
-// RefreshTokenContext refreshes with the hosted client first, then the
-// built-in client, because Google binds refresh tokens to the issuing client.
+const refreshCredentialPrefix = "ov-gemini-v1:"
+
+type refreshCredential struct {
+	ClientID string `json:"client_id"`
+	Token    string `json:"token"`
+}
+
+func encodeRefreshCredential(id, token string) string {
+	if token == "" {
+		return ""
+	}
+	b, _ := json.Marshal(refreshCredential{ClientID: id, Token: token})
+	return refreshCredentialPrefix + base64.RawURLEncoding.EncodeToString(b)
+}
+
+func UsesLegacyOAuth(token string) bool {
+	encoded, ok := strings.CutPrefix(token, refreshCredentialPrefix)
+	if !ok {
+		return true
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	var credential refreshCredential
+	return err != nil || json.Unmarshal(raw, &credential) != nil || credential.ClientID == LegacyOAuthClientID
+}
+
 func RefreshTokenContext(ctx context.Context, refreshToken string) (*Tokens, error) {
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, fmt.Errorf("%w: missing refresh token", ErrOAuthReauthenticationRequired)
 	}
-	clients := []OAuthClient{BuiltInOAuthClient()}
-	if hosted, ok := HostedOAuthClient(); ok && hosted.ID != OAuthClientID {
+	clients := []OAuthClient{{ID: LegacyOAuthClientID, Secret: LegacyOAuthClientSecret}}
+	if hosted, ok := HostedOAuthClient(); ok {
 		clients = append([]OAuthClient{hosted}, clients...)
 	}
-	var err error
+	if encoded, ok := strings.CutPrefix(refreshToken, refreshCredentialPrefix); ok {
+		raw, err := base64.RawURLEncoding.DecodeString(encoded)
+		var credential refreshCredential
+		if err != nil || json.Unmarshal(raw, &credential) != nil || credential.Token == "" {
+			return nil, fmt.Errorf("%w: invalid Gemini credential", ErrOAuthReauthenticationRequired)
+		}
+		known := append([]OAuthClient{BuiltInOAuthClient(), BusinessOAuthClient()}, clients...)
+		clients = nil
+		for _, client := range known {
+			if client.ID == credential.ClientID {
+				clients = []OAuthClient{client}
+				break
+			}
+		}
+		if len(clients) == 0 {
+			return nil, fmt.Errorf("%w: OAuth client configuration changed", ErrOAuthReauthenticationRequired)
+		}
+		refreshToken = credential.Token
+	}
 	for _, client := range clients {
-		values := url.Values{}
-		values.Set("grant_type", "refresh_token")
-		values.Set("refresh_token", refreshToken)
-		var tokens *Tokens
-		if tokens, err = postToken(ctx, client, values, refreshToken); err == nil || !errors.Is(err, errWrongClient) {
-			return tokens, err
+		values := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
+		tokens, err := postToken(ctx, client, values, refreshToken)
+		if err == nil {
+			tokens.RefreshToken = encodeRefreshCredential(client.ID, tokens.RefreshToken)
+			return tokens, nil
+		}
+		if !errors.Is(err, errWrongClient) {
+			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("%w: refresh token not accepted by any configured client", ErrOAuthReauthenticationRequired)
+	return nil, fmt.Errorf("%w: refresh token not accepted by configured client", ErrOAuthReauthenticationRequired)
 }
 
 var errWrongClient = errors.New("gemini OAuth client does not own this token")
@@ -218,7 +290,17 @@ var codeAssistMetadata = map[string]string{
 // onboarding to the default tier when the account has none yet. projectHint
 // is required for workspace/standard tiers and ignored by the free tier.
 func SetupCodeAssist(ctx context.Context, accessToken, projectHint string) (string, error) {
-	load := map[string]any{"metadata": withProject(codeAssistMetadata, projectHint)}
+	return setupCodeAssist(ctx, accessToken, projectHint, codeAssistMetadata)
+}
+
+func SetupGoogleAccount(ctx context.Context, accessToken, projectHint string) (string, error) {
+	return setupCodeAssist(ctx, accessToken, projectHint, map[string]string{
+		"ideType": "\x41\x4e\x54\x49\x47\x52\x41\x56\x49\x54\x59", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI",
+	})
+}
+
+func setupCodeAssist(ctx context.Context, accessToken, projectHint string, metadata map[string]string) (string, error) {
+	load := map[string]any{"metadata": withProject(metadata, projectHint)}
 	if projectHint != "" {
 		load["cloudaicompanionProject"] = projectHint
 	}
@@ -226,6 +308,9 @@ func SetupCodeAssist(ctx context.Context, accessToken, projectHint string) (stri
 		CurrentTier *struct {
 			ID string `json:"id"`
 		} `json:"currentTier"`
+		PaidTier *struct {
+			ID string `json:"id"`
+		} `json:"paidTier"`
 		AllowedTiers []struct {
 			ID                                 string `json:"id"`
 			IsDefault                          bool   `json:"isDefault"`
@@ -236,7 +321,7 @@ func SetupCodeAssist(ctx context.Context, accessToken, projectHint string) (stri
 	if err := codeAssistPost(ctx, accessToken, "loadCodeAssist", load, &loaded); err != nil {
 		return "", err
 	}
-	if loaded.CurrentTier != nil {
+	if loaded.CurrentTier != nil || loaded.PaidTier != nil {
 		if loaded.Project != "" {
 			return loaded.Project, nil
 		}
@@ -257,10 +342,10 @@ func SetupCodeAssist(ctx context.Context, accessToken, projectHint string) (stri
 	}
 	onboard := map[string]any{"tierId": tier}
 	if tier == "free-tier" {
-		onboard["metadata"] = codeAssistMetadata
+		onboard["metadata"] = metadata
 	} else {
 		onboard["cloudaicompanionProject"] = projectHint
-		onboard["metadata"] = withProject(codeAssistMetadata, projectHint)
+		onboard["metadata"] = withProject(metadata, projectHint)
 	}
 	for attempt := 0; attempt < 30; attempt++ {
 		var op struct {
@@ -311,6 +396,7 @@ func codeAssistPost(ctx context.Context, accessToken, method string, payload, ou
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("User-Agent", codeAssistUserAgent())
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpretry.DoRequest(oauthHTTPClient, req)
 	if err != nil {

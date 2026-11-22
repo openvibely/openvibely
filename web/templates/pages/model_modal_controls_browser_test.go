@@ -103,6 +103,8 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   field('model_gemini_auth_type').value='oauth';toggleGeminiAuthFields();
   assert(hidden('api_key_field') && !field('model_api_key').required,'Gemini OAuth hides key');
   assert(!hidden('gemini_subscription_info_oauth') && !field('model_gemini_cloud_project').required,'Gemini OAuth shows optional project');
+  field('model_gemini_account_type').value='business';
+  assert(new FormData(field('model_form')).get('gemini_account_type')==='business','Gemini account type submitted');
   input('model_gemini_cloud_project','my-proj');
   assert(new FormData(field('model_form')).get('gemini_cloud_project')==='my-proj','Gemini project submitted');
   await selectProvider('ollama');

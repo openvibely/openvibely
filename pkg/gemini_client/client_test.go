@@ -271,7 +271,7 @@ func TestRefreshInvalidGrant(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 	tokens, err := RefreshTokenContext(context.Background(), "live")
-	if err != nil || tokens.AccessToken != "a" || tokens.RefreshToken != "live" {
+	if err != nil || tokens.AccessToken != "a" || tokens.RefreshToken != encodeRefreshCredential(LegacyOAuthClientID, "live") {
 		t.Fatalf("tokens=%+v err=%v", tokens, err)
 	}
 }
@@ -319,7 +319,7 @@ func TestRefreshFallsBackToBuiltInClient(t *testing.T) {
 	if err != nil || tokens.AccessToken != "a" {
 		t.Fatalf("tokens=%+v err=%v", tokens, err)
 	}
-	if len(seen) != 2 || seen[0] != "hosted-id" || seen[1] != OAuthClientID {
+	if len(seen) != 2 || seen[0] != "hosted-id" || seen[1] != LegacyOAuthClientID {
 		t.Fatalf("clients tried = %v", seen)
 	}
 }

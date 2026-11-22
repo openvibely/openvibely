@@ -179,6 +179,13 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 	usePublicCallback := shouldUsePublicOAuthCallback(redirectMode, publicBaseURL)
 	geminiClient := geminiclient.BuiltInOAuthClient()
 	if agent.Provider == models.ProviderGemini {
+		switch c.FormValue("gemini_account_type") {
+		case "", "personal":
+		case "business":
+			geminiClient = geminiclient.BusinessOAuthClient()
+		default:
+			return echo.NewHTTPError(http.StatusBadRequest, "Select a personal or business Google account")
+		}
 		if hosted, ok := geminiclient.HostedOAuthClient(); ok && usePublicCallback {
 			geminiClient = hosted
 		} else {
@@ -221,7 +228,7 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		clientID = geminiClient.ID
 		clientSecret = geminiClient.Secret
 		tokenEndpoint = geminiclient.OAuthTokenURL
-		scope = geminiclient.OAuthScopes
+		scope = geminiclient.OAuthScopesForClient(clientID)
 	} else if agent.Provider == models.ProviderOpenAI {
 		if usePublicCallback {
 			// Hosted mode prefers explicit hosted OAuth settings, but falls back to
@@ -302,7 +309,10 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 	if agent.Provider == models.ProviderOpenAI {
 		redirectPath = "/auth/callback"
 	} else if agent.Provider == models.ProviderGemini {
-		redirectPath = "/oauth2callback"
+		redirectPath = "/auth/callback"
+		if usePublicCallback {
+			redirectPath = "/oauth2callback"
+		}
 	}
 	localCallbackHost := "localhost"
 	localCallbackPath := redirectPath
@@ -818,7 +828,11 @@ func (h *Handler) exchangeGeminiOAuthCodeAndSaveTokens(ctx context.Context, flow
 
 func (h *Handler) finishGeminiOAuth(ctx context.Context, flow *oauthPendingFlow, tokens *geminiclient.Tokens) (int64, error) {
 	setupCtx, cancelSetup := context.WithTimeout(ctx, 90*time.Second)
-	project, err := geminiclient.SetupCodeAssist(setupCtx, tokens.AccessToken, firstNonEmpty(flow.CloudProject, strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_PROJECT"))))
+	setup := geminiclient.SetupGoogleAccount
+	if flow.ClientID == "" || flow.ClientID == geminiclient.LegacyOAuthClientID {
+		setup = geminiclient.SetupCodeAssist
+	}
+	project, err := setup(setupCtx, tokens.AccessToken, firstNonEmpty(flow.CloudProject, strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_PROJECT"))))
 	cancelSetup()
 	if err != nil {
 		return 0, err

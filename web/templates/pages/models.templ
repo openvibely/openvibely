@@ -797,10 +797,17 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					<div id="subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your Anthropic subscription through OAuth.</div>
 						<div id="openai_subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your OpenAI subscription through OAuth.</div>
 						<div id="gemini_subscription_info_oauth" class="mb-3 hidden">
-							<div class="text-sm opacity-70 mb-3">Uses your Google account through Gemini Code Assist OAuth.</div>
+							<div class="text-sm opacity-70 mb-3">Uses your Google account through Google sign-in.</div>
+							<div class="form-control mb-3">
+								<label class="label" for="model_gemini_account_type"><span class="label-text">Google account type</span></label>
+								<select name="gemini_account_type" id="model_gemini_account_type" class="select select-bordered">
+									<option value="personal">Personal (Google AI subscription)</option>
+									<option value="business">Business (Google Cloud)</option>
+								</select>
+							</div>
 							<div class="form-control">
 								<label class="label" for="model_gemini_cloud_project"><span class="label-text">Google Cloud project (optional)</span></label>
-								<input type="text" name="gemini_cloud_project" id="model_gemini_cloud_project" class="input input-bordered" autocomplete="off" placeholder="Required for Workspace or paid Code Assist accounts"/>
+								<input type="text" name="gemini_cloud_project" id="model_gemini_cloud_project" class="input input-bordered" autocomplete="off" placeholder="Google Cloud project for business accounts"/>
 							</div>
 						</div>
 					<div id="ollama_info" class="mb-3 hidden">
@@ -3095,6 +3102,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				document.getElementById('model_anthropic_auth_type').value = 'api_key';
 				document.getElementById('model_openai_auth_type').value = 'api_key';
 			document.getElementById('model_gemini_auth_type').value = 'api_key';
+			document.getElementById('model_gemini_account_type').value = 'personal';
 				document.getElementById('model_openai_connection_method').value = 'oauth';
 				document.getElementById('model_api_key').value = '';
 				document.getElementById('model_api_key_submit').value = '';
