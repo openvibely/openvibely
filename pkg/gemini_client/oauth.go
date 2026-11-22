@@ -144,6 +144,28 @@ func UsesLegacyOAuth(token string) bool {
 	return err != nil || json.Unmarshal(raw, &credential) != nil || credential.ClientID == LegacyOAuthClientID
 }
 
+// SetOAuthCredential selects protocol authentication metadata from the client
+// that issued the refresh credential. It does not retain the credential.
+func (c *Client) SetOAuthCredential(token string) {
+	c.legacyOAuth = UsesLegacyOAuth(token)
+	c.oauthAuthMethod = ""
+	encoded, ok := strings.CutPrefix(token, refreshCredentialPrefix)
+	if !ok {
+		return
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	var credential refreshCredential
+	if err != nil || json.Unmarshal(raw, &credential) != nil {
+		return
+	}
+	switch credential.ClientID {
+	case OAuthClientID:
+		c.oauthAuthMethod = "consumer"
+	case BusinessOAuthClientID:
+		c.oauthAuthMethod = "gcp"
+	}
+}
+
 func RefreshTokenContext(ctx context.Context, refreshToken string) (*Tokens, error) {
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, fmt.Errorf("%w: missing refresh token", ErrOAuthReauthenticationRequired)

@@ -41,16 +41,17 @@ const SkipThoughtSignature = "skip_thought_signature_validator"
 type UnauthorizedHandler func(ctx context.Context, tokenUsed string) (newToken string, recovered bool, err error)
 
 type Client struct {
-	legacyOAuth   bool
-	httpClient    *http.Client
-	apiKey        string
-	accessToken   string
-	project       string
-	baseURL       string
-	codeAssistURL string
-	unauthorized  UnauthorizedHandler
-	history       []Content
-	lastExchange  []Content
+	legacyOAuth     bool
+	oauthAuthMethod string
+	httpClient      *http.Client
+	apiKey          string
+	accessToken     string
+	project         string
+	baseURL         string
+	codeAssistURL   string
+	unauthorized    UnauthorizedHandler
+	history         []Content
+	lastExchange    []Content
 }
 
 // NewWithAPIKey uses the public Gemini API.
@@ -629,7 +630,7 @@ func (c *Client) post(ctx context.Context, endpoint string, body []byte) (*http.
 		if c.isOAuth() {
 			req.Header.Set("Authorization", "Bearer "+c.accessToken)
 			if !c.legacyOAuth {
-				req.Header.Set("User-Agent", codeAssistUserAgent())
+				req.Header.Set("User-Agent", codeAssistUserAgent(c.oauthAuthMethod))
 			}
 		} else {
 			req.Header.Set("x-goog-api-key", c.apiKey)
@@ -868,8 +869,17 @@ func newRequestID() string {
 	return "ov-" + hex.EncodeToString(id[:])
 }
 
-func codeAssistUserAgent() string {
-	return "\x61\x6e\x74\x69\x67\x72\x61\x76\x69\x74\x79/1.5.14 (" + runtime.GOOS + "; " + runtime.GOARCH + ") OpenVibely"
+// Compatibility metadata from the inspected CLI release. Keep the version and
+// build number together when updating the protocol profile.
+const googleClientVersion = "1.5.14"
+const googleClientBuild = "1026970498"
+
+func codeAssistUserAgent(authMethod ...string) string {
+	metadata := "aidev_client; os_type=" + runtime.GOOS + "; arch=" + runtime.GOARCH + "; cl=" + googleClientBuild
+	if len(authMethod) > 0 && authMethod[0] != "" {
+		metadata += "; auth_method=" + authMethod[0]
+	}
+	return "\x61\x6e\x74\x69\x67\x72\x61\x76\x69\x74\x79/cli/" + googleClientVersion + " (" + metadata + ")"
 }
 
 func thinkingLevel(model, effort string) (string, error) {
