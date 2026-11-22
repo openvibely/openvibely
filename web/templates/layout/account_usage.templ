@@ -235,6 +235,14 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
         ? /^(five_hour|5.hour|session)$/i.test(l.limit_key || "")
         : /^(seven_day|weekly)$/i.test(l.limit_key || ""),
     );
+  const geminiMainLimit = (a, minutes) =>
+    limits(a).find((l) => {
+      const label = (l.label || "").split("·");
+      if (label[0].trim().toLowerCase() !== "gemini models") return false;
+      return l.window_minutes === minutes || (minutes === 10080
+        ? /weekly/i.test(label.slice(1).join("·"))
+        : /five.hour|5.hour|5h/i.test(label.slice(1).join("·")));
+    });
   const percent = (l) =>
     l &&
     l.used_percent !== null &&
@@ -397,9 +405,8 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
       svg.append(n);
       return n;
     };
-    const googleLimits = a.provider === "gemini" ? limits(a).filter(l => percent(l) !== null).sort((a,b) => percent(b)-percent(a)) : [];
-    const weekly = a.provider === "gemini" ? googleLimits[0] : mainLimit(a, 10080),
-      five = a.provider === "gemini" ? googleLimits[1] : mainLimit(a, 300);
+    const weekly = a.provider === "gemini" ? geminiMainLimit(a, 10080) : mainLimit(a, 10080),
+      five = a.provider === "gemini" ? geminiMainLimit(a, 300) : mainLimit(a, 300);
     const logo = (x, y, size, color, clip) => {
       const group = add("g", {transform: `translate(${x} ${y}) scale(${size / 24})`, fill: color});
       for (const d of providerLogoPaths[a.provider] || []) {

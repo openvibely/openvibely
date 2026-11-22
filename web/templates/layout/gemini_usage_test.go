@@ -35,10 +35,18 @@ func TestGeminiUsageMeterStyles(t *testing.T) {
  const document={createElementNS:(_,tag)=>new Element(tag)};
  const window={};
  ` + helpers + renderer + `
- const account={provider:'gemini',data:{limits:[{label:'Group A',used_percent:20},{label:'Group B',used_percent:80},{label:'Unknown'}]}};
+ const account={provider:'gemini',data:{limits:[{label:'Gemini Models · weekly limit',used_percent:20},{label:'Gemini Models · 5-hour session',used_percent:80},{label:'Unknown'}]}};
+ const others=[{label:'Claude and GPT models · weekly limit',used_percent:99},{label:'Gemini 4 Argon · 5-hour session',used_percent:100}];
+ assert.equal(geminiMainLimit({data:{limits:others}},10080),undefined);
+ assert.equal(geminiMainLimit({data:{limits:others}},300),undefined);
  for(const style of ['logos','letters','fill','bars']){
   const svg=svgFor(account,style);
   assert(svg.children.length>0);
+  logoSequence=0;
+  const expected=svgFor(account,style);
+  logoSequence=0;
+  assert.deepEqual(svgFor({...account,data:{limits:[...others,...account.data.limits]}},style),expected);
+  assert.equal(account.data.limits.length,3);
   const encoded=JSON.stringify(svg);
   assert(!encoded.includes('NaN'));
   if(style==='letters')assert(encoded.includes('"textContent":"G"'));
