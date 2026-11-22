@@ -3,12 +3,14 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -1181,5 +1183,32 @@ func TestSwarmLinksPreserveWorkspaceInHref(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestSwarmChildShowsParentTitleAndStatus(t *testing.T) {
+	// The parent summary is decoded from its JSON shape so this test exercises the
+	// read-only swarm_parent contract that the detail loader fills in.
+	const childJSON = `{"id":"child","project_id":"owner","title":"Child","swarm_role":"worker","parent_task_id":"parent",` +
+		`"swarm_parent":{"id":"parent","project_id":"owner","title":"Release Planning","status":"running","category":"active","swarm_role":"parent","swarm_status":"planning"}}`
+	var child models.Task
+	if err := json.Unmarshal([]byte(childJSON), &child); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := SwarmContextPanel(&child).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), ">Release Planning</a>") {
+		t.Fatalf("expected parent title as link text: %s", out.String())
+	}
+	if strings.Contains(out.String(), ">parent</a>") {
+		t.Fatalf("parent ID should not be link text when summary is loaded: %s", out.String())
+	}
+	if !strings.Contains(out.String(), components.StatusLabelForTask(models.StatusRunning, models.CategoryActive)) {
+		t.Fatalf("expected parent task status in swarm context: %s", out.String())
+	}
+	if !strings.Contains(out.String(), components.SwarmStatusDisplayName("planning")) {
+		t.Fatalf("expected parent swarm status in swarm context: %s", out.String())
 	}
 }

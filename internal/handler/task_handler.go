@@ -817,6 +817,12 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 			task.SwarmChildren = children
 		}
 	}
+	if models.IsSwarmChildRole(task.SwarmRole) && task.ParentTaskID != nil {
+		// Compact, project-scoped summary; a missing or cross-project parent leaves SwarmParent nil.
+		if parent, parentErr := h.taskRepo.GetTaskForSwarmInspection(ctx, task.ProjectID, *task.ParentTaskID, ""); parentErr == nil && parent != nil {
+			task.SwarmParent = parent
+		}
+	}
 
 	executionMetrics, _ := h.execRepo.GetTaskExecutionMetrics(ctx, taskID)
 	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)

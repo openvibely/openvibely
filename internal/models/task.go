@@ -214,6 +214,7 @@ type Task struct {
 	SwarmConfig              string       `json:"swarm_config"`
 	SwarmSequence            int          `json:"swarm_sequence"`
 	SwarmChildren            []Task       `json:"swarm_children,omitempty"`
+	SwarmParent              *Task        `json:"swarm_parent,omitempty"` // Read-only parent summary for child detail pages
 	WorktreePath             string       `json:"worktree_path"`
 	WorktreeBranch           string       `json:"worktree_branch"`
 	AutoMerge                bool         `json:"auto_merge"`

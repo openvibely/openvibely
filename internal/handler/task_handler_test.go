@@ -1355,3 +1355,50 @@ func createMultipartFormWithFiles(t *testing.T, fields map[string]string, filena
 
 	return body, writer.FormDataContentType(), nil
 }
+
+func TestHandler_SwarmChildDetailLoadsOnlySameProjectParentSummary(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithStores(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Swarm Parent Summary Project")
+	otherProject := createProject(t, h, "Swarm Parent Summary Other Project")
+
+	parent := createTask(t, h, project.ID, "Release Planning", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.SwarmRole = models.SwarmRoleParent
+		tk.SwarmStatus = "planning"
+	})
+	child := createTask(t, h, project.ID, "Worker Child", func(tk *models.Task) {
+		tk.SwarmRole = models.SwarmRoleWorker
+		tk.ParentTaskID = &parent.ID
+	})
+	foreignParent := createTask(t, h, otherProject.ID, "Foreign Secret Title", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.SwarmRole = models.SwarmRoleParent
+	})
+	crossChild := createTask(t, h, project.ID, "Cross Project Child", func(tk *models.Task) {
+		tk.SwarmRole = models.SwarmRoleWorker
+		tk.ParentTaskID = &foreignParent.ID
+	})
+
+	data, err := h.loadTaskDetailContentData(ctx, child.ID)
+	require.NoError(t, err)
+	require.NotNil(t, data.task.SwarmParent)
+	require.Equal(t, parent.ID, data.task.SwarmParent.ID)
+	require.Equal(t, "Release Planning", data.task.SwarmParent.Title)
+	require.Equal(t, "planning", data.task.SwarmParent.SwarmStatus)
+
+	crossData, err := h.loadTaskDetailContentData(ctx, crossChild.ID)
+	require.NoError(t, err)
+	require.Nil(t, crossData.task.SwarmParent, "parent in another project must not be loaded")
+
+	response := htmxGet(e, "/tasks/"+child.ID+"?project_id="+project.ID)
+	assertCode(t, response, http.StatusOK)
+	assertContains(t, response, ">Release Planning</a>")
+	assertContains(t, response, "Planning")
+
+	crossResponse := htmxGet(e, "/tasks/"+crossChild.ID+"?project_id="+project.ID)
+	assertCode(t, crossResponse, http.StatusOK)
+	require.NotContains(t, crossResponse.Body.String(), "Foreign Secret Title")
+	assertContains(t, crossResponse, ">"+foreignParent.ID+"</a>")
+}
