@@ -767,34 +767,38 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupAndReturnsLa
 }
 
 func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupAndReturnsLaneConflict(t *testing.T) {
-	ctx := context.Background()
-	env := teststores.New(t)
-	taskRepo := env.Tasks
-	execRepo := env.Executions
-	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, env.Attachments, worker)
-	task := &models.Task{ProjectID: "default", Title: "Failed followup lane move", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
-	require.NoError(t, taskRepo.Create(ctx, task))
-	require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: task.ID, Status: models.ExecFailed, PromptSent: "failed followup", IsFollowup: true}))
-	called := 0
-	svc.SetFailedTaskThreadFollowupRetryHook(func(ctx context.Context, taskID string) (bool, error) {
-		called++
-		require.Equal(t, task.ID, taskID)
-		require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
-		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
-		return true, nil
-	})
-	err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusFailed}}, models.StatusRunning)
-	require.ErrorIs(t, err, ErrActiveLaneLifecycleRouted)
-	require.Equal(t, 1, called)
-	loaded, err := taskRepo.GetByID(ctx, task.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.CategoryActive, loaded.Category)
-	require.Equal(t, models.StatusQueued, loaded.Status)
-	select {
-	case submitted := <-worker.Submitted():
-		t.Fatalf("original task prompt was submitted instead of preserving failed followup: %s", submitted.ID)
-	default:
+	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			ctx := context.Background()
+			env := teststores.New(t)
+			taskRepo := env.Tasks
+			execRepo := env.Executions
+			worker := newTestWorkerService(t)
+			svc := NewTaskService(taskRepo, env.Attachments, worker)
+			task := &models.Task{ProjectID: "default", Title: "Failed followup lane move", Category: models.CategoryBacklog, Status: models.TaskStatus(status), Prompt: "original prompt"}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: task.ID, Status: status, PromptSent: "failed followup", IsFollowup: true}))
+			called := 0
+			svc.SetFailedTaskThreadFollowupRetryHook(func(ctx context.Context, taskID string) (bool, error) {
+				called++
+				require.Equal(t, task.ID, taskID)
+				require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
+				require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
+				return true, nil
+			})
+			err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.TaskStatus(status)}}, models.StatusRunning)
+			require.ErrorIs(t, err, ErrActiveLaneLifecycleRouted)
+			require.Equal(t, 1, called)
+			loaded, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryActive, loaded.Category)
+			require.Equal(t, models.StatusQueued, loaded.Status)
+			select {
+			case submitted := <-worker.Submitted():
+				t.Fatalf("original task prompt was submitted instead of preserving failed followup: %s", submitted.ID)
+			default:
+			}
+		})
 	}
 }
 
