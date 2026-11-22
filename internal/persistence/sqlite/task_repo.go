@@ -1244,7 +1244,7 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 				WHERE i.scope = 'task_thread' AND i.task_id = ? AND i.input_status = 'pending'
 				UNION ALL SELECT 1 FROM executions e
 				WHERE e.rowid = (SELECT latest.rowid FROM executions latest WHERE latest.task_id = ? ORDER BY latest.started_at DESC, latest.rowid DESC LIMIT 1)
-				  AND e.is_followup = 1 AND e.status = 'failed' AND TRIM(e.prompt_sent) <> ''
+				  AND e.is_followup = 1 AND e.status IN ('failed','cancelled') AND TRIM(e.prompt_sent) <> ''
 				UNION ALL SELECT 1 FROM executions e
 				WHERE e.task_id = ? AND e.status IN ('queued','running')
 				UNION ALL SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = ?

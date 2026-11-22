@@ -1139,6 +1139,35 @@ func (w *WorkerService) IsCancellationRequested(taskID string) bool {
 	return requested
 }
 
+// TaskAdmissionContext clears stale cancellation intent only after a new
+// execution is committed while its admission still holds the lifecycle lock.
+func (w *WorkerService) TaskAdmissionContext(ctx context.Context) context.Context {
+	return persistence.WithTaskAdmissionCallback(ctx, w.ClearCancellationRequested)
+}
+
+// TaskActivationContext carries the stopping check to the owner of each
+// activation transaction, where it can run under the task lifecycle lock.
+func (w *WorkerService) TaskActivationContext(ctx context.Context) context.Context {
+	return persistence.WithTaskActivationCheck(w.TaskAdmissionContext(ctx), func(taskID string) error {
+		if w.IsTaskStopping(taskID) {
+			return ErrTaskStillStopping
+		}
+		return nil
+	})
+}
+
+// IsTaskStopping keeps manual restarts out until the cancelled run has
+// deregistered after cleanup. A stale stop marker alone must not block a retry.
+func (w *WorkerService) IsTaskStopping(taskID string) bool {
+	if w == nil {
+		return false
+	}
+	w.cancelMu.Lock()
+	defer w.cancelMu.Unlock()
+	_, registered := w.cancelRegistrationIDs[taskID]
+	return registered && w.cancellationRequested[taskID]
+}
+
 // RegisterCancel stores a cancel function for a running task so it can be
 // cancelled later via CancelRunningTask. This is also used by chat tasks
 // that bypass the worker pool.

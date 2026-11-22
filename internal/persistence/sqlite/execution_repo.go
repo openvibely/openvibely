@@ -457,6 +457,9 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	defer unlockParent()
 	unlock := persistence.LockTaskLifecycle(e.TaskID)
 	defer unlock()
+	if err := persistence.CheckTaskActivation(ctx, e.TaskID); err != nil {
+		return false, err
+	}
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
 	err = withImmediateTx(ctx, r.db, func(dbexec sqlExecutor) error {
@@ -523,6 +526,9 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 		started = true
 		return nil
 	})
+	if err == nil && started {
+		persistence.NotifyTaskAdmitted(ctx, e.TaskID)
+	}
 	return started, err
 }
 
@@ -1250,7 +1256,9 @@ func (r *ExecutionRepo) GetLatestFailedFollowupByTask(ctx context.Context, taskI
 	if err != nil {
 		return nil, fmt.Errorf("getting latest task execution: %w", err)
 	}
-	if e.Status != models.ExecFailed || !e.IsFollowup {
+	// Timeouts are finalized as cancelled, as are user interruptions. A manual
+	// restart must resume that follow-up instead of replaying the original task.
+	if (e.Status != models.ExecFailed && e.Status != models.ExecCancelled) || !e.IsFollowup {
 		return nil, nil
 	}
 	return &e, nil
