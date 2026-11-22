@@ -51,8 +51,9 @@ var oauthHTTPClient = httpclient.New(httpclient.OAuthTimeout)
 
 // OAuthClient identifies the Google OAuth client that issued a token.
 type OAuthClient struct {
-	ID     string
-	Secret string
+	ID          string
+	Secret      string
+	AccountType string
 }
 
 // BuiltInOAuthClient only accepts loopback redirect URIs.
@@ -92,12 +93,15 @@ type Tokens struct {
 }
 
 // AuthorizationURL builds a PKCE consent URL that returns a refresh token.
-func AuthorizationURL(clientID, redirectURI, state, codeChallenge string) string {
+func AuthorizationURL(clientID, redirectURI, state, codeChallenge string, scopes ...string) string {
 	q := url.Values{}
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_type", "code")
 	q.Set("scope", OAuthScopesForClient(clientID))
+	if len(scopes) > 0 && scopes[0] != "" {
+		q.Set("scope", scopes[0])
+	}
 	q.Set("access_type", "offline")
 	q.Set("prompt", "consent")
 	q.Set("state", state)
@@ -114,7 +118,7 @@ func ExchangeCode(ctx context.Context, client OAuthClient, code, redirectURI, co
 	values.Set("code_verifier", codeVerifier)
 	tokens, err := postToken(ctx, client, values, "")
 	if err == nil {
-		tokens.RefreshToken = encodeRefreshCredential(client.ID, tokens.RefreshToken)
+		tokens.RefreshToken = encodeRefreshCredential(client.ID, tokens.RefreshToken, client.AccountType)
 	}
 	return tokens, err
 }
@@ -122,15 +126,20 @@ func ExchangeCode(ctx context.Context, client OAuthClient, code, redirectURI, co
 const refreshCredentialPrefix = "ov-gemini-v1:"
 
 type refreshCredential struct {
-	ClientID string `json:"client_id"`
-	Token    string `json:"token"`
+	ClientID    string `json:"client_id"`
+	Token       string `json:"token"`
+	AccountType string `json:"account_type,omitempty"`
 }
 
-func encodeRefreshCredential(id, token string) string {
+func encodeRefreshCredential(id, token string, accountTypes ...string) string {
 	if token == "" {
 		return ""
 	}
-	b, _ := json.Marshal(refreshCredential{ClientID: id, Token: token})
+	credential := refreshCredential{ClientID: id, Token: token}
+	if len(accountTypes) > 0 {
+		credential.AccountType = accountTypes[0]
+	}
+	b, _ := json.Marshal(credential)
 	return refreshCredentialPrefix + base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -169,6 +178,12 @@ func OAuthAuthMethod(token string) string {
 	if err != nil || json.Unmarshal(raw, &credential) != nil {
 		return ""
 	}
+	switch credential.AccountType {
+	case "personal":
+		return "consumer"
+	case "business":
+		return "gcp"
+	}
 	switch credential.ClientID {
 	case OAuthClientID:
 		return "consumer"
@@ -192,6 +207,7 @@ func RefreshTokenContext(ctx context.Context, refreshToken string) (*Tokens, err
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, fmt.Errorf("%w: missing refresh token", ErrOAuthReauthenticationRequired)
 	}
+	accountType := ""
 	clients := []OAuthClient{{ID: LegacyOAuthClientID, Secret: LegacyOAuthClientSecret}}
 	if hosted, ok := HostedOAuthClient(); ok {
 		clients = append([]OAuthClient{hosted}, clients...)
@@ -213,13 +229,14 @@ func RefreshTokenContext(ctx context.Context, refreshToken string) (*Tokens, err
 		if len(clients) == 0 {
 			return nil, fmt.Errorf("%w: OAuth client configuration changed", ErrOAuthReauthenticationRequired)
 		}
+		accountType = credential.AccountType
 		refreshToken = credential.Token
 	}
 	for _, client := range clients {
 		values := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
 		tokens, err := postToken(ctx, client, values, refreshToken)
 		if err == nil {
-			tokens.RefreshToken = encodeRefreshCredential(client.ID, tokens.RefreshToken)
+			tokens.RefreshToken = encodeRefreshCredential(client.ID, tokens.RefreshToken, accountType)
 			return tokens, nil
 		}
 		if !errors.Is(err, errWrongClient) {

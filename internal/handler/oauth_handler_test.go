@@ -1282,30 +1282,38 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		t.Setenv("APP_BASE_URL", "https://dubee.org")
 		t.Setenv("GEMINI_OAUTH_CLIENT_ID", "gemini-hosted-client")
 		t.Setenv("GEMINI_OAUTH_CLIENT_SECRET", "gemini-hosted-secret")
-		h, e, llmConfigRepo := setupTestHandler(t)
-		model := &models.LLMConfig{Name: "Hosted Gemini OAuth", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
-		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
+		for _, accountType := range []string{"personal", "business"} {
+			h, e, llmConfigRepo := setupTestHandler(t)
+			model := &models.LLMConfig{Name: "Hosted Gemini OAuth", Provider: models.ProviderGemini, AuthMethod: models.AuthMethodOAuth, Model: "gemini-3.8-flash"}
+			require.NoError(t, llmConfigRepo.Create(context.Background(), model))
 
-		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
-		rec := httptest.NewRecorder()
-		c := e.NewContext(req, rec)
-		c.SetParamNames("id")
-		c.SetParamValues(model.ID)
-		require.NoError(t, h.OAuthInitiate(c))
-		require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
-		location := rec.Header().Get("Location")
-		require.Contains(t, location, "client_id=gemini-hosted-client")
-		require.Contains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Foauth2callback")
-		require.NotContains(t, location, "localhost")
+			req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate?gemini_account_type="+accountType, nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(model.ID)
+			require.NoError(t, h.OAuthInitiate(c))
+			require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+			location := rec.Header().Get("Location")
+			require.Contains(t, location, "client_id=gemini-hosted-client")
+			require.Contains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Foauth2callback")
+			require.NotContains(t, location, "localhost")
 
-		u, err := url.Parse(location)
-		require.NoError(t, err)
-		oauthFlowsMu.Lock()
-		flow := oauthFlows[u.Query().Get("state")]
-		oauthFlowsMu.Unlock()
-		require.NotNil(t, flow)
-		require.Equal(t, "gemini-hosted-client", flow.ClientID)
-		require.Equal(t, "gemini-hosted-secret", flow.ClientSecret)
+			u, err := url.Parse(location)
+			require.NoError(t, err)
+			oauthFlowsMu.Lock()
+			flow := oauthFlows[u.Query().Get("state")]
+			oauthFlowsMu.Unlock()
+			require.NotNil(t, flow)
+			require.Equal(t, "gemini-hosted-client", flow.ClientID)
+			require.Equal(t, "gemini-hosted-secret", flow.ClientSecret)
+			require.Equal(t, accountType, flow.GeminiAccountType)
+			if accountType == "business" {
+				require.Equal(t, geminiclient.BusinessOAuthScopes, u.Query().Get("scope"))
+			} else {
+				require.Equal(t, geminiclient.OAuthScopes, u.Query().Get("scope"))
+			}
+		}
 	})
 
 	t.Run("keeps gemini on localhost without hosted client", func(t *testing.T) {

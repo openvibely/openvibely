@@ -57,22 +57,23 @@ const (
 
 // oauthPendingFlow stores the PKCE verifier and model config ID for an in-progress OAuth flow.
 type oauthPendingFlow struct {
-	ActorUserID    string
-	SetupID        string
-	ConfigID       string
-	ConnectionID   string
-	Verifier       string
-	State          string
-	RedirectURI    string
-	CreatedAt      time.Time
-	Provider       models.LLMProvider
-	ClientID       string // From model config (OpenAI) or hardcoded (Claude Max)
-	ClientSecret   string // Only used for OpenAI OAuth
-	TokenURL       string // From model config (OpenAI) or hardcoded (Claude Max)
-	ProjectID      string
-	CloudProject   string
-	CustomConfig   string
-	ConfigRevision int64
+	ActorUserID       string
+	SetupID           string
+	ConfigID          string
+	ConnectionID      string
+	Verifier          string
+	State             string
+	RedirectURI       string
+	CreatedAt         time.Time
+	Provider          models.LLMProvider
+	ClientID          string // From model config (OpenAI) or hardcoded (Claude Max)
+	ClientSecret      string // Only used for OpenAI OAuth
+	TokenURL          string // From model config (OpenAI) or hardcoded (Claude Max)
+	ProjectID         string
+	CloudProject      string
+	GeminiAccountType string
+	CustomConfig      string
+	ConfigRevision    int64
 }
 
 type oauthCompletionOutcome int
@@ -178,10 +179,13 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 	}
 	usePublicCallback := shouldUsePublicOAuthCallback(redirectMode, publicBaseURL)
 	geminiClient := geminiclient.BuiltInOAuthClient()
+	geminiAccountType := ""
 	if agent.Provider == models.ProviderGemini {
 		switch c.FormValue("gemini_account_type") {
 		case "", "personal":
+			geminiAccountType = "personal"
 		case "business":
+			geminiAccountType = "business"
 			geminiClient = geminiclient.BusinessOAuthClient()
 		default:
 			return echo.NewHTTPError(http.StatusBadRequest, "Select a personal or business Google account")
@@ -229,6 +233,9 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		clientSecret = geminiClient.Secret
 		tokenEndpoint = geminiclient.OAuthTokenURL
 		scope = geminiclient.OAuthScopesForClient(clientID)
+		if geminiAccountType == "business" {
+			scope = geminiclient.BusinessOAuthScopes
+		}
 	} else if agent.Provider == models.ProviderOpenAI {
 		if usePublicCallback {
 			// Hosted mode prefers explicit hosted OAuth settings, but falls back to
@@ -385,22 +392,23 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		}
 	}
 	oauthFlows[state] = &oauthPendingFlow{
-		ActorUserID:    actor.UserID,
-		SetupID:        setupID,
-		ConfigID:       id,
-		ConnectionID:   agent.OAuthConnectionID,
-		Verifier:       verifier,
-		State:          state,
-		RedirectURI:    redirectURI,
-		CreatedAt:      time.Now(),
-		Provider:       agent.Provider,
-		ClientID:       clientID,
-		ClientSecret:   clientSecret,
-		TokenURL:       tokenEndpoint,
-		ProjectID:      c.QueryParam("project_id"),
-		CloudProject:   strings.TrimSpace(c.FormValue("gemini_cloud_project")),
-		CustomConfig:   agent.CustomAuthConfigJSON,
-		ConfigRevision: agent.OAuthConfigRevision,
+		ActorUserID:       actor.UserID,
+		SetupID:           setupID,
+		ConfigID:          id,
+		ConnectionID:      agent.OAuthConnectionID,
+		Verifier:          verifier,
+		State:             state,
+		RedirectURI:       redirectURI,
+		CreatedAt:         time.Now(),
+		Provider:          agent.Provider,
+		ClientID:          clientID,
+		ClientSecret:      clientSecret,
+		TokenURL:          tokenEndpoint,
+		ProjectID:         c.QueryParam("project_id"),
+		CloudProject:      strings.TrimSpace(c.FormValue("gemini_cloud_project")),
+		GeminiAccountType: geminiAccountType,
+		CustomConfig:      agent.CustomAuthConfigJSON,
+		ConfigRevision:    agent.OAuthConfigRevision,
 	}
 	oauthFlowsMu.Unlock()
 
@@ -441,7 +449,7 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		u.RawQuery = q.Encode()
 		authURLFull = u.String()
 	} else if agent.Provider == models.ProviderGemini {
-		authURLFull = geminiclient.AuthorizationURL(clientID, redirectURI, state, challenge)
+		authURLFull = geminiclient.AuthorizationURL(clientID, redirectURI, state, challenge, scope)
 	} else {
 		authURLFull = authURL +
 			"?response_type=code" +
@@ -808,7 +816,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokensContext(ctx context.Context, flo
 }
 
 func (h *Handler) exchangeGeminiOAuthCodeAndSaveTokens(ctx context.Context, flow *oauthPendingFlow, code string) (int64, error) {
-	tokens, err := geminiclient.ExchangeCode(ctx, geminiclient.OAuthClient{ID: flow.ClientID, Secret: flow.ClientSecret}, code, flow.RedirectURI, flow.Verifier)
+	tokens, err := geminiclient.ExchangeCode(ctx, geminiclient.OAuthClient{ID: flow.ClientID, Secret: flow.ClientSecret, AccountType: flow.GeminiAccountType}, code, flow.RedirectURI, flow.Verifier)
 	if err != nil {
 		return 0, err
 	}
