@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-surface-style="layered" data-layout="unified" data-fade="on" data-fade-blur="on" data-fade-depth="balanced">
+<html lang="en" data-theme="dark" data-surface-style="layered" data-layout="unified" data-fade="soft-edge" data-fade-blur="on" data-fade-depth="balanced">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -461,17 +461,20 @@
       z-index: 20;
     }
 
-    /* When translucent fade is ON: float the breadcrumb row OVER the scrollport */
-    html[data-fade="on"] #task-breadcrumb-toolbar {
+    /* When fade is ON (Codex or Soft Edge): float the breadcrumb row OVER the scrollport */
+    html[data-fade="codex"] #task-breadcrumb-toolbar,
+    html[data-fade="soft-edge"] #task-breadcrumb-toolbar {
       position: absolute;
       top: 0;
       left: 0;
       right: 0;
-      pointer-events: none; /* Let scroll wheel pass cleanly through empty center */
+      pointer-events: none;
     }
 
-    html[data-fade="on"] #task-breadcrumb-toolbar .breadcrumb-left,
-    html[data-fade="on"] #task-breadcrumb-toolbar #task-details-opener {
+    html[data-fade="codex"] #task-breadcrumb-toolbar .breadcrumb-left,
+    html[data-fade="codex"] #task-breadcrumb-toolbar #task-details-opener,
+    html[data-fade="soft-edge"] #task-breadcrumb-toolbar .breadcrumb-left,
+    html[data-fade="soft-edge"] #task-breadcrumb-toolbar #task-details-opener {
       pointer-events: auto;
     }
 
@@ -482,7 +485,7 @@
       background-color: var(--shell-page);
     }
 
-    /* The Codex-style Translucent Gradient Fade Scrim Layer */
+    /* The Translucent Gradient Fade Scrim Layer */
     .header-fade-layer {
       position: absolute;
       top: 0;
@@ -498,8 +501,27 @@
       display: none;
     }
 
-    /* Layer 1: Progressive eased color fade into --shell-page (no hard edge/banding) */
-    .header-fade-scrim {
+    /* Soft Edge mode: solid 48px bar (zero ghosting behind breadcrumb) + 26px soft fade tail below */
+    html[data-fade="soft-edge"] .header-fade-layer {
+      height: 74px;
+    }
+    html[data-fade="soft-edge"] .header-fade-blur {
+      display: none;
+    }
+    html[data-fade="soft-edge"] .header-fade-scrim {
+      background: linear-gradient(
+        to bottom,
+        var(--shell-page) 0%,
+        var(--shell-page) 48px,
+        color-mix(in srgb, var(--shell-page) 78%, transparent) 54px,
+        color-mix(in srgb, var(--shell-page) 42%, transparent) 61px,
+        color-mix(in srgb, var(--shell-page) 14%, transparent) 68px,
+        transparent 74px
+      );
+    }
+
+    /* Codex mode: translucent fade across the full header row */
+    html[data-fade="codex"] .header-fade-scrim {
       position: absolute;
       inset: 0;
       background: linear-gradient(
@@ -512,6 +534,10 @@
         color-mix(in srgb, var(--shell-page) 5%, transparent) 91%,
         transparent 100%
       );
+    }
+    .header-fade-scrim {
+      position: absolute;
+      inset: 0;
     }
 
     /* Layer 2: Subtle masked backdrop blur (optional, matches Codex frosted top soften) */
@@ -655,8 +681,11 @@
     }
 
     /* Extra top clearance when header floats so scrollTop=0 is completely crisp */
-    html[data-fade="on"] #task-thread-messages {
+    html[data-fade="codex"] #task-thread-messages {
       padding-top: calc(var(--fade-height) - 8px);
+    }
+    html[data-fade="soft-edge"] #task-thread-messages {
+      padding-top: 68px;
     }
     html[data-fade="off"] #task-thread-messages {
       padding-top: 16px;
@@ -1073,15 +1102,11 @@
 
     <!-- Compact Mockup Controls for Live Comparison -->
     <div class="mockup-controls" role="toolbar" aria-label="Mockup comparison controls">
-      <span class="ctrl-label">Fade</span>
-      <button class="mockup-pill-btn" data-toggle="fade" data-value="on" aria-pressed="true">On</button>
+      <button class="mockup-pill-btn" data-toggle="fade" data-value="soft-edge" aria-pressed="true">Soft Edge</button>
+      <button class="mockup-pill-btn" data-toggle="fade" data-value="codex" aria-pressed="false">Codex</button>
       <button class="mockup-pill-btn" data-toggle="fade" data-value="off" aria-pressed="false">Off</button>
       <span class="ctrl-sep"></span>
       <button class="mockup-pill-btn" data-toggle="blur" aria-pressed="true" title="Toggle subtle frosted backdrop blur">Blur</button>
-      <span class="ctrl-sep ctrl-depth-sep"></span>
-      <button class="mockup-pill-btn" data-toggle="depth" data-value="compact" aria-pressed="false">74px</button>
-      <button class="mockup-pill-btn" data-toggle="depth" data-value="balanced" aria-pressed="true">92px</button>
-      <button class="mockup-pill-btn" data-toggle="depth" data-value="tall" aria-pressed="false">118px</button>
       <span class="ctrl-sep"></span>
       <button class="mockup-pill-btn" data-toggle="theme" data-value="dark-layered" aria-pressed="true">Dark</button>
       <button class="mockup-pill-btn" data-toggle="theme" data-value="light" aria-pressed="false">Light</button>
