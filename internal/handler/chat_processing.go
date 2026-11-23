@@ -2180,7 +2180,12 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 			automationContext = &value
 		}
 	}
+	principalID := ""
+	if principal, ok := models.PrincipalFromContext(ctx); ok {
+		principalID = "user:" + principal.UserID
+	}
 	h.startStreamingResponse(streamingResponseParams{
+		PrincipalID:                     principalID,
 		ExecID:                          exec.ID,
 		RetrySourceExecutionID:          failed.ID,
 		TaskID:                          taskID,

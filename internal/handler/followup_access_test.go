@@ -2,6 +2,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -232,4 +238,80 @@ func TestFollowupTelegramRequiresCurrentSenderBinding(t *testing.T) {
 	require.NoError(t, tc.stores.TelegramAuth.DeleteForProject(owner, "default", entry.ID))
 	require.NoError(t, running.Err(), "revocation does not stop a run already started")
 	require.Error(t, h.requireFollowupAccess(restored, params))
+}
+
+func TestAuthenticatedFollowupRestart(t *testing.T) {
+	for _, action := range []string{"run", "active lane"} {
+		for _, status := range []models.ExecutionStatus{models.ExecCancelled, models.ExecFailed} {
+			for _, role := range []string{"editor", "viewer"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", action, status, role), func(t *testing.T) {
+					tc := NewStoreTestContext(t)
+					h, ctx := tc.handler, t.Context()
+					h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+					h.SetRunIdentityStore(tc.stores.RunIdentities)
+					h.SetAuthMode(auth.AuthModeLocal)
+					org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+					h.SetOrganizationService(org)
+					invite, err := org.Invite(ctx, models.BootstrapUserID, "member")
+					require.NoError(t, err)
+					user, err := org.Accept(ctx, invite, "retry-user", "long-password-value", "")
+					require.NoError(t, err)
+					require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, "default", user.UserID, role))
+					agent := createAgent(t, tc.llmConfigRepo)
+					task := createTask(t, h, "default", "Authenticated restart", func(task *models.Task) {
+						task.Category = models.CategoryBacklog
+						task.Status = models.TaskStatus(status)
+						task.AgentID = &agent.ID
+						task.Prompt = "original prompt"
+					})
+					createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+						exec.Status = status
+						exec.IsFollowup = true
+						exec.PromptSent = "longer!"
+					})
+					mock := testutil.NewMockLLMCaller()
+					mock.Response, mock.TextOnly = "finished", "finished"
+					h.llmSvc.SetLLMCaller(mock)
+					caller := models.WithPrincipal(ctx, user.Principal)
+					form := url.Values{"project_id": {"default"}, "category": {"active"}, "target_status": {"running"}}
+					req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/run?project_id=default", strings.NewReader(form.Encode())).WithContext(caller)
+					req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+					req.Header.Set("HX-Request", "true")
+					c := tc.echo.NewContext(req, httptest.NewRecorder())
+					c.SetParamNames("taskId")
+					c.SetParamValues(task.ID)
+					if action == "run" {
+						err = h.RunTask(c)
+					} else {
+						err = h.UpdateTaskCategory(c)
+					}
+					if role == "viewer" {
+						require.Error(t, err)
+						execs, loadErr := h.execRepo.ListByTaskChronological(ctx, task.ID)
+						require.NoError(t, loadErr)
+						require.Len(t, execs, 1)
+						require.Zero(t, mock.CallCount())
+						return
+					}
+					// Active-lane routing can return a conflict after successfully starting
+					// its lifecycle-owned follow-up; execution state is the success criterion.
+					if action == "run" {
+						require.NoError(t, err)
+					}
+					require.Eventually(t, func() bool {
+						execs, loadErr := h.execRepo.ListByTaskChronological(ctx, task.ID)
+						return loadErr == nil && len(execs) == 2 && execs[1].Status == models.ExecCompleted
+					}, 3*time.Second, 10*time.Millisecond)
+					require.Equal(t, 1, mock.CallCount())
+					require.Equal(t, "longer!", mock.LastCall().Prompt)
+					execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+					require.NoError(t, err)
+					executor, found, err := tc.stores.RunIdentities.ExecutionUser(ctx, execs[1].ID)
+					require.NoError(t, err)
+					require.True(t, found)
+					require.Equal(t, user.UserID, executor)
+				})
+			}
+		}
+	}
 }
