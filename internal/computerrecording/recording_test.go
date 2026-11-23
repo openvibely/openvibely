@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -263,5 +264,170 @@ func TestInputRecordsFunctionKeysAndRedactsText(t *testing.T) {
 				t.Fatalf("typed text not redacted: %q", got[12])
 			}
 		})
+	}
+}
+
+
+func TestCaptureStateAppliesLifecycleWithoutSnapshottingEvents(t *testing.T) {
+	var r Recorder
+	if err := r.Start("demo"); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.interval = 500 * time.Millisecond
+	r.result.Events = []Event{{Millis: 10, Text: "preserve me"}}
+	r.mu.Unlock()
+
+	state, interval := r.CaptureState()
+	if state != "recording" || interval != 500*time.Millisecond {
+		t.Fatalf("state=%q interval=%s", state, interval)
+	}
+
+	r.mu.Lock()
+	r.result.Started = time.Now().Add(-Duration)
+	generation := r.generation
+	r.mu.Unlock()
+	state, interval = r.CaptureState()
+	if state != "stopped" || interval != 500*time.Millisecond {
+		t.Fatalf("ten-minute boundary: state=%q interval=%s", state, interval)
+	}
+	if r.generation != generation+1 {
+		t.Fatalf("generation=%d, want %d", r.generation, generation+1)
+	}
+	if got := r.Status().Events; len(got) != 1 || got[0].Text != "preserve me" {
+		t.Fatalf("stopping discarded action history: %+v", got)
+	}
+}
+
+func TestCaptureStateExpiresAbandonedStoppedRecording(t *testing.T) {
+	var r Recorder
+	if err := r.Start("demo"); err != nil {
+		t.Fatal(err)
+	}
+	r.Pause()
+	r.mu.Lock()
+	r.result.Started = time.Now().Add(-time.Hour - time.Second)
+	r.result.Events = []Event{{Millis: 1, Text: "sensitive action"}}
+	generation := r.generation
+	r.mu.Unlock()
+
+	state, interval := r.CaptureState()
+	if state != "" {
+		t.Fatalf("expired state=%q", state)
+	}
+	if interval != 250*time.Millisecond {
+		t.Fatalf("interval changed during expiry: %s", interval)
+	}
+	if got := r.Status(); got.ID != "" || len(got.Events) != 0 {
+		t.Fatalf("abandoned recording was retained: %+v", got)
+	}
+	if r.generation != generation+1 {
+		t.Fatalf("generation=%d, want %d", r.generation, generation+1)
+	}
+}
+
+func TestTicketAppliesLifecycleWithoutStatusSnapshot(t *testing.T) {
+	var r Recorder
+	if err := r.Start("demo"); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.result.Events = []Event{{Millis: 1, Text: "keep"}}
+	r.result.Started = time.Now().Add(-Duration)
+	generation := r.generation
+	r.mu.Unlock()
+
+	gotGeneration, _, active := r.Ticket()
+	if active {
+		t.Fatal("ticket remained active beyond the ten-minute limit")
+	}
+	if gotGeneration != generation+1 {
+		t.Fatalf("generation=%d, want %d", gotGeneration, generation+1)
+	}
+	if got := r.Status().Events; len(got) != 1 || got[0].Text != "keep" {
+		t.Fatalf("ticket read discarded action history: %+v", got)
+	}
+}
+
+func TestStatusEventSnapshotRemainsIndependent(t *testing.T) {
+	var r Recorder
+	if err := r.Start("demo"); err != nil {
+		t.Fatal(err)
+	}
+	r.Action("original")
+	snapshot := r.Status()
+	snapshot.Events[0].Text = "mutated snapshot"
+	if got := r.Status().Events[0].Text; got != "original" {
+		t.Fatalf("snapshot mutation reached recorder: %q", got)
+	}
+}
+
+func TestConcurrentRecordingStateReadsAndActions(t *testing.T) {
+	var r Recorder
+	if err := r.Start("demo"); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for j := 0; j < 500; j++ {
+				switch worker {
+				case 0:
+					r.Action(fmt.Sprintf("action-%d", j))
+				case 1:
+					r.Ticket()
+				case 2:
+					r.Status()
+				case 3:
+					r.CaptureState()
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+func benchmarkRecorder(eventCount int, state string) *Recorder {
+	r := &Recorder{
+		result: Result{
+			ID:      "benchmark",
+			State:   state,
+			Started: time.Now(),
+			Events:  make([]Event, eventCount),
+		},
+		interval: 250 * time.Millisecond,
+	}
+	return r
+}
+
+func BenchmarkCaptureState(b *testing.B) {
+	for _, state := range []string{"recording", "stopped"} {
+		for _, eventCount := range []int{0, 1000, 10000, 20000} {
+			b.Run(fmt.Sprintf("%s/events=%d", state, eventCount), func(b *testing.B) {
+				r := benchmarkRecorder(eventCount, state)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					r.CaptureState()
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkTicket(b *testing.B) {
+	for _, state := range []string{"recording", "stopped"} {
+		for _, eventCount := range []int{0, 1000, 10000, 20000} {
+			b.Run(fmt.Sprintf("%s/events=%d", state, eventCount), func(b *testing.B) {
+				r := benchmarkRecorder(eventCount, state)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					r.Ticket()
+				}
+			})
+		}
 	}
 }
