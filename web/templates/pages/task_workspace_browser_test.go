@@ -921,6 +921,7 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/one?project_id=one", "panel-preference", func(b *composerFocusCDP) {
+		b.waitFor("workspace initialized", `String(document.readyState==='complete' && typeof window.taskWorkspace?.togglePanel==='function')`, "true")
 		b.waitFor("initially closed", `String(document.getElementById('task-details-opener')?.getAttribute('aria-expanded'))`, "false")
 		b.click("#task-details-opener")
 		b.waitFor("open preference saved", `localStorage.getItem('task-inspector-open-one')`, "true")
@@ -941,8 +942,13 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 		b.click("#task-details-opener")
 		softNavigate("/tasks/one?project_id=one", "true", "attachments")
 		navigate := func(path, expected string) {
+			// Page.navigate returns before the new document finishes initializing.
+			// Its parsed controls can already match the expected panel state while
+			// their taskWorkspace click handler is still unavailable. Mark the old
+			// document as well so same-URL reloads cannot satisfy the readiness wait.
+			b.evaluate(`window.panelNavigationPending = true; 'marked'`)
 			b.call("Page.navigate", map[string]any{"url": server.URL + path}, nil)
-			b.waitFor("navigation ready", `location.pathname + location.search + ':' + (document.getElementById('task-detail-content')?.dataset.projectId || '')`, path+":"+strings.Split(strings.Split(path, "project_id=")[1], "&")[0])
+			b.waitFor("navigation ready", `!window.panelNavigationPending && document.readyState==='complete' && typeof window.taskWorkspace?.togglePanel==='function' ? location.pathname + location.search + ':' + (document.getElementById('task-detail-content')?.dataset.projectId || '') : 'initializing'`, path+":"+strings.Split(strings.Split(path, "project_id=")[1], "&")[0])
 			b.waitFor("restored panel", `String(document.getElementById('task-details-opener')?.getAttribute('aria-expanded'))`, expected)
 		}
 		for _, path := range []string{"/tasks/other?project_id=one&tab=details", "/tasks/two?project_id=two&tab=details", "/tasks/one?project_id=one&tab=details"} {

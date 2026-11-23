@@ -323,6 +323,12 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 	_ = debugListener.Close()
 
 	stderrPath := filepath.Join(t.TempDir(), profileName+".stderr")
+	t.Cleanup(func() {
+		if t.Failed() {
+			data, _ := os.ReadFile(stderrPath)
+			t.Logf("browser diagnostic stderr: %s", data)
+		}
+	})
 	stderrFile, err := os.Create(stderrPath)
 	if err != nil {
 		t.Fatalf("create Chrome stderr: %v", err)

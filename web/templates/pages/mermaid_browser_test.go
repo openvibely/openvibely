@@ -263,9 +263,10 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
     oldFrame.contentWindow.mermaid.render=()=>new Promise(resolve=>lateResolve=resolve);
     const stalled=message('flowchart LR; Stalled --> Diagram');
     const later=message('flowchart LR; Later --> Diagram');
-    const start=Date.now();
-    await Promise.all([window.renderMermaidDiagrams(stalled),window.renderMermaidDiagrams(later)]);
-    assert(Date.now()-start>=9900 && Date.now()-start<20000,'render deadline not bounded');
+    const start=Date.now(), monotonicStart=performance.now();
+    let stalledAt, laterAt;
+    await Promise.all([window.renderMermaidDiagrams(stalled).then(()=>{stalledAt=performance.now()-monotonicStart}),window.renderMermaidDiagrams(later).then(()=>{laterAt=performance.now()-monotonicStart})]);
+    assert(Date.now()-start>=9900 && Date.now()-start<20000,'render deadline not bounded '+JSON.stringify({elapsed:Date.now()-start,monotonic:performance.now()-monotonicStart,stalledAt,laterAt,stalled:stalled.textContent,later:later.textContent}));
     assert(!oldFrame.isConnected,'timed out renderer retained');
     assert(stalled.querySelector('code'),'timeout lost source');
     assert(stalled.textContent.includes('timed out'),'timeout message missing');
