@@ -28,11 +28,43 @@ For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.
 2. Click `+ Add Model`.
 3. Fill:
    - `Name`
-   - `Provider` (`Anthropic`, `OpenAI`, `Ollama`, `Mixture of Models`, or an OpenAI-compatible preset such as `OpenRouter`, `Groq`, `LM Studio`, or `Custom OpenAI-Compatible`)
+   - `Provider` (`Anthropic`, `OpenAI`, `Google Gemini`, `Ollama`, `Mixture of Models`, or an OpenAI-compatible preset such as `OpenRouter`, `Groq`, `LM Studio`, or `Custom OpenAI-Compatible`)
    - `Authentication` / `Connection Method` (provider-dependent)
    - `Model`
    - Optional, model-dependent runtime settings (`Temperature` when supported, worker pool settings, etc.)
 4. Click `Create`.
+
+## Google Gemini
+
+In **Settings → Models**, choose **Google Gemini**, then use an API key or OAuth. For Google sign-in, select **Personal (Google AI subscription)** or **Business (Google Cloud)**. Supply the optional Google Cloud project for business accounts when required; `GOOGLE_CLOUD_PROJECT` supplies the fallback. Finish sign-in and wait for account setup to complete before using the model.
+
+Compatible model configurations share the saved Google connection and refreshed credentials. Model access depends on the connected account. Gemini 4 through business Code Assist sign-in is not yet verified.
+
+Gemini supports image attachments, tools, conversation compaction, and Google-backed web search with source links. Gemini 4 models provide the effort choices below and default to `medium`; temperature is not configurable for them. The default Gemini preset is `gemini-3.8-flash`.
+
+| Model | Reasoning effort | Authentication |
+|---|---|---|
+| `claude-sonnet-5-5-low` | No separate effort dropdown | OAuth only |
+| `claude-sonnet-5-5-medium` | No separate effort dropdown | OAuth only |
+| `claude-sonnet-5-5-high` | No separate effort dropdown | OAuth only |
+| `claude-opus-5-5-low` | No separate effort dropdown | OAuth only |
+| `claude-opus-5-5-medium` | No separate effort dropdown | OAuth only |
+| `claude-opus-5-5-high` | No separate effort dropdown | OAuth only |
+| `gpt-oss-120b-medium` | No separate effort dropdown | OAuth only |
+| `gemini-4-carbon` | low / medium / high | API key or OAuth |
+| `gemini-4-neon` | low / medium / high / xhigh | API key or OAuth |
+| `gemini-4-hydrogen` | low / medium / high / xhigh | API key or OAuth |
+| `gemini-4-argon` | low / medium / high | API key or OAuth |
+| `gemini-3.8-flash` | No separate effort dropdown | API key or OAuth |
+| `gemini-3.6-flash` | No separate effort dropdown | API key or OAuth |
+| `gemini-3.5-flash` | No separate effort dropdown | API key or OAuth |
+| `gemini-3-flash` | No separate effort dropdown | API key or OAuth |
+| `gemini-3.5-flash-lite` | No separate effort dropdown | API key or OAuth |
+| `gemini-3.1-flash-lite` | No separate effort dropdown | API key or OAuth |
+| `gemini-3.1-pro-preview` | No separate effort dropdown | API key or OAuth |
+| `gemini-3-flash-preview` | No separate effort dropdown | API key or OAuth |
+
+The Google-hosted Claude entries encode effort in the model selection. Google-hosted Claude and GPT-OSS require OAuth and do not enable Google-backed web search. These are Google-provider configurations, separate from direct Anthropic or OpenAI connections.
 
 ## Supported Models
 
