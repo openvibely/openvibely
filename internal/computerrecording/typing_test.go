@@ -594,9 +594,11 @@ func TestTypedSanitization(t *testing.T) {
 func TestFunctionShortcutEndsTyping(t *testing.T) {
 	r, _, send := typingRecorder(t, InputUnknown, false)
 	send('a', true)
+	send(0xffe3, true)
 	send(0xffbe, true)
+	send(0xffe3, false)
 	send('b', true)
-	if got := eventTexts(r); !reflect.DeepEqual(got, []string{`Type "a"`, "Press F1", `Type "b"`}) {
+	if got := eventTexts(r); !reflect.DeepEqual(got, []string{`Type "a"`, "Press Ctrl+F1", `Type "b"`}) {
 		t.Fatal(got)
 	}
 }
@@ -693,6 +695,79 @@ func TestKeypadEditingKeys(t *testing.T) {
 		want := []string{"Press Insert", "Press Delete", "Press Shift+Insert"}
 		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
 			t.Fatal(got)
+		}
+	}
+}
+
+func TestNavigationRepeatInactivityBoundary(t *testing.T) {
+	for _, gap := range []int64{1500, 2000, 2001, 3000} {
+		out := Result{Events: []Event{{0, "Press Down"}, {gap, "Press Down"}}}
+		transcript := out.Transcript()
+		if gap <= 2000 {
+			if !strings.Contains(transcript, "Press Down ×2") {
+				t.Fatalf("gap %d: %s", gap, transcript)
+			}
+		} else if strings.Contains(transcript, "×") || strings.Count(transcript, "Press Down") != 2 {
+			t.Fatalf("gap %d: %s", gap, transcript)
+		}
+	}
+	// Each successive action refreshes inactivity, rather than timing the run
+	// from its first action.
+	out := Result{Events: []Event{{0, "Press Down"}, {1500, "Press Down"}, {3000, "Press Down"}}}
+	if !strings.Contains(out.Transcript(), "Press Down ×3") {
+		t.Fatal(out.Transcript())
+	}
+}
+
+func TestRapidTabSummary(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, _, send := typingRecorder(t, InputOrdinary, extended)
+		for i := 0; i < 2; i++ {
+			send(0xff09, true)
+			send(0xff09, false)
+		}
+		if len(r.Status().Events) != 2 || !strings.Contains(r.Status().Transcript(), "Press Tab ×2") {
+			t.Fatal(r.Status().Transcript())
+		}
+	}
+}
+
+func TestUnmodifiedFunctionKeyPreservesTyping(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, _, send := typingRecorder(t, InputOrdinary, extended)
+		send('a', true)
+		send(0xffbe, true)
+		send(0xffbe, false)
+		send('b', true)
+		if got := eventTexts(r); !reflect.DeepEqual(got, []string{`Type "ab"`, "Press F1"}) {
+			t.Fatal(got)
+		}
+	}
+}
+
+func TestNavigationRefreshesTypingInactivity(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		for _, gap := range []time.Duration{1500 * time.Millisecond, 3 * time.Second} {
+			r, _, send := typingRecorder(t, InputOrdinary, extended)
+			send('a', true)
+			// Advance the inactivity clock without sleeping. No concurrent reader
+			// accesses this recorder in this test.
+			r.lastTyped = time.Now().Add(-gap)
+			beforeNavigation := time.Now()
+			send(0xff54, true)
+			send(0xff54, false)
+			if gap < 2*time.Second && r.lastTyped.Before(beforeNavigation) {
+				t.Fatal("navigation did not refresh inactivity")
+			}
+			r.lastTyped = r.lastTyped.Add(-1500 * time.Millisecond)
+			send('b', true)
+			want := []string{`Type "ab"`, "Press Down"}
+			if gap > 2*time.Second {
+				want = []string{`Type "a"`, "Press Down", `Type "b"`}
+			}
+			if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+				t.Fatalf("gap %s: %v", gap, got)
+			}
 		}
 	}
 }

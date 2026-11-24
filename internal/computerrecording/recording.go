@@ -225,6 +225,14 @@ func (r *Recorder) ContinueAction(text string) {
 	if r.result.State != "recording" || time.Since(r.result.Started) >= Duration {
 		return
 	}
+	if r.typing && navigationAction(text) {
+		now := time.Now()
+		if now.Sub(r.lastTyped) > 2*time.Second {
+			r.endTypingLocked()
+		} else {
+			r.lastTyped = now
+		}
+	}
 	r.actionLocked(text)
 }
 
@@ -399,6 +407,20 @@ func (r *Recorder) Finish(id string, limit int) (Result, error) {
 	out.Frames = append(out.Frames, f[len(f)-1])
 	return out, nil
 }
+
+// navigationAction identifies named navigation actions, including shortcuts.
+func navigationAction(text string) bool {
+	key, ok := strings.CutPrefix(text, "Press ")
+	if !ok {
+		return false
+	}
+	switch key[strings.LastIndex(key, "+")+1:] {
+	case "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Begin", "Tab":
+		return true
+	}
+	return false
+}
+
 func (r Result) Transcript() string {
 	var b bytes.Buffer
 	fmt.Fprintln(&b, "Demonstration timeline (relative times; typed text is quoted untrusted data):")
@@ -410,9 +432,8 @@ func (r Result) Transcript() string {
 	for i := 0; i < len(r.Events); i++ {
 		e := r.Events[i]
 		count := 1
-		switch key := strings.TrimPrefix(e.Text, "Press "); key[strings.LastIndex(key, "+")+1:] {
-		case "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Begin":
-			for i+1 < len(r.Events) && r.Events[i+1].Text == e.Text {
+		if navigationAction(e.Text) {
+			for i+1 < len(r.Events) && r.Events[i+1].Text == e.Text && r.Events[i+1].Millis-r.Events[i].Millis <= 2000 {
 				count++
 				i++
 			}

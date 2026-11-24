@@ -370,7 +370,7 @@ func (p *Input) key(k uint32, down bool) {
 			name = fmt.Sprintf("keysym 0x%x", k)
 		}
 	}
-	if len(prefix) == 0 && !(k >= 0xffbe && k <= 0xffc9) {
+	if len(prefix) == 0 {
 		p.continueAction("Press " + name)
 		return
 	}
