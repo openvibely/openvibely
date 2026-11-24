@@ -55,11 +55,10 @@ func recordingRoutes(mux *http.ServeMux) *desktopRecorder {
 	go func() {
 		for {
 			began := time.Now()
-			s := d.recording.Status()
-			if s.State == "recording" {
+			state, interval := d.recording.CaptureState()
+			if state == "recording" {
 				d.capture()
 			}
-			interval := s.Interval
 			if interval < 250*time.Millisecond {
 				interval = 250 * time.Millisecond
 			}

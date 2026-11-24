@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -121,9 +122,9 @@ func (r *Recorder) Clear(id string) error {
 	r.generation++
 	return nil
 }
-func (r *Recorder) Status() Result {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// updateLifecycleLocked applies recording time limits and abandoned-capture
+// expiry. The caller must hold r.mu.
+func (r *Recorder) updateLifecycleLocked() {
 	if r.result.State == "recording" && time.Since(r.result.Started) >= Duration {
 		r.result.State = "stopped"
 		r.generation++
@@ -135,6 +136,21 @@ func (r *Recorder) Status() Result {
 		r.bytes = 0
 		r.generation++
 	}
+}
+
+// CaptureState returns only the fields needed by the background capture loop.
+// It deliberately avoids copying the action log.
+func (r *Recorder) CaptureState() (string, time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.updateLifecycleLocked()
+	return r.result.State, r.interval
+}
+
+func (r *Recorder) Status() Result {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.updateLifecycleLocked()
 	v := r.result
 	v.Events = append([]Event(nil), v.Events...)
 	v.Frames = nil
@@ -144,9 +160,9 @@ func (r *Recorder) Status() Result {
 
 // Ticket timestamps the start of capture on the same clock as received input.
 func (r *Recorder) Ticket() (uint64, int64, bool) {
-	r.Status()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.updateLifecycleLocked()
 	return r.generation, time.Since(r.result.Started).Milliseconds(), r.result.State == "recording"
 }
 func (r *Recorder) Capture(g uint64, ms int64, jpeg, signature []byte) {
@@ -182,7 +198,10 @@ func (r *Recorder) Action(text string) {
 	}
 	now := time.Since(r.result.Started).Milliseconds()
 	ev := r.result.Events
-	if len(ev) > 0 && ev[len(ev)-1].Text == text && now-ev[len(ev)-1].Millis < 500 {
+	// Only redacted input (typed or clipboard values) is coalesced; discrete
+	// navigation or control keys must each be preserved even when they repeat.
+	const redacted = "[user-provided value omitted]"
+	if len(ev) > 0 && strings.HasSuffix(text, redacted) && ev[len(ev)-1].Text == text && now-ev[len(ev)-1].Millis < 500 {
 		return
 	}
 	if len(ev) >= 20000 {

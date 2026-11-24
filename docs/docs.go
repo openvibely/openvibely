@@ -4669,6 +4669,12 @@ const docTemplate = `{
         "update.CoordinatorSnapshot": {
             "type": "object",
             "properties": {
+                "automatic_updates": {
+                    "type": "boolean"
+                },
+                "automatic_updates_supported": {
+                    "type": "boolean"
+                },
                 "channel": {
                     "type": "string"
                 },
