@@ -91,7 +91,10 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("computer shell hides native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
 		b.waitFor("computer shell fills viewport", `String(document.querySelector('[data-computer-dialog]').getBoundingClientRect().width===innerWidth && document.querySelector('[data-computer-dialog]').getBoundingClientRect().height===innerHeight)`, "true")
 		b.waitFor("computer uses gallery backdrop and close button", `String((()=>{const c=document.querySelector('[data-computer-dialog]'),g=document.getElementById('image-gallery');return getComputedStyle(c,'::backdrop').backgroundColor===getComputedStyle(g,'::backdrop').backgroundColor && getComputedStyle(c.querySelector('[data-fullscreen-close]')).borderRadius==='50%' && ['borderRadius','width','height','backgroundColor','padding'].every(key=>getComputedStyle(c.querySelector('[data-fullscreen-close]'))[key]===getComputedStyle(g.querySelector('[data-fullscreen-close]'))[key]) && getComputedStyle(c.querySelector('[data-fullscreen-header]')).padding===getComputedStyle(g.querySelector('[data-fullscreen-header]')).padding && getComputedStyle(c).backgroundColor==='rgba(0, 0, 0, 0)'})())`, "true")
-		b.evaluate(`const canvas=document.createElement('canvas');canvas.id='test-desktop-canvas';canvas.style.cssText='width:200px;height:150px';document.querySelector('[data-computer-screen]').append(canvas);document.querySelector('[data-computer-connection]').style.setProperty('display','none','important');'canvas'`)
+		// This fixture has no VNC connection. Keep its connection overlay hidden
+		// through renderConnection's periodic inline-style updates so native clicks
+		// reach the canvas throughout the gesture.
+		b.evaluate(`const canvas=document.createElement('canvas');canvas.id='test-desktop-canvas';canvas.style.cssText='width:200px;height:150px';document.querySelector('[data-computer-screen]').append(canvas);const style=document.createElement('style');style.textContent='[data-computer-connection]{display:none!important}';document.head.append(style);'canvas'`)
 		b.click("#test-desktop-canvas")
 		b.waitFor("desktop clicks do not dismiss", `String(document.querySelector('[data-computer-dialog]').open)`, "true")
 		// This gallery fixture has no connected VNC control session. Expose the
