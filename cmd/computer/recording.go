@@ -19,6 +19,9 @@ import (
 type desktopRecorder struct {
 	recording computerrecording.Recorder
 	captureMu sync.Mutex
+	// Input processing and lifecycle transitions share this boundary. A save
+	// must include frames already being forwarded or classified by the viewer.
+	inputMu sync.Mutex
 }
 
 func (d *desktopRecorder) capture() {
@@ -75,6 +78,13 @@ func recordingRoutes(mux *http.ServeMux) *desktopRecorder {
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in) != nil {
 			http.Error(w, "Invalid recording command", 400)
 			return
+		}
+		// Wait for in-flight input before freezing or replacing the recording.
+		// Lock ordering is inputMu, then captureMu, then the recorder's mutex.
+		switch in.Action {
+		case "start", "pause", "finish", "discard", "ack":
+			d.inputMu.Lock()
+			defer d.inputMu.Unlock()
 		}
 		var out any
 		var err error

@@ -92,20 +92,30 @@ func (v *viewerConnections) proxy(w http.ResponseWriter, r *http.Request, target
 			if err != nil {
 				return
 			}
-			// Conservative frame-local protection if typing itself moves focus.
-			// This snapshot is discarded for the next frame, never cached across focus changes.
-			frameSecurity = computerrecording.InputUnknown
-			inspectedAfterForward = false
-			postSecurity = computerrecording.InputUnknown
-			if recordingInput {
-				if state, _ := v.recorder.recording.CaptureState(); state == "recording" {
-					frameSecurity = focusedInputSecurity()
+			err = func() error {
+				if recordingInput {
+					v.recorder.inputMu.Lock()
+					defer v.recorder.inputMu.Unlock()
 				}
-			}
-			if dst.Write(ctx, kind, data) != nil {
+				// Conservative frame-local protection if typing itself moves focus.
+				// This snapshot is discarded for the next frame, never cached across focus changes.
+				frameSecurity = computerrecording.InputUnknown
+				inspectedAfterForward = false
+				postSecurity = computerrecording.InputUnknown
+				if recordingInput {
+					if state, _ := v.recorder.recording.CaptureState(); state == "recording" {
+						frameSecurity = focusedInputSecurity()
+					}
+				}
+				if err := dst.Write(ctx, kind, data); err != nil {
+					return err
+				}
+				observer.Feed(data)
+				return nil
+			}()
+			if err != nil {
 				return
 			}
-			observer.Feed(data)
 		}
 	}
 	go func() {
