@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/server"
 	"github.com/openvibely/openvibely/internal/update"
@@ -193,10 +194,11 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 	// Keep the document and native runtime on Wails' origin. Application routes
 	// still use the shared backend; live updates use a ticketed loopback WebSocket.
 	proxy := desktopAssetProxy(backendURL)
+	build := buildinfo.Current(buildinfo.ArtifactDesktop)
 	app := application.New(application.Options{
 		Assets:      application.AssetOptions{Handler: proxy},
 		Name:        "OpenVibely",
-		Description: "OpenVibely desktop application",
+		Description: fmt.Sprintf("OpenVibely desktop application\nVersion: %s\nCommit: %s", build.Version, build.Commit),
 		Icon:        desktopicons.OpenVibelyPNG,
 		OnShutdown:  onShutdown,
 		Mac: application.MacOptions{
@@ -206,6 +208,17 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 			ProgramName: "com.openvibely.desktop",
 		},
 	})
+	if runtime.GOOS == "darwin" {
+		menu := application.DefaultApplicationMenu()
+		// The native About role reads bundle metadata, which is absent when
+		// running the executable directly. Use our explicit app identity instead.
+		if about := menu.FindByRole(application.About); about != nil {
+			about.SetRole(application.NoRole).SetLabel("About OpenVibely").OnClick(func(*application.Context) {
+				app.Menu.ShowAbout()
+			})
+		}
+		app.Menu.Set(menu)
+	}
 	if coordinator == nil {
 		return fmt.Errorf("desktop update coordinator is unavailable")
 	}
