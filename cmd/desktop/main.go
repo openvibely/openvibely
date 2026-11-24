@@ -209,7 +209,20 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		},
 	})
 	if runtime.GOOS == "darwin" {
-		menu := application.DefaultApplicationMenu()
+		menu := app.Menu.New()
+		menu.AddRole(application.AppMenu)
+		// Keep native editing/window shortcuts without visible top-level menus.
+		commands := menu.FindByRole(application.AppMenu).GetSubmenu()
+		for _, role := range []application.Role{
+			application.Undo, application.Redo, application.Cut, application.Copy,
+			application.Paste, application.PasteAndMatchStyle, application.Delete,
+			application.SelectAll, application.CloseWindow, application.Minimise,
+			application.Reload, application.ForceReload, application.ResetZoom,
+			application.ZoomIn, application.ZoomOut, application.ToggleFullscreen,
+		} {
+			commands.AddRole(role)
+			commands.FindByRole(role).SetHidden(true)
+		}
 		// The native About role reads bundle metadata, which is absent when
 		// running the executable directly. Use our explicit app identity instead.
 		if about := menu.FindByRole(application.About); about != nil {
@@ -265,9 +278,13 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		// Composition hosting lets Windows hit-test the caption buttons for Snap Layouts.
 		Windows: application.WindowsWindow{WebView2CompositionHosting: true},
 	})
+	window.SetMenu(nil) // Windows/Linux: explicitly disable the window menu bar.
 	registerPlatformWindowControls(app, window)
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		application.InvokeAsync(installFullscreenPresentation)
+		application.InvokeAsync(func() {
+			installFullscreenPresentation()
+			enableHiddenMenuShortcuts()
+		})
 	})
 	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 
