@@ -493,3 +493,59 @@ func TestModifierCombinationCollapsesSidesAndHandlesThreeKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestShiftEnterVariantsUseTextSecurity(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		for _, enter := range []uint32{0xff0d, 0xff8d} {
+			for _, tc := range []struct {
+				security InputSecurity
+				want     string
+			}{
+				{InputOrdinary, `Type "a\nb"`},
+				{InputSecure, "Type [secure input]"},
+				{InputUnknown, "Type [input withheld: secure-input detection unavailable]"},
+			} {
+				r, p, send := typingRecorder(t, tc.security, extended)
+				classified := 0
+				p.Security = func() InputSecurity { classified++; return tc.security }
+				send('a', true)
+				send('a', false)
+				send(0xffe1, true)
+				send(enter, true)
+				send(enter, false)
+				send(0xffe1, false)
+				send('b', true)
+				send('b', false)
+				out, err := r.Finish("typing", 2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if classified != 3 || len(out.Events) != 1 || out.Events[0].Text != tc.want {
+					t.Fatalf("extended=%v enter=%x security=%d: classified=%d events=%#v", extended, enter, tc.security, classified, out.Events)
+				}
+			}
+		}
+	}
+}
+
+func TestKeypadEnterControlActions(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, _, send := typingRecorder(t, InputOrdinary, extended)
+		for i := 0; i < 2; i++ {
+			send(0xff8d, true)
+			send(0xff8d, false)
+		}
+		send(0xffe3, true)
+		send(0xff8d, true)
+		send(0xff8d, false)
+		send(0xffe1, true)
+		send(0xff8d, true)
+		send(0xff8d, false)
+		send(0xffe1, false)
+		send(0xffe3, false)
+		want := []string{"Press Enter", "Press Enter", "Press Ctrl+Enter", "Press Ctrl+Shift+Enter"}
+		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+			t.Fatalf("extended=%v: %#v", extended, got)
+		}
+	}
+}

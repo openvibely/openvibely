@@ -249,6 +249,10 @@ func (p *Input) key(k uint32, down bool) {
 	if !down {
 		return
 	}
+	// Keypad Enter has the same text/shortcut semantics as Return.
+	if k == 0xff8d {
+		k = 0xff0d
+	}
 	p.useModifiers()
 	held := map[string]bool{}
 	for key := range p.modifiers {
