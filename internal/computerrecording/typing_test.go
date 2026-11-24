@@ -302,7 +302,7 @@ func TestStandaloneModifierTaps(t *testing.T) {
 			{0xffe3, "Ctrl"}, {0xffe4, "Ctrl"},
 			{0xffe9, "Alt"}, {0xffea, "Alt"},
 			{0xffe7, "Meta"}, {0xffe8, "Meta"},
-			{0xffeb, "Super"}, {0xffec, "Super"}, {0xfe03, "AltGr"},
+			{0xffeb, "Super"}, {0xffec, "Super"}, {0xfe03, "AltGr"}, {0xff7e, "AltGr"},
 		} {
 			r, _, send := typingRecorder(t, InputOrdinary, extended)
 			send('a', true)
@@ -398,7 +398,7 @@ func TestMouseActionsIncludeOtherModifiers(t *testing.T) {
 			key  uint32
 			name string
 		}{
-			{0xffea, "Alt"}, {0xffe8, "Meta"}, {0xffec, "Super"}, {0xfe03, "AltGr"},
+			{0xffea, "Alt"}, {0xffe8, "Meta"}, {0xffec, "Super"}, {0xfe03, "AltGr"}, {0xff7e, "AltGr"},
 		} {
 			r, p, send := typingRecorder(t, InputOrdinary, extended)
 			send(tc.key, true)
@@ -610,5 +610,29 @@ func TestModifiedNavigationCounts(t *testing.T) {
 	send(0xffe3, false)
 	if len(r.Status().Events) != 3 || !strings.Contains(r.Status().Transcript(), "Press Ctrl+Right ×3") {
 		t.Fatal(r.Status().Transcript())
+	}
+}
+
+func TestMacOptionModifierReleaseAndTyping(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, p, send := typingRecorder(t, InputOrdinary, extended)
+		send(0xff7e, true)
+		send(0xff7e, true) // Repeated modifier down must not create extra actions.
+		send(0x010020ac, true)
+		send(0xff7e, false)
+		if got := eventTexts(r); !reflect.DeepEqual(got, []string{`Type "€"`}) {
+			t.Fatal(got)
+		}
+		send(0xff7e, true)
+		p.Feed([]byte{5, 1, 0, 10, 0, 20})
+		send(0xff7e, false)
+		p.Feed([]byte{5, 0, 0, 10, 0, 20})
+		send(0xff7e, false) // Duplicate release is ignored.
+		send(0xff7e, true)
+		send(0xff7e, false) // Standalone tap is recorded once.
+		want := []string{`Type "€"`, "AltGr+Left mouse down at 10, 20", "Left mouse up at 10, 20", "Press AltGr"}
+		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+			t.Fatalf("extended=%v: %#v", extended, got)
+		}
 	}
 }

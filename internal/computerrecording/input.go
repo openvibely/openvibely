@@ -215,7 +215,9 @@ func (p *Input) typed(ch rune) {
 	}
 }
 
-var modifierNames = map[uint32]string{0xffe1: "Shift", 0xffe2: "Shift", 0xffe3: "Ctrl", 0xffe4: "Ctrl", 0xffe9: "Alt", 0xffea: "Alt", 0xffe7: "Meta", 0xffe8: "Meta", 0xffeb: "Super", 0xffec: "Super", 0xfe03: "AltGr"}
+// noVNC maps macOS left Option to Mode_switch and right Option to
+// ISO_Level3_Shift. Both have AltGr semantics on the remote desktop.
+var modifierNames = map[uint32]string{0xffe1: "Shift", 0xffe2: "Shift", 0xffe3: "Ctrl", 0xffe4: "Ctrl", 0xffe9: "Alt", 0xffea: "Alt", 0xffe7: "Meta", 0xffe8: "Meta", 0xffeb: "Super", 0xffec: "Super", 0xfe03: "AltGr", 0xff7e: "AltGr"}
 
 // Collapse left/right variants and keep combination ordering deterministic.
 func (p *Input) heldModifierNames() []string {
