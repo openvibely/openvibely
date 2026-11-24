@@ -103,7 +103,7 @@ func (v *viewerConnections) proxy(w http.ResponseWriter, r *http.Request, target
 				inspectedAfterForward = false
 				postSecurity = computerrecording.InputUnknown
 				if recordingInput {
-					if state, _ := v.recorder.recording.CaptureState(); state == "recording" {
+					if state, _ := v.recorder.recording.CaptureState(); state == "recording" && observer.AddsText(data) {
 						frameSecurity = focusedInputSecurity()
 					}
 				}

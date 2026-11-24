@@ -26,6 +26,27 @@ type Input struct {
 	Unsupported    func()
 }
 
+// AddsText previews a frame with the same decoder and modifier state as Feed.
+// It neither consumes input nor invokes recording callbacks. This also handles
+// fragmented keys and coalesced shortcuts without guessing from raw bytes.
+func (p *Input) AddsText(b []byte) bool {
+	preview := *p
+	preview.buf = append([]byte(nil), p.buf...)
+	preview.modifiers = make(map[uint32]bool, len(p.modifiers))
+	for key, used := range p.modifiers {
+		preview.modifiers[key] = used
+	}
+	addsText := false
+	preview.Action = func(string) {}
+	preview.ContinueAction = func(string) {}
+	preview.Backspace = func() {}
+	preview.Unsupported = nil
+	preview.Security = nil
+	preview.Text = func(rune, InputSecurity) { addsText = true }
+	preview.Feed(b)
+	return addsText
+}
+
 func (p *Input) Feed(b []byte) {
 	if p.disabled {
 		if p.Unsupported != nil {
