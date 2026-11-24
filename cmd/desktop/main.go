@@ -50,6 +50,7 @@ func main() {
 		}
 		return
 	}
+	configureDesktopAppName()
 	setDesktopOAuthDefaults()
 	loadDesktopConfigFile()
 
