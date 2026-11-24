@@ -411,7 +411,7 @@ func (r Result) Transcript() string {
 		e := r.Events[i]
 		count := 1
 		switch key := strings.TrimPrefix(e.Text, "Press "); key[strings.LastIndex(key, "+")+1:] {
-		case "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown":
+		case "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Begin":
 			for i+1 < len(r.Events) && r.Events[i+1].Text == e.Text {
 				count++
 				i++

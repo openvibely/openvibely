@@ -636,3 +636,63 @@ func TestMacOptionModifierReleaseAndTyping(t *testing.T) {
 		}
 	}
 }
+
+func TestKeypadNavigationNamesAndCounts(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		for _, tc := range []struct {
+			keypad, regular uint32
+			name            string
+		}{
+			{0xff95, 0xff50, "Home"}, {0xff96, 0xff51, "Left"}, {0xff97, 0xff52, "Up"},
+			{0xff98, 0xff53, "Right"}, {0xff99, 0xff54, "Down"}, {0xff9a, 0xff55, "PageUp"},
+			{0xff9b, 0xff56, "PageDown"}, {0xff9c, 0xff57, "End"}, {0xff9d, 0xff58, "Begin"},
+		} {
+			for _, ctrl := range []bool{false, true} {
+				r, _, send := typingRecorder(t, InputUnknown, extended)
+				send('a', true)
+				prefix := "Press "
+				if ctrl {
+					send(0xffe3, true)
+					prefix += "Ctrl+"
+				}
+				// Mixed keypad/regular arrows are the same action and share a count.
+				for _, k := range []uint32{tc.keypad, tc.regular, tc.keypad} {
+					send(k, true)
+					send(k, false)
+				}
+				if ctrl {
+					send(0xffe3, false)
+				}
+				send('b', true)
+				want := []string{`Type "ab"`, prefix + tc.name, prefix + tc.name, prefix + tc.name}
+				if ctrl {
+					want = []string{`Type "a"`, prefix + tc.name, prefix + tc.name, prefix + tc.name, `Type "b"`}
+				}
+				if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s extended=%v ctrl=%v: %#v", tc.name, extended, ctrl, got)
+				}
+				if text := r.Status().Transcript(); !strings.Contains(text, prefix+tc.name+" ×3") || strings.Contains(text, "keysym") {
+					t.Fatal(text)
+				}
+			}
+		}
+	}
+}
+
+func TestKeypadEditingKeys(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, _, send := typingRecorder(t, InputUnknown, extended)
+		send(0xff9e, true)
+		send(0xff9e, false)
+		send(0xff9f, true)
+		send(0xff9f, false)
+		send(0xffe1, true)
+		send(0xff9e, true)
+		send(0xff9e, false)
+		send(0xffe1, false)
+		want := []string{"Press Insert", "Press Delete", "Press Shift+Insert"}
+		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+			t.Fatal(got)
+		}
+	}
+}

@@ -89,7 +89,11 @@ func TestViewerSkipsDetectionForNonTextInput(t *testing.T) {
 			send(append([]byte("RFB 003.008\n"), 1, 1))
 			began := time.Now()
 			for i := 0; i < 8; i++ {
-				send(key(0xff54, true))
+				if i%2 == 0 {
+					send(key(0xff54, true))
+				} else {
+					send(key(0xff99, true))
+				}
 			}
 			t.Logf("eight navigation frames forwarded in %s", time.Since(began))
 			send([]byte{5, 0, 0, 10, 0, 20})

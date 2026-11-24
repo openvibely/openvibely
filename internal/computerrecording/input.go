@@ -278,9 +278,16 @@ func (p *Input) key(k uint32, down bool) {
 	if !down {
 		return
 	}
-	// Keypad Enter has the same text/shortcut semantics as Return.
-	if k == 0xff8d {
+	// Normalize non-printable keypad keys before naming and shortcut handling.
+	switch {
+	case k == 0xff8d: // KP_Enter
 		k = 0xff0d
+	case k >= 0xff95 && k <= 0xff9d: // KP_Home through KP_Begin
+		k -= 0x45
+	case k == 0xff9e: // KP_Insert
+		k = 0xff63
+	case k == 0xff9f: // KP_Delete
+		k = 0xffff
 	}
 	p.useModifiers()
 	held := map[string]bool{}
@@ -293,7 +300,7 @@ func (p *Input) key(k uint32, down bool) {
 			prefix = append(prefix, name)
 		}
 	}
-	names := map[uint32]string{0xff0d: "Enter", 0xff09: "Tab", 0xff1b: "Escape", 0xff08: "Backspace", 0xffff: "Delete", 0xff51: "Left", 0xff52: "Up", 0xff53: "Right", 0xff54: "Down", 0xff50: "Home", 0xff57: "End", 0xff55: "PageUp", 0xff56: "PageDown"}
+	names := map[uint32]string{0xff0d: "Enter", 0xff09: "Tab", 0xff1b: "Escape", 0xff08: "Backspace", 0xffff: "Delete", 0xff51: "Left", 0xff52: "Up", 0xff53: "Right", 0xff54: "Down", 0xff50: "Home", 0xff57: "End", 0xff55: "PageUp", 0xff56: "PageDown", 0xff58: "Begin", 0xff63: "Insert"}
 	name := names[k]
 	if k >= 0xffbe && k <= 0xffc9 {
 		name = fmt.Sprintf("F%d", k-0xffbe+1)
