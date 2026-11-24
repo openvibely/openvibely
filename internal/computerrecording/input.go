@@ -219,6 +219,18 @@ func (p *Input) key(k uint32, down bool) {
 	} else if k > 0xff {
 		ch = legacyKeysyms[k]
 	}
+	// noVNC sends printable keypad keys as distinct X11 keysyms. Decode
+	// them before classification so they cannot bypass secure-input redaction.
+	switch {
+	case k >= 0xffb0 && k <= 0xffb9: // KP_0 through KP_9
+		ch = '0' + rune(k-0xffb0)
+	case k >= 0xffaa && k <= 0xffaf: // multiply, add, separator, subtract, decimal, divide
+		ch = rune("*+,-./"[k-0xffaa])
+	case k == 0xff80: // KP_Space
+		ch = ' '
+	case k == 0xffbd: // KP_Equal
+		ch = '='
+	}
 	printable := utf8.ValidRune(ch) && ch >= 0x20 && !(ch >= 0x7f && ch <= 0x9f)
 	if len(prefix) == 0 {
 		if k == 0xff0d && held["Shift"] {

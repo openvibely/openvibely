@@ -241,3 +241,53 @@ func TestViewerLegacyUnicodeKeysyms(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestPrintableKeypadSecurity(t *testing.T) {
+	keys := []uint32{0xffb1, 0xffb1, 0xffb2, 0xffb3, 0xffb4, 0xffb5, 0xffb6, 0xffb7, 0xffb8, 0xffb9, 0xffb0, 0xffaa, 0xffab, 0xffac, 0xffad, 0xffae, 0xffaf, 0xff80, 0xffbd}
+	for _, extended := range []bool{false, true} {
+		for _, tc := range []struct {
+			name     string
+			security InputSecurity
+			want     string
+		}{
+			{"ordinary", InputOrdinary, `Type "11234567890*+,-./ ="`},
+			{"secure", InputSecure, "Type [secure input]"},
+			{"unknown", InputUnknown, "Type [input withheld: secure-input detection unavailable]"},
+		} {
+			t.Run(tc.name+map[bool]string{false: "/standard", true: "/extended"}[extended], func(t *testing.T) {
+				r, p, send := typingRecorder(t, tc.security, extended)
+				classified := 0
+				p.Security = func() InputSecurity { classified++; return tc.security }
+				for _, key := range keys {
+					send(key, true)
+					send(key, false)
+				}
+				if classified != len(keys) {
+					t.Fatalf("classified %d of %d keypad characters", classified, len(keys))
+				}
+				if got := eventTexts(r); !reflect.DeepEqual(got, []string{tc.want}) {
+					t.Fatalf("keypad events: %#v", got)
+				}
+				out, err := r.Finish("typing", 2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(out.Events) != 1 || out.Events[0].Text != tc.want || strings.Contains(out.Transcript(), "keysym") {
+					t.Fatalf("saved keypad events: %#v", out.Events)
+				}
+			})
+		}
+	}
+}
+
+func TestKeypadShortcutRemainsAnAction(t *testing.T) {
+	r, _, send := typingRecorder(t, InputOrdinary, false)
+	send(0xffe3, true)
+	send(0xffb1, true)
+	send(0xffb1, false)
+	send(0xffe3, false)
+	send(0xffb2, true)
+	if got := eventTexts(r); !reflect.DeepEqual(got, []string{"Press Ctrl+'1'", `Type "2"`}) {
+		t.Fatal(got)
+	}
+}
