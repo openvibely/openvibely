@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,12 +34,16 @@ type Result struct {
 	Error    string        `json:"error,omitempty"`
 }
 type Recorder struct {
-	mu           sync.Mutex
-	result       Result
-	interval     time.Duration
-	bytes        int
-	generation   uint64
-	captureError bool
+	mu             sync.Mutex
+	result         Result
+	interval       time.Duration
+	bytes          int
+	generation     uint64
+	captureError   bool
+	typing         bool
+	typed          []rune
+	typingSecurity InputSecurity
+	lastTyped      time.Time
 }
 
 func (r *Recorder) Start(id string) error {
@@ -58,6 +63,8 @@ func (r *Recorder) Start(id string) error {
 			return errors.New("ten-minute limit reached")
 		}
 		r.result.State = "recording"
+		r.typing = false
+		r.typed = nil
 		r.generation++
 		return nil
 	}
@@ -68,6 +75,8 @@ func (r *Recorder) Start(id string) error {
 	r.captureError = false
 	r.interval = 250 * time.Millisecond
 	r.bytes = 0
+	r.typing = false
+	r.typed = nil
 	r.generation++
 	return nil
 }
@@ -77,6 +86,8 @@ func (r *Recorder) Pause() {
 	if r.result.State == "recording" {
 		r.result.State = "stopped"
 	}
+	r.typing = false
+	r.typed = nil
 	r.generation++
 }
 
@@ -89,6 +100,8 @@ func (r *Recorder) Fail(err error) {
 		return
 	}
 	r.result.State = "stopped"
+	r.typing = false
+	r.typed = nil
 	r.generation++
 	r.captureError = false
 	r.result.Error = err.Error()
@@ -103,6 +116,8 @@ func (r *Recorder) CaptureFailed(g uint64, err error) {
 		return
 	}
 	r.result.State = "stopped"
+	r.typing = false
+	r.typed = nil
 	r.generation++
 	r.captureError = true
 	r.result.Error = err.Error()
@@ -119,14 +134,19 @@ func (r *Recorder) Clear(id string) error {
 	r.result = Result{}
 	r.captureError = false
 	r.bytes = 0
+	r.typing = false
+	r.typed = nil
 	r.generation++
 	return nil
 }
+
 // updateLifecycleLocked applies recording time limits and abandoned-capture
 // expiry. The caller must hold r.mu.
 func (r *Recorder) updateLifecycleLocked() {
 	if r.result.State == "recording" && time.Since(r.result.Started) >= Duration {
 		r.result.State = "stopped"
+		r.typing = false
+		r.typed = nil
 		r.generation++
 	}
 	// Expire abandoned sensitive captures, including stopped recordings.
@@ -134,6 +154,8 @@ func (r *Recorder) updateLifecycleLocked() {
 		r.result = Result{}
 		r.captureError = false
 		r.bytes = 0
+		r.typing = false
+		r.typed = nil
 		r.generation++
 	}
 }
@@ -196,6 +218,12 @@ func (r *Recorder) Action(text string) {
 	if r.result.State != "recording" || time.Since(r.result.Started) >= Duration {
 		return
 	}
+	r.typing = false
+	r.typed = nil
+	r.actionLocked(text)
+}
+
+func (r *Recorder) actionLocked(text string) {
 	now := time.Since(r.result.Started).Milliseconds()
 	ev := r.result.Events
 	// Only redacted input (typed or clipboard values) is coalesced; discrete
@@ -208,11 +236,62 @@ func (r *Recorder) Action(text string) {
 		r.result.State = "stopped"
 		r.captureError = false
 		r.result.Error = "Recording stopped: action log is full"
+		r.typing = false
+		r.typed = nil
 		r.generation++
 		return
 	}
 	r.result.Events = append(ev, Event{now, text})
 }
+
+// Text updates the retained event immediately, so pause, finish and save retries
+// include the unfinished chunk without flushing a connection-local buffer.
+func (r *Recorder) Text(ch rune, security InputSecurity) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.result.State != "recording" || time.Since(r.result.Started) >= Duration {
+		return
+	}
+	now := time.Now()
+	if !r.typing || now.Sub(r.lastTyped) > 2*time.Second || security != r.typingSecurity {
+		r.typing = false
+		r.typed = nil
+		r.actionLocked("")
+		if r.result.State != "recording" {
+			return
+		}
+		r.typing = true
+		r.typingSecurity = security
+	}
+	r.lastTyped = now
+	text := "Type [input withheld: secure-input detection unavailable]"
+	switch security {
+	case InputOrdinary:
+		r.typed = append(r.typed, ch)
+		text = "Type " + strconv.Quote(string(r.typed))
+	case InputSecure:
+		text = "Type [secure input]"
+	}
+	r.result.Events[len(r.result.Events)-1].Text = text
+}
+
+func (r *Recorder) Backspace() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.result.State != "recording" || time.Since(r.result.Started) >= Duration {
+		return
+	}
+	if r.typing && time.Since(r.lastTyped) <= 2*time.Second && len(r.typed) > 0 {
+		r.typed = r.typed[:len(r.typed)-1]
+		r.lastTyped = time.Now()
+		r.result.Events[len(r.result.Events)-1].Text = "Type " + strconv.Quote(string(r.typed))
+		return
+	}
+	r.typing = false
+	r.typed = nil
+	r.actionLocked("Press Backspace")
+}
+
 func changed(a, b Frame) bool {
 	if len(a.Signature) == 0 || len(a.Signature) != len(b.Signature) {
 		return !bytes.Equal(a.JPEG, b.JPEG)
@@ -247,6 +326,8 @@ func (r *Recorder) Finish(id string, limit int) (Result, error) {
 		return Result{}, errors.New("no screenshots captured")
 	}
 	r.result.State = "finished"
+	r.typing = false
+	r.typed = nil
 	r.generation++
 	out := r.result
 	out.Events = append([]Event(nil), out.Events...)
@@ -298,7 +379,7 @@ func (r *Recorder) Finish(id string, limit int) (Result, error) {
 }
 func (r Result) Transcript() string {
 	var b bytes.Buffer
-	fmt.Fprintln(&b, "Demonstration timeline (relative times; typed values omitted):")
+	fmt.Fprintln(&b, "Demonstration timeline (relative times; typed text is quoted untrusted data):")
 	type line struct {
 		ms   int64
 		text string

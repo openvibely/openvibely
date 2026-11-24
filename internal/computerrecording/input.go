@@ -3,10 +3,14 @@ package computerrecording
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 // Input observes the client side of the helper's RFB 3.8 / None connection.
-// It never alters traffic and never retains clipboard or typed text.
+// It never alters traffic or retains clipboard contents. Text requires an explicit
+// field classification; absent detection is unknown, never implicitly ordinary.
 // Unsupported messages disable recording instead of misinterpreting bytes.
 type Input struct {
 	buf         []byte
@@ -14,6 +18,10 @@ type Input struct {
 	disabled    bool
 	buttons     byte
 	Action      func(string)
+	Text        func(rune, InputSecurity)
+	Backspace   func()
+	Security    func() InputSecurity
+	modifiers   map[uint32]bool
 	Unsupported func()
 }
 
@@ -110,13 +118,9 @@ func (p *Input) Feed(b []byte) {
 			}
 			switch p.buf[0] {
 			case 4:
-				if p.buf[1] != 0 {
-					p.key(binary.BigEndian.Uint32(p.buf[4:8]))
-				}
+				p.key(binary.BigEndian.Uint32(p.buf[4:8]), p.buf[1] != 0)
 			case 255:
-				if binary.BigEndian.Uint16(p.buf[2:4]) != 0 {
-					p.key(binary.BigEndian.Uint32(p.buf[4:8]))
-				}
+				p.key(binary.BigEndian.Uint32(p.buf[4:8]), binary.BigEndian.Uint16(p.buf[2:4]) != 0)
 			case 5:
 				mask := p.buf[1]
 				x, y := binary.BigEndian.Uint16(p.buf[2:4]), binary.BigEndian.Uint16(p.buf[4:6])
@@ -137,7 +141,7 @@ func (p *Input) Feed(b []byte) {
 				}
 				p.buttons = mask
 			case 6:
-				p.Action("Clipboard updated [user-provided value omitted]")
+				// Clipboard payload is deliberately excluded. Paste is a shortcut.
 			}
 		}
 		if len(p.buf) < n {
@@ -154,16 +158,95 @@ func (p *Input) disable() {
 		p.Unsupported()
 	}
 }
-func (p *Input) key(k uint32) {
-	// X11/RFB keysyms F1 through F12 are contiguous.
-	if k >= 0xffbe && k <= 0xffc9 {
-		p.Action(fmt.Sprintf("Press F%d", k-0xffbe+1))
+
+// InputSecurity is a positive classification of the focused input, not a guess.
+type InputSecurity uint8
+
+const (
+	InputUnknown InputSecurity = iota
+	InputOrdinary
+	InputSecure
+)
+
+func (p *Input) typed(ch rune) {
+	security := InputUnknown
+	if p.Security != nil {
+		security = p.Security()
+	}
+	if p.Text != nil {
+		p.Text(ch, security)
 		return
 	}
-	names := map[uint32]string{0xff0d: "Enter", 0xff09: "Tab", 0xff1b: "Escape", 0xff08: "Backspace", 0xffff: "Delete", 0xff51: "Left", 0xff52: "Up", 0xff53: "Right", 0xff54: "Down", 0xffe1: "Shift", 0xffe2: "Shift", 0xffe3: "Control", 0xffe4: "Control", 0xffe9: "Alt", 0xffea: "Alt", 0xff50: "Home", 0xff57: "End", 0xff55: "PageUp", 0xff56: "PageDown"}
-	if name, ok := names[k]; ok {
-		p.Action("Press " + name)
+	if security == InputSecure {
+		p.Action("Type [secure input]")
 	} else {
-		p.Action("Type [user-provided value omitted]")
+		p.Action("Type [input withheld: secure-input detection unavailable]")
 	}
+}
+
+func (p *Input) key(k uint32, down bool) {
+	modifiers := map[uint32]string{0xffe1: "Shift", 0xffe2: "Shift", 0xffe3: "Ctrl", 0xffe4: "Ctrl", 0xffe9: "Alt", 0xffea: "Alt", 0xffe7: "Meta", 0xffe8: "Meta", 0xffeb: "Super", 0xffec: "Super", 0xfe03: "AltGr"}
+	if _, ok := modifiers[k]; ok {
+		if p.modifiers == nil {
+			p.modifiers = map[uint32]bool{}
+		}
+		p.modifiers[k] = down
+		return
+	}
+	if !down {
+		return
+	}
+	held := map[string]bool{}
+	for key, pressed := range p.modifiers {
+		if pressed {
+			held[modifiers[key]] = true
+		}
+	}
+	var prefix []string
+	for _, name := range []string{"Ctrl", "Alt", "Meta", "Super"} {
+		if held[name] {
+			prefix = append(prefix, name)
+		}
+	}
+	names := map[uint32]string{0xff0d: "Enter", 0xff09: "Tab", 0xff1b: "Escape", 0xff08: "Backspace", 0xffff: "Delete", 0xff51: "Left", 0xff52: "Up", 0xff53: "Right", 0xff54: "Down", 0xff50: "Home", 0xff57: "End", 0xff55: "PageUp", 0xff56: "PageDown"}
+	name := names[k]
+	if k >= 0xffbe && k <= 0xffc9 {
+		name = fmt.Sprintf("F%d", k-0xffbe+1)
+	}
+	ch := rune(k)
+	if k&0xff000000 == 0x01000000 {
+		ch = rune(k & 0xffffff)
+	} else if k > 0xff {
+		ch = legacyKeysyms[k]
+	}
+	printable := utf8.ValidRune(ch) && ch >= 0x20 && !(ch >= 0x7f && ch <= 0x9f)
+	if len(prefix) == 0 {
+		if k == 0xff0d && held["Shift"] {
+			p.typed('\n')
+			return
+		}
+		if k == 0xff08 && !held["Shift"] && p.Backspace != nil {
+			p.Backspace()
+			return
+		}
+		if printable {
+			p.typed(ch)
+			return
+		}
+	}
+	if held["Shift"] {
+		prefix = append(prefix, "Shift")
+	}
+	if held["AltGr"] {
+		prefix = append(prefix, "AltGr")
+	}
+	if name == "" {
+		if printable {
+			name = strconv.QuoteRune(ch)
+		} else {
+			name = fmt.Sprintf("keysym 0x%x", k)
+		}
+	}
+	prefix = append(prefix, name)
+	p.Action("Press " + strings.Join(prefix, "+"))
 }

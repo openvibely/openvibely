@@ -59,6 +59,10 @@ func (v *viewerConnections) proxy(w http.ResponseWriter, r *http.Request, target
 	observer := &computerrecording.Input{}
 	if v.recorder != nil && strings.HasSuffix(r.URL.Path, "rfb-control") {
 		observer.Action = v.recorder.recording.Action
+		observer.Text = v.recorder.recording.Text
+		observer.Backspace = v.recorder.recording.Backspace
+		// RFB/X11 provide no secure-field classification. Keep Security nil
+		// (unknown/redacted) until a detector or explicit consent policy is approved.
 		observer.Unsupported = func() { v.recorder.recording.Fail(errors.New("unsupported desktop input protocol; recording stopped")) }
 	} else {
 		observer.Action = func(string) {}

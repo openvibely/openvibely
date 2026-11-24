@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/computerrecording"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +77,12 @@ func TestRecordingRealDesktop(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := append([]byte("RFB 003.008\n"), 1, 1, 5, 1, 0, 40, 0, 80, 5, 0, 0, 40, 0, 80)
+	for _, key := range []uint32{'s', 'e', 'c', 'r', 'e', 't', 0xff51, 0xff51, 0xff51} {
+		packet := make([]byte, 8)
+		packet[0], packet[1] = 4, 1
+		binary.BigEndian.PutUint32(packet[4:], key)
+		payload = append(payload, packet...)
+	}
 	if err = c.Write(ctx, websocket.MessageBinary, payload); err != nil {
 		t.Fatal(err)
 	}
@@ -84,8 +92,16 @@ func TestRecordingRealDesktop(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	call("pause")
 	out := call("finish")
-	if len(out.Frames) < 2 || len(out.Frames) > 3 || len(out.Events) != 2 {
+	if len(out.Frames) < 2 || len(out.Frames) > 3 || len(out.Events) != 6 {
 		t.Fatalf("frames=%d events=%v", len(out.Frames), out.Events)
+	}
+	if strings.Contains(out.Transcript(), "secret") || out.Events[2].Text != "Type [input withheld: secure-input detection unavailable]" {
+		t.Fatalf("unknown field captured: %v", out.Events)
+	}
+	for _, event := range out.Events[3:] {
+		if event.Text != "Press Left" {
+			t.Fatal(out.Events)
+		}
 	}
 	before := out.Frames[len(out.Frames)-1].Millis
 	time.Sleep(300 * time.Millisecond)

@@ -69,7 +69,7 @@ func TestPauseRejectsInFlightCaptureAndPreservesRetry(t *testing.T) {
 		t.Fatal("not cleared")
 	}
 }
-func TestInputHandlesFragmentedCoalescedMessagesWithoutTypedValues(t *testing.T) {
+func TestInputHandlesFragmentedCoalescedMessagesWithUnknownInput(t *testing.T) {
 	var got []string
 	p := Input{Action: func(s string) { got = append(got, s) }, Unsupported: func() { t.Fatal("unsupported") }}
 	data := append([]byte("RFB 003.008\n"), 1, 1)
@@ -82,7 +82,7 @@ func TestInputHandlesFragmentedCoalescedMessagesWithoutTypedValues(t *testing.T)
 	for _, b := range data {
 		p.Feed([]byte{b})
 	}
-	if len(got) != 3 || got[0] != "Type [user-provided value omitted]" || got[1] != "Left mouse down at 10, 20" {
+	if len(got) != 3 || got[0] != "Type [input withheld: secure-input detection unavailable]" || got[1] != "Left mouse down at 10, 20" {
 		t.Fatal(got)
 	}
 }
@@ -224,7 +224,7 @@ func TestCaptureRecoveryDoesNotEraseFatalOrNewerState(t *testing.T) {
 	}
 }
 
-func TestInputRecordsFunctionKeysAndRedactsText(t *testing.T) {
+func TestInputRecordsFunctionKeysAndRedactsUnknownText(t *testing.T) {
 	for _, extended := range []bool{false, true} {
 		t.Run(fmt.Sprintf("extended=%v", extended), func(t *testing.T) {
 			var got []string
@@ -260,7 +260,7 @@ func TestInputRecordsFunctionKeysAndRedactsText(t *testing.T) {
 					t.Errorf("got %q, want %q", got[i], want)
 				}
 			}
-			if got[12] != "Type [user-provided value omitted]" {
+			if got[12] != "Type [input withheld: secure-input detection unavailable]" {
 				t.Fatalf("typed text not redacted: %q", got[12])
 			}
 		})
