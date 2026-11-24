@@ -291,3 +291,74 @@ func TestKeypadShortcutRemainsAnAction(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestStandaloneModifierTaps(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		for _, tc := range []struct {
+			key  uint32
+			name string
+		}{
+			{0xffe1, "Shift"}, {0xffe2, "Shift"},
+			{0xffe3, "Ctrl"}, {0xffe4, "Ctrl"},
+			{0xffe9, "Alt"}, {0xffea, "Alt"},
+			{0xffe7, "Meta"}, {0xffe8, "Meta"},
+			{0xffeb, "Super"}, {0xffec, "Super"}, {0xfe03, "AltGr"},
+		} {
+			r, _, send := typingRecorder(t, InputOrdinary, extended)
+			send('a', true)
+			send(tc.key, false) // An unmatched release is not a tap.
+			send(tc.key, true)
+			send(tc.key, true) // Auto-repeat is still one tap.
+			send(tc.key, false)
+			send(tc.key, false)
+			send('b', true)
+			send(tc.key, true)
+			send(tc.key, false) // A second real tap must be retained.
+			want := []string{`Type "a"`, "Press " + tc.name, `Type "b"`, "Press " + tc.name}
+			if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+				t.Fatalf("key=%x extended=%v: got %#v, want %#v", tc.key, extended, got, want)
+			}
+		}
+	}
+}
+
+func TestUsedModifiersDoNotBecomeStandaloneTaps(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, _, send := typingRecorder(t, InputOrdinary, extended)
+		send(0xffe3, true)
+		send(0xffe9, true)
+		send('c', true)
+		send('c', false)
+		send(0xffe3, true) // Repeated down must not reset the used state.
+		send(0xffe9, false)
+		send(0xffe3, false)
+		send(0xffe1, true)
+		send('A', true)
+		send('A', false)
+		send(0xffe1, false)
+		send(0xfe03, true)
+		send(0x010020ac, true)
+		send(0x010020ac, false)
+		send(0xfe03, false)
+		want := []string{"Press Ctrl+Alt+'c'", `Type "A€"`}
+		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+			t.Fatalf("extended=%v: %#v", extended, got)
+		}
+	}
+}
+
+func TestMouseCombinationDoesNotBecomeModifierTap(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, p, send := typingRecorder(t, InputOrdinary, extended)
+		send(0xffe1, true)
+		p.Feed([]byte{5, 1, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
+		send(0xffe1, false)
+		send(0xffe3, true)
+		p.Feed([]byte{5, 8, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
+		send(0xffe3, false)
+		want := []string{"Left mouse down at 10, 20", "Left mouse up at 10, 20", "Scroll up"}
+		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+			t.Fatalf("extended=%v: %#v", extended, got)
+		}
+	}
+}

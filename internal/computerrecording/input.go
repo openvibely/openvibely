@@ -21,7 +21,7 @@ type Input struct {
 	Text        func(rune, InputSecurity)
 	Backspace   func()
 	Security    func() InputSecurity
-	modifiers   map[uint32]bool
+	modifiers   map[uint32]bool // Held modifiers; value is whether used in a combination.
 	Unsupported func()
 }
 
@@ -125,6 +125,9 @@ func (p *Input) Feed(b []byte) {
 				mask := p.buf[1]
 				x, y := binary.BigEndian.Uint16(p.buf[2:4]), binary.BigEndian.Uint16(p.buf[4:6])
 				pressed := mask &^ p.buttons
+				if pressed != 0 {
+					p.useModifiers()
+				}
 				for i, name := range []string{"Left", "Middle", "Right"} {
 					if pressed&(1<<i) != 0 {
 						p.Action(fmt.Sprintf("%s mouse down at %d, %d", name, x, y))
@@ -184,23 +187,40 @@ func (p *Input) typed(ch rune) {
 	}
 }
 
+func (p *Input) useModifiers() {
+	for key := range p.modifiers {
+		p.modifiers[key] = true
+	}
+}
+
 func (p *Input) key(k uint32, down bool) {
 	modifiers := map[uint32]string{0xffe1: "Shift", 0xffe2: "Shift", 0xffe3: "Ctrl", 0xffe4: "Ctrl", 0xffe9: "Alt", 0xffea: "Alt", 0xffe7: "Meta", 0xffe8: "Meta", 0xffeb: "Super", 0xffec: "Super", 0xfe03: "AltGr"}
-	if _, ok := modifiers[k]; ok {
-		if p.modifiers == nil {
-			p.modifiers = map[uint32]bool{}
+	if name, ok := modifiers[k]; ok {
+		used, pressed := p.modifiers[k]
+		if down && !pressed {
+			combined := len(p.modifiers) > 0 || p.buttons&7 != 0
+			p.useModifiers()
+			if p.modifiers == nil {
+				p.modifiers = map[uint32]bool{}
+			}
+			p.modifiers[k] = combined
+		} else if !down && pressed {
+			delete(p.modifiers, k)
+			// Only a completed, unused tap is a standalone action. Repeated
+			// keydowns and unmatched releases must not add extra actions.
+			if !used {
+				p.Action("Press " + name)
+			}
 		}
-		p.modifiers[k] = down
 		return
 	}
 	if !down {
 		return
 	}
+	p.useModifiers()
 	held := map[string]bool{}
-	for key, pressed := range p.modifiers {
-		if pressed {
-			held[modifiers[key]] = true
-		}
+	for key := range p.modifiers {
+		held[modifiers[key]] = true
 	}
 	var prefix []string
 	for _, name := range []string{"Ctrl", "Alt", "Meta", "Super"} {
