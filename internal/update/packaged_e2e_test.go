@@ -192,11 +192,10 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		t.Fatalf("start current app: %v", err)
 	}
 	t.Cleanup(func() {
+		killExecutables(t, packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand), current)
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
-		killExecutable(t, packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand))
 		killPort(t, port)
-		killExecutable(t, current)
 	})
 
 	baseURL := "http://127.0.0.1:" + port
@@ -1702,19 +1701,21 @@ func killPort(t *testing.T, port string) {
 	terminateUnixProcessTrees(ctx, unixProcessTreePIDs(ctx, strings.Fields(string(out))))
 }
 
+// Keep related app/helper processes in the same Windows cleanup loop so either
+// process spawning the other cannot escape between separate cleanup calls.
+func killExecutables(t *testing.T, executables ...string) {
+	t.Helper()
+	if killExecutablePlatform(t, executables...) {
+		return
+	}
+	for _, executable := range executables {
+		killExecutable(t, executable)
+	}
+}
+
 func killExecutable(t *testing.T, executable string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		// A restarting process may hold the database before opening its port.
-		// Match the full test-owned path so cleanup also finds those processes.
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-			`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:OPENVIBELY_E2E_CLEANUP_EXECUTABLE } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; Wait-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }`)
-		cmd.Env = append(os.Environ(), "OPENVIBELY_E2E_CLEANUP_EXECUTABLE="+executable)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Logf("cleanup executable %s: %v\n%s", executable, err, output)
-		}
+	if killExecutablePlatform(t, executable) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)

@@ -128,6 +128,12 @@ func (a *automaticAppE2E) start() {
 	}
 }
 func (a *automaticAppE2E) stop() {
+	// Drain the helper and app together, including successors created during cleanup.
+	command := ExecutableUpdateHelperCommand
+	if a.distribution == "desktop" && runtime.GOOS == "darwin" {
+		command = AppBundleUpdateHelperCommand
+	}
+	killExecutables(a.t, packagedUpdateHelperPath(a.installUnit, command), a.installed)
 	if a.cmd != nil {
 		_ = a.cmd.Process.Kill()
 		<-a.exited
@@ -139,12 +145,6 @@ func (a *automaticAppE2E) stop() {
 			killPort(a.t, u.Port())
 		}
 	}
-	killExecutable(a.t, a.installed)
-	command := ExecutableUpdateHelperCommand
-	if a.distribution == "desktop" && runtime.GOOS == "darwin" {
-		command = AppBundleUpdateHelperCommand
-	}
-	killExecutable(a.t, packagedUpdateHelperPath(a.installUnit, command))
 }
 func (a *automaticAppE2E) snapshot() (CoordinatorSnapshot, error) {
 	var s CoordinatorSnapshot
