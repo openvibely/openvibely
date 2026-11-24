@@ -79,40 +79,46 @@ func recordingRoutes(mux *http.ServeMux) *desktopRecorder {
 			http.Error(w, "Invalid recording command", 400)
 			return
 		}
-		// Wait for in-flight input before freezing or replacing the recording.
-		// Lock ordering is inputMu, then captureMu, then the recorder's mutex.
 		switch in.Action {
-		case "start", "pause", "finish", "discard", "ack":
-			d.inputMu.Lock()
-			defer d.inputMu.Unlock()
-		}
-		var out any
-		var err error
-		switch in.Action {
-		case "start":
-			err = d.recording.Start(in.ID)
-			if err == nil {
-				d.capture()
-			}
-			out = d.recording.Status()
-		case "pause":
-			d.capture()
-			d.recording.Pause()
-			d.captureMu.Lock()
-			d.captureMu.Unlock()
-			out = d.recording.Status()
-		case "finish":
-			d.capture()
-			out, err = d.recording.Finish(in.ID, in.Limit)
-		case "discard", "ack":
-			err = d.recording.Clear(in.ID)
-			out = d.recording.Status()
-		case "status":
-			out = d.recording.Status()
+		case "start", "pause", "finish", "discard", "ack", "status":
 		default:
 			http.Error(w, "Unknown recording command", 400)
 			return
 		}
+		out, err := func() (any, error) {
+			// Wait for in-flight input, then take the response snapshot. Release
+			// before writing HTTP output so slow transfers cannot block controls.
+			// Lock ordering is inputMu, captureMu, then the recorder's mutex.
+			if in.Action != "status" {
+				d.inputMu.Lock()
+				defer d.inputMu.Unlock()
+			}
+			var out any
+			var err error
+			switch in.Action {
+			case "start":
+				err = d.recording.Start(in.ID)
+				if err == nil {
+					d.capture()
+				}
+				out = d.recording.Status()
+			case "pause":
+				d.capture()
+				d.recording.Pause()
+				d.captureMu.Lock()
+				d.captureMu.Unlock()
+				out = d.recording.Status()
+			case "finish":
+				d.capture()
+				out, err = d.recording.Finish(in.ID, in.Limit)
+			case "discard", "ack":
+				err = d.recording.Clear(in.ID)
+				out = d.recording.Status()
+			case "status":
+				out = d.recording.Status()
+			}
+			return out, err
+		}()
 		if err != nil {
 			http.Error(w, err.Error(), 409)
 			return
