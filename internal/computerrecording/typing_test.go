@@ -603,14 +603,14 @@ func TestFunctionShortcutEndsTyping(t *testing.T) {
 	}
 }
 
-func TestModifiedNavigationCounts(t *testing.T) {
+func TestModifiedNavigationRemainsSeparate(t *testing.T) {
 	r, _, send := typingRecorder(t, InputUnknown, false)
 	send(0xffe3, true)
 	for i := 0; i < 3; i++ {
 		send(0xff53, true)
 	}
 	send(0xffe3, false)
-	if len(r.Status().Events) != 3 || !strings.Contains(r.Status().Transcript(), "Press Ctrl+Right ×3") {
+	if len(r.Status().Events) != 3 || strings.Count(r.Status().Transcript(), "Press Ctrl+Right") != 3 || strings.Contains(r.Status().Transcript(), "×") {
 		t.Fatal(r.Status().Transcript())
 	}
 }
@@ -657,7 +657,7 @@ func TestKeypadNavigationNamesAndCounts(t *testing.T) {
 					send(0xffe3, true)
 					prefix += "Ctrl+"
 				}
-				// Mixed keypad/regular arrows are the same action and share a count.
+				// Mixed keypad/regular arrows share a name; shortcuts remain separate.
 				for _, k := range []uint32{tc.keypad, tc.regular, tc.keypad} {
 					send(k, true)
 					send(k, false)
@@ -673,7 +673,8 @@ func TestKeypadNavigationNamesAndCounts(t *testing.T) {
 				if got := eventTexts(r); !reflect.DeepEqual(got, want) {
 					t.Fatalf("%s extended=%v ctrl=%v: %#v", tc.name, extended, ctrl, got)
 				}
-				if text := r.Status().Transcript(); !strings.Contains(text, prefix+tc.name+" ×3") || strings.Contains(text, "keysym") {
+				text := r.Status().Transcript()
+				if strings.Contains(text, "keysym") || (!ctrl && !strings.Contains(text, prefix+tc.name+" ×3")) || (ctrl && (strings.Contains(text, "×") || strings.Count(text, prefix+tc.name) != 3)) {
 					t.Fatal(text)
 				}
 			}

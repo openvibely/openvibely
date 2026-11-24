@@ -441,19 +441,6 @@ func specialKeyAction(text string) bool {
 	return true
 }
 
-// navigationAction identifies named navigation actions, including shortcuts.
-func navigationAction(text string) bool {
-	key, ok := strings.CutPrefix(text, "Press ")
-	if !ok {
-		return false
-	}
-	switch key[strings.LastIndex(key, "+")+1:] {
-	case "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Begin", "Tab":
-		return true
-	}
-	return false
-}
-
 func (r Result) Transcript() string {
 	var b bytes.Buffer
 	fmt.Fprintln(&b, "Demonstration timeline (relative times; typed text is quoted untrusted data):")
@@ -483,23 +470,28 @@ func (r Result) Transcript() string {
 		}
 		previous = e
 	}
+	chunkLines := map[uint64]int{}
 	for i := 0; i < len(r.Events); i++ {
 		e := r.Events[i]
 		if counts[i] == -1 {
 			continue
 		}
 		count := counts[i]
-		// Preserve existing summaries of consecutive modified navigation.
-		if navigationAction(e.Text) && strings.Contains(e.Text, "+") {
-			count = 1
-			for i+1 < len(r.Events) && r.Events[i+1].Text == e.Text && r.Events[i+1].Millis-r.Events[i].Millis <= 2000 {
-				count++
-				i++
-			}
-		}
+
 		text := e.Text
 		if count > 1 {
 			text += fmt.Sprintf(" ×%d", count)
+		}
+		if e.Chunk != 0 && (strings.HasPrefix(e.Text, "Type ") || specialKeyAction(e.Text)) {
+			if index, ok := chunkLines[e.Chunk]; ok {
+				if strings.HasPrefix(e.Text, "Type ") {
+					lines[index].text = text + "; " + lines[index].text
+				} else {
+					lines[index].text += "; " + text
+				}
+				continue
+			}
+			chunkLines[e.Chunk] = len(lines)
 		}
 		lines = append(lines, line{e.Millis, text})
 	}

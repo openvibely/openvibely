@@ -121,3 +121,68 @@ func TestSpecialKeySummaryIncludesInterveningTypingAndScroll(t *testing.T) {
 		t.Fatal(out.Transcript())
 	}
 }
+
+func TestRepeatedShortcutsHaveSeparateTranscriptLines(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, _, send := typingRecorder(t, InputOrdinary, extended)
+		send(0xffe3, true)
+		for i := 0; i < 2; i++ {
+			send(0xff54, true)
+			send(0xff54, false)
+		}
+		send(0xffe3, false)
+		transcript := r.Status().Transcript()
+		var shortcutLines int
+		for _, line := range strings.Split(transcript, "\n") {
+			if strings.Contains(line, "Press Ctrl+Down") {
+				shortcutLines++
+			}
+		}
+		if shortcutLines != 2 || strings.Contains(transcript, "×") {
+			t.Fatal(transcript)
+		}
+	}
+}
+
+func TestTextAndSpecialKeysShareTranscriptLine(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		for _, keysFirst := range []bool{false, true} {
+			r, _, send := typingRecorder(t, InputOrdinary, extended)
+			if !keysFirst {
+				send('a', true)
+			}
+			send(0xff54, true)
+			send(0xff52, true)
+			send(0xff54, true)
+			if keysFirst {
+				send('a', true)
+			}
+			send('b', true)
+			out, err := r.Finish("typing", 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := `Type "ab"; Press Down ×2; Press Up`
+			transcript := out.Transcript()
+			if !strings.Contains(transcript, expected) {
+				t.Fatal(transcript)
+			}
+			// Raw input remains available, and transport/retry preserve the joined line.
+			if len(out.Events) != 4 {
+				t.Fatal(out.Events)
+			}
+			data, err := json.Marshal(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved Result
+			if err = json.Unmarshal(data, &saved); err != nil {
+				t.Fatal(err)
+			}
+			retry, err := r.Finish("typing", 2)
+			if err != nil || saved.Transcript() != transcript || retry.Transcript() != transcript {
+				t.Fatal("changed during save/retry", err)
+			}
+		}
+	}
+}
