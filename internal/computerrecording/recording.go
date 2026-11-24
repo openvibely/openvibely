@@ -19,6 +19,8 @@ const MaxImages = 30
 type Event struct {
 	Millis int64  `json:"ms"`
 	Text   string `json:"text"`
+	// Chunk preserves grouping across snapshots and JSON transport; zero is legacy data.
+	Chunk uint64 `json:"chunk,omitempty"`
 }
 type Frame struct {
 	Millis    int64  `json:"ms"`
@@ -47,6 +49,8 @@ type Recorder struct {
 	typed          []rune
 	typingSecurity InputSecurity
 	lastTyped      time.Time
+	chunk          uint64
+	chunkActive    bool
 }
 
 func (r *Recorder) Start(id string) error {
@@ -216,6 +220,7 @@ func (r *Recorder) Action(text string) {
 	}
 	r.endTypingLocked()
 	r.actionLocked(text)
+	r.chunkActive = false
 }
 
 // ContinueAction preserves the open typing chunk across navigation and scrolling.
@@ -225,13 +230,8 @@ func (r *Recorder) ContinueAction(text string) {
 	if r.result.State != "recording" || time.Since(r.result.Started) >= Duration {
 		return
 	}
-	if r.typing && navigationAction(text) {
-		now := time.Now()
-		if now.Sub(r.lastTyped) > 2*time.Second {
-			r.endTypingLocked()
-		} else {
-			r.lastTyped = now
-		}
+	if specialKeyAction(text) {
+		r.touchChunkLocked()
 	}
 	r.actionLocked(text)
 }
@@ -253,7 +253,11 @@ func (r *Recorder) actionLocked(text string) {
 		r.generation++
 		return
 	}
-	r.result.Events = append(ev, Event{now, text})
+	if !r.chunkActive {
+		r.chunk++
+		r.chunkActive = true
+	}
+	r.result.Events = append(ev, Event{Millis: now, Text: text, Chunk: r.chunk})
 }
 
 // materializeTypingLocked updates the reserved event only when its text changed.
@@ -269,11 +273,25 @@ func (r *Recorder) resetTypingLocked() {
 	r.typing = false
 	r.typed = nil
 	r.typingDirty = false
+	r.chunkActive = false
 }
 
 func (r *Recorder) endTypingLocked() {
 	r.materializeTypingLocked()
 	r.resetTypingLocked()
+}
+
+// touchChunkLocked tracks typing and special-key activity on the same clock.
+func (r *Recorder) touchChunkLocked() {
+	now := time.Now()
+	if r.chunkActive && now.Sub(r.lastTyped) > 2*time.Second {
+		r.endTypingLocked()
+	}
+	if !r.chunkActive {
+		r.chunk++
+		r.chunkActive = true
+	}
+	r.lastTyped = now
 }
 
 // Text appends to the recorder-owned buffer without serializing the whole chunk
@@ -284,9 +302,11 @@ func (r *Recorder) Text(ch rune, security InputSecurity) {
 	if r.result.State != "recording" || time.Since(r.result.Started) >= Duration {
 		return
 	}
-	now := time.Now()
-	if !r.typing || now.Sub(r.lastTyped) > 2*time.Second || security != r.typingSecurity {
+	if r.typing && security != r.typingSecurity {
 		r.endTypingLocked()
+	}
+	r.touchChunkLocked()
+	if !r.typing {
 		r.actionLocked("")
 		if r.result.State != "recording" {
 			return
@@ -295,7 +315,6 @@ func (r *Recorder) Text(ch rune, security InputSecurity) {
 		r.typingIndex = len(r.result.Events) - 1
 		r.typingSecurity = security
 	}
-	r.lastTyped = now
 	text := "Type [secure input]"
 	switch security {
 	case InputOrdinary, InputUnknown:
@@ -320,6 +339,7 @@ func (r *Recorder) Backspace() {
 		r.typingDirty = true
 		return
 	}
+	r.touchChunkLocked()
 	r.actionLocked("Press Backspace")
 }
 
@@ -408,6 +428,19 @@ func (r *Recorder) Finish(id string, limit int) (Result, error) {
 	return out, nil
 }
 
+// specialKeyAction excludes modifier combinations, which are shortcuts.
+func specialKeyAction(text string) bool {
+	key, ok := strings.CutPrefix(text, "Press ")
+	if !ok || strings.Contains(key, "+") {
+		return false
+	}
+	switch key {
+	case "Ctrl", "Alt", "Meta", "Super", "Shift", "AltGr":
+		return false
+	}
+	return true
+}
+
 // navigationAction identifies named navigation actions, including shortcuts.
 func navigationAction(text string) bool {
 	key, ok := strings.CutPrefix(text, "Press ")
@@ -429,10 +462,36 @@ func (r Result) Transcript() string {
 		text string
 	}
 	var lines []line
+	// Keep raw events intact. Summaries retain each key's first-seen position.
+	counts := map[int]int{}
+	seen := map[string]int{}
+	var previous Event
+	for i, e := range r.Events {
+		if i == 0 || e.Chunk != previous.Chunk || (e.Chunk == 0 && e.Millis-previous.Millis > 2000) {
+			clear(seen)
+		}
+		if specialKeyAction(e.Text) {
+			if first, ok := seen[e.Text]; ok {
+				counts[first]++
+				counts[i] = -1
+			} else {
+				seen[e.Text] = i
+				counts[i] = 1
+			}
+		} else if e.Chunk == 0 && !strings.HasPrefix(e.Text, "Type ") {
+			clear(seen)
+		}
+		previous = e
+	}
 	for i := 0; i < len(r.Events); i++ {
 		e := r.Events[i]
-		count := 1
-		if navigationAction(e.Text) {
+		if counts[i] == -1 {
+			continue
+		}
+		count := counts[i]
+		// Preserve existing summaries of consecutive modified navigation.
+		if navigationAction(e.Text) && strings.Contains(e.Text, "+") {
+			count = 1
 			for i+1 < len(r.Events) && r.Events[i+1].Text == e.Text && r.Events[i+1].Millis-r.Events[i].Millis <= 2000 {
 				count++
 				i++

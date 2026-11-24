@@ -701,7 +701,7 @@ func TestKeypadEditingKeys(t *testing.T) {
 
 func TestNavigationRepeatInactivityBoundary(t *testing.T) {
 	for _, gap := range []int64{1500, 2000, 2001, 3000} {
-		out := Result{Events: []Event{{0, "Press Down"}, {gap, "Press Down"}}}
+		out := Result{Events: []Event{{Millis: 0, Text: "Press Down"}, {Millis: gap, Text: "Press Down"}}}
 		transcript := out.Transcript()
 		if gap <= 2000 {
 			if !strings.Contains(transcript, "Press Down ×2") {
@@ -713,7 +713,7 @@ func TestNavigationRepeatInactivityBoundary(t *testing.T) {
 	}
 	// Each successive action refreshes inactivity, rather than timing the run
 	// from its first action.
-	out := Result{Events: []Event{{0, "Press Down"}, {1500, "Press Down"}, {3000, "Press Down"}}}
+	out := Result{Events: []Event{{Millis: 0, Text: "Press Down"}, {Millis: 1500, Text: "Press Down"}, {Millis: 3000, Text: "Press Down"}}}
 	if !strings.Contains(out.Transcript(), "Press Down ×3") {
 		t.Fatal(out.Transcript())
 	}

@@ -25,7 +25,7 @@ func TestLongRecordingBoundsMemoryAndSelectsChronologically(t *testing.T) {
 	if r.interval <= 250*time.Millisecond {
 		t.Fatal(r.interval)
 	}
-	r.result.Events = []Event{{1000, "Click reports"}, {200000, "Scroll down"}}
+	r.result.Events = []Event{{Millis: 1000, Text: "Click reports"}, {Millis: 200000, Text: "Scroll down"}}
 	r.mu.Unlock()
 	for _, limit := range []int{2, 5, 30} {
 		out, err := r.Finish("demo", limit)
@@ -126,7 +126,7 @@ func TestSelectionIncludesBriefActionsAcrossEntireRecording(t *testing.T) {
 				}
 				r.Capture(generation, ms, []byte{value}, []byte{value})
 			}
-			r.result.Events = []Event{{actionMS - 1, "Open menu"}}
+			r.result.Events = []Event{{Millis: actionMS - 1, Text: "Open menu"}}
 			out, err := r.Finish("demo", 3)
 			if err != nil {
 				t.Fatal(err)
