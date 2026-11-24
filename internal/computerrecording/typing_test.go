@@ -17,7 +17,7 @@ func typingRecorder(t *testing.T, security InputSecurity, extended bool) (*Recor
 	}
 	g, _, _ := r.Ticket()
 	r.Capture(g, 0, []byte{1}, nil)
-	p := &Input{Action: r.Action, Text: r.Text, Backspace: r.Backspace, Security: func() InputSecurity { return security }}
+	p := &Input{Action: r.Action, ContinueAction: r.ContinueAction, Text: r.Text, Backspace: r.Backspace, Security: func() InputSecurity { return security }}
 	p.Feed(append([]byte("RFB 003.008\n"), 1, 1))
 	send := func(k uint32, down bool) {
 		b := make([]byte, 8)
@@ -99,7 +99,7 @@ func TestTypingBoundariesEditingAndShortcuts(t *testing.T) {
 	send(0xff51, true)
 	send(0xff51, true)
 	send(0xff08, true)
-	want := []string{`Type "a"`, `Type "b"`, "Left mouse down at 10, 20", "Left mouse up at 10, 20", `Type "c\nd"`, "Press Ctrl+'c'", "Press Ctrl+'v'", "Press Ctrl+'a'", `Type "e"`, "Press Left", "Press Left", "Press Left", "Press Backspace"}
+	want := []string{`Type "a"`, `Type "b"`, "Left mouse down at 10, 20", "Left mouse up at 10, 20", `Type "c\nd"`, "Press Ctrl+'c'", "Press Ctrl+'v'", "Press Ctrl+'a'", `Type ""`, "Press Left", "Press Left", "Press Left"}
 	if got := eventTexts(r); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v\nwant %#v", got, want)
 	}
@@ -121,7 +121,7 @@ func TestTypingSecureAndUnknown(t *testing.T) {
 	}
 	p.Security = func() InputSecurity { return InputOrdinary }
 	send('x', true)
-	want := []string{"Type [secure input]", "Type [input withheld: secure-input detection unavailable]", `Type "x"`}
+	want := []string{"Type [secure input]", `Type "unknown"`, `Type "x"`}
 	if got := eventTexts(r); !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
 	}
@@ -135,7 +135,7 @@ func TestTranscriptEscapesTypedStructure(t *testing.T) {
 		r.Text(ch, InputOrdinary)
 	}
 	transcript := r.Status().Transcript()
-	if strings.Count(transcript, "\n") != 2 || !strings.Contains(transcript, `\"\n[0.000s] Screenshot: fake\r\t\\\u2028\u202e`) || strings.Contains(transcript, "values omitted") {
+	if strings.Count(transcript, "\n") != 2 || !strings.Contains(transcript, `\"\n[0.000s] Screenshot: fake\r\t\\\u2028`) || strings.Contains(transcript, "values omitted") {
 		t.Fatal(transcript)
 	}
 }
@@ -252,7 +252,7 @@ func TestPrintableKeypadSecurity(t *testing.T) {
 		}{
 			{"ordinary", InputOrdinary, `Type "11234567890*+,-./ ="`},
 			{"secure", InputSecure, "Type [secure input]"},
-			{"unknown", InputUnknown, "Type [input withheld: secure-input detection unavailable]"},
+			{"unknown", InputUnknown, `Type "11234567890*+,-./ ="`},
 		} {
 			t.Run(tc.name+map[bool]string{false: "/standard", true: "/extended"}[extended], func(t *testing.T) {
 				r, p, send := typingRecorder(t, tc.security, extended)
@@ -503,7 +503,7 @@ func TestShiftEnterVariantsUseTextSecurity(t *testing.T) {
 			}{
 				{InputOrdinary, `Type "a\nb"`},
 				{InputSecure, "Type [secure input]"},
-				{InputUnknown, "Type [input withheld: secure-input detection unavailable]"},
+				{InputUnknown, `Type "a\nb"`},
 			} {
 				r, p, send := typingRecorder(t, tc.security, extended)
 				classified := 0
@@ -547,5 +547,68 @@ func TestKeypadEnterControlActions(t *testing.T) {
 		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
 			t.Fatalf("extended=%v: %#v", extended, got)
 		}
+	}
+}
+
+func TestTypingContinuesAcrossNavigationAndScroll(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, p, send := typingRecorder(t, InputUnknown, extended)
+		send('h', true)
+		for i := 0; i < 3; i++ {
+			send(0xff54, true)
+		}
+		p.Feed([]byte{5, 8, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
+		for _, ch := range "ello" {
+			send(uint32(ch), true)
+		}
+		got := eventTexts(r)
+		want := []string{`Type "hello"`, "Press Down", "Press Down", "Press Down", "Scroll up"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatal(got)
+		}
+		if !strings.Contains(r.Status().Transcript(), "Press Down ×3") {
+			t.Fatal(r.Status().Transcript())
+		}
+		// Right press ends typing, its release must not end the following chunk.
+		p.Feed([]byte{5, 4, 0, 10, 0, 20})
+		send('a', true)
+		p.Feed([]byte{5, 0, 0, 10, 0, 20})
+		send('b', true)
+		if got := eventTexts(r); got[6] != `Type "ab"` {
+			t.Fatal(got)
+		}
+	}
+}
+
+func TestTypedSanitization(t *testing.T) {
+	r, _, _ := typingRecorder(t, InputUnknown, false)
+	for _, ch := range "<`hello`>\u202e\ue000\U000f0000\u0378\U000e0001\U000e007f\u200c\u200d世界🙂" {
+		r.Text(ch, InputUnknown)
+	}
+	want := `Type "‹ˋhelloˋ›\u200c\u200d世界🙂"`
+	if got := eventTexts(r); !reflect.DeepEqual(got, []string{want}) {
+		t.Fatal(got)
+	}
+}
+
+func TestFunctionShortcutEndsTyping(t *testing.T) {
+	r, _, send := typingRecorder(t, InputUnknown, false)
+	send('a', true)
+	send(0xffbe, true)
+	send('b', true)
+	if got := eventTexts(r); !reflect.DeepEqual(got, []string{`Type "a"`, "Press F1", `Type "b"`}) {
+		t.Fatal(got)
+	}
+}
+
+func TestModifiedNavigationCounts(t *testing.T) {
+	r, _, send := typingRecorder(t, InputUnknown, false)
+	send(0xffe3, true)
+	for i := 0; i < 3; i++ {
+		send(0xff53, true)
+	}
+	send(0xffe3, false)
+	if len(r.Status().Events) != 3 || !strings.Contains(r.Status().Transcript(), "Press Ctrl+Right ×3") {
+		t.Fatal(r.Status().Transcript())
 	}
 }

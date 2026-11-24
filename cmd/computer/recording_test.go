@@ -77,7 +77,7 @@ func TestRecordingRealDesktop(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := append([]byte("RFB 003.008\n"), 1, 1, 5, 1, 0, 40, 0, 80, 5, 0, 0, 40, 0, 80)
-	for _, key := range []uint32{'s', 'e', 'c', 'r', 'e', 't', 0xff51, 0xff51, 0xff51} {
+	for _, key := range []uint32{'h', 'e', 'l', 'l', 'o', 0xff51, 0xff51, 0xff51} {
 		packet := make([]byte, 8)
 		packet[0], packet[1] = 4, 1
 		binary.BigEndian.PutUint32(packet[4:], key)
@@ -95,8 +95,8 @@ func TestRecordingRealDesktop(t *testing.T) {
 	if len(out.Frames) < 2 || len(out.Frames) > 3 || len(out.Events) != 6 {
 		t.Fatalf("frames=%d events=%v", len(out.Frames), out.Events)
 	}
-	if strings.Contains(out.Transcript(), "secret") || out.Events[2].Text != "Type [input withheld: secure-input detection unavailable]" {
-		t.Fatalf("unknown field captured: %v", out.Events)
+	if !strings.Contains(out.Transcript(), `Type "hello"`) || out.Events[2].Text != `Type "hello"` {
+		t.Fatalf("unknown field typing missing: %v", out.Events)
 	}
 	for _, event := range out.Events[3:] {
 		if event.Text != "Press Left" {

@@ -9,20 +9,21 @@ import (
 )
 
 // Input observes the client side of the helper's RFB 3.8 / None connection.
-// It never alters traffic or retains clipboard contents. Text requires an explicit
-// field classification; absent detection is unknown, never implicitly ordinary.
+// It never alters traffic or retains clipboard contents. Identified secure text
+// is redacted; unavailable detection remains explicitly InputUnknown.
 // Unsupported messages disable recording instead of misinterpreting bytes.
 type Input struct {
-	buf         []byte
-	phase       int
-	disabled    bool
-	buttons     byte
-	Action      func(string)
-	Text        func(rune, InputSecurity)
-	Backspace   func()
-	Security    func() InputSecurity
-	modifiers   map[uint32]bool // Held modifiers; value is whether already consumed by an action.
-	Unsupported func()
+	buf            []byte
+	phase          int
+	disabled       bool
+	buttons        byte
+	Action         func(string)
+	ContinueAction func(string) // Navigation and pointer actions that do not end typing.
+	Text           func(rune, InputSecurity)
+	Backspace      func()
+	Security       func() InputSecurity
+	modifiers      map[uint32]bool // Held modifiers; value is whether already consumed by an action.
+	Unsupported    func()
 }
 
 func (p *Input) Feed(b []byte) {
@@ -131,17 +132,21 @@ func (p *Input) Feed(b []byte) {
 				}
 				for i, name := range []string{"Left", "Middle", "Right"} {
 					if pressed&(1<<i) != 0 {
-						p.Action(prefix + fmt.Sprintf("%s mouse down at %d, %d", name, x, y))
+						if i == 1 && prefix == "" {
+							p.continueAction(fmt.Sprintf("%s mouse down at %d, %d", name, x, y))
+						} else {
+							p.Action(prefix + fmt.Sprintf("%s mouse down at %d, %d", name, x, y))
+						}
 					}
 					if p.buttons&^mask&(1<<i) != 0 {
-						p.Action(prefix + fmt.Sprintf("%s mouse up at %d, %d", name, x, y))
+						p.continueAction(prefix + fmt.Sprintf("%s mouse up at %d, %d", name, x, y))
 					}
 				}
 				if pressed&8 != 0 {
-					p.Action(prefix + "Scroll up")
+					p.pointerAction(prefix, "Scroll up")
 				}
 				if pressed&16 != 0 {
-					p.Action(prefix + "Scroll down")
+					p.pointerAction(prefix, "Scroll down")
 				}
 				p.buttons = mask
 			case 6:
@@ -163,7 +168,8 @@ func (p *Input) disable() {
 	}
 }
 
-// InputSecurity is a positive classification of the focused input, not a guess.
+// InputSecurity describes detection, independently of capture policy. Unknown
+// input is captured; only positively identified secure input is redacted.
 type InputSecurity uint8
 
 const (
@@ -184,7 +190,7 @@ func (p *Input) typed(ch rune) {
 	if security == InputSecure {
 		p.Action("Type [secure input]")
 	} else {
-		p.Action("Type [input withheld: secure-input detection unavailable]")
+		p.Action("Type " + strconv.Quote(sanitizeText(string(ch))))
 	}
 }
 
@@ -315,6 +321,25 @@ func (p *Input) key(k uint32, down bool) {
 			name = fmt.Sprintf("keysym 0x%x", k)
 		}
 	}
+	if len(prefix) == 0 && !(k >= 0xffbe && k <= 0xffc9) {
+		p.continueAction("Press " + name)
+		return
+	}
 	prefix = append(prefix, name)
 	p.Action("Press " + strings.Join(prefix, "+"))
+}
+
+func (p *Input) continueAction(text string) {
+	if p.ContinueAction != nil {
+		p.ContinueAction(text)
+	} else {
+		p.Action(text)
+	}
+}
+func (p *Input) pointerAction(prefix, text string) {
+	if prefix != "" {
+		p.Action(prefix + text)
+	} else {
+		p.continueAction(text)
+	}
 }

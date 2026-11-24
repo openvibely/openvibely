@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const Duration = 10 * time.Minute
@@ -42,6 +43,7 @@ type Recorder struct {
 	captureError   bool
 	typing         bool
 	typingDirty    bool
+	typingIndex    int
 	typed          []rune
 	typingSecurity InputSecurity
 	lastTyped      time.Time
@@ -216,6 +218,16 @@ func (r *Recorder) Action(text string) {
 	r.actionLocked(text)
 }
 
+// ContinueAction preserves the open typing chunk across navigation and scrolling.
+func (r *Recorder) ContinueAction(text string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.result.State != "recording" || time.Since(r.result.Started) >= Duration {
+		return
+	}
+	r.actionLocked(text)
+}
+
 func (r *Recorder) actionLocked(text string) {
 	now := time.Since(r.result.Started).Milliseconds()
 	ev := r.result.Events
@@ -240,7 +252,7 @@ func (r *Recorder) actionLocked(text string) {
 // The recorder owns the buffer; snapshots and lifecycle boundaries include it.
 func (r *Recorder) materializeTypingLocked() {
 	if r.typingDirty {
-		r.result.Events[len(r.result.Events)-1].Text = "Type " + strconv.Quote(string(r.typed))
+		r.result.Events[r.typingIndex].Text = "Type " + strconv.Quote(sanitizeText(string(r.typed)))
 		r.typingDirty = false
 	}
 }
@@ -272,19 +284,20 @@ func (r *Recorder) Text(ch rune, security InputSecurity) {
 			return
 		}
 		r.typing = true
+		r.typingIndex = len(r.result.Events) - 1
 		r.typingSecurity = security
 	}
 	r.lastTyped = now
-	text := "Type [input withheld: secure-input detection unavailable]"
+	text := "Type [secure input]"
 	switch security {
-	case InputOrdinary:
+	case InputOrdinary, InputUnknown:
 		r.typed = append(r.typed, ch)
 		r.typingDirty = true
 		return
 	case InputSecure:
 		text = "Type [secure input]"
 	}
-	r.result.Events[len(r.result.Events)-1].Text = text
+	r.result.Events[r.typingIndex].Text = text
 }
 
 func (r *Recorder) Backspace() {
@@ -299,7 +312,6 @@ func (r *Recorder) Backspace() {
 		r.typingDirty = true
 		return
 	}
-	r.endTypingLocked()
 	r.actionLocked("Press Backspace")
 }
 
@@ -395,8 +407,21 @@ func (r Result) Transcript() string {
 		text string
 	}
 	var lines []line
-	for _, e := range r.Events {
-		lines = append(lines, line{e.Millis, e.Text})
+	for i := 0; i < len(r.Events); i++ {
+		e := r.Events[i]
+		count := 1
+		switch key := strings.TrimPrefix(e.Text, "Press "); key[strings.LastIndex(key, "+")+1:] {
+		case "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown":
+			for i+1 < len(r.Events) && r.Events[i+1].Text == e.Text {
+				count++
+				i++
+			}
+		}
+		text := e.Text
+		if count > 1 {
+			text += fmt.Sprintf(" ×%d", count)
+		}
+		lines = append(lines, line{e.Millis, text})
 	}
 	for i, f := range r.Frames {
 		lines = append(lines, line{f.Millis, fmt.Sprintf("Screenshot: demonstration-%06d.jpg", i+1)})
@@ -406,4 +431,31 @@ func (r Result) Transcript() string {
 		fmt.Fprintf(&b, "[%.3fs] %s\n", float64(l.ms)/1000, l.text)
 	}
 	return b.String()
+}
+
+// Sanitize at serialization, so editing still operates on the original runes.
+func sanitizeText(text string) string {
+	return strings.Map(func(ch rune) rune {
+		switch ch {
+		case '<':
+			return '‹'
+		case '>':
+			return '›'
+		case '`':
+			return 'ˋ'
+		case '\u200c', '\u200d':
+			return ch
+		}
+		if ch >= 0xe0000 && ch <= 0xe007f {
+			return -1
+		}
+		if unicode.Is(unicode.Cf, ch) || unicode.Is(unicode.Co, ch) {
+			return -1
+		}
+		// Go has no Cn table. Unassigned runes belong to none of the assigned categories.
+		if !unicode.IsOneOf([]*unicode.RangeTable{unicode.L, unicode.M, unicode.N, unicode.P, unicode.S, unicode.Z, unicode.Cc, unicode.Cf, unicode.Co, unicode.Cs}, ch) {
+			return -1
+		}
+		return ch
+	}, text)
 }

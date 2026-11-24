@@ -57,12 +57,30 @@ func (v *viewerConnections) proxy(w http.ResponseWriter, r *http.Request, target
 	downstream.SetReadLimit(1 << 20)
 	done := make(chan struct{}, 2)
 	observer := &computerrecording.Input{}
-	if v.recorder != nil && strings.HasSuffix(r.URL.Path, "rfb-control") {
+	frameSecurity := computerrecording.InputUnknown
+	postSecurity := computerrecording.InputUnknown
+	inspectedAfterForward := false
+	recordingInput := v.recorder != nil && strings.HasSuffix(r.URL.Path, "rfb-control")
+	if recordingInput {
 		observer.Action = v.recorder.recording.Action
+		observer.ContinueAction = v.recorder.recording.ContinueAction
 		observer.Text = v.recorder.recording.Text
 		observer.Backspace = v.recorder.recording.Backspace
-		// RFB/X11 provide no secure-field classification. Keep Security nil
-		// (unknown/redacted) until a detector or explicit consent policy is approved.
+		// Probe both sides of forwarding once per frame, never across frames.
+		// Batching prevents a coalesced typing packet from issuing one CDP probe per character.
+		observer.Security = func() computerrecording.InputSecurity {
+			if frameSecurity == computerrecording.InputSecure {
+				return frameSecurity
+			}
+			if state, _ := v.recorder.recording.CaptureState(); state != "recording" {
+				return computerrecording.InputUnknown
+			}
+			if !inspectedAfterForward {
+				postSecurity = focusedInputSecurity()
+				inspectedAfterForward = true
+			}
+			return postSecurity
+		}
 		observer.Unsupported = func() { v.recorder.recording.Fail(errors.New("unsupported desktop input protocol; recording stopped")) }
 	} else {
 		observer.Action = func(string) {}
@@ -73,6 +91,16 @@ func (v *viewerConnections) proxy(w http.ResponseWriter, r *http.Request, target
 			kind, data, err := src.Read(ctx)
 			if err != nil {
 				return
+			}
+			// Conservative frame-local protection if typing itself moves focus.
+			// This snapshot is discarded for the next frame, never cached across focus changes.
+			frameSecurity = computerrecording.InputUnknown
+			inspectedAfterForward = false
+			postSecurity = computerrecording.InputUnknown
+			if recordingInput {
+				if state, _ := v.recorder.recording.CaptureState(); state == "recording" {
+					frameSecurity = focusedInputSecurity()
+				}
 			}
 			if dst.Write(ctx, kind, data) != nil {
 				return
