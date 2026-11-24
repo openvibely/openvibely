@@ -30,8 +30,11 @@ type Input struct {
 // It neither consumes input nor invokes recording callbacks. This also handles
 // fragmented keys and coalesced shortcuts without guessing from raw bytes.
 func (p *Input) AddsText(b []byte) bool {
+	if p.disabled || len(p.buf)+len(b) > 2<<20 {
+		return false
+	}
 	preview := *p
-	preview.buf = append([]byte(nil), p.buf...)
+	preview.buf = nil
 	preview.modifiers = make(map[uint32]bool, len(p.modifiers))
 	for key, used := range p.modifiers {
 		preview.modifiers[key] = used
@@ -43,7 +46,7 @@ func (p *Input) AddsText(b []byte) bool {
 	preview.Unsupported = nil
 	preview.Security = nil
 	preview.Text = func(rune, InputSecurity) { addsText = true }
-	preview.Feed(b)
+	preview.consume(inputView{first: p.buf, second: b})
 	return addsText
 }
 
@@ -59,22 +62,37 @@ func (p *Input) Feed(b []byte) {
 		return
 	}
 	p.buf = append(p.buf, b...)
-	for len(p.buf) > 0 {
+	consumed := p.consume(inputView{first: p.buf})
+	if p.disabled {
+		return
+	}
+	p.buf = p.buf[consumed:]
+	if len(p.buf) == 0 {
+		p.buf = nil
+	}
+}
+
+// Decode a read-only view shared by Feed and AddsText. Only message headers
+// are inspected; clipboard and other ignored payloads are skipped by length.
+func (p *Input) consume(data inputView) (consumed int) {
+	var scratch [20]byte
+	for data.len() > 0 {
+		header := data.prefix(min(data.len(), len(scratch)), &scratch)
 		n := 0
 		switch p.phase {
 		case 0:
 			n = 12
-			if len(p.buf) < n {
+			if data.len() < n {
 				return
 			}
-			if string(p.buf[:n]) != "RFB 003.008\n" {
+			if string(header[:n]) != "RFB 003.008\n" {
 				p.disable()
 				return
 			}
 			p.phase++
 		case 1:
 			n = 1
-			if p.buf[0] != 1 {
+			if header[0] != 1 {
 				p.disable()
 				return
 			}
@@ -83,14 +101,14 @@ func (p *Input) Feed(b []byte) {
 			n = 1
 			p.phase++
 		default:
-			switch p.buf[0] {
+			switch header[0] {
 			case 0:
 				n = 20
 			case 2:
-				if len(p.buf) < 4 {
+				if data.len() < 4 {
 					return
 				}
-				n = 4 + 4*int(binary.BigEndian.Uint16(p.buf[2:4]))
+				n = 4 + 4*int(binary.BigEndian.Uint16(header[2:4]))
 			case 3:
 				n = 10
 			case 4:
@@ -98,10 +116,10 @@ func (p *Input) Feed(b []byte) {
 			case 5:
 				n = 6
 			case 6:
-				if len(p.buf) < 8 {
+				if data.len() < 8 {
 					return
 				}
-				size := int32(binary.BigEndian.Uint32(p.buf[4:8]))
+				size := int32(binary.BigEndian.Uint32(header[4:8]))
 				if size < 0 {
 					size = -size
 				}
@@ -111,22 +129,22 @@ func (p *Input) Feed(b []byte) {
 				}
 				n = 8 + int(size)
 			case 248:
-				if len(p.buf) < 9 {
+				if data.len() < 9 {
 					return
 				}
-				n = 9 + int(p.buf[8])
+				n = 9 + int(header[8])
 			case 150:
 				n = 10
 			case 251:
-				if len(p.buf) < 8 {
+				if data.len() < 8 {
 					return
 				}
-				n = 8 + 16*int(p.buf[6])
+				n = 8 + 16*int(header[6])
 			case 255:
-				if len(p.buf) < 2 {
+				if data.len() < 2 {
 					return
 				}
-				if p.buf[1] != 0 {
+				if header[1] != 0 {
 					p.disable()
 					return
 				}
@@ -135,17 +153,17 @@ func (p *Input) Feed(b []byte) {
 				p.disable()
 				return
 			}
-			if len(p.buf) < n {
+			if data.len() < n {
 				return
 			}
-			switch p.buf[0] {
+			switch header[0] {
 			case 4:
-				p.key(binary.BigEndian.Uint32(p.buf[4:8]), p.buf[1] != 0)
+				p.key(binary.BigEndian.Uint32(header[4:8]), header[1] != 0)
 			case 255:
-				p.key(binary.BigEndian.Uint32(p.buf[4:8]), binary.BigEndian.Uint16(p.buf[2:4]) != 0)
+				p.key(binary.BigEndian.Uint32(header[4:8]), binary.BigEndian.Uint16(header[2:4]) != 0)
 			case 5:
-				mask := p.buf[1]
-				x, y := binary.BigEndian.Uint16(p.buf[2:4]), binary.BigEndian.Uint16(p.buf[4:6])
+				mask := header[1]
+				x, y := binary.BigEndian.Uint16(header[2:4]), binary.BigEndian.Uint16(header[4:6])
 				pressed := mask &^ p.buttons
 				prefix := p.mouseModifierPrefix()
 				if pressed != 0 {
@@ -174,12 +192,13 @@ func (p *Input) Feed(b []byte) {
 				// Clipboard payload is deliberately excluded. Paste is a shortcut.
 			}
 		}
-		if len(p.buf) < n {
+		if data.len() < n {
 			return
 		}
-		p.buf = p.buf[n:]
+		data.skip(n)
+		consumed += n
 	}
-	p.buf = nil
+	return
 }
 func (p *Input) disable() {
 	p.disabled = true
@@ -372,4 +391,30 @@ func (p *Input) pointerAction(prefix, text string) {
 	} else {
 		p.continueAction(text)
 	}
+}
+
+// inputView joins buffered and incoming bytes without copying their payloads.
+// Headers crossing the boundary use a small fixed scratch buffer.
+type inputView struct{ first, second []byte }
+
+func (v inputView) len() int { return len(v.first) + len(v.second) }
+func (v inputView) prefix(n int, scratch *[20]byte) []byte {
+	if len(v.first) >= n {
+		return v.first[:n]
+	}
+	if len(v.first) == 0 {
+		return v.second[:n]
+	}
+	copied := copy(scratch[:n], v.first)
+	copy(scratch[copied:n], v.second)
+	return scratch[:n]
+}
+func (v *inputView) skip(n int) {
+	if n < len(v.first) {
+		v.first = v.first[n:]
+		return
+	}
+	n -= len(v.first)
+	v.first = v.second[n:]
+	v.second = nil
 }

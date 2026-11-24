@@ -67,3 +67,77 @@ func TestInputAddsTextPreview(t *testing.T) {
 		})
 	}
 }
+
+func clipboardPreviewMessage(size int) []byte {
+	b := make([]byte, 8+size)
+	b[0] = 6
+	binary.BigEndian.PutUint32(b[4:8], uint32(size))
+	// Payload deliberately resembles key events.
+	for i := 8; i+8 <= len(b); i += 8 {
+		copy(b[i:], []byte{4, 1, 0, 0, 0, 0, 0, 'x'})
+	}
+	return b
+}
+
+func TestInputPreviewFragmentedClipboard(t *testing.T) {
+	for split := 1; split <= 8; split++ {
+		t.Run(fmt.Sprint(split), func(t *testing.T) {
+			var text []rune
+			callbacks := 0
+			p := Input{phase: 3, Text: func(r rune, _ InputSecurity) { text = append(text, r); callbacks++ }, Action: func(string) { callbacks++ }, Unsupported: func() { callbacks++ }}
+			message := clipboardPreviewMessage(1 << 20)
+			check := func(frame []byte, want bool) {
+				t.Helper()
+				before := callbacks
+				for i := 0; i < 2; i++ {
+					if got := p.AddsText(frame); got != want {
+						t.Fatalf("preview = %v, want %v", got, want)
+					}
+				}
+				if callbacks != before {
+					t.Fatal("preview invoked callbacks")
+				}
+				p.Feed(frame)
+				if p.disabled {
+					t.Fatal("decoder disabled on valid clipboard")
+				}
+			}
+			check(message[:split], false)
+			for offset := split; offset < len(message)-3; {
+				end := min(offset+10*1024, len(message)-3)
+				check(message[offset:end], false)
+				offset = end
+			}
+			// Complete clipboard and begin a real, fragmented key in one frame.
+			key := []byte{4, 1, 0, 0, 0, 0, 0, 'h'}
+			check(append(append([]byte{}, message[len(message)-3:]...), key[:5]...), false)
+			check(key[5:], true)
+			if string(text) != "h" || callbacks != 1 {
+				t.Fatalf("clipboard leaked: text=%q callbacks=%d", string(text), callbacks)
+			}
+		})
+	}
+}
+
+func BenchmarkFragmentedClipboardPreview(b *testing.B) {
+	for _, size := range []int{256 << 10, 512 << 10, 1 << 20} {
+		for _, preview := range []bool{false, true} {
+			b.Run(fmt.Sprintf("bytes=%d/preview=%v", size, preview), func(b *testing.B) {
+				message := clipboardPreviewMessage(size)
+				b.ReportAllocs()
+				b.SetBytes(int64(size))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					p := Input{phase: 3}
+					for offset := 0; offset < len(message); offset += 10 * 1024 {
+						frame := message[offset:min(offset+10*1024, len(message))]
+						if preview && p.AddsText(frame) {
+							b.Fatal("clipboard classified as typing")
+						}
+						p.Feed(frame)
+					}
+				}
+			})
+		}
+	}
+}
