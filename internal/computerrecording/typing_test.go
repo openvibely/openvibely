@@ -411,3 +411,85 @@ func TestMouseActionsIncludeOtherModifiers(t *testing.T) {
 		}
 	}
 }
+
+func TestModifierOnlyCombinationRecordedOnce(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		for _, release := range [][]uint32{{0xffe9, 0xffe1}, {0xffe1, 0xffe9}} {
+			r, _, send := typingRecorder(t, InputOrdinary, extended)
+			send('a', true)
+			send(0xffe9, true)
+			send(0xffe1, true)
+			send(0xffe1, true) // Repeated down is not another combination.
+			for _, key := range release {
+				send(key, false)
+			}
+			send(release[0], false) // Unmatched release is ignored.
+			send('b', true)
+			want := []string{`Type "a"`, "Press Alt+Shift", `Type "b"`}
+			if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+				t.Fatalf("extended=%v release=%x: %#v", extended, release, got)
+			}
+		}
+	}
+}
+
+func TestModifierCombinationConsumedByLargerAction(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		for _, mouse := range []bool{false, true} {
+			r, p, send := typingRecorder(t, InputOrdinary, extended)
+			send(0xffe9, true)
+			send(0xffe1, true)
+			want := []string{"Press Alt+Shift+Tab"}
+			if mouse {
+				p.Feed([]byte{5, 8, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
+				want = []string{"Alt+Shift+Scroll up"}
+			} else {
+				send(0xff09, true)
+				send(0xff09, false)
+			}
+			send(0xffe1, false)
+			send(0xffe9, false)
+			if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+				t.Fatalf("extended=%v mouse=%v: %#v", extended, mouse, got)
+			}
+		}
+	}
+}
+
+func TestModifierCombinationsWhileAnotherModifierStaysHeld(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, _, send := typingRecorder(t, InputOrdinary, extended)
+		send(0xffe9, true)
+		for i := 0; i < 2; i++ {
+			send(0xffe1, true)
+			send(0xffe1, false)
+		}
+		send(0xffe9, false)
+		// A previously consumed Ctrl can participate in a fresh combination.
+		send(0xffe3, true)
+		send('c', true)
+		send('c', false)
+		send(0xffe1, true)
+		send(0xffe3, false)
+		send(0xffe1, false)
+		want := []string{"Press Alt+Shift", "Press Alt+Shift", "Press Ctrl+'c'", "Press Ctrl+Shift"}
+		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+			t.Fatalf("extended=%v: %#v", extended, got)
+		}
+	}
+}
+
+func TestModifierCombinationCollapsesSidesAndHandlesThreeKeys(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, _, send := typingRecorder(t, InputOrdinary, extended)
+		for _, key := range []uint32{0xffe4, 0xffe3, 0xffea, 0xffe2} {
+			send(key, true)
+		}
+		for _, key := range []uint32{0xffe3, 0xffe2, 0xffe4, 0xffea} {
+			send(key, false)
+		}
+		if got := eventTexts(r); !reflect.DeepEqual(got, []string{"Press Ctrl+Alt+Shift"}) {
+			t.Fatalf("extended=%v: %#v", extended, got)
+		}
+	}
+}

@@ -21,7 +21,7 @@ type Input struct {
 	Text        func(rune, InputSecurity)
 	Backspace   func()
 	Security    func() InputSecurity
-	modifiers   map[uint32]bool // Held modifiers; value is whether used in a combination.
+	modifiers   map[uint32]bool // Held modifiers; value is whether already consumed by an action.
 	Unsupported func()
 }
 
@@ -190,9 +190,8 @@ func (p *Input) typed(ch rune) {
 
 var modifierNames = map[uint32]string{0xffe1: "Shift", 0xffe2: "Shift", 0xffe3: "Ctrl", 0xffe4: "Ctrl", 0xffe9: "Alt", 0xffea: "Alt", 0xffe7: "Meta", 0xffe8: "Meta", 0xffeb: "Super", 0xffec: "Super", 0xfe03: "AltGr"}
 
-// Mouse actions carry the modifiers held at that event, including releases.
 // Collapse left/right variants and keep combination ordering deterministic.
-func (p *Input) mouseModifierPrefix() string {
+func (p *Input) heldModifierNames() []string {
 	held := map[string]bool{}
 	for key := range p.modifiers {
 		held[modifierNames[key]] = true
@@ -203,6 +202,12 @@ func (p *Input) mouseModifierPrefix() string {
 			names = append(names, name)
 		}
 	}
+	return names
+}
+
+// Mouse actions carry the modifiers held at that event, including releases.
+func (p *Input) mouseModifierPrefix() string {
+	names := p.heldModifierNames()
 	if len(names) == 0 {
 		return ""
 	}
@@ -216,22 +221,28 @@ func (p *Input) useModifiers() {
 }
 
 func (p *Input) key(k uint32, down bool) {
-	if name, ok := modifierNames[k]; ok {
-		used, pressed := p.modifiers[k]
+	if _, ok := modifierNames[k]; ok {
+		_, pressed := p.modifiers[k]
 		if down && !pressed {
-			combined := len(p.modifiers) > 0 || p.buttons&7 != 0
-			p.useModifiers()
 			if p.modifiers == nil {
 				p.modifiers = map[uint32]bool{}
 			}
-			p.modifiers[k] = combined
+			p.modifiers[k] = p.buttons&7 != 0
 		} else if !down && pressed {
-			delete(p.modifiers, k)
-			// Only a completed, unused tap is a standalone action. Repeated
-			// keydowns and unmatched releases must not add extra actions.
-			if !used {
-				p.Action("Press " + name)
+			names := p.heldModifierNames()
+			unused := false
+			for _, consumed := range p.modifiers {
+				unused = unused || !consumed
 			}
+			// Complete an unused chord on its first release. Consume the
+			// remaining modifiers so their releases cannot duplicate it.
+			// Two sides of the same modifier are one logical key: wait for
+			// its final release, since the other side can still form a shortcut.
+			if unused && (len(names) > 1 || len(p.modifiers) == 1) {
+				p.Action("Press " + strings.Join(names, "+"))
+				p.useModifiers()
+			}
+			delete(p.modifiers, k)
 		}
 		return
 	}
