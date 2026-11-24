@@ -356,9 +356,58 @@ func TestMouseCombinationDoesNotBecomeModifierTap(t *testing.T) {
 		send(0xffe3, true)
 		p.Feed([]byte{5, 8, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
 		send(0xffe3, false)
-		want := []string{"Left mouse down at 10, 20", "Left mouse up at 10, 20", "Scroll up"}
+		want := []string{"Shift+Left mouse down at 10, 20", "Shift+Left mouse up at 10, 20", "Ctrl+Scroll up"}
 		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
 			t.Fatalf("extended=%v: %#v", extended, got)
+		}
+	}
+}
+
+func TestMouseModifierReleaseAndRepeatedScroll(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		r, p, send := typingRecorder(t, InputOrdinary, extended)
+		send(0xffe4, true) // Right Ctrl remains held after left Ctrl is released.
+		send(0xffe3, true)
+		send(0xffe2, true)
+		p.Feed([]byte{5, 4, 0, 10, 0, 20})
+		send(0xffe3, false)
+		send(0xffe2, false)
+		p.Feed([]byte{5, 0, 0, 10, 0, 20})
+		for i := 0; i < 2; i++ {
+			p.Feed([]byte{5, 16, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
+		}
+		send(0xffe4, false)
+		p.Feed([]byte{5, 2, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
+		p.Feed([]byte{5, 8, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
+		want := []string{
+			"Ctrl+Shift+Right mouse down at 10, 20",
+			"Ctrl+Right mouse up at 10, 20",
+			"Ctrl+Scroll down", "Ctrl+Scroll down",
+			"Middle mouse down at 10, 20", "Middle mouse up at 10, 20",
+			"Scroll up",
+		}
+		if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+			t.Fatalf("extended=%v: got %#v, want %#v", extended, got, want)
+		}
+	}
+}
+
+func TestMouseActionsIncludeOtherModifiers(t *testing.T) {
+	for _, extended := range []bool{false, true} {
+		for _, tc := range []struct {
+			key  uint32
+			name string
+		}{
+			{0xffea, "Alt"}, {0xffe8, "Meta"}, {0xffec, "Super"}, {0xfe03, "AltGr"},
+		} {
+			r, p, send := typingRecorder(t, InputOrdinary, extended)
+			send(tc.key, true)
+			p.Feed([]byte{5, 1, 0, 10, 0, 20, 5, 0, 0, 10, 0, 20})
+			send(tc.key, false)
+			want := []string{tc.name + "+Left mouse down at 10, 20", tc.name + "+Left mouse up at 10, 20"}
+			if got := eventTexts(r); !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s extended=%v: %#v", tc.name, extended, got)
+			}
 		}
 	}
 }

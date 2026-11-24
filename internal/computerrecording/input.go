@@ -125,22 +125,23 @@ func (p *Input) Feed(b []byte) {
 				mask := p.buf[1]
 				x, y := binary.BigEndian.Uint16(p.buf[2:4]), binary.BigEndian.Uint16(p.buf[4:6])
 				pressed := mask &^ p.buttons
+				prefix := p.mouseModifierPrefix()
 				if pressed != 0 {
 					p.useModifiers()
 				}
 				for i, name := range []string{"Left", "Middle", "Right"} {
 					if pressed&(1<<i) != 0 {
-						p.Action(fmt.Sprintf("%s mouse down at %d, %d", name, x, y))
+						p.Action(prefix + fmt.Sprintf("%s mouse down at %d, %d", name, x, y))
 					}
 					if p.buttons&^mask&(1<<i) != 0 {
-						p.Action(fmt.Sprintf("%s mouse up at %d, %d", name, x, y))
+						p.Action(prefix + fmt.Sprintf("%s mouse up at %d, %d", name, x, y))
 					}
 				}
 				if pressed&8 != 0 {
-					p.Action("Scroll up")
+					p.Action(prefix + "Scroll up")
 				}
 				if pressed&16 != 0 {
-					p.Action("Scroll down")
+					p.Action(prefix + "Scroll down")
 				}
 				p.buttons = mask
 			case 6:
@@ -187,6 +188,27 @@ func (p *Input) typed(ch rune) {
 	}
 }
 
+var modifierNames = map[uint32]string{0xffe1: "Shift", 0xffe2: "Shift", 0xffe3: "Ctrl", 0xffe4: "Ctrl", 0xffe9: "Alt", 0xffea: "Alt", 0xffe7: "Meta", 0xffe8: "Meta", 0xffeb: "Super", 0xffec: "Super", 0xfe03: "AltGr"}
+
+// Mouse actions carry the modifiers held at that event, including releases.
+// Collapse left/right variants and keep combination ordering deterministic.
+func (p *Input) mouseModifierPrefix() string {
+	held := map[string]bool{}
+	for key := range p.modifiers {
+		held[modifierNames[key]] = true
+	}
+	var names []string
+	for _, name := range []string{"Ctrl", "Alt", "Meta", "Super", "Shift", "AltGr"} {
+		if held[name] {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return strings.Join(names, "+") + "+"
+}
+
 func (p *Input) useModifiers() {
 	for key := range p.modifiers {
 		p.modifiers[key] = true
@@ -194,8 +216,7 @@ func (p *Input) useModifiers() {
 }
 
 func (p *Input) key(k uint32, down bool) {
-	modifiers := map[uint32]string{0xffe1: "Shift", 0xffe2: "Shift", 0xffe3: "Ctrl", 0xffe4: "Ctrl", 0xffe9: "Alt", 0xffea: "Alt", 0xffe7: "Meta", 0xffe8: "Meta", 0xffeb: "Super", 0xffec: "Super", 0xfe03: "AltGr"}
-	if name, ok := modifiers[k]; ok {
+	if name, ok := modifierNames[k]; ok {
 		used, pressed := p.modifiers[k]
 		if down && !pressed {
 			combined := len(p.modifiers) > 0 || p.buttons&7 != 0
@@ -220,7 +241,7 @@ func (p *Input) key(k uint32, down bool) {
 	p.useModifiers()
 	held := map[string]bool{}
 	for key := range p.modifiers {
-		held[modifiers[key]] = true
+		held[modifierNames[key]] = true
 	}
 	var prefix []string
 	for _, name := range []string{"Ctrl", "Alt", "Meta", "Super"} {
