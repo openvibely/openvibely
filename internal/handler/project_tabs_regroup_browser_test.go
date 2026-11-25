@@ -56,6 +56,10 @@ func TestProjectTabsRegroupWhileServerModalOpen(t *testing.T) {
  if((!location.hash&&!dialog.open)||!dialog.isConnected)throw Error('modal lost');
  if(document.getElementById('tasks-page').dataset.projectId!==group)throw Error('task scope stale');
  if(!document.querySelector('[data-regroup-board]'))throw Error('board not refreshed');
+ const add=document.querySelector('a[aria-label="Add Task"]');
+ if(new URL(add.href).searchParams.get('project_id')!==group)throw Error('Add Task link retains old scope');
+ if(new URL(add.getAttribute('hx-get'),location.href).searchParams.get('project_id')!==group)throw Error('Add Task request retains old scope');
+
  if(tabs.includes(local)||tabs.filter(id=>id===group).length!==1)throw Error('duplicate tabs: '+JSON.stringify(tabs));
  await original('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)})}

@@ -24,7 +24,7 @@ templ Tasks(projects []models.Project, project *models.Project, tasks []models.T
 }
 
 templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
-	<div class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
+	<div data-tasks-view class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
 		@layout.PageTitle("Tasks")
 		<div data-page-header class="tasks-page-header flex items-center justify-between mb-6 flex-shrink-0 gap-3">
 			<h2 class="text-2xl font-bold flex-shrink-0">Tasks</h2>
@@ -219,7 +219,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
                         projectID = next;
                         tasksPage.setAttribute('data-project-id', next);
                         backgroundRefreshPath = '/tasks?project_id=' + encodeURIComponent(next) + '&refresh_source=sse';
-                        tasksPage.querySelectorAll('[href], [hx-get], [hx-post]').forEach(function(element) {
+                        tasksPage.closest('[data-tasks-view]').querySelectorAll('[href], [hx-get], [hx-post]').forEach(function(element) {
                             ['href', 'hx-get', 'hx-post'].forEach(function(attr) {
                                 const raw = element.getAttribute(attr);
                                 if (!raw || !raw.startsWith('/')) return;
