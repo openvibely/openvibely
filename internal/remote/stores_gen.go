@@ -460,10 +460,6 @@ var paramNames = map[string]map[string][]string{
 		"RecordForwardedAndQueue": {"feedback", "input"},
 	},
 	"Insights": {
-		"CountByStatus":         {"projectID"},
-		"CountByType":           {"projectID"},
-		"CreateHealthCheck":     {"hc"},
-		"CreateIdeaGrade":       {"ig"},
 		"CreateInsight":         {"i"},
 		"CreateReport":          {"rpt"},
 		"DeleteInsight":         {"projectID", "id"},
@@ -473,10 +469,7 @@ var paramNames = map[string]map[string][]string{
 		"GetInsight":            {"projectID", "id"},
 		"GetLatestHealthCheck":  {"projectID"},
 		"GetLatestIdeaGrade":    {"projectID"},
-		"GetLatestReport":       {"projectID"},
 		"GetSlowExecutions":     {"projectID", "minDurationSecs", "limit"},
-		"ListByProject":         {"projectID", "limit"},
-		"ListByStatus":          {"projectID", "status", "limit"},
 		"ListByType":            {"projectID", "insightType", "limit"},
 		"ListHealthChecks":      {"projectID", "limit"},
 		"ListIdeaGrades":        {"projectID", "limit"},
@@ -3544,34 +3537,6 @@ type InsightsStore struct {
 
 func (s *InsightsStore) Local() persistence.InsightsStore { return s.local }
 
-func (s *InsightsStore) CountByStatus(ctx context.Context, a1 string) (r0 map[string]int, r1 error) {
-	if s.r.Remote(ctx, "Insights", "CountByStatus", []any{a1}, func() []any { r0, r1 = s.local.CountByStatus(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.CountByStatus(ctx, a1)
-}
-
-func (s *InsightsStore) CountByType(ctx context.Context, a1 string) (r0 map[string]int, r1 error) {
-	if s.r.Remote(ctx, "Insights", "CountByType", []any{a1}, func() []any { r0, r1 = s.local.CountByType(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.CountByType(ctx, a1)
-}
-
-func (s *InsightsStore) CreateHealthCheck(ctx context.Context, a1 *models.HealthCheck) (r0 error) {
-	if s.r.Remote(ctx, "Insights", "CreateHealthCheck", []any{a1}, func() []any { r0 = s.local.CreateHealthCheck(ctx, a1); return []any{r0} }, &r0) {
-		return
-	}
-	return s.local.CreateHealthCheck(ctx, a1)
-}
-
-func (s *InsightsStore) CreateIdeaGrade(ctx context.Context, a1 *models.IdeaGrade) (r0 error) {
-	if s.r.Remote(ctx, "Insights", "CreateIdeaGrade", []any{a1}, func() []any { r0 = s.local.CreateIdeaGrade(ctx, a1); return []any{r0} }, &r0) {
-		return
-	}
-	return s.local.CreateIdeaGrade(ctx, a1)
-}
-
 func (s *InsightsStore) CreateInsight(ctx context.Context, a1 *models.Insight) (r0 error) {
 	if s.r.Remote(ctx, "Insights", "CreateInsight", []any{a1}, func() []any { r0 = s.local.CreateInsight(ctx, a1); return []any{r0} }, &r0) {
 		return
@@ -3635,13 +3600,6 @@ func (s *InsightsStore) GetLatestIdeaGrade(ctx context.Context, a1 string) (r0 *
 	return s.local.GetLatestIdeaGrade(ctx, a1)
 }
 
-func (s *InsightsStore) GetLatestReport(ctx context.Context, a1 string) (r0 *models.InsightReport, r1 error) {
-	if s.r.Remote(ctx, "Insights", "GetLatestReport", []any{a1}, func() []any { r0, r1 = s.local.GetLatestReport(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.GetLatestReport(ctx, a1)
-}
-
 func (s *InsightsStore) GetSlowExecutions(ctx context.Context, a1 string, a2 int, a3 int) (r0 []struct {
 	TaskTitle string
 	Duration  int
@@ -3651,20 +3609,6 @@ func (s *InsightsStore) GetSlowExecutions(ctx context.Context, a1 string, a2 int
 		return
 	}
 	return s.local.GetSlowExecutions(ctx, a1, a2, a3)
-}
-
-func (s *InsightsStore) ListByProject(ctx context.Context, a1 string, a2 int) (r0 []models.Insight, r1 error) {
-	if s.r.Remote(ctx, "Insights", "ListByProject", []any{a1, a2}, func() []any { r0, r1 = s.local.ListByProject(ctx, a1, a2); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.ListByProject(ctx, a1, a2)
-}
-
-func (s *InsightsStore) ListByStatus(ctx context.Context, a1 string, a2 models.InsightStatus, a3 int) (r0 []models.Insight, r1 error) {
-	if s.r.Remote(ctx, "Insights", "ListByStatus", []any{a1, a2, a3}, func() []any { r0, r1 = s.local.ListByStatus(ctx, a1, a2, a3); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.ListByStatus(ctx, a1, a2, a3)
 }
 
 func (s *InsightsStore) ListByType(ctx context.Context, a1 string, a2 models.InsightType, a3 int) (r0 []models.Insight, r1 error) {

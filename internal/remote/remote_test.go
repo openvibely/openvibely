@@ -447,9 +447,4 @@ func TestReadResultsDistinguishTextFromIDs(t *testing.T) {
 	if config == nil || config.ID != remoteid.ID(server, hex) || config.Name != hex {
 		t.Fatalf("model map corrupted: %+v", modelsByID)
 	}
-	tags := map[string]int{hex: 2}
-	tagReadResult(server, "Insights", "CountByType", 0, reflect.ValueOf(&tags).Elem())
-	if tags[hex] != 2 {
-		t.Fatal("insight type key rewritten")
-	}
 }

@@ -393,10 +393,6 @@ type GitHubPRFeedbackStore interface {
 
 // InsightsStore persists project insights.
 type InsightsStore interface {
-	CountByStatus(ctx context.Context, projectID string) (map[string]int, error)
-	CountByType(ctx context.Context, projectID string) (map[string]int, error)
-	CreateHealthCheck(ctx context.Context, hc *models.HealthCheck) error
-	CreateIdeaGrade(ctx context.Context, ig *models.IdeaGrade) error
 	CreateInsight(ctx context.Context, i *models.Insight) error
 	CreateReport(ctx context.Context, rpt *models.InsightReport) error
 	DeleteInsight(ctx context.Context, projectID string, id string) error
@@ -406,14 +402,11 @@ type InsightsStore interface {
 	GetInsight(ctx context.Context, projectID string, id string) (*models.Insight, error)
 	GetLatestHealthCheck(ctx context.Context, projectID string) (*models.HealthCheck, error)
 	GetLatestIdeaGrade(ctx context.Context, projectID string) (*models.IdeaGrade, error)
-	GetLatestReport(ctx context.Context, projectID string) (*models.InsightReport, error)
 	GetSlowExecutions(ctx context.Context, projectID string, minDurationSecs int, limit int) ([]struct {
 		TaskTitle string
 		Duration  int
 		AgentName string
 	}, error)
-	ListByProject(ctx context.Context, projectID string, limit int) ([]models.Insight, error)
-	ListByStatus(ctx context.Context, projectID string, status models.InsightStatus, limit int) ([]models.Insight, error)
 	ListByType(ctx context.Context, projectID string, insightType models.InsightType, limit int) ([]models.Insight, error)
 	ListHealthChecks(ctx context.Context, projectID string, limit int) ([]models.HealthCheck, error)
 	ListIdeaGrades(ctx context.Context, projectID string, limit int) ([]models.IdeaGrade, error)

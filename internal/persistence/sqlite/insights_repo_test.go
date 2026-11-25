@@ -62,7 +62,7 @@ func TestInsightsRepo_CreateAndGet(t *testing.T) {
 	}
 }
 
-func TestInsightsRepo_ListByStatusAndType(t *testing.T) {
+func TestInsightsRepo_ListByType(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
@@ -98,19 +98,6 @@ func TestInsightsRepo_ListByStatusAndType(t *testing.T) {
 		if err := repo.CreateInsight(ctx, i); err != nil {
 			t.Fatalf("create insight %s: %v", tc.title, err)
 		}
-	}
-
-	// List new insights
-	newInsights, err := repo.ListByStatus(ctx, project.ID, models.InsightStatusNew, 10)
-	if err != nil {
-		t.Fatalf("list by status: %v", err)
-	}
-	if len(newInsights) != 3 {
-		t.Errorf("new insights count: got %d, want 3", len(newInsights))
-	}
-	// Should be ordered by severity (high first)
-	if len(newInsights) > 0 && newInsights[0].Severity != models.InsightSeverityHigh {
-		t.Errorf("first insight should be high severity, got %s", newInsights[0].Severity)
 	}
 
 	// List by type
@@ -244,43 +231,6 @@ func TestInsightsRepo_ProjectScopedMutations(t *testing.T) {
 
 }
 
-func TestInsightsRepo_Counts(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-
-	projectRepo := NewProjectRepo(db)
-	repo := NewInsightsRepo(db)
-
-	project := &models.Project{Name: "Test Counts"}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	for _, conf := range []float64{0.6, 0.8, 1.0} {
-		i := &models.Insight{
-			ProjectID:  project.ID,
-			Type:       models.InsightBugPattern,
-			Severity:   models.InsightSeverityMedium,
-			Status:     models.InsightStatusNew,
-			Title:      "Test",
-			Evidence:   "{}",
-			Confidence: conf,
-		}
-		if err := repo.CreateInsight(ctx, i); err != nil {
-			t.Fatalf("create: %v", err)
-		}
-	}
-
-	counts, err := repo.CountByStatus(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("count by status: %v", err)
-	}
-	if counts["new"] != 3 {
-		t.Errorf("new count: got %d, want 3", counts["new"])
-	}
-
-}
-
 func TestInsightsRepo_ExistingInsight(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -350,23 +300,15 @@ func TestInsightsRepo_Reports(t *testing.T) {
 		t.Fatal("expected report ID")
 	}
 
-	latest, err := repo.GetLatestReport(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("get latest report: %v", err)
-	}
-	if latest == nil {
-		t.Fatal("expected latest report")
-	}
-	if latest.Summary != rpt.Summary {
-		t.Errorf("summary mismatch")
-	}
-
 	reports, err := repo.ListReports(ctx, project.ID, 10)
 	if err != nil {
 		t.Fatalf("list reports: %v", err)
 	}
 	if len(reports) != 1 {
-		t.Errorf("report count: got %d, want 1", len(reports))
+		t.Fatalf("report count: got %d, want 1", len(reports))
+	}
+	if reports[0].Summary != rpt.Summary {
+		t.Error("summary mismatch")
 	}
 }
 
@@ -396,7 +338,13 @@ func TestInsightsRepo_HealthChecks(t *testing.T) {
 		BacklogSize:      20,
 		AvgCompletionPct: 70.0,
 	}
-	if err := repo.CreateHealthCheck(ctx, hc); err != nil {
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO health_checks (project_id, grade, strengths, improvements, assessment, how_to_improve, tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-01-01 00:00:00')
+		RETURNING id, created_at`,
+		hc.ProjectID, hc.Grade, hc.Strengths, hc.Improvements, hc.Assessment, hc.HowToImprove,
+		hc.TasksTotal, hc.TasksCompleted, hc.TasksFailed, hc.TasksPending, hc.BacklogSize, hc.AvgCompletionPct,
+	).Scan(&hc.ID, &hc.CreatedAt); err != nil {
 		t.Fatalf("create health check: %v", err)
 	}
 	if hc.ID == "" {
@@ -421,7 +369,7 @@ func TestInsightsRepo_HealthChecks(t *testing.T) {
 		t.Errorf("avg_completion_pct: got %f, want 70.0", latest.AvgCompletionPct)
 	}
 
-	// Create a second health check
+	// Seed a newer historical health check
 	hc2 := &models.HealthCheck{
 		ProjectID:        project.ID,
 		Grade:            "A-",
@@ -436,7 +384,13 @@ func TestInsightsRepo_HealthChecks(t *testing.T) {
 		BacklogSize:      15,
 		AvgCompletionPct: 83.3,
 	}
-	if err := repo.CreateHealthCheck(ctx, hc2); err != nil {
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO health_checks (project_id, grade, strengths, improvements, assessment, how_to_improve, tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-01-02 00:00:00')
+		RETURNING id, created_at`,
+		hc2.ProjectID, hc2.Grade, hc2.Strengths, hc2.Improvements, hc2.Assessment, hc2.HowToImprove,
+		hc2.TasksTotal, hc2.TasksCompleted, hc2.TasksFailed, hc2.TasksPending, hc2.BacklogSize, hc2.AvgCompletionPct,
+	).Scan(&hc2.ID, &hc2.CreatedAt); err != nil {
 		t.Fatalf("create health check 2: %v", err)
 	}
 
@@ -499,7 +453,13 @@ func TestInsightsRepo_IdeaGrades(t *testing.T) {
 		DiversityScore: 85.0,
 		StrategyScore:  65.0,
 	}
-	if err := repo.CreateIdeaGrade(ctx, ig); err != nil {
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO idea_grades (project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade, tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-01-01 00:00:00')
+		RETURNING id, created_at`,
+		ig.ProjectID, ig.Grade, ig.Summary, ig.Strengths, ig.Improvements, ig.HowToNextGrade, ig.NextGrade,
+		ig.TasksEvaluated, ig.ClarityScore, ig.AmbitionScore, ig.FollowThrough, ig.DiversityScore, ig.StrategyScore,
+	).Scan(&ig.ID, &ig.CreatedAt); err != nil {
 		t.Fatalf("create idea grade: %v", err)
 	}
 	if ig.ID == "" {
@@ -527,7 +487,7 @@ func TestInsightsRepo_IdeaGrades(t *testing.T) {
 		t.Errorf("next_grade: got %q, want A-", latest.NextGrade)
 	}
 
-	// Create a second grade
+	// Seed a newer historical grade
 	ig2 := &models.IdeaGrade{
 		ProjectID:      project.ID,
 		Grade:          "A-",
@@ -543,7 +503,13 @@ func TestInsightsRepo_IdeaGrades(t *testing.T) {
 		DiversityScore: 80.0,
 		StrategyScore:  78.0,
 	}
-	if err := repo.CreateIdeaGrade(ctx, ig2); err != nil {
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO idea_grades (project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade, tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-01-02 00:00:00')
+		RETURNING id, created_at`,
+		ig2.ProjectID, ig2.Grade, ig2.Summary, ig2.Strengths, ig2.Improvements, ig2.HowToNextGrade, ig2.NextGrade,
+		ig2.TasksEvaluated, ig2.ClarityScore, ig2.AmbitionScore, ig2.FollowThrough, ig2.DiversityScore, ig2.StrategyScore,
+	).Scan(&ig2.ID, &ig2.CreatedAt); err != nil {
 		t.Fatalf("create idea grade 2: %v", err)
 	}
 

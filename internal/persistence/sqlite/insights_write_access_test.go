@@ -21,12 +21,6 @@ func TestInsightsResultWritesRecheckActorAndAuditAtomically(t *testing.T) {
 		{"insight_reports", "insight.report_created", func(ctx context.Context, r *InsightsRepo) error {
 			return r.CreateReport(ctx, &models.InsightReport{ProjectID: "default", ReportDate: "2026-10-30", Summary: "private generated text"})
 		}},
-		{"health_checks", "insight.health_check_created", func(ctx context.Context, r *InsightsRepo) error {
-			return r.CreateHealthCheck(ctx, &models.HealthCheck{ProjectID: "default", Grade: "B", Assessment: "private generated text"})
-		}},
-		{"idea_grades", "insight.idea_grade_created", func(ctx context.Context, r *InsightsRepo) error {
-			return r.CreateIdeaGrade(ctx, &models.IdeaGrade{ProjectID: "default", Grade: "B", Summary: "private generated text"})
-		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.table, func(t *testing.T) {

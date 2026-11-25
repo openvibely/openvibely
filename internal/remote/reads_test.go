@@ -53,7 +53,7 @@ var writeMethods = map[string][]string{
 		"UpsertChatProviderSessionState", "UpsertSwarmParentResult",
 	},
 	"Insights": {
-		"CreateHealthCheck", "CreateIdeaGrade", "CreateInsight", "CreateKnowledge", "CreateReport",
+		"CreateInsight", "CreateKnowledge", "CreateReport",
 		"DeleteInsight", "DeleteKnowledge", "ExistingInsight", "UpdateStatus",
 	},
 	"LLMConfigs": {

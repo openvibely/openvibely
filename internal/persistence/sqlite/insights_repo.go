@@ -45,35 +45,6 @@ func (r *InsightsRepo) GetInsight(ctx context.Context, projectID, id string) (*m
 	return &i, nil
 }
 
-func (r *InsightsRepo) ListByProject(ctx context.Context, projectID string, limit int) ([]models.Insight, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence, created_at, updated_at, resolved_at
-		FROM insights WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+`
-		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanInsights(rows)
-}
-
-func (r *InsightsRepo) ListByStatus(ctx context.Context, projectID string, status models.InsightStatus, limit int) ([]models.Insight, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence, created_at, updated_at, resolved_at
-		FROM insights WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` AND status = ?
-		ORDER BY
-			CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 WHEN 'info' THEN 4 END,
-			confidence DESC
-		LIMIT ?`, projectID, status, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanInsights(rows)
-}
-
 func (r *InsightsRepo) ListByType(ctx context.Context, projectID string, insightType models.InsightType, limit int) ([]models.Insight, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence, created_at, updated_at, resolved_at
@@ -133,48 +104,6 @@ func (r *InsightsRepo) DeleteInsight(ctx context.Context, projectID, id string) 
 	})
 }
 
-func (r *InsightsRepo) CountByStatus(ctx context.Context, projectID string) (map[string]int, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT status, COUNT(*) FROM insights WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` GROUP BY status`, projectID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	counts := make(map[string]int)
-	for rows.Next() {
-		var status string
-		var count int
-		if err := rows.Scan(&status, &count); err != nil {
-			return nil, err
-		}
-		counts[status] = count
-	}
-	return counts, rows.Err()
-}
-
-func (r *InsightsRepo) CountByType(ctx context.Context, projectID string) (map[string]int, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT type, COUNT(*) FROM insights WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+` GROUP BY type`, projectID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	counts := make(map[string]int)
-	for rows.Next() {
-		var t string
-		var count int
-		if err := rows.Scan(&t, &count); err != nil {
-			return nil, err
-		}
-		counts[t] = count
-	}
-	return counts, rows.Err()
-}
-
 // ExistingInsight checks for duplicate insights by title and type
 func (r *InsightsRepo) ExistingInsight(ctx context.Context, projectID string, title string, insightType models.InsightType) (bool, error) {
 	var count int
@@ -201,22 +130,6 @@ func (r *InsightsRepo) CreateReport(ctx context.Context, rpt *models.InsightRepo
 		).Scan(&rpt.ID, &rpt.CreatedAt)
 		return rpt.ID, err
 	})
-}
-
-func (r *InsightsRepo) GetLatestReport(ctx context.Context, projectID string) (*models.InsightReport, error) {
-	var rpt models.InsightReport
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, project_id, report_date, summary, insight_ids, stats, analysis_log, created_at
-		FROM insight_reports WHERE project_id = ?
-		ORDER BY created_at DESC LIMIT 1`, projectID,
-	).Scan(&rpt.ID, &rpt.ProjectID, &rpt.ReportDate, &rpt.Summary, &rpt.InsightIDs, &rpt.Stats, &rpt.AnalysisLog, &rpt.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &rpt, nil
 }
 
 func (r *InsightsRepo) ListReports(ctx context.Context, projectID string, limit int) ([]models.InsightReport, error) {
@@ -333,19 +246,6 @@ func (r *InsightsRepo) GetSlowExecutions(ctx context.Context, projectID string, 
 
 // --- Health Checks ---
 
-func (r *InsightsRepo) CreateHealthCheck(ctx context.Context, hc *models.HealthCheck) error {
-	return r.authorizedInsightWrite(ctx, hc.ProjectID, "insight.health_check_created", func(tx sqlExecutor) (string, error) {
-		err := tx.QueryRowContext(ctx, `
-		INSERT INTO health_checks (project_id, grade, strengths, improvements, assessment, how_to_improve, tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING id, created_at`,
-			hc.ProjectID, hc.Grade, hc.Strengths, hc.Improvements, hc.Assessment, hc.HowToImprove,
-			hc.TasksTotal, hc.TasksCompleted, hc.TasksFailed, hc.TasksPending, hc.BacklogSize, hc.AvgCompletionPct,
-		).Scan(&hc.ID, &hc.CreatedAt)
-		return hc.ID, err
-	})
-}
-
 func (r *InsightsRepo) GetLatestHealthCheck(ctx context.Context, projectID string) (*models.HealthCheck, error) {
 	var hc models.HealthCheck
 	err := r.db.QueryRowContext(ctx, `
@@ -389,19 +289,6 @@ func (r *InsightsRepo) ListHealthChecks(ctx context.Context, projectID string, l
 }
 
 // --- Idea Grades ---
-
-func (r *InsightsRepo) CreateIdeaGrade(ctx context.Context, ig *models.IdeaGrade) error {
-	return r.authorizedInsightWrite(ctx, ig.ProjectID, "insight.idea_grade_created", func(tx sqlExecutor) (string, error) {
-		err := tx.QueryRowContext(ctx, `
-		INSERT INTO idea_grades (project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade, tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING id, created_at`,
-			ig.ProjectID, ig.Grade, ig.Summary, ig.Strengths, ig.Improvements, ig.HowToNextGrade, ig.NextGrade,
-			ig.TasksEvaluated, ig.ClarityScore, ig.AmbitionScore, ig.FollowThrough, ig.DiversityScore, ig.StrategyScore,
-		).Scan(&ig.ID, &ig.CreatedAt)
-		return ig.ID, err
-	})
-}
 
 func (r *InsightsRepo) GetLatestIdeaGrade(ctx context.Context, projectID string) (*models.IdeaGrade, error) {
 	var ig models.IdeaGrade

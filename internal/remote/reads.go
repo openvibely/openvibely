@@ -68,10 +68,10 @@ var readMethods = map[string]map[string]bool{
 		"ReadProjectDisplayTail": true, "ReadProjectDisplayTailRevision": true, "ReplayContinuationRowsByExecutionIDs": true, "ReplayMessagesByExecutionIDs": true, "ReplayRowsByExecutionIDs": true, "TaskExecutionHistoryCutoff": true,
 	},
 	"Insights": {
-		"CountByStatus": true, "CountByType": true, "GetCompletedBugFixes": true, "GetFailedTaskPatterns": true,
-		"GetInsight": true, "GetLatestHealthCheck": true, "GetLatestIdeaGrade": true, "GetLatestReport": true,
-		"GetSlowExecutions": true, "ListByProject": true,
-		"ListByStatus": true, "ListByType": true, "ListHealthChecks": true, "ListIdeaGrades": true, "ListReports": true,
+		"GetCompletedBugFixes": true, "GetFailedTaskPatterns": true,
+		"GetInsight": true, "GetLatestHealthCheck": true, "GetLatestIdeaGrade": true,
+		"GetSlowExecutions": true,
+		"ListByType":        true, "ListHealthChecks": true, "ListIdeaGrades": true, "ListReports": true,
 	},
 	"LLMConfigs": {
 		"ExistsByID": true, "GetByID": true, "GetByIDs": true, "GetDefault": true, "GetDefaultID": true,
