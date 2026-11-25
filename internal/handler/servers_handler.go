@@ -87,6 +87,8 @@ func readServerForm(c echo.Context) (serverForm, error) {
 
 func (h *Handler) requireServersSameOrigin(c echo.Context) error {
 	if !sameOriginRequest(c.Request(), c.Scheme(), h.desktopMode) {
+		c.Response().Header().Set("HX-Reswap", "none")
+		setHTMXToast(c, "Server request rejected: same-origin request required.", "failed")
 		return echo.NewHTTPError(http.StatusForbidden, "same-origin request required")
 	}
 	return nil
@@ -98,6 +100,8 @@ func (h *Handler) requireServersAdmin(c echo.Context) error {
 		return err
 	}
 	if h.organizationSvc != nil && h.requireCurrentOrgAdmin(c) != nil {
+		c.Response().Header().Set("HX-Reswap", "none")
+		setHTMXToast(c, "Organization administrator required to manage servers.", "failed")
 		return echo.NewHTTPError(http.StatusForbidden, "organization administrator required")
 	}
 	return nil

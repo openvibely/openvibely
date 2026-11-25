@@ -182,3 +182,42 @@ func TestDesktopProxySessionBoundaries(t *testing.T) {
 		t.Fatalf("stale session restored: %q", got)
 	}
 }
+
+func TestDesktopServerFormsOrigin(t *testing.T) {
+	for _, path := range []string{"/servers", "/servers/example/connect", "/servers/example/disconnect"} {
+		t.Run(path, func(t *testing.T) {
+			calls := 0
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.Header.Get("Origin") != "http://localhost" {
+					t.Errorf("unexpected forwarded origin %q", r.Header.Get("Origin"))
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer backend.Close()
+			target, _ := url.Parse(backend.URL)
+			proxy := desktopAssetProxy(target)
+			for _, origin := range []string{"", "wails://localhost", "null", "https://evil.example"} {
+				req := httptest.NewRequest("POST", "wails://localhost"+path, strings.NewReader("name=Remote"))
+				req.Header.Set("HX-Request", "true")
+				if origin != "" {
+					req.Header.Set("Origin", origin)
+				}
+				rec := httptest.NewRecorder()
+				proxy.ServeHTTP(rec, req)
+				if origin == "" || origin == "wails://localhost" {
+					if rec.Code != http.StatusNoContent {
+						t.Fatalf("trusted %q: %d", origin, rec.Code)
+					}
+				} else {
+					if rec.Code != http.StatusForbidden || rec.Header().Get("HX-Trigger") == "" {
+						t.Fatalf("untrusted %q: %d, missing error notification", origin, rec.Code)
+					}
+				}
+			}
+			if calls != 2 {
+				t.Fatalf("untrusted requests reached backend: %d", calls)
+			}
+		})
+	}
+}
