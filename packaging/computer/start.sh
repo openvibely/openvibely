@@ -88,6 +88,26 @@ for name, props in stock.items():
     os.replace(tmp, path)
     open(marker, "w").close()
 EOF
+# Chromium ignores the GTK theme unless the profile opts in; opt in once.
+run_desktop python3 - <<'EOF' || true
+import json, os
+path = os.path.join(os.path.dirname(os.environ["HOME"]), "browser/Default/Preferences")
+marker = path + ".ov-theme-1"
+if not os.path.exists(marker) and not os.path.islink(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    prefs = {}
+    if os.path.isfile(path):
+        with open(path) as f:
+            prefs = json.load(f)
+    prefs.setdefault("extensions", {}).setdefault("theme", {})["system_theme"] = 1
+    tmp = path + ".ov-tmp"
+    with open(tmp, "w") as f:
+        json.dump(prefs, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    open(marker, "w").close()
+EOF
 run_desktop dbus-run-session -- xfce4-session >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/xfce.log" 2>&1 &
 run_desktop /usr/local/bin/openvibely-browser --restore-last-session >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/browser.log" 2>&1 &
 browser_pid=$!

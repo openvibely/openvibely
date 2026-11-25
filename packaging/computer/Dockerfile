@@ -36,10 +36,10 @@ RUN chmod +x /usr/local/bin/openvibely-browser && \
     printf '[Default Applications]\nx-scheme-handler/http=chromium.desktop\nx-scheme-handler/https=chromium.desktop\ntext/html=chromium.desktop\n' > /etc/xdg/mimeapps.list
 COPY packaging/computer/xfce/ /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/
 RUN f=/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml && \
-    sed -i -e 's|"ThemeName" type="string" value="[^"]*"|"ThemeName" type="string" value="Adwaita-dark"|' \
+    sed -i -e 's|"ThemeName" type="string" value="[^"]*"|"ThemeName" type="string" value="Arc-Dark"|' \
       -e 's|"IconThemeName" type="string" value="[^"]*"|"IconThemeName" type="string" value="Papirus-Dark"|' \
       -e 's|"FontName" type="string" value="[^"]*"|"FontName" type="string" value="Inter 10"|' "$f" && \
-    grep -q 'value="Adwaita-dark"' "$f" && grep -q 'value="Papirus-Dark"' "$f" && grep -q 'value="Inter 10"' "$f"
+    grep -q 'value="Arc-Dark"' "$f" && grep -q 'value="Papirus-Dark"' "$f" && grep -q 'value="Inter 10"' "$f"
 COPY --from=builder /licenses/ /usr/share/licenses/openvibely-computer/
 COPY packaging/computer/licenses.cjs /tmp/openvibely-licenses.cjs
 RUN node /tmp/openvibely-licenses.cjs && rm /tmp/openvibely-licenses.cjs
