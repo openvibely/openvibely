@@ -783,3 +783,44 @@ func TestBrowserFunctional_ServerSettingsRegroup(t *testing.T) {
 		t.Log("state:", b.evaluate(`JSON.stringify({tabs:Array.from(document.querySelectorAll('[data-project-tab]')).map(x=>x.dataset.projectTab),selection:document.getElementById('project-selector').value,list:document.getElementById('task-list-groups').getAttribute('hx-get'),url:location.pathname+location.search})`))
 	})
 }
+
+func TestBrowserFunctional_SettingsRegroupReloadsRetainedLists(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, page := range []string{"analytics", "automations"} {
+		t.Run(page, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path == "/ui/preferences" {
+					w.WriteHeader(204)
+					return
+				}
+				if r.URL.Path == "/servers" {
+					fmt.Fprint(w, `<div id="servers-container">Servers</div>`)
+					return
+				}
+				if r.URL.Path != "/"+page {
+					w.WriteHeader(204)
+					return
+				}
+				if r.Header.Get("HX-Request") == "true" {
+					fmt.Fprintf(w, `<div id="loaded-scope">%s</div>`, r.URL.Query().Get("project_id"))
+					return
+				}
+				_ = layout.Base("Workspace", []models.Project{{ID: "local", Name: "Local"}}, "local").Render(r.Context(), w)
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL+"/"+page+"?project_id=local", "retained-"+page, func(b *composerFocusCDP) {
+				b.waitFor("navigation ready", `String(!!window.workspaceNavigation)`, "true")
+				b.evaluate(`document.getElementById('main-content').innerHTML='<div id="old-list">Local</div>';htmx.ajax('GET','/servers?project_id=local',{target:'#main-content',swap:'innerHTML'});'opening'`)
+				b.waitFor("retained", `String(!!document.querySelector('#settings-retained-workspace #old-list')&&!!document.getElementById('servers-container'))`, "true")
+				b.evaluate(`window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed',{detail:{projectID:'__repo_group'}}));'changed'`)
+				b.waitFor("settings remains", `String(!!document.getElementById('servers-container')&&!document.getElementById('loaded-scope'))`, "true")
+				b.evaluate(`window.workspaceNavigation.back();'back'`)
+				b.waitFor("group loaded", `document.getElementById('loaded-scope')?.textContent||''`, "__repo_group")
+				b.waitFor("old page removed", `String(!document.getElementById('old-list')&&!document.getElementById('settings-retained-workspace')&&location.search==='?project_id=__repo_group')`, "true")
+			})
+		})
+	}
+}

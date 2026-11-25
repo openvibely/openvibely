@@ -196,6 +196,7 @@ templ TaskListPanel(currentProjectID string) {
             var root = document.documentElement;
             var inSettings = false;
             var retainedWorkspace = null;
+            var retainedScopeStale = false;
             var settingsPane = null;
             var restoringWorkspace = false;
             var retainedScroll = [];
@@ -246,6 +247,17 @@ templ TaskListPanel(currentProjectID string) {
                 if (!retainedWorkspace || !settingsPane) return false;
                 if (settingsRequest && settingsRequest.readyState !== 4) settingsRequest.abort();
                 settingsRequest = null;
+                if (retainedScopeStale) {
+                    var source = document.createElement('a');
+                    source.hidden = true;
+                    source.setAttribute('hx-push-url', push ? workspaceURL : 'false');
+                    source.dataset.workspaceHistoryNavigation = 'true';
+                    document.body.appendChild(source);
+                    htmx.ajax('GET', workspaceURL, {source:source, target:'#main-content', swap:'innerHTML'}).finally(function() {
+                        source.remove();
+                    }).catch(function() {});
+                    return true;
+                }
                 var main = document.getElementById('main-content');
                 if (push) window.workspaceNavigation.commit(workspaceURL);
                 // HTMX owns cleanup for the outgoing Settings content only.
@@ -296,6 +308,7 @@ templ TaskListPanel(currentProjectID string) {
                 var retained = retainedWorkspace && (localTask || next.href === stored.href);
                 if (!retained && (!localTask || retainedWorkspace)) return false;
                 if (settingsRequest && settingsRequest.readyState !== 4) settingsRequest.abort();
+                if (retained && retainedScopeStale) return window.restoreSettingsWorkspace(push);
                 if (push) commitURL(next.href);
                 if (retained) window.restoreSettingsWorkspace(false);
                 if (localTask) taskView.show(next);
@@ -329,6 +342,7 @@ templ TaskListPanel(currentProjectID string) {
             document.addEventListener('htmx:beforeCleanupElement', function(event) {
                 if (event.detail.elt === retainedWorkspace) {
                     retainedScroll = [];
+                    retainedScopeStale = false;
                     retainedWorkspace = null;
                     settingsPane = null;
                 }
@@ -359,6 +373,7 @@ templ TaskListPanel(currentProjectID string) {
                 var url = new URL(workspaceURL, location.href);
                 // Keep item pages bound to their owner. Lists follow the grouped tab.
                 if (['/tasks', '/analytics', '/automations'].includes(url.pathname)) {
+                    if (retainedWorkspace && url.searchParams.get('project_id') !== next && url.pathname !== '/tasks') retainedScopeStale = true;
                     url.searchParams.set('project_id', next);
                     workspaceURL = url.pathname + url.search + url.hash;
                     workspaceURLs.set(next, workspaceURL);
