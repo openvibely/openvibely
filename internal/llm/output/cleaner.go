@@ -110,7 +110,7 @@ var (
 	reCleanToolResult       = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?.*?(?:\r\n|\r|\n)?\[/Tool\](?:\r\n|\r|\n)?`)
 	reCleanToolResultLegacy = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]\r\n]*\](?:\r\n|\r|\n)?`)
 	reCleanProtocolArtifact = regexp.MustCompile(`(?m)(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)`)
-	reCleanSummary          = regexp.MustCompile(`(?s)(?:\r\n|\r|\n)---(?:\r\n|\r|\n)(?:Created \d+ task|Edited \d+ task|Failed to (?:create|edit) \d+ task|Task Execution Results|Thread Messages|Schedule Results|Schedule Delete Results|Schedule Modify Results|Available Personalities|Personality Settings|Configured Models|Model Settings|App Settings|Project Info|Alert Results|Alert Create Results|Alert Delete Results|Configured Agents|Alert Toggle Results|Available Projects|Project Switch Results|\*\*Thread history for task|Could not find task|Error retrieving thread for task).*`)
+	reCleanSummary          = regexp.MustCompile(`(?s)(?:\r\n|\r|\n)---(?:\r\n|\r|\n)(?:Created \d+ task|Edited \d+ task|Failed to (?:create|edit) \d+ task|Task Execution Results|Thread Messages|Schedule Results|Schedule Delete Results|Schedule Modify Results|Configured Models|Model Settings|App Settings|Project Info|Alert Results|Alert Create Results|Alert Delete Results|Configured Agents|Alert Toggle Results|Available Projects|Project Switch Results|\*\*Thread history for task|Could not find task|Error retrieving thread for task).*`)
 	reCleanTaskID           = regexp.MustCompile(`\[TASK_ID:[^\]]+\]`)
 	reCleanEdited           = regexp.MustCompile(`\[TASK_EDITED:[^\]]+\]`)
 )

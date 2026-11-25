@@ -115,6 +115,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 
  await navigate('/alerts','#alerts-container');
  assert(!document.querySelector('a[data-nav-base="/insights"]'),'removed Grades link is present');
+ assert(!document.querySelector('a[data-nav-base="/personality"]'),'removed Personality link is present');
  await navigate('/analytics','#analytics-data');
  await navigate('/automations','#automations-container');
  assert(document.querySelector('[data-card-list-toolbar]'),'native toolbar missing');

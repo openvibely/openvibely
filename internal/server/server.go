@@ -763,9 +763,6 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	xInboundReceiptRepo := stores.XInboundReceipts
 	channelTargetRepo := stores.ChannelTargets
 
-	// Custom personalities
-	customPersonalityRepo := stores.CustomPersonalities
-
 	settingsRepo := stores.Settings
 	accountUsageMonitor := service.NewAccountUsageMonitor(usageAnalyticsSvc, settingsRepo, projectRepo, alertSvc)
 	// Usage scheduling is independent of credential refresh.
@@ -856,7 +853,6 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		slackTaskContextRepo,
 		slackAuthRepo,
 	)
-	slackSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 	slackSvc.SetUploadsDir(uploadsPath)
 	slackSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	slackSvc.SetChatBroadcaster(chatBroadcaster)
@@ -887,7 +883,6 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	channelMessageRouter.SetEmailAuthStore(emailAuthRepo)
 	slackSvc.SetChannelMessageRouter(channelMessageRouter)
 	emailSvc.SetChannelMessageRouter(channelMessageRouter)
-	emailSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 	emailSvc.SetUploadsDir(uploadsPath)
 	emailSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	emailSvc.SetChatBroadcaster(chatBroadcaster)
@@ -908,7 +903,6 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		discordAuthRepo,
 		discordTaskContextRepo,
 	)
-	discordSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 	discordSvc.SetUploadsDir(uploadsPath)
 	discordSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	discordSvc.SetChatBroadcaster(chatBroadcaster)
@@ -1066,7 +1060,6 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 			telegramSvc.SetTelegramAuthRepo(telegramAuthRepo)
 			telegramSvc.SetTelegramUserProjectRepo(telegramUserProjectRepo)
 			telegramSvc.SetSettingsRepo(settingsRepo)
-			telegramSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 			telegramSvc.SetAlertService(alertSvc)
 			telegramSvc.SetTaskGoalService(taskGoalSvc)
 			telegramSvc.SetUpcomingService(upcomingSvc)
@@ -1233,7 +1226,6 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	h.SetXRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo)
 	h.SetXService(xSvc)
 	h.SetReviewCommentRepo(reviewCommentRepo)
-	h.SetCustomPersonalityRepo(customPersonalityRepo)
 	h.SetWorktreeService(worktreeSvc)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
@@ -1259,7 +1251,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	discordSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 	discordSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	discordSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
-	xSvc.SetRuntime(agentRepo, customPersonalityRepo, chatBroadcaster, executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, channelMessageRouter)
+	xSvc.SetRuntime(agentRepo, chatBroadcaster, executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, channelMessageRouter)
 
 	if telegramSvc != nil {
 		telegramSvc.SetChannelMessageRouter(channelMessageRouter)

@@ -10,7 +10,6 @@ var (
 	_ persistence.ChannelTargetStore       = (*ChannelTargetRepo)(nil)
 	_ persistence.ChatAttachmentStore      = (*ChatAttachmentRepo)(nil)
 	_ persistence.ChatInputRequestStore    = (*ChatInputRequestRepo)(nil)
-	_ persistence.CustomPersonalityStore   = (*CustomPersonalityRepo)(nil)
 	_ persistence.DiscordAuthStore         = (*DiscordAuthRepo)(nil)
 	_ persistence.DiscordTaskContextStore  = (*DiscordTaskContextRepo)(nil)
 	_ persistence.DiscordUserProjectStore  = (*DiscordUserProjectRepo)(nil)

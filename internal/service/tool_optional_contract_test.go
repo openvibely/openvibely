@@ -37,8 +37,8 @@ func TestEveryToolOptionalArgumentContract(t *testing.T) {
 		"list_alerts": "", "get_alert": "alert_id", "list_existing_automation_notifications": "", "create_alert": "title", "create_notification": "title type",
 		"decide_alert": "alert_id decision", "claim_alert": "alert_id", "create_alert_implementation_task": "alert_id title prompt",
 		"link_alert_implementation_task": "alert_id task_id", "complete_alert_processing": "alert_id", "fail_alert_processing": "alert_id", "release_alert_claim": "alert_id",
-		"delete_alert": "alert_id", "toggle_alert": "alert_id", "list_personalities": "", "get_personality": "", "set_personality": "personality",
-		"save_custom_personality": "mode name system_prompt", "list_models": "", "get_model": "", "view_usage_analytics": "", "list_agents": "",
+		"delete_alert": "alert_id", "toggle_alert": "alert_id",
+		"list_models": "", "get_model": "", "view_usage_analytics": "", "list_agents": "",
 		"create_agent": "name system_prompt", "update_agent": "", "list_projects": "", "project_info": "", "get_current_project": "",
 		"create_project": "name repo_url", "update_project_settings": "", "switch_project": "project", "view_settings": "", "list_channels": "", "view_system_update": "",
 		"memory_view": "handle", "list_automations": "", "get_automation": "automation_id", "preview_automation_description": "description",
@@ -285,9 +285,9 @@ func TestToolSchemasMatchDecodedRequestFields(t *testing.T) {
 		"cancel_task": cancelTaskRuntimeInput{}, "list_tasks": ListTasksRequest{}, "view_swarm": ViewSwarmRequest{}, "view_task_thread": ViewThreadRequest{},
 		"send_message": SendMessageRequest{}, "github_create_issue": githubCreateIssueRuntimeInput{},
 		"schedule_task": ScheduleTaskRequest{}, "modify_schedule": ModifyScheduleRequest{}, "delete_schedule": DeleteScheduleRequest{}, "list_schedules": ListSchedulesRequest{},
-		"create_alert": CreateAlertRequest{}, "delete_alert": DeleteAlertRequest{}, "toggle_alert": ToggleAlertRequest{}, "list_personalities": personalityListRequest{},
-		"set_personality": SetPersonalityRequest{}, "save_custom_personality": CustomPersonalitySaveInput{}, "view_usage_analytics": usageAnalyticsActionInput{},
-		"create_agent": CreateAgentRuntimeInput{}, "update_agent": UpdateAgentRuntimeInput{}, "create_project": CreateGitHubProjectRuntimeInput{},
+		"create_alert": CreateAlertRequest{}, "delete_alert": DeleteAlertRequest{}, "toggle_alert": ToggleAlertRequest{},
+		"view_usage_analytics": usageAnalyticsActionInput{},
+		"create_agent":         CreateAgentRuntimeInput{}, "update_agent": UpdateAgentRuntimeInput{}, "create_project": CreateGitHubProjectRuntimeInput{},
 		"update_project_settings": UpdateProjectSettingsRuntimeInput{}, "switch_project": SwitchProjectRequest{}, "list_automations": channelListAutomationsInput{},
 		"get_automation": channelGetAutomationInput{}, "update_automation_template": AutomationTemplateUpdateRuntimeInput{},
 	}
@@ -340,7 +340,7 @@ func checkDecodedSchemaFields(t *testing.T, s *toolschema.Schema, typ reflect.Ty
 }
 
 func TestPresenceSensitiveToolDefaultsAfterNullNormalization(t *testing.T) {
-	for _, name := range []string{"list_personalities", "list_alerts", "list_existing_automation_notifications", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs"} {
+	for _, name := range []string{"list_alerts", "list_existing_automation_notifications", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs"} {
 		t.Run(name, func(t *testing.T) {
 			args := map[string]any{"limit": nil, "offset": nil}
 			if strings.Contains(name, "list_assigned") {
@@ -355,8 +355,6 @@ func TestPresenceSensitiveToolDefaultsAfterNullNormalization(t *testing.T) {
 			_ = json.Unmarshal(raw, &req)
 			var limit, offset int
 			switch name {
-			case "list_personalities":
-				limit, offset, err = PersonalityListPageArgs(raw)
 			case "list_alerts", "list_existing_automation_notifications":
 				limit, offset, err = alertRuntimeListPage(raw, 0, 0)
 			case "github_list_existing_automation_issues":

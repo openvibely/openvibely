@@ -149,7 +149,6 @@ func TestBrowserFunctional_CardMenuOpeningClickSurvivesReleasePaint(t *testing.T
 		{"models", ModelsContent([]models.LLMConfig{{ID: "model", Name: "Model", Provider: models.ProviderOpenAI, Model: "test"}}, nil, false)},
 		{"skills", SkillsContent([]SkillCard{{Handle: "skill", Name: "Skill", Scope: "project", Enabled: true}}, true)},
 		{"alerts", AlertsContent([]models.AlertSummary{{ID: "alert", Title: "Alert"}}, "project", 1)},
-		{"personality", AppSettingsContent("base", "project", nil)},
 		{"channels", SettingsContent(channels)},
 	}
 	for _, tc := range cases {

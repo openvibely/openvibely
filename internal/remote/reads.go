@@ -46,9 +46,6 @@ var readMethods = map[string]map[string]bool{
 		"ListInstallationAnswersAwaitingChatRecovery": true, "ListReadyInstallationAnswers": true,
 		"LoadInstallationContinuation": true,
 	},
-	"CustomPersonalities": {
-		"Count": true, "GetByKey": true, "List": true, "ListRuntimePage": true,
-	},
 	"Executions": {
 		"ConversationRevision": true, "CountByTask": true, "FindActiveTaskExecution": true,
 		"FindActiveTaskThreadExecution": true, "FindLatestActiveChatExecution": true,

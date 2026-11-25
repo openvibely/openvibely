@@ -184,7 +184,6 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 	agentRepo := tc.stores.Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
-	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 
 	projectQuery := "?project_id=" + url.QueryEscape(project.ID)
 	getPaths := []string{
@@ -207,7 +206,6 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 		"/api/capacity/models/" + agent.ID + projectQuery,
 		"/channels/outbound-targets" + projectQuery,
 		"/channels/outbound-targets/card" + projectQuery,
-		"/personality" + projectQuery,
 		"/alerts" + projectQuery,
 		"/alerts/" + alert.ID + "/details" + projectQuery,
 		"/alerts/unread-count" + projectQuery,
@@ -253,8 +251,6 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 		{"/workers", url.Values{"max_workers": {"3"}}},
 		{"/workers/projects/" + project.ID + "/limit" + projectQuery, url.Values{"max_workers": {"2"}}},
 		{"/channels/webhooks" + projectQuery, url.Values{"name": {"Broad webhook"}, "path": {"broad-webhook"}, "enabled": {"true"}}},
-		{"/personality/save" + projectQuery, url.Values{"personality": {"concise"}}},
-		{"/personality/custom" + projectQuery, url.Values{"name": {"Broad Custom"}, "prompt": {"Be broad."}}},
 		{"/chat/send" + projectQuery, url.Values{"message": {"hello broad chat"}, "agent_id": {agent.ID}}},
 		{"/chat/steer" + projectQuery, url.Values{"message": {"steer broad chat"}}},
 		{"/chat/stop" + projectQuery, nil},

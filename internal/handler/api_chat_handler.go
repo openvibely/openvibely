@@ -516,7 +516,6 @@ var actAPIChatSend = defineAction("chat.api.send", func(h *Handler, ctx context.
 
 	// Live project catalogs are discovered through runtime tools instead of
 	// being embedded in every API Chat request.
-	fullContext := h.getPersonalityContext(ctx, projectID)
 
 	// Get working directory for the provider call.
 	workDir := project.RepoPath
@@ -533,7 +532,6 @@ var actAPIChatSend = defineAction("chat.api.send", func(h *Handler, ctx context.
 		ChatHistory:       priorHistory,
 		ProjectID:         projectID,
 		PrincipalID:       principalIDFromContext(ctx),
-		SystemContext:     fullContext,
 		AttachmentContext: attachmentContext,
 		WorkDir:           workDir,
 		ImageAttachments:  imageAttachments,

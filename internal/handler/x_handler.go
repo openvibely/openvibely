@@ -90,7 +90,7 @@ func (h *Handler) configureXOnOwner(ctx context.Context, form ownerFormValues) e
 	svc.SetCredentialAuthorization(h.workerSvc)
 	svc.SetAPI(api)
 	svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
-	svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
+	svc.SetRuntime(h.agentRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
 	svc.SetPollInterval(time.Duration(pollSeconds) * time.Second)
 	me, baselineCursor, err := svc.PrepareConnection(ctx)
 	if err != nil {

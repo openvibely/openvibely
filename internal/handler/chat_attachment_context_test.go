@@ -45,7 +45,7 @@ func TestChatAttachmentContextPreservesTurnOwnership(t *testing.T) {
 		require.NoError(t, stores.ChatAttachments.Create(ctx, &file))
 	}
 	history := []models.Execution{*old}
-	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, Message: "Replace Paver with Fin", ChatHistory: history, SystemContext: "Personality",
+	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, Message: "Replace Paver with Fin", ChatHistory: history, SystemContext: "Task framing",
 		ImageAttachments: []models.Attachment{{FileName: "current.pdf", FilePath: "/missing/current.pdf", MediaType: "application/pdf"}}}
 	files, err := h.prepareChatAttachmentContext(ctx, &params)
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestChatAttachmentContextPreservesTurnOwnership(t *testing.T) {
 	require.NotContains(t, params.historicalAttachmentContext, "excluded.pdf")
 	require.NotContains(t, params.Message, "old.docx")
 	require.Contains(t, params.Message, "/missing/current.pdf")
-	require.Equal(t, "Personality", params.SystemContext)
+	require.Equal(t, "Task framing", params.SystemContext)
 	require.Len(t, params.ImageAttachments, 1, "historical attachments must not be re-uploaded")
 }
 

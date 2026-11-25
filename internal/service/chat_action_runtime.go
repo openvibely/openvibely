@@ -123,17 +123,16 @@ type channelGoalActionHandlerOptions struct {
 }
 
 type channelThreadActionHandlerOptions struct {
-	Platform                 string
-	ProjectID                string
-	Surface                  chatcontrol.Surface
-	Source                   string
-	ActorID                  string
-	TaskRepo                 persistence.TaskStore
-	ExecRepo                 persistence.ExecutionStore
-	ThreadInputRepo          persistence.ThreadInputStore
-	LLMConfigRepo            persistence.LLMConfigStore
-	SettingsRepo             persistence.SettingsStore
-	CustomPersonalityRepo    persistence.CustomPersonalityStore
+	Platform        string
+	ProjectID       string
+	Surface         chatcontrol.Surface
+	Source          string
+	ActorID         string
+	TaskRepo        persistence.TaskStore
+	ExecRepo        persistence.ExecutionStore
+	ThreadInputRepo persistence.ThreadInputStore
+	LLMConfigRepo   persistence.LLMConfigStore
+
 	ChannelTaskRunner        ChannelTaskRunner
 	RuntimeToolsForTask      func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter func(taskID string)
@@ -375,7 +374,6 @@ type channelUtilityActionHandlerOptions struct {
 	LLMConfigRepo             persistence.LLMConfigStore
 	AgentRepo                 persistence.AgentStore
 	SettingsRepo              persistence.SettingsStore
-	CustomPersonalityRepo     persistence.CustomPersonalityStore
 	ProjectRepo               persistence.ProjectStore
 	AlertSvc                  *AlertService
 	UsageAnalyticsSvc         *UsageAnalyticsService
@@ -733,8 +731,6 @@ func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHan
 		ExecRepo:                 opts.ExecRepo,
 		ThreadInputRepo:          opts.ThreadInputRepo,
 		LLMConfigRepo:            opts.LLMConfigRepo,
-		SettingsRepo:             opts.SettingsRepo,
-		CustomPersonalityRepo:    opts.CustomPersonalityRepo,
 		ChannelTaskRunner:        opts.ChannelTaskRunner,
 		RuntimeToolsForTask:      opts.RuntimeToolsForTask,
 		QueuedTaskThreadPromoter: opts.QueuedTaskThreadPromoter,
@@ -855,22 +851,6 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		"view_pulse": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return ExecuteViewPulseTool(ctx, opts.UpcomingSvc, opts.ProjectID, input)
 		},
-		"list_personalities": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return ExecuteListPersonalitiesTool(ctx, opts.CustomPersonalityRepo, opts.SettingsRepo, input, false)
-		},
-		"set_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return channelSetPersonalityResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo, input), nil
-		},
-		"save_custom_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return ExecuteSaveCustomPersonalityRuntime(ctx, CustomPersonalitySaveOptions{
-				Input:                 input,
-				CustomPersonalityRepo: opts.CustomPersonalityRepo,
-				SettingsRepo:          opts.SettingsRepo,
-			})
-		},
-		"get_personality": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			return channelGetPersonalityResult(ctx, opts.SettingsRepo), nil
-		},
 		"list_models": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelListModelsResult(ctx, opts.LLMConfigRepo), nil
 		},
@@ -909,7 +889,7 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 			return out, err
 		},
 		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			return channelViewSettingsResult(ctx, opts.SettingsRepo, opts.LLMConfigRepo, opts.ProjectRepo), nil
+			return channelViewSettingsResult(ctx, opts.LLMConfigRepo, opts.ProjectRepo), nil
 		},
 		"list_channels": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelListChannelsResult(ctx, opts)
@@ -2650,43 +2630,6 @@ func channelScheduleRepeatDescription(repeatType models.RepeatType, interval int
 	return FormatRepeatPattern(repeatType, interval)
 }
 
-func channelGetPersonalityResult(ctx context.Context, settingsRepo persistence.SettingsStore) string {
-	if settingsRepo == nil {
-		return "Current personality: default (no personality set)"
-	}
-	current, err := settingsRepo.Get(ctx, "personality")
-	if err != nil {
-		return "Error retrieving personality setting."
-	}
-	if current == "" {
-		return "Current personality: default (base, no personality modifier active)"
-	}
-	return fmt.Sprintf("Current personality: %s", current)
-}
-
-func channelSetPersonalityResult(ctx context.Context, settingsRepo persistence.SettingsStore, customRepo persistence.CustomPersonalityStore, input json.RawMessage) string {
-	var req struct {
-		Personality string `json:"personality"`
-	}
-	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
-		return "Invalid input for set_personality."
-	}
-	key := strings.TrimSpace(req.Personality)
-	if key == "" {
-		return "set_personality requires personality."
-	}
-	if !IsAvailablePersonalityKey(ctx, key, customRepo) {
-		return fmt.Sprintf("Unknown personality %q. Use list_personalities to view options.", key)
-	}
-	if settingsRepo == nil {
-		return "Error setting personality: settings repository not configured."
-	}
-	if err := settingsRepo.Set(ctx, "personality", key); err != nil {
-		return fmt.Sprintf("Error setting personality to %q: %v", key, err)
-	}
-	return fmt.Sprintf("Personality changed to %q.", key)
-}
-
 func channelListModelsResult(ctx context.Context, repo persistence.LLMConfigStore) string {
 	configs, err := repo.ListRuntimeSummaries(ctx)
 	if err != nil {
@@ -2774,18 +2717,9 @@ func channelListAgentsResult(ctx context.Context, repo persistence.AgentStore, u
 	return strings.TrimSpace(sb.String())
 }
 
-func channelViewSettingsResult(ctx context.Context, settingsRepo persistence.SettingsStore, llmRepo persistence.LLMConfigStore, projectRepo persistence.ProjectStore) string {
+func channelViewSettingsResult(ctx context.Context, llmRepo persistence.LLMConfigStore, projectRepo persistence.ProjectStore) string {
 	var sb strings.Builder
 	sb.WriteString("App Settings:\n")
-	if settingsRepo != nil {
-		personality, err := settingsRepo.Get(ctx, "personality")
-		if err == nil {
-			if personality == "" {
-				personality = "default"
-			}
-			sb.WriteString(fmt.Sprintf("- Personality: %s\n", personality))
-		}
-	}
 	if configs, err := llmRepo.ListRuntimeSummaries(ctx); err == nil {
 		sb.WriteString(fmt.Sprintf("- Configured models: %d\n", len(configs)))
 	}

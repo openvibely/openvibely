@@ -690,7 +690,7 @@ func TestXPollReplacementBetweenMentionHandoffsCreatesNoStaleWork(t *testing.T) 
 
 			handoffs := 0
 			var replacementErr error
-			svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, _ ChannelChatRunRequest) {
+			svc.SetRuntime(nil, nil, nil, func(_ context.Context, _ ChannelChatRunRequest) {
 				handoffs++
 				if handoffs == 1 {
 					replacementErr = tt.replaceSettings(ctx, settings)
@@ -729,7 +729,7 @@ func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
 	require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
 	var run ChannelChatRunRequest
-	svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
+	svc.SetRuntime(nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentions.Meta.NewestID = "20"
 	api.mentions.Data = []XTweet{{ID: "20", Text: "@openvibely ship it", AuthorID: "author", ConversationID: "conversation"}}
@@ -782,7 +782,7 @@ func TestXAuthorizedMentionTextPreservesHandlesAndPunctuation(t *testing.T) {
 			require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
 			require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
 			var run ChannelChatRunRequest
-			svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
+			svc.SetRuntime(nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
 			api := &fakeXAPI{me: XUser{ID: "bot", Username: tt.username}}
 			api.mentions.Meta.NewestID = fmt.Sprintf("%d", 100+i)
 			api.mentions.Data = []XTweet{{ID: api.mentions.Meta.NewestID, Text: tt.text, AuthorID: "author", ConversationID: "conversation"}}
@@ -817,7 +817,7 @@ func TestXAuthorizedMentionUsesAuthorIDWhenExpansionIsMissing(t *testing.T) {
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
 	require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
 	var run ChannelChatRunRequest
-	svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
+	svc.SetRuntime(nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentions.Meta.NewestID = "21"
 	api.mentions.Data = []XTweet{{ID: "21", Text: "@openvibely ship it", AuthorID: "author", ConversationID: "conversation"}}
@@ -946,7 +946,7 @@ func TestXImmediateTaskThreadRunCarriesAuthorizedRuntimeTools(t *testing.T) {
 	task := &models.Task{ProjectID: project.ID, Title: "X follow-up target", Prompt: "initial", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentID: &agent.ID}
 	require.NoError(t, svc.taskRepo.Create(ctx, task))
 	var run ChannelTaskRunRequest
-	svc.SetRuntime(nil, nil, nil, nil, nil, func(_ context.Context, req ChannelTaskRunRequest) { run = req }, nil, nil, nil)
+	svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelTaskRunRequest) { run = req }, nil, nil, nil)
 
 	runtime := svc.RuntimeTools("caller", project.ID, "bot", "123", "conversation", "tweet", "alice")
 	payload, err := json.Marshal(SendToTaskRequest{TaskID: task.ID, Message: "continue"})
@@ -1736,7 +1736,7 @@ func TestXAuthorizedMentionRuntimeCreateTaskClaimsWithContextAndRepliesOnce(t *t
 		err     error
 	}
 	runnerResultCh := make(chan actionResult, 1)
-	fixture.xSvc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) {
+	fixture.xSvc.SetRuntime(nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) {
 		result := actionResult{}
 		if req.RuntimeTools == nil {
 			result.err = errors.New("X runtime tools were not provided")

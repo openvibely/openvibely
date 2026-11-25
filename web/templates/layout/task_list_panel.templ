@@ -207,7 +207,7 @@ templ TaskListPanel(currentProjectID string) {
             var settingsRequest = null;
             function isSettingsURL(value) {
                 var path = new URL(value, location.href).pathname;
-                return /^\/(servers|themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(path);
+                return /^\/(servers|themes|shortcuts|models|agents|skills|channels|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(path);
             }
             window.isSettingsWorkspaceURL = isSettingsURL;
             // Keep the workspace connected: its drafts, live subscriptions and
@@ -354,7 +354,7 @@ templ TaskListPanel(currentProjectID string) {
             var inContextSidebar = false;
             var contextChanges = null;
             var wasCollapsed = false;
-            var workspaceURL = /^\/(servers|themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
+            var workspaceURL = /^\/(servers|themes|shortcuts|models|agents|skills|channels|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
             var workspaceURLs = new Map();
             function workspaceProject(value) {
                 return new URL(value, location.href).searchParams.get('project_id') || (document.getElementById('project-selector') || {}).value || '';
@@ -418,7 +418,7 @@ templ TaskListPanel(currentProjectID string) {
                 var reviewing = !settingsPane && !!changes && !changes.classList.contains('hidden');
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
-                var settings = appearance || workers || !!document.querySelector('#main-content #servers-container, #main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container, #main-content #plugin-settings, #main-content #computer-settings-content, #main-content #update-settings-content');
+                var settings = appearance || workers || !!document.querySelector('#main-content #servers-container, #main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #organization-container, #main-content #plugin-settings, #main-content #computer-settings-content, #main-content #update-settings-content');
                 var active = reviewing || settings;
                 if (active && !inContextSidebar) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');
@@ -1438,19 +1438,6 @@ templ SettingsLinks(currentProjectID string) {
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16M4 12h16M4 19h10"></path>
 		</svg>
 		<span class="task-list-title">Custom pages</span>
-	</a>
-	<a
-		class="task-list-row"
-		data-nav-base="/personality"
-		href={ templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)) }
-		hx-get={ fmt.Sprintf("/personality?project_id=%s", currentProjectID) }
-		hx-target="#main-content"
-		hx-push-url="true"
-	>
-		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0"></path>
-		</svg>
-		<span class="task-list-title">Personality</span>
 	</a>
 	<a class="task-list-row"
                         data-nav-base="/organization"

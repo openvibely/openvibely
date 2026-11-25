@@ -47,9 +47,6 @@ func TestSharedDefinitionHTTPRequiresCurrentOrgAdmin(t *testing.T) {
 		{"GET", "/skills/item/details"}, {"PUT", "/skills/item"},
 		{"POST", "/skills/item/enabled"}, {"POST", "/skills/item/always_use"},
 		{"DELETE", "/skills/bulk"}, {"DELETE", "/skills/item"}, {"POST", "/skills/dependency-preview"},
-		{"GET", "/personality"}, {"POST", "/personality/save"}, {"POST", "/personality/custom"},
-		{"GET", "/personality/custom/key"}, {"PUT", "/personality/custom/key"},
-		{"DELETE", "/personality/custom/bulk"}, {"DELETE", "/personality/custom/key"},
 	}
 	e := echo.New()
 	e.Use(h.projectAccessBoundary)
@@ -70,7 +67,7 @@ func TestSharedDefinitionHTTPRequiresCurrentOrgAdmin(t *testing.T) {
 	principal.Role = "owner"
 	for _, route := range routes {
 		want := 404
-		if route.method == "GET" && (route.path == "/models" || route.path == "/agents" || route.path == "/skills" || route.path == "/personality") {
+		if route.method == "GET" && (route.path == "/models" || route.path == "/agents" || route.path == "/skills") {
 			want = 403
 		}
 		require.Equal(t, want, request(route.method, route.path, principal), route.path)
@@ -84,7 +81,7 @@ func TestSharedDefinitionHTTPRequiresCurrentOrgAdmin(t *testing.T) {
 	require.NoError(t, tc.stores.Organizations.ChangeMember(ctx, models.BootstrapUserID, user.UserID, "member", false))
 	for _, route := range routes {
 		want := 404
-		if route.method == "GET" && (route.path == "/models" || route.path == "/agents" || route.path == "/skills" || route.path == "/personality") {
+		if route.method == "GET" && (route.path == "/models" || route.path == "/agents" || route.path == "/skills") {
 			want = 403
 		}
 		require.Equal(t, want, request(route.method, route.path, principal), route.path)
@@ -127,9 +124,7 @@ func TestSharedDefinitionHTTPBlocksRealMutations(t *testing.T) {
 	e.POST("/skills", h.CreateSkill)
 	e.POST("/skills/import", h.ImportSkillPackage)
 	e.POST("/skills/dependency-preview", h.PreviewSkillDependencies)
-	e.POST("/personality/custom", h.CreateCustomPersonality)
-	e.POST("/personality/save", h.handlePersonalitySave)
-	for _, path := range []string{"/channels/telegram", "/channels/github/configure", "/channels/email/configure", "/models", "/models/oauth/setup", "/models/oauth/manual-complete", "/skills", "/skills/import", "/skills/dependency-preview", "/personality/custom", "/personality/save"} {
+	for _, path := range []string{"/channels/telegram", "/channels/github/configure", "/channels/email/configure", "/models", "/models/oauth/setup", "/models/oauth/manual-complete", "/skills", "/skills/import", "/skills/dependency-preview"} {
 		req := httptest.NewRequest("POST", path, nil).WithContext(models.WithPrincipal(ctx, user.Principal))
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)

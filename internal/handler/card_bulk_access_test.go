@@ -40,7 +40,7 @@ func TestCardBulkActionsEnforceEveryOwnerAndAdmin(t *testing.T) {
 	_, allowed := runAction[struct{}](t, h, userCtx, "cards.bulk", cardBulkArgs{Kind: "alerts", Operation: "read", ProjectID: models.AllProjectsID, IDs: []string{a.ID}})
 	require.Empty(t, allowed.Error)
 	require.Empty(t, allowed.Code)
-	for _, kind := range []string{"models", "agents", "personalities"} {
+	for _, kind := range []string{"models", "agents"} {
 		_, res := runAction[struct{}](t, h, userCtx, "cards.bulk", cardBulkArgs{Kind: kind, Operation: "delete", IDs: []string{"selected"}})
 		require.True(t, res.Code != "" || res.Error != "", kind)
 	}

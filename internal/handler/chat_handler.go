@@ -403,7 +403,6 @@ var actChatSend = defineAction("chat.send", func(h *Handler, ctx context.Context
 	// Build request-local context and spawn the LLM processing goroutine. Live
 	// project catalogs are discovered through runtime tools instead of being
 	// embedded in every Chat request.
-	personalityContext := h.getPersonalityContext(ctx, projectID)
 	workDir := h.resolveWorkDir(ctx, projectID)
 
 	if err := h.startStreamingResponse(streamingResponseParams{
@@ -414,7 +413,6 @@ var actChatSend = defineAction("chat.send", func(h *Handler, ctx context.Context
 		ChatHistory:       priorHistory,
 		ProjectID:         projectID,
 		PrincipalID:       principalIDFromContext(ctx),
-		SystemContext:     personalityContext,
 		AttachmentContext: attachmentContext,
 		WorkDir:           workDir,
 		ImageAttachments:  imageAttachments,

@@ -101,7 +101,6 @@ type Handler struct {
 	slackTaskContextRepo       persistence.SlackTaskContextStore
 	discordTaskContextRepo     persistence.DiscordTaskContextStore
 	reviewCommentRepo          persistence.ReviewCommentStore
-	customPersonalityRepo      persistence.CustomPersonalityStore
 	agentRepo                  persistence.AgentStore
 	// taskUIAgentOptionsLoader is a test seam; production uses agentRepo.ListTaskUIOptions.
 	taskUIAgentOptionsLoader             func(context.Context) ([]persistence.AgentTaskUIOption, error)
@@ -499,11 +498,6 @@ func (h *Handler) SetSlackTaskContextRepo(repo persistence.SlackTaskContextStore
 // SetReviewCommentRepo sets the review comment repo for inline code review.
 func (h *Handler) SetReviewCommentRepo(repo persistence.ReviewCommentStore) {
 	h.reviewCommentRepo = repo
-}
-
-// SetCustomPersonalityRepo sets the custom personality repo for managing custom personalities.
-func (h *Handler) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
-	h.customPersonalityRepo = repo
 }
 
 // SetAgentRepo sets the agent definition repo for managing agents.
@@ -1137,20 +1131,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/outbound-targets/:id/test", h.handleOutboundTargetTest)
 	e.POST("/channels/send-message-explicit-targets", h.handleSendMessageExplicitTargets)
 
-	// Personality
-	e.GET("/personality", h.handleAppSettings)
-	e.POST("/personality/save", h.handlePersonalitySave)
-
 	// Themes
 	e.GET("/themes", h.Themes)
 	e.GET("/shortcuts", h.Shortcuts)
-
-	// Custom personalities
-	e.POST("/personality/custom", h.CreateCustomPersonality)
-	e.GET("/personality/custom/:key", h.GetCustomPersonality)
-	e.PUT("/personality/custom/:key", h.UpdateCustomPersonality)
-	e.DELETE("/personality/custom/bulk", h.DeleteCustomPersonalitiesBulk)
-	e.DELETE("/personality/custom/:key", h.DeleteCustomPersonality)
 
 	// GitHub runtime trust and inbox settings
 	e.POST("/channels/github/authorized-actors", h.AddGitHubAuthorizedActor)

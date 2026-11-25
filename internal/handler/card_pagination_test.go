@@ -55,7 +55,6 @@ func TestEveryCollectionBulkRouteRejectsMalformedPayload(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	tc.handler.SetAgentRepo(tc.stores.Agents)
 	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
-	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 	automationRepo := tc.stores.Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
@@ -63,7 +62,7 @@ func TestEveryCollectionBulkRouteRejectsMalformedPayload(t *testing.T) {
 
 	malformedBodies := []string{`{}`, `{`, `{"ids":["a"],"extra":true}`, `{"ids":["a"]} {}`, `{"ids":[]}`, `{"skills":[]}`}
 	for _, path := range []string{
-		"/alerts/bulk", "/automations/bulk", "/agents/bulk", "/skills/bulk", "/models/bulk", "/channels/bulk", "/channels/webhooks/bulk", "/personality/custom/bulk",
+		"/alerts/bulk", "/automations/bulk", "/agents/bulk", "/skills/bulk", "/models/bulk", "/channels/bulk", "/channels/webhooks/bulk",
 	} {
 		t.Run(path, func(t *testing.T) {
 			for _, body := range malformedBodies {
@@ -90,25 +89,6 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 		remaining, err := tc.llmConfigRepo.GetByIDs(t.Context(), []string{ordinaryModel.ID, defaultModel.ID})
 		require.NoError(t, err)
 		require.Len(t, remaining, 2)
-	})
-
-	t.Run("personalities", func(t *testing.T) {
-		tc := NewStoreTestContext(t)
-		repo := tc.stores.CustomPersonalities
-		tc.handler.SetCustomPersonalityRepo(repo)
-		active := &models.CustomPersonality{Name: "Active custom", Key: "active_custom", SystemPrompt: "A sufficiently long active prompt."}
-		inactive := &models.CustomPersonality{Name: "Inactive custom", Key: "inactive_custom", SystemPrompt: "A sufficiently long inactive prompt."}
-		require.NoError(t, repo.Create(t.Context(), active))
-		require.NoError(t, repo.Create(t.Context(), inactive))
-		require.NoError(t, tc.settingsRepo.Set(t.Context(), "personality", active.Key))
-
-		rec := serveBulkDeleteRequest(t, tc.echo, "/personality/custom/bulk", bulkIDsRequest{IDs: []string{inactive.Key, active.Key}})
-		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-		for _, key := range []string{inactive.Key, active.Key} {
-			personality, err := repo.GetByKey(t.Context(), key)
-			require.NoError(t, err)
-			require.NotNil(t, personality)
-		}
 	})
 
 	t.Run("channels", func(t *testing.T) {
@@ -249,7 +229,6 @@ func TestCollectionHandlersNormalizeRejectedToolbarState(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	tc.handler.SetAgentRepo(tc.stores.Agents)
 	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
-	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 	automationRepo := tc.stores.Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	project := tc.CreateProject().WithName("Rejected toolbar state").Build()
@@ -260,7 +239,6 @@ func TestCollectionHandlersNormalizeRejectedToolbarState(t *testing.T) {
 		"/skills?project_id=" + project.ID + "&enabled=bad&scope=bad&always_use=bad&archived=bad&source=bad&sort=bad",
 		"/models?project_id=" + project.ID + "&provider=bad&default=bad&auth_status=bad&kind=bad&sort=bad",
 		"/channels?project_id=" + project.ID + "&type=bad&connection_state=bad&webhook_enabled=bad&sort=bad",
-		"/personality?project_id=" + project.ID + "&kind=bad&active=bad&sort=bad",
 	} {
 		rec := serveCardPageRequest(t, tc.echo, path)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -285,19 +263,11 @@ func TestCollectionMutationMarkupPreservesValidatedListState(t *testing.T) {
 		require.Contains(t, automations.String(), "/automations/automation-state/"+endpoint+"?health_state=degraded&amp;lifecycle_state=active&amp;project_id=project-state&amp;search=needle&amp;sort=name_desc")
 	}
 
-	personalityState := pages.PersonalityListState{ProjectID: "project-state", Search: "needle", Kind: "custom", Active: "false", Sort: "name_desc"}
-	cards := []pages.PersonalityListCard{{Key: "custom-state", Name: "Custom state", Kind: "custom", Custom: &models.CustomPersonality{Key: "custom-state", Name: "Custom state"}}}
-	var personality bytes.Buffer
-	require.NoError(t, pages.PersonalitySectionPageWithPaginationState("", cards, false, personalityState).Render(t.Context(), &personality))
-	require.Contains(t, personality.String(), "/personality/custom/custom-state?active=false&amp;kind=custom&amp;project_id=project-state&amp;search=needle&amp;sort=name_desc")
-	require.Contains(t, personality.String(), "/personality/save?active=false&amp;kind=custom&amp;personality=custom-state&amp;project_id=project-state&amp;search=needle&amp;sort=name_desc")
-
 	for _, marker := range []string{
 		"cardCollectionActionURL(document.getElementById('agents-container')",
 		"cardCollectionActionURL(document.getElementById('models-container')",
-		"cardCollectionActionURL(root, path)",
 	} {
-		require.Contains(t, automations.String()+personality.String()+renderCollectionPageScripts(t), marker)
+		require.Contains(t, automations.String()+renderCollectionPageScripts(t), marker)
 	}
 }
 
@@ -355,27 +325,12 @@ func TestIndividualMutationRefreshesPreserveValidatedListState(t *testing.T) {
 		require.NotContains(t, rec.Body.String(), `data-model-id="`+second.ID+`"`)
 	})
 
-	t.Run("personality create", func(t *testing.T) {
-		tc := NewStoreTestContext(t)
-		tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
-		project := tc.CreateProject().WithName("Personality mutation state").Build()
-		form := url.Values{"name": {"Mutation personality"}, "description": {"mutation"}, "system_prompt": {"A sufficiently long personality prompt."}}
-		req := httptest.NewRequest(http.MethodPost, "/personality/custom?project_id="+project.ID+"&kind=base&active=false&sort=name_desc&search=Base", strings.NewReader(form.Encode()))
-		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
-		req.Header.Set("HX-Request", "true")
-		rec := httptest.NewRecorder()
-		tc.echo.ServeHTTP(rec, req)
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		require.Contains(t, rec.Body.String(), `data-card-pagination-url="/personality?active=false&amp;kind=base&amp;search=Base&amp;sort=name_desc"`)
-		require.NotContains(t, rec.Body.String(), `data-personality-name="Mutation personality"`)
-	})
 }
 
 func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	tc.handler.SetAgentRepo(tc.stores.Agents)
 	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
-	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 	automationRepo := tc.stores.Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	project := tc.CreateProject().WithName("Toolbar state").Build()
@@ -388,7 +343,7 @@ func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
 		{name: "models", path: "/models?provider=openai&default=false&auth_status=not_connected&kind=direct&sort=name_desc", contains: []string{`data-card-filter-chip="provider"`, `data-card-filter-chip="default"`, `data-card-filter-chip="auth_status"`, `data-card-filter-chip="kind"`, `<option value="name_desc" selected`}},
 		{name: "agents", path: "/agents?enabled=true&scope=global&origin=custom&sort=updated_desc", contains: []string{`data-card-filter-chip="enabled"`, `data-card-filter-chip="scope"`, `data-card-filter-chip="origin"`, `<option value="updated_desc" selected`}},
 		{name: "skills", path: "/skills?project_id=" + project.ID + "&enabled=true&scope=global&always_use=false&archived=false&source=global&sort=scope", contains: []string{`data-card-filter-chip="enabled"`, `data-card-filter-chip="scope"`, `data-card-filter-chip="always_use"`, `data-card-filter-chip="archived"`, `data-card-filter-chip="source"`, `<option value="scope" selected`}},
-		{name: "channels", path: "/channels?project_id=" + project.ID + "&type=webhook&connection_state=configured&webhook_enabled=true&sort=name_desc", contains: []string{`data-card-filter-chip="type"`, `data-card-filter-chip="connection_state"`, `data-card-filter-chip="webhook_enabled"`, `<option value="name_desc" selected`}}, {name: "personality", path: "/personality?project_id=" + project.ID + "&kind=custom&active=false&sort=name_desc", contains: []string{`data-card-filter-chip="kind"`, `data-card-filter-chip="active"`, `project_id=` + project.ID, `<option value="name_desc" selected`}},
+		{name: "channels", path: "/channels?project_id=" + project.ID + "&type=webhook&connection_state=configured&webhook_enabled=true&sort=name_desc", contains: []string{`data-card-filter-chip="type"`, `data-card-filter-chip="connection_state"`, `data-card-filter-chip="webhook_enabled"`, `<option value="name_desc" selected`}},
 		{name: "alerts", path: "/alerts?project_id=" + project.ID + "&read=unread&severity=error&decision_state=pending&type=custom&source=native&processing_state=failed&implementation_task_linked=false&sort=severity", contains: []string{`data-card-filter-chip="read"`, `data-card-filter-chip="severity"`, `data-card-filter-chip="decision_state"`, `data-card-filter-chip="processing_state"`, `data-card-filter-chip="implementation_task_linked"`, `data-card-filter-chip="type"`, `data-card-filter-chip="source"`, `<option value="severity" selected`}},
 	}
 	for _, tt := range tests {
@@ -405,7 +360,6 @@ func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
 func TestCollectionSortMenusUseConsistentDefaultsAndOptions(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
-	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(tc.stores.Automations), nil)
 	project := tc.CreateProject().WithName("Sort menu contract").Build()
 
@@ -417,7 +371,6 @@ func TestCollectionSortMenusUseConsistentDefaultsAndOptions(t *testing.T) {
 		{name: "channels", path: "/channels?project_id=" + project.ID},
 		{name: "automations", path: "/automations?project_id=" + project.ID},
 		{name: "models", path: "/models?project_id=" + project.ID, forbidden: []string{`value="default_name"`, `>Default then name<`, `<option value="name">Name</option>`}},
-		{name: "personality", path: "/personality?project_id=" + project.ID, forbidden: []string{`value="curated"`, `>Curated<`}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			rec := serveCardPageRequest(t, tc.echo, test.path)
@@ -461,31 +414,6 @@ func TestModelsNameSortIsCaseInsensitiveInBothDirections(t *testing.T) {
 	require.NotEqual(t, -1, mixDescending)
 	require.NotEqual(t, -1, solDescending)
 	require.Less(t, solDescending, mixDescending)
-}
-
-func TestPersonalityFilteringAndSortingPrecedePagination(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithStores(t)
-	repo := db.CustomPersonalities
-	h.SetCustomPersonalityRepo(repo)
-	for _, personality := range []*models.CustomPersonality{
-		{Name: "Aardvark custom", Key: "aardvark_custom", Description: "first by name", SystemPrompt: "A sufficiently long custom personality prompt."},
-		{Name: "Zulu custom", Key: "zulu_custom", Description: "last by name", SystemPrompt: "Another sufficiently long custom personality prompt."},
-	} {
-		require.NoError(t, repo.Create(t.Context(), personality))
-	}
-
-	baseOnly := serveCardPageRequest(t, e, "/personality?kind=base&page_size=2&card_page=1")
-	require.Equal(t, http.StatusOK, baseOnly.Code)
-	require.Equal(t, "false", baseOnly.Header().Get(cardPageHasMoreHeader))
-	require.Equal(t, 1, strings.Count(baseOnly.Body.String(), `data-personality-key=`))
-	require.Contains(t, baseOnly.Body.String(), `data-personality-name="Base"`)
-
-	ascending := serveCardPageRequest(t, e, "/personality?sort=name_asc&page_size=2&card_page=1")
-	require.Equal(t, http.StatusOK, ascending.Code)
-	require.Equal(t, 2, strings.Count(ascending.Body.String(), `data-personality-key=`))
-	matches := regexp.MustCompile(`data-personality-name="([^"]+)"`).FindAllStringSubmatch(ascending.Body.String(), -1)
-	require.Len(t, matches, 2)
-	require.LessOrEqual(t, strings.ToLower(matches[0][1]), strings.ToLower(matches[1][1]))
 }
 
 func TestChannelsSortContractOrdersMixedVisibleCardsByName(t *testing.T) {
@@ -670,7 +598,6 @@ func TestEveryCollectionPageAcceptsAndRejectsItsFilterAndSortValues(t *testing.T
 	tc := NewStoreTestContext(t)
 	tc.handler.SetAgentRepo(tc.stores.Agents)
 	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
-	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 	tc.handler.SetAgentSkillRoot(t.TempDir())
 	automationRepo := tc.stores.Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
@@ -702,7 +629,7 @@ func TestEveryCollectionPageAcceptsAndRejectsItsFilterAndSortValues(t *testing.T
 		}, sorts: []string{"name_asc", "name_desc", "provider"}, fallback: "name_asc"}, "channels": {path: "/channels?project_id=" + project.ID, filters: map[string][]string{
 			"type": {"github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets"}, "connection_state": {"connected", "configured", "disconnected"}, "webhook_enabled": {"true", "false"},
 		}, sorts: []string{"name_asc", "name_desc"}, fallback: "name_asc"},
-		"personality": {path: "/personality?project_id=" + project.ID, filters: map[string][]string{"kind": {"base", "built_in", "custom", "override"}, "active": {"true", "false"}}, sorts: []string{"name_asc", "name_desc"}, fallback: "name_asc"}}
+	}
 
 	for pageName, spec := range specs {
 		t.Run(pageName, func(t *testing.T) {
@@ -1154,91 +1081,6 @@ func TestCardPaginationAlertsAndWebhooksStayProjectScoped(t *testing.T) {
 	require.NotContains(t, webhooks.Body.String(), "Foreign webhook")
 }
 
-func TestCardPaginationPersonalityHandlerFiltersFixedCardsAndPagesCustomCards(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithStores(t)
-	repo := db.CustomPersonalities
-	h.SetCustomPersonalityRepo(repo)
-	ctx := context.Background()
-	presets := service.AllPersonalities()
-	require.NotEmpty(t, presets)
-	require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
-		Name:         "Paged custom preset override",
-		Key:          presets[0].Key,
-		Description:  "preset override",
-		SystemPrompt: "A custom prompt long enough for a preset override card.",
-	}))
-	for i := 0; i < 3; i++ {
-		personality := &models.CustomPersonality{
-			Name:         fmt.Sprintf("Paged custom %02d", i),
-			Key:          fmt.Sprintf("paged_custom_%02d", i),
-			Description:  "paged personality",
-			SystemPrompt: "A custom prompt long enough for a card.",
-		}
-		require.NoError(t, repo.Create(ctx, personality))
-	}
-
-	first := serveCardPageRequest(t, e, "/personality?page=0&page_size=2&search=paged+custom&card_page=1")
-	require.Equal(t, http.StatusOK, first.Code)
-	require.Equal(t, "true", first.Header().Get(cardPageHasMoreHeader))
-	require.Contains(t, first.Body.String(), `data-card-pagination-has-more="true"`)
-	require.Equal(t, 2, strings.Count(first.Body.String(), `data-personality-is-preset="false"`))
-	require.Contains(t, first.Body.String(), "Paged custom 00")
-	require.NotContains(t, first.Body.String(), "data-personality-is-preset=\"true\"")
-
-	last := serveCardPageRequest(t, e, "/personality?page=1&page_size=2&search=paged+custom&card_page=1")
-	require.Equal(t, http.StatusOK, last.Code)
-	require.Equal(t, "false", last.Header().Get(cardPageHasMoreHeader))
-	require.Equal(t, 1, strings.Count(last.Body.String(), `data-personality-is-preset="false"`))
-	require.Contains(t, last.Body.String(), "Paged custom 02")
-}
-
-func TestCardPaginationPersonalityHandlerKeepsMatchingActiveCardOutsidePageWindow(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithStores(t)
-	repo := db.CustomPersonalities
-	h.SetCustomPersonalityRepo(repo)
-	ctx := context.Background()
-	presets := service.AllPersonalities()
-	require.Greater(t, len(presets), 1)
-	activeKey := "paged_custom_21"
-	require.NoError(t, h.settingsRepo.Set(ctx, "personality", activeKey))
-	require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
-		Name:         "Overridden preset",
-		Key:          presets[1].Key,
-		Description:  "fixed override",
-		SystemPrompt: "A compact preset override prompt for cards.",
-	}))
-	for i := 0; i < 22; i++ {
-		require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
-			Name:         fmt.Sprintf("Paged custom %02d", i),
-			Key:          fmt.Sprintf("paged_custom_%02d", i),
-			Description:  "paged personality",
-			SystemPrompt: "A custom prompt long enough for a card.",
-		}))
-	}
-
-	first := serveCardPageRequest(t, e, "/personality?page=0&page_size=20&search=paged+custom&card_page=1")
-	require.Equal(t, http.StatusOK, first.Code)
-	require.Equal(t, "true", first.Header().Get(cardPageHasMoreHeader))
-	require.NotContains(t, first.Body.String(), `data-personality-key="paged_custom_21"`)
-	require.NotContains(t, first.Body.String(), `data-personality-key="`+presets[1].Key+`"`)
-	require.NotContains(t, first.Body.String(), `data-personality-name="Overridden preset"`)
-	require.Equal(t, 20, strings.Count(first.Body.String(), `data-personality-pagination-card="true"`))
-	require.NotContains(t, first.Body.String(), `data-personality-pagination-card="false"`)
-	for i := 0; i < 20; i++ {
-		require.Contains(t, first.Body.String(), fmt.Sprintf(`data-personality-key="paged_custom_%02d"`, i))
-	}
-	require.NotContains(t, first.Body.String(), `data-personality-key="paged_custom_20"`)
-
-	continuationOffset := strings.Count(first.Body.String(), `data-personality-pagination-card="true"`)
-	continuation := serveCardPageRequest(t, e, fmt.Sprintf("/personality?page=1&page_size=20&offset=%d&search=paged+custom&card_page=1", continuationOffset))
-	require.Equal(t, http.StatusOK, continuation.Code)
-	require.Equal(t, "false", continuation.Header().Get(cardPageHasMoreHeader))
-	require.Equal(t, 2, strings.Count(continuation.Body.String(), `data-personality-pagination-card="true"`))
-	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_20"`)
-	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_21"`)
-	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_21" data-personality-name="Paged custom 21"`)
-}
-
 func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
@@ -1545,125 +1387,6 @@ func TestCardPaginationProductionBrowserDoesNotRestoreClearedURLSearchAfterRefre
 		t.Fatalf("browser URL search pagination regression did not report a result; DOM length=%d", len(dom))
 	}
 	require.Equal(t, int32(1), clearedSearchRequests.Load())
-}
-
-func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping browser regression in short mode")
-	}
-	chrome := findChromeForBrowserTest(t)
-	if chrome == "" {
-		t.Skip("Chrome/Chromium executable not found")
-	}
-
-	selected := models.CustomPersonality{
-		Key:                 "fixed-selected",
-		Name:                "Fixed selected",
-		Description:         "selected fixed card",
-		SystemPromptPreview: "A selected custom personality preview.",
-	}
-	pageable := models.CustomPersonality{
-		Key:                 "page-owned",
-		Name:                "Page owned",
-		Description:         "page-owned card",
-		SystemPromptPreview: "A pageable custom personality preview.",
-	}
-	render := func(personality string, cards []models.CustomPersonality) string {
-		var buf bytes.Buffer
-		require.NoError(t, pages.PersonalitySectionPageWithPagination(personality, cards, false).Render(context.Background(), &buf))
-		return buf.String()
-	}
-	initialHTML := render(selected.Key, []models.CustomPersonality{selected, pageable})
-	replacementHTMLJSON, err := json.Marshal(render("", []models.CustomPersonality{pageable}))
-	require.NoError(t, err)
-
-	var base bytes.Buffer
-	require.NoError(t, layout.Base("Fixed Personality focus fixture", nil, "").Render(context.Background(), &base))
-	var localBaseLines []string
-	for _, line := range strings.Split(base.String(), "\n") {
-		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
-	}
-	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
-	page = strings.Replace(page, "</head>", `<script src="`+static.URL("panel-scroll.js")+`"></script><style>
-	.dropdown-content { visibility: hidden; opacity: 0; }
-	.dropdown[data-menu-open="true"] > .dropdown-content { visibility: visible; opacity: 1; }
-	</style></head>`, 1)
-	page = strings.Replace(page, "</body>", `<script>
-(function() {
-  function result(status, message) {
-    var node = document.createElement('div');
-    node.id = 'browser-result';
-    node.setAttribute('data-status', status);
-    node.textContent = message || status;
-    document.body.appendChild(node);
-  }
-  function fail(message) { result('fail', String(message && message.stack || message)); }
-  function visibleEnabled(node) {
-    if (!node || node.disabled || node.getAttribute('aria-disabled') === 'true') return false;
-    var style = window.getComputedStyle(node);
-    return style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0;
-  }
-  function menuVisible(card) {
-    var menu = card && card.querySelector('.dropdown-content');
-    return !!(menu && window.getComputedStyle(menu).visibility !== 'hidden');
-  }
-  function waitForInitial() {
-    var root = document.getElementById('personality-section');
-    var card = document.querySelector('[data-personality-key="fixed-selected"]');
-    if (!root || !root._openVibelyCardPaginationState || !card) return setTimeout(waitForInitial, 30);
-    var toggle = card.querySelector('.dropdown > [tabindex="0"]');
-    var actions = card.querySelectorAll('.dropdown-content button');
-    var deletion = null;
-    for (var i = 0; i < actions.length; i++) if (actions[i].textContent.trim() === 'Delete') deletion = actions[i];
-    if (!toggle || !deletion) return fail('fixed selected card actions were not rendered');
-    toggle.click();
-    deletion.focus();
-    if (document.activeElement !== deletion || !visibleEnabled(deletion)) return fail('fixed selected delete action could not be focused while open');
-    window.replaceSearchableCardContainer(root, `+string(replacementHTMLJSON)+`);
-    var focused = document.activeElement;
-    if (!focused || !focused.matches('[data-personality-key]') || !visibleEnabled(focused)) return fail('fixed selected deletion did not focus a visible surviving Personality card');
-    if (focused.getAttribute('data-personality-key') === 'fixed-selected') return fail('focus remained on the deleted fixed selected card');
-    if (menuVisible(focused)) return fail('fixed selected deletion reopened a surviving dropdown');
-    result('pass', 'fixed selected Personality focus restored');
-  }
-  window.addEventListener('load', function() { setTimeout(waitForInitial, 50); });
-  setTimeout(function() {
-    if (!document.getElementById('browser-result')) fail('fixed Personality focus fixture timed out');
-  }, 8000);
-})();
-</script></body>`, 1)
-
-	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
-		if static.ServeAsset(w, assetReq) {
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(page))
-	}))
-	defer fixture.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome,
-
-		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
-		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
-		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
-	)
-	out, err := runHandlerBrowserProcess(t, cmd)
-	requireCardPaginationBrowserProcess(t, ctx, out, err)
-	dom := string(out)
-	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
-		idx := strings.Index(dom, `id="browser-result"`)
-		if idx >= 0 {
-			end := idx + 700
-			if end > len(dom) {
-				end = len(dom)
-			}
-			t.Fatalf("fixed Personality browser focus regression failed: %s", html.UnescapeString(dom[idx:end]))
-		}
-		t.Fatalf("fixed Personality browser focus regression did not report a result; DOM length=%d", len(dom))
-	}
 }
 
 func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *testing.T) {

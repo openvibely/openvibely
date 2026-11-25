@@ -382,7 +382,6 @@ func geometryToolbarFixture(t *testing.T) string {
 	for _, config := range []pages.CardListToolbarConfig{
 		{PageKey: "channels-geometry", Sort: "name_asc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "name_desc", Label: "Name Z–A"}}},
 		{PageKey: "automations-geometry", Sort: "updated_asc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "updated_asc", Label: "Least recently updated"}}},
-		{PageKey: "personality-geometry", Sort: "name_desc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "name_desc", Label: "Name Z–A"}}},
 	} {
 		buf.WriteString(`<div data-geometry-toolbar>`)
 		if err := pages.CardListToolbar(config).Render(context.Background(), &buf); err != nil {

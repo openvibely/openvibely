@@ -71,13 +71,6 @@ func TestCardActionDropdownMenusRenderSharedShellAndLocalActions(t *testing.T) {
 			required: []string{`aria-label="More actions for GitHub"`, `aria-label="More actions for Slack"`, `aria-label="More actions for Telegram Bot"`, `aria-label="More actions for Discord"`, `aria-label="More actions for Email"`, `aria-label="More actions for X (formerly Twitter)"`, `aria-label="More actions for Webhook"`, `aria-label="More actions for Outbound Message Targets"`, `openGitHubConfigModal()`, `openSlackConfigModal()`, `openDeleteChannelConfirm('X (formerly Twitter)'`, `hx-post="/channels/slack/test"`, `hx-post="/channels/telegram/test"`, `hx-post="/channels/email/test"`, `Rotate Secret`, `openOutboundTargetsModal()`},
 		},
 		{
-			name: "personality",
-			render: func(t *testing.T) string {
-				return renderActionDropdownComponent(t, AppSettingsContent("base", "project-1", []models.CustomPersonality{{ID: "personality-1", Key: "custom", Name: "Custom Persona", Description: "Custom", SystemPromptPreview: "Prompt"}}))
-			},
-			required: []string{`aria-label="More actions for Custom Persona"`, `aria-label="More actions for Base"`, `onclick="handleDropdownToggle(event)"`, `Edit`, `Set as Default`, `Delete`, `hx-delete="/personality/custom/custom`},
-		},
-		{
 			name: "automations",
 			render: func(t *testing.T) string {
 				cards := []models.AutomationCard{{Automation: models.Automation{ID: "automation-1", ProjectID: "project-1", Name: "Nightly Build", LifecycleState: models.AutomationActive, HealthState: models.AutomationHealthHealthy}, Version: models.AutomationVersion{AdapterKey: "custom"}}}

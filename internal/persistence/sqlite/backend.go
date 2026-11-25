@@ -57,7 +57,6 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 		ChannelTargets:       NewChannelTargetRepo(db),
 		ChatAttachments:      NewChatAttachmentRepo(db),
 		ChatInputRequests:    NewChatInputRequestRepo(db),
-		CustomPersonalities:  NewCustomPersonalityRepo(db),
 		DiscordAuth:          NewDiscordAuthRepo(db),
 		DiscordTaskContexts:  NewDiscordTaskContextRepo(db),
 		DiscordUserProjects:  NewDiscordUserProjectRepo(db),

@@ -183,7 +183,6 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    document.querySelector('main').appendChild(root); window.refreshCardListToolbars(root);
 	    var controls=root.querySelectorAll('[data-card-selection-gutter] input'), master=root.querySelector('[data-card-select-loaded]');
 	    if (controls.length!==2 || (key==='channels' ? controls[0].disabled : !controls[0].disabled) || controls[1].disabled) fail(key+' did not distinguish its fixed and eligible cards');
-	    if (key!=='channels' && (!controls[0].title || controls[0].title.toLowerCase().indexOf('custom personalities')<0)) fail(key+' fixed card lacks the page-specific selection explanation');
 	    master.click();
 	    var expectedCount=key==='channels' ? '2 selected' : '1 selected';
 	    if (!master.checked || !controls[1].checked || root.querySelector('[data-card-selected-count]').textContent.trim()!==expectedCount) fail(key+' master checkbox did not select its loaded eligible cards');
@@ -243,7 +242,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    root._openVibelyInstallSelectionCards();
 	    var fixedCheckbox=checkbox('fixed');
 	    if (!checkbox('a').checked || !checkbox('appended') || checkbox('appended').checked) fail('loaded-card reconciliation changed selection or missed the new checkbox');
-	    if (!fixedCheckbox || !fixedCheckbox.disabled || !fixedCheckbox.title) fail('fixed Personality/Channel-style card did not receive an explained disabled checkbox');    window.addEventListener('sse-card-refresh', function() { root=window.replaceSearchableCardContainer(root, REPLACEMENT_HTML); document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail:{elt:root}})); });
+	    if (!fixedCheckbox || !fixedCheckbox.disabled || !fixedCheckbox.title) fail('fixed card did not receive an explained disabled checkbox');    window.addEventListener('sse-card-refresh', function() { root=window.replaceSearchableCardContainer(root, REPLACEMENT_HTML); document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail:{elt:root}})); });
     window.dispatchEvent(new CustomEvent('sse-card-refresh'));
     await wait(25);
     if (selectedCount() !== '0 selected' || !checkbox('e')) fail('HTMX/SSE replacement did not reconcile removed and new cards');
@@ -296,7 +295,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     window.fetch=readFetch;window.showToast=readToast;
     if(readToasts.length!==1||readToasts[0]!=='Editor access required'||!readError.classList.contains('hidden')||alertsRoot.querySelector('[data-card-selected-count]').textContent.trim()!=='1 selected')fail('mark read denial changed selection or added inline error');
 
-		    verifyMixedCollection('personality'); verifyMixedCollection('channels');
+		    verifyMixedCollection('channels');
 		    var emptyChannelsParsed=new DOMParser().parseFromString(EMPTY_CHANNELS_HTML, 'text/html'), emptyChannelsRoot=emptyChannelsParsed.getElementById('channels-container');
 		    emptyChannelsRoot=document.querySelector('main').appendChild(document.importNode(emptyChannelsRoot, true)); window.refreshCardListToolbars(emptyChannelsRoot);
 		    var emptyState=emptyChannelsRoot.querySelector('[data-search-empty-state]'), emptyMaster=emptyChannelsRoot.querySelector('[data-card-select-loaded]');
@@ -399,7 +398,6 @@ func TestCollectionCardToolbars(t *testing.T) {
 		{name: "skills", path: "/skills?project_id=default", pageKey: "skills", wantSort: true},
 		{name: "models", path: "/models?project_id=default", pageKey: "models", wantSort: true},
 		{name: "channels", path: "/channels?project_id=default", pageKey: "channels", wantSort: true},
-		{name: "personality", path: "/personality?project_id=default", pageKey: "personality", wantSort: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -460,40 +458,6 @@ func TestAlertsFiltersDecisionStateOnlyInsidePopover(t *testing.T) {
 	}
 	if !strings.Contains(body, `data-card-filter-chip="decision_state"`) {
 		t.Fatal("active decision state must be rendered as a removable chip")
-	}
-}
-
-func TestCardSearch_PersonalityPage(t *testing.T) {
-	_, e, _ := setupTestHandler(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/personality?project_id=default", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-	body := rec.Body.String()
-	assertSearch(t, body, "personality", "Search personalities...")
-}
-
-func TestCardSearch_PersonalityPartial(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
-	_ = h
-
-	req := httptest.NewRequest(http.MethodGet, "/personality?project_id=default", nil)
-	req.Header.Set("HX-Request", "true")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-	body := rec.Body.String()
-	assertSearch(t, body, "personality", "Search personalities...")
-	// Partial should not contain full layout
-	if strings.Contains(body, "<!DOCTYPE") {
-		t.Error("HTMX partial should not contain full HTML layout")
 	}
 }
 

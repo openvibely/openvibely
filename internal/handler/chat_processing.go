@@ -53,7 +53,7 @@ var (
 //   - Agent: LLM configuration (model, provider, API key, etc.)
 //   - ChatHistory: Prior conversation turns for context (may be empty for first message)
 //   - ProjectID: Project ID for task creation/lookup
-//   - SystemContext: Request-scoped system prompt context (personality, task framing, etc.)
+//   - SystemContext: Request-scoped system prompt context (task framing, etc.)
 //   - WorkDir: Working directory for CLI agents (project repo path)
 //   - ImageAttachments: Attachments; supported images are inline, other files are references
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
@@ -675,7 +675,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			buildThreadSystemContext(params.Task.Title, len(params.ChatHistory) > 0, ""),
 			h.taskGoalContext(ctx, params.Task.ID, agentDefForSys),
 		)
-		personalityCtx := h.getPersonalityContext(ctx, params.ProjectID)
 		workDir, worktreeCtx, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, params.Task)
 		if workDirErr != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s deferred worktree error: %v", params.ExecID, workDirErr)
@@ -686,7 +685,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			h.finalizeStreamingTurn(params, "")
 			return
 		}
-		params.SystemContext = combineContexts(combineContexts(sysCtx, worktreeCtx), personalityCtx)
+		params.SystemContext = combineContexts(sysCtx, worktreeCtx)
 		params.WorkDir = workDir
 		params.RepublishOpenPRAfterStartupSync = republishOpenPR
 	}
@@ -1843,7 +1842,6 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		applog.Infof("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
 		history = []models.Execution{}
 	}
-	personalityContext := h.getPersonalityContext(ctx, input.ProjectID)
 	workDir := h.resolveWorkDir(ctx, input.ProjectID)
 	chatMode := models.NormalizeChatMode(string(input.ChatMode))
 	if chatMode == "" {
@@ -1873,7 +1871,6 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		Message:     input.Content,
 		Agent:       *agent,
 		ChatHistory: history, ProjectID: input.ProjectID,
-		SystemContext:     personalityContext,
 		AttachmentContext: attachmentContext,
 		WorkDir:           workDir,
 		ImageAttachments:  imageAttachments,
@@ -2002,7 +1999,7 @@ func (h *Handler) xRuntimeToolsForThreadInput(taskID string, input models.Thread
 		// remains authorized and persisted even while outbound X is disconnected.
 		svc = service.NewXService(service.XCredentials{}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 		svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
-		svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
+		svc.SetRuntime(h.agentRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
 	}
 	return svc.RuntimeTools(taskID, input.ProjectID, input.XAccountID, input.XUserID, input.XConversationID, input.XReplyToTweetID, input.XUsername)
 }
@@ -2168,7 +2165,6 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		}
 	}
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(ctx, task.ID, agentDef))
-	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
 	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, workDirErr.Error(), 0)
@@ -2197,7 +2193,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		AgentDefinition:                 agentDef,
 		ChatHistory:                     priorHistory,
 		ProjectID:                       task.ProjectID,
-		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		SystemContext:                   combineContexts(systemContext, worktreeContext),
 		WorkDir:                         workDir,
 		RepublishOpenPRAfterStartupSync: republishOpenPR,
 		IsTaskFollowup:                  true,
@@ -2355,7 +2351,6 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		}
 	}
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(ctx, task.ID, agentDef))
-	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
 	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, exec.TaskID, workDirErr.Error(), 0, channelReplyFromThreadInput(input))
@@ -2386,7 +2381,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		AgentDefinition:                 agentDef,
 		ChatHistory:                     priorHistory,
 		ProjectID:                       task.ProjectID,
-		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		SystemContext:                   combineContexts(systemContext, worktreeContext),
 		AttachmentContext:               attachmentContext,
 		WorkDir:                         workDir,
 		RepublishOpenPRAfterStartupSync: republishOpenPR,
@@ -3999,24 +3994,6 @@ func (h *Handler) formatThreadTranscriptPage(task *models.Task, executions []mod
 	return threadTranscriptFormatResult{transcript: sb.String(), budgetExceeded: budgetExceeded}
 }
 
-// executeListPersonalities returns one bounded page of personality presets and custom personalities.
-func (h *Handler) executeListPersonalities(ctx context.Context, input json.RawMessage) (string, error) {
-	return service.ExecuteListPersonalitiesTool(ctx, h.customPersonalityRepo, h.settingsRepo, input, true)
-}
-
-// executeSetPersonality applies a typed set_personality runtime action.
-func (h *Handler) executeSetPersonality(ctx context.Context, req service.SetPersonalityRequest) string {
-	// Validate personality key against presets + custom.
-	personality, ok := service.FindPersonality(ctx, req.Personality, h.customPersonalityRepo)
-	if !ok {
-		return fmt.Sprintf("Unknown personality %q. Use list_personalities to see available options.", req.Personality)
-	}
-	if err := h.settingsRepo.Set(ctx, "personality", req.Personality); err != nil {
-		return fmt.Sprintf("Error setting personality to %q: %v", req.Personality, err)
-	}
-	return fmt.Sprintf("Personality changed to **%s** (`%s`)", personality.Name, req.Personality)
-}
-
 // executeListModels returns available model configurations.
 func (h *Handler) executeListModels(ctx context.Context) string {
 	configs, err := h.llmConfigRepo.ListRuntimeSummaries(ctx)
@@ -4082,16 +4059,6 @@ func (h *Handler) executeListAgents(ctx context.Context) string {
 func (h *Handler) executeViewSettings(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n---\nApp Settings:\n")
-
-	// Personality
-	personality, err := h.settingsRepo.Get(ctx, "personality")
-	if err != nil {
-		applog.Infof("[handler] executeViewSettings error reading personality: %v", err)
-	}
-	if personality == "" {
-		personality = "default (no personality)"
-	}
-	sb.WriteString(fmt.Sprintf("- **Personality:** %s\n", personality))
 
 	// Model count
 	configs, err := h.llmConfigRepo.ListRuntimeSummaries(ctx)
@@ -4361,23 +4328,6 @@ func combineContexts(taskContext, attachmentContext string) string {
 		fullContext += attachmentContext
 	}
 	return fullContext
-}
-
-// getPersonalityContext loads the global personality setting and returns the
-// corresponding system prompt modifier. Returns empty string if no personality is set.
-func (h *Handler) getPersonalityContext(ctx context.Context, projectID string) string {
-	if h.settingsRepo == nil {
-		return ""
-	}
-	personality, err := h.settingsRepo.Get(ctx, "personality")
-	if err != nil || personality == "" {
-		return ""
-	}
-	prompt := service.GetPersonalityPromptWithCustom(ctx, personality, h.customPersonalityRepo)
-	if prompt == "" {
-		return ""
-	}
-	return "\n# Communication Style\n\n" + prompt
 }
 
 // extractTaskIDsFromOutput reads [TASK_ID:xxx] result metadata emitted by

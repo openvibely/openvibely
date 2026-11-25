@@ -3157,7 +3157,7 @@ var actThreadSend = defineAction("thread.send", ownTaskRef[threadSendArgs], func
 
 	// Spawn LLM processing goroutine (acquires per-model worker slot in processStreamingResponse).
 	// DeferHistoryLoad=true moves the full ListByTaskChronological scan, agent-definition
-	// loading, system/goal/personality context building, and worktree resolution out of the
+	// loading, system/goal context building, and worktree resolution out of the
 	// HTTP handler and into the background goroutine, eliminating the per-execution O(N) block
 	// that caused visible UI hangs on tasks with many prior executions.
 	if err := h.startStreamingResponse(streamingResponseParams{

@@ -1162,11 +1162,6 @@ type ToggleAlertRequest struct {
 	AlertID string `json:"alert_id"` // Alert ID to toggle
 }
 
-// SetPersonalityRequest represents a request to change the global personality setting.
-type SetPersonalityRequest struct {
-	Personality string `json:"personality"` // Personality key to set
-}
-
 // SwitchProjectRequest represents a request to switch the active project.
 type SwitchProjectRequest struct {
 	Project string `json:"project"` // Project name or ID to switch to

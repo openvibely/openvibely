@@ -16,7 +16,7 @@ func instanceSettingsPath(path string) bool {
 	if path == "/settings/computer" || capacityAPIPath(path) {
 		return true
 	}
-	if modelManagementPath(path) || path == "/personality" || strings.HasPrefix(path, "/personality/") || path == "/organization" || strings.HasPrefix(path, "/organization/") {
+	if modelManagementPath(path) || path == "/organization" || strings.HasPrefix(path, "/organization/") {
 		return true
 	}
 	if path == "/api/analytics/usage/resets" || path == "/api/analytics/usage/resets/consume" {

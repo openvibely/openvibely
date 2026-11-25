@@ -40,7 +40,6 @@ type Stores struct {
 	ChannelTargets       ChannelTargetStore
 	ChatAttachments      ChatAttachmentStore
 	ChatInputRequests    ChatInputRequestStore
-	CustomPersonalities  CustomPersonalityStore
 	DiscordAuth          DiscordAuthStore
 	DiscordTaskContexts  DiscordTaskContextStore
 	DiscordUserProjects  DiscordUserProjectStore

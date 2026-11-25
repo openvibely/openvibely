@@ -155,7 +155,6 @@ var unwrappedMethods = map[string]string{
 	"Automations":          "AbandonQueuedDispatch BindThreadInput BindingsForWorkItemKey FinalizeExecutionProjection FindActivityResource GetCustomTaskHandoff ListByProject ListPortfolioCardsPage ListSavedByProject PublishResourceInvalidations RenewDispatchLease SetBroadcaster",
 	"ChannelTargets":       "Delete DeleteForProject DeleteProjectExcept ListSendsByProject Upsert",
 	"ChatAttachments":      "GetAllFilePaths GetByID",
-	"CustomPersonalities":  "ListPage",
 	"DiscordAuth":          "Delete HasAnyAuthorizedUsers HasAnyAuthorizedUsersAnywhere IsAuthorizedForProject",
 	"DiscordTaskContexts":  "DeleteByTaskID UpsertInTx",
 	"DiscordUserProjects":  "DeleteUserProject",

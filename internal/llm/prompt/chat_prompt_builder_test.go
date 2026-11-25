@@ -15,7 +15,6 @@ var legacyMutationMarkers = []string{
 	"[SCHEDULE_TASK]",
 	"[DELETE_SCHEDULE]",
 	"[MODIFY_SCHEDULE]",
-	"[SET_PERSONALITY]",
 	"[CREATE_ALERT]",
 	"[DELETE_ALERT]",
 	"[TOGGLE_ALERT]",

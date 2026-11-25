@@ -65,7 +65,7 @@ Useful starting points:
 | Parallel task execution | Queue coding work, run tasks concurrently, stream progress, inspect logs and threads, and decide what ships. |
 | Continued execution | Use goals, schedules, and task chains to keep longer efforts moving across agent runs. |
 | Reviewable changes | Use isolated Git worktrees and GitHub issue-to-PR workflows so AI output becomes visible diffs, pull requests, and review follow-ups rather than hidden edits. |
-| Reusable agent profiles | Capture system prompts, personalities, tools, skills, plugins, permissions, routing hints, and lifecycle behavior as reusable worker profiles. |
+| Reusable agent profiles | Capture system prompts, tools, skills, plugins, permissions, routing hints, and lifecycle behavior as reusable worker profiles. |
 | Memory curation | Autonomously create, recall, update, and consolidate durable project memory so repeated context does not have to be re-explained. |
 | Skill curation | Learn from completed work and improve reusable standalone or agent-owned skills for future tasks. |
 | Automation Graphs | Build project-scoped graphs from schedules, Tasks and Agents, Native approvals, GitHub actions, and outcomes; save them into real resources and watch current state on the Live graph. |

@@ -2201,48 +2201,20 @@ func (s *summaryOnlyChannelTargetStore) RecordSend(ctx context.Context, send mod
 	return nil
 }
 
-func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {
+func TestBuildChannelUtilityActionHandlersModelAndProjectInfo(t *testing.T) {
 	env := teststores.New(t)
 	ctx := context.Background()
 	projectRepo := env.Projects
 	taskRepo := env.Tasks
 	settingsRepo := env.Settings
-	customPersonalityRepo := env.CustomPersonalities
 	llmConfigRepo := env.LLMConfigs
 	project := &models.Project{Name: "Info Project", Description: "Details"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Default Model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	require.NoError(t, taskRepo.Create(ctx, &models.Task{ProjectID: project.ID, Title: "Info task", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}))
-	require.NoError(t, customPersonalityRepo.Create(ctx, &models.CustomPersonality{
-		Name:         "Channel Custom",
-		Key:          "channel_custom",
-		Description:  "Custom channel personality",
-		SystemPrompt: "You are a channel custom personality with enough detail.",
-	}))
 
-	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ProjectRepo: projectRepo, SettingsRepo: settingsRepo, CustomPersonalityRepo: customPersonalityRepo, LLMConfigRepo: llmConfigRepo})
-	saveOut, err := handlers["save_custom_personality"](ctx, json.RawMessage(`{"mode":"create","name":"Channel Runtime Created","description":"Created from channel chat","system_prompt":"You are a channel-created custom personality with enough detail."}`))
-	require.NoError(t, err)
-	require.Contains(t, saveOut, `"ok":true`)
-	created, err := customPersonalityRepo.GetByKey(ctx, "channel_runtime_created")
-	require.NoError(t, err)
-	require.NotNil(t, created)
-	setCreatedOut, err := handlers["set_personality"](ctx, json.RawMessage(`{"personality":"channel_runtime_created"}`))
-	require.NoError(t, err)
-	require.Contains(t, setCreatedOut, "Personality changed")
-	setOut, err := handlers["set_personality"](ctx, json.RawMessage(`{"personality":"no_nonsense_pro"}`))
-	require.NoError(t, err)
-	require.Contains(t, setOut, "Personality changed")
-	customOut, err := handlers["set_personality"](ctx, json.RawMessage(`{"personality":"channel_custom"}`))
-	require.NoError(t, err)
-	require.Contains(t, customOut, "Personality changed")
-	unknownOut, err := handlers["set_personality"](ctx, json.RawMessage(`{"personality":"missing_custom"}`))
-	require.NoError(t, err)
-	require.Contains(t, unknownOut, `Unknown personality "missing_custom"`)
-	getOut, err := handlers["get_personality"](ctx, nil)
-	require.NoError(t, err)
-	require.Contains(t, getOut, "channel_custom")
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ProjectRepo: projectRepo, SettingsRepo: settingsRepo, LLMConfigRepo: llmConfigRepo})
 	modelsOut, err := handlers["list_models"](ctx, nil)
 	require.NoError(t, err)
 	require.Contains(t, modelsOut, "Default Model")

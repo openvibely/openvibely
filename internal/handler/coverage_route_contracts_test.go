@@ -685,15 +685,6 @@ func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testi
 	agentRepo := tc.stores.Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	require.NoError(t, agentRepo.Create(ctx, &models.Agent{Name: "Runtime Agent", Key: "runtime-agent", Description: "Does runtime work", Model: "gpt-test", Skills: []models.SkillConfig{{Name: "Audit"}}, MCPServers: []models.MCPServerConfig{{Name: "tools", Command: []string{"node"}}}, Scope: models.AgentScopeProject}))
-	require.NoError(t, tc.settingsRepo.Set(ctx, "personality", "direct"))
-
-	personalities, err := tc.handler.executeListPersonalities(ctx, nil)
-	require.NoError(t, err)
-	require.Contains(t, personalities, "Available Personalities")
-	require.Contains(t, personalities, "Current personality: **direct**")
-	require.Contains(t, tc.handler.executeSetPersonality(ctx, service.SetPersonalityRequest{Personality: "no_nonsense_pro"}), "Personality changed")
-	require.Contains(t, tc.handler.executeSetPersonality(ctx, service.SetPersonalityRequest{Personality: "does-not-exist"}), "Unknown personality")
-
 	modelsOut := tc.handler.executeListModels(ctx)
 	require.Contains(t, modelsOut, "Runtime Model")
 	require.Contains(t, modelsOut, "max_workers: 2")
@@ -739,9 +730,6 @@ func TestChatActionReadHelpersUseRepositories(t *testing.T) {
 	alert := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityError, Title: "Action alert", Message: "inspect me"}
 	require.NoError(t, tc.alertRepo.Create(ctx, alert))
 
-	require.Contains(t, tc.handler.executeGetPersonality(ctx), "default")
-	require.NoError(t, tc.settingsRepo.Set(ctx, "personality", "detailed"))
-	require.Contains(t, tc.handler.executeGetPersonality(ctx), "detailed")
 	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"model_id":"`+model.ID+`"}`)), "Action Model")
 	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"name":"action model"}`)), "max_workers: 4")
 	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"model_id":"missing"}`)), "not found")
@@ -943,9 +931,6 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 		{name: "get_chat_mode", input: `{}`, want: "Current chat mode"},
 		{name: "set_chat_mode", input: `{"mode":"plan"}`, want: "Chat mode set to plan"},
 		{name: "list_capabilities", input: `{}`, want: "Available capabilities"},
-		{name: "list_personalities", input: `{}`, want: "Available Personalities"},
-		{name: "get_personality", input: `{}`, want: "Current personality"},
-		{name: "set_personality", input: `{"personality":"no_nonsense_pro"}`, want: "Personality changed"},
 		{name: "list_models", input: `{}`, want: "Executor Model"},
 		{name: "get_model", input: `{"model_id":"` + model.ID + `"}`, want: "Executor Model"},
 		{name: "list_agents", input: `{}`, want: "Configured Agents"},

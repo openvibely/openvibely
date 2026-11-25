@@ -27,7 +27,6 @@ func TestPrimaryNavigationFragmentsIncludeAuthoritativePageTitles(t *testing.T) 
 		{name: "agents", title: "Agents", component: AgentsContent(nil, nil)},
 		{name: "skills", title: "Skills", component: SkillsContent(nil, false)},
 		{name: "workers", title: "Workers", component: WorkerSettingsContent(0, 0, 0, 0, nil, nil)},
-		{name: "personality", title: "Personality", component: AppSettingsContent("", "", nil)},
 	}
 
 	for _, tt := range tests {

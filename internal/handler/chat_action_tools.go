@@ -502,26 +502,6 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"view_pulse": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return service.ExecuteViewPulseTool(ctx, h.upcomingSvc, params.ProjectID, input)
 		},
-		"list_personalities": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeListPersonalities(ctx, input)
-		},
-		"get_personality": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			return h.executeGetPersonality(ctx), nil
-		},
-		"set_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req service.SetPersonalityRequest
-			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			return strings.TrimSpace(h.executeSetPersonality(ctx, req)), nil
-		},
-		"save_custom_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return service.ExecuteSaveCustomPersonalityRuntime(ctx, service.CustomPersonalitySaveOptions{
-				Input:                 input,
-				CustomPersonalityRepo: h.customPersonalityRepo,
-				SettingsRepo:          h.settingsRepo,
-			})
-		},
 		"list_models": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListModels(ctx)), nil
 		},
@@ -917,21 +897,6 @@ func githubToolJSON(payload map[string]any) (string, error) {
 
 func (h *Handler) executeViewUsageAnalytics(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
 	return service.ExecuteViewUsageAnalyticsTool(ctx, h.usageAnalyticsSvc, projectID, input)
-}
-
-func (h *Handler) executeGetPersonality(ctx context.Context) string {
-	if h.settingsRepo == nil {
-		return "Current personality: default (no personality set)"
-	}
-	current, err := h.settingsRepo.Get(ctx, "personality")
-	if err != nil {
-		applog.Infof("[handler] executeGetPersonality error: %v", err)
-		return "Error retrieving personality setting."
-	}
-	if current == "" {
-		return "Current personality: default (base, no personality modifier active)"
-	}
-	return fmt.Sprintf("Current personality: %s", current)
 }
 
 func (h *Handler) executeGetModel(ctx context.Context, input json.RawMessage) string {

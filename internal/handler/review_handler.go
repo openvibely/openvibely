@@ -260,7 +260,6 @@ var actSubmitReview = defineAction("review.submit", ownTaskRef[TaskRef], func(h 
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, taskID, nil)
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(ctx, task.ID, agentDef))
-	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
 	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, workDirErr.Error(), 0)
@@ -276,7 +275,7 @@ var actSubmitReview = defineAction("review.submit", ownTaskRef[TaskRef], func(h 
 		AgentDefinition:                 agentDef,
 		ChatHistory:                     priorHistory,
 		ProjectID:                       task.ProjectID,
-		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		SystemContext:                   combineContexts(systemContext, worktreeContext),
 		WorkDir:                         workDir,
 		IsTaskFollowup:                  true,
 		RepublishOpenPRAfterStartupSync: republishOpenPR,

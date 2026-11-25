@@ -263,7 +263,7 @@ func (h *Handler) pageChatParams(ctx context.Context, binding pageintegration.Co
 	return streamingResponseParams{
 		CancellationContext: binding.Lifetime(), ExecID: exec.ID, TaskID: task.ID, Message: message, Agent: *agent,
 		ChatHistory: filterChatHistory(history, exec.ID), ProjectID: binding.Page.ProjectID, PrincipalID: turn.Principal,
-		SystemContext: combineContexts(editContext, combineContexts(h.getPersonalityContext(ctx, binding.Page.ProjectID), pageintegration.RenderContextForPrompt(binding.Page, turn.Snapshot, integration.Operations()))),
+		SystemContext: combineContexts(editContext, pageintegration.RenderContextForPrompt(binding.Page, turn.Snapshot, integration.Operations())),
 		WorkDir:       workDir, TaskScopedChat: true, PageConversation: &binding,
 		ChatMode: models.ChatModeOrchestrate, Surface: chatcontrol.SurfaceWeb,
 		RuntimeTools: runtime,

@@ -558,34 +558,6 @@ func TestWebhookRepoListCardsByProjectPageIsolatedAndSearchable(t *testing.T) {
 	require.Len(t, labelSearch, 3)
 }
 
-func TestCustomPersonalityRepoListPageUsesPromptPreviewAndSearchesPageSet(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := NewCustomPersonalityRepo(db)
-	ctx := context.Background()
-
-	for i := 0; i < 4; i++ {
-		personality := &models.CustomPersonality{
-			Name:         fmt.Sprintf("Paged Personality %02d", i),
-			Key:          fmt.Sprintf("paged_personality_%02d", i),
-			Description:  "custom card",
-			SystemPrompt: strings.Repeat("prompt body ", 30),
-		}
-		require.NoError(t, repo.Create(ctx, personality))
-	}
-
-	first, err := repo.ListPage(ctx, 3, 0, "paged personality")
-	require.NoError(t, err)
-	require.Len(t, first, 3)
-	require.Equal(t, "Paged Personality 00", first[0].Name)
-	require.Len(t, first[0].SystemPromptPreview, 150)
-	require.Empty(t, first[0].SystemPrompt)
-
-	second, err := repo.ListPage(ctx, 3, 3, "paged personality")
-	require.NoError(t, err)
-	require.Len(t, second, 1)
-	require.Equal(t, "Paged Personality 03", second[0].Name)
-}
-
 func TestAlertRepoListFilteredSummariesPageSearchesWithinProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := NewProjectRepo(db)

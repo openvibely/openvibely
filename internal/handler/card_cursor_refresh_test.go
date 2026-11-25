@@ -28,7 +28,6 @@ func TestCardCursorActionScopeMatchesDisplayedList(t *testing.T) {
 		{"skills always use", "/skills/backup/always_use?skill_project_id=project1", "/skills", ""},
 		{"skills edit", "/skills/backup?skill_project_id=project1", "/skills", ""},
 		{"skills delete", "/skills/backup?target_scope=global", "/skills", ""},
-		{"personality select", "/personality/save?personality=analyst", "/personality", ""},
 		{"model default delete", "/models/id?new_default_id=other", "/models", ""},
 		{"agents", "/agents/id", "/agents", ""},
 		{"alerts", "/alerts/id/read", "/alerts", ""},
@@ -117,19 +116,6 @@ func TestCardCursorAfterModelDefaultDeletion(t *testing.T) {
 	assertRefreshContinuation(t, e, rec, "/models?search=Cursor+model", "data-model-name")
 }
 
-func TestCardCursorAfterPersonalitySelection(t *testing.T) {
-	h, e, _, stores := setupTestHandlerWithStores(t)
-	h.SetCustomPersonalityRepo(stores.CustomPersonalities)
-	for i := 0; i < 45; i++ {
-		require.NoError(t, stores.CustomPersonalities.Create(t.Context(), &models.CustomPersonality{Name: fmt.Sprintf("Cursor personality %03d", i), Key: fmt.Sprintf("cursor_%03d", i), SystemPrompt: "A sufficiently long personality prompt for testing."}))
-	}
-	req := httptest.NewRequest(http.MethodPost, "/personality/save?personality=cursor_000&search=Cursor+personality", nil)
-	req.Header.Set("HX-Request", "true")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	assertRefreshContinuation(t, e, rec, "/personality?search=Cursor+personality", "data-personality-key")
-}
-
 func TestCardCursorAfterAllProjectsAutomationActions(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().WithName("Project 1").Build()
@@ -194,7 +180,6 @@ func TestCardCursorListFiltersRemainBoundToCursor(t *testing.T) {
 		{"/models", "provider=anthropic&default=false&auth_status=connected&kind=direct&sort=provider"},
 		{"/agents", "enabled=true&scope=project&origin=custom&sort=created_desc"},
 		{"/skills", "enabled=true&scope=project&always_use=true&archived=false&source=project&sort=source"},
-		{"/personality", "kind=custom&active=true&sort=name_desc"},
 		{"/channels", "type=webhook&connection_state=connected&webhook_enabled=true&sort=name_desc"},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
@@ -255,25 +240,6 @@ func TestCardCursorAfterNamedSkillActions(t *testing.T) {
 				rec := httptest.NewRecorder()
 				e.ServeHTTP(rec, req)
 				assertRefreshContinuation(t, e, rec, "/skills?search=Review", "data-skill-scroll-anchor")
-			}
-		})
-	}
-}
-
-func TestCardCursorAfterNamedPersonalityActions(t *testing.T) {
-	for _, key := range []string{"models", "agents", "automations", "alerts", "skills", "webhook_backup", "channels_helper"} {
-		t.Run(key, func(t *testing.T) {
-			h, e, _, stores := setupTestHandlerWithStores(t)
-			h.SetCustomPersonalityRepo(stores.CustomPersonalities)
-			for i := 0; i < 45; i++ {
-				require.NoError(t, stores.CustomPersonalities.Create(t.Context(), &models.CustomPersonality{Name: fmt.Sprintf("Review personality %03d", i), Key: fmt.Sprintf("review_%03d", i), SystemPrompt: "A sufficiently long personality prompt for testing."}))
-			}
-			require.NoError(t, stores.CustomPersonalities.Create(t.Context(), &models.CustomPersonality{Name: "Review target", Key: key, SystemPrompt: "A sufficiently long personality prompt for testing."}))
-			for _, method := range []string{http.MethodPut, http.MethodDelete} {
-				req := serversRequest(method, "/personality/custom/"+key+"?search=Review", url.Values{"name": {"Review target edited"}, "system_prompt": {"A sufficiently long personality prompt for testing."}})
-				rec := httptest.NewRecorder()
-				e.ServeHTTP(rec, req)
-				assertRefreshContinuation(t, e, rec, "/personality?search=Review", "data-personality-key")
 			}
 		})
 	}

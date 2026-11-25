@@ -25,7 +25,7 @@ func TestGlobalRuntimeToolsRequireCurrentOrgAdmin(t *testing.T) {
 	require.NoError(t, err)
 	project := createProject(t, h, "Global tools")
 	require.NoError(t, tc.stores.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, "maintainer"))
-	names := []string{"view_settings", "list_channels", "view_system_update", "list_models", "get_model", "list_personalities", "get_personality", "set_personality", "save_custom_personality", "list_agents", "create_agent", "update_agent"}
+	names := []string{"view_settings", "list_channels", "view_system_update", "list_models", "get_model", "list_agents", "create_agent", "update_agent"}
 	calls := 0
 	handlers := map[string]chatcontrol.RuntimeActionHandler{}
 	for _, name := range names {

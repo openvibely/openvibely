@@ -68,7 +68,7 @@ func TestViewerPermissionToastsInChrome(t *testing.T) {
     const count=denials.length;
     if(!await openVibelyPermissionErrors.fetch(response)||denials.length!==count+1)throw Error('Expected one permission toast: '+path);
   }
-  for(const path of ['/models','/agents','/skills','/personality','/workers']) {
+  for(const path of ['/models','/agents','/skills','/workers']) {
     const response=await fetch(path),count=denials.length;
     if(response.status!==403||!await openVibelyPermissionErrors.fetch(response)||denials.length!==count+1)throw Error('Missing settings permission toast: '+path);
     if(!denials[count].includes('Organization admin access is required'))throw Error('Wrong settings permission explanation: '+path);

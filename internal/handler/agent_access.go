@@ -9,7 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/service/authz"
 )
 
-// Agent definitions, skills, personalities, hooks, and plugins are instance-wide.
+// Agent definitions, skills, hooks, and plugins are instance-wide.
 // A project maintainer grant must not authorize changing shared executable code.
 func (h *Handler) authorizeSharedDefinitionResource(c echo.Context) error {
 	path := c.Path()
@@ -49,7 +49,7 @@ func (h *Handler) authorizeSharedDefinitionResource(c echo.Context) error {
 		return h.requireCurrentOrgAdmin(c)
 	}
 	protected := false
-	for _, root := range []string{"/agents", "/skills", "/personality", "/models"} {
+	for _, root := range []string{"/agents", "/skills", "/models"} {
 		if path == root || strings.HasPrefix(path, root+"/") {
 			protected = true
 			break
@@ -91,7 +91,6 @@ func organizationSettingsAccessResponse(c echo.Context) error {
 		"/models":                "Models",
 		"/agents":                "Agents",
 		"/skills":                "Skills",
-		"/personality":           "Personalities",
 		"/workers":               "Workers",
 		"/settings/workers":      "Workers",
 		"/settings/plugin-pages": "Custom Pages",

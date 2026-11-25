@@ -247,7 +247,6 @@ func TestSidebar_ProjectSelectorPreservesRouteMappingAndConfirmation(t *testing.
 		"/alerts",
 		"/workers",
 		"/channels",
-		"/personality",
 	} {
 		if !strings.Contains(html, "currentPath.includes('"+path+"')") {
 			t.Fatalf("project selector route mapping missing %s", path)
@@ -299,7 +298,7 @@ func TestSidebar_NavigationHeadingHiddenAndLinksPreserved(t *testing.T) {
 		t.Fatal("insights navigation must render as top-level links, not a collapsible details menu")
 	}
 
-	for _, route := range []string{"models", "agents", "skills", "channels", "personality", "workers"} {
+	for _, route := range []string{"models", "agents", "skills", "channels", "workers"} {
 		if strings.Contains(html, `data-nav-base="/`+route+`"`) {
 			t.Errorf("configuration link %s remains in the rail", route)
 		}

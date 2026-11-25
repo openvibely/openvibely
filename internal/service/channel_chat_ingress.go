@@ -67,8 +67,6 @@ type channelTaskThreadSendOptions struct {
 	ExecRepo                   persistence.ExecutionStore
 	ThreadInputRepo            persistence.ThreadInputStore
 	LLMConfigRepo              persistence.LLMConfigStore
-	SettingsRepo               persistence.SettingsStore
-	CustomPersonalityRepo      persistence.CustomPersonalityStore
 	ChannelTaskRunner          ChannelTaskRunner
 	RuntimeToolsForTask        func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter   func(taskID string)
@@ -134,8 +132,6 @@ type channelChatIngressFirstTurnOptions struct {
 	LLMConfigRepo              persistence.LLMConfigStore
 	ScheduleRepo               persistence.ScheduleStore
 	AgentRepo                  persistence.AgentStore
-	SettingsRepo               persistence.SettingsStore
-	CustomPersonalityRepo      persistence.CustomPersonalityStore
 	ProjectRepo                persistence.ProjectStore
 	OnTaskCreateFailure        func(context.Context)
 	OnTaskContextFailure       func(context.Context)
@@ -161,18 +157,16 @@ type channelChatIngressOptions struct {
 	HasAttachments bool
 	Start          time.Time
 
-	TaskRepo              persistence.TaskStore
-	ExecRepo              persistence.ExecutionStore
-	ThreadInputRepo       persistence.ThreadInputStore
-	LLMConfigRepo         persistence.LLMConfigStore
-	ScheduleRepo          persistence.ScheduleStore
-	AgentRepo             persistence.AgentStore
-	SettingsRepo          persistence.SettingsStore
-	CustomPersonalityRepo persistence.CustomPersonalityStore
-	ProjectRepo           persistence.ProjectStore
-	TaskSvc               *TaskService
-	ChatBroadcaster       *events.ChatBroadcaster
-	UploadsDir            string
+	TaskRepo        persistence.TaskStore
+	ExecRepo        persistence.ExecutionStore
+	ThreadInputRepo persistence.ThreadInputStore
+	LLMConfigRepo   persistence.LLMConfigStore
+	ScheduleRepo    persistence.ScheduleStore
+	AgentRepo       persistence.AgentStore
+	ProjectRepo     persistence.ProjectStore
+	TaskSvc         *TaskService
+	ChatBroadcaster *events.ChatBroadcaster
+	UploadsDir      string
 
 	DownloadAttachments                       func(context.Context) (channelChatIngressDownloadResult, error)
 	ContinueWithoutAttachmentsOnDownloadError bool
@@ -287,8 +281,6 @@ type channelChatContextOptions struct {
 	AvailableModelsLoaded bool
 	ScheduleRepo          persistence.ScheduleStore
 	AgentRepo             persistence.AgentStore
-	SettingsRepo          persistence.SettingsStore
-	CustomPersonalityRepo persistence.CustomPersonalityStore
 }
 
 func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions) string {
@@ -311,9 +303,6 @@ func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions
 		}
 	}
 	systemContext := BuildChatContextWithAgentDefinitions(existingTasks, availableModels, listChannelChatAssignableAgentDefinitions(ctx, opts.Platform, opts.AgentRepo), schedules, time.Now())
-	if personalityPrompt := getChannelChatPersonalityContext(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo); personalityPrompt != "" {
-		systemContext += personalityPrompt
-	}
 	return systemContext
 }
 
@@ -327,21 +316,6 @@ func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform str
 		return nil
 	}
 	return UniqueChatAssignableAgentDefinitions(agents)
-}
-
-func getChannelChatPersonalityContext(ctx context.Context, settingsRepo persistence.SettingsStore, customRepo persistence.CustomPersonalityStore) string {
-	if settingsRepo == nil {
-		return ""
-	}
-	personality, err := settingsRepo.Get(ctx, "personality")
-	if err != nil || personality == "" {
-		return ""
-	}
-	prompt := GetPersonalityPromptWithCustom(ctx, personality, customRepo)
-	if prompt == "" {
-		return ""
-	}
-	return "\n# Communication Style\n\n" + prompt
 }
 
 func resolveChannelChatWorkDir(ctx context.Context, projectRepo persistence.ProjectStore, projectID string) string {
@@ -540,9 +514,6 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 		priorHistory = opts.FilterHistory(priorExecs, exec.ID)
 	}
 	systemContext := buildTelegramTaskChatContext(task.Title, len(priorHistory) > 0)
-	if pCtx := getChannelChatPersonalityContext(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo); pCtx != "" {
-		systemContext += pCtx
-	}
 	if opts.ChannelTaskRunner == nil {
 		msgText := "shared task runner is unavailable"
 		if opts.CompleteExecution != nil {
@@ -802,12 +773,6 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 	}
 	if first.AgentRepo == nil {
 		first.AgentRepo = opts.AgentRepo
-	}
-	if first.SettingsRepo == nil {
-		first.SettingsRepo = opts.SettingsRepo
-	}
-	if first.CustomPersonalityRepo == nil {
-		first.CustomPersonalityRepo = opts.CustomPersonalityRepo
 	}
 	if first.ProjectRepo == nil {
 		first.ProjectRepo = opts.ProjectRepo
@@ -1085,8 +1050,6 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		AvailableModelsLoaded: opts.AvailableModelsLoaded,
 		ScheduleRepo:          opts.ScheduleRepo,
 		AgentRepo:             opts.AgentRepo,
-		SettingsRepo:          opts.SettingsRepo,
-		CustomPersonalityRepo: opts.CustomPersonalityRepo,
 	})
 	workDir := resolveChannelChatWorkDir(ctx, opts.ProjectRepo, opts.ProjectID)
 	initialAckID := opts.InitialAckID

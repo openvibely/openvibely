@@ -131,8 +131,6 @@ func Terms(kind, order string) []Term {
 		if order == "source" {
 			return append([]Term{{Field: "Source"}}, name...)
 		}
-	case "personalities":
-		name[2].Field = "Key"
 	}
 	if order == "name_desc" {
 		for i := range name {

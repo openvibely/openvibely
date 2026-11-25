@@ -24,14 +24,11 @@ const (
 )
 
 type cardPageRequest struct {
-	Page              int
-	PageSize          int
-	Offset            int
-	Search            string
-	IsFragment        bool
-	PersonalityActive *bool
-	PersonalityKind   string
-	PersonalitySort   string
+	Page       int
+	PageSize   int
+	Offset     int
+	Search     string
+	IsFragment bool
 }
 
 func parseCardPageRequest(c echo.Context) cardPageRequest {
@@ -75,14 +72,11 @@ func parseCardPageRequest(c echo.Context) cardPageRequest {
 		s.Limit = pageSize + 1
 	}
 	return cardPageRequest{
-		Page:              page,
-		PageSize:          pageSize,
-		Offset:            offset,
-		Search:            strings.TrimSpace(c.QueryParam("search")),
-		IsFragment:        isFragment,
-		PersonalityActive: optionalBoolQuery(c, "active"),
-		PersonalityKind:   allowlistedQuery(c, "kind", "", "base", "built_in", "custom", "override"),
-		PersonalitySort:   allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc"),
+		Page:       page,
+		PageSize:   pageSize,
+		Offset:     offset,
+		Search:     strings.TrimSpace(c.QueryParam("search")),
+		IsFragment: isFragment,
 	}
 }
 
@@ -208,8 +202,6 @@ func initCardCursor(c echo.Context) {
 	switch section {
 	case "automations", "alerts", "models", "agents", "skills":
 		kind = section
-	case "personality":
-		kind = "personalities"
 	case "channels":
 		kind = "webhooks"
 	}
@@ -279,10 +271,6 @@ func cardCursorListQuery(c echo.Context, kind string) url.Values {
 		for _, key := range []string{"scope", "source"} {
 			allowed(key, "", "global", "project")
 		}
-	case "personalities":
-		allowed("sort", "name_asc", "name_asc", "name_desc")
-		allowed("kind", "", "base", "built_in", "custom", "override")
-		boolean("active")
 	case "webhooks":
 		allowed("sort", "name_asc", "name_asc", "name_desc")
 		allowed("type", "", "github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets")

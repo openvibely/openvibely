@@ -6610,10 +6610,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									if (card.querySelector(':scope > [data-card-selection-gutter]')) return;
 									card.classList.add('relative');
 									var gutter = document.createElement('div'); gutter.className = 'absolute left-5 top-8 z-20 hidden md:block'; gutter.setAttribute('data-card-selection-gutter', '');
-									var checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'checkbox checkbox-sm'; checkbox.setAttribute('aria-label', 'Select ' + (card.getAttribute('data-card-select-id') || card.getAttribute('data-personality-name') || card.getAttribute('data-channel-type') || 'card'));
+									var checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'checkbox checkbox-sm'; checkbox.setAttribute('aria-label', 'Select ' + (card.getAttribute('data-card-select-id') || card.getAttribute('data-channel-type') || 'card'));
 									if (!eligible(card)) {
 										var reason = card.getAttribute('data-card-select-disabled-reason');
-										if (!reason && key === 'personality') reason = 'Only custom personalities can be selected';
 										if (!reason && key === 'channels') reason = 'This channel cannot be selected';
 										if (!reason) reason = 'This card cannot be selected';
 										var help = document.createElement('span'); help.id = key + '-selection-help-' + index; help.className = 'sr-only'; help.textContent = reason;

@@ -61,9 +61,6 @@ func (h *Handler) cardBulk(ctx context.Context, kind, operation, project string,
 	projectServer, _ := remoteid.ServerOf(project)
 	for _, id := range ids {
 		server, _ := remoteid.ServerOf(id)
-		if server == "" && (kind == "personalities") {
-			server = projectServer
-		}
 		groups[server] = append(groups[server], id)
 	}
 	// Shared repository scopes are selected on the desktop; verify membership
@@ -174,7 +171,7 @@ var actCardBulk = defineAction("cards.bulk", func(h *Handler, ctx context.Contex
 		return "", authz.Edit, statusErr(http.StatusBadRequest, "invalid selection size")
 	}
 	switch a.Kind {
-	case "models", "agents", "personalities":
+	case "models", "agents":
 		return instanceActionProject, authz.Edit, h.requireActionAdmin(ctx)
 	}
 	projects, err := h.cardBulkProjects(ctx, a)
@@ -194,8 +191,6 @@ var actCardBulk = defineAction("cards.bulk", func(h *Handler, ctx context.Contex
 		err = h.deleteModels(ctx, a.IDs, a.CheckOnly)
 	case "agents":
 		err = h.deleteAgents(ctx, a.ProjectID, a.IDs, a.CheckOnly)
-	case "personalities":
-		err = h.deletePersonalities(ctx, a.IDs, a.CheckOnly)
 	default:
 		projects, e := h.cardBulkProjects(ctx, a)
 		if e != nil {

@@ -527,7 +527,7 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 		}
 		params.ChatHistory = filterChatHistory(history, exec.ID)
 		params.WorkDir = h.resolveWorkDir(ctx, task.ProjectID)
-		params.SystemContext = h.getPersonalityContext(ctx, task.ProjectID)
+		params.SystemContext = ""
 	}
 	if h.automationGraphSvc != nil {
 		value, e := h.automationGraphSvc.ContextForExecution(ctx, task.ProjectID, original.ID)

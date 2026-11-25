@@ -78,7 +78,6 @@ type DiscordService struct {
 	automationCompiler                   *AutomationCompiler
 	threadInputRepo                      persistence.ThreadInputStore
 	chatAttachmentRepo                   persistence.ChatAttachmentStore
-	customPersonalityRepo                persistence.CustomPersonalityStore
 	agentRepo                            persistence.AgentStore
 	alertSvc                             *AlertService
 	usageAnalyticsSvc                    *UsageAnalyticsService
@@ -163,9 +162,6 @@ func (s *DiscordService) SetUsageAnalyticsService(svc *UsageAnalyticsService) {
 
 func (s *DiscordService) SetThreadInputRepo(repo persistence.ThreadInputStore) {
 	s.threadInputRepo = repo
-}
-func (s *DiscordService) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
-	s.customPersonalityRepo = repo
 }
 func (s *DiscordService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
 	s.projectSvc = projectSvc
@@ -455,25 +451,23 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 	}
 	discordAckID := ""
 	runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:              "discord",
-		ProjectID:             projectID,
-		Message:               msg.Text,
-		Source:                msg.Source,
-		Surface:               chatcontrol.SurfaceDiscord,
-		HasAttachments:        len(msg.Attachments) > 0,
-		Start:                 start,
-		TaskRepo:              s.taskRepo,
-		ExecRepo:              s.execRepo,
-		ThreadInputRepo:       s.threadInputRepo,
-		LLMConfigRepo:         s.llmConfigRepo,
-		ChatBroadcaster:       s.chatBroadcaster,
-		UploadsDir:            s.uploadsDir,
-		TaskSvc:               s.taskSvc,
-		ScheduleRepo:          s.scheduleRepo,
-		AgentRepo:             s.agentRepo,
-		SettingsRepo:          s.settingsRepo,
-		CustomPersonalityRepo: s.customPersonalityRepo,
-		ProjectRepo:           s.projectRepo,
+		Platform:        "discord",
+		ProjectID:       projectID,
+		Message:         msg.Text,
+		Source:          msg.Source,
+		Surface:         chatcontrol.SurfaceDiscord,
+		HasAttachments:  len(msg.Attachments) > 0,
+		Start:           start,
+		TaskRepo:        s.taskRepo,
+		ExecRepo:        s.execRepo,
+		ThreadInputRepo: s.threadInputRepo,
+		LLMConfigRepo:   s.llmConfigRepo,
+		ChatBroadcaster: s.chatBroadcaster,
+		UploadsDir:      s.uploadsDir,
+		TaskSvc:         s.taskSvc,
+		ScheduleRepo:    s.scheduleRepo,
+		AgentRepo:       s.agentRepo,
+		ProjectRepo:     s.projectRepo,
 		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
 			if len(msg.Attachments) == 0 {
 				return channelChatIngressDownloadResult{}, nil
@@ -814,17 +808,16 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
-		Platform:                 "discord",
-		ProjectID:                projectID,
-		Surface:                  chatcontrol.SurfaceDiscord,
-		Source:                   models.TaskOriginDiscord,
-		ActorID:                  actionCtx.UserID,
-		TaskRepo:                 s.taskRepo,
-		ExecRepo:                 s.execRepo,
-		ThreadInputRepo:          s.threadInputRepo,
-		LLMConfigRepo:            s.llmConfigRepo,
-		SettingsRepo:             s.settingsRepo,
-		CustomPersonalityRepo:    s.customPersonalityRepo,
+		Platform:        "discord",
+		ProjectID:       projectID,
+		Surface:         chatcontrol.SurfaceDiscord,
+		Source:          models.TaskOriginDiscord,
+		ActorID:         actionCtx.UserID,
+		TaskRepo:        s.taskRepo,
+		ExecRepo:        s.execRepo,
+		ThreadInputRepo: s.threadInputRepo,
+		LLMConfigRepo:   s.llmConfigRepo,
+
 		ChannelTaskRunner:        s.channelTaskRunner,
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
@@ -846,18 +839,17 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		AutomationCompiler: s.automationCompiler,
 		WorkerSvc:          s.workerSvc,
 		LLMConfigRepo:      s.llmConfigRepo, AgentRepo: s.agentRepo,
-		SettingsRepo:          s.settingsRepo,
-		CustomPersonalityRepo: s.customPersonalityRepo,
-		ProjectRepo:           s.projectRepo,
-		AlertSvc:              s.alertSvc,
-		UsageAnalyticsSvc:     s.usageAnalyticsSvc,
-		UpcomingSvc:           s.upcomingSvc,
-		DiscordStatus:         s.GetConnectionStatus,
-		DiscordAuthRepo:       s.discordAuthRepo,
-		EmailStatus:           s.emailStatus,
-		EmailAuthRepo:         s.emailAuthRepo,
-		WebhookRepo:           s.webhookRepo,
-		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
+		SettingsRepo:      s.settingsRepo,
+		ProjectRepo:       s.projectRepo,
+		AlertSvc:          s.alertSvc,
+		UsageAnalyticsSvc: s.usageAnalyticsSvc,
+		UpcomingSvc:       s.upcomingSvc,
+		DiscordStatus:     s.GetConnectionStatus,
+		DiscordAuthRepo:   s.discordAuthRepo,
+		EmailStatus:       s.emailStatus,
+		EmailAuthRepo:     s.emailAuthRepo,
+		WebhookRepo:       s.webhookRepo,
+		ChannelTargets:    channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:     projectID,

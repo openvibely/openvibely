@@ -32,10 +32,8 @@ func TestRemoteOwnerOperationsPreserveLocalState(t *testing.T) {
 	h, e := env.Handler, env.Echo
 	h.SetRemote(hub, nil)
 	h.SetAgentRepo(wrapped.Agents)
-	h.SetCustomPersonalityRepo(wrapped.CustomPersonalities)
 	srv, _, owner := fakeRemoteOV(t, "secret")
 	owner.SetAgentRepo(owner.remoteExecutor.Stores.Agents)
-	owner.SetCustomPersonalityRepo(owner.remoteExecutor.Stores.CustomPersonalities)
 	owner.lifecycleRepo = owner.remoteExecutor.Stores.Lifecycle
 	owner.slackAuthRepo = owner.remoteExecutor.Stores.SlackAuth
 	owner.telegramAuthRepo = owner.remoteExecutor.Stores.TelegramAuth
@@ -52,33 +50,6 @@ func TestRemoteOwnerOperationsPreserveLocalState(t *testing.T) {
 	require.Eventually(t, func() bool { return len(hub.Servers(models.BootstrapUserID)) == 1 }, 5*time.Second, 20*time.Millisecond)
 	sid := savedServerID(t, h)
 	projectID := remoteid.ID(sid, project.ID)
-
-	t.Run("personality CRUD and selection", func(t *testing.T) {
-		p := &models.CustomPersonality{Key: "reviewer", Name: "Reviewer", SystemPrompt: "Review carefully"}
-		require.NoError(t, local.Stores.CustomPersonalities.Create(ctx, &models.CustomPersonality{Key: p.Key, Name: "Local reviewer", SystemPrompt: "Keep Local"}))
-		require.NoError(t, h.settingsRepo.Set(ctx, "personality", "local-choice"))
-		_, err := actPersonalityOperation(h, caller, personalityOperationArgs{ProjectID: projectID, Key: p.Key, Operation: "create", Personality: p})
-		require.NoError(t, err)
-		_, err = actPersonalityOperation(h, caller, personalityOperationArgs{ProjectID: projectID, Key: p.Key, Operation: "select"})
-		require.NoError(t, err)
-		got, err := owner.settingsRepo.Get(ctx, "personality")
-		require.NoError(t, err)
-		require.Equal(t, "reviewer", got)
-		got, err = h.settingsRepo.Get(ctx, "personality")
-		require.NoError(t, err)
-		require.Equal(t, "local-choice", got)
-		p.Name = "Updated reviewer"
-		_, err = actPersonalityOperation(h, caller, personalityOperationArgs{ProjectID: projectID, Key: p.Key, Operation: "update", Personality: p})
-		require.NoError(t, err)
-		_, err = actPersonalityOperation(h, caller, personalityOperationArgs{ProjectID: projectID, Key: p.Key, Operation: "delete"})
-		require.NoError(t, err)
-		kept, err := local.Stores.CustomPersonalities.GetByKey(ctx, p.Key)
-		require.NoError(t, err)
-		require.Equal(t, "Local reviewer", kept.Name)
-		deleted, err := owner.customPersonalityRepo.GetByKey(ctx, p.Key)
-		require.NoError(t, err)
-		require.Nil(t, deleted)
-	})
 
 	t.Run("model create edit secret preservation default and deletion", func(t *testing.T) {
 		values := url.Values{"name": {"Remote model"}, "provider": {"anthropic"}, "anthropic_auth_type": {"api_key"}, "model": {"claude-sonnet-4-5-20250929"}, "api_key": {"remote-test-key"}}
@@ -320,11 +291,6 @@ func TestRemoteOwnerOperationsPreserveLocalState(t *testing.T) {
 		got, err := h.settingsRepo.Get(ctx, service.DiscordSettingBotToken)
 		require.NoError(t, err)
 		require.Equal(t, "Local unchanged", got)
-		_, err = actPersonalityOperation(h, caller, personalityOperationArgs{ProjectID: projectID, Key: "reviewer", Operation: "delete"})
-		require.Error(t, err)
-		kept, err := local.Stores.CustomPersonalities.GetByKey(ctx, "reviewer")
-		require.NoError(t, err)
-		require.NotNil(t, kept)
 	})
 
 }

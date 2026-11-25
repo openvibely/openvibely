@@ -31,7 +31,7 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 			content = ShortcutsContent()
 		case "/themes":
 			content = ThemesContent(nil)
-		case "/models", "/agents", "/skills", "/channels", "/personality":
+		case "/models", "/agents", "/skills", "/channels":
 			content = templ.Raw(`<div id="` + r.URL.Path[1:] + `-container">Configuration</div>`)
 		case "/settings/updates":
 			content = UpdateSettingsContent("project", update.CoordinatorSnapshot{AutomaticUpdates: true, AutomaticUpdatesSupported: true}, true, false, "")
@@ -87,7 +87,7 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		waitFor("layout previews", `String(!document.querySelector('[data-settings-section="layout"]').hidden && document.querySelector('[data-settings-section="themes"]').hidden && !!document.querySelector('[data-settings-section="layout"] .display-preview'))`, "true")
 		b.evaluate(`document.querySelector('[data-settings-link="chat"]').click();'chat'`)
 		waitFor("chat previews", `String(!document.querySelector('[data-settings-section="chat"]').hidden && !!document.querySelector('[data-settings-section="chat"] .display-preview'))`, "true")
-		for _, route := range []string{"models", "shortcuts", "channels", "personality", "skills", "agents"} {
+		for _, route := range []string{"models", "shortcuts", "channels", "skills", "agents"} {
 			b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/` + route + `"] ').click();'configuration'`)
 			waitFor("settings navigation survives "+route, `String(!!document.getElementById('`+route+`-container') && document.documentElement.classList.contains('appearance-settings') && !document.documentElement.classList.contains('task-list-collapsed'))`, "true")
 			waitFor("settings rail selected", `String(document.querySelector('.sidebar-aside [data-nav-base="/themes"]').getAttribute('aria-current')==='page')`, "true")

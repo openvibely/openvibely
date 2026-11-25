@@ -527,20 +527,19 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		}
 	}
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
-		GitHubConnection:      personalGitHubStatusProvider(s.gitCredentials),
-		ProjectID:             task.ProjectID,
-		CallerTaskID:          task.ID,
-		TaskRepo:              s.taskRepo,
-		ScheduleRepo:          s.scheduleRepo,
-		WorkerSvc:             workerFromTaskService(s.taskSvc),
-		LLMConfigRepo:         s.llmConfigRepo,
-		AgentRepo:             s.agentRepo,
-		SettingsRepo:          nil,
-		CustomPersonalityRepo: nil,
-		ProjectRepo:           s.projectRepo,
-		AlertSvc:              s.alertSvc,
-		UsageAnalyticsSvc:     usageAnalyticsSvc,
-		UpcomingSvc:           s.upcomingSvc,
+		GitHubConnection:  personalGitHubStatusProvider(s.gitCredentials),
+		ProjectID:         task.ProjectID,
+		CallerTaskID:      task.ID,
+		TaskRepo:          s.taskRepo,
+		ScheduleRepo:      s.scheduleRepo,
+		WorkerSvc:         workerFromTaskService(s.taskSvc),
+		LLMConfigRepo:     s.llmConfigRepo,
+		AgentRepo:         s.agentRepo,
+		SettingsRepo:      nil,
+		ProjectRepo:       s.projectRepo,
+		AlertSvc:          s.alertSvc,
+		UsageAnalyticsSvc: usageAnalyticsSvc,
+		UpcomingSvc:       s.upcomingSvc,
 		PrepareImplementationTask: func(ctx context.Context, input *models.AlertImplementationTaskInput) error {
 			return s.prepareAutomationAlertImplementationTask(ctx, task.ProjectID, input)
 		},

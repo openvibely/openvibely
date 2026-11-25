@@ -29,7 +29,6 @@ func TestInstanceSettingsIgnoreRemoteProjectSelection(t *testing.T) {
 	h, app := env.Handler, env.Echo
 	h.SetRemote(hub, nil)
 	h.SetAgentRepo(wrapped.Agents)
-	h.SetCustomPersonalityRepo(wrapped.CustomPersonalities)
 	h.SetAgentSkillRoot(t.TempDir())
 	srv, _, owner := fakeRemoteOV(t, "secret")
 	owner.SetAgentRepo(owner.remoteExecutor.Stores.Agents)
@@ -67,14 +66,6 @@ func TestInstanceSettingsIgnoreRemoteProjectSelection(t *testing.T) {
 			got, err = owner.settingsRepo.Get(ctx, service.SlackSettingClientID)
 			require.NoError(t, err)
 			require.Equal(t, "remote-client", got)
-			key := fmt.Sprintf("local_personality_%d", i)
-			post("/personality/custom", url.Values{"name": {key}, "system_prompt": {"A sufficiently long personality prompt for testing."}})
-			p, err := stores.Stores.CustomPersonalities.GetByKey(ctx, key)
-			require.NoError(t, err)
-			require.NotNil(t, p)
-			p, err = owner.remoteExecutor.Stores.CustomPersonalities.GetByKey(ctx, key)
-			require.NoError(t, err)
-			require.Nil(t, p)
 			post("/settings/worktree", url.Values{"worktree_cleanup": {"true"}})
 			cleanup, err := stores.Stores.Settings.Get(ctx, "worktree_cleanup")
 			require.NoError(t, err)
@@ -89,7 +80,7 @@ func TestInstanceSettingsIgnoreRemoteProjectSelection(t *testing.T) {
 			n, err = owner.workerRepo.GetMaxWorkers(ctx)
 			require.NoError(t, err)
 			require.Equal(t, remoteWorkers, n)
-			for _, path := range []string{"/personality", "/workers", "/workers/stats/models", "/models"} {
+			for _, path := range []string{"/workers", "/workers/stats/models", "/models"} {
 				rec := httptest.NewRecorder()
 				req := httptest.NewRequest("GET", path+"?project_id="+url.QueryEscape(scope), nil)
 				req.Header.Set("HX-Request", "true")

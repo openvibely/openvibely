@@ -82,7 +82,6 @@ type TelegramService struct {
 	telegramAuthRepo                     telegramAuthorizationStore
 	telegramUserProjectRepo              persistence.TelegramUserProjectStore
 	settingsRepo                         persistence.SettingsStore
-	customPersonalityRepo                persistence.CustomPersonalityStore
 	agentRepo                            persistence.AgentStore
 	alertSvc                             *AlertService
 	usageAnalyticsSvc                    *UsageAnalyticsService
@@ -229,14 +228,9 @@ func (s *TelegramService) SetTelegramUserProjectRepo(repo persistence.TelegramUs
 	s.telegramUserProjectRepo = repo
 }
 
-// SetSettingsRepo sets the global settings repo for reading app-wide settings like personality.
+// SetSettingsRepo sets the global settings repo for reading app-wide settings.
 func (s *TelegramService) SetSettingsRepo(repo persistence.SettingsStore) {
 	s.settingsRepo = repo
-}
-
-// SetCustomPersonalityRepo sets the custom personality repo for resolving custom personality prompts.
-func (s *TelegramService) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
-	s.customPersonalityRepo = repo
 }
 
 func (s *TelegramService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
@@ -734,25 +728,23 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 	var telegramImageAttachments []models.Attachment
 	durablyHandedOff := false
 	runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:              "telegram",
-		ProjectID:             projectID,
-		Message:               text,
-		Source:                models.TaskOriginTelegram,
-		Surface:               chatcontrol.SurfaceTelegram,
-		HasAttachments:        fileID != "",
-		Start:                 start,
-		TaskRepo:              s.taskRepo,
-		ExecRepo:              s.execRepo,
-		ThreadInputRepo:       s.threadInputRepo,
-		LLMConfigRepo:         s.llmConfigRepo,
-		ChatBroadcaster:       s.chatBroadcaster,
-		UploadsDir:            telegramUploadsDir,
-		TaskSvc:               s.taskSvc,
-		ScheduleRepo:          s.scheduleRepo,
-		AgentRepo:             s.agentRepo,
-		SettingsRepo:          s.settingsRepo,
-		CustomPersonalityRepo: s.customPersonalityRepo,
-		ProjectRepo:           s.projectRepo,
+		Platform:        "telegram",
+		ProjectID:       projectID,
+		Message:         text,
+		Source:          models.TaskOriginTelegram,
+		Surface:         chatcontrol.SurfaceTelegram,
+		HasAttachments:  fileID != "",
+		Start:           start,
+		TaskRepo:        s.taskRepo,
+		ExecRepo:        s.execRepo,
+		ThreadInputRepo: s.threadInputRepo,
+		LLMConfigRepo:   s.llmConfigRepo,
+		ChatBroadcaster: s.chatBroadcaster,
+		UploadsDir:      telegramUploadsDir,
+		TaskSvc:         s.taskSvc,
+		ScheduleRepo:    s.scheduleRepo,
+		AgentRepo:       s.agentRepo,
+		ProjectRepo:     s.projectRepo,
 		OnDurableHandoff: func() {
 			durablyHandedOff = true
 			if onDurableHandoff != nil {
@@ -1381,17 +1373,16 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
-		Platform:                 "telegram",
-		ProjectID:                projectID,
-		Surface:                  chatcontrol.SurfaceTelegram,
-		Source:                   models.TaskOriginTelegram,
-		ActorID:                  fmt.Sprintf("%d", userID),
-		TaskRepo:                 s.taskRepo,
-		ExecRepo:                 s.execRepo,
-		ThreadInputRepo:          s.threadInputRepo,
-		LLMConfigRepo:            s.llmConfigRepo,
-		SettingsRepo:             s.settingsRepo,
-		CustomPersonalityRepo:    s.customPersonalityRepo,
+		Platform:        "telegram",
+		ProjectID:       projectID,
+		Surface:         chatcontrol.SurfaceTelegram,
+		Source:          models.TaskOriginTelegram,
+		ActorID:         fmt.Sprintf("%d", userID),
+		TaskRepo:        s.taskRepo,
+		ExecRepo:        s.execRepo,
+		ThreadInputRepo: s.threadInputRepo,
+		LLMConfigRepo:   s.llmConfigRepo,
+
 		ChannelTaskRunner:        s.channelTaskRunner,
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
@@ -1437,18 +1428,17 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		AutomationCompiler: s.automationCompiler,
 		WorkerSvc:          s.workerSvc,
 		LLMConfigRepo:      s.llmConfigRepo, AgentRepo: s.agentRepo,
-		SettingsRepo:          s.settingsRepo,
-		CustomPersonalityRepo: s.customPersonalityRepo,
-		ProjectRepo:           s.projectRepo,
-		AlertSvc:              s.alertSvc,
-		UsageAnalyticsSvc:     s.usageAnalyticsSvc,
-		UpcomingSvc:           s.upcomingSvc,
-		TelegramRunning:       s.IsRunning,
-		TelegramAuthRepo:      telegramAuthCountStore(s.telegramAuthRepo),
-		EmailStatus:           s.emailStatus,
-		EmailAuthRepo:         s.emailAuthRepo,
-		WebhookRepo:           s.webhookRepo,
-		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
+		SettingsRepo:      s.settingsRepo,
+		ProjectRepo:       s.projectRepo,
+		AlertSvc:          s.alertSvc,
+		UsageAnalyticsSvc: s.usageAnalyticsSvc,
+		UpcomingSvc:       s.upcomingSvc,
+		TelegramRunning:   s.IsRunning,
+		TelegramAuthRepo:  telegramAuthCountStore(s.telegramAuthRepo),
+		EmailStatus:       s.emailStatus,
+		EmailAuthRepo:     s.emailAuthRepo,
+		WebhookRepo:       s.webhookRepo,
+		ChannelTargets:    channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:     projectID,

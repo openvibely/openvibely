@@ -304,7 +304,6 @@ type EmailService struct {
 	emailInboundReceiptStore   emailInboundReceiptStore
 	emailSenderProjectRepo     persistence.EmailSenderProjectStore
 	threadInputRepo            persistence.ThreadInputStore
-	customPersonalityRepo      persistence.CustomPersonalityStore
 	agentRepo                  persistence.AgentStore
 	chatBroadcaster            *events.ChatBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
@@ -391,9 +390,6 @@ func (s *EmailService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 }
 func (s *EmailService) SetThreadInputRepo(repo persistence.ThreadInputStore) {
 	s.threadInputRepo = repo
-}
-func (s *EmailService) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
-	s.customPersonalityRepo = repo
 }
 func (s *EmailService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
 	s.projectSvc = projectSvc
@@ -1314,25 +1310,23 @@ func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx conte
 	handedOff := false
 	receiptRecorded := false
 	runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:              "email",
-		ProjectID:             projectID,
-		Message:               prompt,
-		Source:                models.TaskOriginEmail,
-		Surface:               chatcontrol.SurfaceEmail,
-		HasAttachments:        len(msg.Attachments) > 0,
-		TaskRepo:              s.taskRepo,
-		ExecRepo:              s.execRepo,
-		ThreadInputRepo:       s.threadInputRepo,
-		LLMConfigRepo:         s.llmConfigRepo,
-		ChatBroadcaster:       s.chatBroadcaster,
-		TaskSvc:               s.taskSvc,
-		ScheduleRepo:          s.scheduleRepo,
-		AgentRepo:             s.agentRepo,
-		SettingsRepo:          s.settingsRepo,
-		CustomPersonalityRepo: s.customPersonalityRepo,
-		ProjectRepo:           s.projectRepo,
-		UploadsDir:            s.emailUploadsDir(),
-		SelectionMessage:      msg.Body,
+		Platform:         "email",
+		ProjectID:        projectID,
+		Message:          prompt,
+		Source:           models.TaskOriginEmail,
+		Surface:          chatcontrol.SurfaceEmail,
+		HasAttachments:   len(msg.Attachments) > 0,
+		TaskRepo:         s.taskRepo,
+		ExecRepo:         s.execRepo,
+		ThreadInputRepo:  s.threadInputRepo,
+		LLMConfigRepo:    s.llmConfigRepo,
+		ChatBroadcaster:  s.chatBroadcaster,
+		TaskSvc:          s.taskSvc,
+		ScheduleRepo:     s.scheduleRepo,
+		AgentRepo:        s.agentRepo,
+		ProjectRepo:      s.projectRepo,
+		UploadsDir:       s.emailUploadsDir(),
+		SelectionMessage: msg.Body,
 		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
 			if len(msg.Attachments) == 0 {
 				return channelChatIngressDownloadResult{}, nil

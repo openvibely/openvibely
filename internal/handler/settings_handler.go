@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/openvibely/openvibely/internal/remoteid"
 	"net/http"
 	"net/url"
@@ -648,38 +647,6 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	return render(c, http.StatusOK, pages.SettingsPage(projects, channelView))
 }
 
-// handleAppSettings renders the application settings page (personality, etc.)
-func (h *Handler) handleAppSettings(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	page := h.parseCardPageRequest(c)
-
-	// Get projects for sidebar
-	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load projects")
-	}
-
-	// Load global personality setting
-	var personality string
-	if h.settingsRepo != nil {
-		personality, _ = h.settingsRepo.Get(c.Request().Context(), "personality")
-	}
-
-	// Load custom personalities using the bounded card projection.
-	customPersonalities, customPersonalitiesHasMore, err := h.listPersonalityCardPage(c.Request().Context(), page, personality)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load custom personalities")
-	}
-	setCardPageResponse(c, customPersonalitiesHasMore)
-
-	state := personalityListState(page)
-	state.ProjectID = projectID
-	if isHTMX(c) || page.IsFragment {
-		return render(c, http.StatusOK, pages.AppSettingsContentWithPaginationState(personality, projectID, customPersonalities, customPersonalitiesHasMore, state))
-	}
-	return render(c, http.StatusOK, pages.AppSettingsPageWithPaginationState(personality, projects, projectID, customPersonalities, customPersonalitiesHasMore, state))
-}
-
 // handleTelegramSave saves the Telegram bot token and starts the bot
 func (h *Handler) handleTelegramSave(c echo.Context) error {
 	projectID, err := h.getCurrentProjectID(c)
@@ -741,9 +708,6 @@ func (h *Handler) configureTelegramOnOwner(ctx context.Context, form url.Values)
 		}
 		if h.settingsRepo != nil {
 			svc.SetSettingsRepo(h.settingsRepo)
-		}
-		if h.customPersonalityRepo != nil {
-			svc.SetCustomPersonalityRepo(h.customPersonalityRepo)
 		}
 		if h.automationGraphSvc != nil {
 			svc.SetAutomationGraphService(h.automationGraphSvc)
@@ -1444,38 +1408,4 @@ func (h *Handler) configuredAppBaseURL() string {
 func templateEscape(s string) string {
 	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;")
 	return replacer.Replace(s)
-}
-
-// handlePersonalitySave saves the global chat personality setting
-func (h *Handler) handlePersonalitySave(c echo.Context) error {
-	ctx := c.Request().Context()
-	// Accept personality from form value OR query param (for kebab menu hx-post with query string).
-	// Read PostForm directly so an explicit empty form value still clears to the base/default personality.
-	personality := c.QueryParam("personality")
-	if err := c.Request().ParseForm(); err == nil {
-		if values, ok := c.Request().PostForm["personality"]; ok {
-			personality = ""
-			if len(values) > 0 {
-				personality = values[0]
-			}
-		}
-	}
-
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil {
-		return err
-	}
-	if _, err := actPersonalityOperation(h, ctx, personalityOperationArgs{ProjectID: projectID, Key: personality, Operation: "select"}); err != nil {
-		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusBadRequest {
-			return c.String(http.StatusBadRequest, fmt.Sprintf("Unknown personality %q. Refresh Personality settings and choose an available option.", personality))
-		}
-		return err
-	}
-
-	// Return re-rendered personality section for HTMX requests
-	if isHTMX(c) {
-		return h.renderPersonalitySection(c)
-	}
-
-	return c.String(http.StatusOK, "Personality saved successfully")
 }

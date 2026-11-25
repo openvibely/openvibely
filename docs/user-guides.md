@@ -26,11 +26,11 @@ OpenVibely is organized around a selected project. The sidebar project selector 
 | Automations | Build supported graphs from schedules, Tasks and Agents, Native approvals, GitHub actions, and outcomes, then watch current state in the Live graph. |
 | Schedule | Put individual project Tasks on a calendar so they run once or repeat. |
 | Insights | Use pulse, reflection, and analytics (including token usage, cost, and model breakdowns) to understand activity, history, and trends. |
-| System | Configure alerts, models, agents, workers, channels, and personality. |
+| System | Configure alerts, models, agents, workers, and channels. |
 
 ## Managing Large Collections
 
-Card-based lists for Alerts, Automations, Agents, Skills, Models, Channels, and custom Personalities share the same collection controls. Use search and the filters available for that surface to narrow the current project, choose a sort order, and scroll to load additional results without replacing the page.
+Card-based lists for Alerts, Automations, Agents, Skills, Models, and Channels share the same collection controls. Use search and the filters available for that surface to narrow the current project, choose a sort order, and scroll to load additional results without replacing the page.
 
 When selection is available, enter selection mode, choose individual cards or all loaded cards, and use the bulk delete action. The confirmation dialog states what will be removed; protected or non-manageable entries remain unavailable. Search, filters, and sort state are preserved while the collection refreshes.
 

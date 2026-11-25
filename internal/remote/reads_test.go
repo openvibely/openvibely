@@ -40,9 +40,6 @@ var writeMethods = map[string][]string{
 	"ChatInputRequests": {
 		"ClaimInstallationAnswer", "Create", "Resolve", "SaveInstallationContinuationResult",
 	},
-	"CustomPersonalities": {
-		"Create", "Delete", "DeleteBulk", "Update",
-	},
 	"Executions": {
 		"AppendConversationChanges", "AppendOutput", "CancelActiveByTaskThroughHistoryOrderReturningIDs",
 		"CancelQueuedOrdinaryByTaskReturningIDs", "Complete", "Create", "CreateDirectTaskFollowupOrQueue",

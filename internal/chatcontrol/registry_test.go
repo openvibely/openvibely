@@ -207,7 +207,7 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 func TestRegistry_AllActionsHaveDomain(t *testing.T) {
 	validDomains := map[Domain]bool{
 		DomainTasks: true, DomainSchedules: true, DomainAlerts: true,
-		DomainPersonality: true, DomainModels: true, DomainAgents: true,
+		DomainModels: true, DomainAgents: true,
 		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAnalytics: true, DomainPulse: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
 	}
 	for _, a := range Registry() {
@@ -265,43 +265,6 @@ func TestRegistry_DestructiveActionsNeedConfirmation(t *testing.T) {
 			t.Errorf("destructive action %q should have NeedsConfirmation=true", a.Name)
 		}
 	}
-}
-
-func TestSaveCustomPersonalityRegisteredOrchestrateOnly(t *testing.T) {
-	def := Get("save_custom_personality")
-	if def == nil {
-		t.Fatal("save_custom_personality missing from registry")
-	}
-	if def.Domain != DomainPersonality || def.Access != AccessWrite {
-		t.Fatalf("save_custom_personality domain/access = %s/%s, want personality/write", def.Domain, def.Access)
-	}
-	for _, surface := range AllSurfaces {
-		if err := IsAllowed("save_custom_personality", models.ChatModeOrchestrate, surface); err != nil {
-			t.Fatalf("save_custom_personality should be allowed in orchestrate on %s: %v", surface, err)
-		}
-		mustContain(t, toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true)), "save_custom_personality")
-		if err := IsAllowed("save_custom_personality", models.ChatModePlan, surface); err == nil {
-			t.Fatalf("save_custom_personality should be denied in plan on %s", surface)
-		}
-		mustNotContain(t, toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true)), "save_custom_personality")
-	}
-	var schema struct {
-		Required   []string                   `json:"required"`
-		Properties map[string]json.RawMessage `json:"properties"`
-	}
-	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
-		t.Fatalf("decode schema: %v", err)
-	}
-	for _, name := range []string{"mode", "name", "system_prompt", "key", "description", "activate"} {
-		if _, ok := schema.Properties[name]; !ok {
-			t.Fatalf("save_custom_personality schema missing %s", name)
-		}
-	}
-	required := map[string]bool{}
-	for _, name := range schema.Required {
-		required[name] = true
-	}
-	mustContain(t, required, "mode", "name", "system_prompt")
 }
 
 func TestDecideAlertRegisteredOrchestrateOnly(t *testing.T) {
@@ -444,7 +407,7 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	mustContain(t, names, "get_chat_mode", "set_chat_mode", "list_capabilities")
 	mustNotContain(t, names, "switch_project")
 	// Must have new read actions
-	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view", "view_system_update", "view_swarm")
+	mustContain(t, names, "get_alert", "get_model", "get_current_project", "memory_view", "view_system_update", "view_swarm")
 	// Must have alert decision actions in Orchestrate mode.
 	mustContain(t, names, "decide_alert")
 	// Must have GitHub mailbox actions on web/API surfaces.
@@ -469,16 +432,16 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 
 	// Must NOT have write actions
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
-		"set_personality", "save_custom_personality", "schedule_task", "delete_schedule", "modify_schedule",
+		"schedule_task", "delete_schedule", "modify_schedule",
 		"create_alert", "create_notification", "decide_alert", "delete_alert", "toggle_alert", "create_project", "update_project_settings", "switch_project",
 		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 		"save_automation", "run_automation_now", "pause_automation", "resume_automation", "delete_automation")
 
 	// Must have read actions
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
-		"list_personalities", "view_settings", "list_channels", "view_system_update", "project_info",
+		"view_settings", "list_channels", "view_system_update", "project_info",
 		"get_chat_mode", "list_capabilities", "get_alert", "get_model",
-		"get_personality", "get_current_project", "memory_view", "view_task_thread", "view_swarm", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
+		"get_current_project", "memory_view", "view_task_thread", "view_swarm", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
 }
 
 func TestViewSwarmRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
@@ -796,14 +759,13 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"create_task", "edit_task", "execute_tasks",
 		"view_task_thread", "send_to_task",
 		"schedule_task", "delete_schedule", "modify_schedule",
-		"list_personalities", "set_personality",
 		"list_models", "list_agents", "create_agent", "update_agent",
 		"view_settings", "list_channels", "view_system_update", "project_info",
 		"list_projects", "create_project", "update_project_settings", "switch_project",
 		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "decide_alert", "delete_alert", "toggle_alert",
 		// new actions
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
-		"get_alert", "get_model", "get_personality", "get_current_project",
+		"get_alert", "get_model", "get_current_project",
 		"memory_view", "send_message",
 		"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 	}
@@ -901,23 +863,6 @@ func TestRegistry_ModelFlowActions(t *testing.T) {
 		if def.Access != AccessRead {
 			t.Errorf("%s should be read, got %s", name, def.Access)
 		}
-	}
-}
-
-func TestRegistry_PersonalityFlowActions(t *testing.T) {
-	setPers := Get("set_personality")
-	if setPers == nil {
-		t.Fatal("missing set_personality")
-	}
-	if setPers.Access != AccessWrite {
-		t.Errorf("set_personality should be write, got %s", setPers.Access)
-	}
-	getPers := Get("get_personality")
-	if getPers == nil {
-		t.Fatal("missing get_personality")
-	}
-	if getPers.Access != AccessRead {
-		t.Errorf("get_personality should be read, got %s", getPers.Access)
 	}
 }
 

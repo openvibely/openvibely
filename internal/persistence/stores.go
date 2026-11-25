@@ -216,18 +216,6 @@ type ChatInputRequestStore interface {
 	Resolve(ctx context.Context, id string, projectID string, answersJSON string) (*ChatInputRequestRecord, error)
 }
 
-// CustomPersonalityStore persists user-defined chat personalities.
-type CustomPersonalityStore interface {
-	Count(ctx context.Context) (int, error)
-	Create(ctx context.Context, p *models.CustomPersonality) error
-	Delete(ctx context.Context, key string) error
-	DeleteBulk(ctx context.Context, keys []string) error
-	GetByKey(ctx context.Context, key string) (*models.CustomPersonality, error)
-	List(ctx context.Context) ([]models.CustomPersonality, error)
-	ListRuntimePage(ctx context.Context, limit int, offset int) ([]models.CustomPersonality, error)
-	Update(ctx context.Context, key string, p *models.CustomPersonality) error
-}
-
 // DiscordAuthStore persists authorized Discord users.
 type DiscordAuthStore interface {
 	BindApplicationUser(ctx context.Context, projectID, allowlistID, userID string) error

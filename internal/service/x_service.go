@@ -81,7 +81,6 @@ type XService struct {
 	taskContextRepo          persistence.XTaskContextStore
 	receiptRepo              persistence.XInboundReceiptStore
 	taskSvc                  *TaskService
-	customPersonalityRepo    persistence.CustomPersonalityStore
 	agentRepo                persistence.AgentStore
 	chatBroadcaster          *events.ChatBroadcaster
 	executionStreamHub       *events.ExecutionStreamHub
@@ -133,9 +132,8 @@ func (s *XService) SetRepositories(auth persistence.XAuthStore, selections persi
 	s.receiptRepo = receipts
 	s.threadInputRepo = inputs
 }
-func (s *XService) SetRuntime(agent persistence.AgentStore, personalities persistence.CustomPersonalityStore, broadcaster *events.ChatBroadcaster, hub *events.ExecutionStreamHub, chatRunner ChannelChatRunner, taskRunner ChannelTaskRunner, chatPromoter, taskPromoter func(string), router *ChannelMessageRouter) {
+func (s *XService) SetRuntime(agent persistence.AgentStore, broadcaster *events.ChatBroadcaster, hub *events.ExecutionStreamHub, chatRunner ChannelChatRunner, taskRunner ChannelTaskRunner, chatPromoter, taskPromoter func(string), router *ChannelMessageRouter) {
 	s.agentRepo = agent
-	s.customPersonalityRepo = personalities
 	s.chatBroadcaster = broadcaster
 	s.executionStreamHub = hub
 	s.channelChatRunner = chatRunner
@@ -702,7 +700,7 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform: "x", ProjectID: projectID, Message: text, Source: models.TaskOriginX, Surface: chatcontrol.SurfaceX, Start: s.now(),
 		TaskRepo: s.taskRepo, ExecRepo: s.execRepo, ThreadInputRepo: s.threadInputRepo, LLMConfigRepo: s.llmConfigRepo,
-		ScheduleRepo: s.scheduleRepo, AgentRepo: s.agentRepo, SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo,
+		ScheduleRepo: s.scheduleRepo, AgentRepo: s.agentRepo,
 		ProjectRepo: s.projectRepo, TaskSvc: s.taskSvc, ChatBroadcaster: s.chatBroadcaster,
 		FindActiveExecution: s.execRepo.FindLatestActiveChatExecution,
 		NewQueuedInput: func() *models.ThreadInput {
@@ -852,7 +850,7 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 	threadHandlers := buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
 		Platform: "x", ProjectID: projectID, Surface: chatcontrol.SurfaceX, Source: models.TaskOriginX, ActorID: userID,
 		TaskRepo: s.taskRepo, ExecRepo: s.execRepo, ThreadInputRepo: s.threadInputRepo, LLMConfigRepo: s.llmConfigRepo,
-		SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo, ChannelTaskRunner: s.channelTaskRunner,
+		ChannelTaskRunner: s.channelTaskRunner,
 		RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
 			return s.runtimeTools(taskID, projectID, accountID, userID, conversationID, replyToTweetID, username)
 		},

@@ -46,7 +46,7 @@ func RuntimeToolPermission(name string) (authz.Permission, bool) {
 			return authz.View, true
 		}
 		return authz.Manage, true
-	case chatcontrol.DomainAnalytics, chatcontrol.DomainPulse, chatcontrol.DomainMemory, chatcontrol.DomainSettings, chatcontrol.DomainModels, chatcontrol.DomainPersonality, chatcontrol.DomainAgents:
+	case chatcontrol.DomainAnalytics, chatcontrol.DomainPulse, chatcontrol.DomainMemory, chatcontrol.DomainSettings, chatcontrol.DomainModels, chatcontrol.DomainAgents:
 		return authz.View, true
 	case chatcontrol.DomainAutomations:
 		// Description preview invokes a model even though the registry labels its
@@ -78,7 +78,7 @@ func requireRuntimeToolRole(ctx context.Context, access persistence.ProjectAcces
 	}
 	if def := chatcontrol.Get(name); def != nil {
 		switch def.Domain {
-		case chatcontrol.DomainSettings, chatcontrol.DomainModels, chatcontrol.DomainPersonality, chatcontrol.DomainAgents:
+		case chatcontrol.DomainSettings, chatcontrol.DomainModels, chatcontrol.DomainAgents:
 			principal, ok := models.PrincipalFromContext(ctx)
 			if !ok || principal.UserID == "" {
 				return authz.ErrDenied

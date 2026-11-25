@@ -16,7 +16,7 @@ func guardChannelGlobalActions(handlers map[string]chatcontrol.RuntimeActionHand
 	if worker == nil || worker.runOrganizations == nil {
 		return
 	}
-	for _, name := range []string{"view_settings", "list_channels", "list_models", "get_model", "list_personalities", "get_personality", "set_personality", "save_custom_personality", "list_agents", "create_agent", "update_agent"} {
+	for _, name := range []string{"view_settings", "list_channels", "list_models", "get_model", "list_agents", "create_agent", "update_agent"} {
 		handler := handlers[name]
 		if handler == nil {
 			continue

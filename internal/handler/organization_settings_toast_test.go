@@ -23,7 +23,7 @@ func TestOrganizationSettingsNavigationPermissionToasts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, env.stores.ProjectAccess.SetMember(t.Context(), models.BootstrapUserID, env.projA.ID, user.UserID, "maintainer"))
 	for path, section := range map[string]string{
-		"/models": "Models", "/agents": "Agents", "/skills": "Skills", "/personality": "Personalities", "/workers": "Workers", "/settings/workers": "Workers", "/settings/plugin-pages": "Custom Pages",
+		"/models": "Models", "/agents": "Agents", "/skills": "Skills", "/workers": "Workers", "/settings/workers": "Workers", "/settings/plugin-pages": "Custom Pages",
 	} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path+"?project_id="+env.projA.ID, nil)

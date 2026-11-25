@@ -26,7 +26,6 @@ func Wrap(s persistence.Stores, r *Router) persistence.Stores {
 	s.ChannelTargets = &ChannelTargetStore{local: s.ChannelTargets, r: r}
 	s.ChatAttachments = &ChatAttachmentStore{local: s.ChatAttachments, r: r}
 	s.ChatInputRequests = &ChatInputRequestStore{local: s.ChatInputRequests, r: r}
-	s.CustomPersonalities = &CustomPersonalityStore{local: s.CustomPersonalities, r: r}
 	s.DiscordAuth = &DiscordAuthStore{local: s.DiscordAuth, r: r}
 	s.DiscordTaskContexts = &DiscordTaskContextStore{local: s.DiscordTaskContexts, r: r}
 	s.DiscordUserProjects = &DiscordUserProjectStore{local: s.DiscordUserProjects, r: r}
@@ -315,16 +314,6 @@ var paramNames = map[string]map[string][]string{
 		"LoadInstallationContinuation":                {"projectID", "executionID", "agentID"},
 		"Resolve":                                     {"id", "projectID", "answersJSON"},
 		"SaveInstallationContinuationResult":          {"questionID", "executionID", "content"},
-	},
-	"CustomPersonalities": {
-		"Count":           {},
-		"Create":          {"p"},
-		"Delete":          {"key"},
-		"DeleteBulk":      {"keys"},
-		"GetByKey":        {"key"},
-		"List":            {},
-		"ListRuntimePage": {"limit", "offset"},
-		"Update":          {"key", "p"},
 	},
 	"DiscordAuth": {
 		"BindApplicationUser":    {"projectID", "allowlistID", "userID"},
@@ -2583,69 +2572,6 @@ func (s *ChatInputRequestStore) SaveInstallationContinuationResult(ctx context.C
 		return
 	}
 	return s.local.SaveInstallationContinuationResult(ctx, a1, a2, a3)
-}
-
-type CustomPersonalityStore struct {
-	local persistence.CustomPersonalityStore
-	r     *Router
-}
-
-func (s *CustomPersonalityStore) Local() persistence.CustomPersonalityStore { return s.local }
-
-func (s *CustomPersonalityStore) Count(ctx context.Context) (r0 int, r1 error) {
-	if s.r.Remote(ctx, "CustomPersonalities", "Count", []any{}, func() []any { r0, r1 = s.local.Count(ctx); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.Count(ctx)
-}
-
-func (s *CustomPersonalityStore) Create(ctx context.Context, a1 *models.CustomPersonality) (r0 error) {
-	if s.r.Remote(ctx, "CustomPersonalities", "Create", []any{a1}, func() []any { r0 = s.local.Create(ctx, a1); return []any{r0} }, &r0) {
-		return
-	}
-	return s.local.Create(ctx, a1)
-}
-
-func (s *CustomPersonalityStore) Delete(ctx context.Context, a1 string) (r0 error) {
-	if s.r.Remote(ctx, "CustomPersonalities", "Delete", []any{a1}, func() []any { r0 = s.local.Delete(ctx, a1); return []any{r0} }, &r0) {
-		return
-	}
-	return s.local.Delete(ctx, a1)
-}
-
-func (s *CustomPersonalityStore) DeleteBulk(ctx context.Context, a1 []string) (r0 error) {
-	if s.r.Remote(ctx, "CustomPersonalities", "DeleteBulk", []any{a1}, func() []any { r0 = s.local.DeleteBulk(ctx, a1); return []any{r0} }, &r0) {
-		return
-	}
-	return s.local.DeleteBulk(ctx, a1)
-}
-
-func (s *CustomPersonalityStore) GetByKey(ctx context.Context, a1 string) (r0 *models.CustomPersonality, r1 error) {
-	if s.r.Remote(ctx, "CustomPersonalities", "GetByKey", []any{a1}, func() []any { r0, r1 = s.local.GetByKey(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.GetByKey(ctx, a1)
-}
-
-func (s *CustomPersonalityStore) List(ctx context.Context) (r0 []models.CustomPersonality, r1 error) {
-	if s.r.Remote(ctx, "CustomPersonalities", "List", []any{}, func() []any { r0, r1 = s.local.List(ctx); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.List(ctx)
-}
-
-func (s *CustomPersonalityStore) ListRuntimePage(ctx context.Context, a1 int, a2 int) (r0 []models.CustomPersonality, r1 error) {
-	if s.r.Remote(ctx, "CustomPersonalities", "ListRuntimePage", []any{a1, a2}, func() []any { r0, r1 = s.local.ListRuntimePage(ctx, a1, a2); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.ListRuntimePage(ctx, a1, a2)
-}
-
-func (s *CustomPersonalityStore) Update(ctx context.Context, a1 string, a2 *models.CustomPersonality) (r0 error) {
-	if s.r.Remote(ctx, "CustomPersonalities", "Update", []any{a1, a2}, func() []any { r0 = s.local.Update(ctx, a1, a2); return []any{r0} }, &r0) {
-		return
-	}
-	return s.local.Update(ctx, a1, a2)
 }
 
 type DiscordAuthStore struct {

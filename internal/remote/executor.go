@@ -22,7 +22,7 @@ type Executor struct {
 // readableStores excludes credentials, identity and instance settings.
 var readableStores = map[string]bool{
 	"Agents": true, "Alerts": true, "Attachments": true, "Automations": true, "ChannelTargets": true,
-	"ChatAttachments": true, "ChatInputRequests": true, "CustomPersonalities": true, "Executions": true,
+	"ChatAttachments": true, "ChatInputRequests": true, "Executions": true,
 	"Insights": true, "Lifecycle": true, "LLMConfigs": true, "Projects": true, "ReviewComments": true,
 	"Schedules": true, "SkillAnalytics": true, "TaskCommitStats": true, "TaskGoals": true,
 	"TaskPullRequests": true, "Tasks": true, "ThreadInputs": true, "Upcoming": true, "Usage": true,
@@ -189,7 +189,7 @@ func scrubValue(v reflect.Value, canManage func(projectID string) bool) {
 
 // ownerless stores hold instance-wide data rather than project data.
 var ownerless = map[string]bool{
-	"Agents": true, "LLMConfigs": true, "CustomPersonalities": true, "Workers": true, "Projects": true, "ProjectAccess": true,
+	"Agents": true, "LLMConfigs": true, "Workers": true, "Projects": true, "ProjectAccess": true,
 }
 
 type ownerSet struct {

@@ -40,7 +40,7 @@ func (h *Handler) authorizeProjectRuntimeHandlers(projectID string, handlers map
 func (h *Handler) requireProjectRuntimeAction(ctx context.Context, projectID, name string, permission authz.Permission, input json.RawMessage) error {
 	if def := chatcontrol.Get(name); def != nil {
 		switch def.Domain {
-		case chatcontrol.DomainSettings, chatcontrol.DomainModels, chatcontrol.DomainPersonality, chatcontrol.DomainAgents:
+		case chatcontrol.DomainSettings, chatcontrol.DomainModels, chatcontrol.DomainAgents:
 			principal, ok := models.PrincipalFromContext(ctx)
 			if !ok || principal.UserID == "" || h.organizationSvc == nil {
 				return authz.ErrDenied

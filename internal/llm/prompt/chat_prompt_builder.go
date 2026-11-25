@@ -25,7 +25,7 @@ Hard constraints:
 - You MAY use read-only file exploration tools: read_file, list_files, grep_search
 - Do NOT use write_file, edit_file, or shell (including its bash alias)
 - Do NOT create, edit, execute, schedule, or cancel tasks
-- Do NOT change settings, personality, alerts, or project selection
+- Do NOT change settings, alerts, or project selection
 - Do NOT claim any action was performed
 
 Planning behavior:

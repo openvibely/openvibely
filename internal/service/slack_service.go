@@ -102,7 +102,6 @@ type SlackService struct {
 	slackTaskContextRepo       persistence.SlackTaskContextStore
 	slackInboundReceiptRepo    persistence.SlackInboundReceiptStore
 	threadInputRepo            persistence.ThreadInputStore
-	customPersonalityRepo      persistence.CustomPersonalityStore
 	slackAuthRepo              persistence.SlackAuthStore
 	agentRepo                  persistence.AgentStore
 	chatBroadcaster            *events.ChatBroadcaster
@@ -191,10 +190,6 @@ func NewSlackService(
 		preACKTimeout:           slackPreACKTimeout,
 		cleanupRetryDelay:       100 * time.Millisecond,
 	}
-}
-
-func (s *SlackService) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
-	s.customPersonalityRepo = repo
 }
 
 func (s *SlackService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
@@ -1315,25 +1310,23 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 		}
 	}
 	runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:              "slack",
-		ProjectID:             projectID,
-		Message:               msg.Text,
-		Source:                msg.Source,
-		Surface:               chatcontrol.SurfaceSlack,
-		HasAttachments:        len(msg.Files) > 0,
-		Start:                 start,
-		TaskRepo:              s.taskRepo,
-		ExecRepo:              s.execRepo,
-		ThreadInputRepo:       s.threadInputRepo,
-		LLMConfigRepo:         s.llmConfigRepo,
-		ChatBroadcaster:       s.chatBroadcaster,
-		UploadsDir:            s.uploadsDir,
-		TaskSvc:               s.taskSvc,
-		ScheduleRepo:          s.scheduleRepo,
-		AgentRepo:             s.agentRepo,
-		SettingsRepo:          s.settingsRepo,
-		CustomPersonalityRepo: s.customPersonalityRepo,
-		ProjectRepo:           s.projectRepo,
+		Platform:        "slack",
+		ProjectID:       projectID,
+		Message:         msg.Text,
+		Source:          msg.Source,
+		Surface:         chatcontrol.SurfaceSlack,
+		HasAttachments:  len(msg.Files) > 0,
+		Start:           start,
+		TaskRepo:        s.taskRepo,
+		ExecRepo:        s.execRepo,
+		ThreadInputRepo: s.threadInputRepo,
+		LLMConfigRepo:   s.llmConfigRepo,
+		ChatBroadcaster: s.chatBroadcaster,
+		UploadsDir:      s.uploadsDir,
+		TaskSvc:         s.taskSvc,
+		ScheduleRepo:    s.scheduleRepo,
+		AgentRepo:       s.agentRepo,
+		ProjectRepo:     s.projectRepo,
 		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
 			if len(msg.Files) == 0 {
 				return channelChatIngressDownloadResult{}, nil
@@ -1506,17 +1499,16 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
-		Platform:                 "slack",
-		ProjectID:                projectID,
-		Surface:                  chatcontrol.SurfaceSlack,
-		Source:                   models.TaskOriginSlack,
-		ActorID:                  actionCtx.UserID,
-		TaskRepo:                 s.taskRepo,
-		ExecRepo:                 s.execRepo,
-		ThreadInputRepo:          s.threadInputRepo,
-		LLMConfigRepo:            s.llmConfigRepo,
-		SettingsRepo:             s.settingsRepo,
-		CustomPersonalityRepo:    s.customPersonalityRepo,
+		Platform:        "slack",
+		ProjectID:       projectID,
+		Surface:         chatcontrol.SurfaceSlack,
+		Source:          models.TaskOriginSlack,
+		ActorID:         actionCtx.UserID,
+		TaskRepo:        s.taskRepo,
+		ExecRepo:        s.execRepo,
+		ThreadInputRepo: s.threadInputRepo,
+		LLMConfigRepo:   s.llmConfigRepo,
+
 		ChannelTaskRunner:        s.channelTaskRunner,
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
@@ -1547,7 +1539,6 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		WorkerSvc:          s.workerSvc,
 		LLMConfigRepo:      s.llmConfigRepo, AgentRepo: s.agentRepo,
 		SettingsRepo:          s.settingsRepo,
-		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
 		UsageAnalyticsSvc:     s.usageAnalyticsSvc,

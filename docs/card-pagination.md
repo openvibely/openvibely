@@ -12,10 +12,9 @@ The shared infinite-scroll loader uses stateless cursors. Initial HTML includes 
 | Agents | SQLite seek predicate, also used when routed to a selected remote |
 | Webhooks in Channels | SQLite seek predicate; per-source remote cursors and global merge |
 | Skills | Cursor selection over the existing assembled filesystem/remote collection |
-| Personalities | Cursor selection over the existing built-in/custom collection |
 | Custom Pages | Already loads its complete collection and advertises no further pages; no offset paging to replace |
 
-Fixed Channels cards and the pinned Personality card retain their existing behavior. Agent maintenance scans and non-card store APIs retain their offset interfaces. Older explicit offset requests are still accepted, but the current browser loader sends cursors.
+Fixed Channels cards retain their existing behavior. Agent maintenance scans and non-card store APIs retain their offset interfaces. Older explicit offset requests are still accepted, but the current browser loader sends cursors.
 
 ## Ordering and continuation
 
@@ -29,4 +28,4 @@ Updates, additions and deletions during scrolling can still cause a skipped or r
 
 ## Verification
 
-Tests cover SQLite continuation for every supported sort, ties and Unicode names, sub-millisecond timestamps, Local HTTP continuation and loaded-window refresh, query-scope rejection, and two real remote sockets plus Local. The remote case includes 100 early names on one remote and checks all 150 records appear exactly once. Browser tests cover scrolling, replacement-window cursor continuation, search reset, stale responses, retry and focus preservation. HTTP regression tests traverse the refreshed list after automation run/pause/resume, skill changes, personality selection and default-model deletion, checking that the same cards appear exactly once. Scope tests also verify that list filters still invalidate old cursors while action-only parameters do not.
+Tests cover SQLite continuation for every supported sort, ties and Unicode names, sub-millisecond timestamps, Local HTTP continuation and loaded-window refresh, query-scope rejection, and two real remote sockets plus Local. The remote case includes 100 early names on one remote and checks all 150 records appear exactly once. Browser tests cover scrolling, replacement-window cursor continuation, search reset, stale responses, retry and focus preservation. HTTP regression tests traverse the refreshed list after automation run/pause/resume, skill changes and default-model deletion, checking that the same cards appear exactly once. Scope tests also verify that list filters still invalidate old cursors while action-only parameters do not.

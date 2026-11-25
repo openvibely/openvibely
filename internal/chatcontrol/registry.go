@@ -10,7 +10,6 @@
 //   - tasks: create_task, create_swarm_task, edit_task, execute_tasks, cancel_task, send_to_task
 //   - schedules: schedule_task, delete_schedule, modify_schedule
 //   - alerts: create_alert, create_notification, decide_alert, delete_alert, toggle_alert
-//   - personality: set_personality, save_custom_personality
 //   - projects: create_project, update_project_settings, switch_project
 //   - agents: create_agent, update_agent
 //   - automations: save_automation, update_automation_template, run_automation_now, pause_automation, resume_automation, delete_automation
@@ -25,7 +24,6 @@
 //   - analytics: view_usage_analytics
 //   - agents: list_agents
 //   - alerts: list_alerts, get_alert
-//   - personality: list_personalities, get_personality
 //   - settings: view_settings, list_channels, view_system_update
 //   - memory: memory_view (only when selected-memory runtime tools authorize a handle)
 //   - chat: get_chat_mode, list_capabilities
@@ -90,7 +88,6 @@ const (
 	DomainTasks       Domain = "tasks"
 	DomainSchedules   Domain = "schedules"
 	DomainAlerts      Domain = "alerts"
-	DomainPersonality Domain = "personality"
 	DomainModels      Domain = "models"
 	DomainAgents      Domain = "agents"
 	DomainProjects    Domain = "projects"
@@ -376,38 +373,6 @@ var updateAgentParams = &toolschema.Schema{
 			Description: "Whether the Agent can be assigned as a primary Agent for tasks.",
 		},
 	},
-	AdditionalProperties: toolschema.Pointer(false),
-}
-var saveCustomPersonalityParams = &toolschema.Schema{
-	Type: "object",
-	Properties: map[string]*toolschema.Schema{
-		"mode": {
-			Type:        "string",
-			Enum:        []any{"create", "update"},
-			Description: "Use create for a new custom personality and update for an existing custom personality.",
-		},
-		"name": {
-			Type:        "string",
-			Description: "Display name for the custom personality.",
-		},
-		"key": {
-			Type:        "string",
-			Description: "Optional key for create; required exact existing custom key for update.",
-		},
-		"description": {
-			Type:        "string",
-			Description: "Short description shown in Personality settings and list_personalities.",
-		},
-		"system_prompt": {
-			Type:        "string",
-			Description: "Custom personality system prompt. Must satisfy the same length validation as Settings.",
-		},
-		"activate": {
-			Type:        "boolean",
-			Description: "Set this custom personality as active after the save succeeds.",
-		},
-	},
-	Required:             []string{"mode", "name", "system_prompt"},
 	AdditionalProperties: toolschema.Pointer(false),
 }
 var createProjectParams = &toolschema.Schema{
@@ -2131,75 +2096,6 @@ var registry = []ActionDef{
 			Required:             []string{"alert_id"},
 			AdditionalProperties: toolschema.Pointer(false),
 		},
-	},
-
-	// --- Personality domain ---
-	{
-		Name:         "list_personalities",
-		Description:  "List one bounded page of personality presets and custom personalities. Built-in presets sort first, then custom personalities by name. Defaults to 20 items and caps at 50. Returns pagination metadata (total, has_more, next_offset). Use set_personality with an exact key even when that key is not on the current page.",
-		Domain:       DomainPersonality,
-		Access:       AccessRead,
-		Sensitivity:  SensitivityNormal,
-		AllowedModes: bothModes(),
-		Surfaces:     allSurfaces(),
-		Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"limit": {
-					Type:        "integer",
-					Minimum:     toolschema.Number("1"),
-					Maximum:     toolschema.Number("50"),
-					Description: "Maximum personalities to return. Defaults to 20 and caps at 50.",
-				},
-				"offset": {
-					Type:        "integer",
-					Minimum:     toolschema.Number("0"),
-					Description: "Number of personalities to skip; use next_offset from the previous response.",
-				},
-			},
-			AdditionalProperties: toolschema.Pointer(false),
-		},
-	},
-	{
-		Name:         "get_personality",
-		Description:  "Get the current active personality preset.",
-		Domain:       DomainPersonality,
-		Access:       AccessRead,
-		Sensitivity:  SensitivityNormal,
-		AllowedModes: bothModes(),
-		Surfaces:     allSurfaces(),
-		Schema: &toolschema.Schema{
-			Type:                 "object",
-			Properties:           map[string]*toolschema.Schema{},
-			AdditionalProperties: toolschema.Pointer(false),
-		},
-	},
-	{
-		Name:         "set_personality",
-		Description:  "Set the global personality preset.",
-		Domain:       DomainPersonality,
-		Access:       AccessWrite,
-		Sensitivity:  SensitivitySystemWide,
-		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     allSurfaces(),
-		Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"personality": {
-					Type: "string"}},
-			Required:             []string{"personality"},
-			AdditionalProperties: toolschema.Pointer(false),
-		},
-	},
-	{
-		Name:         "save_custom_personality",
-		Description:  "Create or update a custom personality using name, optional key for create, description, and system_prompt. Deletion is not supported. Use activate=true only when the user asks to select it after saving.",
-		Domain:       DomainPersonality,
-		Access:       AccessWrite,
-		Sensitivity:  SensitivitySystemWide,
-		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     allSurfaces(),
-		Schema:       saveCustomPersonalityParams,
 	},
 
 	// --- Models domain (read-only from chat) ---
