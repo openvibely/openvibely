@@ -232,13 +232,12 @@ templ PluginSettingsContent(v PluginSettingsView) {
 							}
 						</div>
 						<h3 class="card-title pr-12">{ r.Instance.Title }</h3>
- if models.IsAggregateProject(v.ProjectID) {
- <p class="text-sm opacity-60">{ r.Instance.ProjectName }</p>
- }
+
 						if r.Description != "" {
  <p class="text-sm opacity-60">{ r.Description }</p>
  }
-						<div class="flex gap-2">
+						<div class="flex flex-wrap gap-2">
+                            @components.ProjectBadge(r.Instance.ProjectID)
 							if r.Instance.Enabled {
 								<span class="badge badge-success badge-sm">Enabled</span>
 							} else {
