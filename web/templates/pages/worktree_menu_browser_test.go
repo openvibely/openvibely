@@ -70,6 +70,11 @@ func worktreeActionsFixtureForTask(t *testing.T, runner string, results chan str
 	actions := []map[string]string{}
 	diff := "diff --git a/example.go b/example.go\n--- a/example.go\n+++ b/example.go\n@@ -1 +1 @@\n-old\n+new\n"
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if task.ProjectID == "remote-owner" && strings.Contains(r.URL.Path, "/worktree/") && r.URL.Query().Get("project_id") != task.ProjectID {
+			http.Error(w, "wrong project scope", http.StatusNotFound)
+			return
+		}
+
 		if r.URL.Path == "/fixture-state" {
 			mu.Lock()
 			defer mu.Unlock()
