@@ -344,6 +344,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (activeTab) window.openVibelyScrollIntoPanel(activeTab, {container: list});
    }
    function render() {
+    var grouped = Array.from(new Set(ids.map(tabFor)));
+    if (JSON.stringify(grouped) !== JSON.stringify(ids)) { ids = grouped; saveTabs(); }
     list.replaceChildren();
     shown().forEach(function(id) {
      var option = Array.from(select.options).find(function(option) { return option.value === id; });

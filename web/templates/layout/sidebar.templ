@@ -529,6 +529,19 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         if (!['/tasks', '/analytics', '/automations', '/chat'].includes(location.pathname)) return;
                         // A copy's chat stays open; the combined chat page only picks a copy.
                         if (location.pathname === '/chat' && window.openVibelyIsAggregateProject(target)) return;
+                        if (location.pathname === '/tasks' && document.getElementById('tasks-page')) {
+                            const url = new URL(location.href);
+                            url.searchParams.set('project_id', target);
+                            sel.value = target;
+                            previousProjectID = target;
+                            syncProjectSelector();
+                            persistSelectedProject(target);
+                            history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+                            syncProjectSelectorFromURL();
+                            if (window.openVibelyRetargetLiveEvents) window.openVibelyRetargetLiveEvents(target, '');
+                            window.dispatchEvent(new CustomEvent('openvibely-task-scope-changed', {detail: {projectID: target}}));
+                            return;
+                        }
                         if (document.querySelector('dialog[open]')) return;
                         const url = new URL(location.href);
                         url.searchParams.set('project_id', target);

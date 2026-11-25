@@ -73,8 +73,8 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					const tasksPage = document.getElementById('tasks-page');
 					if (!tasksPage) return;
 
-					const projectID = tasksPage.getAttribute('data-project-id');
-					const backgroundRefreshPath = '/tasks?project_id=' + encodeURIComponent(projectID) + '&refresh_source=sse';
+					let projectID = tasksPage.getAttribute('data-project-id');
+					let backgroundRefreshPath = '/tasks?project_id=' + encodeURIComponent(projectID) + '&refresh_source=sse';
 					let refreshTimeout = null;
 					let backgroundRefreshXHR = null;
 					let foregroundBoardRequests = 0;
@@ -93,7 +93,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 							if (document.hidden) return 'hidden';						if (window._taskCardActionRequest) return 'task action';
 						const board = document.getElementById('kanban-board');
 						if (board && board.getAttribute('data-open-kanban-menu-key')) return 'task menu';
-						const openModals = document.querySelectorAll('dialog[open]');
+						const openModals = document.querySelectorAll('dialog[open]:not(#server_modal)');
 						if (openModals.length > 0) return 'modal';
 						return '';
 					}
@@ -212,6 +212,28 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						scheduleRefresh(500);
 					}
 
+                    function handleScopeChanged(event) {
+                        const next = event.detail && event.detail.projectID;
+                        if (!next || next === projectID) return;
+                        if (backgroundRefreshXHR) { backgroundRefreshXHR.abort(); backgroundRefreshXHR = null; }
+                        projectID = next;
+                        tasksPage.setAttribute('data-project-id', next);
+                        backgroundRefreshPath = '/tasks?project_id=' + encodeURIComponent(next) + '&refresh_source=sse';
+                        tasksPage.querySelectorAll('[href], [hx-get], [hx-post]').forEach(function(element) {
+                            ['href', 'hx-get', 'hx-post'].forEach(function(attr) {
+                                const raw = element.getAttribute(attr);
+                                if (!raw || !raw.startsWith('/')) return;
+                                const url = new URL(raw, location.origin);
+                                if (!url.searchParams.has('project_id')) return;
+                                url.searchParams.set('project_id', next);
+                                element.setAttribute(attr, url.pathname + url.search + url.hash);
+                            });
+                            htmx.process(element);
+                        });
+                        pendingRefresh = true;
+                        flushPendingRefresh();
+                    }
+                    window.addEventListener('openvibely-task-scope-changed', handleScopeChanged);
 					function handleSSEReconnected(event) {
 						// On reconnect we may have missed events while disconnected.
 						// Force a refresh so the kanban board re-syncs with server state.
@@ -264,6 +286,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						document.body.removeEventListener('htmx:beforeCleanupElement', cleanupKanbanListenersOnNavigation);
 						window.removeEventListener('sse-task-event', handleTaskEvent);
 						window.removeEventListener('sse-live-connected', handleSSEReconnected);
+                        window.removeEventListener('openvibely-task-scope-changed', handleScopeChanged);
 						window.removeEventListener('kanban-menu-opened', handleKanbanMenuOpened);
 						window.removeEventListener('kanban-move-started', handleKanbanMoveStarted);
 						window.removeEventListener('kanban-refresh-unblocked', flushPendingRefresh);
