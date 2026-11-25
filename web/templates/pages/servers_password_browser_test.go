@@ -13,7 +13,7 @@ import (
 func TestBrowserFunctional_ServerPasswordReveal(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	var content bytes.Buffer
-	if err := ServersContent(ServersPageData{}).Render(context.Background(), &content); err != nil {
+	if err := ServersContent(ServersPageData{Servers: []SavedServer{{ID: "0123456789abcdef", Name: "Remote", URL: "http://localhost:3001", Enabled: true, Password: "saved-password"}}}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +31,11 @@ func TestBrowserFunctional_ServerPasswordReveal(t *testing.T) {
 		browser.click("#server_modal .password-toggle-btn")
 		browser.waitFor("hidden password", `document.getElementById('server_password').type`, "password")
 		browser.click("#server_modal .password-toggle-btn")
+		browser.evaluate(`server_modal.close();openServerModal();'ok'`)
+		browser.evaluate(`server_modal.close();openServerModal(document.querySelector('[data-server-id]'));'ok'`)
+		browser.waitFor("saved password masked", `document.getElementById('server_password').type+':'+document.getElementById('server_password').value`, "password:saved-password")
+		browser.click("#server_modal .password-toggle-btn")
+		browser.waitFor("saved password revealed", `document.getElementById('server_password').type+':'+document.getElementById('server_password').value`, "text:saved-password")
 		browser.evaluate(`server_modal.close();openServerModal();'ok'`)
 		browser.waitFor("reset password", `document.getElementById('server_password').type+':'+document.getElementById('server_password').value`, "password:")
 	})

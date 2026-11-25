@@ -16,6 +16,11 @@ func (h *Handler) serversPageData(c echo.Context) (pages.ServersPageData, error)
 	if err != nil {
 		return pages.ServersPageData{}, err
 	}
+	if h.organizationSvc != nil && h.requireCurrentOrgAdmin(c) != nil {
+		for i := range servers {
+			servers[i].Password = ""
+		}
+	}
 	data := pages.ServersPageData{
 		Servers:     servers,
 		Search:      c.QueryParam("search"),
@@ -147,6 +152,7 @@ func (h *Handler) SaveServer(c echo.Context) error {
 		index = len(servers) - 1
 	}
 	previous := servers[index]
+	servers[index].Password = form.password
 	servers[index].Name, servers[index].URL, servers[index].Username, servers[index].Enabled = form.name, form.url, form.username, form.enabled
 	if err := h.storeSavedServers(ctx, servers); err != nil {
 		return err

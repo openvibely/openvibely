@@ -15,12 +15,13 @@ const (
 	ServerStatusDisabled  = "disabled"
 )
 
-// SavedServer is a remote OpenVibely server. Passwords are never stored.
+// SavedServer is a remote OpenVibely server. Passwords are excluded from API serialization.
 type SavedServer struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	URL        string `json:"url"`
 	Username   string `json:"username"`
+ Password string `json:"-"`
 	Enabled    bool   `json:"enabled"`
 	Status     string `json:"-"`
 	SignedInAs string `json:"-"`
@@ -97,7 +98,7 @@ templ ServersContent(data ServersPageData) {
 			<div class="modal-box">
 				@ModalCloseButton("server_modal", "Close server settings")
 				<h3 id="server_modal_title" class="font-bold text-lg mb-1 pr-10">Add Server</h3>
-				<p class="text-sm opacity-60 mb-4">Sign in with your account on that server. Your password is used once and never saved.</p>
+				<p class="text-sm opacity-60 mb-4">Sign in with your account on that server. Your password is saved so you can reveal or update it later.</p>
 				<form id="server_form" hx-post="/servers" hx-target="#servers-card-list" hx-swap="outerHTML" autocomplete="off">
 					<div class="form-control mb-3">
 						<label class="label" for="server_name"><span class="label-text">Name</span></label>
@@ -115,7 +116,7 @@ templ ServersContent(data ServersPageData) {
 						<label class="label" for="server_password"><span class="label-text">Password</span></label>
 						@components.SecretInput(components.SecretInputConfig{
  ID: "server_password", Name: "password", Class: "input input-bordered w-full pr-10",
- MaxLength: 1024, AutoComplete: "current-password", Placeholder: "Leave blank to save without signing in",
+ MaxLength: 1024, AutoComplete: "current-password", Placeholder: "Password",
  AriaLabel: "Toggle password visibility",
 })
 @components.SecretInputVisibilityScript()
@@ -159,7 +160,7 @@ templ ServersContent(data ServersPageData) {
 					field('server_name').value = d.serverName || '';
 					field('server_url').value = d.serverUrl || '';
 					field('server_username').value = d.serverUsername || '';
-					field('server_password').value = '';
+					field('server_password').value = d.serverPassword || '';
  window.resetSecretInputVisibility?.('server_password');
 					var enabled = d.serverEnabled !== 'false';
 					field('server_enabled').checked = enabled;
@@ -243,6 +244,7 @@ templ ServersCardList(data ServersPageData) {
 						data-server-name={ server.Name }
 						data-server-url={ server.URL }
 						data-server-username={ server.Username }
+ data-server-password={ server.Password }
 						data-server-enabled={ serverEnabledString(server) }
 						data-server-status={ server.Status }
 						data-search-card

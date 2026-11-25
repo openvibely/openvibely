@@ -555,6 +555,11 @@ func normalizeServerURL(raw string) (string, error) {
 	return u.String(), nil
 }
 
+type storedSavedServer struct {
+	pages.SavedServer
+	Password string `json:"password,omitempty"`
+}
+
 func (h *Handler) loadSavedServers(ctx context.Context) ([]pages.SavedServer, error) {
 	if h.settingsRepo == nil {
 		return nil, nil
@@ -563,12 +568,14 @@ func (h *Handler) loadSavedServers(ctx context.Context) ([]pages.SavedServer, er
 	if err != nil || strings.TrimSpace(raw) == "" {
 		return nil, err
 	}
-	var servers []pages.SavedServer
-	if err := json.Unmarshal([]byte(raw), &servers); err != nil {
+	var records []storedSavedServer
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
 		return nil, nil
 	}
-	valid := servers[:0]
-	for _, s := range servers {
+	valid := make([]pages.SavedServer, 0, len(records))
+	for _, record := range records {
+		s := record.SavedServer
+		s.Password = record.Password
 		if validServerID(s.ID) && s.URL != "" {
 			valid = append(valid, s)
 		}
@@ -583,7 +590,11 @@ func (h *Handler) storeSavedServers(ctx context.Context, servers []pages.SavedSe
 	if servers == nil {
 		servers = []pages.SavedServer{}
 	}
-	encoded, err := json.Marshal(servers)
+	records := make([]storedSavedServer, 0, len(servers))
+	for _, server := range servers {
+		records = append(records, storedSavedServer{SavedServer: server, Password: server.Password})
+	}
+	encoded, err := json.Marshal(records)
 	if err != nil {
 		return err
 	}

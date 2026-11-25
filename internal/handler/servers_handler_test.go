@@ -132,7 +132,11 @@ func TestSaveServerConnectsAndRunsRemoteActions(t *testing.T) {
 
 	raw, err := h.settingsRepo.Get(context.Background(), uiPreferenceSavedServersKey)
 	require.NoError(t, err)
-	require.NotContains(t, raw, "secret")
+	require.Contains(t, raw, `"password":"secret"`)
+	saved, err := h.findSavedServer(context.Background(), id)
+	require.NoError(t, err)
+	require.Equal(t, "secret", saved.Password)
+	require.Contains(t, rec.Body.String(), `data-server-password="secret"`)
 
 	require.Eventually(t, func() bool {
 		groups := h.remoteServerGroups(context.Background())
@@ -412,4 +416,27 @@ func TestServersLocalServicesStoppingRefresh(t *testing.T) {
 	require.NoError(t, pages.ServersCardList(pages.ServersPageData{DesktopMode: true, LocalBackend: "off"}).Render(t.Context(), &out))
 	require.NotContains(t, out.String(), `hx-trigger="every 2s"`)
 	require.NotContains(t, out.String(), "Stopping Local services")
+}
+
+func TestServerPasswordReplacementAndDeletion(t *testing.T) {
+	h, e := setupHubHandler(t)
+	srv, _, _ := fakeRemoteOV(t, "updated-password")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, serversRequest(http.MethodPost, "/servers", url.Values{"url": {srv.URL}, "username": {"alice"}, "password": {"old-password"}, "enabled": {"false"}}))
+	require.Equal(t, http.StatusOK, rec.Code)
+	id := savedServerID(t, h)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, serversRequest(http.MethodPost, "/servers/"+id, url.Values{"url": {srv.URL}, "username": {"alice"}, "password": {"updated-password"}, "enabled": {"true"}}))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "Signed in as Alice")
+	saved, err := h.findSavedServer(context.Background(), id)
+	require.NoError(t, err)
+	require.Equal(t, "updated-password", saved.Password)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, serversRequest(http.MethodDelete, "/servers/"+id, nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	raw, err := h.settingsRepo.Get(context.Background(), uiPreferenceSavedServersKey)
+	require.NoError(t, err)
+	require.NotContains(t, raw, "updated-password")
+	require.NotContains(t, raw, "old-password")
 }
