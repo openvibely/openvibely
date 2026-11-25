@@ -209,6 +209,9 @@ func (s *TaskService) ListByProjectWithCategorySorts(ctx context.Context, projec
 		}
 	}
 	applog.Infof("[task-svc] ListByProjectWithCategorySorts returned %d tasks", len(tasks))
+	if models.IsAggregateProject(projectID) {
+		models.SortTasksWithCategorySorts(tasks, category, backlogSort, completedSort)
+	}
 	return tasks, nil
 }
 
@@ -231,6 +234,9 @@ func (s *TaskService) ListBoardByProjectWithCategorySorts(ctx context.Context, p
 		}
 	}
 	applog.Debugf("[task-svc] ListBoardByProjectWithCategorySorts returned %d tasks", len(tasks))
+	if models.IsAggregateProject(projectID) {
+		models.SortTasksWithCategorySorts(tasks, category, backlogSort, completedSort)
+	}
 	return tasks, nil
 }
 

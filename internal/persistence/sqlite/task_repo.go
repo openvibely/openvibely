@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -649,134 +648,8 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 		return nil, err
 	}
 
-	switch category {
-	case string(models.CategoryBacklog):
-		sortTasks(tasks, backlogSort)
-	case string(models.CategoryCompleted):
-		sortTasks(tasks, completedSort)
-	default:
-		sortCategoryTasks(tasks, models.CategoryBacklog, backlogSort)
-		sortCategoryTasks(tasks, models.CategoryCompleted, completedSort)
-	}
-
+	models.SortTasksWithCategorySorts(tasks, category, backlogSort, completedSort)
 	return tasks, nil
-}
-
-func sortCategoryTasks(tasks []models.Task, category models.TaskCategory, sortBy string) {
-	if len(tasks) < 2 || sortBy == "" {
-		return
-	}
-
-	categoryIndexes := make([]int, 0, len(tasks))
-	categoryTasks := make([]models.Task, 0, len(tasks))
-	for i, task := range tasks {
-		if task.Category == category {
-			categoryIndexes = append(categoryIndexes, i)
-			categoryTasks = append(categoryTasks, task)
-		}
-	}
-	if len(categoryTasks) < 2 {
-		return
-	}
-
-	sortTasks(categoryTasks, sortBy)
-	for i, idx := range categoryIndexes {
-		tasks[idx] = categoryTasks[i]
-	}
-}
-
-func sortTasks(tasks []models.Task, sortBy string) {
-	if len(tasks) < 2 || sortBy == "" {
-		return
-	}
-
-	sort.SliceStable(tasks, func(i, j int) bool {
-		return taskSortLess(tasks[i], tasks[j], sortBy)
-	})
-}
-
-func taskSortLess(a models.Task, b models.Task, sortBy string) bool {
-	switch sortBy {
-	case "title_asc":
-		aTitle := strings.ToLower(a.Title)
-		bTitle := strings.ToLower(b.Title)
-		if aTitle != bTitle {
-			return aTitle < bTitle
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "title_desc":
-		aTitle := strings.ToLower(a.Title)
-		bTitle := strings.ToLower(b.Title)
-		if aTitle != bTitle {
-			return aTitle > bTitle
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "created_asc":
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.Before(b.CreatedAt)
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "created_desc":
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.After(b.CreatedAt)
-		}
-		return taskDisplayOrderDesc(a, b)
-	case "completed_asc":
-		aTime := completedSortTime(a)
-		bTime := completedSortTime(b)
-		if !aTime.Equal(bTime) {
-			return aTime.Before(bTime)
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "completed_desc":
-		aTime := completedSortTime(a)
-		bTime := completedSortTime(b)
-		if !aTime.Equal(bTime) {
-			return aTime.After(bTime)
-		}
-		return taskDisplayOrderDesc(a, b)
-	case "priority_asc":
-		if a.Priority != b.Priority {
-			return a.Priority < b.Priority
-		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.Before(b.CreatedAt)
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "priority_desc":
-		if a.Priority != b.Priority {
-			return a.Priority > b.Priority
-		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.After(b.CreatedAt)
-		}
-		return taskDisplayOrderDesc(a, b)
-	default:
-		return taskDisplayOrderAsc(a, b)
-	}
-}
-
-// completedSortTime returns CompletedAt if set, falling back to UpdatedAt.
-// Tasks in the completed category always have CompletedAt set after migration 096.
-func completedSortTime(t models.Task) time.Time {
-	if t.CompletedAt != nil {
-		return *t.CompletedAt
-	}
-	return t.UpdatedAt
-}
-
-func taskDisplayOrderAsc(a models.Task, b models.Task) bool {
-	if a.DisplayOrder != b.DisplayOrder {
-		return a.DisplayOrder < b.DisplayOrder
-	}
-	return a.CreatedAt.Before(b.CreatedAt)
-}
-
-func taskDisplayOrderDesc(a models.Task, b models.Task) bool {
-	if a.DisplayOrder != b.DisplayOrder {
-		return a.DisplayOrder > b.DisplayOrder
-	}
-	return a.CreatedAt.After(b.CreatedAt)
 }
 
 func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {
