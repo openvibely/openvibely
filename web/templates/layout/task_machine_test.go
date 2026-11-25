@@ -1,0 +1,38 @@
+package layout
+
+import (
+	"context"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
+	"strings"
+	"testing"
+)
+
+func TestTaskMachineRows(t *testing.T) {
+	server := "0123456789abcdef"
+	remote := remoteid.ID(server, "project")
+	ctx := WithTaskMachines(context.Background(), map[string]TaskMachine{server: {Name: "oldmac", Kind: "laptop"}})
+	tasks := []models.Task{{ID: "a", ProjectID: "local", Title: "Local task"}, {ID: "b", ProjectID: remote, Title: "Remote task"}}
+	for _, scope := range []string{"local", "__repo_group", models.AllProjectsID} {
+		var out strings.Builder
+		err := TaskListPanelContentWithProjects(scope, []TaskListGroup{{Label: "Active", Tasks: tasks}}, map[string]string{"local": "Foo · This computer", remote: "Foo · oldmac"}).Render(ctx, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := out.String()
+		for _, want := range []string{`data-tip="This computer"`, `data-tip="oldmac"`, `M3 19l18 0`, `tabindex="0"`} {
+			if !strings.Contains(s, want) {
+				t.Errorf("missing %s", want)
+			}
+		}
+		if strings.Contains(s, "data-task-list-project=") != (scope == models.AllProjectsID) {
+			t.Errorf("incorrect project label for %s", scope)
+		}
+		if scope == models.AllProjectsID && !strings.Contains(s, ">Foo</span>") {
+			t.Fatal("project name absent")
+		}
+	}
+	if taskMachine(context.Background(), remote).Kind != "server" {
+		t.Fatal("older server fallback")
+	}
+}

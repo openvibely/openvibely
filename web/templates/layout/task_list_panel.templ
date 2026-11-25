@@ -106,9 +106,12 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 				>
 					@taskstate.Icon(task)
 					<span class="task-list-title">{ task.Title }</span>
-                    if name := names[task.ProjectID]; name != "" {
-                        <span data-task-list-project={ task.ProjectID } title={ name } style="max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; opacity: .65;">{ name }</span>
+                    if name := names[task.ProjectID]; name != "" && projectID == models.AllProjectsID {
+                        <span data-task-list-project={ task.ProjectID } title={ taskProjectLabel(ctx, task.ProjectID, name) } style="max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; opacity: .65;">{ taskProjectLabel(ctx, task.ProjectID, name) }</span>
                     }
+                    <span class="task-machine-badge" tabindex="0" aria-label={ taskMachine(ctx, task.ProjectID).Name } data-tip={ taskMachine(ctx, task.ProjectID).Name }>
+                        @MachineIcon(taskMachine(ctx, task.ProjectID).Kind)
+                    </span>
 					if task.Prompt != "" {
 						<template data-task-list-prompt>{ task.Prompt }</template>
 					}

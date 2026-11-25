@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/machinetype"
 	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"io"
 	"net"
@@ -455,6 +456,7 @@ type Options struct {
 // The caller is responsible for calling Instance.Shutdown when done, or
 // listening for OS signals and calling it from a signal handler.
 func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instance, error) {
+	go machinetype.Local()
 	if cfg == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
