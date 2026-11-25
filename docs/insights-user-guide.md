@@ -6,7 +6,6 @@ Use the Insights section in the sidebar to understand project activity after tas
 
 | UI Label | What It Is For |
 |---|---|
-| Grades | Proactive insights, health checks, knowledge signals, and idea grading. |
 | Pulse | Upcoming work and generated pulse summaries. |
 | Reflection | Historical task activity and generated reflections. |
 | Analytics | Outcomes, supporting task evidence, agent and model comparisons, learning signals, automations, and provider usage. |

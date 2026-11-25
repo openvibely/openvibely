@@ -228,6 +228,11 @@ func TestSidebar_ProjectSelectorPreservesRouteMappingAndConfirmation(t *testing.
 		t.Fatalf("failed to render Sidebar: %v", err)
 	}
 	html := buf.String()
+	for _, retired := range []string{`data-nav-base="/insights"`, `>Grades<`, `currentPath.includes('/insights')`} {
+		if strings.Contains(html, retired) {
+			t.Errorf("sidebar still contains retired Grades navigation: %s", retired)
+		}
+	}
 
 	for _, path := range []string{
 		"/automations",
@@ -241,7 +246,6 @@ func TestSidebar_ProjectSelectorPreservesRouteMappingAndConfirmation(t *testing.
 		"/analytics",
 		"/alerts",
 		"/workers",
-		"/insights",
 		"/channels",
 		"/personality",
 	} {

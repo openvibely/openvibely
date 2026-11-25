@@ -5570,7 +5570,6 @@ func TestTabDuplication_PagesReturnFullLayoutOrPartial(t *testing.T) {
 		{"/alerts", "Alerts"},
 		{"/upcoming", "Upcoming"},
 		{"/history", "History"},
-		{"/insights", "Insights"},
 	}
 
 	for _, pg := range pages {
@@ -5952,7 +5951,6 @@ func TestSidebar_LightModeBackgroundAndNavReadability(t *testing.T) {
 		"/alerts",
 		"/upcoming",
 		"/history",
-		"/insights",
 	}
 
 	requiredSnippets := []string{
@@ -9105,33 +9103,6 @@ func TestHandler_GetTaskThread_PreservesHistoryAfterRateLimitFailure(t *testing.
 	if !strings.Contains(body, streamedFailureOutput) {
 		t.Fatal("expected 429 failure execution output to be preserved in thread")
 	}
-}
-
-func TestHandler_GradeIdeas_NoService(t *testing.T) {
-	_, e, _ := setupTestHandler(t)
-
-	// GradeIdeas with nil insightsSvc should return bad request
-	req := httptest.NewRequest(http.MethodPost, "/history/grade-ideas?project_id=test", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-}
-
-func TestHandler_GradeIdeas_MissingProjectID(t *testing.T) {
-	_, e := setupTestHandlerWithInsights(t)
-	rec := htmxPost(e, "/history/grade-ideas", nil)
-	assertCode(t, rec, http.StatusBadRequest)
-}
-
-func TestHandler_GradeIdeas_NoTasks(t *testing.T) {
-	h, e := setupTestHandlerWithInsights(t)
-	project := createProject(t, h, "Empty Project")
-
-	rec := htmxPost(e, "/history/grade-ideas?project_id="+project.ID, nil)
-	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, "failed")
 }
 
 func TestHandler_GetTaskThreadRendersLatestWindowAndEarlierFragment(t *testing.T) {

@@ -33,8 +33,8 @@ func TestActivityHTTPPermissionsAndRevocation(t *testing.T) {
 		minimum      int
 	}{
 		{"GET", "/upcoming", 1}, {"GET", "/history", 1}, {"POST", "/upcoming/summary", 2}, {"POST", "/history/summary", 2},
-		{"GET", "/insights", 1}, {"GET", "/insights/by-type", 1}, {"GET", "/insights/reports", 1},
-		{"POST", "/insights/analyze", 2}, {"POST", "/insights/health-check", 2}, {"POST", "/history/grade-ideas", 2},
+		{"GET", "/insights/by-type", 1}, {"GET", "/insights/reports", 1},
+		{"POST", "/insights/analyze", 2},
 		{"PATCH", "/insights/:id/status", 2}, {"DELETE", "/insights/:id", 2},
 	}
 	calls := 0

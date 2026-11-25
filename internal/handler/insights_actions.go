@@ -20,12 +20,6 @@ func ownInsightProject(h *Handler, ctx context.Context, projectID string) (strin
 var actInsightsRunAnalysis = defineAction("insights.analyze", ownInsightProject, func(h *Handler, ctx context.Context, projectID string) (*models.InsightReport, error) {
 	return h.insightsSvc.RunAnalysis(ctx, projectID)
 })
-var actInsightsRunHealthCheck = defineAction("insights.health", ownInsightProject, func(h *Handler, ctx context.Context, projectID string) (*models.HealthCheck, error) {
-	return h.insightsSvc.RunHealthCheck(ctx, projectID)
-})
-var actInsightsGradeIdeas = defineAction("insights.grade", ownInsightProject, func(h *Handler, ctx context.Context, projectID string) (*models.IdeaGrade, error) {
-	return h.insightsSvc.GradeIdeas(ctx, projectID)
-})
 
 type insightMutationArgs struct {
 	ProjectID, InsightID, Operation string

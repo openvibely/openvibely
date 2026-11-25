@@ -38,34 +38,6 @@ func createHandlerTestInsight(t *testing.T, repo persistence.InsightsStore, proj
 	return insight
 }
 
-// ProactiveInsights always renders (no nil-service guard upfront).
-func TestProactiveInsights_NoProjects(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	rec := tc.HTTP().Get("/insights").Execute()
-	tc.Assert(rec).StatusCode(http.StatusOK)
-}
-
-func TestProactiveInsights_WithProject(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	tc.CreateProject().WithName("Insights Project").Build()
-	rec := tc.HTTP().Get("/insights").Execute()
-	tc.Assert(rec).StatusCode(http.StatusOK).Contains("Insights Project")
-}
-
-func TestProactiveInsights_WithProjectID(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	p := tc.CreateProject().Build()
-	rec := tc.HTTP().Get("/insights?project_id=" + p.ID).Execute()
-	tc.Assert(rec).StatusCode(http.StatusOK)
-}
-
-func TestProactiveInsights_HTMX(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	tc.CreateProject().Build()
-	rec := tc.HTMX().Get("/insights").Execute()
-	tc.Assert(rec).StatusCode(http.StatusOK)
-}
-
 func TestUpdateInsightStatus_RejectsForeignProject(t *testing.T) {
 	tc, insightsRepo := newInsightsHandlerTestContext(t)
 
@@ -235,26 +207,18 @@ func TestListInsightReports_NilService(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
-func TestRunHealthCheck_MissingProjectID(t *testing.T) {
+func TestGradesRoutesRemoved(t *testing.T) {
 	tc := NewStoreTestContext(t)
-	rec := tc.HTTP().Post("/insights/health-check").Execute()
-	tc.Assert(rec).StatusCode(http.StatusBadRequest)
-}
-
-func TestRunHealthCheck_NilService(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	rec := tc.HTTP().Post("/insights/health-check?project_id=proj-1").Execute()
-	tc.Assert(rec).StatusCode(http.StatusBadRequest)
-}
-
-func TestGradeIdeas_MissingProjectID(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	rec := tc.HTTP().Post("/history/grade-ideas").Execute()
-	tc.Assert(rec).StatusCode(http.StatusBadRequest)
-}
-
-func TestGradeIdeas_NilService(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	rec := tc.HTTP().Post("/history/grade-ideas?project_id=proj-1").Execute()
-	tc.Assert(rec).StatusCode(http.StatusBadRequest)
+	for _, path := range []string{"/insights", "/insights/health-check", "/history/grade-ideas"} {
+		for _, route := range tc.echo.Routes() {
+			if route.Path == path {
+				t.Errorf("retired Grades route still registered: %s %s", route.Method, path)
+			}
+		}
+	}
+	for _, name := range []string{"insights.health", "insights.grade"} {
+		if _, exists := serverActions[name]; exists {
+			t.Errorf("retired Grades action still registered: %s", name)
+		}
+	}
 }

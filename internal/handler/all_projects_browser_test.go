@@ -114,7 +114,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(scheduleAgent && !scheduleAgent.disabled && !scheduleAgent.hidden,'destination schedule agent missing');
 
  await navigate('/alerts','#alerts-container');
- await navigate('/insights','#health-check-section');
+ assert(!document.querySelector('a[data-nav-base="/insights"]'),'removed Grades link is present');
  await navigate('/analytics','#analytics-data');
  await navigate('/automations','#automations-container');
  assert(document.querySelector('[data-card-list-toolbar]'),'native toolbar missing');

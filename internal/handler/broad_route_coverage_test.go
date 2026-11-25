@@ -211,7 +211,6 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 		"/alerts" + projectQuery,
 		"/alerts/" + alert.ID + "/details" + projectQuery,
 		"/alerts/unread-count" + projectQuery,
-		"/insights" + projectQuery,
 		"/insights/by-type" + projectQuery,
 		"/insights/reports" + projectQuery,
 		"/chat" + projectQuery,
@@ -267,8 +266,6 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 		{"/alerts/" + alert.ID + "/dismiss" + projectQuery, nil},
 		{"/alerts/read-all" + projectQuery, nil},
 		{"/insights/analyze" + projectQuery, nil},
-		{"/insights/health-check" + projectQuery, nil},
-		{"/history/grade-ideas" + projectQuery, nil},
 	}
 	for _, tt := range postForms {
 		rec := tc.HTMX().Post(tt.path).WithForm(tt.form).Execute()

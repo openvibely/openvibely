@@ -28,7 +28,6 @@ func TestAllProjectsSharedSidebarPages(t *testing.T) {
 		{"/history", `id="history-container"`, ""},
 		{"/schedule", `id="schedule-content"`, "shared pending"},
 		{"/alerts", `id="alerts-container"`, "shared alert"},
-		{"/insights", `id="health-check-section"`, ""},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()

@@ -11,39 +11,6 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-// ProactiveInsights renders the insights dashboard page
-func (h *Handler) ProactiveInsights(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-
-	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	if projectID == "" && len(projects) > 0 {
-		projectID = projects[0].ID
-	}
-
-	var currentProject *models.Project
-	currentProject = h.virtualProject(c.Request().Context(), projectID)
-	var data *models.InsightDashboardData
-
-	if projectID != "" && h.insightsSvc != nil {
-		for i := range projects {
-			if projects[i].ID == projectID {
-				currentProject = &projects[i]
-				break
-			}
-		}
-		var err error
-		data, err = h.insightsSvc.GetDashboard(c.Request().Context(), projectID)
-		if err != nil {
-			data = &models.InsightDashboardData{}
-		}
-	}
-
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.InsightsContent(currentProject, data))
-	}
-	return render(c, http.StatusOK, pages.Insights(projects, currentProject, data))
-}
-
 // RunInsightsAnalysis triggers a full project analysis
 func (h *Handler) RunInsightsAnalysis(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
@@ -145,36 +112,4 @@ func (h *Handler) ListInsightReports(c echo.Context) error {
 	}
 
 	return render(c, http.StatusOK, pages.InsightReportsList(reports))
-}
-
-// RunHealthCheck triggers an AI-powered project health evaluation
-func (h *Handler) RunHealthCheck(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	if projectID == "" || h.insightsSvc == nil {
-		return c.String(http.StatusBadRequest, "missing project_id")
-	}
-
-	hc, err := actInsightsRunHealthCheck(h, c.Request().Context(), projectID)
-	if err != nil {
-		return render(c, http.StatusOK, pages.HealthCheckResult(nil, err))
-	}
-
-	history, _ := h.insightsSvc.ListHealthChecks(c.Request().Context(), projectID, 10)
-	return render(c, http.StatusOK, pages.HealthCheckResult(hc, nil, history...))
-}
-
-// GradeIdeas triggers an AI-powered evaluation of the user's idea quality
-func (h *Handler) GradeIdeas(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	if projectID == "" || h.insightsSvc == nil {
-		return c.String(http.StatusBadRequest, "missing project_id")
-	}
-
-	ig, err := actInsightsGradeIdeas(h, c.Request().Context(), projectID)
-	if err != nil {
-		return render(c, http.StatusOK, pages.IdeaGradeResult(nil, err))
-	}
-
-	history, _ := h.insightsSvc.ListIdeaGrades(c.Request().Context(), projectID, 10)
-	return render(c, http.StatusOK, pages.IdeaGradeResult(ig, nil, history...))
 }

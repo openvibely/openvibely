@@ -387,12 +387,6 @@ func TestRemoteInsightActions(t *testing.T) {
 	requireOK(t, res)
 	require.Equal(t, project.ID, report.ProjectID)
 
-	// The test model returns no JSON, so these reach the model and fail parsing its reply.
-	_, res = runAction[*models.HealthCheck](t, h, ctx, "insights.health", project.ID)
-	require.Contains(t, res.Error, "parse health check")
-	_, res = runAction[*models.IdeaGrade](t, h, ctx, "insights.grade", project.ID)
-	require.Contains(t, res.Error, "parse")
-
 	_, res = runAction[struct{}](t, h, ctx, "insights.mutate", insightMutationArgs{ProjectID: project.ID, InsightID: "missing", Operation: "delete"})
 	require.Equal(t, "status:404", res.Code)
 	_, res = runAction[struct{}](t, h, ctx, "insights.mutate", insightMutationArgs{ProjectID: project.ID, Operation: "bogus"})

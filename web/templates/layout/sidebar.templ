@@ -361,8 +361,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
  newUrl = '/settings/computer?project_id=' + encodeURIComponent(newProjectId);
  } else if (currentPath.includes('/workers')) {
 							newUrl = (currentPath === '/settings/workers' ? '/settings/workers' : '/workers') + '?project_id=' + encodeURIComponent(newProjectId);
-						} else if (currentPath.includes('/insights')) {
-							newUrl = '/insights?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/channels')) {
 							newUrl = '/channels?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/personality')) {
@@ -1043,20 +1041,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<!-- Insights Section -->
 				<li class="menu-title sidebar-hide-collapsed">
 					<span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Insights</span>
-				</li>
-				<li>
-					<a
-						data-nav-base="/insights"
-						href={ templ.SafeURL(fmt.Sprintf("/insights?project_id=%s", currentProjectID)) }
-						hx-get={ fmt.Sprintf("/insights?project_id=%s", currentProjectID) }
-						hx-target="#main-content"
-						hx-push-url="true"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-						</svg>
-						<span class="sidebar-text">Grades</span>
-					</a>
 				</li>
 				<li>
 					<a

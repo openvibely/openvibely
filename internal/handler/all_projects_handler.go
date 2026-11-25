@@ -21,7 +21,7 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		if instanceSettingsPath(path) || instanceAccountProjection(c) {
 			return next(c)
 		}
-		workspaceEntry := path == "/chat" || path == "/tasks" || path == "/tasks/new" || path == "/analytics" || path == "/automations" || path == "/upcoming" || path == "/history" || path == "/alerts" || path == "/schedule" || path == "/insights" || path == "/skills" || path == "/agents" || path == "/channels"
+		workspaceEntry := path == "/chat" || path == "/tasks" || path == "/tasks/new" || path == "/analytics" || path == "/automations" || path == "/upcoming" || path == "/history" || path == "/alerts" || path == "/schedule" || path == "/skills" || path == "/agents" || path == "/channels"
 		if c.Request().Method == http.MethodGet && !isHTMX(c) && workspaceEntry && c.QueryParam("project_id") == "" && h.settingsRepo != nil {
 			selected, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
 			if err == nil && models.IsAggregateProject(selected) {

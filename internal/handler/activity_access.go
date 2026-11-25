@@ -11,10 +11,10 @@ import (
 func (h *Handler) authorizeActivityResource(c echo.Context) error {
 	permission := authz.View
 	switch c.Path() {
-	case "/upcoming", "/history", "/schedule", "/schedule/calendar-state", "/insights", "/insights/by-type", "/insights/reports":
+	case "/upcoming", "/history", "/schedule", "/schedule/calendar-state", "/insights/by-type", "/insights/reports":
 	case "/reviews/:id", "/schedule/calendar-action":
 		permission = authz.Edit
-	case "/upcoming/summary", "/history/summary", "/insights/analyze", "/insights/health-check", "/history/grade-ideas", "/insights/:id/status", "/insights/:id":
+	case "/upcoming/summary", "/history/summary", "/insights/analyze", "/insights/:id/status", "/insights/:id":
 		permission = authz.Edit // Mutations and model-backed analysis require editor access.
 		if strings.TrimSpace(c.QueryParam("project_id")) == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "missing project_id")

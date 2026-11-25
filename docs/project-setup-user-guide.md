@@ -28,7 +28,7 @@ Why this matters:
 | Skills | Project-scoped skills and agent-owned skills can override global behavior for this repository. |
 | Workers | Project worker limits prevent one workspace from consuming all execution capacity. |
 | Channels | Slack, Telegram, GitHub, and webhooks can be connected to project work. |
-| Insights | Grades, Pulse, Reflection, and Analytics summarize project activity. |
+| Insights | Pulse, Reflection, and Analytics summarize project activity. |
 
 ## Project Computers
 

@@ -307,7 +307,7 @@ html[data-shell-frame] #sidebar .sidebar-footer-menu {
   moreItem.append(more);
   // Keep both popups outside the rail so WebKit paints them over the task list.
   document.body.append(popup, overflow);
-  const paths = ["/analytics", "/insights", "/history", "/upcoming"];
+  const paths = ["/analytics", "/history", "/upcoming"];
   for (const path of paths) {
     const link = nav?.querySelector('[data-nav-base="' + path + '"]');
     if (!link) continue;

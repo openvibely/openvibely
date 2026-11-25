@@ -1261,15 +1261,12 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/alerts/unread-count", h.GetUnreadAlertCount)
 	e.GET("/api/alerts/pending-count", h.GetPendingAlertCount)
 
-	// Proactive Insights (individual endpoints still work)
-	e.GET("/insights", h.ProactiveInsights)
+	// Insight analysis and reports
 	e.POST("/insights/analyze", h.RunInsightsAnalysis)
 	e.PATCH("/insights/:id/status", h.UpdateInsightStatus)
 	e.DELETE("/insights/:id", h.DeleteInsight)
 	e.GET("/insights/by-type", h.ListInsightsByType)
 	e.GET("/insights/reports", h.ListInsightReports)
-	e.POST("/insights/health-check", h.RunHealthCheck)
-	e.POST("/history/grade-ideas", h.GradeIdeas)
 
 	// Shared browser/native WebSocket transport
 	e.GET("/events/ws", h.LiveWebSocket)
