@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"github.com/openvibely/openvibely/internal/remote"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
@@ -14,9 +17,11 @@ func (h *Handler) ProjectComputerSettings(c echo.Context) error {
 	if c.Request().Method == http.MethodPost && !computerSameOrigin(c.Request()) {
 		return echo.NewHTTPError(http.StatusForbidden, "Cross-origin request denied")
 	}
-	id, err := h.getCurrentProjectID(c)
-	if err != nil {
-		return err
+	// This page manages this installation's computers, never a selected remote.
+	c.SetRequest(c.Request().WithContext(remote.WithServer(c.Request().Context(), "")))
+	id := strings.TrimSpace(c.QueryParam("project_id"))
+	if _, isRemote := remoteid.ServerOf(id); isRemote || models.IsSharedProjectID(id) {
+		return echo.NewHTTPError(http.StatusBadRequest, "Manage remote computers on their server's OV app.")
 	}
 	if h.computerSvc == nil {
 		return echo.NewHTTPError(503, "Project computers unavailable")

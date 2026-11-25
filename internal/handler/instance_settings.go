@@ -13,7 +13,7 @@ import (
 // instanceSettingsPath identifies server-wide controls. Project IDs on these
 // URLs are navigation state, never a destination for settings writes.
 func instanceSettingsPath(path string) bool {
-	if capacityAPIPath(path) {
+	if path == "/settings/computer" || capacityAPIPath(path) {
 		return true
 	}
 	if modelManagementPath(path) || path == "/personality" || strings.HasPrefix(path, "/personality/") || path == "/organization" || strings.HasPrefix(path, "/organization/") {

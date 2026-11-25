@@ -64,7 +64,10 @@ func (h *Handler) ProjectComputerPage(c echo.Context) error {
 			return projectAccessResponse(c, err)
 		}
 	}
-	// Keep old project links working after validating their owning server.
+	if _, isRemote := remoteid.ServerOf(c.Param("id")); isRemote && c.QueryParam("task_id") == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Manage remote computers on their server's OV app.")
+	}
+	// Keep old local project links working.
 	if c.QueryParam("task_id") == "" {
 		return c.Redirect(http.StatusSeeOther, "/settings/computer?project_id="+url.QueryEscape(c.Param("id")))
 	}

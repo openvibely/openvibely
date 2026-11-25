@@ -59,8 +59,7 @@ func TestRemoteProjectComputerRunsOnRemote(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, serversRequest(http.MethodGet, "/projects/"+remoteProject+"/computer", nil))
-	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
-	require.Equal(t, "/settings/computer?project_id="+url.QueryEscape(remoteProject), rec.Header().Get("Location"))
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, serversRequest(http.MethodGet, "/projects/"+remoteid.ID(server, "missing")+"/computer", nil))
@@ -182,4 +181,22 @@ func TestRemoteProjectComputerAsksToReconnectWhenSignedOut(t *testing.T) {
 		require.Equal(t, reconnect, frame.Data["reconnect"])
 		break
 	}
+}
+
+func TestComputerSettingsRejectRemoteSelectionWithoutConnecting(t *testing.T) {
+	h, e := setupHubHandler(t)
+	h.computerSvc = service.NewProjectComputerService(h.projectRepo, handlerComputerProvisioner{})
+	local := createProject(t, h, "Local computer settings")
+	remoteProject := remoteid.ID("abcdef0123456789", "project")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, serversRequest(method, "/settings/computer?project_id="+url.QueryEscape(remoteProject), url.Values{"idle_minutes": {"88"}}))
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, remoteProject))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, serversRequest(http.MethodGet, "/settings/computer", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), local.Name)
+	require.NotContains(t, rec.Body.String(), "value=\""+remoteProject+"\"")
 }
