@@ -354,6 +354,19 @@ templ TaskListPanel(currentProjectID string) {
             document.addEventListener('htmx:historyRestore', function() {
                 mountedProject = workspaceProject(location.href);
             });
+            window.addEventListener('openvibely-workspace-scope-changed', function(event) {
+                var next = event.detail.projectID;
+                var url = new URL(workspaceURL, location.href);
+                // Keep item pages bound to their owner. Lists follow the grouped tab.
+                if (['/tasks', '/analytics', '/automations'].includes(url.pathname)) {
+                    url.searchParams.set('project_id', next);
+                    workspaceURL = url.pathname + url.search + url.hash;
+                    workspaceURLs.set(next, workspaceURL);
+                    mountedProject = next;
+                    window.dispatchEvent(new CustomEvent('openvibely-task-scope-changed', {detail: {projectID: next}}));
+                }
+                if (window.syncAppearanceSettings) window.syncAppearanceSettings();
+            });
             var workspaceScroll = 0;
             var boardScroll = new Map();
             var boardScrollSelector = '#tasks-page, #kanban-board, .category-drop-zone, .task-drop-zone';
@@ -1270,6 +1283,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			document.body.addEventListener('htmx:historyRestore', syncProject);
 			document.body.addEventListener('htmx:afterSettle', syncProject);
 			window.addEventListener('popstate', syncProject);
+            window.addEventListener('openvibely-workspace-scope-changed', syncProject);
 			document.addEventListener('DOMContentLoaded', syncToggle);
 			syncToggle();
 		})();
