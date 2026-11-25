@@ -43,6 +43,25 @@ func TestComposerDestinationModelOptions(t *testing.T) {
 		e.ServeHTTP(r, req)
 		return r
 	}
+	localAgent := &models.Agent{Name: "Local selectable agent", Key: "local-agent", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true}
+	remoteAgent := &models.Agent{Name: "Remote selectable agent", Key: "remote-agent", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, local.Stores.Agents.Create(ctx, localAgent))
+	require.NoError(t, owner.remoteExecutor.Stores.Agents.Create(ctx, remoteAgent))
+	h.SetAgentRepo(wrapped.Agents)
+	owner.SetAgentRepo(owner.remoteExecutor.Stores.Agents)
+	getAgents := func(id string) *httptest.ResponseRecorder {
+		r := httptest.NewRecorder()
+		e.ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/tasks/new?agent_options=1&project_id="+url.QueryEscape(id), nil))
+		return r
+	}
+	ar := getAgents(remoteid.ID(sid, project.ID))
+	require.Equal(t, http.StatusOK, ar.Code, ar.Body.String())
+	require.Contains(t, ar.Body.String(), remoteid.ID(sid, remoteAgent.ID))
+	require.NotContains(t, ar.Body.String(), localAgent.Name)
+	ar = getAgents("default")
+	require.Equal(t, http.StatusOK, ar.Code, ar.Body.String())
+	require.Contains(t, ar.Body.String(), localAgent.Name)
+	require.NotContains(t, ar.Body.String(), remoteAgent.Name)
 	r := get(remoteid.ID(sid, project.ID))
 	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
 	require.Contains(t, r.Body.String(), rm.Name)
@@ -54,6 +73,9 @@ func TestComposerDestinationModelOptions(t *testing.T) {
 	require.Contains(t, r.Body.String(), lm.Name)
 	require.NotContains(t, r.Body.String(), rm.Name)
 	hub.Close(models.BootstrapUserID, sid)
+	ar = getAgents(remoteid.ID(sid, project.ID))
+	require.NotEqual(t, http.StatusOK, ar.Code)
+	require.NotContains(t, ar.Body.String(), localAgent.Name)
 	r = get(remoteid.ID(sid, project.ID))
 	require.NotEqual(t, http.StatusOK, r.Code)
 	require.NotContains(t, r.Body.String(), lm.Name)

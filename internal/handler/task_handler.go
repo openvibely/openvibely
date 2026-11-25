@@ -445,6 +445,22 @@ func (h *Handler) NewTask(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusNotFound, "project not found")
 		}
 	}
+	if c.QueryParam("agent_options") == "1" {
+		if models.IsAggregateProject(project.ID) {
+			return echo.NewHTTPError(http.StatusBadRequest, "Choose a destination project.")
+		}
+		options := make([]map[string]string, 0)
+		if h.agentRepo != nil {
+			definitions, err := h.agentRepo.ListTaskUIOptions(ctx)
+			if err != nil {
+				return err
+			}
+			for _, agent := range selectableTaskAgentDefinitionsForProject(definitions, project.ID) {
+				options = append(options, map[string]string{"id": agent.ID, "name": agent.Name, "scope": string(agent.Scope), "project": agent.ProjectID})
+			}
+		}
+		return c.JSON(http.StatusOK, options)
+	}
 	agents, err := h.llmConfigRepo.ListPickerOptions(ctx)
 	if err != nil {
 		return err

@@ -139,6 +139,9 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  let requestedModelProject='';
  window.fetch=function(input,options){
   const url=new URL(String(input),location.href);
+  if(url.searchParams.get('agent_options')==='1') {
+   return Promise.resolve(new Response(JSON.stringify([{id:'destination-agent',name:'Destination agent',scope:'global',project:''}]),{status:200}));
+  }
   if(url.searchParams.get('model_options')==='1') {
    requestedModelProject=url.searchParams.get('project_id');
    return Promise.resolve(new Response('<li data-value="default">Default</li><li data-value="destination-model" data-picker-name="Destination model" data-picker-model="destination-model" data-picker-provider="openai">Destination model</li>',{status:200}));
@@ -154,7 +157,14 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  chainForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
  assert(document.querySelector('[data-chain-draft="chain_child_agent_id"]').value==='old-server-model','chain setup failed');
  document.getElementById('task-thread-form-agent-id').value='old-server-model';
+ const agentInput=document.querySelector('[data-draft-property="agent_definition_id"]');
+ agentInput.value='old-server-agent';
  projectOption.click();
+ await wait(()=>document.querySelector('[data-options="agent_definition_id"] [data-value="destination-agent"]'));
+ assert(agentInput.value==='','old agent would be submitted');
+ const agentMenu=document.querySelector('[data-options="agent_definition_id"]');
+ assert(agentMenu.children.length===2,'old agents retained');
+ assert(!document.querySelector('[data-detail-property="agent_definition_id"]').disabled,'agent picker still disabled');
  await wait(()=>!document.getElementById('task-thread-form-agent-select').disabled && document.querySelector('li[data-value="destination-model"]'));
  assert(requestedModelProject==='` + project.ID + `','model request used wrong project');
  assert(chainModels.options.length===2 && chainModels.options[1].value==='destination-model','chain models were not refreshed');
