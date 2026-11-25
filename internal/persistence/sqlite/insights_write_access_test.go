@@ -71,14 +71,13 @@ func TestInsightsResultWritesRecheckActorAndAuditAtomically(t *testing.T) {
 }
 
 func TestInsightsMutationsRecheckAccessAndRollbackAuditFailure(t *testing.T) {
-	for _, operation := range []string{"status", "link", "delete"} {
+	for _, operation := range []string{"status", "delete"} {
 		t.Run(operation, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			repo := NewInsightsRepo(db)
 			ctx := t.Context()
 			insight := &models.Insight{ProjectID: "default", Type: models.InsightBugPattern, Severity: models.InsightSeverityHigh, Status: models.InsightStatusNew, Title: "original"}
 			require.NoError(t, repo.CreateInsight(ctx, insight))
-			task := createThreadInputTask(t, ctx, db, "default")
 			_, err := db.Exec(`INSERT INTO users(id,username) VALUES('editor','editor'); INSERT INTO org_memberships VALUES('default','editor','member'); INSERT INTO project_members VALUES('default','editor','editor')`)
 			require.NoError(t, err)
 			actor := models.WithPrincipal(ctx, models.Principal{UserID: "editor", Role: "owner"})
@@ -86,8 +85,6 @@ func TestInsightsMutationsRecheckAccessAndRollbackAuditFailure(t *testing.T) {
 				switch operation {
 				case "status":
 					return repo.UpdateStatus(actor, "default", insight.ID, models.InsightStatusResolved)
-				case "link":
-					return repo.LinkTask(actor, "default", insight.ID, task.ID)
 				default:
 					return repo.DeleteInsight(actor, "default", insight.ID)
 				}
@@ -117,22 +114,4 @@ func TestInsightsMutationsRecheckAccessAndRollbackAuditFailure(t *testing.T) {
 			require.Equal(t, 1, count)
 		})
 	}
-}
-
-func TestInsightCannotLinkForeignProjectTask(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := models.WithPrincipal(t.Context(), models.Principal{UserID: models.BootstrapUserID, OrgID: models.DefaultOrgID})
-	repo := NewInsightsRepo(db)
-	insight := &models.Insight{ProjectID: "default", Type: models.InsightBugPattern, Severity: models.InsightSeverityHigh, Status: models.InsightStatusNew, Title: "local"}
-	require.NoError(t, repo.CreateInsight(ctx, insight))
-	project := &models.Project{Name: "foreign"}
-	require.NoError(t, NewProjectRepo(db).Create(ctx, project))
-	task := createThreadInputTask(t, ctx, db, project.ID)
-	require.ErrorIs(t, repo.LinkTask(ctx, "default", insight.ID, task.ID), persistence.ErrInsightNotFound)
-	got, err := repo.GetInsight(ctx, "default", insight.ID)
-	require.NoError(t, err)
-	require.Equal(t, insight, got)
-	var count int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM project_audit_events WHERE action='insight.task_linked'`).Scan(&count))
-	require.Zero(t, count)
 }

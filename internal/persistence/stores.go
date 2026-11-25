@@ -393,7 +393,6 @@ type GitHubPRFeedbackStore interface {
 
 // InsightsStore persists project insights.
 type InsightsStore interface {
-	AvgConfidence(ctx context.Context, projectID string) (float64, error)
 	CountByStatus(ctx context.Context, projectID string) (map[string]int, error)
 	CountByType(ctx context.Context, projectID string) (map[string]int, error)
 	CreateHealthCheck(ctx context.Context, hc *models.HealthCheck) error
@@ -408,20 +407,11 @@ type InsightsStore interface {
 	GetLatestHealthCheck(ctx context.Context, projectID string) (*models.HealthCheck, error)
 	GetLatestIdeaGrade(ctx context.Context, projectID string) (*models.IdeaGrade, error)
 	GetLatestReport(ctx context.Context, projectID string) (*models.InsightReport, error)
-	GetProjectTaskStats(ctx context.Context, projectID string) (total int, completed int, failed int, pending int, backlog int, err error)
-	GetRecentCompletionRate(ctx context.Context, projectID string, days int) (float64, error)
 	GetSlowExecutions(ctx context.Context, projectID string, minDurationSecs int, limit int) ([]struct {
 		TaskTitle string
 		Duration  int
 		AgentName string
 	}, error)
-	GetTagDistribution(ctx context.Context, projectID string) (map[string]int, error)
-	GetTaskActivityTrend(ctx context.Context, projectID string, days int) ([]struct {
-		Date  string
-		Count int
-	}, error)
-	GetTaskPriorityDistribution(ctx context.Context, projectID string) (map[int]int, error)
-	LinkTask(ctx context.Context, projectID string, insightID string, taskID string) error
 	ListByProject(ctx context.Context, projectID string, limit int) ([]models.Insight, error)
 	ListByStatus(ctx context.Context, projectID string, status models.InsightStatus, limit int) ([]models.Insight, error)
 	ListByType(ctx context.Context, projectID string, insightType models.InsightType, limit int) ([]models.Insight, error)

@@ -23,7 +23,6 @@ type InsightsService struct {
 	taskRepo      persistence.TaskStore
 	projectRepo   persistence.ProjectStore
 	llmConfigRepo persistence.LLMConfigStore
-	execRepo      persistence.ExecutionStore
 	llmSvc        *LLMService
 }
 
@@ -32,14 +31,12 @@ func NewInsightsService(
 	taskRepo persistence.TaskStore,
 	projectRepo persistence.ProjectStore,
 	llmConfigRepo persistence.LLMConfigStore,
-	execRepo persistence.ExecutionStore,
 ) *InsightsService {
 	return &InsightsService{
 		insightsRepo:  insightsRepo,
 		taskRepo:      taskRepo,
 		projectRepo:   projectRepo,
 		llmConfigRepo: llmConfigRepo,
-		execRepo:      execRepo,
 	}
 }
 
@@ -490,18 +487,6 @@ func (s *InsightsService) UpdateInsightStatus(ctx context.Context, projectID, id
 		return authErr
 	}
 	return s.insightsRepo.UpdateStatus(ctx, projectID, id, status)
-}
-
-// AcceptInsight marks an insight as accepted within a project and optionally links a task.
-func (s *InsightsService) AcceptInsight(ctx context.Context, projectID, insightID string, taskID *string) error {
-	ctx, authErr := s.authorizeInsights(ctx, projectID, authz.Edit)
-	if authErr != nil {
-		return authErr
-	}
-	if taskID != nil && *taskID != "" {
-		return s.insightsRepo.LinkTask(ctx, projectID, insightID, *taskID)
-	}
-	return s.insightsRepo.UpdateStatus(ctx, projectID, insightID, models.InsightStatusAccepted)
 }
 
 // GetInsight returns a single insight within a project.

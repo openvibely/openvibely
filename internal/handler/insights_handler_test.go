@@ -17,7 +17,7 @@ func newInsightsHandlerTestContext(t *testing.T) (*TestContext, persistence.Insi
 	t.Helper()
 	tc := NewStoreTestContext(t)
 	insightsRepo := tc.stores.Insights
-	tc.handler.insightsSvc = service.NewInsightsService(insightsRepo, tc.taskRepo, tc.projectRepo, tc.llmConfigRepo, tc.execRepo)
+	tc.handler.insightsSvc = service.NewInsightsService(insightsRepo, tc.taskRepo, tc.projectRepo, tc.llmConfigRepo)
 	return tc, insightsRepo
 }
 

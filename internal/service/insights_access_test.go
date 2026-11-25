@@ -41,7 +41,7 @@ func TestInsightsServiceCurrentPermissions(t *testing.T) {
 	policy.Visibility = "private"
 	require.NoError(t, env.ProjectAccess.Update(ctx, models.BootstrapUserID, *policy))
 	store := &insightsAccessStore{}
-	svc := NewInsightsService(store, nil, nil, nil, nil)
+	svc := NewInsightsService(store, nil, nil, nil)
 	svc.SetProjectAuthorization(NewProjectAccessService(env.ProjectAccess), false)
 	viewer := models.WithPrincipal(ctx, user.Principal)
 	require.NoError(t, env.ProjectAccess.SetMember(ctx, models.BootstrapUserID, project.ID, user.UserID, "viewer"))
@@ -51,7 +51,6 @@ func TestInsightsServiceCurrentPermissions(t *testing.T) {
 	for _, call := range []func() error{
 		func() error { _, e := svc.RunAnalysis(viewer, project.ID); return e },
 		func() error { return svc.DeleteInsight(viewer, project.ID, "id") },
-		func() error { return svc.AcceptInsight(viewer, project.ID, "id", nil) },
 		func() error { return svc.UpdateInsightStatus(viewer, project.ID, "id", models.InsightStatusAccepted) },
 	} {
 		require.ErrorIs(t, call(), authz.ErrDenied)

@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -113,23 +112,6 @@ func (r *InsightsRepo) UpdateStatus(ctx context.Context, projectID, id string, s
 	})
 }
 
-func (r *InsightsRepo) LinkTask(ctx context.Context, projectID, insightID, taskID string) error {
-	return r.authorizedInsightWrite(ctx, projectID, "insight.task_linked", func(tx sqlExecutor) (string, error) {
-		result, err := tx.ExecContext(ctx, `UPDATE insights SET task_id = ?, status = 'accepted', updated_at = datetime('now') WHERE project_id = ? AND id = ? AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND project_id = ?)`, taskID, projectID, insightID, taskID, projectID)
-		if err != nil {
-			return "", err
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return "", err
-		}
-		if rows == 0 {
-			return "", persistence.ErrInsightNotFound
-		}
-		return insightID, nil
-	})
-}
-
 func (r *InsightsRepo) DeleteInsight(ctx context.Context, projectID, id string) error {
 	projectID, err := r.insightRowProject(ctx, "insights", projectID, id)
 	if err != nil {
@@ -191,18 +173,6 @@ func (r *InsightsRepo) CountByType(ctx context.Context, projectID string) (map[s
 		counts[t] = count
 	}
 	return counts, rows.Err()
-}
-
-func (r *InsightsRepo) AvgConfidence(ctx context.Context, projectID string) (float64, error) {
-	var avg sql.NullFloat64
-	err := r.db.QueryRowContext(ctx, `SELECT AVG(confidence) FROM insights WHERE `+analyticsProjectPredicate(ctx, "project_id", projectID)+``, projectID).Scan(&avg)
-	if err != nil {
-		return 0, err
-	}
-	if !avg.Valid {
-		return 0, nil
-	}
-	return avg.Float64, nil
 }
 
 // ExistingInsight checks for duplicate insights by title and type
@@ -416,116 +386,6 @@ func (r *InsightsRepo) ListHealthChecks(ctx context.Context, projectID string, l
 		checks = append(checks, hc)
 	}
 	return checks, rows.Err()
-}
-
-// GetProjectTaskStats returns task counts by status for a project
-func (r *InsightsRepo) GetProjectTaskStats(ctx context.Context, projectID string) (total, completed, failed, pending, backlog int, err error) {
-	err = r.db.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*) as total,
-			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed,
-			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
-			COALESCE(SUM(CASE WHEN status = 'pending' AND category = 'active' THEN 1 ELSE 0 END), 0) as pending,
-			COALESCE(SUM(CASE WHEN category = 'backlog' THEN 1 ELSE 0 END), 0) as backlog
-		FROM tasks WHERE `+insightsTaskPredicate(ctx, "", projectID)+``, projectID,
-	).Scan(&total, &completed, &failed, &pending, &backlog)
-	return
-}
-
-// GetTaskPriorityDistribution returns count by priority for a project
-func (r *InsightsRepo) GetTaskPriorityDistribution(ctx context.Context, projectID string) (map[int]int, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT priority, COUNT(*) FROM tasks WHERE `+insightsTaskPredicate(ctx, "", projectID)+` GROUP BY priority`, projectID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	dist := make(map[int]int)
-	for rows.Next() {
-		var p, c int
-		if err := rows.Scan(&p, &c); err != nil {
-			return nil, err
-		}
-		dist[p] = c
-	}
-	return dist, rows.Err()
-}
-
-// GetRecentCompletionRate returns the completion rate from recent tasks
-func (r *InsightsRepo) GetRecentCompletionRate(ctx context.Context, projectID string, days int) (float64, error) {
-	var rate sql.NullFloat64
-	err := r.db.QueryRowContext(ctx, `
-		SELECT CASE WHEN COUNT(*) > 0
-			THEN CAST(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS REAL) / COUNT(*) * 100
-			ELSE 0 END
-		FROM tasks
-		WHERE `+insightsTaskPredicate(ctx, "", projectID)+` AND category IN ('active', 'completed')
-			AND created_at >= datetime('now', ?)`,
-		projectID, fmt.Sprintf("-%d days", days),
-	).Scan(&rate)
-	if err != nil {
-		return 0, err
-	}
-	if !rate.Valid {
-		return 0, nil
-	}
-	return rate.Float64, nil
-}
-
-// GetTaskActivityTrend returns how many tasks were created per day over the last N days
-func (r *InsightsRepo) GetTaskActivityTrend(ctx context.Context, projectID string, days int) ([]struct {
-	Date  string
-	Count int
-}, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT date(created_at) as d, COUNT(*) as c
-		FROM tasks WHERE `+insightsTaskPredicate(ctx, "", projectID)+` AND created_at >= datetime('now', ?)
-		GROUP BY d ORDER BY d`, projectID, fmt.Sprintf("-%d days", days),
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []struct {
-		Date  string
-		Count int
-	}
-	for rows.Next() {
-		var r struct {
-			Date  string
-			Count int
-		}
-		if err := rows.Scan(&r.Date, &r.Count); err != nil {
-			return nil, err
-		}
-		results = append(results, r)
-	}
-	return results, rows.Err()
-}
-
-// GetTagDistribution returns count by tag for a project
-func (r *InsightsRepo) GetTagDistribution(ctx context.Context, projectID string) (map[string]int, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT COALESCE(tag, 'none'), COUNT(*) FROM tasks WHERE `+insightsTaskPredicate(ctx, "", projectID)+` GROUP BY tag`, projectID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	dist := make(map[string]int)
-	for rows.Next() {
-		var t string
-		var c int
-		if err := rows.Scan(&t, &c); err != nil {
-			return nil, err
-		}
-		dist[t] = c
-	}
-	return dist, rows.Err()
 }
 
 // --- Idea Grades ---

@@ -13,7 +13,7 @@ import (
 
 func TestAllProjectsSharedSidebarPages(t *testing.T) {
 	h, app, _, stores := setupTestHandlerWithStores(t)
-	h.insightsSvc = service.NewInsightsService(stores.Insights, stores.Tasks, stores.Projects, stores.LLMConfigs, stores.Executions)
+	h.insightsSvc = service.NewInsightsService(stores.Insights, stores.Tasks, stores.Projects, stores.LLMConfigs)
 	second := createProject(t, h, "Second native workspace")
 	for _, project := range []string{"default", second.ID} {
 		task := &models.Task{ProjectID: project, Title: project + " shared pending", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2}

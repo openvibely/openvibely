@@ -25,7 +25,7 @@ func TestInsightsService_DetectBugPatterns(t *testing.T) {
 	llmConfigRepo := env.LLMConfigs
 	execRepo := env.Executions
 
-	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo)
 
 	project := &models.Project{Name: "Bug Pattern Test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -104,7 +104,7 @@ func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
 	insightsRepo := env.Insights
 	llmConfigRepo := env.LLMConfigs
 	execRepo := env.Executions
-	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo)
 
 	project := &models.Project{Name: "Run Analysis Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -218,7 +218,7 @@ func TestInsightsService_RunAnalysisStalePendingTasks(t *testing.T) {
 			projectRepo := env.Projects
 			taskRepo := env.Tasks
 			insightsRepo := env.Insights
-			svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, env.LLMConfigs, env.Executions)
+			svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, env.LLMConfigs)
 			project := &models.Project{Name: "Stale pending analysis"}
 			if err := projectRepo.Create(ctx, project); err != nil {
 				t.Fatalf("create project: %v", err)
@@ -305,7 +305,7 @@ func TestInsightsService_GenerateProactiveSuggestionsParsesAndDeduplicates(t *te
 	mock.Response = `[{"title":"Split deployment checks","description":"Deployment work is failing often.","suggestion":"Split smoke tests from release steps.","impact":"Faster diagnosis","severity":"high","confidence":0.95},{"title":"Document retry limits","description":"Retries are implicit.","suggestion":"Write down retry boundaries.","impact":"Fewer duplicate side effects","severity":"medium","confidence":2}]`
 	llmSvc.SetLLMCaller(mock)
 
-	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo)
 	svc.SetLLMService(llmSvc)
 	project := &models.Project{Name: "Proactive Project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -343,7 +343,7 @@ func TestInsightsService_ListAndDeleteInsights(t *testing.T) {
 	env := teststores.New(t)
 	ctx := t.Context()
 	insightsRepo := env.Insights
-	svc := NewInsightsService(insightsRepo, env.Tasks, env.Projects, env.LLMConfigs, env.Executions)
+	svc := NewInsightsService(insightsRepo, env.Tasks, env.Projects, env.LLMConfigs)
 	project := &models.Project{Name: "Insights Project"}
 	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -369,7 +369,7 @@ func TestInsightsService_ListAndDeleteInsights(t *testing.T) {
 	}
 }
 
-func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
+func TestInsightsService_UpdateInsightStatus(t *testing.T) {
 	env := teststores.New(t)
 	ctx := context.Background()
 
@@ -377,9 +377,8 @@ func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	taskRepo := env.Tasks
 	insightsRepo := env.Insights
 	llmConfigRepo := env.LLMConfigs
-	execRepo := env.Executions
 
-	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo)
 
 	project := &models.Project{Name: "Accept Test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -400,7 +399,7 @@ func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	}
 
 	// Accept without task
-	if err := svc.AcceptInsight(ctx, project.ID, insight.ID, nil); err != nil {
+	if err := svc.UpdateInsightStatus(ctx, project.ID, insight.ID, models.InsightStatusAccepted); err != nil {
 		t.Fatalf("accept insight: %v", err)
 	}
 	got, _ := insightsRepo.GetInsight(ctx, project.ID, insight.ID)
@@ -426,8 +425,7 @@ func TestInsightsService_ProjectScopedMutations(t *testing.T) {
 	insightsRepo := env.Insights
 	taskRepo := env.Tasks
 	llmConfigRepo := env.LLMConfigs
-	execRepo := env.Executions
-	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo)
 
 	projectA := &models.Project{Name: "Project A"}
 	projectB := &models.Project{Name: "Project B"}
@@ -454,7 +452,7 @@ func TestInsightsService_ProjectScopedMutations(t *testing.T) {
 	if foreign, err := svc.GetInsight(ctx, projectA.ID, insight.ID); err != nil || foreign != nil {
 		t.Fatalf("foreign insight lookup = %#v, err=%v; want not found", foreign, err)
 	}
-	if err := svc.AcceptInsight(ctx, projectA.ID, insight.ID, nil); !errors.Is(err, ErrInsightNotFound) {
+	if err := svc.UpdateInsightStatus(ctx, projectA.ID, insight.ID, models.InsightStatusAccepted); !errors.Is(err, ErrInsightNotFound) {
 		t.Fatalf("foreign accept error = %v, want %v", err, ErrInsightNotFound)
 	}
 	if err := svc.UpdateInsightStatus(ctx, projectA.ID, insight.ID, models.InsightStatusRejected); !errors.Is(err, ErrInsightNotFound) {

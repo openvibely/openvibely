@@ -723,7 +723,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	upcomingSvc.SetProjectAuthorization(projectAccessSvc, cfg.AuthMode == auth.AuthModeDisabled)
 	insightsRepo := stores.Insights
-	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo)
 	insightsSvc.SetProjectAuthorization(projectAccessSvc, cfg.AuthMode == auth.AuthModeDisabled)
 	insightsSvc.SetLLMService(llmSvc)
 	upcomingSvc.SetProjectRepo(projectRepo)

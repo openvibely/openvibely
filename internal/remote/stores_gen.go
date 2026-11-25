@@ -460,35 +460,28 @@ var paramNames = map[string]map[string][]string{
 		"RecordForwardedAndQueue": {"feedback", "input"},
 	},
 	"Insights": {
-		"AvgConfidence":               {"projectID"},
-		"CountByStatus":               {"projectID"},
-		"CountByType":                 {"projectID"},
-		"CreateHealthCheck":           {"hc"},
-		"CreateIdeaGrade":             {"ig"},
-		"CreateInsight":               {"i"},
-		"CreateReport":                {"rpt"},
-		"DeleteInsight":               {"projectID", "id"},
-		"ExistingInsight":             {"projectID", "title", "insightType"},
-		"GetCompletedBugFixes":        {"projectID", "limit"},
-		"GetFailedTaskPatterns":       {"projectID", "minFailures"},
-		"GetInsight":                  {"projectID", "id"},
-		"GetLatestHealthCheck":        {"projectID"},
-		"GetLatestIdeaGrade":          {"projectID"},
-		"GetLatestReport":             {"projectID"},
-		"GetProjectTaskStats":         {"projectID"},
-		"GetRecentCompletionRate":     {"projectID", "days"},
-		"GetSlowExecutions":           {"projectID", "minDurationSecs", "limit"},
-		"GetTagDistribution":          {"projectID"},
-		"GetTaskActivityTrend":        {"projectID", "days"},
-		"GetTaskPriorityDistribution": {"projectID"},
-		"LinkTask":                    {"projectID", "insightID", "taskID"},
-		"ListByProject":               {"projectID", "limit"},
-		"ListByStatus":                {"projectID", "status", "limit"},
-		"ListByType":                  {"projectID", "insightType", "limit"},
-		"ListHealthChecks":            {"projectID", "limit"},
-		"ListIdeaGrades":              {"projectID", "limit"},
-		"ListReports":                 {"projectID", "limit"},
-		"UpdateStatus":                {"projectID", "id", "status"},
+		"CountByStatus":         {"projectID"},
+		"CountByType":           {"projectID"},
+		"CreateHealthCheck":     {"hc"},
+		"CreateIdeaGrade":       {"ig"},
+		"CreateInsight":         {"i"},
+		"CreateReport":          {"rpt"},
+		"DeleteInsight":         {"projectID", "id"},
+		"ExistingInsight":       {"projectID", "title", "insightType"},
+		"GetCompletedBugFixes":  {"projectID", "limit"},
+		"GetFailedTaskPatterns": {"projectID", "minFailures"},
+		"GetInsight":            {"projectID", "id"},
+		"GetLatestHealthCheck":  {"projectID"},
+		"GetLatestIdeaGrade":    {"projectID"},
+		"GetLatestReport":       {"projectID"},
+		"GetSlowExecutions":     {"projectID", "minDurationSecs", "limit"},
+		"ListByProject":         {"projectID", "limit"},
+		"ListByStatus":          {"projectID", "status", "limit"},
+		"ListByType":            {"projectID", "insightType", "limit"},
+		"ListHealthChecks":      {"projectID", "limit"},
+		"ListIdeaGrades":        {"projectID", "limit"},
+		"ListReports":           {"projectID", "limit"},
+		"UpdateStatus":          {"projectID", "id", "status"},
 	},
 	"Lifecycle": {
 		"CreateExecution":                {"e"},
@@ -3551,13 +3544,6 @@ type InsightsStore struct {
 
 func (s *InsightsStore) Local() persistence.InsightsStore { return s.local }
 
-func (s *InsightsStore) AvgConfidence(ctx context.Context, a1 string) (r0 float64, r1 error) {
-	if s.r.Remote(ctx, "Insights", "AvgConfidence", []any{a1}, func() []any { r0, r1 = s.local.AvgConfidence(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.AvgConfidence(ctx, a1)
-}
-
 func (s *InsightsStore) CountByStatus(ctx context.Context, a1 string) (r0 map[string]int, r1 error) {
 	if s.r.Remote(ctx, "Insights", "CountByStatus", []any{a1}, func() []any { r0, r1 = s.local.CountByStatus(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
 		return
@@ -3656,23 +3642,6 @@ func (s *InsightsStore) GetLatestReport(ctx context.Context, a1 string) (r0 *mod
 	return s.local.GetLatestReport(ctx, a1)
 }
 
-func (s *InsightsStore) GetProjectTaskStats(ctx context.Context, a1 string) (r0 int, r1 int, r2 int, r3 int, r4 int, r5 error) {
-	if s.r.Remote(ctx, "Insights", "GetProjectTaskStats", []any{a1}, func() []any {
-		r0, r1, r2, r3, r4, r5 = s.local.GetProjectTaskStats(ctx, a1)
-		return []any{r0, r1, r2, r3, r4, r5}
-	}, &r0, &r1, &r2, &r3, &r4, &r5) {
-		return
-	}
-	return s.local.GetProjectTaskStats(ctx, a1)
-}
-
-func (s *InsightsStore) GetRecentCompletionRate(ctx context.Context, a1 string, a2 int) (r0 float64, r1 error) {
-	if s.r.Remote(ctx, "Insights", "GetRecentCompletionRate", []any{a1, a2}, func() []any { r0, r1 = s.local.GetRecentCompletionRate(ctx, a1, a2); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.GetRecentCompletionRate(ctx, a1, a2)
-}
-
 func (s *InsightsStore) GetSlowExecutions(ctx context.Context, a1 string, a2 int, a3 int) (r0 []struct {
 	TaskTitle string
 	Duration  int
@@ -3682,37 +3651,6 @@ func (s *InsightsStore) GetSlowExecutions(ctx context.Context, a1 string, a2 int
 		return
 	}
 	return s.local.GetSlowExecutions(ctx, a1, a2, a3)
-}
-
-func (s *InsightsStore) GetTagDistribution(ctx context.Context, a1 string) (r0 map[string]int, r1 error) {
-	if s.r.Remote(ctx, "Insights", "GetTagDistribution", []any{a1}, func() []any { r0, r1 = s.local.GetTagDistribution(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.GetTagDistribution(ctx, a1)
-}
-
-func (s *InsightsStore) GetTaskActivityTrend(ctx context.Context, a1 string, a2 int) (r0 []struct {
-	Date  string
-	Count int
-}, r1 error) {
-	if s.r.Remote(ctx, "Insights", "GetTaskActivityTrend", []any{a1, a2}, func() []any { r0, r1 = s.local.GetTaskActivityTrend(ctx, a1, a2); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.GetTaskActivityTrend(ctx, a1, a2)
-}
-
-func (s *InsightsStore) GetTaskPriorityDistribution(ctx context.Context, a1 string) (r0 map[int]int, r1 error) {
-	if s.r.Remote(ctx, "Insights", "GetTaskPriorityDistribution", []any{a1}, func() []any { r0, r1 = s.local.GetTaskPriorityDistribution(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.GetTaskPriorityDistribution(ctx, a1)
-}
-
-func (s *InsightsStore) LinkTask(ctx context.Context, a1 string, a2 string, a3 string) (r0 error) {
-	if s.r.Remote(ctx, "Insights", "LinkTask", []any{a1, a2, a3}, func() []any { r0 = s.local.LinkTask(ctx, a1, a2, a3); return []any{r0} }, &r0) {
-		return
-	}
-	return s.local.LinkTask(ctx, a1, a2, a3)
 }
 
 func (s *InsightsStore) ListByProject(ctx context.Context, a1 string, a2 int) (r0 []models.Insight, r1 error) {

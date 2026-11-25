@@ -53,8 +53,8 @@ var writeMethods = map[string][]string{
 		"UpsertChatProviderSessionState", "UpsertSwarmParentResult",
 	},
 	"Insights": {
-		"AvgConfidence", "CreateHealthCheck", "CreateIdeaGrade", "CreateInsight", "CreateKnowledge", "CreateReport",
-		"DeleteInsight", "DeleteKnowledge", "ExistingInsight", "LinkTask", "UpdateStatus",
+		"CreateHealthCheck", "CreateIdeaGrade", "CreateInsight", "CreateKnowledge", "CreateReport",
+		"DeleteInsight", "DeleteKnowledge", "ExistingInsight", "UpdateStatus",
 	},
 	"LLMConfigs": {
 		"AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches", "AdvanceCustomOAuthRevision", "Create", "Delete",

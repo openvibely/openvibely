@@ -448,8 +448,8 @@ func TestReadResultsDistinguishTextFromIDs(t *testing.T) {
 		t.Fatalf("model map corrupted: %+v", modelsByID)
 	}
 	tags := map[string]int{hex: 2}
-	tagReadResult(server, "Insights", "GetTagDistribution", 0, reflect.ValueOf(&tags).Elem())
+	tagReadResult(server, "Insights", "CountByType", 0, reflect.ValueOf(&tags).Elem())
 	if tags[hex] != 2 {
-		t.Fatal("user tag rewritten")
+		t.Fatal("insight type key rewritten")
 	}
 }

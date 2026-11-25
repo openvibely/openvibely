@@ -25,7 +25,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 		t.Skip("Chrome unavailable")
 	}
 	h, app, _, stores := setupTestHandlerWithStores(t)
-	h.insightsSvc = service.NewInsightsService(stores.Insights, stores.Tasks, stores.Projects, stores.LLMConfigs, stores.Executions)
+	h.insightsSvc = service.NewInsightsService(stores.Insights, stores.Tasks, stores.Projects, stores.LLMConfigs)
 	h.broadcaster = events.NewBroadcaster()
 	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
 	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
@@ -313,7 +313,7 @@ func TestAllProjectsDesktopRestoresSavedLocationInChrome(t *testing.T) {
 		t.Skip("Chrome unavailable")
 	}
 	h, app, _, stores := setupTestHandlerWithStores(t)
-	h.insightsSvc = service.NewInsightsService(stores.Insights, stores.Tasks, stores.Projects, stores.LLMConfigs, stores.Executions)
+	h.insightsSvc = service.NewInsightsService(stores.Insights, stores.Tasks, stores.Projects, stores.LLMConfigs)
 	h.SetDesktopMode(true)
 	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
 	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))

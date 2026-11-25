@@ -70,7 +70,7 @@ var readMethods = map[string]map[string]bool{
 	"Insights": {
 		"CountByStatus": true, "CountByType": true, "GetCompletedBugFixes": true, "GetFailedTaskPatterns": true,
 		"GetInsight": true, "GetLatestHealthCheck": true, "GetLatestIdeaGrade": true, "GetLatestReport": true,
-		"GetProjectTaskStats": true, "GetRecentCompletionRate": true, "GetSlowExecutions": true, "GetTagDistribution": true, "GetTaskActivityTrend": true, "GetTaskPriorityDistribution": true, "ListByProject": true,
+		"GetSlowExecutions": true, "ListByProject": true,
 		"ListByStatus": true, "ListByType": true, "ListHealthChecks": true, "ListIdeaGrades": true, "ListReports": true,
 	},
 	"LLMConfigs": {

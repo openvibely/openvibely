@@ -105,7 +105,7 @@ func wireTestHandler(t testing.TB, stores persistence.Stores, o testHandlerOptio
 	}
 	var insightsSvc *service.InsightsService
 	if o.insights {
-		insightsSvc = service.NewInsightsService(stores.Insights, env.TaskRepo, env.ProjectRepo, env.LLMConfigRepo, env.ExecRepo)
+		insightsSvc = service.NewInsightsService(stores.Insights, env.TaskRepo, env.ProjectRepo, env.LLMConfigRepo)
 		insightsSvc.SetLLMService(env.LLMSvc)
 	}
 

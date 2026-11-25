@@ -25,7 +25,7 @@ func TestProjectTabsRegroupWhileServerModalOpen(t *testing.T) {
 	}
 	h, app, _, stores := setupTestHandlerWithStores(t)
 	h.SetDesktopMode(true)
-	h.insightsSvc = service.NewInsightsService(stores.Insights, stores.Tasks, stores.Projects, stores.LLMConfigs, stores.Executions)
+	h.insightsSvc = service.NewInsightsService(stores.Insights, stores.Tasks, stores.Projects, stores.LLMConfigs)
 	h.broadcaster = events.NewBroadcaster()
 	runner := `<script>
 (async()=>{

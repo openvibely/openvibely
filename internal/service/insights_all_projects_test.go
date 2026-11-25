@@ -19,7 +19,7 @@ func TestInsightsAllProjectsCombinedReports(t *testing.T) {
 	}
 	chat := &models.Task{ProjectID: models.AllProjectsID, Title: "Conversation", Category: models.CategoryChat, Status: models.StatusPending}
 	require.NoError(t, env.Tasks.Create(ctx, chat))
-	svc := NewInsightsService(env.Insights, env.Tasks, env.Projects, env.LLMConfigs, env.Executions)
+	svc := NewInsightsService(env.Insights, env.Tasks, env.Projects, env.LLMConfigs)
 	report, err := svc.RunAnalysis(ctx, models.AllProjectsID)
 	require.NoError(t, err)
 	require.Equal(t, models.AllProjectsID, report.ProjectID)

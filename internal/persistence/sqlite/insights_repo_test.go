@@ -244,7 +244,7 @@ func TestInsightsRepo_ProjectScopedMutations(t *testing.T) {
 
 }
 
-func TestInsightsRepo_CountsAndAvgConfidence(t *testing.T) {
+func TestInsightsRepo_Counts(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
@@ -279,13 +279,6 @@ func TestInsightsRepo_CountsAndAvgConfidence(t *testing.T) {
 		t.Errorf("new count: got %d, want 3", counts["new"])
 	}
 
-	avg, err := repo.AvgConfidence(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("avg confidence: %v", err)
-	}
-	if avg < 0.79 || avg > 0.81 {
-		t.Errorf("avg confidence: got %f, want ~0.8", avg)
-	}
 }
 
 func TestInsightsRepo_ExistingInsight(t *testing.T) {
@@ -476,67 +469,6 @@ func TestInsightsRepo_HealthChecks(t *testing.T) {
 	}
 	if none != nil {
 		t.Error("expected nil for nonexistent project")
-	}
-}
-
-func TestInsightsRepo_ProjectTaskStats(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-
-	projectRepo := NewProjectRepo(db)
-	repo := NewInsightsRepo(db)
-	taskRepo := NewTaskRepo(db, nil)
-
-	project := &models.Project{Name: "Test Stats"}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	// Create tasks in various states
-	for _, tc := range []struct {
-		title    string
-		category models.TaskCategory
-		status   models.TaskStatus
-	}{
-		{"Task 1", models.CategoryActive, models.StatusCompleted},
-		{"Task 2", models.CategoryActive, models.StatusCompleted},
-		{"Task 3", models.CategoryActive, models.StatusFailed},
-		{"Task 4", models.CategoryActive, models.StatusPending},
-		{"Task 5", models.CategoryBacklog, models.StatusPending},
-		{"Task 6", models.CategoryBacklog, models.StatusPending},
-	} {
-		task := &models.Task{
-			ProjectID: project.ID,
-			Title:     tc.title,
-			Prompt:    "test prompt",
-			Category:  tc.category,
-			Status:    tc.status,
-			Priority:  3,
-			Tag:       models.TagNone,
-		}
-		if err := taskRepo.Create(ctx, task); err != nil {
-			t.Fatalf("create task %s: %v", tc.title, err)
-		}
-	}
-
-	total, completed, failed, pending, backlog, err := repo.GetProjectTaskStats(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("get task stats: %v", err)
-	}
-	if total != 6 {
-		t.Errorf("total: got %d, want 6", total)
-	}
-	if completed != 2 {
-		t.Errorf("completed: got %d, want 2", completed)
-	}
-	if failed != 1 {
-		t.Errorf("failed: got %d, want 1", failed)
-	}
-	if pending != 1 {
-		t.Errorf("pending: got %d, want 1", pending)
-	}
-	if backlog != 2 {
-		t.Errorf("backlog: got %d, want 2", backlog)
 	}
 }
 
