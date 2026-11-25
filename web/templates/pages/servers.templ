@@ -113,7 +113,12 @@ templ ServersContent(data ServersPageData) {
 					</div>
 					<div class="form-control mb-3">
 						<label class="label" for="server_password"><span class="label-text">Password</span></label>
-						<input type="password" id="server_password" name="password" class="input input-bordered" maxlength="1024" autocomplete="current-password" placeholder="Leave blank to save without signing in"/>
+						@components.SecretInput(components.SecretInputConfig{
+ ID: "server_password", Name: "password", Class: "input input-bordered w-full pr-10",
+ MaxLength: 1024, AutoComplete: "current-password", Placeholder: "Leave blank to save without signing in",
+ AriaLabel: "Toggle password visibility",
+})
+@components.SecretInputVisibilityScript()
 					</div>
 					<label class="label cursor-pointer justify-start gap-3 mb-2">
 						<input type="hidden" name="enabled" value="false" id="server_enabled_hidden" disabled/>
@@ -155,6 +160,7 @@ templ ServersContent(data ServersPageData) {
 					field('server_url').value = d.serverUrl || '';
 					field('server_username').value = d.serverUsername || '';
 					field('server_password').value = '';
+ window.resetSecretInputVisibility?.('server_password');
 					var enabled = d.serverEnabled !== 'false';
 					field('server_enabled').checked = enabled;
 					field('server_enabled_hidden').disabled = enabled;

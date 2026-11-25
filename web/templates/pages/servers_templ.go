@@ -194,7 +194,23 @@ func ServersContent(data ServersPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<h3 id=\"server_modal_title\" class=\"font-bold text-lg mb-1 pr-10\">Add Server</h3><p class=\"text-sm opacity-60 mb-4\">Sign in with your account on that server. Your password is used once and never saved.</p><form id=\"server_form\" hx-post=\"/servers\" hx-target=\"#servers-card-list\" hx-swap=\"outerHTML\" autocomplete=\"off\"><div class=\"form-control mb-3\"><label class=\"label\" for=\"server_name\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"server_name\" name=\"name\" class=\"input input-bordered\" maxlength=\"80\" placeholder=\"Team server\"></div><div class=\"form-control mb-3\"><label class=\"label\" for=\"server_url\"><span class=\"label-text\">URL</span></label> <input type=\"text\" id=\"server_url\" name=\"url\" class=\"input input-bordered\" required placeholder=\"https://ov.example.com\" inputmode=\"url\" spellcheck=\"false\"></div><div class=\"form-control mb-3\"><label class=\"label\" for=\"server_username\"><span class=\"label-text\">Username</span></label> <input type=\"text\" id=\"server_username\" name=\"username\" class=\"input input-bordered\" maxlength=\"200\" autocomplete=\"username\" spellcheck=\"false\"></div><div class=\"form-control mb-3\"><label class=\"label\" for=\"server_password\"><span class=\"label-text\">Password</span></label> <input type=\"password\" id=\"server_password\" name=\"password\" class=\"input input-bordered\" maxlength=\"1024\" autocomplete=\"current-password\" placeholder=\"Leave blank to save without signing in\"></div><label class=\"label cursor-pointer justify-start gap-3 mb-2\"><input type=\"hidden\" name=\"enabled\" value=\"false\" id=\"server_enabled_hidden\" disabled> <input type=\"checkbox\" id=\"server_enabled\" class=\"toggle toggle-sm toggle-primary\" checked onchange=\"document.getElementById('server_enabled_hidden').disabled = this.checked\"> <span class=\"label-text\">Enabled</span></label><p class=\"text-xs opacity-60 mb-4\">Server uses single sign-on? <a id=\"server_sso_link\" class=\"link hidden\" target=\"_blank\" rel=\"noopener\" href=\"#\">Sign in with SSO</a> <span id=\"server_sso_hint\">Save it first, then sign in with SSO.</span></p><div class=\"modal-action\"><button type=\"button\" class=\"btn btn-ghost\" onclick=\"server_modal.close()\">Cancel</button> <button type=\"submit\" id=\"server_submit\" class=\"btn btn-primary\">Save &amp; connect</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"Close\">close</button></form></dialog><script>\n\t\t\t(function() {\n\t\t\t\tfunction field(id) { return document.getElementById(id); }\n\t\t\t\tfunction setFormTarget(id) {\n\t\t\t\t\tvar form = field('server_form');\n\t\t\t\t\tvar path = id ? '/servers/' + id : '/servers';\n\t\t\t\t\tform.setAttribute('hx-post', path);\n\t\t\t\t\tform.dataset.serverId = id || '';\n\t\t\t\t\tif (window.htmx) htmx.process(form);\n\t\t\t\t\tvar sso = field('server_sso_link');\n\t\t\t\t\tsso.classList.toggle('hidden', !id);\n\t\t\t\t\tfield('server_sso_hint').classList.toggle('hidden', !!id);\n\t\t\t\t\tsso.href = id ? '/servers/' + id + '/sso' : '#';\n\t\t\t\t}\n\t\t\t\twindow.openServerModal = function(card) {\n\t\t\t\t\tvar d = card ? card.dataset : {};\n\t\t\t\t\tvar id = d.serverId || '';\n\t\t\t\t\tfield('server_modal_title').textContent = id ? (d.serverStatus === 'connected' ? 'Edit Server' : 'Reconnect ' + d.serverName) : 'Add Server';\n\t\t\t\t\tfield('server_name').value = d.serverName || '';\n\t\t\t\t\tfield('server_url').value = d.serverUrl || '';\n\t\t\t\t\tfield('server_username').value = d.serverUsername || '';\n\t\t\t\t\tfield('server_password').value = '';\n\t\t\t\t\tvar enabled = d.serverEnabled !== 'false';\n\t\t\t\t\tfield('server_enabled').checked = enabled;\n\t\t\t\t\tfield('server_enabled_hidden').disabled = enabled;\n\t\t\t\t\tfield('server_submit').textContent = id && d.serverStatus !== 'connected' ? 'Reconnect' : 'Save & connect';\n\t\t\t\t\tsetFormTarget(id);\n\t\t\t\t\tserver_modal.showModal();\n\t\t\t\t\t(id ? field('server_password') : field('server_url')).focus();\n\t\t\t\t};\n\t\t\t\twindow.disconnectServer = function(button) {\n\t\t\t\t\tvar card = button.closest('[data-server-id]');\n\t\t\t\t\thtmx.ajax('POST', '/servers/' + card.dataset.serverId + '/disconnect', { target: '#servers-card-list', swap: 'outerHTML' });\n\t\t\t\t};\n\t\t\t\twindow.deleteServer = async function(button) {\n\t\t\t\t\tvar card = button.closest('[data-server-id]');\n\t\t\t\t\tif (!await window.openVibelyConfirm('Delete server \"' + card.dataset.serverName + '\"? Data on that server is not affected.')) return;\n\t\t\t\t\thtmx.ajax('DELETE', '/servers/' + card.dataset.serverId, { target: '#servers-card-list', swap: 'outerHTML' });\n\t\t\t\t};\n\t\t\t\tif (!window.__ovServersListeners) {\n\t\t\t\t\twindow.__ovServersListeners = true;\n\t\t\t\t\tdocument.body.addEventListener('servers-saved', function() {\n\t\t\t\t\t\tvar modal = document.getElementById('server_modal');\n\t\t\t\t\t\tif (modal && modal.open) modal.close();\n\t\t\t\t\t});\n\t\t\t\t\tdocument.body.addEventListener('server-saved-id', function(e) {\n\t\t\t\t\t\tvar form = document.getElementById('server_form');\n\t\t\t\t\t\tif (form && e.detail && e.detail.value && !form.dataset.serverId) setFormTarget(e.detail.value);\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t\tvar root = field('servers-container');\n\t\t\t\tvar reconnect = root && root.dataset.serversReconnect;\n\t\t\t\tif (reconnect) {\n\t\t\t\t\tvar card = root.querySelector('[data-server-id=\"' + CSS.escape(reconnect) + '\"]');\n\t\t\t\t\tif (card) setTimeout(function() { openServerModal(card); }, 0);\n\t\t\t\t}\n\t\t\t})();\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<h3 id=\"server_modal_title\" class=\"font-bold text-lg mb-1 pr-10\">Add Server</h3><p class=\"text-sm opacity-60 mb-4\">Sign in with your account on that server. Your password is used once and never saved.</p><form id=\"server_form\" hx-post=\"/servers\" hx-target=\"#servers-card-list\" hx-swap=\"outerHTML\" autocomplete=\"off\"><div class=\"form-control mb-3\"><label class=\"label\" for=\"server_name\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"server_name\" name=\"name\" class=\"input input-bordered\" maxlength=\"80\" placeholder=\"Team server\"></div><div class=\"form-control mb-3\"><label class=\"label\" for=\"server_url\"><span class=\"label-text\">URL</span></label> <input type=\"text\" id=\"server_url\" name=\"url\" class=\"input input-bordered\" required placeholder=\"https://ov.example.com\" inputmode=\"url\" spellcheck=\"false\"></div><div class=\"form-control mb-3\"><label class=\"label\" for=\"server_username\"><span class=\"label-text\">Username</span></label> <input type=\"text\" id=\"server_username\" name=\"username\" class=\"input input-bordered\" maxlength=\"200\" autocomplete=\"username\" spellcheck=\"false\"></div><div class=\"form-control mb-3\"><label class=\"label\" for=\"server_password\"><span class=\"label-text\">Password</span></label>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = components.SecretInput(components.SecretInputConfig{
+			ID: "server_password", Name: "password", Class: "input input-bordered w-full pr-10",
+			MaxLength: 1024, AutoComplete: "current-password", Placeholder: "Leave blank to save without signing in",
+			AriaLabel: "Toggle password visibility",
+		}).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = components.SecretInputVisibilityScript().Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div><label class=\"label cursor-pointer justify-start gap-3 mb-2\"><input type=\"hidden\" name=\"enabled\" value=\"false\" id=\"server_enabled_hidden\" disabled> <input type=\"checkbox\" id=\"server_enabled\" class=\"toggle toggle-sm toggle-primary\" checked onchange=\"document.getElementById('server_enabled_hidden').disabled = this.checked\"> <span class=\"label-text\">Enabled</span></label><p class=\"text-xs opacity-60 mb-4\">Server uses single sign-on? <a id=\"server_sso_link\" class=\"link hidden\" target=\"_blank\" rel=\"noopener\" href=\"#\">Sign in with SSO</a> <span id=\"server_sso_hint\">Save it first, then sign in with SSO.</span></p><div class=\"modal-action\"><button type=\"button\" class=\"btn btn-ghost\" onclick=\"server_modal.close()\">Cancel</button> <button type=\"submit\" id=\"server_submit\" class=\"btn btn-primary\">Save &amp; connect</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"Close\">close</button></form></dialog><script>\n\t\t\t(function() {\n\t\t\t\tfunction field(id) { return document.getElementById(id); }\n\t\t\t\tfunction setFormTarget(id) {\n\t\t\t\t\tvar form = field('server_form');\n\t\t\t\t\tvar path = id ? '/servers/' + id : '/servers';\n\t\t\t\t\tform.setAttribute('hx-post', path);\n\t\t\t\t\tform.dataset.serverId = id || '';\n\t\t\t\t\tif (window.htmx) htmx.process(form);\n\t\t\t\t\tvar sso = field('server_sso_link');\n\t\t\t\t\tsso.classList.toggle('hidden', !id);\n\t\t\t\t\tfield('server_sso_hint').classList.toggle('hidden', !!id);\n\t\t\t\t\tsso.href = id ? '/servers/' + id + '/sso' : '#';\n\t\t\t\t}\n\t\t\t\twindow.openServerModal = function(card) {\n\t\t\t\t\tvar d = card ? card.dataset : {};\n\t\t\t\t\tvar id = d.serverId || '';\n\t\t\t\t\tfield('server_modal_title').textContent = id ? (d.serverStatus === 'connected' ? 'Edit Server' : 'Reconnect ' + d.serverName) : 'Add Server';\n\t\t\t\t\tfield('server_name').value = d.serverName || '';\n\t\t\t\t\tfield('server_url').value = d.serverUrl || '';\n\t\t\t\t\tfield('server_username').value = d.serverUsername || '';\n\t\t\t\t\tfield('server_password').value = '';\n window.resetSecretInputVisibility?.('server_password');\n\t\t\t\t\tvar enabled = d.serverEnabled !== 'false';\n\t\t\t\t\tfield('server_enabled').checked = enabled;\n\t\t\t\t\tfield('server_enabled_hidden').disabled = enabled;\n\t\t\t\t\tfield('server_submit').textContent = id && d.serverStatus !== 'connected' ? 'Reconnect' : 'Save & connect';\n\t\t\t\t\tsetFormTarget(id);\n\t\t\t\t\tserver_modal.showModal();\n\t\t\t\t\t(id ? field('server_password') : field('server_url')).focus();\n\t\t\t\t};\n\t\t\t\twindow.disconnectServer = function(button) {\n\t\t\t\t\tvar card = button.closest('[data-server-id]');\n\t\t\t\t\thtmx.ajax('POST', '/servers/' + card.dataset.serverId + '/disconnect', { target: '#servers-card-list', swap: 'outerHTML' });\n\t\t\t\t};\n\t\t\t\twindow.deleteServer = async function(button) {\n\t\t\t\t\tvar card = button.closest('[data-server-id]');\n\t\t\t\t\tif (!await window.openVibelyConfirm('Delete server \"' + card.dataset.serverName + '\"? Data on that server is not affected.')) return;\n\t\t\t\t\thtmx.ajax('DELETE', '/servers/' + card.dataset.serverId, { target: '#servers-card-list', swap: 'outerHTML' });\n\t\t\t\t};\n\t\t\t\tif (!window.__ovServersListeners) {\n\t\t\t\t\twindow.__ovServersListeners = true;\n\t\t\t\t\tdocument.body.addEventListener('servers-saved', function() {\n\t\t\t\t\t\tvar modal = document.getElementById('server_modal');\n\t\t\t\t\t\tif (modal && modal.open) modal.close();\n\t\t\t\t\t});\n\t\t\t\t\tdocument.body.addEventListener('server-saved-id', function(e) {\n\t\t\t\t\t\tvar form = document.getElementById('server_form');\n\t\t\t\t\t\tif (form && e.detail && e.detail.value && !form.dataset.serverId) setFormTarget(e.detail.value);\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t\tvar root = field('servers-container');\n\t\t\t\tvar reconnect = root && root.dataset.serversReconnect;\n\t\t\t\tif (reconnect) {\n\t\t\t\t\tvar card = root.querySelector('[data-server-id=\"' + CSS.escape(reconnect) + '\"]');\n\t\t\t\t\tif (card) setTimeout(function() { openServerModal(card); }, 0);\n\t\t\t\t}\n\t\t\t})();\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -219,135 +235,135 @@ func ServersCardList(data ServersPageData) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div id=\"servers-card-list\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div id=\"servers-card-list\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if data.LocalBackend == "stopping" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<p role=\"status\" hx-get=\"/servers\" hx-trigger=\"every 2s\" hx-select=\"#servers-card-list\" hx-target=\"#servers-card-list\" hx-swap=\"outerHTML\">Stopping Local services… Waiting for Local work and listeners to stop.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<p role=\"status\" hx-get=\"/servers\" hx-trigger=\"every 2s\" hx-select=\"#servers-card-list\" hx-target=\"#servers-card-list\" hx-swap=\"outerHTML\">Stopping Local services… Waiting for Local work and listeners to stop.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if data.DesktopMode && data.LocalBackend != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"card bg-base-100 shadow-sm border border-base-300 mb-4\"><div class=\"card-body py-4\"><div class=\"flex items-center justify-between gap-4\"><div><h3 class=\"font-bold\">Run Local services</h3><p class=\"text-sm opacity-60\">Run Local tasks, schedules, automations, and channel listeners. Turning off lets active work finish; remote servers stay connected.</p></div><input type=\"checkbox\" name=\"enabled\" value=\"true\" class=\"toggle toggle-primary\" aria-label=\"Run Local services\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"card bg-base-100 shadow-sm border border-base-300 mb-4\"><div class=\"card-body py-4\"><div class=\"flex items-center justify-between gap-4\"><div><h3 class=\"font-bold\">Run Local services</h3><p class=\"text-sm opacity-60\">Run Local tasks, schedules, automations, and channel listeners. Turning off lets active work finish; remote servers stay connected.</p></div><input type=\"checkbox\" name=\"enabled\" value=\"true\" class=\"toggle toggle-primary\" aria-label=\"Run Local services\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if data.LocalBackend == "on" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " checked")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, " checked")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, " hx-post=\"/servers/local-backend\" hx-trigger=\"change\" hx-target=\"#servers-card-list\" hx-swap=\"outerHTML\"></div></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " hx-post=\"/servers/local-backend\" hx-trigger=\"change\" hx-target=\"#servers-card-list\" hx-swap=\"outerHTML\"></div></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if len(data.Servers) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"text-center py-12\" data-search-empty-state><p class=\"opacity-50 mb-4\">No servers yet. Add a remote OpenVibely server to work with its projects here.</p><button class=\"btn btn-primary\" onclick=\"openServerModal()\">Add Server</button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div class=\"text-center py-12\" data-search-empty-state><p class=\"opacity-50 mb-4\">No servers yet. Add a remote OpenVibely server to work with its projects here.</p><button class=\"btn btn-primary\" onclick=\"openServerModal()\">Add Server</button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div class=\"grid gap-4\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div class=\"grid gap-4\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, server := range data.Servers {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-server-id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-server-id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(server.ID).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 236, Col: 32}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 242, Col: 32}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" data-server-name=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" data-server-name=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression(server.Name).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 237, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 243, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" data-server-url=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" data-server-url=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templruntime.NewAttributeExpression(server.URL).ResolveURL(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 238, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 244, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" data-server-username=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" data-server-username=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templruntime.NewAttributeExpression(server.Username).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 239, Col: 44}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 245, Col: 44}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" data-server-enabled=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" data-server-enabled=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var10 string
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templruntime.NewAttributeExpression(serverEnabledString(server)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 240, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 246, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" data-server-status=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" data-server-status=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templruntime.NewAttributeExpression(server.Status).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 241, Col: 40}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 247, Col: 40}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" data-search-card data-search-text=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" data-search-card data-search-text=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(serverSearchText(server)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 243, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 249, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openServerModal(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openServerModal(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -363,17 +379,17 @@ func ServersCardList(data ServersPageData) templ.Component {
 						}()
 					}
 					ctx = templ.InitializeContext(ctx)
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<li><button onclick=\"event.stopPropagation(); openServerModal(this.closest('[data-server-id]'))\">Edit</button></li>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<li><button onclick=\"event.stopPropagation(); openServerModal(this.closest('[data-server-id]'))\">Edit</button></li>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					if server.Status == ServerStatusConnected || server.Status == ServerStatusOffline || server.Status == ServerStatusExpired {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<li><button onclick=\"event.stopPropagation(); disconnectServer(this)\">Disconnect</button></li>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<li><button onclick=\"event.stopPropagation(); disconnectServer(this)\">Disconnect</button></li>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, " <li><button class=\"text-error\" onclick=\"event.stopPropagation(); deleteServer(this)\">Delete</button></li>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " <li><button class=\"text-error\" onclick=\"event.stopPropagation(); deleteServer(this)\">Delete</button></li>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -383,20 +399,20 @@ func ServersCardList(data ServersPageData) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(server.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 258, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 264, Col: 22}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, " ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -404,7 +420,7 @@ func ServersCardList(data ServersPageData) templ.Component {
 					templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
 					templ_7745c5c3_Buffer := templ.GetBuffer()
 					var templ_7745c5c3_ElementScripts []templ.ComponentScript
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<span class=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<span class=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -422,7 +438,7 @@ func ServersCardList(data ServersPageData) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -436,103 +452,103 @@ func ServersCardList(data ServersPageData) templ.Component {
 					}
 					templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, ">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, ">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(serverStatusLabel(server))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 259, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 265, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</span></h3><p class=\"text-sm opacity-60 break-all\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</span></h3><p class=\"text-sm opacity-60 break-all\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var18 string
 				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(server.URL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 261, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 267, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if server.SignedInAs != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<p class=\"text-sm opacity-60\">Signed in as ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<p class=\"text-sm opacity-60\">Signed in as ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var19 string
 					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(server.SignedInAs)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 263, Col: 71}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 269, Col: 71}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</p>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else if server.Username != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<p class=\"text-sm opacity-60\">Username: ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<p class=\"text-sm opacity-60\">Username: ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var20 string
 					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(server.Username)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 265, Col: 66}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 271, Col: 66}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</p>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if server.Version != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<p class=\"text-sm opacity-60\">Version ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<p class=\"text-sm opacity-60\">Version ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var21 string
 					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(server.Version)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 268, Col: 63}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/servers.templ`, Line: 274, Col: 63}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</p>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</div></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</div></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
