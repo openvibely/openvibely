@@ -28,6 +28,7 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -249,6 +250,7 @@ func (h *Handler) PluginPagesNav(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), projectID)))
 	return render(c, http.StatusOK, pages.PluginNav(entries, models.IsAggregateProject(projectID)))
 }
 

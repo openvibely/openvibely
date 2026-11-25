@@ -101,6 +101,15 @@ func TestRemotePluginPageOwnerIsolation(t *testing.T) {
 	require.Contains(t, rec.Body.String(), instance)
 	rec = request("GET", "/p/"+instance+"?project_id="+models.AllProjectsID, "")
 	require.Equal(t, 200, rec.Code, rec.Body.String())
+	// A hard refresh keeps the rail's workspace while the page bridge uses its owner.
+	full := httptest.NewRequest("GET", "/p/"+instance+"?project_id="+models.AllProjectsID, nil).WithContext(ctx)
+	full.Header.Set("Accept", "text/html")
+	fullResponse := httptest.NewRecorder()
+	e.ServeHTTP(fullResponse, full)
+	require.Equal(t, http.StatusOK, fullResponse.Code, fullResponse.Body.String())
+	require.Contains(t, fullResponse.Body.String(), `data-plugin-project="`+models.AllProjectsID+`"`)
+	require.Contains(t, fullResponse.Body.String(), `data-project-id="`+project+`"`)
+
 	// Live page events use the remote socket, preserving application data verbatim.
 	desktop := httptest.NewServer(e)
 	defer desktop.Close()

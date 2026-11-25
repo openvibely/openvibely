@@ -71,7 +71,7 @@ func PluginPage(projects []models.Project, currentProjectID string, v PluginPage
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layout.Base(v.Title, projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.Base(v.Title, projects, layout.WorkspaceProjectID(ctx, currentProjectID)).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -342,9 +342,9 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var16 string
-			templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject)))).ResolveURL(ctx)
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, pluginNavScope(e, showProject))))).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 115, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 115, Col: 161}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
@@ -355,9 +355,9 @@ func PluginNav(entries []PluginNavEntry, showProject bool) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var17 string
-			templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject))).Resolve(ctx)
+			templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, pluginNavScope(e, showProject)))).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 116, Col: 116}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/plugin_pages.templ`, Line: 116, Col: 148}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 			if templ_7745c5c3_Err != nil {

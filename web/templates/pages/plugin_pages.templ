@@ -28,7 +28,7 @@ func pluginAPI(v PluginPageView, suffix string) string {
 }
 
 templ PluginPage(projects []models.Project, currentProjectID string, v PluginPageView) {
-	@layout.Base(v.Title, projects, currentProjectID) {
+	@layout.Base(v.Title, projects, layout.WorkspaceProjectID(ctx, currentProjectID)) {
 		@PluginPageContent(v)
 	}
 }
@@ -112,8 +112,8 @@ templ PluginNav(entries []PluginNavEntry, showProject bool) {
 		<li data-plugin-nav-entry={ e.InstanceID }>
 			<a
 				data-sidebar-path={ "/p/" + url.PathEscape(e.InstanceID) }
-				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject))) }
-				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(pluginNavScope(e, showProject)) }
+				href={ templ.SafeURL("/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, pluginNavScope(e, showProject)))) }
+				hx-get={ "/p/" + url.PathEscape(e.InstanceID) + "?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(ctx, pluginNavScope(e, showProject))) }
 				aria-label={ e.Title + pluginNavProjectSuffix(e, showProject) }
 				data-tip={ e.Title + pluginNavProjectSuffix(e, showProject) }
 				data-tip-side="right"
