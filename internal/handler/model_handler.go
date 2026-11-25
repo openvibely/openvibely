@@ -232,7 +232,7 @@ func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMet
 	return models.LLMProvider(provider), models.AuthMethodAPIKey
 }
 
-func resolveFormProviderAndAuth(c echo.Context) (models.LLMProvider, models.AuthMethod) {
+func resolveFormProviderAndAuth(c ownerForm) (models.LLMProvider, models.AuthMethod) {
 	if c.FormValue("provider") == string(models.ProviderGemini) {
 		if c.FormValue("gemini_auth_type") == string(models.AuthMethodOAuth) {
 			return models.ProviderGemini, models.AuthMethodOAuth
@@ -820,12 +820,7 @@ func validateBrowserRunnableModelSlug(agent *models.LLMConfig) error {
 }
 
 func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c ownerForm, agent *models.LLMConfig, opts modelFormOptions) error {
-	provider, authMethod := resolveProviderAndAuth(
-		c.FormValue("provider"),
-		c.FormValue("anthropic_auth_type"),
-		c.FormValue("openai_auth_type"),
-		c.FormValue("auth_method"),
-	)
+	provider, authMethod := resolveFormProviderAndAuth(c)
 	if provider == models.ProviderOpenAICompatible && c.FormValue("custom_auth_method") == string(models.AuthMethodOAuth) {
 		authMethod = models.AuthMethodOAuth
 	}

@@ -56,13 +56,6 @@ func (h *Handler) computerService(c echo.Context) *service.ProjectComputerServic
 	return h.computerSvc
 }
 func (h *Handler) ProjectComputerPage(c echo.Context) error {
-	// Keep old project links working; task viewer routes still render their desktop.
-	if c.QueryParam("task_id") == "" {
-		if err := h.computerProject(c); err != nil {
-			return err
-		}
-		return c.Redirect(http.StatusSeeOther, "/settings/computer?project_id="+url.QueryEscape(c.Param("id")))
-	}
 	if err := h.computerProject(c); err != nil {
 		return err
 	}
@@ -70,6 +63,10 @@ func (h *Handler) ProjectComputerPage(c echo.Context) error {
 		if _, err := actComputerAccess(h, c.Request().Context(), ComputerArgs{ProjectID: c.Param("id"), TaskID: c.QueryParam("task_id")}); err != nil {
 			return projectAccessResponse(c, err)
 		}
+	}
+	// Keep old project links working after validating their owning server.
+	if c.QueryParam("task_id") == "" {
+		return c.Redirect(http.StatusSeeOther, "/settings/computer?project_id="+url.QueryEscape(c.Param("id")))
 	}
 	var taskIDs []string
 	if id := c.QueryParam("task_id"); id != "" {

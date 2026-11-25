@@ -80,6 +80,7 @@ var writeMethods = map[string][]string{
 		"Computers", "Create", "DeleteWithCleanupManifest", "ForEachRepoRoot", "Update",
 	},
 	"ReviewComments": {
+		"DeleteSubmitted",
 		"Create", "Delete", "DeleteByTask", "DeleteForProject", "UpdateText", "UpdateTextForProject",
 	},
 	"Schedules": {

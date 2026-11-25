@@ -162,7 +162,7 @@ var unwrappedMethods = map[string]string{
 	"EmailAuth":            "Delete HasAnyAuthorizedUsers HasAnyAuthorizedUsersAnywhere IsAuthorizedForProject",
 	"EmailSenderProjects":  "DeleteSenderProject",
 	"EmailTaskContexts":    "DeleteByTaskID UpsertInTx",
-	"Executions":           "GetFailedTaskPatterns ListByProject ListByTaskIDs ListTaskAnthropicHistory ListTaskCompletionsHistory ListTaskResponsesHistory SetAutomationRepo",
+	"Executions":           "GetFailedTaskPatterns ListByProject ListByTaskIDs ListTaskGeminiHistory ListTaskAnthropicHistory ListTaskCompletionsHistory ListTaskResponsesHistory SetAutomationRepo",
 	"GitHubPRFeedback":     "RecordForwarded",
 	"Insights":             "GetKnowledge",
 	"Lifecycle":            "HasNewerTaskRun ListExecutionEvents ListExecutionsForTask",

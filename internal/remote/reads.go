@@ -71,7 +71,7 @@ var readMethods = map[string]map[string]bool{
 		"CountByStatus": true, "CountByType": true, "GetCompletedBugFixes": true, "GetFailedTaskPatterns": true,
 		"GetInsight": true, "GetLatestHealthCheck": true, "GetLatestIdeaGrade": true, "GetLatestReport": true,
 		"GetProjectTaskStats": true, "GetRecentCompletionRate": true, "GetSlowExecutions": true, "GetTagDistribution": true, "GetTaskActivityTrend": true, "GetTaskPriorityDistribution": true, "ListByProject": true,
-		"ListByStatus": true, "ListByType": true, "ListHealthChecks": true, "ListIdeaGrades": true, "ListKnowledge": true, "ListReports": true,
+		"ListByStatus": true, "ListByType": true, "ListHealthChecks": true, "ListIdeaGrades": true, "ListReports": true,
 	},
 	"LLMConfigs": {
 		"ExistsByID": true, "GetByID": true, "GetByIDs": true, "GetDefault": true, "GetDefaultID": true,
@@ -103,6 +103,7 @@ var readMethods = map[string]map[string]bool{
 		"GetByTaskID": true, "ListOpenByProjectID": true,
 	},
 	"Tasks": {
+		"ListCustomTags":         true,
 		"CountBacklogByPriority": true, "CountByProjectAndCategory": true, "CountPendingByProject": true,
 		"CountPendingForProject": true, "CountProjectStatus": true, "FilterNonChatTaskIDs": true,
 		"FindBlockedChildByParent": true, "FindChainChildByParent": true, "FindSwarmChildByRole": true, "GetByID": true, "GetByIDForProject": true, "GetByProjectAndTitle": true, "GetDetailActionMetadata": true,

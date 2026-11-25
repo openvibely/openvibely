@@ -59,7 +59,8 @@ func TestRemoteProjectComputerRunsOnRemote(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, serversRequest(http.MethodGet, "/projects/"+remoteProject+"/computer", nil))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+	require.Equal(t, "/settings/computer?project_id="+url.QueryEscape(remoteProject), rec.Header().Get("Location"))
 
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, serversRequest(http.MethodGet, "/projects/"+remoteid.ID(server, "missing")+"/computer", nil))
