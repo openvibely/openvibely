@@ -915,3 +915,44 @@ func TestBrowserFunctional_ListScopeRefreshAfterDialog(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_AnalyticsScopePreservesInflightPreview(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/release" {
+			once.Do(func() { close(release) })
+			return
+		}
+		if r.URL.Path != "/analytics" {
+			w.WriteHeader(204)
+			return
+		}
+		if r.Header.Get("HX-Request") == "true" {
+			<-release
+			fmt.Fprint(w, `<div id="audit-new-scope">shared</div>`)
+			return
+		}
+		p := models.Project{ID: "local", Name: "Local"}
+		_ = Analytics([]models.Project{p}, &p).Render(r.Context(), w)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/analytics?project_id=local", "audit-inflight", func(b *composerFocusCDP) {
+		b.waitFor("ready", `String(!!document.querySelector('dialog[data-analytics-preview]'))`, "true")
+		b.evaluate(`document.body.addEventListener('htmx:beforeRequest',()=>{window.auditSent=true});window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed',{detail:{projectID:'__repo_group'}}));'sent'`)
+		b.waitFor("request underway", `String(!!window.auditSent)`, "true")
+		b.evaluate(`document.querySelector('dialog[data-analytics-preview]').showModal();'open'`)
+		b.waitFor("preview open", `String(!!document.querySelector('dialog[open]'))`, "true")
+		b.evaluate(`document.body.addEventListener('htmx:afterRequest',()=>{window.auditResponseFinished=true});fetch('/release');'released'`)
+		b.waitFor("response finished", `String(!!window.auditResponseFinished)`, "true")
+		b.waitFor("preview preserved", `String(!!document.querySelector('dialog[open]')&&!document.getElementById('audit-new-scope'))`, "true")
+		b.evaluate(`document.querySelector('dialog[open]').close();'closed'`)
+		b.waitFor("new content", `String(!!document.getElementById('audit-new-scope'))`, "true")
+		b.waitFor("preview destroyed", `String(!document.querySelector('dialog[open]'))`, "true")
+	})
+}

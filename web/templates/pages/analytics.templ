@@ -315,12 +315,33 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
 						var charts = window._analyticsCharts;
 						var eventSignal = window._analyticsAbortController.signal;
                         var pendingScopeURL = '';
+                        var scopeRefreshInFlight = false;
                         function refreshScope() {
-                            if (!pendingScopeURL || !dataEl.isConnected || dataEl.closest('#settings-retained-workspace') || location.pathname !== '/analytics' || document.querySelector('dialog[open]')) return;
+                            if (scopeRefreshInFlight || !pendingScopeURL || !dataEl.isConnected || dataEl.closest('#settings-retained-workspace') || location.pathname !== '/analytics' || document.querySelector('dialog[open]')) return;
                             var url = pendingScopeURL;
                             pendingScopeURL = '';
-                            Promise.resolve(htmx.ajax('GET', url, {target:'#main-content', swap:'innerHTML'})).catch(function() { pendingScopeURL = url; });
+                            scopeRefreshInFlight = true;
+                            Promise.resolve(htmx.ajax('GET', url, {target:'#main-content', swap:'innerHTML', headers:{'X-Analytics-Scope-Refresh':'true'}})).then(function() {
+                                scopeRefreshInFlight = false;
+                                refreshScope();
+                            }, function() {
+                                scopeRefreshInFlight = false;
+                                if (!pendingScopeURL) pendingScopeURL = url;
+                            });
                         }
+                        document.body.addEventListener('htmx:beforeSwap', function(event) {
+                            var detail = event.detail || {};
+                            var config = detail.requestConfig || {};
+                            if ((config.headers || {})['X-Analytics-Scope-Refresh'] !== 'true') return;
+                            if (!dataEl.isConnected || dataEl.closest('#settings-retained-workspace') || location.pathname !== '/analytics') {
+                                detail.shouldSwap = false;
+                                return;
+                            }
+                            if (pendingScopeURL || document.querySelector('dialog[open]')) {
+                                detail.shouldSwap = false;
+                                if (!pendingScopeURL) pendingScopeURL = config.path;
+                            }
+                        }, {signal:eventSignal});
                         window.addEventListener('openvibely-workspace-scope-changed', function(event) {
                             if (!dataEl.isConnected || dataEl.closest('#settings-retained-workspace')) return;
                             var url = new URL(location.href);
