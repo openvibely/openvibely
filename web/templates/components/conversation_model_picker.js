@@ -63,7 +63,11 @@
   const favoritesEndpoint = "/ui/model-favorites";
   function favoritesURL() {
     const url = new URL(favoritesEndpoint, location.href);
-    const project = active?.closest('form')?.querySelector('[name="_project_id"]')?.value || '';
+    const form = active?.closest('form');
+    const destination = form?.querySelector('[data-project-input]');
+    const project = form?.elements.namedItem('destination_project')?.value || form?.querySelector('[name="_project_id"]')?.value ||
+      (destination && document.getElementById(destination.dataset.projectInput)?.value) ||
+      active?.closest('[data-project-id]')?.dataset.projectId || '';
     if (/^r-[a-f0-9]{16}-/.test(project)) url.searchParams.set('project_id', project);
     return url.pathname + url.search;
   }

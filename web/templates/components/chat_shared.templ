@@ -3097,9 +3097,36 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					}
 				};
 				syncProjectLabel();
+                var modelRequest = 0;
+                async function refreshProjectModels() {
+                    var token = ++modelRequest;
+                    var picker = form.querySelector('[id$="-agent-select"]');
+                    var input = form.querySelector('[name="agent_id"]');
+                    if (!picker || !input) return;
+                    window.ovModelPicker?.close();
+                    input.value = 'default';
+                    var options = picker.parentElement.querySelector('.chat-custom-select-options');
+                    options.innerHTML = '<li data-value="default">Default</li>';
+                    form.querySelectorAll('[name="reasoning_effort"], [name="service_tier"]').forEach(function(field) { field.value = ''; });
+                    picker.disabled = true;
+                    picker.querySelector('.chat-custom-select-label').textContent = 'Loading models…';
+                    try {
+                        var response = await fetch('/tasks/new?model_options=1&project_id=' + encodeURIComponent(chosenProject()));
+                        if (!response.ok) throw new Error('Models unavailable');
+                        var html = await response.text();
+                        if (token !== modelRequest || !form.isConnected) return;
+                        options.innerHTML = html;
+                        picker.disabled = false;
+                        window._setChatCustomSelectValue?.(picker, 'default');
+                        window.ovModelPicker?.changed(picker);
+                    } catch (_) {
+                        if (token === modelRequest && form.isConnected) picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';
+                    }
+                }
 				var uploadedForProject = projectInput.value;
 				projectInput.addEventListener('change', function() {
 					syncProjectLabel();
+                    if (projectSelect.getAttribute('data-project-send-url')) refreshProjectModels();
 					// Uploaded files are staged on the previous project's server.
 					if (uploadedForProject !== projectInput.value && window[clearFuncName]) window[clearFuncName]();
 					uploadedForProject = projectInput.value;

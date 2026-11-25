@@ -79,6 +79,17 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  const favoritesLoaded=async()=>{while(favoriteReads)await wait();};
  const trigger=document.getElementById('chat-form-agent-select');
  trigger.scrollIntoView({block:'end'});await nextFrame();
+ // A shared Chat destination is outside the form, unlike ordinary project forms.
+ const projectField=document.querySelector('[name="_project_id"]');
+ const originalProject=projectField.value;projectField.removeAttribute('name');
+ const destination=document.createElement('button');destination.dataset.projectInput='remote-destination';trigger.closest('form').append(destination);
+ const remoteInput=document.createElement('input');remoteInput.id='remote-destination';remoteInput.value='r-1234567890abcdef-project';document.body.append(remoteInput);
+ const scopeFetch=window.fetch;let requestedFavorites='';
+ window.fetch=async(url,opts)=>{if(String(url).startsWith('/ui/model-favorites')){requestedFavorites=String(url);return new Response(JSON.stringify({m0:true}),{headers:{'Content-Type':'application/json'}});}return scopeFetch(url,opts);};
+ trigger.click();for(let i=0;i<100&&!document.querySelector('#conversation-model-picker .ov-mp-star[aria-pressed=true]');i++)await wait();
+ assert(requestedFavorites.includes('project_id=r-1234567890abcdef-project'),'shared Chat favorites use chosen destination');
+ assert(document.querySelector('#conversation-model-picker .ov-mp-star[aria-pressed=true]'),'remote favorite is displayed');
+ window.ovModelPicker.close();window.fetch=scopeFetch;destination.remove();remoteInput.remove();projectField.name='_project_id';projectField.value=originalProject;
  const textarea=document.querySelector('textarea');textarea.focus();
  const apple=/Mac|iPhone|iPad|iPod|iOS/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
  assert(trigger.title===(apple?'Models (⌘M)':'Models (Ctrl+M)'),'initial model hint before opening menu');
@@ -772,4 +783,42 @@ document.body.dataset.testResult='pass';
 			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "shared preference persistence "+scope, 1000, 800, 20*time.Second)
 		})
 	}
+}
+
+func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
+	chrome := testChromePath(t)
+	var content bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{FormID: "shared-chat-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/chat/send", Agents: []models.LLMConfig{{ID: "local-model", Name: "Local model", Provider: models.ProviderOpenAI}}, ShowModelSelector: true, ProjectChoices: []models.Project{{ID: "local", Name: "Local"}, {ID: "r-1234567890abcdef-project", Name: "Remote"}}, ProjectInputID: "destination", ProjectSendURL: "/chat/send?project_id="}).Render(context.Background(), &content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/new" {
+			if r.URL.Query().Get("project_id") != "r-1234567890abcdef-project" {
+				t.Errorf("unexpected destination %s", r.URL.RawQuery)
+			}
+			_ = ComposerModelOptions([]models.LLMConfig{{ID: "r-1234567890abcdef-model", Name: "Remote model", Provider: models.ProviderOpenAI}}, "").Render(r.Context(), w)
+			return
+		}
+		if r.URL.Path == "/ui/model-favorites" {
+			fmt.Fprint(w, `{}`)
+			return
+		}
+		fmt.Fprint(w, `<!doctype html><html><body data-test-result="pending"><input id="destination"><div id="messages"></div><script>window.htmx={process:function(){}};</script>`+content.String()+`<script>
+ (async function(){try {
+ const wait=()=>new Promise(r=>setTimeout(r,30)),assert=(v,m)=>{if(!v)throw Error(m)};
+ const destination=document.getElementById('destination'),form=document.getElementById('shared-chat-form');
+ form.querySelector('[name="agent_id"]').value='local-model';
+ destination.value='r-1234567890abcdef-project';destination.dispatchEvent(new Event('change',{bubbles:true}));
+ const picker=document.getElementById('shared-chat-form-agent-select');
+ for(let i=0;i<100&&!picker.parentElement.querySelector('[data-value="r-1234567890abcdef-model"]');i++)await wait();
+ assert(picker.parentElement.querySelector('[data-value="r-1234567890abcdef-model"]'),'remote models loaded');
+ assert(!picker.parentElement.querySelector('[data-value="local-model"]'),'local options removed');
+ assert(form.querySelector('[name="agent_id"]').value==='default','old selection reset');
+ assert(!picker.disabled,'picker available');
+ document.body.dataset.testResult='pass';
+ }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;}})();</script></body></html>`)
+	}))
+	defer srv.Close()
+	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "shared Chat destination", 1200, 900, 15*time.Second)
 }
