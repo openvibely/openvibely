@@ -824,3 +824,135 @@ func TestBrowserFunctional_SettingsRegroupReloadsRetainedLists(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_ChatStartupRegroup(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projects := []models.Project{{ID: "local-one", Name: "OpenVibely"}}
+	group := layout.SharedProject{ID: "__repo_1234567890abcdef", Name: "OpenVibely", Members: []layout.SharedMember{{ID: "local-one", Name: "OpenVibely", Machine: "Local"}, {ID: "r-1234567890abcdef-remote-one", Name: "OpenVibely", Machine: "Remote"}}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/wails/runtime.js" {
+			w.Header().Set("Content-Type", "text/javascript")
+			fmt.Fprint(w, `export const Window={};`)
+			return
+		}
+		if r.URL.Path == "/ui/preferences" {
+			w.WriteHeader(204)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		ctx := layout.WithUIPreferences(layout.WithDesktopMode(context.Background(), true), layout.UIPreferences{PinnedProjectIDs: []string{"local-one"}})
+		if r.URL.Path == "/ui/project-catalog" {
+			ctx = layout.WithSharedProjects(ctx, []layout.SharedProject{group})
+			_ = layout.ProjectCatalog(projects, "local-one").Render(ctx, w)
+			return
+		}
+		if r.URL.Path != "/chat" {
+			w.WriteHeader(204)
+			return
+		}
+		_ = layout.Base("Chat", projects, "local-one").Render(ctx, w)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id=local-one", "audit-settings-regroup", func(b *composerFocusCDP) {
+		b.waitFor("tabs ready", `String(!!window.openVibelyProjectTabsRender)`, "true")
+		b.evaluate(`document.body.insertAdjacentHTML('beforeend','<dialog id=server_modal><input id=server_password></dialog>');document.getElementById('server_modal').showModal();document.getElementById('server_password').value='keep me';window.dispatchEvent(new Event('openvibely-servers-changed')); 'sent'`)
+		b.waitFor("catalog loaded", `String(!!window.openVibelySharedProjects['__repo_1234567890abcdef'])`, "true")
+		b.waitFor("settings sidebar grouped", `String(document.getElementById('project-selector').value==='__repo_1234567890abcdef' && document.getElementById('task-list-groups').getAttribute('hx-get')==='/tasks/sidebar?project_id=__repo_1234567890abcdef' && location.pathname==='/chat')`, "true")
+		b.waitFor("modal and return scope preserved", `String(document.getElementById('server_modal').open && document.getElementById('server_password').value==='keep me' && location.search==='?project_id=local-one')`, "true")
+		t.Log("state:", b.evaluate(`JSON.stringify({tabs:Array.from(document.querySelectorAll('[data-project-tab]')).map(x=>x.dataset.projectTab),selection:document.getElementById('project-selector').value,list:document.getElementById('task-list-groups').getAttribute('hx-get'),url:location.pathname+location.search})`))
+	})
+}
+
+func TestBrowserFunctional_ListScopeRefreshAfterDialog(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, page := range []string{"automations", "analytics"} {
+		t.Run(page, func(t *testing.T) {
+			projects := []models.Project{{ID: "local", Name: "Local"}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path != "/"+page {
+					w.WriteHeader(204)
+					return
+				}
+				if r.Header.Get("HX-Request") == "true" {
+					if page == "automations" {
+						_ = AutomationsContent(nil, r.URL.Query().Get("project_id")).Render(r.Context(), w)
+					} else {
+						fmt.Fprintf(w, `<div id="refreshed-scope">%s</div>`, r.URL.Query().Get("project_id"))
+					}
+					return
+				}
+				if page == "automations" {
+					_ = AutomationsPage(projects, "local", nil, false).Render(r.Context(), w)
+				} else {
+					_ = Analytics(projects, &projects[0]).Render(r.Context(), w)
+				}
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL+"/"+page+"?project_id=local", "scope-dialog-"+page, func(b *composerFocusCDP) {
+				if page == "automations" {
+					b.waitFor("ready", `String(!!window.openAutomationNewModal)`, "true")
+					b.evaluate(`document.getElementById('automation-template-modal').showModal();'open'`)
+				} else {
+					b.waitFor("preview ready", `String(!!document.querySelector('dialog[data-analytics-preview]'))`, "true")
+					b.evaluate(`document.querySelector('dialog[data-analytics-preview]').showModal();'open'`)
+				}
+				b.evaluate(`window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed',{detail:{projectID:'__repo_group'}}));'changed'`)
+				b.waitFor("dialog preserved", `String(!!document.querySelector('dialog[open]')&&!document.getElementById('refreshed-scope'))`, "true")
+				b.evaluate(`document.querySelector('dialog[open]').close();document.activeElement.blur();'closed'`)
+				if page == "automations" {
+					b.waitFor("creation scope updated despite identical empty cards", `document.querySelector('#automation-custom-form [name="project_id"]').value`, "__repo_group")
+					b.waitFor("form action updated", `String(document.getElementById('automation-custom-form').getAttribute('hx-post').includes('project_id=__repo_group'))`, "true")
+				} else {
+					b.waitFor("combined data fetched", `document.getElementById('refreshed-scope')?.textContent||''`, "__repo_group")
+				}
+			})
+		})
+	}
+}
+
+func TestBrowserFunctional_AnalyticsScopePreservesInflightPreview(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/release" {
+			once.Do(func() { close(release) })
+			return
+		}
+		if r.URL.Path != "/analytics" {
+			w.WriteHeader(204)
+			return
+		}
+		if r.Header.Get("HX-Request") == "true" {
+			<-release
+			fmt.Fprint(w, `<div id="audit-new-scope">shared</div>`)
+			return
+		}
+		p := models.Project{ID: "local", Name: "Local"}
+		_ = Analytics([]models.Project{p}, &p).Render(r.Context(), w)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/analytics?project_id=local", "audit-inflight", func(b *composerFocusCDP) {
+		b.waitFor("ready", `String(!!document.querySelector('dialog[data-analytics-preview]'))`, "true")
+		b.evaluate(`document.body.addEventListener('htmx:beforeRequest',()=>{window.auditSent=true});window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed',{detail:{projectID:'__repo_group'}}));'sent'`)
+		b.waitFor("request underway", `String(!!window.auditSent)`, "true")
+		b.evaluate(`document.querySelector('dialog[data-analytics-preview]').showModal();'open'`)
+		b.waitFor("preview open", `String(!!document.querySelector('dialog[open]'))`, "true")
+		b.evaluate(`document.body.addEventListener('htmx:afterRequest',()=>{window.auditResponseFinished=true});fetch('/release');'released'`)
+		b.waitFor("response finished", `String(!!window.auditResponseFinished)`, "true")
+		b.waitFor("preview preserved", `String(!!document.querySelector('dialog[open]')&&!document.getElementById('audit-new-scope'))`, "true")
+		b.evaluate(`document.querySelector('dialog[open]').close();'closed'`)
+		b.waitFor("new content", `String(!!document.getElementById('audit-new-scope'))`, "true")
+		b.waitFor("preview destroyed", `String(!document.querySelector('dialog[open]'))`, "true")
+	})
+}

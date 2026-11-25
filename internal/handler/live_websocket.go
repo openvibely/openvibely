@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/machinetype"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/remote"
 	"github.com/openvibely/openvibely/internal/remoteid"
@@ -335,7 +336,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 	serversChanged, unwatchServers := h.remoteSessions.watch(principalUserID(ctx))
 	defer unwatchServers()
 	var repositorySnapshot map[string]models.ProjectAPIItem
-	writeFrame(liveFrame{Event: "ready", Data: map[string]string{"version": h.buildIdentity.Version}})
+	writeFrame(liveFrame{Event: "ready", Data: map[string]string{"version": h.buildIdentity.Version, "machine_type": machinetype.Local()}})
 	for {
 		select {
 		case <-ctx.Done():

@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/machinetype"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/remoteid"
 )
@@ -191,13 +192,14 @@ type Conn struct {
 	onExpired func()
 	seq       atomic.Uint64
 
-	mu      sync.Mutex
-	ws      *websocket.Conn
-	ready   chan struct{}
-	pending map[string]chan Frame
-	subs    map[string]*subscription
-	version string
-	down    bool
+	mu          sync.Mutex
+	ws          *websocket.Conn
+	ready       chan struct{}
+	pending     map[string]chan Frame
+	subs        map[string]*subscription
+	version     string
+	machineType string
+	down        bool
 }
 
 func (c *Conn) ServerID() string { return c.serverID }
@@ -319,12 +321,14 @@ func (c *Conn) session() (expired bool, err error) {
 		return false, errors.New("unexpected first frame " + first.Event)
 	}
 	var hello struct {
-		Version string `json:"version"`
+		Version     string `json:"version"`
+		MachineType string `json:"machine_type"`
 	}
 	_ = json.Unmarshal(first.Data, &hello)
 	c.mu.Lock()
 	c.ws = ws
 	c.version = hello.Version
+	c.machineType = machinetype.Normalize(hello.MachineType)
 	c.down = false
 	close(c.ready)
 	c.mu.Unlock()
@@ -610,4 +614,11 @@ func (c *Conn) signInRedirect(resp *http.Response) bool {
 	}
 	path := strings.TrimPrefix(loc.Path, strings.TrimRight(c.base.Path, "/"))
 	return path == "/login" || path == "/auth/sso/start"
+}
+
+// MachineType is the hardware category announced by the peer.
+func (c *Conn) MachineType() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return machinetype.Normalize(c.machineType)
 }

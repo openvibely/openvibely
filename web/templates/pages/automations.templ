@@ -78,6 +78,14 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
   if (event && event.type === 'sse-automation-event' && event.detail && !window.openVibelyProjectInScope(event.detail.project_id, project)) return;
   pending = true; clearTimeout(timer);timer = setTimeout(refresh,100);
  }
+ window.addEventListener('openvibely-workspace-scope-changed', function(event) {
+  var node = root();
+  if (!node || node.closest('#settings-retained-workspace')) return;
+  var url = new URL(node.dataset.cardPaginationUrl, location.href);
+  url.searchParams.set('project_id', event.detail.projectID);
+  node.dataset.cardPaginationUrl = url.pathname + url.search;
+  changed();
+ });
  window.addEventListener('sse-automation-event', changed);
  window.addEventListener('sse-live-connected', changed);
  document.addEventListener('visibilitychange', function(){if(!document.hidden) refresh();});
@@ -91,15 +99,18 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
   if(headers['X-Automation-List-Refresh']!=='true')return;
   var node=root();
   if(!node || node!==d.target || !node.isConnected){d.shouldSwap=false;return;}
+  var requested = new URL(d.xhr.responseURL || d.requestConfig.path, location.href);
+  var intended = new URL(node.dataset.cardPaginationUrl, location.href);
+  if(requested.searchParams.get('project_id')!==intended.searchParams.get('project_id')){pending=true;d.shouldSwap=false;return;}
   if(busy(node)){pending=true;d.shouldSwap=false;return;}
   var parsed=new DOMParser().parseFromString(d.xhr.responseText,'text/html');
   var current=node.querySelector('#automations-card-list'), replacement=parsed.querySelector('#automations-card-list');
-  if(current && replacement && current.innerHTML===replacement.innerHTML && node.dataset.cardPaginationHasMore===parsed.querySelector('#automations-container')?.dataset.cardPaginationHasMore)d.shouldSwap=false;
+  if(node.dataset.renderedProjectId===parsed.querySelector('#automations-container')?.dataset.renderedProjectId && current && replacement && current.innerHTML===replacement.innerHTML && node.dataset.cardPaginationHasMore===parsed.querySelector('#automations-container')?.dataset.cardPaginationHasMore)d.shouldSwap=false;
  });
 })();
 </script>
 
-		<div id="automations-container" class="min-w-0 max-w-full" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("automations", state) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+		<div id="automations-container" data-rendered-project-id={ currentProjectID } class="min-w-0 max-w-full" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("automations", state) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Automations")
 		<div data-page-header class="mb-6 flex items-center justify-between gap-3">
 			<h2 class="text-2xl font-bold">Automations</h2>

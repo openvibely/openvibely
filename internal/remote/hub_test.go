@@ -208,3 +208,42 @@ func TestShutdownClosesEverySocket(t *testing.T) {
 		t.Fatal("a stopped hub accepted a new socket")
 	}
 }
+
+func TestMachineMetadataFromReady(t *testing.T) {
+	for _, kind := range []string{"laptop", "desktop", "cloud", "", "unknown"} {
+		t.Run(kind, func(t *testing.T) {
+			hold := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true, Subprotocols: []string{"openvibely-live"}})
+				if err != nil {
+					return
+				}
+				defer ws.CloseNow()
+				_ = wsjson.Write(r.Context(), ws, map[string]any{"event": "ready", "data": map[string]string{"version": "test", "machine_type": kind}})
+				<-hold
+			}))
+			defer srv.Close()
+			defer close(hold)
+			hub := &Hub{}
+			base, _ := url.Parse(srv.URL)
+			jar, _ := cookiejar.New(nil)
+			hub.Connect("u", "box", base, jar, nil)
+			defer hub.Close("u", "box")
+			conn := hub.Get("u", "box")
+			deadline := time.Now().Add(3 * time.Second)
+			for conn.Version() != "test" {
+				if time.Now().After(deadline) {
+					t.Fatal("missing ready")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			want := kind
+			if kind == "" || kind == "unknown" {
+				want = "server"
+			}
+			if conn.MachineType() != want {
+				t.Fatalf("got %s want %s", conn.MachineType(), want)
+			}
+		})
+	}
+}

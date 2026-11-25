@@ -423,6 +423,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							url.searchParams.set('project_id', projectID);
 							history.replaceState(history.state, '', url.pathname + url.search + url.hash);
 						}
+                        projectID = window.openVibelyProjectPage(window.openVibelyProjectTab(projectID));
 						var option = Array.prototype.slice.call(sel.options).find(function(candidate) { return candidate.value === projectID; });
 						if (!option) return;
 						sel.value = projectID;
@@ -523,42 +524,23 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         syncProjectSelector();
                         const target = window.openVibelyProjectPage(window.openVibelyProjectTab(current));
                         if (target === current || !Array.from(sel.options).some(function(option) { return option.value === target; })) return;
-                        if (window.isSettingsWorkspaceURL && window.isSettingsWorkspaceURL(location.href)) {
-                            const url = new URL(location.href);
-                            url.searchParams.set('project_id', target);
-                            sel.value = target;
-                            previousProjectID = target;
-                            syncProjectSelector();
-                            persistSelectedProject(target);
-                            history.replaceState(history.state, '', url.pathname + url.search + url.hash);
-                            if (window.openVibelyRetargetLiveEvents) window.openVibelyRetargetLiveEvents(target, '');
-                            window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed', {detail: {projectID: target, previousProjectID: current}}));
-                            return;
-                        }
-                        // Item pages belong to one copy; only list pages follow the tab.
-                        if (!['/tasks', '/analytics', '/automations', '/chat'].includes(location.pathname)) return;
-                        // A copy's chat stays open; the combined chat page only picks a copy.
-                        if (location.pathname === '/chat' && window.openVibelyIsAggregateProject(target)) return;
-                        if (location.pathname === '/tasks' && document.getElementById('tasks-page')) {
-                            const url = new URL(location.href);
-                            url.searchParams.set('project_id', target);
-                            sel.value = target;
-                            previousProjectID = target;
-                            syncProjectSelector();
-                            persistSelectedProject(target);
-                            history.replaceState(history.state, '', url.pathname + url.search + url.hash);
-                            syncProjectSelectorFromURL();
-                            if (window.openVibelyRetargetLiveEvents) window.openVibelyRetargetLiveEvents(target, '');
-                            window.dispatchEvent(new CustomEvent('openvibely-task-scope-changed', {detail: {projectID: target}}));
-                            return;
-                        }
-                        if (document.querySelector('dialog[open]')) return;
-                        const url = new URL(location.href);
-                        url.searchParams.set('project_id', target);
+                        // Navigation scope is independent of the mounted page's owner.
                         sel.value = target;
                         previousProjectID = target;
                         syncProjectSelector();
-                        navigateProject(url.pathname + url.search + url.hash, target);
+                        persistSelectedProject(target);
+                        const url = new URL(location.href);
+                        const settings = window.isSettingsWorkspaceURL && window.isSettingsWorkspaceURL(url.href);
+                        const listPage = ['/tasks', '/analytics', '/automations'].includes(url.pathname);
+                        if (settings || listPage) {
+                            url.searchParams.set('project_id', target);
+                            history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+                        }
+                        // Preserve item/chat URLs and their streams; the sidebar reads
+                        // the grouped navigation scope separately.
+                        window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed', {detail: {projectID: target, previousProjectID: current}}));
+                        if (listPage && window.openVibelyRetargetLiveEvents) window.openVibelyRetargetLiveEvents(target, '');
+
                     }
                     window.addEventListener('openvibely-servers-changed', refreshProjectCatalog);
                     // Covers a server that connected before this page's live socket did.
