@@ -135,7 +135,22 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  arrow.click();
  const projectOption=document.querySelector('#task-property-picker [data-options="destination_project"] button[data-value="` + project.ID + `"]');
  await wait(()=>projectOption.getClientRects().length>0);
+ const originalModelFetch=window.fetch;
+ let requestedModelProject='';
+ window.fetch=function(input,options){
+  const url=new URL(String(input),location.href);
+  if(url.searchParams.get('model_options')==='1') {
+   requestedModelProject=url.searchParams.get('project_id');
+   return Promise.resolve(new Response('<li data-value="default">Default</li><li data-value="destination-model" data-picker-name="Destination model" data-picker-model="destination-model" data-picker-provider="openai">Destination model</li>',{status:200}));
+  }
+  return originalModelFetch(input,options);
+ };
+ document.getElementById('task-thread-form-agent-id').value='old-server-model';
  projectOption.click();
+ await wait(()=>!document.getElementById('task-thread-form-agent-select').disabled && document.querySelector('li[data-value="destination-model"]'));
+ assert(requestedModelProject==='` + project.ID + `','model request used wrong project');
+ assert(document.getElementById('task-thread-form-agent-id').value==='default','old server model was retained');
+ window.fetch=originalModelFetch;
  await wait(()=>document.getElementById('new-task-project').value==='` + project.ID + `');
  assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','project label did not update');
  assert(new FormData(document.getElementById('task-thread-form')).get('destination_project')==='` + project.ID + `','destination not submitted');

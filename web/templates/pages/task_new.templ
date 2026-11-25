@@ -91,8 +91,38 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     var root = document.getElementById('task-detail-content');
     var destination = root.querySelector('#new-task-project');
     if (destination) {
+     var modelRequest = 0;
+     async function refreshDestinationModels() {
+      var token = ++modelRequest;
+      var picker = root.querySelector('#task-thread-form-agent-select');
+      var input = root.querySelector('#task-thread-form-agent-id');
+      if (!picker || !input) return;
+      window.ovModelPicker?.close();
+      input.value = 'default';
+      window._setChatCustomSelectValue?.(picker, 'default');
+      picker.parentElement.querySelector('.chat-custom-select-options').innerHTML = '<li data-value="default">Default</li>';
+      root.querySelectorAll('[name="reasoning_effort"], [name="service_tier"]').forEach(function(field) { field.value = ''; });
+      picker.disabled = true;
+      picker.querySelector('.chat-custom-select-label').textContent = destination.value ? 'Loading models…' : 'Choose a project';
+      if (!destination.value) return;
+      try {
+       var response = await fetch('/tasks/new?model_options=1&project_id=' + encodeURIComponent(destination.value));
+       if (!response.ok) throw new Error('Could not load models');
+       var html = await response.text();
+       if (token !== modelRequest || !root.isConnected) return;
+       picker.parentElement.querySelector('.chat-custom-select-options').innerHTML = html;
+       picker.disabled = false;
+       window._setChatCustomSelectValue?.(picker, 'default');
+       window.ovModelPicker?.changed(picker);
+      } catch (_) {
+       if (token !== modelRequest || !root.isConnected) return;
+       picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';
+       picker.title = 'Select the project again to retry loading its models.';
+      }
+     }
      // The composer picker and the Details row edit the same input.
      destination.addEventListener('change', function() {
+      refreshDestinationModels();
       var row = destination.closest('[data-detail-property="destination_project"]');
       var option = root.querySelector('#task-property-picker [data-options="destination_project"] button[data-value="' + CSS.escape(destination.value) + '"]');
       row.dataset.value = destination.value;

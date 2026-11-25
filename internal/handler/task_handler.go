@@ -449,6 +449,16 @@ func (h *Handler) NewTask(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if c.QueryParam("model_options") == "1" {
+		if models.IsAggregateProject(project.ID) {
+			return echo.NewHTTPError(http.StatusBadRequest, "Choose a destination project.")
+		}
+		defaultID := ""
+		if project.DefaultAgentConfigID != nil {
+			defaultID = *project.DefaultAgentConfigID
+		}
+		return render(c, http.StatusOK, components.ComposerModelOptions(agents, defaultID))
+	}
 	projects, err := h.projectSvc.ListSelectorOptions(ctx)
 	if err != nil {
 		return err
