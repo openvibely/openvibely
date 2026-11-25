@@ -105,12 +105,12 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
   if(busy(node)){pending=true;d.shouldSwap=false;return;}
   var parsed=new DOMParser().parseFromString(d.xhr.responseText,'text/html');
   var current=node.querySelector('#automations-card-list'), replacement=parsed.querySelector('#automations-card-list');
-  if(current && replacement && current.innerHTML===replacement.innerHTML && node.dataset.cardPaginationHasMore===parsed.querySelector('#automations-container')?.dataset.cardPaginationHasMore)d.shouldSwap=false;
+  if(node.dataset.renderedProjectId===parsed.querySelector('#automations-container')?.dataset.renderedProjectId && current && replacement && current.innerHTML===replacement.innerHTML && node.dataset.cardPaginationHasMore===parsed.querySelector('#automations-container')?.dataset.cardPaginationHasMore)d.shouldSwap=false;
  });
 })();
 </script>
 
-		<div id="automations-container" class="min-w-0 max-w-full" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("automations", state) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+		<div id="automations-container" data-rendered-project-id={ currentProjectID } class="min-w-0 max-w-full" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("automations", state) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Automations")
 		<div data-page-header class="mb-6 flex items-center justify-between gap-3">
 			<h2 class="text-2xl font-bold">Automations</h2>

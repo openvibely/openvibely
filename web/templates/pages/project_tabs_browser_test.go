@@ -881,7 +881,7 @@ func TestBrowserFunctional_ListScopeRefreshAfterDialog(t *testing.T) {
 				}
 				if r.Header.Get("HX-Request") == "true" {
 					if page == "automations" {
-						fmt.Fprintf(w, `<div id="automations-container"><div id="automations-card-list"><span id="refreshed-scope">%s</span></div></div>`, r.URL.Query().Get("project_id"))
+						_ = AutomationsContent(nil, r.URL.Query().Get("project_id")).Render(r.Context(), w)
 					} else {
 						fmt.Fprintf(w, `<div id="refreshed-scope">%s</div>`, r.URL.Query().Get("project_id"))
 					}
@@ -905,7 +905,12 @@ func TestBrowserFunctional_ListScopeRefreshAfterDialog(t *testing.T) {
 				b.evaluate(`window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed',{detail:{projectID:'__repo_group'}}));'changed'`)
 				b.waitFor("dialog preserved", `String(!!document.querySelector('dialog[open]')&&!document.getElementById('refreshed-scope'))`, "true")
 				b.evaluate(`document.querySelector('dialog[open]').close();document.activeElement.blur();'closed'`)
-				b.waitFor("combined data fetched", `document.getElementById('refreshed-scope')?.textContent||''`, "__repo_group")
+				if page == "automations" {
+					b.waitFor("creation scope updated despite identical empty cards", `document.querySelector('#automation-custom-form [name="project_id"]').value`, "__repo_group")
+					b.waitFor("form action updated", `String(document.getElementById('automation-custom-form').getAttribute('hx-post').includes('project_id=__repo_group'))`, "true")
+				} else {
+					b.waitFor("combined data fetched", `document.getElementById('refreshed-scope')?.textContent||''`, "__repo_group")
+				}
 			})
 		})
 	}
