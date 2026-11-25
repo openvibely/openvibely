@@ -92,6 +92,23 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     var destination = root.querySelector('#new-task-project');
     if (destination) {
      var modelRequest = 0;
+     function syncDetailModels(options, loading) {
+      var menu = root.querySelector('#task-property-picker [data-options="agent_id"]');
+      var row = root.querySelector('[data-detail-property="agent_id"]');
+      if (!menu || !row) return;
+      menu.replaceChildren();
+      options.querySelectorAll('li[data-value]').forEach(function(option) {
+       var button = document.createElement('button');
+       button.type = 'button';
+       button.className = 'ov-menu-option w-full';
+       button.dataset.value = option.dataset.value === 'auto' ? '' : option.dataset.value;
+       button.textContent = option.dataset.pickerName || option.textContent;
+       menu.appendChild(button);
+      });
+      row.dataset.value = 'default';
+      row.querySelector('[data-property-label]').textContent = 'Default';
+      row.disabled = loading;
+     }
      async function refreshDestinationModels() {
       var token = ++modelRequest;
       var picker = root.querySelector('#task-thread-form-agent-select');
@@ -100,7 +117,9 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
       window.ovModelPicker?.close();
       input.value = 'default';
       window._setChatCustomSelectValue?.(picker, 'default');
-      picker.parentElement.querySelector('.chat-custom-select-options').innerHTML = '<li data-value="default">Default</li>';
+      var options = picker.parentElement.querySelector('.chat-custom-select-options');
+      options.innerHTML = '<li data-value="default">Default</li>';
+      syncDetailModels(options, true);
       root.querySelectorAll('[name="reasoning_effort"], [name="service_tier"]').forEach(function(field) { field.value = ''; });
       picker.disabled = true;
       picker.querySelector('.chat-custom-select-label').textContent = destination.value ? 'Loading models…' : 'Choose a project';
@@ -110,7 +129,8 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
        if (!response.ok) throw new Error('Could not load models');
        var html = await response.text();
        if (token !== modelRequest || !root.isConnected) return;
-       picker.parentElement.querySelector('.chat-custom-select-options').innerHTML = html;
+       options.innerHTML = html;
+       syncDetailModels(options, false);
        picker.disabled = false;
        window._setChatCustomSelectValue?.(picker, 'default');
        window.ovModelPicker?.changed(picker);

@@ -150,6 +150,17 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>!document.getElementById('task-thread-form-agent-select').disabled && document.querySelector('li[data-value="destination-model"]'));
  assert(requestedModelProject==='` + project.ID + `','model request used wrong project');
  assert(document.getElementById('task-thread-form-agent-id').value==='default','old server model was retained');
+ const detailModelRow=document.querySelector('[data-detail-property="agent_id"]');
+ assert(detailModelRow.dataset.value==='default','Details retained the old model');
+ const detailModels=document.querySelector('#task-property-picker [data-options="agent_id"]');
+ assert(detailModels.querySelectorAll('button').length===2,'Details retained old server options');
+ assert(detailModels.querySelector('[data-value="destination-model"]'),'destination model missing from Details');
+ detailModelRow.click();
+ await wait(()=>detailModels.querySelector('[data-value="destination-model"]').getClientRects().length>0);
+ detailModels.querySelector('[data-value="destination-model"]').click();
+ assert(document.getElementById('task-thread-form-agent-id').value==='destination-model','Details did not update composer model');
+ assert(document.getElementById('task-thread-form-agent-select').dataset.currentValue==='destination-model','composer label retained old model');
+
  window.fetch=originalModelFetch;
  await wait(()=>document.getElementById('new-task-project').value==='` + project.ID + `');
  assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','project label did not update');
