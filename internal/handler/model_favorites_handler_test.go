@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,4 +45,33 @@ func TestModelFavoritesPersistAndMergeAcrossClients(t *testing.T) {
 	stored, err := h.settingsRepo.Get(context.Background(), modelFavoritesSettingKey)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"model-b":true}`, stored)
+}
+
+func TestModelFavoritesRemoteOwner(t *testing.T) {
+	h, e := setupHubHandler(t)
+	srv, _, owner := fakeRemoteOV(t, "secret")
+	project := createProject(t, owner, "Remote")
+	id, _ := signInTwoUsers(t, h, e, srv.URL)
+	remoteProject := remoteid.ID(id, project.ID)
+	require.NoError(t, h.settingsRepo.Set(context.Background(), modelFavoritesSettingKey, `{"local":true}`))
+	require.NoError(t, owner.settingsRepo.Set(context.Background(), modelFavoritesSettingKey, `{"remote-model":true}`))
+	request := func(method, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/ui/model-favorites?project_id="+remoteProject, strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := request(http.MethodGet, "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{"`+remoteid.ID(id, "remote-model")+`":true}`, rec.Body.String())
+	rec = request(http.MethodPost, `{"model_id":"`+remoteid.ID(id, "remote-model")+`","favorite":false}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{}`, rec.Body.String())
+	raw, err := owner.settingsRepo.Get(context.Background(), modelFavoritesSettingKey)
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, raw)
+	raw, err = h.settingsRepo.Get(context.Background(), modelFavoritesSettingKey)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"local":true}`, raw)
 }
