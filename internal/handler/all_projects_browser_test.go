@@ -145,10 +145,29 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
   }
   return originalModelFetch(input,options);
  };
+ const chainForm=document.querySelector('[data-chain-form]');
+ const chainModels=chainForm.elements.chain_child_agent_id;
+ chainModels.add(new Option('Old server model','old-server-model'));
+ chainModels.value='old-server-model';
+ chainForm.elements.chain_child_model.value='old-provider-model';
+ chainForm.elements.chain_enabled.value='true';
+ chainForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+ assert(document.querySelector('[data-chain-draft="chain_child_agent_id"]').value==='old-server-model','chain setup failed');
  document.getElementById('task-thread-form-agent-id').value='old-server-model';
  projectOption.click();
  await wait(()=>!document.getElementById('task-thread-form-agent-select').disabled && document.querySelector('li[data-value="destination-model"]'));
  assert(requestedModelProject==='` + project.ID + `','model request used wrong project');
+ assert(chainModels.options.length===2 && chainModels.options[1].value==='destination-model','chain models were not refreshed');
+ assert(chainModels.value==='' && !chainModels.disabled,'chain model was not reset');
+ assert(document.querySelector('[data-chain-draft="chain_child_agent_id"]').value==='','old chain model would be submitted');
+ assert(document.querySelector('[data-chain-draft="chain_child_model"]').value==='','old chain override would be submitted');
+ assert(document.querySelector('[data-chain-draft="chain_enabled"]').value==='true','destination change removed chaining');
+ assert(document.querySelector('[data-chain-model]').textContent==='Model: Use default model','chain label stayed stale');
+ // Opening the editor must not restore the old selection from its internal state.
+ document.querySelector('[data-chain-open]').click();
+ assert(chainModels.value==='' && chainForm.elements.chain_child_model.value==='','chain editor restored stale values');
+ document.getElementById('task-chain-editor').close();
+
  assert(document.getElementById('task-thread-form-agent-id').value==='default','old server model was retained');
  const detailModelRow=document.querySelector('[data-detail-property="agent_id"]');
  assert(detailModelRow.dataset.value==='default','Details retained the old model');

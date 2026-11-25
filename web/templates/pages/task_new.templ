@@ -93,6 +93,12 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     if (destination) {
      var modelRequest = 0;
      function syncDetailModels(options, loading) {
+      root.querySelector('#task-chain-panel')?.dispatchEvent(new CustomEvent('draft-destination-models', {detail: {
+       loading: loading,
+       models: Array.from(options.querySelectorAll('li[data-value]')).filter(function(option) {
+        return option.dataset.value !== 'default' && option.dataset.value !== 'auto';
+       }).map(function(option) { return {id: option.dataset.value, name: option.dataset.pickerName || option.textContent}; })
+      }}));
       var menu = root.querySelector('#task-property-picker [data-options="agent_id"]');
       var row = root.querySelector('[data-detail-property="agent_id"]');
       if (!menu || !row) return;
