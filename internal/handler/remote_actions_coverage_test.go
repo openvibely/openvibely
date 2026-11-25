@@ -235,11 +235,14 @@ func TestRemoteThreadActions(t *testing.T) {
 	requireOK(t, res)
 	require.Equal(t, agent.ID, *e.reload(t, task.ID).AgentID)
 
-	sent, res := runAction[threadSendResult](t, e.h, e.ctx, "thread.send", threadSendArgs{TaskRef: ref, Message: "follow up"})
-	requireOK(t, res)
-	require.Equal(t, "follow up", sent.Message)
-
-	_, res = runAction[*models.ThreadInput](t, e.h, e.ctx, "thread.steer", threadSteerArgs{TaskRef: ref, Message: "steer"})
+	// The missing-turn guard requires a running execution. Seed one on a
+	// separate task so a background send cannot race this validation.
+	active, activeRef := e.task(t, "Active thread", func(tk *models.Task) {
+		tk.Category, tk.Status = models.CategoryActive, models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	createExec(t, e.h, active.ID, agent.ID)
+	_, res = runAction[*models.ThreadInput](t, e.h, e.ctx, "thread.steer", threadSteerArgs{TaskRef: activeRef, Message: "steer"})
 	require.Equal(t, "status:400", res.Code, "steering needs the turn being steered")
 
 	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: e.project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued"}
@@ -249,6 +252,11 @@ func TestRemoteThreadActions(t *testing.T) {
 	mutated, res := runAction[inputMutationResult](t, e.h, e.ctx, "thread.input.mutate", inputMutationArgs{InputID: queued.ID, Op: "cancel"})
 	requireOK(t, res)
 	require.Equal(t, "cancelled", mutated.Status)
+
+	// Start the asynchronous send only after checking the idle thread's inputs.
+	sent, res := runAction[threadSendResult](t, e.h, e.ctx, "thread.send", threadSendArgs{TaskRef: ref, Message: "follow up"})
+	requireOK(t, res)
+	require.Equal(t, "follow up", sent.Message)
 }
 
 func TestRemoteChatActions(t *testing.T) {

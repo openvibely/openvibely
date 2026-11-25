@@ -11,6 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	templateui "github.com/openvibely/openvibely/web/templates"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 func TestBrowserFunctional_NewTaskPastedTextProjectSelection(t *testing.T) {
@@ -25,6 +26,22 @@ func TestBrowserFunctional_NewTaskPastedTextProjectSelection(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/tasks/new":
+			// Project selection refreshes both option lists while retrying the
+			// submission. Match the real endpoints instead of rendering another
+			// full page that can still be streaming when the browser closes.
+			if r.URL.Query().Get("agent_options") == "1" {
+				w.Header().Set("Content-Type", "application/json")
+				if _, err := fmt.Fprint(w, `[]`); err != nil {
+					t.Error(err)
+				}
+				return
+			}
+			if r.URL.Query().Get("model_options") == "1" {
+				if err := components.ComposerModelOptions(agents, "").Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+				return
+			}
 			if err := NewTask([]models.Project{project}, &all, agents, nil).Render(templateui.WithProjectNames(r.Context(), []models.Project{project}), w); err != nil {
 				t.Error(err)
 			}
