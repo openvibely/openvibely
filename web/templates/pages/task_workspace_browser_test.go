@@ -805,7 +805,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		visible := `String(!!document.getElementById('task-change-activity') && document.getElementById('task-change-activity').checkVisibility())`
 		b.waitFor("saved changes visible on direct running-task visit", visible, "true")
 		b.evaluate(`window.beforeDiffReload = true; 'ready'`)
-		b.call("Page.reload", map[string]any{}, nil)
+		b.reload()
 		b.waitFor("new document loaded", `String(!window.beforeDiffReload && !!document.getElementById('task-message-input'))`, "true")
 		b.waitFor("saved changes visible after reload", visible, "true")
 		b.click("[data-review-changes]")
