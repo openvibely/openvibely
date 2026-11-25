@@ -582,11 +582,11 @@ func (r *UsageRepo) GetEvidence(ctx context.Context, filter persistence.UsageFil
 
 func usageWhere(ctx context.Context, filter persistence.UsageFilter) (string, []any) {
 	clauses := []string{"1=1"}
-	if filter.ProjectID == models.AllProjectsID {
-		clauses = append(clauses, accessibleProjectPredicate(ctx, "project_id", false))
+	if models.IsAggregateProject(filter.ProjectID) {
+		clauses = append(clauses, aggregateProjectPredicate(ctx, "project_id", filter.ProjectID, false))
 	}
 	args := []any{}
-	if filter.ProjectID != "" && filter.ProjectID != models.AllProjectsID {
+	if filter.ProjectID != "" && !models.IsAggregateProject(filter.ProjectID) {
 		clauses = append(clauses, "project_id = ?")
 		args = append(args, filter.ProjectID)
 	}

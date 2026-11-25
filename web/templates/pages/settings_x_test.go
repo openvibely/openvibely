@@ -47,7 +47,7 @@ func TestSettingsContentRendersXConfigurationWithoutSecrets(t *testing.T) {
 	for _, expected := range []string{
 		`data-channel-type="x"`,
 		`id="x_config_modal"`,
-		`action="/channels/x/configure"`,
+		`action="/channels/x/configure?project_id=`,
 		`data-x-authorized-user-id="authorization-1"`,
 		`data-x-authorized-project-id="project-1"`,
 		`data-x-user-id="12345"`,

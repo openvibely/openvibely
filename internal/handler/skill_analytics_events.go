@@ -29,7 +29,7 @@ func (h *Handler) recordManualSkillEvent(c echo.Context, eventType, handle, scop
 		normalizedScope = models.SkillScopeGlobal
 	}
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
-	if projectID == models.AllProjectsID {
+	if models.IsAggregateProject(projectID) {
 		switch normalizedScope {
 		case models.SkillScopeProject:
 			projectID = strings.TrimSpace(c.QueryParam("skill_project_id"))

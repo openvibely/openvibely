@@ -44,6 +44,16 @@ func TestProjectComputerSharingPermissions(t *testing.T) {
 			require.Equal(t, expected, status.Code, status.Body.String())
 			memberContext := models.WithPrincipal(ctx, models.Principal{UserID: user.UserID})
 			require.Equal(t, role == "editor" || role == "maintainer", tc.handler.liveSubscriptionAllowed(memberContext, liveCommand{Op: "computer", ProjectID: project.ID}), "private status subscriptions require editor access")
+			// A desktop asks this server before opening the page for a remote project.
+			_, res := runAction[struct{}](t, tc.handler, memberContext, "computer.access", ComputerArgs{ProjectID: project.ID})
+			switch role {
+			case "":
+				require.Equal(t, "denied", res.Code)
+			case "viewer":
+				require.Equal(t, "role:viewer:edit", res.Code)
+			default:
+				require.Empty(t, res.Code+res.Error)
+			}
 			save := orgRequest(e, http.MethodPost, "/projects/"+project.ID+"/computer/time-zone", url.Values{"time_zone": {"UTC"}}, cookie)
 			expected = http.StatusForbidden
 			if role == "" {

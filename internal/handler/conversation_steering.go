@@ -46,8 +46,7 @@ func (h *Handler) beginPageSteering(ctx context.Context, taskID string) (*pagein
 
 // Save page provenance before making a steer consumable. Failed provider turns
 // can then use the same durable queue recovery as any other page submission.
-func (h *Handler) saveConversationSteering(c echo.Context, input *models.ThreadInput, active *models.Execution) error {
-	ctx := c.Request().Context()
+func (h *Handler) saveSteering(ctx context.Context, input *models.ThreadInput, active *models.Execution) error {
 	if input.Scope != models.ThreadInputScopeTask {
 		return h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, active.ID)
 	}
@@ -62,7 +61,7 @@ func (h *Handler) saveConversationSteering(c echo.Context, input *models.ThreadI
 	if input.AttachmentSessionID != "" && !isValidPendingAttachmentSessionID(input.AttachmentSessionID) {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
 	}
-	turn := pageQueuedContext{Principal: h.authPrincipalID(c)}
+	turn := pageQueuedContext{Principal: principalIDFromContext(ctx)}
 	if snap, ok := binding.Contexts.Get(turn.Principal, binding.Page); ok {
 		turn.Snapshot = &snap
 	}

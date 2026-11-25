@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/remote"
 	"net/http"
 	"time"
 )
@@ -89,15 +90,16 @@ func (h *Handler) auditedUsageReset(c echo.Context, input ConsumeUsageResetReque
 	if h.projectAccessSvc == nil {
 		return consume()
 	}
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil {
+	if err := h.requireCurrentOrgAdmin(c); err != nil {
 		return nil, err
 	}
+	ctx := remote.WithServer(c.Request().Context(), "")
+	c.SetRequest(c.Request().WithContext(ctx))
 	details, err := json.Marshal(input)
 	if err != nil {
 		return nil, err
 	}
-	if err := h.projectAccessSvc.RecordAction(c.Request().Context(), projectID, "usage_reset.requested", input.AccountKey, string(details)); err != nil {
+	if err := h.projectAccessSvc.RecordInstanceAction(ctx, "usage_reset.requested", string(details)); err != nil {
 		return nil, err
 	}
 	result, providerErr := consume()
@@ -107,7 +109,7 @@ func (h *Handler) auditedUsageReset(c echo.Context, input ConsumeUsageResetReque
 	}
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
 	defer cancel()
-	if err := h.projectAccessSvc.RecordAction(auditCtx, projectID, action, input.AccountKey, string(details)); err != nil {
+	if err := h.projectAccessSvc.RecordInstanceAction(auditCtx, action, string(details)); err != nil {
 		return nil, err
 	}
 	return result, providerErr

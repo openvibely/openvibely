@@ -61,9 +61,15 @@
     favoritesLoadToken = 0,
     favoriteWrites = Promise.resolve();
   const favoritesEndpoint = "/ui/model-favorites";
-  async function requestFavorites(payload) {
+  function favoritesURL() {
+    const url = new URL(favoritesEndpoint, location.href);
+    const project = active?.closest('form')?.querySelector('[name="_project_id"]')?.value || '';
+    if (/^r-[a-f0-9]{16}-/.test(project)) url.searchParams.set('project_id', project);
+    return url.pathname + url.search;
+  }
+  async function requestFavorites(payload, endpoint = favoritesURL()) {
     const response = await fetch(
-      favoritesEndpoint,
+      endpoint,
       payload
         ? {
             method: "POST",
@@ -85,12 +91,12 @@
     try {
       await favoriteWrites.catch(() => {});
       let saved = await requestFavorites();
-      const legacy = read(favoritesKey);
+      const legacy = favoritesURL().includes("project_id=r-") ? {} : read(favoritesKey);
       const importIDs = Object.keys(legacy || {}).filter((id) => legacy[id]);
       if (importIDs.length)
         saved = await requestFavorites({ import_ids: importIDs });
       try {
-        localStorage.removeItem(favoritesKey);
+        if (!favoritesURL().includes("project_id=r-")) localStorage.removeItem(favoritesKey);
       } catch (_) {}
       if (token !== favoritesLoadToken) return;
       favorites = saved;
@@ -459,6 +465,7 @@
       star.setAttribute("aria-pressed", String(!!favorites[m.id]));
       star.disabled = favoritesLoading || !!favoritesError;
       star.onclick = () => {
+        const endpoint = favoritesURL();
         const desired = !favorites[m.id];
         if (desired) favorites[m.id] = true;
         else delete favorites[m.id];
@@ -472,7 +479,7 @@
         button?.focus({ preventScroll: true });
         favoriteWrites = favoriteWrites
           .catch(() => {})
-          .then(() => requestFavorites({ model_id: m.id, favorite: desired }));
+          .then(() => requestFavorites({ model_id: m.id, favorite: desired }, endpoint));
         favoriteWrites.catch(() => {
           favoritesError =
             "Could not save favorites. Reopen the picker to retry.";

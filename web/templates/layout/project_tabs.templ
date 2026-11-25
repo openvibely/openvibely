@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 )
 
 func withAllProjectsOption(projects []models.Project) []models.Project {
@@ -18,7 +19,8 @@ func withAllProjectsOption(projects []models.Project) []models.Project {
 	return append(out, models.AllProjectsOption())
 }
 
-func pinnedProjects(projects []models.Project, ids []string) []models.Project {
+// pinnedProjects lists open tabs. A copy's ID opens its repository's tab.
+func pinnedProjects(ctx context.Context, projects []models.Project, ids []string) []models.Project {
 	byID := make(map[string]models.Project, len(projects))
 	for _, project := range projects {
 		byID[project.ID] = project
@@ -30,18 +32,55 @@ func pinnedProjects(projects []models.Project, ids []string) []models.Project {
 		delete(byID, models.AllProjectsID)
 	}
 	for _, id := range ids {
-		if project, ok := byID[id]; ok {
+		if project, ok := byID[TabID(ctx, id)]; ok {
 			result = append(result, project)
-			delete(byID, id)
+			delete(byID, project.ID)
 		}
 	}
 	return result
 }
 
-func pinnedProjectJSON(projects []models.Project) string {
-	ids := make([]string, 0, len(projects))
+// tabProjects adds connected servers' and shared projects so their tabs can be pinned.
+func tabProjects(ctx context.Context, projects []models.Project) []models.Project {
+	out := append([]models.Project(nil), projects...)
+	for _, server := range RemoteServers(ctx) {
+		for _, p := range server.Projects {
+			out = append(out, models.Project{ID: p.ID, Name: p.Name})
+		}
+	}
+	for _, p := range SharedProjects(ctx) {
+		out = append(out, models.Project{ID: p.ID, Name: p.Name})
+	}
+	return out
+}
+
+// pinnedProjectJSON lists the open tabs, keeping remote tabs whose server has
+// not answered yet so they reappear in place once it does.
+func pinnedProjectJSON(ctx context.Context, projects []models.Project, saved []string) string {
+	known := map[string]bool{}
 	for _, project := range projects {
-		ids = append(ids, project.ID)
+		known[project.ID] = true
+	}
+	pinned := pinnedProjects(ctx, projects, saved)
+	ids := make([]string, 0, len(saved)+1)
+	seen := map[string]bool{}
+	add := func(id string) {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if saved == nil {
+		for _, project := range pinned {
+			add(project.ID)
+		}
+	}
+	for _, id := range saved {
+		if tab := TabID(ctx, id); known[tab] {
+			add(tab)
+		} else if _, remote := remoteid.ServerOf(id); remote || models.IsSharedProjectID(id) {
+			add(id)
+		}
 	}
 	value, _ := json.Marshal(ids)
 	return string(value)
@@ -164,17 +203,17 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar [data-project-selector] .label-text { display: none; }
 	  #desktop-project-titlebar #project-selector-trigger { width: 30px; }
  </style>
-	<header id="desktop-project-titlebar" class="bg-base-300" data-platform={ projectBarPlatform(ctx) } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
+	<header id="desktop-project-titlebar" class="bg-base-300" data-platform={ projectBarPlatform(ctx) } data-pinned-projects={ pinnedProjectJSON(ctx, tabProjects(ctx, projects), uiPreferences(ctx).PinnedProjectIDs) } aria-label="Project title bar">
 			<span class="project-bar-brand">OpenVibely</span>
 			@TaskListHeaderControls(currentProjectID)
 
 			if serverRuntimeMode(ctx) == "desktop" {
  @SidebarToggle()
  }
-			<div id="desktop-project-tabs" role="tablist" aria-label="Open projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
-				<div class="desktop-project-tab" data-selected={ fmtBool(project.ID == currentProjectID) }>
-					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID }>{ project.Name }</button>
-					<button type="button" disabled?={ len(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) <= 1 } data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name }><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>
+			<div id="desktop-project-tabs" role="tablist" aria-label="Open projects">			for _, project := range pinnedProjects(ctx, tabProjects(ctx, projects), uiPreferences(ctx).PinnedProjectIDs) {
+				<div class="desktop-project-tab" data-selected={ fmtBool(project.ID == TabID(ctx, currentProjectID)) }>
+					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == TabID(ctx, currentProjectID)) } tabindex={ tabIndex(project.ID == TabID(ctx, currentProjectID)) } data-project-tab={ project.ID }>{ project.Name }</button>
+					<button type="button" disabled?={ len(pinnedProjects(ctx, tabProjects(ctx, projects), uiPreferences(ctx).PinnedProjectIDs)) <= 1 } data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name }><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>
 				</div>
 			}
 		if serverRuntimeMode(ctx) == "desktop" {
@@ -269,25 +308,28 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (getComputedStyle(event.target).getPropertyValue('--wails-draggable').trim() !== 'drag') return;
     if (window.wails && window.wails.Window) window.wails.Window.ToggleMaximise();
    });
+   var tabFor = window.openVibelyProjectTab, pageFor = window.openVibelyProjectPage;
    var recoveredTabs = (window.openVibelyRecoveredProjectPreferences || {}).pinned_project_ids;
-   var ids = Array.from(new Set((Array.isArray(recoveredTabs) ? recoveredTabs : JSON.parse(bar.dataset.pinnedProjects)).filter(function(id) {
-    return Array.from(select.options).some(function(option) { return option.value === id; });
-   })));
-   bar.dataset.pinnedProjects = JSON.stringify(ids);
+   function has(id) { return Array.from(select.options).some(function(option) { return option.value === id; }); }
+   // A tab whose server is still connecting stays in ids, hidden until its project loads.
+   var ids = Array.from(new Set((Array.isArray(recoveredTabs) ? recoveredTabs : JSON.parse(bar.dataset.pinnedProjects)).map(tabFor)));
+   function shown() { return ids.filter(has); }
  var closedActive = "";
  var pendingCloses = new Set();
    function saveTabs() {
     bar.dataset.pinnedProjects = JSON.stringify(ids);
     window.openVibelySaveProjectPreferences({pinned_project_ids: ids.slice()});
    }
-   function switchProject(id, request) {
+   function switchProject(tab, request) {
+    var id = pageFor(tab);
+    if (tabFor(select.value) === tab && select.value !== tab) id = select.value;
     select.value = id;
     select.dispatchEvent(new CustomEvent('change', {bubbles: true, detail: request || {}}));
     return select.value === id;
    }
    function sync() {
     if (bar.dataset.platform === 'web' && !matchMedia('(min-width: 1024px)').matches) return;
-    var active = select.value;
+    var active = tabFor(select.value);
  if (active && !ids.includes(active) && active !== closedActive) { ids.push(active); saveTabs(); render(); return; }
     list.querySelectorAll('[data-project-tab]').forEach(function(tab, index) {
      tab.dataset.ovTooltip = 'Next project (' + projectTabShortcut + '→)\nPrevious project (' + projectTabShortcut + '←)';
@@ -296,20 +338,21 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;
     });
     list.querySelectorAll('[data-close-project]').forEach(function(close) {
-     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
+     close.disabled = shown().length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === tabFor(window.openVibelyProtectedProjectID);
     });
     var activeTab = list.querySelector('[aria-selected="true"]');
     if (activeTab) window.openVibelyScrollIntoPanel(activeTab, {container: list});
    }
    function render() {
+    var grouped = Array.from(new Set(ids.map(tabFor)));
+    if (JSON.stringify(grouped) !== JSON.stringify(ids)) { ids = grouped; saveTabs(); }
     list.replaceChildren();
-    ids.forEach(function(id) {
+    shown().forEach(function(id) {
      var option = Array.from(select.options).find(function(option) { return option.value === id; });
-     if (!option) return;
      var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';
      var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim();
      var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg>'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
-     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
+     close.disabled = shown().length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === tabFor(window.openVibelyProtectedProjectID);
      wrapper.append(tab, close); list.append(wrapper);
     });
     list.append(add);
@@ -392,7 +435,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     setTimeout(function() { suppressDragClick = false; }, 0);
     if (event.type !== 'pointerup') { render(); return; }
     var reordered = Array.from(list.querySelectorAll('[data-project-tab]')).map(function(tab) { return tab.dataset.projectTab; });
-    if (JSON.stringify(reordered) !== JSON.stringify(ids)) { ids = reordered; saveTabs(); }
+    if (JSON.stringify(reordered) !== JSON.stringify(shown())) {
+     var next = reordered.slice();
+     ids = ids.map(function(id) { return has(id) ? next.shift() : id; });
+     saveTabs();
+    }
    }
    document.addEventListener('pointerup', finishDrag);
    document.addEventListener('pointercancel', finishDrag);
@@ -402,8 +449,24 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (suppressDragClick) { event.preventDefault(); event.stopImmediatePropagation(); }
    }, true);
    list.addEventListener('dragstart', function(event) { if (event.target.closest('[data-project-tab]')) event.preventDefault(); });
+   var settingsAction = document.getElementById('project-tab-settings-action');
+   function openSettings(id) {
+    closeMenu();
+    htmx.ajax('GET', '/projects/' + encodeURIComponent(id) + '/edit', {target: document.getElementById('project-settings-container'), swap: 'innerHTML'});
+   }
    function openMenu(tab, x, y) {
-    if (!tab || tab.dataset.projectTab === '__all_projects__') return;
+    if (!tab) return;
+    var page = pageFor(tab.dataset.projectTab);
+    var copies = (window.openVibelySharedProjectMachines || {})[page] || [];
+    if (window.openVibelyIsAggregateProject(page) && !copies.length) return;
+    menu.querySelectorAll('[data-project-settings-copy]').forEach(function(item) { item.remove(); });
+    settingsAction.hidden = copies.length > 0;
+    copies.forEach(function(copy) {
+     var item = document.createElement('button'); item.type = 'button'; item.setAttribute('role', 'menuitem');
+     item.dataset.projectSettingsCopy = copy.ID; item.textContent = 'Settings · ' + copy.Machine;
+     item.addEventListener('click', function() { openSettings(copy.ID); });
+     menu.append(item);
+    });
     closeMenu(); menuTab = tab; contextController.open({x:x,y:y});
    }
    function showMenu(x,y) {
@@ -411,7 +474,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     else menu.setAttribute('data-menu-open', '');
     menu.style.left = Math.max(0, Math.min(x, innerWidth - menu.offsetWidth)) + 'px';
     menu.style.top = Math.max(0, Math.min(y, innerHeight - menu.offsetHeight)) + 'px';
-    document.getElementById('project-tab-settings-action').focus();
+    menu.querySelector('[role=menuitem]:not([hidden])').focus();
    }
    list.addEventListener('contextmenu', function(event) {
     var wrapper = event.target.closest('.desktop-project-tab');
@@ -427,43 +490,42 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    list.addEventListener('scroll', closeMenu);
    menu.addEventListener('keydown', function(event) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-     event.preventDefault(); var items = Array.from(menu.querySelectorAll('[role=menuitem]'));
+     event.preventDefault(); var items = Array.from(menu.querySelectorAll('[role=menuitem]:not([hidden])'));
      items[(items.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
     }
     if (event.key === 'Tab') { closeMenu(); if (menuTab) menuTab.focus(); } });
-   document.getElementById('project-tab-settings-action').addEventListener('click', function() {
-    if (!menuTab) return;
-    closeMenu();
-    htmx.ajax('GET', '/projects/' + encodeURIComponent(menuTab.dataset.projectTab) + '/edit', {target: document.getElementById('project-settings-container'), swap: 'innerHTML'});
+   settingsAction.addEventListener('click', function() {
+    if (menuTab) openSettings(pageFor(menuTab.dataset.projectTab));
    });
    list.addEventListener('click', async function(event) {
     var option = event.target.closest('[data-project-selector-option]');
     if (option) {
      closedActive = '';
      // Selecting the current project does not emit a change event.
-     if (option.dataset.projectId === select.value) sync();
+     if (option.dataset.projectId === select.value || tabFor(option.dataset.projectId) === tabFor(select.value)) sync();
      return;
     }
     var tab = event.target.closest('[data-project-tab]');
     // Pointer activation already happened on press; retain keyboard activation.
     if (tab) { if (event.detail === 0) switchProject(tab.dataset.projectTab); return; }
     var close = event.target.closest('[data-close-project]');
-    if (!close || ids.length <= 1) return;
-    var index = ids.indexOf(close.dataset.closeProject);
-    var next = ids[index + 1] || ids[index - 1];
+    if (!close || shown().length <= 1) return;
+    var visible = shown();
+    var index = visible.indexOf(close.dataset.closeProject);
+    var next = visible[index + 1] || visible[index - 1];
     var closingID = close.dataset.closeProject;
-    if (pendingCloses.has(closingID) || closingID === window.openVibelyProtectedProjectID) return;
+    if (pendingCloses.has(closingID) || closingID === tabFor(window.openVibelyProtectedProjectID)) return;
     pendingCloses.add(closingID);
     close.disabled = true;
     try {
-     if (closingID === select.value && next) {
+     if (closingID === tabFor(select.value) && next) {
       var request = {};
       if (!switchProject(next, request) || !request.navigation || !await request.navigation) return;
-      if (select.value !== next) return;
+      if (tabFor(select.value) !== next) return;
      }
      // Navigation may have allowed other tab changes while this close was pending.
      index = ids.indexOf(closingID);
-     if (index < 0 || ids.length <= 1) return;
+     if (index < 0 || shown().length <= 1) return;
      closedActive = closingID;
      ids.splice(index, 1); render(); saveTabs();
      var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || add;
@@ -499,13 +561,14 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])')) || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
     var tabs = Array.from(list.querySelectorAll('[data-project-tab]'));
     if (tabs.length < 2 || !list.getClientRects().length) return;
-    var index = tabs.findIndex(function(tab) { return tab.dataset.projectTab === select.value; });
+    var index = tabs.findIndex(function(tab) { return tab.dataset.projectTab === tabFor(select.value); });
     if (index < 0) return;
     event.preventDefault();
     index = (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
     switchProject(tabs[index].dataset.projectTab);
    });
    window.openVibelyProjectTabsSync = sync;
+   window.openVibelyProjectTabsRender = render;
    render();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installProjectTabs, {once: true});

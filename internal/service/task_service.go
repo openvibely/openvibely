@@ -209,6 +209,9 @@ func (s *TaskService) ListByProjectWithCategorySorts(ctx context.Context, projec
 		}
 	}
 	applog.Infof("[task-svc] ListByProjectWithCategorySorts returned %d tasks", len(tasks))
+	if models.IsAggregateProject(projectID) {
+		models.SortTasksWithCategorySorts(tasks, category, backlogSort, completedSort)
+	}
 	return tasks, nil
 }
 
@@ -231,6 +234,9 @@ func (s *TaskService) ListBoardByProjectWithCategorySorts(ctx context.Context, p
 		}
 	}
 	applog.Debugf("[task-svc] ListBoardByProjectWithCategorySorts returned %d tasks", len(tasks))
+	if models.IsAggregateProject(projectID) {
+		models.SortTasksWithCategorySorts(tasks, category, backlogSort, completedSort)
+	}
 	return tasks, nil
 }
 
@@ -286,8 +292,11 @@ func (s *TaskService) ValidateTaskIDsForProject(ctx context.Context, projectID s
 	for _, id := range ids {
 		var task *models.Task
 		var err error
-		if projectID == models.AllProjectsID {
+		if models.IsAggregateProject(projectID) {
 			task, err = s.repo.GetByID(ctx, id)
+			if err == nil && task != nil && !models.InScope(ctx, task.ProjectID) {
+				task = nil
+			}
 		} else {
 			task, err = s.repo.GetByIDForProject(ctx, projectID, id)
 		}

@@ -66,17 +66,11 @@ func (h *Handler) GeneratePulseSummary(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing project_id")
 	}
 
-	upcoming, err := h.upcomingSvc.GenerateUpcoming(ctx, projectID)
+	summary, err := actActivitySummary(h, ctx, activitySummaryArgs{ProjectID: projectID})
 	if err != nil {
 		return render(c, http.StatusOK, pages.AISummaryResult("", err))
 	}
 
-	summary, err := h.upcomingSvc.GeneratePulseSummary(ctx, projectID, upcoming)
-	if err != nil {
-		return render(c, http.StatusOK, pages.AISummaryResult("", err))
-	}
-
-	upcoming.AISummary = summary
 	return render(c, http.StatusOK, pages.AISummaryResult(summary, nil))
 }
 
@@ -93,12 +87,7 @@ func (h *Handler) GenerateReflectionSummary(c echo.Context) error {
 		timeRange = models.TimeRangeDay
 	}
 
-	history, err := h.upcomingSvc.GenerateHistory(ctx, projectID, timeRange)
-	if err != nil {
-		return render(c, http.StatusOK, pages.AISummaryResult("", err))
-	}
-
-	summary, err := h.upcomingSvc.GenerateReflectionSummary(ctx, projectID, history)
+	summary, err := actActivitySummary(h, ctx, activitySummaryArgs{ProjectID: projectID, Reflection: true, Range: timeRange})
 	if err != nil {
 		return render(c, http.StatusOK, pages.AISummaryResult("", err))
 	}

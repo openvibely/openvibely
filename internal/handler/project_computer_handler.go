@@ -18,12 +18,15 @@ import (
 	"github.com/coder/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 func (h *Handler) computerProject(c echo.Context) error {
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		return nil
+	}
 	if h.computerSvc == nil || h.projectRepo == nil {
 		return echo.NewHTTPError(503, "Project computers unavailable")
 	}
@@ -33,12 +36,7 @@ func (h *Handler) computerProject(c echo.Context) error {
 	// A desktop provides shell and signed-in browser access, so even viewing it
 	// requires editor access, including connections using native stream tickets.
 	if h.projectAccessSvc != nil {
-		permission := authz.Edit
-		switch c.Param("action") {
-		case "enable", "disable", "time-zone", "idle-timeout":
-			permission = authz.Manage
-		}
-		if err := h.projectAccessSvc.Require(c.Request().Context(), c.Param("id"), permission); err != nil {
+		if err := h.projectAccessSvc.Require(c.Request().Context(), c.Param("id"), computerLifecyclePermission(c.Param("action"))); err != nil {
 			return err
 		}
 	}
@@ -58,15 +56,20 @@ func (h *Handler) computerService(c echo.Context) *service.ProjectComputerServic
 	return h.computerSvc
 }
 func (h *Handler) ProjectComputerPage(c echo.Context) error {
-	// Keep old project links working; task viewer routes still render their desktop.
-	if c.QueryParam("task_id") == "" {
-		if err := h.computerProject(c); err != nil {
-			return err
-		}
-		return c.Redirect(http.StatusSeeOther, "/settings/computer?project_id="+url.QueryEscape(c.Param("id")))
-	}
 	if err := h.computerProject(c); err != nil {
 		return err
+	}
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		if _, err := actComputerAccess(h, c.Request().Context(), ComputerArgs{ProjectID: c.Param("id"), TaskID: c.QueryParam("task_id")}); err != nil {
+			return projectAccessResponse(c, err)
+		}
+	}
+	if _, isRemote := remoteid.ServerOf(c.Param("id")); isRemote && c.QueryParam("task_id") == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Manage remote computers on their server's OV app.")
+	}
+	// Keep old local project links working.
+	if c.QueryParam("task_id") == "" {
+		return c.Redirect(http.StatusSeeOther, "/settings/computer?project_id="+url.QueryEscape(c.Param("id")))
 	}
 	var taskIDs []string
 	if id := c.QueryParam("task_id"); id != "" {
@@ -88,6 +91,13 @@ func (h *Handler) ProjectComputerStatus(c echo.Context) error {
 		return err
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		enabled, err := actComputerEnabled(h, c.Request().Context(), ComputerArgs{ProjectID: c.Param("id")})
+		if err != nil {
+			return err
+		}
+		return c.JSON(200, map[string]any{"enabled": enabled})
+	}
 	status, err := h.computerStatus(c.Request().Context(), h.computerService(c), c.Param("id"), c.QueryParam("task_id"), c.QueryParam("viewer_id"), c.QueryParam("viewer_mode"), c.Request().Header.Get("X-OpenVibely-Native-Window") == "1")
 	if err != nil {
 		return err
@@ -173,6 +183,20 @@ func (h *Handler) ProjectComputerLifecycle(c echo.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Minute)
 	defer cancel()
+	if _, remote := remoteid.ServerOf(c.Param("id")); remote {
+		args := computerLifecycleArgs{ComputerArgs: ComputerArgs{ProjectID: c.Param("id"), TaskID: c.QueryParam("task_id")}, Action: c.Param("action"), Value: c.FormValue("time_zone")}
+		if args.Action == "idle-timeout" {
+			minutes, err := strconv.Atoi(c.FormValue("idle_minutes"))
+			if err != nil {
+				return echo.NewHTTPError(400, "Choose an idle timeout in minutes")
+			}
+			args.Minutes = minutes
+		}
+		if _, err := actComputerLifecycle(h, ctx, args); err != nil {
+			return err
+		}
+		return c.JSON(200, map[string]bool{"ok": true})
+	}
 	var err error
 	switch c.Param("action") {
 	case "idle-timeout":
@@ -230,6 +254,9 @@ func (h *Handler) ProjectComputerStream(c echo.Context) error {
 	mode := c.Param("mode")
 	if mode != "view" && mode != "control" {
 		return echo.NewHTTPError(404)
+	}
+	if server, remote := remoteid.ServerOf(c.Param("id")); remote {
+		return h.relayComputerScreen(c, server, mode)
 	}
 	id := c.Param("id")
 

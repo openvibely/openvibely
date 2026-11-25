@@ -359,6 +359,10 @@ func (r *AgentRepo) ListPage(ctx context.Context, limit, offset int, search stri
 func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, filter persistence.AgentPageFilter) ([]models.Agent, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query, args := buildAgentPageFilteredQuery(limit, offset, filter)
+	query, args, cursorErr := cardCursorQuery(ctx, "agents", "", query, args)
+	if cursorErr != nil {
+		return nil, cursorErr
+	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing agent page: %w", err)
@@ -379,7 +383,7 @@ func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, fil
 func buildAgentPageFilteredQuery(limit, offset int, filter persistence.AgentPageFilter) (string, []any) {
 	query := `SELECT ` + agentColumns + ` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived'`
 	args := make([]any, 0, 4)
-	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" && projectID != models.AllProjectsID {
+	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" && !models.IsAggregateProject(projectID) {
 		query += ` AND (
 			COALESCE(scope, 'global') <> 'project'
 			OR project_id IS NULL

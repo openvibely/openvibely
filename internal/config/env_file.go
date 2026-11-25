@@ -70,3 +70,34 @@ func desktopConfigFilePath() string {
 	}
 	return filepath.Join(desktopDataDir(), "config.env")
 }
+
+// SetEnvFileValue writes KEY=value into path, replacing an existing KEY line.
+func SetEnvFileValue(path, key, value string) error {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	var lines []string
+	if len(data) > 0 {
+		lines = strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	}
+	entry := key + "=" + value
+	replaced := false
+	for i, line := range lines {
+		if k, _, ok := strings.Cut(strings.TrimSpace(line), "="); ok && strings.TrimSpace(k) == key {
+			lines[i] = entry
+			replaced = true
+		}
+	}
+	if !replaced {
+		lines = append(lines, entry)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}

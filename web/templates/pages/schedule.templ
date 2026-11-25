@@ -725,7 +725,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					hx-swap="outerHTML show:none"
 				>
 					<input type="hidden" name="category" value="scheduled"/>
-                    if projectID(currentProject) == models.AllProjectsID {
+                    if models.IsAggregateProject(projectID(currentProject)) {
                         <label class="form-control mb-3"><span class="label-text">Project</span>
                         <select name="destination_project" class="select select-bordered" required onchange="const agents=this.form.querySelector('[name=agent_definition_id]');if(agents){Array.from(agents.options).forEach(option=>{const unavailable=!!option.dataset.projectId &amp;&amp; option.dataset.projectId!==this.value;option.hidden=unavailable;option.disabled=unavailable;});if(agents.selectedOptions[0]?.disabled)agents.value='';}">
                             <option value="">Choose project</option>

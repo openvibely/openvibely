@@ -24,7 +24,7 @@ func (h *Handler) GetBreadcrumbSelectorResults(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if project == nil && projectID != models.AllProjectsID {
+	if project == nil && h.virtualProject(c.Request().Context(), projectID) == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "selector unavailable")
 	}
 
@@ -42,10 +42,7 @@ func (h *Handler) GetBreadcrumbSelectorResults(c echo.Context) error {
 		items, err = h.taskSvc.ListBreadcrumbSelector(c.Request().Context(), projectID, search, currentID, scheduleOnly, breadcrumbSelectorLimit+1)
 	case "custom-pages":
 		kind = "Custom page"
-		if h.pagePlugins == nil {
-			return echo.NewHTTPError(http.StatusServiceUnavailable, "selector unavailable")
-		}
-		instances, listErr := h.pagePlugins.ListEnabled(c.Request().Context(), projectID)
+		instances, listErr := h.pluginNavigation(c.Request().Context(), projectID)
 		if listErr != nil {
 			return listErr
 		}
@@ -59,7 +56,7 @@ func (h *Handler) GetBreadcrumbSelectorResults(c echo.Context) error {
 			if search != "" && !strings.Contains(strings.ToLower(instance.Title), strings.ToLower(search)) {
 				continue
 			}
-			items = append(items, models.BreadcrumbSelectorItem{ID: instance.ID, Name: instance.Title, ProjectID: instance.ProjectID})
+			items = append(items, models.BreadcrumbSelectorItem{ID: instance.InstanceID, Name: instance.Title, ProjectID: instance.ProjectID})
 			if len(items) > breadcrumbSelectorLimit {
 				break
 			}

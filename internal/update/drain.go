@@ -42,17 +42,29 @@ const (
 )
 
 type WorkTracker struct {
-	mu     sync.Mutex
-	open   bool
-	active ActiveWork
+	mu            sync.Mutex
+	open          bool
+	admissionGate func() bool
+	active        ActiveWork
 }
 
 func NewWorkTracker() *WorkTracker { return &WorkTracker{open: true} }
 
-func (t *WorkTracker) Start(class WorkClass) (func(), error) {
+// AdmittedContext marks work already counted by this tracker. Nested model calls
+// may finish after Local admission closes without admitting a new execution.
+type admittedWorkKey struct{}
+
+func (t *WorkTracker) AdmittedContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, admittedWorkKey{}, t)
+}
+func (t *WorkTracker) StartWithin(ctx context.Context, class WorkClass) (func(), error) {
+	return t.start(class, ctx.Value(admittedWorkKey{}) == t)
+}
+func (t *WorkTracker) Start(class WorkClass) (func(), error) { return t.start(class, false) }
+func (t *WorkTracker) start(class WorkClass, admitted bool) (func(), error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.open {
+	if !t.open || (!admitted && t.admissionGate != nil && !t.admissionGate()) {
 		return nil, ErrDraining
 	}
 	switch class {
@@ -87,9 +99,20 @@ func (t *WorkTracker) Active() ActiveWork {
 	defer t.mu.Unlock()
 	return t.active
 }
-func (t *WorkTracker) Open()       { t.mu.Lock(); t.open = true; t.mu.Unlock() }
-func (t *WorkTracker) Close()      { t.mu.Lock(); t.open = false; t.mu.Unlock() }
-func (t *WorkTracker) Admit() bool { t.mu.Lock(); defer t.mu.Unlock(); return t.open }
+func (t *WorkTracker) Open()  { t.mu.Lock(); t.open = true; t.mu.Unlock() }
+func (t *WorkTracker) Close() { t.mu.Lock(); t.open = false; t.mu.Unlock() }
+func (t *WorkTracker) Admit() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.open && (t.admissionGate == nil || t.admissionGate())
+}
+
+// SetAdmissionGate adds a lifecycle gate independent of update draining.
+func (t *WorkTracker) SetAdmissionGate(gate func() bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.admissionGate = gate
+}
 
 type DrainRequest struct{ Lease time.Duration }
 

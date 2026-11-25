@@ -14,6 +14,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/attachmentsession"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/pkg/filecontent"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
@@ -73,11 +76,68 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 	// Create or reuse a temporary directory for this upload session.
 	// We'll associate these with an execution ID when the message is sent.
 	sessionID := strings.TrimSpace(c.FormValue("attachment_session_id"))
-	if !isValidPendingAttachmentSessionID(sessionID) {
+	_, localSession, _ := remoteid.Split(sessionID)
+	if !isValidPendingAttachmentSessionID(localSession) {
 		sessionID = generateSessionID()
 	}
+	projectID := c.QueryParam("project_id")
+	if h.projectSvc != nil {
+		projectID, err = h.getCurrentProjectID(c)
+		if err != nil {
+			return err
+		}
+	}
+	staged, err := h.stageUploads(c.Request().Context(), "", projectID, requestUploads(files))
+	if err != nil {
+		return actionHTTPError(err)
+	}
+	args := pendingUploadArgs{ProjectID: projectID, SessionID: sessionID, Files: staged}
+	var out pendingUploadResult
+	if projectID == "" || h.projectRepo == nil {
+		if _, remote := remoteid.ServerOf(sessionID); remote {
+			return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+		}
+		out, err = h.publishPendingUpload(h.actionCtx(c), args)
+	} else {
+		out, err = actPendingUpload(h, h.actionCtx(c), args)
+	}
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
+type pendingUploadArgs struct {
+	ProjectID string
+	SessionID string
+	Files     []uploadFile
+}
+type pendingUploadInfo struct {
+	Filename  string `json:"filename" remote:"raw"`
+	Size      int64  `json:"size"`
+	MediaType string `json:"media_type"`
+	SessionID string `json:"session_id"`
+}
+type pendingUploadResult struct {
+	SessionID   string              `json:"session_id"`
+	Attachments []pendingUploadInfo `json:"attachments"`
+}
+
+var actPendingUpload = defineAction("chat.upload", func(h *Handler, ctx context.Context, a pendingUploadArgs) (string, authz.Permission, error) {
+	return editProject(h, ctx, a.ProjectID)
+}, (*Handler).publishPendingUpload)
+
+func (h *Handler) publishPendingUpload(ctx context.Context, a pendingUploadArgs) (pendingUploadResult, error) {
+	defer removeStagedUploads(a.ProjectID, a.Files)
+	sessionID, files := a.SessionID, a.Files
+	if !isValidPendingAttachmentSessionID(sessionID) {
+		return pendingUploadResult{}, statusErr(http.StatusBadRequest, "invalid attachment session ID")
+	}
+	if len(files) == 0 || len(files) > maxFilesPerUpload {
+		return pendingUploadResult{}, statusErr(http.StatusBadRequest, "maximum 3 files per upload")
+	}
 	if h.threadInputRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "attachment session storage is unavailable")
+		return pendingUploadResult{}, echo.NewHTTPError(http.StatusInternalServerError, "attachment session storage is unavailable")
 	}
 
 	// Retirement and pending-file publication are coordinated per session. This
@@ -85,31 +145,34 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 	// without holding SQLite or blocking unrelated attachment sessions during I/O.
 	unlockSession := attachmentsession.Lock(sessionID)
 	defer unlockSession()
-	retired, err := h.threadInputRepo.IsAttachmentSessionRetired(c.Request().Context(), sessionID)
+	retired, err := h.threadInputRepo.IsAttachmentSessionRetired(ctx, sessionID)
 	if err != nil {
 		applog.Infof("[handler] UploadChatAttachment error checking session retirement: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to validate attachment session")
+		return pendingUploadResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to validate attachment session")
 	}
 	if retired {
-		return echo.NewHTTPError(http.StatusConflict, "attachment upload session has expired")
+		return pendingUploadResult{}, echo.NewHTTPError(http.StatusConflict, "attachment upload session has expired")
 	}
 	if h.pendingPublicationHook != nil {
 		h.pendingPublicationHook(sessionID)
 	}
 
+	if err := bindPendingProject(sessionID, a.ProjectID); err != nil {
+		return pendingUploadResult{}, err
+	}
 	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		applog.Infof("[handler] UploadChatAttachment error creating directory: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create directory")
+		return pendingUploadResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to create directory")
 	}
 	existingCount, err := countPendingAttachmentFiles(sessionDir)
 	if err != nil {
 		applog.Infof("[handler] UploadChatAttachment error reading pending session: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read pending attachments")
+		return pendingUploadResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to read pending attachments")
 	}
 	if existingCount+len(files) > maxFilesPerUpload {
 		applog.Infof("[handler] UploadChatAttachment too many files in session: existing=%d new=%d max=%d", existingCount, len(files), maxFilesPerUpload)
-		return echo.NewHTTPError(http.StatusBadRequest, "maximum 3 files per message")
+		return pendingUploadResult{}, echo.NewHTTPError(http.StatusBadRequest, "maximum 3 files per message")
 	}
 
 	// Roll back only files created by this request, while still holding the
@@ -128,29 +191,29 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 	}()
 
 	// Process each file
-	var attachmentInfos []map[string]interface{}
+	var attachmentInfos []pendingUploadInfo
 	for _, file := range files {
 		// Check file size
-		if file.Size > filecontent.UploadLimit(file.Filename) {
-			applog.Infof("[handler] UploadChatAttachment file %s too large (%d bytes)", file.Filename, file.Size)
-			return echo.NewHTTPError(http.StatusBadRequest, "file size exceeds upload limit (25 MiB, or 200 MiB for video)")
+		if file.Size > filecontent.UploadLimit(file.Name) {
+			applog.Infof("[handler] UploadChatAttachment file %s too large (%d bytes)", file.Name, file.Size)
+			return pendingUploadResult{}, echo.NewHTTPError(http.StatusBadRequest, "file size exceeds upload limit (25 MiB, or 200 MiB for video)")
 		}
 
 		// Open the uploaded file
-		src, err := file.Open()
+		src, _, err := file.open(a.ProjectID)
 		if err != nil {
-			applog.Infof("[handler] UploadChatAttachment error opening file %s: %v", file.Filename, err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to process file")
+			applog.Infof("[handler] UploadChatAttachment error opening file %s: %v", file.Name, err)
+			return pendingUploadResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to process file")
 		}
 		defer src.Close()
 
 		// Save file without overwriting an earlier drop in the same pending session.
-		filename := uniquePendingAttachmentFilename(sessionDir, filepath.Base(file.Filename))
+		filename := uniquePendingAttachmentFilename(sessionDir, filepath.Base(file.Name))
 		destPath := filepath.Join(sessionDir, filename)
 		dest, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 		if err != nil {
 			applog.Infof("[handler] UploadChatAttachment error creating file %s: %v", filename, err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
+			return pendingUploadResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
 		}
 		createdPaths = append(createdPaths, destPath)
 
@@ -158,11 +221,11 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 		closeErr := dest.Close()
 		if err := errors.Join(copyErr, closeErr); err != nil {
 			applog.Infof("[handler] UploadChatAttachment error copying file %s: %v", filename, err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
+			return pendingUploadResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
 		}
 
 		// Detect media type
-		mediaType := file.Header.Get("Content-Type")
+		mediaType := file.ContentType
 		if known, ok := allowedFileExtensions[strings.ToLower(filepath.Ext(filename))]; ok {
 			mediaType = known
 		}
@@ -172,21 +235,12 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 
 		applog.Infof("[handler] UploadChatAttachment success file=%s size=%d session=%s", filename, file.Size, sessionID)
 
-		attachmentInfos = append(attachmentInfos, map[string]interface{}{
-			"filename":   filename,
-			"size":       file.Size,
-			"media_type": mediaType,
-			"session_id": sessionID,
-		})
+		attachmentInfos = append(attachmentInfos, pendingUploadInfo{Filename: filename, Size: file.Size, MediaType: mediaType, SessionID: sessionID})
 	}
 
 	filesSaved = true
 
-	// Return attachment info as JSON
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"session_id":  sessionID,
-		"attachments": attachmentInfos,
-	})
+	return pendingUploadResult{SessionID: sessionID, Attachments: attachmentInfos}, nil
 }
 
 // DownloadChatAttachment handles downloading a chat attachment
@@ -207,16 +261,8 @@ func (h *Handler) DownloadChatAttachment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
 	}
 
-	// Check if file exists
-	if _, err := os.Stat(attachment.FilePath); os.IsNotExist(err) {
-		applog.Infof("[handler] DownloadChatAttachment file not found: %s", attachment.FilePath)
-		return echo.NewHTTPError(http.StatusNotFound, "file not found")
-	}
-
 	applog.Infof("[handler] DownloadChatAttachment serving file=%s", attachment.FileName)
-
-	// Serve the file
-	return serveFileContent(c, attachment.FilePath, attachment.FileName)
+	return serveFile(c, h.sourceFor(fileKindChatAttachment, attachment.ID, currentProjectID, attachment.FilePath), attachment.FileName)
 }
 
 // DeleteChatAttachment handles deleting a chat attachment
@@ -230,19 +276,36 @@ func (h *Handler) DeleteChatAttachment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
 	}
 
+	attachments, err := actDeleteChatAttachment(h, h.actionCtx(c), deleteChatAttachmentArgs{AttachmentID: attachmentID, ProjectID: currentProjectID})
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, components.ChatAttachmentListOnly(attachments, currentProjectID))
+}
+
+type deleteChatAttachmentArgs struct{ AttachmentID, ProjectID string }
+
+var actDeleteChatAttachment = defineAction("chat.attachment.delete", func(h *Handler, ctx context.Context, a deleteChatAttachmentArgs) (string, authz.Permission, error) {
+	row, err := h.chatAttachmentRepo.GetByIDForProject(ctx, a.AttachmentID, a.ProjectID)
+	if err != nil || row == nil {
+		return "", "", statusErr(http.StatusNotFound, "attachment not found")
+	}
+	return a.ProjectID, authz.Edit, nil
+}, func(h *Handler, ctx context.Context, a deleteChatAttachmentArgs) ([]models.ChatAttachment, error) {
+	attachmentID, currentProjectID := a.AttachmentID, a.ProjectID
 	// Get attachment to find the file path and execution ID, scoped to the current project.
-	attachment, err := h.chatAttachmentRepo.GetByIDForProject(c.Request().Context(), attachmentID, currentProjectID)
+	attachment, err := h.chatAttachmentRepo.GetByIDForProject(ctx, attachmentID, currentProjectID)
 	if err != nil || attachment == nil {
 		applog.Infof("[handler] DeleteChatAttachment not found or forbidden project=%s: %v", currentProjectID, err)
-		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+		return nil, echo.NewHTTPError(http.StatusNotFound, "attachment not found")
 	}
 
 	executionID := attachment.ExecutionID
 
 	// Delete from database with the same project guard used for lookup.
-	if err := h.chatAttachmentRepo.DeleteByIDForProject(c.Request().Context(), attachmentID, currentProjectID); err != nil {
+	if err := h.chatAttachmentRepo.DeleteByIDForProject(ctx, attachmentID, currentProjectID); err != nil {
 		applog.Infof("[handler] DeleteChatAttachment error deleting from db: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete attachment")
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to delete attachment")
 	}
 
 	// Delete file from disk
@@ -253,9 +316,9 @@ func (h *Handler) DeleteChatAttachment(c echo.Context) error {
 	applog.Infof("[handler] DeleteChatAttachment success id=%s", attachmentID)
 
 	// Return updated attachments list for this execution
-	attachments, _ := h.chatAttachmentRepo.ListByExecution(c.Request().Context(), executionID)
-	return render(c, http.StatusOK, components.ChatAttachmentListOnly(attachments, currentProjectID))
-}
+	attachments, _ := h.chatAttachmentRepo.ListByExecution(ctx, executionID)
+	return attachments, nil
+})
 
 func (h *Handler) cleanupUnpublishedPendingAttachmentSession(ctx context.Context, sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
@@ -344,13 +407,38 @@ func generateSessionID() string {
 // when publishing its draft. Do not accept paths outside the named session.
 func (h *Handler) PreviewPendingAttachment(c echo.Context) error {
 	sessionID, name := c.Param("session"), c.Param("name")
-	if !isValidPendingAttachmentSessionID(sessionID) || name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+	_, localSession, _ := remoteid.Split(sessionID)
+	if !isValidPendingAttachmentSessionID(localSession) || name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
 		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
 	}
-	unlock := attachmentsession.Lock(sessionID)
-	defer unlock()
 	c.Response().Header().Set("Cache-Control", "private, no-store")
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().Header().Set("Content-Security-Policy", "sandbox")
+	if _, remote := remoteid.ServerOf(sessionID); remote {
+		return serveFile(c, h.sourceFor(fileKindPending, sessionID+"/"+name, "", ""), name)
+	}
+	unlock := attachmentsession.Lock(sessionID)
+	defer unlock()
 	return serveFileContent(c, filepath.Join(uploadsDir, "chat", "pending", sessionID, name), name)
+}
+
+// Keep ownership outside the upload directory so file enumeration never treats
+// metadata as an attachment. The session lock serializes binding and publication.
+func bindPendingProject(sessionID, projectID string) error {
+	dir := filepath.Join(uploadsDir, "chat", "pending-owners")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, sessionID)
+	existing, err := os.ReadFile(path)
+	if err == nil {
+		if string(existing) != projectID {
+			return statusErr(http.StatusNotFound, "attachment not found")
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(path, []byte(projectID), 0600)
 }

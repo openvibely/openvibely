@@ -18,7 +18,7 @@ var newXAPIClientForSettings = func(credentials service.XCredentials) service.XA
 	return service.NewXAPIClient(credentials)
 }
 
-func (h *Handler) xCredentials(ctx context.Context, form echo.Context) (service.XCredentials, error) {
+func (h *Handler) xCredentials(ctx context.Context, form interface{ FormValue(string) string }) (service.XCredentials, error) {
 	if h.settingsRepo == nil {
 		return service.XCredentials{}, fmt.Errorf("settings repository not configured")
 	}
@@ -55,22 +55,38 @@ func xCursorForConfiguration(existing map[string]string, credentials service.XCr
 }
 
 func (h *Handler) handleXConfigure(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	values, err := c.FormParams()
+	if err != nil {
+		return err
+	}
+	if _, err := actChannelConfigure(h, c.Request().Context(), channelConfigureArgs{ProjectID: projectID, Provider: "x", Values: values}); err != nil {
+		return err
+	}
+	return returnToChannels(c)
+}
+
+func (h *Handler) configureXOnOwner(ctx context.Context, form ownerFormValues) error {
 	h.xConfigMu.Lock()
 	defer h.xConfigMu.Unlock()
-	ctx := h.projectRuntimePrincipalContext(c.Request().Context())
-	creds, err := h.xCredentials(ctx, c)
+	ctx = h.projectRuntimePrincipalContext(ctx)
+	creds, err := h.xCredentials(ctx, form)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load X settings")
 	}
 	if !creds.Ready() {
 		return echo.NewHTTPError(http.StatusBadRequest, "All four X OAuth 1.0a credentials are required")
 	}
-	pollSeconds, err := strconv.Atoi(strings.TrimSpace(c.FormValue("x_poll_interval_seconds")))
+	pollSeconds, err := strconv.Atoi(strings.TrimSpace(form.FormValue("x_poll_interval_seconds")))
 	if err != nil || pollSeconds < 15 || pollSeconds > 300 {
 		return echo.NewHTTPError(http.StatusBadRequest, "X poll interval must be between 15 and 300 seconds")
 	}
 	api := newXAPIClientForSettings(creds)
 	svc := service.NewXService(creds, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetStartGate(h.localServicesAllowed)
 	svc.SetCredentialAuthorization(h.workerSvc)
 	svc.SetAPI(api)
 	svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
@@ -93,7 +109,7 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 		service.XSettingConsumerKey: creds.ConsumerKey, service.XSettingConsumerSecret: creds.ConsumerSecret,
 		service.XSettingAccessToken: creds.AccessToken, service.XSettingAccessTokenSecret: creds.AccessTokenSecret,
 		service.XSettingPollIntervalSeconds: strconv.Itoa(pollSeconds),
-		service.XSettingSendResponses:       strconv.FormatBool(c.FormValue("x_send_responses") == "true"),
+		service.XSettingSendResponses:       strconv.FormatBool(form.FormValue("x_send_responses") == "true"),
 		service.XSettingSinceID:             cursor,
 		service.XSettingPaginationState:     "",
 		service.XSettingAccountID:           me.ID,
@@ -125,7 +141,7 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 	if old != nil {
 		old.Stop()
 	}
-	return returnToChannels(c)
+	return nil
 }
 func (h *Handler) handleXTest(c echo.Context) error {
 	svc := h.getXService()
@@ -136,6 +152,10 @@ func (h *Handler) handleXTest(c echo.Context) error {
 	return renderStandardChannelConnectionTestFeedback(c, "X", true, err, channelConnectionTestFeedbackOptions{})
 }
 func (h *Handler) handleXRemove(c echo.Context) error {
+	if handled, err := h.removeRemoteChannel(c, "x"); handled {
+		return err
+	}
+
 	h.xConfigMu.Lock()
 	defer h.xConfigMu.Unlock()
 	if h.settingsRepo == nil {
@@ -172,6 +192,9 @@ func (h *Handler) xAuthorizedUserProjectID(c echo.Context) (string, error) {
 }
 
 func (h *Handler) AddXAuthorizedUser(c echo.Context) error {
+	if handled, err := h.remoteChannelTrust(c, "x", "create"); handled {
+		return err
+	}
 	if h.xAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "X authorization repository not configured")
 	}
@@ -193,6 +216,9 @@ func (h *Handler) AddXAuthorizedUser(c echo.Context) error {
 	return returnToChannels(c)
 }
 func (h *Handler) RemoveXAuthorizedUser(c echo.Context) error {
+	if handled, err := h.remoteChannelTrust(c, "x", "delete"); handled {
+		return err
+	}
 	if h.xAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "X authorization repository not configured")
 	}

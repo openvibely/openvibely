@@ -30,7 +30,7 @@ func (h *Handler) authorizeAnalyticsResource(c echo.Context) error {
 			return authz.ErrDenied
 		}
 		// Account inventory and resets have no project-scoped representation.
-		if strings.TrimSpace(c.QueryParam("project_id")) == "" && path != "/api/analytics/usage" {
+		if path != "/api/analytics/usage" || instanceAccountProjection(c) {
 			return nil
 		}
 	}

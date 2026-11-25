@@ -83,6 +83,17 @@ templ TaskChainPanelScript() {
    if(draft)names.forEach(function(name){root.querySelector('[data-chain-draft="'+name+'"]').value=exists?values[name]:'';});
   }
   function populate(){names.forEach(function(name){form.elements[name].value=values[name];});form.elements.chain_remove.value='false';}
+  if(draft)root.addEventListener('draft-destination-models',function(event){
+   var select=form.elements.chain_child_agent_id;
+   select.replaceChildren(new Option('Use default model',''));
+   event.detail.models.forEach(function(model){select.add(new Option(model.name,model.id));});
+   select.disabled=event.detail.loading;
+   values.chain_child_agent_id='';
+   values.chain_child_model='';
+   select.value='';
+   form.elements.chain_child_model.value='';
+   render();
+  });
   root.querySelectorAll('[data-chain-open]').forEach(function(button){button.onclick=function(){populate();if(!exists)form.elements.chain_enabled.value='true';root.querySelector('[data-chain-remove]').hidden=!exists;root.querySelector('[data-chain-save]').textContent=exists?'Save':'Add';root.querySelector('[data-chain-form-error]').textContent='';dialog.showModal();};});
   if(draft)form.addEventListener('submit',function(event){event.preventDefault();exists=form.elements.chain_remove.value!=='true';names.forEach(function(name){values[name]=form.elements[name].value;});render();dialog.close();});
   toggle.onchange=function(){populate();form.elements.chain_enabled.value=String(toggle.checked);form.requestSubmit();};

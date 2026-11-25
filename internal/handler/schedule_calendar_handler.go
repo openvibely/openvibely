@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"errors"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -34,7 +36,7 @@ func (h *Handler) ScheduleCalendarAction(c echo.Context) error {
 	if err := c.Bind(&action); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid calendar action")
 	}
-	undo, err := service.ApplyScheduleCalendarAction(c.Request().Context(), h.scheduleRepo, h.mutationProjectID(c), action)
+	undo, err := actCalendarAction(h, c.Request().Context(), calendarActionArgs{ProjectID: h.mutationProjectID(c), Action: action})
 	if errors.Is(err, persistence.ErrScheduleCalendarSelection) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -43,3 +45,18 @@ func (h *Handler) ScheduleCalendarAction(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]any{"undo": undo})
 }
+
+type calendarActionArgs struct {
+	ProjectID string
+	Action    models.ScheduleCalendarAction
+}
+
+var actCalendarAction = defineAction("schedule.calendar", func(h *Handler, ctx context.Context, a calendarActionArgs) (string, authz.Permission, error) {
+	return a.ProjectID, authz.Edit, nil
+}, func(h *Handler, ctx context.Context, a calendarActionArgs) (models.ScheduleCalendarAction, error) {
+	undo, err := service.ApplyScheduleCalendarAction(ctx, h.scheduleRepo, a.ProjectID, a.Action)
+	if errors.Is(err, persistence.ErrScheduleCalendarSelection) {
+		return undo, statusErr(http.StatusBadRequest, err.Error())
+	}
+	return undo, err
+})

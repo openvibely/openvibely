@@ -508,3 +508,18 @@ func (s *AutomationLifecycleService) Delete(ctx context.Context, projectID, auto
 	}
 	return s.repo.DeleteAutomation(ctx, projectID, automationID)
 }
+
+// ProjectForAction resolves an automation owner before a bulk mutation.
+func (s *AutomationLifecycleService) ProjectForAction(ctx context.Context, scope, id string) (string, error) {
+	if s == nil || s.repo == nil {
+		return "", errors.New("automation lifecycle service is unavailable")
+	}
+	definition, err := s.repo.GetDefinition(ctx, scope, id)
+	if err != nil {
+		return "", err
+	}
+	if definition == nil {
+		return "", errors.New("automation not found")
+	}
+	return definition.Automation.ProjectID, nil
+}

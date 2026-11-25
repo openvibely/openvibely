@@ -383,7 +383,7 @@ func (s *AlertService) CreateAccountUsageAlert(ctx context.Context, a *models.Al
 
 // Capture owners before deletion so individual project subscribers also refresh.
 func (s *AlertService) alertChangeOwners(ctx context.Context, projectID string, ids []string) ([]string, error) {
-	if projectID != models.AllProjectsID || s.broadcaster == nil {
+	if !models.IsAggregateProject(projectID) || s.broadcaster == nil {
 		return []string{projectID}, nil
 	}
 	return s.alertRepo.ListOwnerProjectIDs(ctx, projectID, ids)

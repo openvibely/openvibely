@@ -601,7 +601,7 @@ func scanInsights(rows *sql.Rows) ([]models.Insight, error) {
 // Analysis inputs may span projects; saved reports remain owned by their scope.
 func insightsTaskPredicate(ctx context.Context, alias, projectID string) string {
 	predicate := analyticsProjectPredicate(ctx, alias+"project_id", projectID)
-	if projectID == models.AllProjectsID {
+	if models.IsAggregateProject(projectID) {
 		predicate += " AND " + alias + "category NOT IN ('chat','page_chat')"
 	}
 	return predicate
@@ -634,12 +634,15 @@ func (r *InsightsRepo) authorizedInsightWrite(ctx context.Context, projectID, ac
 
 // All-project scope names no owner; writes are authorized against the row's real project.
 func (r *InsightsRepo) insightRowProject(ctx context.Context, table, projectID, id string) (string, error) {
-	if projectID != models.AllProjectsID {
+	if !models.IsAggregateProject(projectID) {
 		return projectID, nil
 	}
 	var owner string
 	err := r.db.QueryRowContext(ctx, `SELECT project_id FROM `+table+` WHERE id = ?`, id).Scan(&owner)
 	if err == sql.ErrNoRows {
+		return "", persistence.ErrInsightNotFound
+	}
+	if err == nil && !models.InScope(ctx, owner) {
 		return "", persistence.ErrInsightNotFound
 	}
 	return owner, err

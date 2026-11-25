@@ -30,7 +30,7 @@ func (r *ProjectAccessRepo) Get(ctx context.Context, id string) (*models.Project
 func projectRole(ctx context.Context, db sqlExecutor, userID, projectID string) (string, error) {
 	// The virtual workspace is a collection scope, not a project grant. Its
 	// queries and mutations authorize each real project separately.
-	if projectID == models.AllProjectsID {
+	if models.IsAggregateProject(projectID) {
 		var role string
 		err := db.QueryRowContext(ctx, `SELECT CASE WHEN m.role IN ('owner','admin') THEN 'owner' ELSE 'editor' END FROM users u JOIN org_memberships m ON m.user_id=u.id WHERE u.id=? AND u.disabled=0 AND m.org_id='default'`, userID).Scan(&role)
 		if errors.Is(err, sql.ErrNoRows) {

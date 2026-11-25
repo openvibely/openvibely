@@ -64,7 +64,7 @@ func (h *Handler) threadInputProjectBoundary(next echo.HandlerFunc) echo.Handler
 		}
 		if input != nil {
 			projectID := h.mutationProjectID(c)
-			if (projectID != "" && projectID != models.AllProjectsID && input.ProjectID != projectID) ||
+			if (projectID != "" && !models.IsAggregateProject(projectID) && input.ProjectID != projectID) ||
 				(c.Param("taskId") != "" && input.TaskID != c.Param("taskId")) ||
 				(strings.HasPrefix(c.Path(), "/chat/queued/") && input.Scope != models.ThreadInputScopeChat) {
 				return echo.NewHTTPError(http.StatusNotFound, "input not found")

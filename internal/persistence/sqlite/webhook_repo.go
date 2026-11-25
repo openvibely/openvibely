@@ -200,6 +200,10 @@ func (r *WebhookRepo) ListCardsByProjectPageFiltered(ctx context.Context, projec
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
+	query, args, cursorErr := cardCursorQuery(ctx, "webhooks", "", query, args)
+	if cursorErr != nil {
+		return nil, cursorErr
+	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing webhook endpoint card page: %w", err)

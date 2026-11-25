@@ -3,7 +3,7 @@ package models
 // GitHubConnection belongs to one OV user. Tokens must never be serialized into
 // API responses or logs; callers expose connection metadata separately.
 type GitHubConnection struct {
-	PAT         string `json:"-"`
+	PAT         string `json:"-" remote:"-"`
 	Login       string `json:"login"`
 	APIEndpoint string `json:"api_endpoint"`
 	AuthorName  string `json:"author_name"`

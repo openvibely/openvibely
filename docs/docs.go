@@ -4133,6 +4133,14 @@ const docTemplate = `{
                 "swarm_config": {
                     "type": "string"
                 },
+                "swarm_parent": {
+                    "description": "Read-only parent summary for child detail pages",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Task"
+                        }
+                    ]
+                },
                 "swarm_role": {
                     "$ref": "#/definitions/models.SwarmRole"
                 },

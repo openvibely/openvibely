@@ -15,11 +15,19 @@ var discordNumericUserIDPattern = regexp.MustCompile(`^[0-9]+$`)
 
 // ListDiscordAuthorizedUsers returns the authorized Discord users list for a project.
 func (h *Handler) ListDiscordAuthorizedUsers(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "discord", "list"); handled {
+		return err
+	}
+
 	return h.discordAuthorizedUserCRUD().listHandler(c)
 }
 
 // AddDiscordAuthorizedUser adds a new authorized Discord user.
 func (h *Handler) AddDiscordAuthorizedUser(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "discord", "create"); handled {
+		return err
+	}
+
 	return h.discordAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
 		discordUserID := strings.TrimSpace(c.FormValue("discord_user_id"))
 		displayName := strings.TrimSpace(c.FormValue("display_name"))
@@ -46,6 +54,10 @@ func (h *Handler) AddDiscordAuthorizedUser(c echo.Context) error {
 
 // RemoveDiscordAuthorizedUser removes an authorized Discord user.
 func (h *Handler) RemoveDiscordAuthorizedUser(c echo.Context) error {
+	if handled, err := h.remoteChannelSender(c, "discord", "delete"); handled {
+		return err
+	}
+
 	return h.discordAuthorizedUserCRUD().deleteHandler(c)
 }
 

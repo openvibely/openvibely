@@ -520,6 +520,9 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	applog.Infof("[worker] executing task=%s %q (project: %s, model: %s)", task.ID, task.Title, task.ProjectID, agentConfigID)
 
 	taskCtx, taskCancel := context.WithCancel(w.ctx)
+	if w.updateTracker != nil {
+		taskCtx = w.updateTracker.AdmittedContext(taskCtx)
+	}
 	if isPrepared {
 		taskCtx = WithAutomationContext(taskCtx, prepared.Envelope.Context)
 		if prepared.ExecutionID != "" {

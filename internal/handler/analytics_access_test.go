@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remote"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -88,4 +90,58 @@ func TestAnalyticsHTTPProjectAndAccountBoundaries(t *testing.T) {
 		require.Equal(t, 404, request("GET", path+"?projection=local&project_id="+project.ID, user.Principal))
 	}
 	require.Equal(t, 404, request("POST", "/api/analytics/usage/resets/consume", models.Principal{}))
+}
+
+func TestAccountProjectionsIgnoreRemoteProject(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	h := tc.handler
+	h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+	org := service.NewOrganizationService(tc.stores.Organizations, "secret")
+	h.SetOrganizationService(org)
+	token, err := org.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	user, err := org.Accept(t.Context(), token, "account-member", "long-password-value", "")
+	require.NoError(t, err)
+	cfg := &models.LLMConfig{Name: "Local account", Provider: models.ProviderOpenAI, Model: "gpt-5", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "local-token", OAuthAccountID: "local-account"}
+	require.NoError(t, tc.llmConfigRepo.Create(t.Context(), cfg))
+	calls := 0
+	h.usageAnalyticsSvc.SetAccountUsageFetcher(func(ctx context.Context, got models.LLMConfig) (*models.AccountUsageResult, error) {
+		calls++
+		require.Equal(t, "", remote.RoutingServer(ctx))
+		require.Equal(t, cfg.ID, got.ID)
+		pct := 12.0
+		return &models.AccountUsageResult{PrimaryLabel: "Session", PrimaryUsedPercent: &pct}, nil
+	})
+	e := echo.New()
+	e.Use(h.remoteRouting)
+	e.Use(h.allProjectsScope)
+	e.Use(h.projectAccessBoundary)
+	e.GET("/api/analytics/usage", h.GetAnalyticsUsage)
+	for _, selected := range []string{"missing", "r-0123456789abcdef-project1", models.AllProjectsID, models.SharedProjectID("missing")} {
+		for _, projection := range []string{"accounts", "account_limits"} {
+			for _, admin := range []bool{true, false} {
+				principal := user.Principal
+				if admin {
+					principal = models.Principal{UserID: models.BootstrapUserID}
+				}
+				req := httptest.NewRequest("GET", "/api/analytics/usage?projection="+projection+"&project_id="+selected+"&refresh=true", nil).WithContext(models.WithPrincipal(t.Context(), principal))
+				rec := httptest.NewRecorder()
+				before := calls
+				e.ServeHTTP(rec, req)
+				if admin {
+					require.Equal(t, 200, rec.Code, rec.Body.String())
+					require.Contains(t, rec.Body.String(), "openai")
+				} else {
+					require.Equal(t, 404, rec.Code, rec.Body.String())
+					require.Equal(t, before, calls)
+				}
+			}
+		}
+	}
+	require.Positive(t, calls)
+	// Historical usage must still reject nonexistent project selections.
+	req := httptest.NewRequest("GET", "/api/analytics/usage?projection=local&project_id=missing", nil).WithContext(models.WithPrincipal(t.Context(), models.Principal{UserID: models.BootstrapUserID}))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, 404, rec.Code)
 }

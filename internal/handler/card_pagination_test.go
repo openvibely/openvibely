@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/cardcursor"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -365,7 +366,7 @@ func TestIndividualMutationRefreshesPreserveValidatedListState(t *testing.T) {
 		rec := httptest.NewRecorder()
 		tc.echo.ServeHTTP(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		require.Contains(t, rec.Body.String(), `data-card-pagination-url="/personality?active=false&amp;kind=base&amp;project_id=`+project.ID+`&amp;search=Base&amp;sort=name_desc"`)
+		require.Contains(t, rec.Body.String(), `data-card-pagination-url="/personality?active=false&amp;kind=base&amp;search=Base&amp;sort=name_desc"`)
 		require.NotContains(t, rec.Body.String(), `data-personality-name="Mutation personality"`)
 	})
 }
@@ -1788,7 +1789,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *tes
 	}
 }
 
-func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOffset(t *testing.T) {
+func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowCursor(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
 	}
@@ -1806,8 +1807,12 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 	}
 	render := func(cards []models.LLMConfig, hasMore bool) string {
 		var buf bytes.Buffer
+		cursorState := cardcursor.New("models", "name_asc", "fixture", "")
+		cursorCtx := cardcursor.With(context.Background(), cursorState)
+		_, _, err := cardcursor.Finish(cursorCtx, cards, len(cards))
+		require.NoError(t, err)
 		state := pages.CardListState{Preserved: []pages.CardListQueryValue{{Key: "partial", Value: "1"}}}
-		require.NoError(t, pages.ModelsContentPageWithPaginationAndState(cards, nil, map[string]int{}, false, hasMore, state).Render(context.Background(), &buf))
+		require.NoError(t, pages.ModelsContentPageWithPaginationAndState(cards, nil, map[string]int{}, false, hasMore, state).Render(cursorCtx, &buf))
 		return buf.String()
 	}
 	initialHTML := render(makeCards(0, 35), false)
@@ -1955,6 +1960,10 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
   function waitForContinuation() {
     var cards = document.querySelectorAll('#models-card-list [data-model-id][data-model-provider]');
     if (cards.length === 41) {
+      var root = document.getElementById('models-container');
+      var state = root._openVibelyCardPaginationState;
+      var boundary = root.querySelector('[data-card-pagination-status]');
+      if (!state.cursor || boundary.getAttribute('data-card-pagination-cursor') !== state.cursor || boundary.getAttribute('data-card-pagination-has-more') !== 'false') return fail('continuation was not saved for history restoration');
       var seen = Object.create(null);
       for (var i = 0; i < cards.length; i++) seen[cards[i].getAttribute('data-model-id')] = (seen[cards[i].getAttribute('data-model-id')] || 0) + 1;
       for (var n = 0; n < 41; n++) {
@@ -1976,7 +1985,7 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 </script></body>`, 1)
 
 	var continuationRequests atomic.Int32
-	var wrongOffsets atomic.Int32
+	var wrongCursors atomic.Int32
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -1984,10 +1993,15 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.URL.Path == "/models" && r.URL.Query().Get("partial") == "1" {
 			continuationRequests.Add(1)
-			if r.URL.Query().Get("offset") != "35" {
-				wrongOffsets.Add(1)
+			state := cardcursor.New("models", "name_asc", "fixture", r.URL.Query().Get("cursor"))
+			if state.Err != nil || r.URL.Query().Get("offset") != "" || len(state.Token.Sources[""]) != 3 || state.Token.Sources[""][2] != "focus-34" {
+				wrongCursors.Add(1)
 			}
 			w.Header().Set(cardPageHasMoreHeader, "false")
+			token := regexp.MustCompile(`data-card-pagination-cursor="([^"]+)"`).FindStringSubmatch(continuationHTML)
+			if len(token) == 2 {
+				w.Header().Set("X-OpenVibely-Card-Cursor", html.UnescapeString(token[1]))
+			}
 			_, _ = w.Write([]byte(continuationHTML))
 			return
 		}
@@ -2013,12 +2027,12 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 			if end > len(dom) {
 				end = len(dom)
 			}
-			t.Fatalf("browser focus/partial-window regression failed (requests=%d wrongOffsets=%d): %s", continuationRequests.Load(), wrongOffsets.Load(), html.UnescapeString(dom[idx:end]))
+			t.Fatalf("browser focus/partial-window regression failed (requests=%d wrongCursors=%d): %s", continuationRequests.Load(), wrongCursors.Load(), html.UnescapeString(dom[idx:end]))
 		}
 		t.Fatalf("browser focus/partial-window regression did not report a result; DOM length=%d", len(dom))
 	}
 	require.Equal(t, int32(1), continuationRequests.Load())
-	require.Zero(t, wrongOffsets.Load())
+	require.Zero(t, wrongCursors.Load())
 }
 
 func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(t *testing.T) {

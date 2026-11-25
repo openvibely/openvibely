@@ -161,7 +161,7 @@
    if(typeof rendered==='string'){const template=document.createElement('template');template.innerHTML=rendered;root=template.content;}
    return Array.from(root.querySelectorAll('a[href]')).filter(link=>{
     let url;try{url=new URL(link.href,location.href)}catch{return false}
-    if(url.origin!==location.origin||!/^\/files\/[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return false;
+    if(url.origin!==location.origin||!/^\/files\/(?:r-[a-f0-9]{16}-)?[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return false;
     link.dataset.filePreview='';return true;
    }).map(link=>{link.remove();return link});
   });
@@ -183,7 +183,7 @@
   const linkIdentity=link=>identity(link.href||link.dataset.imageUrl||link.dataset.filePreview);
   if(conversation){
    group=conversation;
-   candidates=window.queryChatVirtualElements?window.queryChatVirtualElements(conversation,selector,modelFileLinks):Array.from(conversation.querySelectorAll(selector));
+   candidates=window.queryChatVirtualElements?window.queryChatVirtualElements(conversation,selector,async model=>(await modelFileLinks(model)).map(link=>{const copy=link.cloneNode(true);copy.href=scopeFileURL(copy.getAttribute('href'),conversation);return copy})):Array.from(conversation.querySelectorAll(selector));
   }
   if(!dialog.contains(trigger)){opener=trigger;pointerOpened=!!event && event.detail>0}else group=null;
   // Show the requested file immediately while offscreen links are collected.
@@ -239,8 +239,32 @@
   if(!root||(root.dataset.taskId||'')!==owner.task||(root.dataset.projectId||'')!==owner.project)close();
  }).observe(document.body,{childList:true,subtree:true});
  window.imageGallery={close,refreshItem(element){const at=items.findIndex(item=>item.element===element);if(at<0)return;items[at]=itemFrom(element);if(at===index){if(currentKind==='image'&&window.OVFileImage.refresh(items[at])){download.href=items[at].download}else show(at)}}};
+ // Route only generated-file URLs, using the conversation owner rather than
+ // the selected workspace. Persisted Markdown and external links are untouched.
+ function scopeFileURL(raw,owner){
+  const project=owner?.closest('#task-detail-content,#chat-page-root,#plugin-page-root')?.dataset.projectId;
+  const prefix=project?.match(/^r-[a-f0-9]{16}-/)?.[0];
+  if(!prefix)return raw;
+  let url;try{url=new URL(raw,location.href)}catch{return raw}
+  if(url.protocol!==location.protocol||url.host!==location.host)return raw;
+  const match=url.pathname.match(/^\/files\/([a-f0-9]+)$/);
+  if(!match)return raw;
+  const requested=url.searchParams.get('project_id');
+  if(requested&&requested.startsWith('r-')&&!requested.startsWith(prefix))return raw;
+  url.pathname='/files/'+prefix+match[1];
+  url.searchParams.set('project_id',requested?(requested.startsWith(prefix)?requested:prefix+requested):project);
+  return url.pathname+url.search+url.hash;
+ }
+ function scopeFileLinks(root,owner){
+  root.querySelectorAll('a[href],img[src]').forEach(node=>{
+   const attr=node.tagName==='IMG'?'src':'href',raw=node.getAttribute(attr);
+   const scoped=scopeFileURL(raw,owner||node);
+   if(scoped!==raw)node.setAttribute(attr,scoped);
+  });
+ }
  // Retain enhanced published file links while the surrounding response is rebuilt.
  function prepareStream(fragment,previous){
+  scopeFileLinks(fragment,previous);
   const saved=new Map();
   const key=link=>link.href+'\n'+link.textContent;
   const links=Array.from(previous.querySelectorAll('a[data-file-link-bound][data-image-gallery-item],a[data-file-link-bound][data-file-preview]'));
@@ -428,10 +452,10 @@
  });
  // Server-rendered preview links already own their thumbnail and gallery group.
  // Only enhance ordinary published links, such as links in model responses.
- function scanLinks(root=document){root.querySelectorAll('a[href]:not([data-file-link-bound]):not([data-image-gallery-item]):not([data-file-preview])').forEach(link=>{
+ function scanLinks(root=document){scopeFileLinks(root);root.querySelectorAll('a[href]:not([data-file-link-bound]):not([data-image-gallery-item]):not([data-file-preview])').forEach(link=>{
  if(link.closest('[data-thread-refresh-preview]'))return;
  let url;try{url=new URL(link.href,location.href)}catch{return}
- if(url.origin!==location.origin||!/^\/files\/[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return;
+ if(url.origin!==location.origin||!/^\/files\/(?:r-[a-f0-9]{16}-)?[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return;
  link.dataset.fileLinkBound='';link.dataset.filePreview='';
  if(link.closest('[data-result-content]'))return;
  const meta=new URL(url);meta.searchParams.set('metadata','1');fetch(meta).then(r=>r.ok?r.json():null).then(file=>{

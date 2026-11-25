@@ -110,6 +110,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
    </style>
    <script>
     (function(){
+     const fetch=async(...args)=>{const res=await window.fetch(...args);if(await window.openVibelyReconnect?.fetch(res))return new Promise(()=>{});return res;};
      const root=document.getElementById('project-computer');
      if(!root || root.dataset.bound) return;
      root.dataset.bound='true';
@@ -181,7 +182,7 @@ templ ProjectComputerContent(projectID string, taskIDs ...string) {
        onopen:()=>{statusLive=true;},
        listeners:{computer_status:statusChanged,
         task_deleted:event=>{let data;try{data=JSON.parse(event.data);}catch{return;}previewWasDeleted({detail:data});},
-        retry:()=>{statusFailed=true;statusDisconnected();},error:()=>{statusStream?.close();statusStream=null;pendingState=null;disconnect();statusFailed=true;statusDisconnected();}}
+        retry:()=>{statusFailed=true;statusDisconnected();},error:event=>{if(window.openVibelyReconnect?.frame(event.data))return;statusStream?.close();statusStream=null;pendingState=null;disconnect();statusFailed=true;statusDisconnected();}}
       });
      }
      window.addEventListener('live-transport-disconnected',statusDisconnected);
@@ -501,7 +502,7 @@ templ ProjectComputerToggle(projectID string) {
  <p class="text-xs opacity-70">Saved for all task desktops in this project. Apply restarts the computer when idle; files are kept.</p>
  <p role="status" data-computer-preference-status></p>
  <script>
- (()=>{document.querySelectorAll('[data-computer-preference]').forEach(root=>{
+ (()=>{const fetch=async(...args)=>{const res=await window.fetch(...args);if(await window.openVibelyReconnect?.fetch(res))return new Promise(()=>{});return res;};document.querySelectorAll('[data-computer-preference]').forEach(root=>{
  if(root.dataset.bound)return;root.dataset.bound='true';const box=root.querySelector('input'),status=root.querySelector('[role=status]');const base='/projects/'+encodeURIComponent(root.dataset.computerPreference)+'/computer';
  const idle=root.querySelector('[data-computer-idle]');
  idle.onchange=async()=>{idle.disabled=true;try{const res=await fetch(base+'/idle-timeout',{method:'POST',body:new URLSearchParams({idle_minutes:idle.value})});if(!res.ok){const data=await res.json();throw Error(data.message||'Could not save idle timeout');}status.textContent='Idle timeout saved for this project.';}catch(e){status.textContent=e.message;await load();}finally{idle.disabled=false;}};
@@ -532,7 +533,7 @@ templ ProjectComputerPermissions(projectID, taskID string, compact ...bool) {
  <div data-computer-grant-list></div>
  }
  <script>
- (()=>{document.querySelectorAll('[data-computer-grants]').forEach(root=>{
+ (()=>{const fetch=async(...args)=>{const res=await window.fetch(...args);if(await window.openVibelyReconnect?.fetch(res))return new Promise(()=>{});return res;};document.querySelectorAll('[data-computer-grants]').forEach(root=>{
  if(root.dataset.bound)return;root.dataset.bound='true';
  const picker=root.querySelector('[data-searchable-selector-dialog]'),list=root.querySelector('[data-computer-grant-list]');
  picker.setAttribute('aria-label','Chrome permissions');
@@ -570,7 +571,7 @@ templ TaskComputerToggle(projectID, taskID string) {
  if taskID=="" {
  <p class="text-sm opacity-60">The desktop and preview start after you send the first message.</p>
  <script>
- (()=>{
+ (()=>{const fetch=async(...args)=>{const res=await window.fetch(...args);if(await window.openVibelyReconnect?.fetch(res))return new Promise(()=>{});return res;};
  const box=document.querySelector('[data-task-computer-preference]');if(!box)return;
  const toggle=box.querySelector('[data-task-computer-toggle]');
  async function update(){

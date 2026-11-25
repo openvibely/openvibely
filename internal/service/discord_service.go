@@ -54,6 +54,7 @@ type DiscordConnectionStatus struct {
 }
 
 type DiscordService struct {
+	localServiceGate
 	session                              *discordgo.Session
 	settingsRepo                         persistence.SettingsStore
 	discordAuthRepo                      persistence.DiscordAuthStore
@@ -219,12 +220,18 @@ func (s *DiscordService) runtimeStatus() (bool, string) {
 }
 
 func (s *DiscordService) Start() error {
+	if !s.startAllowed() {
+		return nil
+	}
 	botToken := strings.TrimSpace(s.getSetting(context.Background(), DiscordSettingBotToken))
 	if botToken == "" {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.startAllowed() {
+		return nil
+	}
 	if s.running {
 		return nil
 	}

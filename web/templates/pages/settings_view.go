@@ -8,20 +8,22 @@ import (
 
 // ChannelsSettingsView contains all channel state rendered by the Channels settings page and fragment.
 type ChannelsSettingsView struct {
-	TelegramToken                string
-	IsBotRunning                 bool
-	AuthorizedUsers              []models.TelegramAuthorizedUser
-	SlackAuthorizedUsers         []models.SlackAuthorizedUser
-	DiscordAuthorizedUsers       []models.DiscordAuthorizedUser
-	XAuthorizedUsers             []models.XAuthorizedUser
-	XStatus                      service.XConnectionStatus
-	XHasConsumerKey              bool
-	XHasConsumerSecret           bool
-	XHasAccessToken              bool
-	XHasAccessTokenSecret        bool
-	XPollIntervalSeconds         string
-	XSendResponses               bool
-	CurrentProjectID             string
+	TelegramToken          string
+	IsBotRunning           bool
+	AuthorizedUsers        []models.TelegramAuthorizedUser
+	SlackAuthorizedUsers   []models.SlackAuthorizedUser
+	DiscordAuthorizedUsers []models.DiscordAuthorizedUser
+	XAuthorizedUsers       []models.XAuthorizedUser
+	XStatus                service.XConnectionStatus
+	XHasConsumerKey        bool
+	XHasConsumerSecret     bool
+	XHasAccessToken        bool
+	XHasAccessTokenSecret  bool
+	XPollIntervalSeconds   string
+	XSendResponses         bool
+	CurrentProjectID       string
+	// WebhookBaseURL is the owning server's URL for remote projects; empty means this origin.
+	WebhookBaseURL               string
 	SendResponses                bool
 	RichMessagesV2               bool
 	GitHubStatus                 service.GitHubConnectionStatus

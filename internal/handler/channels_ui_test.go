@@ -42,7 +42,7 @@ func TestChannelsPageRendersConfiguredXWithoutOAuthSecrets(t *testing.T) {
 	for _, expected := range []string{
 		`data-channel-type="x"`,
 		`id="x_config_modal"`,
-		`hx-post="/channels/x/configure"`,
+		`hx-post="/channels/x/configure?project_id=`,
 		`name="x_consumer_key"`,
 		`name="x_consumer_secret"`,
 		`name="x_access_token"`,
@@ -188,7 +188,7 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 	if !strings.Contains(body, `id="channel_form"`) {
 		t.Error("expected telegram channel form")
 	}
-	if !strings.Contains(body, `hx-post="/channels/telegram"`) {
+	if !strings.Contains(body, `hx-post="/channels/telegram?project_id=`) {
 		t.Error("expected telegram channel form to submit via HTMX")
 	}
 	if !strings.Contains(body, `hx-swap="none"`) {
@@ -217,7 +217,7 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 	if strings.Contains(body, "Discord Bot") || strings.Contains(body, "Discord Bot Coming Soon") {
 		t.Error("did not expect Discord to render as coming soon")
 	}
-	if !strings.Contains(body, `id="discord_config_modal"`) || !strings.Contains(body, `hx-post="/channels/discord/configure"`) {
+	if !strings.Contains(body, `id="discord_config_modal"`) || !strings.Contains(body, `hx-post="/channels/discord/configure?project_id=`) {
 		t.Error("expected Discord configuration modal")
 	}
 	if !strings.Contains(body, `id="discord_config_modal" class="modal" onclose="resetDiscordConfigForm()"`) ||

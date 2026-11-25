@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,9 +20,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
-	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/builtinskills"
+	"github.com/openvibely/openvibely/internal/cardcursor"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"gopkg.in/yaml.v3"
 )
@@ -41,6 +43,14 @@ func (h *Handler) SetSkillAlwaysUse(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
 	scope := h.dialogStandaloneSkillScope(c, req.Scope)
+	if out, handled, err := h.remoteSkillOperation(c, skillOperationArgs{Operation: "always_use", Scope: scope, Handle: handle, Value: req.AlwaysUse}); handled {
+		if err != nil {
+			return err
+		}
+		_ = out
+		return h.ListSkills(c)
+	}
+
 	root, err := h.rootForDialogScope(c, scope)
 	if err != nil {
 		return err
@@ -89,7 +99,7 @@ func (h *Handler) ListSkills(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	page := parseCardPageRequest(c)
+	page := h.parseCardPageRequest(c)
 	skills := make([]pages.SkillCard, 0, len(allSkills))
 	search := strings.ToLower(page.Search)
 	enabled := optionalBoolQuery(c, "enabled")
@@ -150,8 +160,12 @@ func (h *Handler) ListSkills(c echo.Context) error {
 		end = len(skills)
 	}
 	pageItems := skills[start:end]
-	pageItems, hasMore := cardPageItems(pageItems, page.PageSize)
-	canManage := h.agentSkillRoot != "" || h.currentProjectSkillRoot(c) != "" || (c.QueryParam("project_id") == models.AllProjectsID && len(allSkills) > 0)
+	if cardcursor.From(c.Request().Context()) != nil {
+		pageItems = skills
+	}
+	pageItems, hasMore := finishCardPage(c, pageItems, page.PageSize)
+	_, remoteProject := remoteid.ServerOf(c.QueryParam("project_id"))
+	canManage := remoteProject || h.agentSkillRoot != "" || h.currentProjectSkillRoot(c) != "" || (models.IsAggregateProject(c.QueryParam("project_id")) && len(allSkills) > 0)
 	currentProjectID, _ := h.getCurrentProjectID(c)
 	listState := pages.CardListState{
 		ProjectID: currentProjectID,
@@ -203,47 +217,20 @@ func (h *Handler) GetSkillDetail(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug")
 	}
 	scope := h.dialogStandaloneSkillScope(c, c.QueryParam("scope"))
+	if out, handled, err := h.remoteSkillOperation(c, skillOperationArgs{Operation: "detail", Scope: scope, Handle: handle, Value: false}); handled {
+		if err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, out.Detail)
+	}
+
 	root, err := h.rootForDialogScope(c, scope)
 	if err != nil {
 		return err
 	}
-	skillPath := filepath.Join(root, "skills", handle, "SKILL.md")
-	data, err := os.ReadFile(skillPath)
+	resp, err := h.readSkillDetail(root, scope, handle, h.currentProjectSkillRoot(c))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return echo.NewHTTPError(http.StatusNotFound, "skill not found at selected scope")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	decl, body, err := agentlibrary.ParseDeclaration(string(data))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	content, err := agentlibrary.RenderSkillMarkdown(decl, body)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	resp := skillDetailResponse{
-		Dependencies: decl.Dependencies,
-		Platform:     runtime.GOOS + "/" + runtime.GOARCH,
-		Handle:       handle,
-		Name:         firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, handle),
-		Description:  firstNonEmpty(decl.Skill.Description, decl.Routing.Description),
-		Scope:        scope,
-		Source:       scope,
-		Content:      content,
-		Files:        listStandaloneSkillPackageFiles(skillPath),
-		Archived:     decl.Skill.Archived,
-		Enabled:      decl.Skill.Enabled == nil || *decl.Skill.Enabled,
-	}
-	if enabled := agentskills.SkillEnabledPreference(skillPath); enabled != nil {
-		resp.Enabled = *enabled
-	}
-	switch scope {
-	case "global":
-		resp.AlwaysUse = alwaysUseSet(h.agentSkillRoot)[handle]
-	default:
-		resp.AlwaysUse = alwaysUseSet(h.currentProjectSkillRoot(c))[handle]
+		return err
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -282,10 +269,6 @@ func (h *Handler) UpdateSkill(c echo.Context) error {
 
 func (h *Handler) ImportSkillPackage(c echo.Context) error {
 	scope := h.dialogStandaloneSkillScope(c, c.FormValue("scope"))
-	root, err := h.rootForDialogScope(c, scope)
-	if err != nil {
-		return err
-	}
 	form, err := c.MultipartForm()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "skill package upload is required")
@@ -298,6 +281,17 @@ func (h *Handler) ImportSkillPackage(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if _, handled, err := h.remoteSkillOperation(c, skillOperationArgs{Operation: "import", Scope: scope, Package: &pkg}); handled {
+		if err != nil {
+			return err
+		}
+		return h.ListSkills(c)
+	}
+	root, err := h.rootForDialogScope(c, scope)
+	if err != nil {
+		return err
+	}
+
 	decl, body, err := parseUploadedStandaloneSkillDeclaration(pkg.SkillMD, pkg.PackageName, scope)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -347,60 +341,10 @@ func (h *Handler) DeleteSkillsBulk(c echo.Context) error {
 	if err := ensureJSONEOF(decoder); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	seen := map[string]struct{}{}
-	refs := make([]bulkSkillRef, 0, len(request.Skills))
-	roots := make([]string, 0, len(request.Skills))
-	for _, ref := range request.Skills {
-		ref.Handle = strings.TrimSpace(ref.Handle)
-		ref.Scope = strings.TrimSpace(ref.Scope)
-		if !validDialogSkillKey(ref.Handle) || (ref.Scope != "global" && ref.Scope != "project") {
-			return echo.NewHTTPError(http.StatusBadRequest, "every skill must have a valid handle and scope")
-		}
-		identity := ref.ProjectID + ":" + ref.Scope + ":" + ref.Handle
-		if _, ok := seen[identity]; ok {
-			continue
-		}
-		seen[identity] = struct{}{}
-		scoped := c
-		if c.QueryParam("project_id") == models.AllProjectsID && ref.Scope == "project" {
-			if ref.ProjectID == "" || ref.ProjectID == models.AllProjectsID {
-				return echo.NewHTTPError(http.StatusBadRequest, "Choose a project")
-			}
-			req := c.Request().Clone(c.Request().Context())
-			query := req.URL.Query()
-			query.Set("skill_project_id", ref.ProjectID)
-			req.URL.RawQuery = query.Encode()
-			scoped = c.Echo().NewContext(req, c.Response())
-		} else if ref.ProjectID != "" && ref.ProjectID != c.QueryParam("project_id") {
-			return echo.NewHTTPError(http.StatusBadRequest, "Skill belongs to another project")
-		}
-		root, err := h.rootForDialogScope(scoped, ref.Scope)
-		if err != nil {
-			return err
-		}
-		path := filepath.Join(root, "skills", ref.Handle)
-		stat, err := os.Stat(path)
-		if err != nil || !stat.IsDir() {
-			return echo.NewHTTPError(http.StatusBadRequest, "all selected skills must exist at the selected scope")
-		}
-		refs = append(refs, ref)
-		roots = append(roots, root)
+	if err := h.deleteSkillSelection(c, request.Skills); err != nil {
+		return actionHTTPError(err)
 	}
-	if len(refs) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "at least one skill is required")
-	}
-	if len(refs) > bulkDeleteMaxItems {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("at most %d skills may be deleted at once", bulkDeleteMaxItems))
-	}
-	for i, ref := range refs {
-		if err := os.RemoveAll(filepath.Join(roots[i], "skills", ref.Handle)); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "skill deletion stopped after a filesystem failure; some earlier packages may already be removed")
-		}
-		if _, err := agentlibrary.RemoveSkillIndexEntry(filepath.Join(roots[i], "skills", "SKILLS.md"), ref.Handle); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "skill index cleanup failed after package deletion; manual repair may be required")
-		}
-	}
-	return c.JSON(http.StatusOK, map[string]int{"deleted": len(refs)})
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(request.Skills)})
 }
 
 func (h *Handler) DeleteSkill(c echo.Context) error {
@@ -413,6 +357,14 @@ func (h *Handler) DeleteSkill(c echo.Context) error {
 		requestedScope = c.QueryParam("scope")
 	}
 	scope := h.dialogStandaloneSkillScope(c, requestedScope)
+	if out, handled, err := h.remoteSkillOperation(c, skillOperationArgs{Operation: "delete", Scope: scope, Handle: handle, Value: false}); handled {
+		if err != nil {
+			return err
+		}
+		_ = out
+		return h.ListSkills(c)
+	}
+
 	root, err := h.rootForDialogScope(c, scope)
 	if err != nil {
 		return err
@@ -451,6 +403,14 @@ func (h *Handler) SetSkillEnabled(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
 	scope := h.dialogStandaloneSkillScope(c, req.Scope)
+	if out, handled, err := h.remoteSkillOperation(c, skillOperationArgs{Operation: "enabled", Scope: scope, Handle: handle, Value: req.Enabled}); handled {
+		if err != nil {
+			return err
+		}
+		_ = out
+		return h.ListSkills(c)
+	}
+
 	root, err := h.rootForDialogScope(c, scope)
 	if err != nil {
 		return err
@@ -681,30 +641,35 @@ func listStandaloneSkillPackageFiles(skillPath string) []string {
 }
 
 func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error) {
-	if c.QueryParam("project_id") == models.AllProjectsID {
-		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
+	if c.QueryParam("scope") == "global" {
+		return h.listSkillCards("", "")
+	}
+	if models.IsAggregateProject(c.QueryParam("project_id")) {
+		projects, err := h.cardActionProjects(c.Request().Context(), c.QueryParam("project_id"))
 		if err != nil {
 			return nil, err
 		}
-		result, err := h.listStandaloneSkillsInProject(c)
+		result, err := h.listSkillCards("", "")
 		if err != nil {
 			return nil, err
 		}
 		for _, project := range projects {
 			req := c.Request().Clone(c.Request().Context())
 			query := req.URL.Query()
-			query.Set("project_id", project.ID)
+			query.Set("project_id", project)
 			query.Del("skill_project_id")
 			req.URL.RawQuery = query.Encode()
 			scoped := c.Echo().NewContext(req, c.Response())
 			cards, err := h.listStandaloneSkillsInProject(scoped)
 			if err != nil {
-				applog.Infof("[handler] All projects skills: skipping project %s: %v", project.ID, err)
-				continue
+				if _, remoteProject := remoteid.ServerOf(project); !remoteProject {
+					continue
+				}
+				return nil, err
 			}
 			for _, card := range cards {
 				if card.Scope == "project" {
-					card.ProjectID = project.ID
+					card.ProjectID = project
 					result = append(result, card)
 				}
 			}
@@ -715,61 +680,28 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 }
 
 func (h *Handler) listStandaloneSkillsInProject(c echo.Context) ([]pages.SkillCard, error) {
+	if out, handled, err := h.remoteSkillOperation(c, skillOperationArgs{Operation: "list"}); handled {
+		if err != nil {
+			return nil, err
+		}
+		cards, err := h.listSkillCards("", "")
+		if err != nil {
+			return nil, err
+		}
+		for _, card := range out.Cards {
+			if card.Scope != "project" {
+				continue
+			}
+			card.ProjectID = skillRequestProject(c)
+			cards = append(cards, card)
+		}
+		return cards, nil
+	}
 	projectRoot := h.currentProjectSkillRoot(c)
-	if c.QueryParam("project_id") == models.AllProjectsID {
+	if models.IsAggregateProject(c.QueryParam("project_id")) {
 		projectRoot = ""
 	}
-	catalog, err := agentskills.BuildCatalogAll("skills-page", h.agentSkillRoot, projectRoot)
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-
-	// Read always_use lists from both roots to populate AlwaysUse on each card.
-	globalAlwaysUse := alwaysUseSet(h.agentSkillRoot)
-	projectAlwaysUse := alwaysUseSet(projectRoot)
-
-	out := make([]pages.SkillCard, 0, len(catalog.Entries()))
-	for _, entry := range catalog.Entries() {
-		scope := h.scopeForStandaloneSkillPath(c, entry.AbsolutePath)
-		card := pages.SkillCard{
-			Handle: entry.Handle,
-			Name:   entry.Skill,
-			Scope:  scope,
-			ProjectID: func() string {
-				if scope == "project" {
-					return c.QueryParam("project_id")
-				}
-				return ""
-			}(),
-			Source:  string(entry.Source),
-			Enabled: true, // default to enabled when frontmatter is absent
-		}
-		// Populate AlwaysUse from the appropriate root's index.
-		switch scope {
-		case "global":
-			card.AlwaysUse = globalAlwaysUse[entry.Handle]
-		default: // project
-			card.AlwaysUse = projectAlwaysUse[entry.Handle]
-		}
-		if decl, ok := readStandaloneSkillFrontmatter(entry.AbsolutePath); ok && decl != nil {
-			card.Name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
-			card.Description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
-			card.Archived = decl.Skill.Archived
-			card.RequiresExternalTools = len(decl.Dependencies) > 0
-			card.Enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
-		}
-		if enabled := agentskills.SkillEnabledPreference(entry.AbsolutePath); enabled != nil {
-			card.Enabled = *enabled
-		}
-		out = append(out, card)
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Scope != out[j].Scope {
-			return out[i].Scope == "project"
-		}
-		return out[i].Handle < out[j].Handle
-	})
-	return out, nil
+	return h.listSkillCards(projectRoot, c.QueryParam("project_id"))
 }
 
 const standaloneSkillFrontmatterReadLimit = 64 * 1024
@@ -822,12 +754,37 @@ func alwaysUseSet(root string) map[string]bool {
 }
 
 func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRequest, requireExisting bool) (*agentlibrary.ImportResult, error) {
+	scope := h.dialogStandaloneSkillScope(c, req.Scope)
+	operation := "create"
+	if requireExisting {
+		operation = "edit"
+	}
+	if out, handled, err := h.remoteSkillOperation(c, skillOperationArgs{Operation: operation, Scope: scope, Handle: req.Handle, Save: req}); handled {
+		return out.Write, err
+	}
+	return h.writeStandaloneSkill(c.Request().Context(), req, requireExisting, scope, h.currentProjectSkillRoot(c))
+}
+
+func (h *Handler) dialogStandaloneSkillScope(c echo.Context, requested string) string {
+	scope := strings.ToLower(strings.TrimSpace(requested))
+	if scope == "global" || scope == "project" {
+		return scope
+	}
+	if _, ok := remoteid.ServerOf(skillRequestProject(c)); ok {
+		return "project"
+	}
+	if h.currentProjectSkillRoot(c) != "" {
+		return "project"
+	}
+	return "global"
+}
+
+func (h *Handler) writeStandaloneSkill(ctx context.Context, req skillSaveRequest, requireExisting bool, scope, projectRoot string) (*agentlibrary.ImportResult, error) {
 	handle := strings.TrimSpace(req.Handle)
 	if !validDialogSkillKey(handle) {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug")
 	}
-	scope := h.dialogStandaloneSkillScope(c, req.Scope)
-	root, err := h.rootForDialogScope(c, scope)
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -851,34 +808,119 @@ func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRe
 	if err != nil {
 		return nil, err
 	}
-	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, nil)
-	res, err := importer.WriteSkill(c.Request().Context(), decl, body)
+	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: projectRoot}, nil)
+	res, err := importer.WriteSkill(ctx, decl, body)
 	if err != nil {
 		return res, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return res, nil
 }
 
-func (h *Handler) dialogStandaloneSkillScope(c echo.Context, requested string) string {
-	scope := strings.ToLower(strings.TrimSpace(requested))
-	if scope == "global" || scope == "project" {
-		return scope
+func (h *Handler) readSkillDetail(root, scope, handle, projectRoot string) (skillDetailResponse, error) {
+	skillPath := filepath.Join(root, "skills", handle, "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return skillDetailResponse{}, echo.NewHTTPError(http.StatusNotFound, "skill not found at selected scope")
+		}
+		return skillDetailResponse{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	if h.currentProjectSkillRoot(c) != "" {
-		return "project"
+	decl, body, err := agentlibrary.ParseDeclaration(string(data))
+	if err != nil {
+		return skillDetailResponse{}, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return "global"
+	content, err := agentlibrary.RenderSkillMarkdown(decl, body)
+	if err != nil {
+		return skillDetailResponse{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	resp := skillDetailResponse{
+		Dependencies: decl.Dependencies,
+		Platform:     runtime.GOOS + "/" + runtime.GOARCH,
+		Handle:       handle,
+		Name:         firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, handle),
+		Description:  firstNonEmpty(decl.Skill.Description, decl.Routing.Description),
+		Scope:        scope,
+		Source:       scope,
+		Content:      content,
+		Files:        listStandaloneSkillPackageFiles(skillPath),
+		Archived:     decl.Skill.Archived,
+		Enabled:      decl.Skill.Enabled == nil || *decl.Skill.Enabled,
+	}
+	if enabled := agentskills.SkillEnabledPreference(skillPath); enabled != nil {
+		resp.Enabled = *enabled
+	}
+	switch scope {
+	case "global":
+		resp.AlwaysUse = alwaysUseSet(h.agentSkillRoot)[handle]
+	default:
+		resp.AlwaysUse = alwaysUseSet(projectRoot)[handle]
+	}
+	return resp, nil
 }
 
-func (h *Handler) scopeForStandaloneSkillPath(c echo.Context, path string) string {
+func (h *Handler) listSkillCards(projectRoot, projectID string) ([]pages.SkillCard, error) {
+	catalog, err := agentskills.BuildCatalogAll("skills-page", h.agentSkillRoot, projectRoot)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Read always_use lists from both roots to populate AlwaysUse on each card.
+	globalAlwaysUse := alwaysUseSet(h.agentSkillRoot)
+	projectAlwaysUse := alwaysUseSet(projectRoot)
+
+	out := make([]pages.SkillCard, 0, len(catalog.Entries()))
+	for _, entry := range catalog.Entries() {
+		scope := standaloneSkillPathScope(h.agentSkillRoot, projectRoot, entry.AbsolutePath)
+		card := pages.SkillCard{
+			Handle: entry.Handle,
+			Name:   entry.Skill,
+			Scope:  scope,
+			ProjectID: func() string {
+				if scope == "project" {
+					return projectID
+				}
+				return ""
+			}(),
+			Source:  string(entry.Source),
+			Enabled: true, // default to enabled when frontmatter is absent
+		}
+		// Populate AlwaysUse from the appropriate root's index.
+		switch scope {
+		case "global":
+			card.AlwaysUse = globalAlwaysUse[entry.Handle]
+		default: // project
+			card.AlwaysUse = projectAlwaysUse[entry.Handle]
+		}
+		if decl, ok := readStandaloneSkillFrontmatter(entry.AbsolutePath); ok && decl != nil {
+			card.Name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
+			card.Description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
+			card.Archived = decl.Skill.Archived
+			card.RequiresExternalTools = len(decl.Dependencies) > 0
+			card.Enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
+		}
+		if enabled := agentskills.SkillEnabledPreference(entry.AbsolutePath); enabled != nil {
+			card.Enabled = *enabled
+		}
+		out = append(out, card)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Scope != out[j].Scope {
+			return out[i].Scope == "project"
+		}
+		return out[i].Handle < out[j].Handle
+	})
+	return out, nil
+}
+
+func standaloneSkillPathScope(globalRoot, projectRoot, path string) string {
 	clean := filepath.Clean(path)
-	if projectRoot := h.currentProjectSkillRoot(c); projectRoot != "" {
+	if projectRoot != "" {
 		if rel, err := filepath.Rel(filepath.Clean(projectRoot), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
 			return "project"
 		}
 	}
-	if h.agentSkillRoot != "" {
-		if rel, err := filepath.Rel(filepath.Clean(h.agentSkillRoot), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
+	if globalRoot != "" {
+		if rel, err := filepath.Rel(filepath.Clean(globalRoot), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
 			return "global"
 		}
 	}

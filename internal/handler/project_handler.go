@@ -17,9 +17,10 @@ import (
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/cardcursor"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -107,12 +108,15 @@ type projectFormSettingsOptions struct {
 }
 
 func parseProjectFormSettings(c echo.Context, opts projectFormSettingsOptions) (projectFormSettings, error) {
+	return parseProjectFormValues(c.FormValue, opts)
+}
+func parseProjectFormValues(value func(string) string, opts projectFormSettingsOptions) (projectFormSettings, error) {
 	settings := projectFormSettings{
-		Name:        strings.TrimSpace(c.FormValue("name")),
-		Description: c.FormValue("description"),
-		RepoSource:  normalizeRepoSource(c.FormValue("repo_source"), c.FormValue("repo_url")),
-		RepoPath:    normalizeRepoPathInput(c.FormValue("repo_path")),
-		RepoURL:     strings.TrimSpace(c.FormValue("repo_url")),
+		Name:        strings.TrimSpace(value("name")),
+		Description: value("description"),
+		RepoSource:  normalizeRepoSource(value("repo_source"), value("repo_url")),
+		RepoPath:    normalizeRepoPathInput(value("repo_path")),
+		RepoURL:     strings.TrimSpace(value("repo_url")),
 	}
 	if settings.Name == "" {
 		return settings, errors.New("Project name is required")
@@ -129,10 +133,10 @@ func parseProjectFormSettings(c echo.Context, opts projectFormSettingsOptions) (
 			return settings, errors.New("GitHub integration is not configured")
 		}
 	}
-	if agentID := c.FormValue("default_agent_config_id"); agentID != "" {
+	if agentID := value("default_agent_config_id"); agentID != "" {
 		settings.DefaultAgentConfigID = &agentID
 	}
-	maxWorkers, err := parseNonNegativeWorkerLimit(c.FormValue("max_workers"))
+	maxWorkers, err := parseNonNegativeWorkerLimit(value("max_workers"))
 	if err != nil {
 		return settings, err
 	}
@@ -411,85 +415,26 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	projectID := c.Param("id")
 	applog.Infof("[handler] UpdateProject id=%s", projectID)
 
-	p, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
+	form := projectEditArgs{ProjectID: projectID, AgentID: c.FormValue("default_agent_config_id"), Values: map[string]string{}}
+	for _, key := range []string{"name", "description", "repo_source", "repo_url", "repo_path", "max_workers"} {
+		form.Values[key] = c.FormValue(key)
+	}
+	knowledge := &models.Project{}
+	applyProjectKnowledgeForm(c, knowledge)
+	form.Knowledge = knowledge.SkillMemoryPermissions
+	if c.FormValue("computer_setting_present") == "1" {
+		enabled := c.FormValue("computer_enabled") == "on"
+		form.Computer = &enabled
+	}
+	result, err := actUpdateProject(h, c.Request().Context(), form)
 	if err != nil {
-		applog.Infof("[handler] UpdateProject fetch error: %v", err)
 		return err
 	}
-	if p == nil {
-		applog.Infof("[handler] UpdateProject not found id=%s", projectID)
-		return echo.NewHTTPError(http.StatusNotFound, "project not found")
-	}
-
-	localRepoPathEnabled := h.isLocalRepoPathEnabled()
-	globalMaxWorkers, err := h.configuredGlobalWorkerLimit(c.Request().Context())
-	if err != nil {
-		return h.projectErrorResponse(c, http.StatusInternalServerError, "failed to read global worker limit")
-	}
-	currentRepoPath := p.RepoPath
-	settings, err := parseProjectFormSettings(c, projectFormSettingsOptions{
-		LocalRepoPathEnabled: localRepoPathEnabled,
-		GitHubSvc:            h.githubSvc,
-		CurrentProject:       p,
-		GlobalMaxWorkers:     globalMaxWorkers,
-	})
-	if err != nil {
-		return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
-	}
-
-	recloneGitHubRepo := settings.RepoSource == "github"
-	if recloneGitHubRepo {
-		submittedRepo, err := service.ParseGitHubRepoURL(settings.RepoURL)
-		if err != nil {
-			return h.projectGitHubCloneErrorResponse(c, http.StatusBadRequest, err)
+	if result.Code != 0 {
+		if result.CloneError {
+			return h.projectGitHubCloneErrorResponse(c, result.Code, errors.New(result.Message))
 		}
-		if p.RepoURL != "" {
-			if currentRepo, err := service.ParseGitHubRepoURL(p.RepoURL); err == nil {
-				recloneGitHubRepo = !strings.EqualFold(currentRepo.HTMLURL, submittedRepo.HTMLURL)
-			}
-		}
-	}
-
-	p.Name = settings.Name
-	p.Description = settings.Description
-	p.DefaultAgentConfigID = settings.DefaultAgentConfigID
-	p.MaxWorkers = settings.MaxWorkers
-	applyProjectKnowledgeForm(c, p)
-
-	if recloneGitHubRepo {
-		reclonedPath, normalizedURL, err := h.githubSvc.RecloneProjectRepo(c.Request().Context(), p.ID, currentRepoPath, settings.RepoURL)
-		if err != nil {
-			return h.projectGitHubCloneErrorResponse(c, http.StatusBadRequest, err)
-		}
-		p.RepoPath = reclonedPath
-		p.RepoURL = normalizedURL
-	} else if settings.RepoSource == "github" {
-		p.RepoPath = currentRepoPath
-	} else if settings.PreserveLegacyLocalProject {
-		// Preserve existing local-path configuration for legacy projects when local paths
-		// are disabled in this environment.
-		p.RepoPath = currentRepoPath
-		p.RepoURL = ""
-	} else {
-		p.RepoPath = settings.RepoPath
-		p.RepoURL = ""
-	}
-	applog.Infof("[handler] UpdateProject id=%s name=%q repo_source=%q repo_path=%q repo_url=%q default_agent=%v max_workers=%v local_repo_path_enabled=%v legacy_local_project=%v", projectID, p.Name, settings.RepoSource, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, localRepoPathEnabled, settings.PreserveLegacyLocalProject)
-
-	if err := h.saveProjectComputerForm(c, p.ID); err != nil {
-		return err
-	}
-	if err := h.projectSvc.Update(c.Request().Context(), p); err != nil {
-		applog.Infof("[handler] UpdateProject error: %v", err)
-		if isHTMX(c) {
-			return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
-		}
-		return err
-	}
-	applog.Infof("[handler] UpdateProject success id=%s", projectID)
-	if h.workerSvc != nil {
-		h.workerSvc.ReconcilePendingTasks(c.Request().Context())
-		h.workerSvc.DispatchNext()
+		return h.projectErrorResponse(c, result.Code, result.Message)
 	}
 
 	// Return to current page
@@ -535,22 +480,12 @@ func (h *Handler) NewProjectDialog(c echo.Context) error {
 }
 
 func (h *Handler) RecoverProjectRepo(c echo.Context) error {
-	p, err := h.projectSvc.GetByID(c.Request().Context(), c.Param("id"))
+	result, err := actRecoverProject(h, c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return err
 	}
-	if p == nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "Project not found."})
-	}
-	if p.RepoURL == "" || h.projectSvc.RepoPathHealth(p).Status != models.RepoPathHealthMissing {
-		return c.JSON(http.StatusConflict, map[string]string{"error": "Re-clone is only available for a missing GitHub repository folder. Reopen project settings to check its status."})
-	}
-	if h.githubSvc == nil {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "GitHub integration is unavailable."})
-	}
-	if err := h.githubSvc.RecoverProjectRepo(c.Request().Context(), p.ID, p.RepoPath, p.RepoURL); err != nil {
-		applog.Infof("[handler] repository recovery failed for project %s: %v", p.ID, err)
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Re-clone failed. Check GitHub access and the managed repository storage, then retry."})
+	if result.Code != 0 {
+		return c.JSON(result.Code, map[string]string{"error": result.Message})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "healthy"})
 }
@@ -575,9 +510,16 @@ func (h *Handler) EditProjectDialog(c echo.Context) error {
 		return err
 	}
 
-	repoPathHealth := h.projectSvc.RepoPathHealth(p)
+	repoPathHealth, err := actProjectPathHealth(h, c.Request().Context(), projectPathArgs{ProjectID: projectID})
+	if err != nil {
+		return err
+	}
 	enabled := false
-	if h.computerSvc != nil {
+	if _, remote := remoteid.ServerOf(projectID); remote {
+		if enabled, err = actComputerEnabled(h, c.Request().Context(), ComputerArgs{ProjectID: projectID}); err != nil {
+			return err
+		}
+	} else if h.computerSvc != nil {
 		state, err := h.computerSvc.Get(c.Request().Context(), projectID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -586,7 +528,8 @@ func (h *Handler) EditProjectDialog(c echo.Context) error {
 			enabled = state.Enabled
 		}
 	}
-	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled(), globalMaxWorkers, repoPathHealth, enabled))
+	_, remoteProject := remoteid.ServerOf(projectID)
+	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled() && !remoteProject, globalMaxWorkers, repoPathHealth, enabled))
 }
 
 func (h *Handler) DeleteProject(c echo.Context) error {
@@ -595,36 +538,15 @@ func (h *Handler) DeleteProject(c echo.Context) error {
 
 	ctx := c.Request().Context()
 
-	p, err := h.projectSvc.GetByID(ctx, projectID)
+	tab := h.sharedTabOf(ctx, projectID)
+	cleanupWarning, err := actDeleteProject(h, ctx, projectID)
 	if err != nil {
-		applog.Infof("[handler] DeleteProject fetch error: %v", err)
 		return err
 	}
-	if p == nil {
-		applog.Infof("[handler] DeleteProject not found id=%s", projectID)
-		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	if server, ok := remoteid.ServerOf(projectID); ok {
+		h.remoteSessions.serverChanged(principalUserID(ctx), server)
 	}
-
-	if p.IsDefault {
-		applog.Infof("[handler] DeleteProject refused: cannot delete default project id=%s", projectID)
-		return echo.NewHTTPError(http.StatusBadRequest, "cannot delete the default project")
-	}
-
-	cleanupWarning := false
-	if err := h.projectSvc.Delete(ctx, projectID); err != nil {
-		var cleanupErr *service.ProjectDeletionCleanupError
-		if !errors.As(err, &cleanupErr) {
-			applog.Infof("[handler] DeleteProject error: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "could not delete this project; its data was kept")
-		}
-		cleanupWarning = true
-		applog.Infof("[handler] DeleteProject filesystem cleanup warning: %v", cleanupErr)
-	}
-
-	if h.pagePlugins != nil {
-		h.pagePlugins.ReleaseProject(projectID)
-	}
-	applog.Infof("[handler] DeleteProject success id=%s", projectID)
+	h.unpinDeletedProject(ctx, projectID, tab)
 
 	// Find the default project to redirect to
 	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
@@ -661,9 +583,7 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 	}
 
 	var currentProject *models.Project
-	if projectID == models.AllProjectsID {
-		currentProject = &models.Project{ID: projectID, Name: "All projects"}
-	}
+	currentProject = h.virtualProject(c.Request().Context(), projectID)
 	for i := range projects {
 		if projects[i].ID == projectID {
 			currentProject = &projects[i]
@@ -711,21 +631,38 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 }
 
 func render(c echo.Context, status int, component templ.Component) error {
+	if s := cardcursor.From(c.Request().Context()); s != nil && s.Err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, s.Err.Error())
+	}
 	ctx := c.Request().Context()
 	if h, ok := c.Get("handler").(*Handler); ok {
 		ctx = templateui.WithMessageAuthors(ctx, h.authEnabled())
-		if layout.WorkspaceProjectID(ctx, c.QueryParam("project_id")) == models.AllProjectsID {
+		var servers []layout.RemoteServer
+		workspace := layout.WorkspaceProjectID(ctx, c.QueryParam("project_id"))
+		if !isHTMX(c) || models.IsSharedProjectID(workspace) {
+			servers = h.remoteServerGroups(ctx)
+		}
+		if workspace == models.AllProjectsID {
 			projects, err := h.projectSvc.ListSelectorOptions(ctx)
 			if err != nil {
 				return err
 			}
 			ctx = templateui.WithProjectNames(ctx, projects)
+		} else if models.IsSharedProjectID(workspace) {
+			for _, shared := range h.repoGroups(ctx, servers) {
+				if shared.ID == workspace {
+					ctx = templateui.WithProjectNames(ctx, sharedMemberOptions(shared))
+				}
+			}
 		}
 		ctx = layout.WithDesktopMode(ctx, h.desktopMode)
 		ctx = layout.WithBuildVersion(ctx, h.buildIdentity.Version)
 		ctx = layout.WithNativeWindow(ctx, h.desktopMode && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1")
 		if !isHTMX(c) {
-			ctx = layout.WithUIPreferences(ctx, h.uiPreferences(ctx))
+			prefs := h.uiPreferences(ctx)
+			ctx = layout.WithUIPreferences(ctx, prefs)
+			ctx = layout.WithRemoteServers(ctx, servers)
+			ctx = layout.WithSharedProjects(ctx, h.repoGroups(ctx, servers))
 		}
 	}
 	c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")

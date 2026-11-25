@@ -24,7 +24,9 @@ import (
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -384,8 +386,8 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	applog.Debugf("[handler] ListTasks found %d tasks", len(tasks))
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
-	if projectID == models.AllProjectsID {
-		project = &models.Project{ID: projectID, Name: "All projects"}
+	if virtual := h.virtualProject(c.Request().Context(), projectID); virtual != nil {
+		project = virtual
 	}
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
@@ -428,8 +430,8 @@ func (h *Handler) NewTask(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	var project *models.Project
 	var err error
-	if projectID == models.AllProjectsID {
-		project = &models.Project{ID: models.AllProjectsID}
+	if models.IsAggregateProject(projectID) {
+		project = &models.Project{ID: projectID}
 	} else {
 		projectID, err = h.getCurrentProjectID(c)
 		if err != nil {
@@ -443,9 +445,35 @@ func (h *Handler) NewTask(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusNotFound, "project not found")
 		}
 	}
+	if c.QueryParam("agent_options") == "1" {
+		if models.IsAggregateProject(project.ID) {
+			return echo.NewHTTPError(http.StatusBadRequest, "Choose a destination project.")
+		}
+		options := make([]map[string]string, 0)
+		if h.agentRepo != nil {
+			definitions, err := h.agentRepo.ListTaskUIOptions(ctx)
+			if err != nil {
+				return err
+			}
+			for _, agent := range selectableTaskAgentDefinitionsForProject(definitions, project.ID) {
+				options = append(options, map[string]string{"id": agent.ID, "name": agent.Name, "scope": string(agent.Scope), "project": agent.ProjectID})
+			}
+		}
+		return c.JSON(http.StatusOK, options)
+	}
 	agents, err := h.llmConfigRepo.ListPickerOptions(ctx)
 	if err != nil {
 		return err
+	}
+	if c.QueryParam("model_options") == "1" {
+		if models.IsAggregateProject(project.ID) {
+			return echo.NewHTTPError(http.StatusBadRequest, "Choose a destination project.")
+		}
+		defaultID := ""
+		if project.DefaultAgentConfigID != nil {
+			defaultID = *project.DefaultAgentConfigID
+		}
+		return render(c, http.StatusOK, components.ComposerModelOptions(agents, defaultID))
 	}
 	projects, err := h.projectSvc.ListSelectorOptions(ctx)
 	if err != nil {
@@ -454,7 +482,7 @@ func (h *Handler) NewTask(c echo.Context) error {
 	// The draft can change destination without reloading. Carry the compact
 	// catalog once; the picker filters it against the selected project.
 	var agentDefs []persistence.AgentTaskUIOption
-	if layout.WorkspaceProjectID(ctx, projectID) == models.AllProjectsID {
+	if models.IsAggregateProject(layout.WorkspaceProjectID(ctx, projectID)) {
 		agentDefs = h.listAgentDefinitions(ctx)
 	} else {
 		agentDefs = h.listTaskFormAgentDefinitions(ctx, projectID, nil)
@@ -492,37 +520,8 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 	threadDraft := c.QueryParam("from") == "new" && c.QueryParam("thread") == "1"
 	scheduledDraft := threadDraft && c.FormValue("add_schedule") == "on"
-	var selectedThreadAgent *models.LLMConfig
-	if threadDraft {
-		message := strings.TrimSpace(c.FormValue("message"))
-		if message == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "message is required")
-		}
-		// Sending immediately needs a model; saving a backlog or scheduled draft does not.
-		if !scheduledDraft && (c.FormValue("category") == "" || c.FormValue("category") == string(models.CategoryActive)) {
-			hasModels, err := h.hasConfiguredModels(c)
-			if err != nil {
-				applog.Infof("[handler] CreateTask model availability check error: %v", err)
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check model availability")
-			}
-			if !hasModels {
-				return noModelsConfiguredResponse(c)
-			}
-		}
-		selectedAgent, err := h.selectTaskAgent(c.Request().Context(), projectID, c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id")))
-		if err != nil && !scheduledDraft && c.FormValue("category") != string(models.CategoryBacklog) {
-			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
-		}
-		if err == nil {
-			selectedThreadAgent = selectedAgent
-		}
-		if selectedThreadAgent != nil {
-			if err := h.applyConversationEffort(c, "", selectedThreadAgent); err != nil {
-				return err
-			}
-		} else if c.FormValue("reasoning_effort") != "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "reasoning effort requires a selected model")
-		}
+	if threadDraft && strings.TrimSpace(c.FormValue("message")) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
 	category := models.TaskCategory(c.FormValue("category"))
@@ -536,43 +535,21 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if threadDraft && priority == 0 {
 		priority = 2
 	}
-	if startDraft && !isSwarmTaskForm(c) {
-		// The first composer send owns admission; do not also submit a worker run.
-		category = models.CategoryBacklog
-		if priority == 0 {
-			priority = 2
-		}
-	}
 	var scheduledFormValues scheduleFormValues
-	if category == models.CategoryScheduled || (threadDraft && c.FormValue("add_schedule") == "on") {
+	if category == models.CategoryScheduled || scheduledDraft {
 		var err error
 		scheduledFormValues, err = parseScheduleForm(c, models.RepeatDaily)
 		if err != nil {
 			return scheduleFormHTTPError(err)
 		}
 	}
-
 	if scheduledDraft {
 		if err := validatePanelScheduleStart(scheduledFormValues.runAt); err != nil {
 			return err
 		}
 	}
 
-	// Creating an active task immediately submits it to the worker pool.
-	// Block this when no models are configured so tasks do not get stuck queued.
-	if category == models.CategoryActive {
-		hasModels, err := h.hasConfiguredModels(c)
-		if err != nil {
-			applog.Infof("[handler] CreateTask model availability check error: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check model availability")
-		}
-		if !hasModels {
-			applog.Infof("[handler] CreateTask blocked: no models configured project=%s title=%q", projectID, c.FormValue("title"))
-			return noModelsConfiguredResponse(c)
-		}
-	}
-
-	t := &models.Task{
+	args := createTaskArgs{
 		ProjectID:               projectID,
 		Title:                   c.FormValue("title"),
 		Category:                category,
@@ -582,182 +559,80 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		AutoMerge:               formBoolEnabled(c, "auto_merge", false),
 		AutoMergeOnGoalAchieved: formBoolEnabled(c, "auto_merge_on_goal_achieved", false),
 		MergeTargetBranch:       c.FormValue("merge_target_branch"),
+		Goal:                    c.FormValue("goal"),
+		AgentDefinitionID:       c.FormValue("agent_definition_id"),
 	}
-
-	autoName := false
-	if threadDraft {
-		t.Prompt = strings.TrimSpace(c.FormValue("message"))
-		t.Title = strings.TrimSpace(t.Title)
-		if t.Title == "" {
-			autoName = true
-			t.Title = service.ProvisionalTaskTitle(t.Prompt)
-		}
-	}
-
-	if c.FormValue("chain_trigger") != "" {
-		config, err := taskChainFormConfig(c, t)
-		if err != nil {
-			return err
-		}
-		if err := setTaskPanelChainConfig(t, config); err != nil {
-			return err
-		}
-	}
-
-	// Handle optional agent (LLM config) selection
 	if agentID := c.FormValue("agent_id"); agentID != "" && (!threadDraft || (agentID != "auto" && agentID != "default")) {
-		t.AgentID = &agentID
+		args.AgentID = &agentID
 	}
-	// Handle optional primary Agent definition selection separately from the model config.
-	if agentDefID := c.FormValue("agent_definition_id"); agentDefID != "" {
-		resolvedAgentDefID, err := h.resolvePrimaryAgentDefinition(c.Request().Context(), projectID, agentDefID)
+	if threadDraft {
+		args.Draft = &threadDraftForm{
+			AgentID:   c.FormValue("agent_id"),
+			Effort:    parseEffortForm(c),
+			Scheduled: scheduledDraft,
+			Start:     startDraft,
+			Computer:  c.FormValue("computer_enabled") == "on",
+		}
+		args.Prompt = strings.TrimSpace(c.FormValue("message"))
+		args.Title = strings.TrimSpace(args.Title)
+		if !startDraft || isSwarmTaskForm(c) {
+			args.Draft.PendingSession = c.FormValue("attachment_session_id")
+		}
+		args.Draft.ImageSession = c.FormValue("attachment_session_id")
+	}
+	if c.FormValue("chain_trigger") != "" {
+		form, err := parseChainForm(c)
 		if err != nil {
 			return err
 		}
-		t.AgentDefinitionID = resolvedAgentDefID
+		args.Chain = &form
+	}
+	if isSwarmTaskForm(c) {
+		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
+		args.Swarm = &swarmCreateForm{
+			MaxWorkers:      maxWorkers,
+			WorkerIsolation: c.FormValue("swarm_worker_isolation"),
+			ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true),
+			MergerEnabled:   swarmMergerEnabledFormValue(c),
+		}
+	}
+	if category == models.CategoryScheduled || scheduledDraft {
+		args.Schedule = &createScheduleForm{
+			RunAt:               scheduledFormValues.runAt,
+			RepeatType:          scheduledFormValues.repeatType,
+			RepeatInterval:      scheduledFormValues.repeatInterval,
+			ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
+			Paused:              threadDraft && c.FormValue("schedule_enabled") == "false",
+		}
+	}
+	if !threadDraft {
+		if form, err := c.MultipartForm(); err == nil && form != nil && len(form.File["files"]) > 0 {
+			if args.Files, err = h.stageUploads(c.Request().Context(), "", projectID, requestUploads(form.File["files"])); err != nil {
+				return actionHTTPError(err)
+			}
+		}
 	}
 	applog.Infof("[handler] CreateTask project=%s title=%q category=%s priority=%d tag=%s prompt_len=%d",
-		projectID, t.Title, t.Category, t.Priority, t.Tag, len(t.Prompt))
-
-	// Repeated requests may produce the same provisional title. Retry creation
-	// with a unique suffix; explicit user titles retain duplicate validation.
-	createWithTitle := func(create func() error) error {
-		err := create()
-		if autoName && errors.Is(err, service.ErrDuplicateTask) {
-			runes := []rune(t.Title)
-			if len(runes) > 49 {
-				runes = runes[:49]
-			}
-			t.Title = string(runes) + " " + persistence.NewID()[:8]
-			err = create()
-		}
-		return err
-	}
-
-	if isSwarmTaskForm(c) {
-		if h.swarmSvc == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
-		}
-		// Keep the planner stopped until pending uploads have been published.
-		swarmCategory := category
-		if threadDraft && category == models.CategoryActive {
-			swarmCategory = models.CategoryBacklog
-		}
-		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
-		var parent *models.Task
-		err := createWithTitle(func() error {
-			created, createErr := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: swarmCategory, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), AutoMerge: t.AutoMerge, AutoMergeOnGoalAchieved: t.AutoMergeOnGoalAchieved, MergeTargetBranch: t.MergeTargetBranch})
-			parent = created
-			return createErr
-		})
-		if err != nil {
-			if errors.Is(err, service.ErrDuplicateTask) {
-				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
-			}
-			if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
-				return httpErr
-			}
-			return err
-		}
-		*t = *parent
-	} else if err := createWithTitle(func() error { return h.taskSvc.CreateWithGoal(c.Request().Context(), t, c.FormValue("goal")) }); err != nil {
-		if errors.Is(err, service.ErrDuplicateTask) {
-			applog.Infof("[handler] CreateTask duplicate title=%q", t.Title)
-			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
-		}
-		if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
-			return httpErr
+		projectID, args.Title, args.Category, args.Priority, args.Tag, len(args.Prompt))
+	created, err := actCreateTask(h, c.Request().Context(), args)
+	if err != nil {
+		if ok, resp := noModelsResponse(c, err); ok {
+			applog.Infof("[handler] CreateTask blocked: no models configured project=%s", projectID)
+			return resp
 		}
 		applog.Infof("[handler] CreateTask error: %v", err)
 		return err
 	}
-	// Save task computer opt-in before the first thread turn is submitted.
-	if threadDraft && c.FormValue("computer_enabled") == "on" {
-		var preferenceErr error
-		if h.computerSvc == nil {
-			preferenceErr = errors.New("project computers unavailable")
-		} else {
-			var scoped *service.ProjectComputerService
-			scoped, preferenceErr = h.computerSvc.ForTask(c.Request().Context(), t.ProjectID, t.ID)
-			if preferenceErr == nil {
-				preferenceErr = scoped.SetTaskEnabled(c.Request().Context(), t.ProjectID, true)
-			}
-		}
-		if preferenceErr != nil {
-			if rollbackErr := h.taskRepo.Delete(context.WithoutCancel(c.Request().Context()), t.ID); rollbackErr != nil {
-				return fmt.Errorf("saving computer preference: %w; rollback: %v", preferenceErr, rollbackErr)
-			}
-			return echo.NewHTTPError(http.StatusBadRequest, preferenceErr.Error())
-		}
-	}
-	// Persist the composer's preference before a scheduled task or swarm planner
-	// can run; backlog drafts never pass through TaskThreadSend.
-	if threadDraft && selectedThreadAgent != nil {
-		if err := h.applyConversationEffort(c, t.ID, selectedThreadAgent); err != nil {
-			if rollbackErr := h.taskRepo.Delete(context.WithoutCancel(c.Request().Context()), t.ID); rollbackErr != nil {
-				return fmt.Errorf("saving task effort: %w; rolling back task: %v", err, rollbackErr)
-			}
-			return err
-		}
-	}
+	t := created.Task
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
-
-	if threadDraft && (!startDraft || isSwarmTaskForm(c)) {
-		if err := h.saveDeferredTaskUploads(c.Request().Context(), t.ID, c.FormValue("attachment_session_id")); err != nil {
-			if rollbackErr := h.taskRepo.Delete(context.WithoutCancel(c.Request().Context()), t.ID); rollbackErr != nil {
-				return fmt.Errorf("saving attachments: %w; rolling back task: %v", err, rollbackErr)
-			}
-			return err
-		}
-	}
-
-	// If category is scheduled, create its schedule before reporting success.
-	if t.Category == models.CategoryScheduled || (threadDraft && c.FormValue("add_schedule") == "on") {
-		clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
-		sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
-			TaskID:              t.ID,
-			RunAt:               scheduledFormValues.runAt,
-			RepeatType:          scheduledFormValues.repeatType,
-			RepeatInterval:      scheduledFormValues.repeatInterval,
-			ClearContextOnStart: &clearContextOnStart,
-		})
-		if err != nil {
-			applog.Infof("[handler] CreateTask schedule create error: %v", err)
-			rollbackCtx := context.WithoutCancel(c.Request().Context())
-			if rollbackErr := h.taskRepo.Delete(rollbackCtx, t.ID); rollbackErr != nil {
-				return fmt.Errorf("creating schedule: %w; rolling back task: %v", err, rollbackErr)
-			}
-			return err
-		}
-		if threadDraft && c.FormValue("schedule_enabled") == "false" {
-			if _, err := h.scheduleRepo.SetEnabledForTask(c.Request().Context(), sched.ID, t.ID, false); err != nil {
-				rollbackCtx := context.WithoutCancel(c.Request().Context())
-				if rollbackErr := h.taskRepo.Delete(rollbackCtx, t.ID); rollbackErr != nil {
-					return fmt.Errorf("pausing schedule: %w; rolling back task: %v", err, rollbackErr)
-				}
-				return err
-			}
-		}
-		applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
-	}
-
-	if autoName && h.llmSvc != nil {
-		h.llmSvc.NameTaskAsync(c.Request().Context(), *t, selectedThreadAgent)
-	}
-
-	if threadDraft && isSwarmTaskForm(c) && category == models.CategoryActive {
-		if err := h.swarmSvc.StartPlanner(c.Request().Context(), t.ID); err != nil {
-			return err
-		}
-	}
 
 	if threadDraft && !isSwarmTaskForm(c) {
 		c.SetParamNames("taskId")
 		c.SetParamValues(t.ID)
 		c.Set("newTaskThread", true)
 		if startDraft {
-			if selectedThreadAgent != nil {
-				c.Set(newTaskThreadSelectedAgentContextKey, selectedThreadAgent)
+			if created.Agent != nil {
+				c.Set(newTaskThreadSelectedAgentContextKey, created.Agent)
 			}
 			return h.TaskThreadSend(c)
 		}
@@ -766,14 +641,6 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		c.Response().Header().Set("HX-Reswap", "innerHTML")
 		c.Response().Header().Set("HX-Push-Url", "/tasks/"+t.ID+"?project_id="+url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), t.ProjectID)))
 		return h.GetTaskThread(c)
-	}
-
-	// Handle optional file attachments (multiple files supported)
-	form, err := c.MultipartForm()
-	if err == nil && form != nil {
-		if files := form.File["files"]; len(files) > 0 {
-			h.persistTaskAttachmentFiles(c.Request().Context(), t.ID, files, "CreateTask")
-		}
 	}
 
 	// If created from the schedule page, return the updated schedule content for HTMX
@@ -802,6 +669,258 @@ func (h *Handler) CreateTask(c echo.Context) error {
 
 	// Return the full kanban board
 	return h.renderTaskBoardRefresh(c, projectID, nil)
+}
+
+type threadDraftForm struct {
+	AgentID   string
+	Effort    effortForm
+	Scheduled bool
+	Start     bool
+	Computer  bool
+	// PendingSession holds composer uploads to publish onto a task that is
+	// not sent now; ImageSession only informs automatic model selection.
+	PendingSession string
+	ImageSession   string
+}
+
+type swarmCreateForm struct {
+	MaxWorkers      int
+	WorkerIsolation string
+	ReviewerEnabled bool
+	MergerEnabled   bool
+}
+
+type createScheduleForm struct {
+	RunAt               time.Time
+	RepeatType          models.RepeatType
+	RepeatInterval      int
+	ClearContextOnStart bool
+	Paused              bool
+}
+
+type createTaskArgs struct {
+	ProjectID               string
+	Title                   string
+	Prompt                  string
+	Category                models.TaskCategory
+	Priority                int
+	Tag                     models.TaskTag
+	AutoMerge               bool
+	AutoMergeOnGoalAchieved bool
+	MergeTargetBranch       string
+	Goal                    string
+	AgentID                 *string
+	AgentDefinitionID       string
+	Chain                   *chainForm
+	Swarm                   *swarmCreateForm
+	Schedule                *createScheduleForm
+	Draft                   *threadDraftForm
+	Files                   []uploadFile
+}
+
+type createdTask struct {
+	Task *models.Task
+	// Agent is the model a thread draft selected for its first send.
+	Agent *models.LLMConfig
+}
+
+var actCreateTask = defineAction("task.create", func(h *Handler, ctx context.Context, a createTaskArgs) (string, authz.Permission, error) {
+	return editProject(h, ctx, a.ProjectID)
+}, func(h *Handler, ctx context.Context, a createTaskArgs) (createdTask, error) {
+	defer removeStagedUploads(a.ProjectID, a.Files)
+	return h.createTask(ctx, a)
+})
+
+func (h *Handler) requireModels(ctx context.Context) error {
+	hasModels, err := h.llmConfigRepo.HasAny(ctx)
+	if err != nil {
+		applog.Infof("[handler] model availability check error: %v", err)
+		return statusErr(http.StatusInternalServerError, "failed to check model availability")
+	}
+	if !hasModels {
+		return errNoModels
+	}
+	return nil
+}
+
+func (h *Handler) createTask(ctx context.Context, a createTaskArgs) (createdTask, error) {
+	var out createdTask
+	category := a.Category
+	draft := a.Draft
+	if draft != nil {
+		// Sending immediately needs a model; saving a backlog or scheduled draft does not.
+		if !draft.Scheduled && category == models.CategoryActive {
+			if err := h.requireModels(ctx); err != nil {
+				return out, err
+			}
+		}
+		agent, err := h.selectTaskAgent(ctx, a.ProjectID, draft.AgentID, a.Prompt, hasPendingImages(draft.ImageSession))
+		if err != nil && !draft.Scheduled && category != models.CategoryBacklog {
+			return out, statusErr(http.StatusBadRequest, "no agent available")
+		}
+		if err == nil && agent != nil {
+			if err := h.applyEffort(ctx, "", agent, draft.Effort); err != nil {
+				return out, err
+			}
+			out.Agent = agent
+		} else if draft.Effort.Effort != nil && *draft.Effort.Effort != "" {
+			return out, statusErr(http.StatusBadRequest, "reasoning effort requires a selected model")
+		}
+		if draft.Start && a.Swarm == nil {
+			// The first composer send owns admission; do not also submit a worker run.
+			category = models.CategoryBacklog
+		}
+	}
+	// Creating an active task immediately submits it to the worker pool.
+	// Block this when no models are configured so tasks do not get stuck queued.
+	if category == models.CategoryActive {
+		if err := h.requireModels(ctx); err != nil {
+			return out, err
+		}
+	}
+
+	t := &models.Task{
+		ProjectID:               a.ProjectID,
+		Title:                   a.Title,
+		Category:                category,
+		Priority:                a.Priority,
+		Prompt:                  a.Prompt,
+		Tag:                     a.Tag,
+		AutoMerge:               a.AutoMerge,
+		AutoMergeOnGoalAchieved: a.AutoMergeOnGoalAchieved,
+		MergeTargetBranch:       a.MergeTargetBranch,
+		AgentID:                 a.AgentID,
+	}
+	autoName := draft != nil && t.Title == ""
+	if autoName {
+		t.Title = service.ProvisionalTaskTitle(t.Prompt)
+	}
+	if a.Chain != nil {
+		config, err := a.Chain.config(t)
+		if err != nil {
+			return out, err
+		}
+		if err := setTaskPanelChainConfig(t, config); err != nil {
+			return out, err
+		}
+	}
+	if a.AgentDefinitionID != "" {
+		resolved, err := h.resolvePrimaryAgentDefinition(ctx, a.ProjectID, a.AgentDefinitionID)
+		if err != nil {
+			return out, err
+		}
+		t.AgentDefinitionID = resolved
+	}
+
+	// Repeated requests may produce the same provisional title. Retry creation
+	// with a unique suffix; explicit user titles retain duplicate validation.
+	createWithTitle := func(create func() error) error {
+		err := create()
+		if autoName && errors.Is(err, service.ErrDuplicateTask) {
+			runes := []rune(t.Title)
+			if len(runes) > 49 {
+				runes = runes[:49]
+			}
+			t.Title = string(runes) + " " + persistence.NewID()[:8]
+			err = create()
+		}
+		return err
+	}
+	var err error
+	if sw := a.Swarm; sw != nil {
+		if h.swarmSvc == nil {
+			return out, statusErr(http.StatusInternalServerError, "swarm service unavailable")
+		}
+		// Keep the planner stopped until pending uploads have been published.
+		swarmCategory := category
+		if draft != nil && category == models.CategoryActive {
+			swarmCategory = models.CategoryBacklog
+		}
+		err = createWithTitle(func() error {
+			created, createErr := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{ProjectID: a.ProjectID, Title: t.Title, Prompt: t.Prompt, Goal: a.Goal, Category: swarmCategory, Priority: t.Priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: sw.MaxWorkers, WorkerIsolation: sw.WorkerIsolation, ReviewerEnabled: sw.ReviewerEnabled, MergerEnabled: sw.MergerEnabled, AutoMerge: t.AutoMerge, AutoMergeOnGoalAchieved: t.AutoMergeOnGoalAchieved, MergeTargetBranch: t.MergeTargetBranch})
+			if created != nil {
+				*t = *created
+			}
+			return createErr
+		})
+	} else {
+		err = createWithTitle(func() error { return h.taskSvc.CreateWithGoal(ctx, t, a.Goal) })
+	}
+	if err != nil {
+		if errors.Is(err, service.ErrDuplicateTask) {
+			applog.Infof("[handler] CreateTask duplicate title=%q", t.Title)
+			return out, statusErr(http.StatusConflict, "A task with this name already exists in this project")
+		}
+		if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
+			return out, statusErr(httpErr.Code, fmt.Sprint(httpErr.Message))
+		}
+		return out, err
+	}
+	out.Task = t
+
+	rollback := func(step string, err error) (createdTask, error) {
+		if rollbackErr := h.taskRepo.Delete(context.WithoutCancel(ctx), t.ID); rollbackErr != nil {
+			return createdTask{}, fmt.Errorf("%s: %w; rolling back task: %v", step, err, rollbackErr)
+		}
+		return createdTask{}, err
+	}
+	// Save task computer opt-in before the first thread turn is submitted.
+	if draft != nil && draft.Computer {
+		if h.computerSvc == nil {
+			return rollback("saving computer preference", statusErr(http.StatusBadRequest, "project computers unavailable"))
+		}
+		scoped, err := h.computerSvc.ForTask(ctx, t.ProjectID, t.ID)
+		if err == nil {
+			err = scoped.SetTaskEnabled(ctx, t.ProjectID, true)
+		}
+		if err != nil {
+			return rollback("saving computer preference", statusErr(http.StatusBadRequest, err.Error()))
+		}
+	}
+	// Persist the composer's preference before a scheduled task or swarm planner
+	// can run; backlog drafts never pass through TaskThreadSend.
+	if out.Agent != nil {
+		if err := h.applyEffort(ctx, t.ID, out.Agent, draft.Effort); err != nil {
+			return rollback("saving task effort", err)
+		}
+	}
+	if draft != nil && draft.PendingSession != "" {
+		if err := h.saveDeferredTaskUploads(ctx, t.ID, draft.PendingSession); err != nil {
+			return rollback("saving attachments", err)
+		}
+	}
+	if sc := a.Schedule; sc != nil {
+		clearContext := sc.ClearContextOnStart
+		sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(ctx, service.CreateScheduleForTaskRequest{
+			TaskID:              t.ID,
+			RunAt:               sc.RunAt,
+			RepeatType:          sc.RepeatType,
+			RepeatInterval:      sc.RepeatInterval,
+			ClearContextOnStart: &clearContext,
+		})
+		if err != nil {
+			applog.Infof("[handler] CreateTask schedule create error: %v", err)
+			return rollback("creating schedule", err)
+		}
+		if sc.Paused {
+			if _, err := h.scheduleRepo.SetEnabledForTask(ctx, sched.ID, t.ID, false); err != nil {
+				return rollback("pausing schedule", err)
+			}
+		}
+		applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
+	}
+	if autoName && h.llmSvc != nil {
+		h.llmSvc.NameTaskAsync(ctx, *t, out.Agent)
+	}
+	if draft != nil && a.Swarm != nil && category == models.CategoryActive {
+		if err := h.swarmSvc.StartPlanner(ctx, t.ID); err != nil {
+			return out, err
+		}
+	}
+	if len(a.Files) > 0 {
+		h.persistTaskAttachmentFiles(ctx, t.ID, a.ProjectID, a.Files, "CreateTask")
+	}
+	return out, nil
 }
 
 func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) (*taskDetailContentData, error) {
@@ -1298,6 +1417,12 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 	if task == nil {
 		return state
 	}
+	if remote, err := h.remoteAct(ctx, task.ID, "changes.state", task.ID, &state); remote {
+		if err != nil {
+			applog.Infof("[task-changes] remote state task=%s: %v", task.ID, err)
+		}
+		return state
+	}
 
 	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	var preservedDiffOnce struct {
@@ -1385,6 +1510,13 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.Task, fileIndex int) (components.DiffFileRenderMeta, bool) {
 	if task == nil || fileIndex < 0 {
 		return components.DiffFileRenderMeta{}, false
+	}
+	var found changesFileMeta
+	if remote, err := h.remoteAct(ctx, task.ID, "changes.file", changesFileArgs{TaskID: task.ID, Index: fileIndex}, &found); remote {
+		if err != nil {
+			applog.Infof("[task-changes] remote file task=%s: %v", task.ID, err)
+		}
+		return found.Meta, found.OK
 	}
 
 	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
@@ -1652,209 +1784,224 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 	return render(c, http.StatusOK, component)
 }
 
-func (h *Handler) updateTaskGoalFromEditForm(c echo.Context, taskID string) error {
-	if c.FormValue("goal_present") == "" || h.taskGoalSvc == nil {
+// goalEdit is the edit form's goal controls; Present is false when the form
+// had none.
+type goalEdit struct {
+	Present       bool
+	Text          string
+	StatusPresent bool
+	Active        bool
+}
+
+func (h *Handler) applyGoalEdit(ctx context.Context, taskID string, g goalEdit) error {
+	if !g.Present || h.taskGoalSvc == nil {
 		return nil
 	}
-
-	goalText := strings.TrimSpace(c.FormValue("goal"))
-	existingGoal := h.loadTaskGoal(c.Request().Context(), taskID)
-	if goalText == "" {
+	existingGoal := h.loadTaskGoal(ctx, taskID)
+	if g.Text == "" {
 		if existingGoal != nil && existingGoal.Status != models.TaskGoalStatusCleared {
-			return h.taskGoalSvc.ClearGoal(c.Request().Context(), taskID, "user")
+			return h.taskGoalSvc.ClearGoal(ctx, taskID, "user")
 		}
 		return nil
 	}
-
-	if existingGoal == nil || existingGoal.Status == models.TaskGoalStatusCleared || strings.TrimSpace(existingGoal.Objective) != goalText {
-		if _, err := h.taskGoalSvc.SetGoal(c.Request().Context(), taskID, goalText, service.GoalOptions{Actor: "user"}); err != nil {
+	if existingGoal == nil || existingGoal.Status == models.TaskGoalStatusCleared || strings.TrimSpace(existingGoal.Objective) != g.Text {
+		if _, err := h.taskGoalSvc.SetGoal(ctx, taskID, g.Text, service.GoalOptions{Actor: "user"}); err != nil {
 			if err == service.ErrTaskGoalEmpty || err == service.ErrTaskGoalTooLong {
-				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+				return statusErr(http.StatusBadRequest, err.Error())
 			}
 			return err
 		}
 	}
-
-	if c.FormValue("goal_status_present") == "" {
+	if !g.StatusPresent {
 		return nil
 	}
-	latestGoal := h.loadTaskGoal(c.Request().Context(), taskID)
+	latestGoal := h.loadTaskGoal(ctx, taskID)
 	if latestGoal == nil || latestGoal.Status == models.TaskGoalStatusCleared {
 		return nil
 	}
-	goalActive := c.FormValue("goal_active") == "on" || c.FormValue("goal_active") == "true"
-	if goalActive && (latestGoal.Status == models.TaskGoalStatusPaused || latestGoal.Status == models.TaskGoalStatusBlocked) {
-		return h.taskGoalSvc.ResumeGoal(c.Request().Context(), taskID, "user")
+	if g.Active && (latestGoal.Status == models.TaskGoalStatusPaused || latestGoal.Status == models.TaskGoalStatusBlocked) {
+		return h.taskGoalSvc.ResumeGoal(ctx, taskID, "user")
 	}
-	if !goalActive && latestGoal.Status == models.TaskGoalStatusActive {
-		return h.taskGoalSvc.PauseGoal(c.Request().Context(), taskID, "user")
+	if !g.Active && latestGoal.Status == models.TaskGoalStatusActive {
+		return h.taskGoalSvc.PauseGoal(ctx, taskID, "user")
 	}
 	return nil
+}
+
+type updateTaskArgs struct {
+	TaskRef
+	Title                   string
+	Prompt                  string
+	Tag                     models.TaskTag
+	TagPresent              bool
+	Priority                string
+	Category                models.TaskCategory
+	AgentID                 string
+	AgentDefinitionID       string
+	AutoMerge               *bool
+	AutoMergeOnGoalAchieved *bool
+	MergeTargetBranch       string
+	Goal                    goalEdit
+	Files                   []uploadFile
+	RemoveAttachmentIDs     []string
 }
 
 func (h *Handler) UpdateTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UpdateTask id=%s", taskID)
-	if _, err := parseTaskAttachmentForm(c, "UpdateTask"); err != nil {
-		return err
-	}
-
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	form, err := parseTaskAttachmentForm(c, "UpdateTask")
 	if err != nil {
-		applog.Infof("[handler] UpdateTask fetch error: %v", err)
 		return err
 	}
-	if task == nil {
-		applog.Infof("[handler] UpdateTask not found id=%s", taskID)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	args := updateTaskArgs{
+		TaskRef:           TaskRef{TaskID: taskID},
+		Title:             c.FormValue("title"),
+		Prompt:            c.FormValue("prompt"),
+		Tag:               models.TaskTag(c.FormValue("tag")),
+		TagPresent:        c.Request().Form.Has("tag"),
+		Priority:          c.FormValue("priority"),
+		Category:          models.TaskCategory(c.FormValue("category")),
+		AgentID:           c.FormValue("agent_id"),
+		AgentDefinitionID: c.FormValue("agent_definition_id"),
+		MergeTargetBranch: c.FormValue("merge_target_branch"),
+		Goal: goalEdit{
+			Present:       c.FormValue("goal_present") != "",
+			Text:          strings.TrimSpace(c.FormValue("goal")),
+			StatusPresent: c.FormValue("goal_status_present") != "",
+			Active:        c.FormValue("goal_active") == "on" || c.FormValue("goal_active") == "true",
+		},
 	}
+	// The hidden sentinel marks a submitted checkbox; unchecked boxes send nothing.
+	if c.FormValue("auto_merge_present") != "" {
+		v := formBoolEnabled(c, "auto_merge", false)
+		args.AutoMerge = &v
+	}
+	if c.FormValue("auto_merge_on_goal_achieved_present") != "" {
+		v := formBoolEnabled(c, "auto_merge_on_goal_achieved", false)
+		args.AutoMergeOnGoalAchieved = &v
+	}
+	for _, id := range strings.Split(c.FormValue("remove_attachments"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			args.RemoveAttachmentIDs = append(args.RemoveAttachmentIDs, id)
+		}
+	}
+	if form != nil && len(form.File["files"]) > 0 {
+		if args.Files, err = h.stageUploads(c.Request().Context(), taskID, "", requestUploads(form.File["files"])); err != nil {
+			return actionHTTPError(err)
+		}
+	}
+	if _, err := actUpdateTask(h, c.Request().Context(), args); err != nil {
+		if ok, resp := noModelsResponse(c, err); ok {
+			return resp
+		}
+		return err
+	}
+	if isHTMX(c) {
+		return h.renderTaskDetailContent(c, taskID, "details")
+	}
+	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
+}
 
+var actUpdateTask = defineAction("task.update", ownTaskRef[updateTaskArgs], func(h *Handler, ctx context.Context, a updateTaskArgs) (struct{}, error) {
+	taskID := a.TaskID
+	defer removeStagedUploads(taskID, a.Files)
+	task, err := h.loadTask(ctx, taskID)
+	if err != nil {
+		return struct{}{}, err
+	}
 	oldCategory := task.Category
 	oldStatus := task.Status
-	newCategory := models.TaskCategory(c.FormValue("category"))
+	newCategory := a.Category
 	isCancellableActiveWork := oldStatus == models.StatusRunning || oldStatus == models.StatusQueued || (oldStatus == models.StatusPending && models.IsSwarmChildRole(task.SwarmRole))
 	stopActiveViaCategoryUpdate := oldCategory == models.CategoryActive && newCategory != oldCategory && newCategory != models.CategoryActive && isCancellableActiveWork
 	if oldCategory != newCategory && newCategory == models.CategoryActive {
-		hasModels, err := h.hasConfiguredModels(c)
+		hasModels, err := h.llmConfigRepo.HasAny(ctx)
 		if err != nil {
-			applog.Infof("[handler] UpdateTask model availability check error: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check model availability")
+			return struct{}{}, statusErr(http.StatusInternalServerError, "failed to check model availability")
 		}
 		if !hasModels {
-			applog.Infof("[handler] UpdateTask blocked: no models configured task=%s", taskID)
-			return noModelsConfiguredResponse(c)
+			return struct{}{}, errNoModels
 		}
 	}
 
-	task.Title = c.FormValue("title")
-	// Category transitions must go through UpdateCategory after the generic field
-	// update so completed_at, display order, events, and execution lifecycle stay
-	// consistent with drag/drop transitions.
+	task.Title = a.Title
+	// Category transitions go through UpdateCategory after the field update so
+	// completed_at, display order, events and execution lifecycle stay consistent.
 	task.Category = oldCategory
-	task.Prompt = c.FormValue("prompt")
-	if _, present := c.Request().Form["tag"]; present {
-		task.Tag = models.TaskTag(c.FormValue("tag"))
+	task.Prompt = a.Prompt
+	if a.TagPresent {
+		task.Tag = a.Tag
 	}
-	priorityValue := strings.TrimSpace(c.FormValue("priority"))
-	priority, err := strconv.Atoi(priorityValue)
-	if priorityValue == "" || err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Task priority must be between 1 and 4")
+	priority, err := strconv.Atoi(strings.TrimSpace(a.Priority))
+	if strings.TrimSpace(a.Priority) == "" || err != nil {
+		return struct{}{}, statusErr(http.StatusBadRequest, "Task priority must be between 1 and 4")
 	}
 	task.Priority = priority
-
-	// Handle optional agent (LLM config) selection
-	if agentID := c.FormValue("agent_id"); agentID != "" {
+	if a.AgentID != "" {
+		agentID := a.AgentID
 		task.AgentID = &agentID
 	} else {
 		task.AgentID = nil
 	}
-	// Handle optional primary Agent definition selection separately from the model config.
-	agentDefID, err := h.resolvePrimaryAgentDefinition(c.Request().Context(), task.ProjectID, c.FormValue("agent_definition_id"))
+	agentDefID, err := h.resolvePrimaryAgentDefinition(ctx, task.ProjectID, a.AgentDefinitionID)
 	if err != nil {
-		return err
+		return struct{}{}, err
 	}
 	task.AgentDefinitionID = agentDefID
-
-	// Handle auto-merge settings — if the hidden sentinel is present, the edit form
-	// was submitted and we always update (unchecked checkbox sends no value).
-	if c.FormValue("auto_merge_present") != "" {
-		task.AutoMerge = formBoolEnabled(c, "auto_merge", false)
+	if a.AutoMerge != nil {
+		task.AutoMerge = *a.AutoMerge
 	}
-	if c.FormValue("auto_merge_on_goal_achieved_present") != "" {
-		task.AutoMergeOnGoalAchieved = formBoolEnabled(c, "auto_merge_on_goal_achieved", false)
+	if a.AutoMergeOnGoalAchieved != nil {
+		task.AutoMergeOnGoalAchieved = *a.AutoMergeOnGoalAchieved
 	}
-	if targetBranch := c.FormValue("merge_target_branch"); targetBranch != "" {
-		task.MergeTargetBranch = targetBranch
+	if a.MergeTargetBranch != "" {
+		task.MergeTargetBranch = a.MergeTargetBranch
 	}
 
 	applog.Infof("[handler] UpdateTask id=%s title=%q category=%s->%s tag=%s", taskID, task.Title, oldCategory, newCategory, task.Tag)
-	if err := h.taskSvc.Update(c.Request().Context(), task); err != nil {
+	if err := h.taskSvc.Update(ctx, task); err != nil {
 		if errors.Is(err, service.ErrDuplicateTask) {
-			applog.Infof("[handler] UpdateTask duplicate title=%q", task.Title)
-			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
+			return struct{}{}, statusErr(http.StatusConflict, "A task with this name already exists in this project")
 		}
 		if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
-			return httpErr
+			return struct{}{}, httpErr
 		}
-		applog.Infof("[handler] UpdateTask error: %v", err)
-		return err
+		return struct{}{}, err
 	}
-	if err := h.updateTaskGoalFromEditForm(c, taskID); err != nil {
-		return err
+	if err := h.applyGoalEdit(ctx, taskID, a.Goal); err != nil {
+		return struct{}{}, err
+	}
+	if len(a.Files) > 0 {
+		h.persistTaskAttachmentFiles(ctx, taskID, taskID, a.Files, "UpdateTask")
+	}
+	for _, attID := range a.RemoveAttachmentIDs {
+		att, err := h.attachmentRepo.GetByID(ctx, attID)
+		if err != nil || att == nil || att.TaskID != taskID {
+			continue
+		}
+		if err := h.attachmentRepo.Delete(ctx, attID); err != nil {
+			applog.Infof("[handler] UpdateTask error deleting attachment %s: %v", attID, err)
+			continue
+		}
+		h.removeTaskAttachmentFileIfUnreferenced(ctx, taskID, att.FilePath, "UpdateTask")
 	}
 
-	// Handle file uploads if present (multipart form)
-	if form, err := c.MultipartForm(); err == nil && form != nil {
-		if files := form.File["files"]; len(files) > 0 {
-			h.persistTaskAttachmentFiles(c.Request().Context(), taskID, files, "UpdateTask")
-		}
-	}
-
-	// Handle removal of attachments (comma-separated IDs)
-	if removeIDs := c.FormValue("remove_attachments"); removeIDs != "" {
-		for _, attID := range strings.Split(removeIDs, ",") {
-			attID = strings.TrimSpace(attID)
-			if attID == "" {
-				continue
-			}
-			att, err := h.attachmentRepo.GetByID(c.Request().Context(), attID)
-			if err != nil || att == nil || att.TaskID != taskID {
-				continue
-			}
-			if err := h.attachmentRepo.Delete(c.Request().Context(), attID); err != nil {
-				applog.Infof("[handler] UpdateTask error deleting attachment %s: %v", attID, err)
-				continue
-			}
-			h.removeTaskAttachmentFileIfUnreferenced(c.Request().Context(), taskID, att.FilePath, "UpdateTask")
-			applog.Infof("[handler] UpdateTask removed attachment %s from task %s", attID, taskID)
-		}
-	}
-
-	// Task detail edits are metadata saves. They may update the stored category for
-	// display/sorting, but must not activate or enqueue work; explicit Run Now,
-	// drag/drop category changes, schedules, and task-thread follow-ups own those
-	// execution side effects.
+	// Detail edits are metadata saves: they may change the stored category but
+	// never activate or enqueue work.
 	if stopActiveViaCategoryUpdate {
-		applog.Infof("[handler] UpdateTask category changed from Active while %s, cancelling id=%s", oldStatus, taskID)
-		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
-			applog.Infof("[handler] UpdateTask error stopping active task: %v", err)
-			return err
-		}
-	} else if oldCategory != newCategory {
-		applog.Infof("[handler] UpdateTask metadata category changed %s->%s id=%s", oldCategory, newCategory, taskID)
-		if err := h.taskRepo.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
-			applog.Infof("[handler] UpdateTask error changing metadata category: %v", err)
-			return err
-		}
+		return struct{}{}, h.taskSvc.UpdateCategory(ctx, taskID, newCategory)
 	}
-
-	applog.Infof("[handler] UpdateTask success id=%s", taskID)
-
-	// Re-fetch updated task data for rendering
-	if isHTMX(c) {
-		return h.renderTaskDetailContent(c, taskID, "details")
+	if oldCategory != newCategory {
+		return struct{}{}, h.taskRepo.UpdateCategory(ctx, taskID, newCategory)
 	}
-
-	return c.Redirect(http.StatusSeeOther, "/tasks/"+task.ID)
-}
+	return struct{}{}, nil
+})
 
 func (h *Handler) DeleteTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] DeleteTask task=%s", taskID)
-
-	// Fetch task before deleting to get projectID for kanban board response
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	projectID, err := actDeleteTask(h, c.Request().Context(), TaskRef{TaskID: taskID})
 	if err != nil {
-		applog.Infof("[handler] DeleteTask fetch error: %v", err)
-		return err
-	}
-	if task == nil {
-		applog.Infof("[handler] DeleteTask not found id=%s", taskID)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	projectID := task.ProjectID
-
-	if err := h.taskSvc.Delete(c.Request().Context(), taskID); err != nil {
 		applog.Infof("[handler] DeleteTask error: %v", err)
 		return err
 	}
@@ -1888,44 +2035,14 @@ func taskActivationError(c echo.Context, err error) error {
 		c.Response().Header().Set("HX-Reswap", "none")
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	}
-	return err
+	_, response := noModelsResponse(c, err)
+	return response
 }
 
 func (h *Handler) RunTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] RunTask task=%s", taskID)
-
-	hasModels, err := h.hasConfiguredModels(c)
-	if err != nil {
-		applog.Infof("[handler] RunTask model availability check error: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check model availability")
-	}
-	if !hasModels {
-		applog.Infof("[handler] RunTask blocked: no models configured task=%s", taskID)
-		return noModelsConfiguredResponse(c)
-	}
-
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil {
-		applog.Infof("[handler] RunTask fetch error: %v", err)
-		return err
-	}
-	if task == nil {
-		applog.Infof("[handler] RunTask not found id=%s", taskID)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	if projectID := h.mutationProjectID(c); projectID != "" && task.ProjectID != projectID {
-		return echo.NewHTTPError(http.StatusBadRequest, "task does not belong to the active project")
-	}
-	if task.SwarmRole == models.SwarmRoleParent {
-		if h.swarmSvc == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
-		}
-		if err := h.swarmSvc.StartPlanner(c.Request().Context(), taskID); err != nil {
-			applog.Infof("[handler] RunTask swarm planner start error: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-	} else if err := h.taskSvc.RunTask(c.Request().Context(), taskID); err != nil {
+	if _, err := actRunTask(h, c.Request().Context(), TaskRef{TaskID: taskID, ProjectID: h.mutationProjectID(c)}); err != nil {
 		applog.Infof("[handler] RunTask error: %v", err)
 		return taskActivationError(c, err)
 	}
@@ -1936,6 +2053,10 @@ func (h *Handler) RunTask(c echo.Context) error {
 	if isHTMX(c) {
 		setHTMXToast(c, "Task queued to run now", "success")
 		if isSchedulePageMutation(c) {
+			task, err := h.loadTask(c.Request().Context(), taskID)
+			if err != nil {
+				return actionHTTPError(err)
+			}
 			return h.renderScheduleContentForProject(c, task.ProjectID)
 		}
 		return c.NoContent(http.StatusNoContent)
@@ -2026,84 +2147,40 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	if pulseRequest && pulseProjectID == "" {
 		return h.renderPulseCancelError(c, http.StatusBadRequest, taskID, "Unable to stop this task without a project context.")
 	}
-
-	// Fetch task to get projectID for kanban board response
-	task, cutoff, err := h.taskSvc.ObserveTaskCancellation(c.Request().Context(), taskID)
-	if err != nil {
-		applog.Infof("[handler] CancelTask fetch error: %v", err)
+	args := cancelTaskArgs{
+		TaskRef:              TaskRef{TaskID: taskID},
+		ComposerStop:         c.QueryParam("composer_stop") == "1",
+		ExpectedGeneration:   c.QueryParam("expected_generation"),
+		ExpectedStopRevision: c.QueryParam("expected_stop_revision"),
+		ExpectedTurnID:       c.QueryParam("expected_turn_id"),
+	}
+	if pulseRequest {
+		args.ProjectID = pulseProjectID
+	}
+	if _, err := actCancelTask(h, c.Request().Context(), args); err != nil {
+		applog.Infof("[handler] CancelTask error task=%s: %v", taskID, err)
 		if pulseRequest {
-			return h.renderPulseCancelError(c, http.StatusInternalServerError, taskID, "Unable to stop this task. Try again.")
+			var httpErr *echo.HTTPError
+			status, message := http.StatusBadRequest, "Unable to stop this task. Try again."
+			if errors.As(err, &httpErr) {
+				switch httpErr.Code {
+				case http.StatusNotFound:
+					status, message = http.StatusNotFound, "This task is no longer available."
+					if httpErr.Message == "This task is not available in the selected project." {
+						message = "This task is not available in the selected project."
+					}
+				case http.StatusConflict:
+					status, message = http.StatusConflict, "This task changed before Stop could be applied."
+				case http.StatusInternalServerError:
+					status = http.StatusInternalServerError
+				}
+			}
+			if status == http.StatusBadRequest && errors.As(err, &httpErr) && httpErr.Code == http.StatusBadRequest {
+				status, message = http.StatusConflict, "This task is no longer cancellable."
+			}
+			return h.renderPulseCancelError(c, status, taskID, message)
 		}
 		return err
-	}
-	if task == nil {
-		applog.Infof("[handler] CancelTask not found id=%s", taskID)
-		if pulseRequest {
-			return h.renderPulseCancelError(c, http.StatusNotFound, taskID, "This task is no longer available.")
-		}
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	if pulseRequest && task.ProjectID != pulseProjectID {
-		applog.Infof("[handler] CancelTask pulse project mismatch task=%s task_project=%s requested_project=%s", taskID, task.ProjectID, pulseProjectID)
-		return h.renderPulseCancelError(c, http.StatusNotFound, taskID, "This task is not available in the selected project.")
-	}
-	projectID := task.ProjectID
-
-	composerStop := c.QueryParam("composer_stop") == "1"
-	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_generation") != "" {
-		expectedGeneration, err := strconv.Atoi(c.QueryParam("expected_generation"))
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm generation")
-		}
-		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
-		if err != nil {
-			return err
-		}
-		if expectedGeneration != cfg.Generation {
-			return echo.NewHTTPError(http.StatusConflict, "swarm generation changed; Stop was not applied")
-		}
-	}
-	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_stop_revision") != "" {
-		expectedRevision, err := strconv.Atoi(c.QueryParam("expected_stop_revision"))
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm Stop revision")
-		}
-		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
-		if err != nil {
-			return err
-		}
-		if expectedRevision != cfg.StopRevision {
-			return echo.NewHTTPError(http.StatusConflict, "swarm follow-up changed; Stop was not applied")
-		}
-	}
-	if composerStop && c.QueryParam("expected_turn_id") != "" {
-		matches, err := h.execRepo.IsTaskExecutionAtHistoryCutoff(c.Request().Context(), taskID, c.QueryParam("expected_turn_id"), cutoff)
-		if err != nil {
-			return err
-		}
-		if !matches {
-			return echo.NewHTTPError(http.StatusConflict, "response turn changed; Stop was not applied")
-		}
-	}
-	result, err := h.cancelTaskWork(c.Request().Context(), task, cutoff, composerStop, "CancelTask")
-	if err != nil {
-		if errors.Is(err, service.ErrTaskCancellationSuperseded) {
-			if pulseRequest {
-				return h.renderPulseCancelError(c, http.StatusConflict, taskID, "This task changed before Stop could be applied.")
-			}
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
-		}
-		if pulseRequest {
-			return h.renderPulseCancelError(c, http.StatusBadRequest, taskID, "Unable to stop this task. Try again.")
-		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if result != nil && !result.Accepted {
-		applog.Infof("[handler] CancelTask not cancellable task=%s status=%s category=%s", taskID, task.Status, task.Category)
-		if pulseRequest {
-			return h.renderPulseCancelError(c, http.StatusConflict, taskID, "This task is no longer cancellable.")
-		}
-		return echo.NewHTTPError(http.StatusBadRequest, result.Message)
 	}
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)
 
@@ -2122,10 +2199,14 @@ func (h *Handler) CancelTask(c echo.Context) error {
 
 	// Return the full kanban board for HTMX requests
 	if isHTMX(c) {
-		if composerStop {
+		if args.ComposerStop {
 			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""))
 		}
-		return h.renderTaskBoardRefresh(c, projectID, nil)
+		task, err := h.loadTask(c.Request().Context(), taskID)
+		if err != nil {
+			return actionHTTPError(err)
+		}
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
 }
@@ -2169,305 +2250,104 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid Active target status")
 	}
 	applog.Infof("[handler] UpdateTaskCategory task=%s newCategory=%s target_status=%s", taskID, category, targetStatus)
-
-	// Validate: cannot move to scheduled category unless the task has a schedule
-	if category == models.CategoryScheduled {
-		schedules, err := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-		if err != nil {
-			applog.Infof("[handler] UpdateTaskCategory error checking schedules: %v", err)
-			return err
-		}
-		if len(schedules) == 0 {
-			applog.Infof("[handler] UpdateTaskCategory rejected: task %s has no schedule", taskID)
-			return echo.NewHTTPError(http.StatusBadRequest, "Cannot move task to Scheduled category: task has no schedule. Create a schedule first.")
-		}
-	}
-	if category == models.CategoryActive {
-		hasModels, err := h.hasConfiguredModels(c)
-		if err != nil {
-			applog.Infof("[handler] UpdateTaskCategory model availability check error: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check model availability")
-		}
-		if !hasModels {
-			applog.Infof("[handler] UpdateTaskCategory blocked: no models configured task=%s", taskID)
-			return noModelsConfiguredResponse(c)
-		}
-	}
-
-	if category == models.CategoryActive && targetStatus != "" {
-		task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-		if err != nil {
-			return err
-		}
-		if task == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
-		}
-		moves, err := h.activeLaneTaskMoves(c.Request().Context(), []string{taskID}, c.FormValue("expected_states"))
-		if err != nil {
-			return err
-		}
-		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), task.ProjectID, moves, targetStatus); err != nil {
-			applog.Infof("[handler] UpdateTaskCategory active lane error: %v", err)
-			if errors.Is(err, persistence.ErrActiveLaneTaskChanged) || errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
-				return echo.NewHTTPError(http.StatusConflict, "task lifecycle changed before the move completed")
-			}
-			return taskActivationError(c, err)
-		}
-	} else if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, category); err != nil {
+	projectID, err := actUpdateTaskCategory(h, c.Request().Context(), taskCategoryArgs{
+		TaskRef: TaskRef{TaskID: taskID}, Category: category, TargetStatus: targetStatus, ExpectedStates: c.FormValue("expected_states"),
+	})
+	if err != nil {
 		applog.Infof("[handler] UpdateTaskCategory error: %v", err)
 		return taskActivationError(c, err)
 	}
 	applog.Infof("[handler] UpdateTaskCategory success task=%s -> %s", taskID, category)
-
-	// Fetch task to get projectID for kanban board response
-	task, _ := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	// Return the full kanban board
 	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
 
 func (h *Handler) MoveCompletedActiveToCompleted(c echo.Context) error {
-	projectID := strings.TrimSpace(c.QueryParam("project_id"))
-	if projectID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
-	}
-	applog.Infof("[handler] MoveCompletedActiveToCompleted project=%s", projectID)
-
-	count, err := h.taskSvc.MoveCompletedActiveToCompleted(c.Request().Context(), projectID)
-	if err != nil {
-		applog.Infof("[handler] MoveCompletedActiveToCompleted error: %v", err)
-		if errors.Is(err, service.ErrTaskProjectScopeRequired) {
-			return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
-		}
-		return err
-	}
-	applog.Infof("[handler] MoveCompletedActiveToCompleted moved %d tasks", count)
-
-	// Return the full kanban board
-	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, nil)
-	}
-
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
+	return h.boardAction(c, actMoveCompleted, strings.TrimSpace(c.QueryParam("project_id")))
 }
 
 func (h *Handler) UpdateTaskStatus(c echo.Context) error {
 	taskID := c.Param("taskId")
 	status := models.TaskStatus(c.FormValue("status"))
 	applog.Infof("[handler] UpdateTaskStatus task=%s newStatus=%s", taskID, status)
-
-	if err := h.taskSvc.UpdateStatus(c.Request().Context(), taskID, status); err != nil {
+	projectID, err := actUpdateTaskStatus(h, c.Request().Context(), taskStatusArgs{TaskRef: TaskRef{TaskID: taskID}, Status: status})
+	if err != nil {
 		applog.Infof("[handler] UpdateTaskStatus error: %v", err)
 		return taskActivationError(c, err)
 	}
 	applog.Infof("[handler] UpdateTaskStatus success task=%s -> %s", taskID, status)
-
-	// Fetch task to get projectID for kanban board response
-	task, _ := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	// Return the full kanban board
 	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
 
 func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
-	projectID := c.FormValue("project_id")
-	taskIDsValue := c.FormValue("task_ids")
-	category := models.TaskCategory(c.FormValue("category"))
-	targetStatus := models.TaskStatus(strings.TrimSpace(c.FormValue("target_status")))
-	if targetStatus != "" {
-		if category != models.CategoryActive || (targetStatus != models.StatusPending && targetStatus != models.StatusRunning) {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid Active target status")
-		}
+	args := batchCategoryArgs{
+		ProjectID:      c.FormValue("project_id"),
+		Category:       models.TaskCategory(c.FormValue("category")),
+		TargetStatus:   models.TaskStatus(strings.TrimSpace(c.FormValue("target_status"))),
+		ExpectedStates: c.FormValue("expected_states"),
 	}
-	applog.Infof("[handler] BatchUpdateTaskCategory project=%s category=%s target_status=%s task_ids=%s", projectID, category, targetStatus, taskIDsValue)
-
-	taskIDs := make([]string, 0)
-	for _, rawID := range strings.Split(taskIDsValue, ",") {
+	for _, rawID := range strings.Split(c.FormValue("task_ids"), ",") {
 		if id := strings.TrimSpace(rawID); id != "" {
-			taskIDs = append(taskIDs, id)
+			args.TaskIDs = append(args.TaskIDs, id)
 		}
 	}
-
-	// Preflight every selected task before any schedule, model, worker, or
-	// category mutation can occur. This prevents stale selections from changing
-	// a task outside the project whose board is currently open.
-	if err := h.taskSvc.ValidateTaskIDsForProject(c.Request().Context(), projectID, taskIDs); err != nil {
-		if errors.Is(err, service.ErrTaskNotFoundInProject) {
-			applog.Infof("[handler] BatchUpdateTaskCategory rejected: selected task is not in project=%s", projectID)
-			return echo.NewHTTPError(http.StatusBadRequest, "one or more selected tasks were not found in the selected project")
-		}
-		applog.Infof("[handler] BatchUpdateTaskCategory error validating task ownership: %v", err)
-		return err
+	applog.Infof("[handler] BatchUpdateTaskCategory project=%s category=%s target_status=%s tasks=%d", args.ProjectID, args.Category, args.TargetStatus, len(args.TaskIDs))
+	if _, err := actBatchCategory(h, c.Request().Context(), args); err != nil {
+		return taskActivationError(c, err)
 	}
-
-	// Validate: if moving to scheduled category, all tasks must have schedules
-	if category == models.CategoryScheduled {
-		for _, id := range taskIDs {
-			schedules, err := h.scheduleRepo.ListByTask(c.Request().Context(), id)
-			if err != nil {
-				applog.Infof("[handler] BatchUpdateTaskCategory error checking schedules for task=%s: %v", id, err)
-				return err
-			}
-			if len(schedules) == 0 {
-				applog.Infof("[handler] BatchUpdateTaskCategory rejected: task %s has no schedule", id)
-				return echo.NewHTTPError(http.StatusBadRequest, "Cannot move tasks to Scheduled category: one or more tasks have no schedule")
-			}
-		}
-	}
-	if category == models.CategoryActive {
-		hasModels, err := h.hasConfiguredModels(c)
-		if err != nil {
-			applog.Infof("[handler] BatchUpdateTaskCategory model availability check error: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check model availability")
-		}
-		if !hasModels {
-			applog.Infof("[handler] BatchUpdateTaskCategory blocked: no models configured project=%s", projectID)
-			return noModelsConfiguredResponse(c)
-		}
-	}
-
-	if category == models.CategoryActive && targetStatus != "" {
-		moves, err := h.activeLaneTaskMoves(c.Request().Context(), taskIDs, c.FormValue("expected_states"))
-		if err != nil {
-			return err
-		}
-		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), projectID, moves, targetStatus); err != nil {
-			applog.Infof("[handler] BatchUpdateTaskCategory active lane error: %v", err)
-			if errors.Is(err, persistence.ErrActiveLaneTaskChanged) || errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
-				return echo.NewHTTPError(http.StatusConflict, "one or more selected tasks changed before the move completed")
-			}
-			return taskActivationError(c, err)
-		}
-	} else {
-		for _, id := range taskIDs {
-			if err := h.taskSvc.UpdateCategory(c.Request().Context(), id, category); err != nil {
-				applog.Infof("[handler] BatchUpdateTaskCategory error task=%s: %v", id, err)
-				return taskActivationError(c, err)
-			}
-		}
-	}
-	applog.Infof("[handler] BatchUpdateTaskCategory success")
-
 	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, nil)
+		return h.renderTaskBoardRefresh(c, args.ProjectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
 
 func (h *Handler) DeleteAllCompletedTasks(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	applog.Infof("[handler] DeleteAllCompletedTasks project=%s", projectID)
-
-	count, err := h.taskSvc.DeleteAllCompleted(c.Request().Context(), projectID)
-	if err != nil {
-		applog.Infof("[handler] DeleteAllCompletedTasks error: %v", err)
-		return err
-	}
-	applog.Infof("[handler] DeleteAllCompletedTasks deleted %d tasks", count)
-
-	// Return the full kanban board
-	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, nil)
-	}
-
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
+	return h.boardAction(c, actDeleteCompleted, c.QueryParam("project_id"))
 }
 
 func (h *Handler) DeleteAllBacklogTasks(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	applog.Infof("[handler] DeleteAllBacklogTasks project=%s", projectID)
-
-	count, err := h.taskSvc.DeleteAllBacklog(c.Request().Context(), projectID)
-	if err != nil {
-		applog.Infof("[handler] DeleteAllBacklogTasks error: %v", err)
-		return err
-	}
-	applog.Infof("[handler] DeleteAllBacklogTasks deleted %d tasks", count)
-
-	// Return the full kanban board
-	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, nil)
-	}
-
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
+	return h.boardAction(c, actDeleteBacklog, c.QueryParam("project_id"))
 }
 
 func (h *Handler) ReorderTask(c echo.Context) error {
 	taskID := c.Param("taskId")
-	scope := layout.WorkspaceProjectID(c.Request().Context(), h.mutationProjectID(c))
 	beforeID, afterID := c.FormValue("before_task_id"), c.FormValue("after_task_id")
 	if beforeID != "" && afterID != "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "choose one reorder target")
 	}
-	var err error
-	if beforeID != "" || afterID != "" {
-		anchorID := beforeID
-		if anchorID == "" {
-			anchorID = afterID
-		}
-		err = h.taskSvc.ReorderTaskRelative(c.Request().Context(), taskID, anchorID, beforeID != "", scope)
-	} else {
-		position, parseErr := strconv.Atoi(c.FormValue("position"))
-		if parseErr != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid position")
-		}
-		err = h.taskSvc.ReorderTask(c.Request().Context(), taskID, position, scope)
-	}
+	projectID, err := actReorderTask(h, c.Request().Context(), reorderTaskArgs{
+		TaskRef:  TaskRef{TaskID: taskID},
+		Scope:    layout.WorkspaceProjectID(c.Request().Context(), h.mutationProjectID(c)),
+		BeforeID: beforeID, AfterID: afterID, Position: c.FormValue("position"),
+	})
 	if err != nil {
 		return err
 	}
-
-	// Fetch task to get projectID for kanban board response
-	task, _ := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	// Return the full kanban board
 	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
 
 func (h *Handler) ExecuteBacklogTasks(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
-	priorityStr := c.QueryParam("priority")
 	priority := 0
-	if priorityStr != "" {
+	if priorityStr := c.QueryParam("priority"); priorityStr != "" {
 		var err error
 		priority, err = strconv.Atoi(priorityStr)
 		if err != nil || priority < 0 || priority > 4 {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid priority")
 		}
 	}
-	applog.Infof("[handler] ExecuteBacklogTasks project=%s priority=%d", projectID, priority)
-
-	tasks, submitted, err := h.taskSvc.ExecuteBacklogTasks(c.Request().Context(), projectID, priority)
-	if err != nil {
-		applog.Infof("[handler] ExecuteBacklogTasks error: %v", err)
+	if _, err := actExecuteBacklog(h, c.Request().Context(), executeBacklogArgs{ProjectID: projectID, Priority: priority}); err != nil {
 		return err
 	}
-	applog.Infof("[handler] ExecuteBacklogTasks submitted %d/%d tasks", submitted, len(tasks))
-
-	// Return the full kanban board
-	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, nil)
-	}
-
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
+	return h.boardRefresh(c, projectID)
 }
 
 // TaskReference is the compact machine-facing task projection used by terminal
@@ -2781,39 +2661,71 @@ func setTaskPanelChainConfig(task *models.Task, config *models.ChainConfiguratio
 	return nil
 }
 
-// taskChainFormConfig preserves server-owned handoff fields while editing the panel's controls.
-func taskChainFormConfig(c echo.Context, task *models.Task) (*models.ChainConfiguration, error) {
-	if c.FormValue("chain_remove") == "true" {
+// chainForm is the task panel's chain controls. Absent title/prefix fields
+// are nil so applying the form preserves values other clients set.
+type chainForm struct {
+	Remove            bool
+	Enabled           bool
+	Trigger           string
+	ChildAgentID      string
+	ChildModel        string
+	ChildCategory     string
+	ChildTitle        *string
+	ChildPromptPrefix *string
+}
+
+func parseChainForm(c echo.Context) (chainForm, error) {
+	f := chainForm{
+		Remove:        c.FormValue("chain_remove") == "true",
+		Enabled:       c.FormValue("chain_enabled") == "true",
+		Trigger:       c.FormValue("chain_trigger"),
+		ChildAgentID:  c.FormValue("chain_child_agent_id"),
+		ChildModel:    c.FormValue("chain_child_model"),
+		ChildCategory: c.FormValue("chain_child_category"),
+	}
+	params, err := c.FormParams()
+	if err != nil {
+		return f, err
+	}
+	if _, ok := params["chain_child_title"]; ok {
+		v := c.FormValue("chain_child_title")
+		f.ChildTitle = &v
+	}
+	if _, ok := params["chain_child_prompt_prefix"]; ok {
+		v := c.FormValue("chain_child_prompt_prefix")
+		f.ChildPromptPrefix = &v
+	}
+	return f, nil
+}
+
+// config preserves server-owned handoff fields while editing the panel's controls.
+func (f chainForm) config(task *models.Task) (*models.ChainConfiguration, error) {
+	if f.Remove {
 		return nil, nil
 	}
 	config, err := task.ParseChainConfig()
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid chain configuration")
+		return nil, statusErr(http.StatusBadRequest, "invalid chain configuration")
 	}
-	config.Enabled = c.FormValue("chain_enabled") == "true"
-	config.Trigger = c.FormValue("chain_trigger")
+	config.Enabled = f.Enabled
+	config.Trigger = f.Trigger
 	if config.Trigger == "" {
 		config.Trigger = "on_completion"
 	}
-	config.ChildAgentID = c.FormValue("chain_child_agent_id")
-	config.ChildModel = c.FormValue("chain_child_model")
-	config.ChildCategory = c.FormValue("chain_child_category")
+	config.ChildAgentID = f.ChildAgentID
+	config.ChildModel = f.ChildModel
+	config.ChildCategory = f.ChildCategory
 	if config.Trigger != "on_completion" && config.Trigger != "on_planning_complete" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid chain trigger")
+		return nil, statusErr(http.StatusBadRequest, "invalid chain trigger")
 	}
 	if config.ChildCategory != "" && config.ChildCategory != "active" && config.ChildCategory != "backlog" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid child category")
+		return nil, statusErr(http.StatusBadRequest, "invalid child category")
 	}
-	// Other clients can edit these fields; the compact panel must not erase them.
-	params, err := c.FormParams()
-	if err != nil {
-		return nil, err
+	if f.ChildTitle != nil {
+		config.ChildTitle = *f.ChildTitle
 	}
-	if _, ok := params["chain_child_title"]; ok {
-		config.ChildTitle = c.FormValue("chain_child_title")
-	}
-	if _, ok := params["chain_child_prompt_prefix"]; ok {
-		config.ChildPromptPrefix = c.FormValue("chain_child_prompt_prefix")
+	if f.ChildPromptPrefix != nil {
+		config.ChildPromptPrefix = *f.ChildPromptPrefix
 	}
 	return config, nil
 }
@@ -2821,71 +2733,14 @@ func taskChainFormConfig(c echo.Context, task *models.Task) (*models.ChainConfig
 func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UpdateTaskChainConfig id=%s", taskID)
-
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil {
-		applog.Infof("[handler] UpdateTaskChainConfig fetch error: %v", err)
-		return err
-	}
-	if task == nil {
-		applog.Infof("[handler] UpdateTaskChainConfig not found id=%s", taskID)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	config, err := taskChainFormConfig(c, task)
+	form, err := parseChainForm(c)
 	if err != nil {
 		return err
 	}
-	enabled := config != nil && config.Enabled
-
-	// Update task with new chain config
-	if err := setTaskPanelChainConfig(task, config); err != nil {
-		applog.Infof("[handler] UpdateTaskChainConfig error serializing config: %v", err)
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid chain configuration")
-	}
-
-	if err := h.taskSvc.UpdatePreservingTitle(c.Request().Context(), task); err != nil {
-		applog.Infof("[handler] UpdateTaskChainConfig error updating task: %v", err)
+	task, err := actTaskChain(h, c.Request().Context(), taskChainArgs{TaskRef: TaskRef{TaskID: taskID}, Form: form})
+	if err != nil {
 		return err
 	}
-
-	// Manage blocked child task for visibility:
-	// - Chain enabled: pre-create blocked child so it's visible on the board
-	// - Chain disabled: remove any existing blocked child
-	if enabled {
-		existing, _ := h.taskRepo.FindBlockedChildByParent(c.Request().Context(), taskID)
-		if existing == nil {
-			chainChild, findChildErr := h.taskRepo.FindChainChildByParent(c.Request().Context(), taskID)
-			if findChildErr != nil {
-				applog.Infof("[handler] UpdateTaskChainConfig error checking existing chain child for parent=%s: %v", taskID, findChildErr)
-			} else if chainChild != nil {
-				applog.Infof("[handler] UpdateTaskChainConfig chain child already left blocked status id=%s status=%s for parent=%s", chainChild.ID, chainChild.Status, taskID)
-			} else {
-				blockedChild := llmworkflow.BuildBlockedChild(*task, config)
-				if createErr := h.taskSvc.Create(c.Request().Context(), blockedChild); createErr != nil {
-					applog.Infof("[handler] UpdateTaskChainConfig error creating blocked child: %v", createErr)
-				} else {
-					applog.Infof("[handler] UpdateTaskChainConfig pre-created blocked child id=%s for parent=%s", blockedChild.ID, taskID)
-				}
-			}
-		} else {
-			llmworkflow.ApplyBlockedChildMaterialization(*task, config, existing)
-			if updateErr := h.taskSvc.Update(c.Request().Context(), existing); updateErr != nil {
-				applog.Infof("[handler] UpdateTaskChainConfig error refreshing blocked child id=%s for parent=%s: %v", existing.ID, taskID, updateErr)
-			} else {
-				applog.Infof("[handler] UpdateTaskChainConfig refreshed blocked child id=%s for parent=%s", existing.ID, taskID)
-			}
-		}
-	} else {
-		if delErr := h.taskRepo.DeleteBlockedChildrenByParent(c.Request().Context(), taskID); delErr != nil {
-			applog.Infof("[handler] UpdateTaskChainConfig error deleting blocked children: %v", delErr)
-		} else {
-			applog.Infof("[handler] UpdateTaskChainConfig removed blocked children for parent=%s (chain disabled)", taskID)
-		}
-	}
-
-	applog.Infof("[handler] UpdateTaskChainConfig success id=%s", taskID)
-
 	if c.QueryParam("from") == "task-panel" {
 		agents, err := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 		if err != nil {
@@ -2893,14 +2748,65 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 		}
 		return pages.TaskChainPanel(task, agents).Render(c.Request().Context(), c.Response().Writer)
 	}
-
-	// Return updated task detail content
 	if isHTMX(c) {
 		return h.renderTaskDetailContent(c, taskID, "chaining")
 	}
-
 	return c.NoContent(http.StatusOK)
 }
+
+type taskChainArgs struct {
+	TaskRef
+	Form chainForm
+}
+
+func (a taskChainArgs) ref() TaskRef { return a.TaskRef }
+
+var actTaskChain = defineAction("task.chain", ownTaskRef[taskChainArgs], func(h *Handler, ctx context.Context, a taskChainArgs) (*models.Task, error) {
+	taskID := a.TaskID
+	task, err := h.loadTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	config, err := a.Form.config(task)
+	if err != nil {
+		return nil, err
+	}
+	enabled := config != nil && config.Enabled
+	if err := setTaskPanelChainConfig(task, config); err != nil {
+		applog.Infof("[handler] UpdateTaskChainConfig error serializing config: %v", err)
+		return nil, statusErr(http.StatusBadRequest, "invalid chain configuration")
+	}
+	if err := h.taskSvc.UpdatePreservingTitle(ctx, task); err != nil {
+		applog.Infof("[handler] UpdateTaskChainConfig error updating task: %v", err)
+		return nil, err
+	}
+
+	// Keep a blocked child visible on the board while the chain is enabled.
+	if enabled {
+		existing, _ := h.taskRepo.FindBlockedChildByParent(ctx, taskID)
+		if existing == nil {
+			chainChild, findChildErr := h.taskRepo.FindChainChildByParent(ctx, taskID)
+			if findChildErr != nil {
+				applog.Infof("[handler] UpdateTaskChainConfig error checking existing chain child for parent=%s: %v", taskID, findChildErr)
+			} else if chainChild != nil {
+				applog.Infof("[handler] UpdateTaskChainConfig chain child already left blocked status id=%s status=%s for parent=%s", chainChild.ID, chainChild.Status, taskID)
+			} else {
+				blockedChild := llmworkflow.BuildBlockedChild(*task, config)
+				if createErr := h.taskSvc.Create(ctx, blockedChild); createErr != nil {
+					applog.Infof("[handler] UpdateTaskChainConfig error creating blocked child: %v", createErr)
+				}
+			}
+		} else {
+			llmworkflow.ApplyBlockedChildMaterialization(*task, config, existing)
+			if updateErr := h.taskSvc.Update(ctx, existing); updateErr != nil {
+				applog.Infof("[handler] UpdateTaskChainConfig error refreshing blocked child id=%s for parent=%s: %v", existing.ID, taskID, updateErr)
+			}
+		}
+	} else if delErr := h.taskRepo.DeleteBlockedChildrenByParent(ctx, taskID); delErr != nil {
+		applog.Infof("[handler] UpdateTaskChainConfig error deleting blocked children: %v", delErr)
+	}
+	return task, nil
+})
 
 func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 	taskID := c.Param("taskId")
@@ -2941,40 +2847,46 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 // are not persisted for ordinary tasks. For swarms they clear the fixed parent
 // assignment; each follow-up resolves its planner model from the message.
 func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
-	taskID := c.Param("taskId")
-
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	_, err := actThreadModel(h, h.actionCtx(c), threadModelArgs{TaskRef: TaskRef{TaskID: c.Param("taskId")}, AgentID: c.FormValue("agent_id"), Effort: parseEffortForm(c)})
 	if err != nil {
-		return err
-	}
-	if task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	if err := h.persistTaskThreadModel(c, task); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
+type threadModelArgs struct {
+	TaskRef
+	AgentID string
+	Effort  effortForm
+}
+
+func (a threadModelArgs) ref() TaskRef { return a.TaskRef }
+
+var actThreadModel = defineAction("thread.model", ownTaskRef[threadModelArgs], func(h *Handler, ctx context.Context, a threadModelArgs) (struct{}, error) {
+	task, err := h.loadTask(ctx, a.TaskID)
+	if err != nil {
+		return struct{}{}, err
+	}
+	return struct{}{}, h.persistThreadModel(ctx, task, a.AgentID, a.Effort)
+})
+
 // Persist the parent selection for future swarm children as well as ordinary runs.
-func (h *Handler) persistTaskThreadModel(c echo.Context, task *models.Task) error {
-	agentID := c.FormValue("agent_id")
+func (h *Handler) persistThreadModel(ctx context.Context, task *models.Task, agentID string, effort effortForm) error {
 
 	if (agentID == "auto" || agentID == "") && task.SwarmRole == models.SwarmRoleParent && h.taskRepo != nil {
-		return h.taskRepo.UpdateAgentID(c.Request().Context(), task.ID, "")
+		return h.taskRepo.UpdateAgentID(ctx, task.ID, "")
 	}
 
 	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
-		agent, selErr := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
+		agent, selErr := h.selectTaskAgent(ctx, task.ProjectID, agentID, "", false)
 		if selErr != nil || agent == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
 		}
-		if err := h.applyConversationEffort(c, task.ID, agent); err != nil {
+		if err := h.applyEffort(ctx, task.ID, agent, effort); err != nil {
 			return err
 		}
 		if task.AgentID == nil || *task.AgentID != agent.ID {
-			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), task.ID, agent.ID); updErr != nil {
+			if updErr := h.taskRepo.UpdateAgentID(ctx, task.ID, agent.ID); updErr != nil {
 				applog.Infof("[handler] TaskThreadSelectModel error persisting selected model task=%s agent=%s: %v", task.ID, agent.ID, updErr)
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist model selection")
 			}
@@ -2991,18 +2903,6 @@ const (
 	newTaskThreadForceReselectionContextKey = "newTaskThreadForceReselection"
 )
 
-func (h *Handler) selectTaskThreadAgent(c echo.Context, projectID, agentID, message string, hasImages bool) (*models.LLMConfig, error) {
-	if isNewTaskThread, _ := c.Get("newTaskThread").(bool); isNewTaskThread {
-		forceReselection, _ := c.Get(newTaskThreadForceReselectionContextKey).(bool)
-		if !forceReselection {
-			if selected, _ := c.Get(newTaskThreadSelectedAgentContextKey).(*models.LLMConfig); selected != nil {
-				return selected, nil
-			}
-		}
-	}
-	return h.selectTaskAgent(c.Request().Context(), projectID, agentID, message, hasImages)
-}
-
 func (h *Handler) processTaskThreadAttachments(ctx context.Context, sessionID, executionID string) (string, []models.Attachment, []models.ChatAttachment, error) {
 	if h.processTaskThreadAttachmentsOverride != nil {
 		return h.processTaskThreadAttachmentsOverride(ctx, sessionID, executionID)
@@ -3014,96 +2914,156 @@ func (h *Handler) processTaskThreadAttachments(ctx context.Context, sessionID, e
 // Uses shared agent selection and streaming response processing from chat_processing.go.
 func (h *Handler) TaskThreadSend(c echo.Context) error {
 	taskID := c.Param("taskId")
-	message := strings.TrimSpace(c.FormValue("message"))
-	agentID := c.FormValue("agent_id")
-	sessionID := c.FormValue("attachment_session_id")
+	ctx := h.actionCtx(c)
+	if c.Get("newTaskThread") == true && c.Get(newTaskThreadForceReselectionContextKey) != true {
+		if agent, ok := c.Get(newTaskThreadSelectedAgentContextKey).(*models.LLMConfig); ok {
+			ctx = context.WithValue(ctx, selectedThreadAgentKey{}, agent)
+		}
+	}
+	out, err := actThreadSend(h, ctx, threadSendArgs{TaskRef: TaskRef{TaskID: taskID}, Message: c.FormValue("message"), AgentID: c.FormValue("agent_id"), SessionID: c.FormValue("attachment_session_id"), Effort: parseEffortForm(c), ManagedModelSelection: c.FormValue("model_selection_managed") == "1"})
+	if err != nil {
+		if _, remoteTask := remoteid.ServerOf(taskID); !remoteTask && isActionNotFound(err) {
+			if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(ctx, c.FormValue("attachment_session_id")); cleanupErr != nil {
+				applog.Infof("[handler] TaskThreadSend stale task upload cleanup: %v", cleanupErr)
+			}
+		}
+		var status *echo.HTTPError
+		if errors.As(err, &status) && status.Code == http.StatusServiceUnavailable {
+			c.Response().Header().Set("Retry-After", "30")
+		}
+		return err
+	}
+	if out.Swarm {
+		return render(c, http.StatusOK, templ.Join(components.TaskThreadQueuedFollowupResponse(out.Message, nil, out.Task.ProjectID, out.AuthorName), components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, "")))
+	}
+	if q := out.Queued; q != nil {
+		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(q.ID, out.Message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, q.ID), q.AttachmentSessionID != "", taskID, q.AuthorName))
+	}
+	if c.Get("newTaskThread") == true {
+		c.Response().Header().Set("X-Created-Task-ID", taskID)
+		c.Response().Header().Set("HX-Retarget", "#main-content")
+		c.Response().Header().Set("HX-Reswap", "innerHTML")
+		c.Response().Header().Set("HX-Push-Url", "/tasks/"+taskID+"?project_id="+url.QueryEscape(layout.WorkspaceProjectID(ctx, out.Task.ProjectID)))
+		return h.GetTaskThread(c)
+	}
+	return render(c, http.StatusOK, templ.Join(components.TaskThreadFollowupResponse(out.Message, out.Execution.ID, out.Attachments, out.Task.ProjectID, *out.Execution), components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true, out.Execution.ID)))
+}
+
+type selectedThreadAgentKey struct{}
+
+func (h *Handler) selectThreadActionAgent(ctx context.Context, projectID, agentID, message string, images bool) (*models.LLMConfig, error) {
+	if agent, ok := ctx.Value(selectedThreadAgentKey{}).(*models.LLMConfig); ok {
+		return agent, nil
+	}
+	return h.selectTaskAgent(ctx, projectID, agentID, message, images)
+}
+
+type threadSendArgs struct {
+	TaskRef
+	Message               string `remote:"raw"`
+	AgentID               string
+	SessionID             string
+	Effort                effortForm
+	ManagedModelSelection bool
+}
+
+func (a threadSendArgs) ref() TaskRef { return a.TaskRef }
+
+type threadSendResult struct {
+	Task        *models.Task
+	Execution   *models.Execution
+	Queued      *models.ThreadInput
+	Message     string `remote:"raw"`
+	Attachments []models.ChatAttachment
+	Swarm       bool
+	AuthorName  string `remote:"raw"`
+}
+
+var actThreadSend = defineAction("thread.send", ownTaskRef[threadSendArgs], func(h *Handler, ctx context.Context, a threadSendArgs) (threadSendResult, error) {
+	taskID := a.TaskID
+	message := strings.TrimSpace(a.Message)
+	agentID := a.AgentID
+	sessionID := a.SessionID
 	if sessionID != "" && !isValidPendingAttachmentSessionID(sessionID) {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
+		return threadSendResult{}, echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session ID")
 	}
 	// The picker persists the current task selection separately. A delayed send
 	// can carry an older model for this message without changing that selection.
-	managedModelSelection := c.FormValue("model_selection_managed") == "1"
+	managedModelSelection := a.ManagedModelSelection
 
 	if message == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+		return threadSendResult{}, echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
 
 	applog.Infof("[handler] TaskThreadSend task=%s message=%q agent_id=%s", taskID, message, agentID)
 
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	task, err := h.taskSvc.GetByID(ctx, taskID)
 	if err != nil {
-		return err
+		return threadSendResult{}, err
 	}
 	// Page turns require their owning surface's authorization and context.
 	// Never admit them through the ordinary coding-task follow-up path.
-	pageOwned, err := h.taskRepo.IsPageConversation(c.Request().Context(), taskID)
+	pageOwned, err := h.taskRepo.IsPageConversation(ctx, taskID)
 	if err != nil {
-		return err
+		return threadSendResult{}, err
 	}
 	if task == nil || pageOwned {
-		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(ctx, sessionID); cleanupErr != nil {
 			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s for missing task: %v", sessionID, cleanupErr)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		return threadSendResult{}, echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 	if h.swarmSvc != nil && task.SwarmRole == models.SwarmRoleParent {
 		var modelSelection []service.SwarmFollowupModelSelection
 		if agentID == "auto" || agentID == "" {
-			model, err := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, message, hasPendingImages(sessionID))
+			model, err := h.selectTaskAgent(ctx, task.ProjectID, agentID, message, hasPendingImages(sessionID))
 			if err != nil || model == nil {
-				return echo.NewHTTPError(http.StatusBadRequest, "no model available for automatic selection")
+				return threadSendResult{}, echo.NewHTTPError(http.StatusBadRequest, "no model available for automatic selection")
 			}
 			modelSelection = []service.SwarmFollowupModelSelection{{ModelID: model.ID}}
 		} else if managedModelSelection {
-			model, err := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
+			model, err := h.selectTaskAgent(ctx, task.ProjectID, agentID, "", false)
 			if err != nil || model == nil {
-				return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
+				return threadSendResult{}, echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
 			}
-			if err := h.applyConversationEffort(c, "", model); err != nil {
-				return err
+			if err := h.applyEffort(ctx, "", model, a.Effort); err != nil {
+				return threadSendResult{}, err
 			}
 			selection := service.SwarmFollowupModelSelection{ModelID: model.ID}
-			if tier, present := formValueIfPresent(c, "service_tier"); present {
-				selection.ServiceTier = &tier
-			}
-			if effort, present := formValueIfPresent(c, "reasoning_effort"); present {
-				selection.ReasoningEffort = &effort
-			}
+			selection.ServiceTier = a.Effort.Tier
+			selection.ReasoningEffort = a.Effort.Effort
 			modelSelection = []service.SwarmFollowupModelSelection{selection}
 		}
 		if !managedModelSelection {
-			if err := h.persistTaskThreadModel(c, task); err != nil {
-				return err
+			if err := h.persistThreadModel(ctx, task, agentID, a.Effort); err != nil {
+				return threadSendResult{}, err
 			}
 		}
-		if err := h.saveDeferredTaskUploads(c.Request().Context(), task.ID, sessionID); err != nil {
-			return err
+		if err := h.saveDeferredTaskUploads(ctx, task.ID, sessionID); err != nil {
+			return threadSendResult{}, err
 		}
-		if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message, modelSelection...); err != nil {
+		if err := h.swarmSvc.HandleParentFollowup(ctx, task.ID, message, modelSelection...); err != nil {
 			applog.Infof("[handler] TaskThreadSend swarm parent follow-up routing failed task=%s: %v", taskID, err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
+			return threadSendResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 		}
-		principal, _ := models.PrincipalFromContext(c.Request().Context())
-		return render(c, http.StatusOK, templ.Join(
-			components.TaskThreadQueuedFollowupResponse(message, nil, task.ProjectID, principal.Username),
-			components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""),
-		))
+		principal, _ := models.PrincipalFromContext(ctx)
+		return threadSendResult{Task: task, Message: message, Swarm: true, AuthorName: principal.Username}, nil
 	}
 
 	// Select agent: prefer form value, fall back to task's assigned agent, then auto-select.
 	// "auto" routes through complexity-based auto-selection; explicit IDs route directly.
 	hasImages := hasPendingImages(sessionID)
-	agent, err := h.selectTaskThreadAgent(c, task.ProjectID, agentID, message, hasImages)
+	agent, err := h.selectThreadActionAgent(ctx, task.ProjectID, agentID, message, hasImages)
 	if err != nil {
 		if managedModelSelection {
-			return echo.NewHTTPError(http.StatusBadRequest, "selected model is unavailable")
+			return threadSendResult{}, echo.NewHTTPError(http.StatusBadRequest, "selected model is unavailable")
 		}
 		applog.Infof("[handler] TaskThreadSend agent selection error: %v, trying task fallback", err)
 		if task.AgentID != nil {
-			agent, _ = h.llmConfigRepo.GetByID(c.Request().Context(), *task.AgentID)
+			agent, _ = h.llmConfigRepo.GetByID(ctx, *task.AgentID)
 		}
 		if agent == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
+			return threadSendResult{}, echo.NewHTTPError(http.StatusBadRequest, "no agent available")
 		}
 	}
 
@@ -3113,8 +3073,8 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		// its captured value and must not overwrite a later effort change.
 		effortTaskID = ""
 	}
-	if err := h.applyConversationEffort(c, effortTaskID, agent); err != nil {
-		return err
+	if err := h.applyEffort(ctx, effortTaskID, agent, a.Effort); err != nil {
+		return threadSendResult{}, err
 	}
 
 	// Direct callers still persist an explicit model as the task's assignment.
@@ -3124,7 +3084,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	if !managedModelSelection && agentID != "" && agentID != "auto" && h.taskRepo != nil {
 		newAgentID := agent.ID
 		if task.AgentID == nil || *task.AgentID != newAgentID {
-			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), taskID, newAgentID); updErr != nil {
+			if updErr := h.taskRepo.UpdateAgentID(ctx, taskID, newAgentID); updErr != nil {
 				applog.Infof("[handler] TaskThreadSend error persisting selected model task=%s agent=%s: %v", taskID, newAgentID, updErr)
 			} else {
 				task.AgentID = &newAgentID
@@ -3132,7 +3092,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
-	admission, err := h.admitTaskFollowup(c.Request().Context(), taskFollowupAdmissionRequest{
+	admission, err := h.admitTaskFollowup(ctx, taskFollowupAdmissionRequest{
 		Task:                task,
 		Agent:               agent,
 		Message:             message,
@@ -3145,34 +3105,34 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 			switch admissionErr.Op {
 			case taskFollowupAdmissionOpActiveCheck:
 				applog.Infof("[handler] TaskThreadSend active execution check failed task=%s: %v", taskID, admissionErr.Err)
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
+				return threadSendResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
 			case taskFollowupAdmissionOpFirstTurnCheck:
 				applog.Infof("[handler] TaskThreadSend first-turn state check failed task=%s: %v", taskID, admissionErr.Err)
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
+				return threadSendResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
 			case taskFollowupAdmissionOpQueueUnavailable:
-				return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+				return threadSendResult{}, echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
 			case taskFollowupAdmissionOpQueueCreate:
 				applog.Infof("[handler] TaskThreadSend error creating queued input: %v", admissionErr.Err)
-				if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+				if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(ctx, sessionID); cleanupErr != nil {
 					applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s: %v", sessionID, cleanupErr)
 				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
+				return threadSendResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
 			case taskFollowupAdmissionOpDirectAdmission:
 				applog.Infof("[handler] TaskThreadSend error admitting execution: %v", admissionErr.Err)
-				if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+				if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(ctx, sessionID); cleanupErr != nil {
 					applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s after admission failure: %v", sessionID, cleanupErr)
 				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+				return threadSendResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
 			case taskFollowupAdmissionOpSwarmChildRouting:
 				applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, admissionErr.Err)
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
+				return threadSendResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 			}
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+		return threadSendResult{}, echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
 	}
 	if admission.Queued != nil {
 		queued := admission.Queued
-		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID, queued.AuthorName))
+		return threadSendResult{Task: task, Message: message, Queued: queued}, nil
 	}
 	exec := admission.Execution
 	task = admission.Task
@@ -3185,15 +3145,15 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	if sessionID != "" {
 		applog.Infof("[handler] TaskThreadSend processing attachments for session=%s", sessionID)
 		var attErr error
-		attachmentContext, imageAttachments, chatAttachments, attErr = h.processTaskThreadAttachments(c.Request().Context(), sessionID, exec.ID)
+		attachmentContext, imageAttachments, chatAttachments, attErr = h.processTaskThreadAttachments(ctx, sessionID, exec.ID)
 		if attErr != nil {
 			applog.Infof("[handler] TaskThreadSend error processing attachments: %v", attErr)
 			message = message + fmt.Sprintf("\n\n⚠️ Attachment processing error: %v", attErr)
 		}
 	}
 
-	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")
-	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
+	h.resumeUserStoppedGoalForManualStart(ctx, taskID, models.TaskOriginWeb, "")
+	h.reactivateAchievedGoalForManualFollowup(ctx, taskID, models.TaskOriginWeb, "")
 
 	// Spawn LLM processing goroutine (acquires per-model worker slot in processStreamingResponse).
 	// DeferHistoryLoad=true moves the full ListByTaskChronological scan, agent-definition
@@ -3201,7 +3161,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	// HTTP handler and into the background goroutine, eliminating the per-execution O(N) block
 	// that caused visible UI hangs on tasks with many prior executions.
 	if err := h.startStreamingResponse(streamingResponseParams{
-		PrincipalID:       h.authPrincipalID(c),
+		PrincipalID:       principalIDFromContext(ctx),
 		ExecID:            exec.ID,
 		TaskID:            taskID,
 		Message:           message,
@@ -3214,54 +3174,63 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		AttachmentContext: attachmentContext,
 		Task:              task,
 	}); err != nil {
-		c.Response().Header().Set("Retry-After", "30")
-		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+		return threadSendResult{}, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
 
-	if c.Get("newTaskThread") == true {
-		c.Response().Header().Set("X-Created-Task-ID", taskID)
-		c.Response().Header().Set("HX-Retarget", "#main-content")
-		c.Response().Header().Set("HX-Reswap", "innerHTML")
-		c.Response().Header().Set("HX-Push-Url", "/tasks/"+taskID+"?project_id="+url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), task.ProjectID)))
-		return h.GetTaskThread(c)
-	}
-
-	return render(c, http.StatusOK, templ.Join(
-		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments, task.ProjectID, *exec),
-		components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true, exec.ID),
-	))
-}
+	return threadSendResult{Task: task, Execution: exec, Message: message, Attachments: chatAttachments}, nil
+})
 
 func (h *Handler) TaskThreadSteer(c echo.Context) error {
-	taskID := c.Param("taskId")
-	message := strings.TrimSpace(c.FormValue("message"))
-	if message == "" {
+	args := threadSteerArgs{TaskRef: TaskRef{TaskID: c.Param("taskId")}, Message: strings.TrimSpace(c.FormValue("message")), ExpectedTurnID: c.FormValue("expected_turn_id"), SessionID: c.FormValue("attachment_session_id")}
+	if args.Message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
-	if h.threadInputRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-	}
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	input, err := actThreadSteer(h, h.actionCtx(c), args)
 	if err != nil {
 		return err
 	}
-	if task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, input.Content, input.AttachmentSessionID != "", args.TaskID, input.AuthorName))
+}
+
+type threadSteerArgs struct {
+	TaskRef
+	Message        string `remote:"raw"`
+	ExpectedTurnID string
+	SessionID      string
+}
+
+func (a threadSteerArgs) ref() TaskRef { return a.TaskRef }
+
+var actThreadSteer = defineAction("thread.steer", ownTaskRef[threadSteerArgs], func(h *Handler, ctx context.Context, a threadSteerArgs) (*models.ThreadInput, error) {
+	taskID := a.TaskID
+	message := strings.TrimSpace(a.Message)
+	if message == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
-	active, err := h.activeConversationTaskExecution(c.Request().Context(), taskID)
+	if h.threadInputRepo == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+	}
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	active, err := h.activeConversationTaskExecution(ctx, taskID)
 	if err != nil {
 		applog.Infof("[handler] TaskThreadSteer active execution check failed task=%s: %v", taskID, err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
 	}
 	if active == nil {
-		return echo.NewHTTPError(http.StatusConflict, "no active response to steer; send a normal follow-up instead")
+		return nil, echo.NewHTTPError(http.StatusConflict, "no active response to steer; send a normal follow-up instead")
 	}
-	expectedTurnID := c.FormValue("expected_turn_id")
+	expectedTurnID := a.ExpectedTurnID
 	if expectedTurnID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 	}
 	if expectedTurnID != active.ID {
-		return echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
+		return nil, echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
 	}
 	input := &models.ThreadInput{
 		Scope:               models.ThreadInputScopeTask,
@@ -3273,21 +3242,21 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 		TurnID:              active.ID,
 		ExpectedTurnID:      expectedTurnID,
 		Content:             message,
-		AttachmentSessionID: c.FormValue("attachment_session_id"),
+		AttachmentSessionID: a.SessionID,
 	}
-	if err := h.saveConversationSteering(c, input, active); err != nil {
+	if err := h.saveSteering(ctx, input, active); err != nil {
 		applog.Infof("[handler] TaskThreadSteer error creating steering input: %v", err)
 		var httpErr *echo.HTTPError
 		if errors.As(err, &httpErr) {
-			return httpErr
+			return nil, httpErr
 		}
 		if errors.Is(err, persistence.ErrExpectedTurnEmpty) {
-			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}
 		if errors.Is(err, persistence.ErrNoActiveTurn) || errors.Is(err, persistence.ErrActiveTurnChanged) {
-			return echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
+			return nil, echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")
 	}
 	if h.broadcaster != nil {
 		h.broadcaster.Publish(events.TaskEvent{
@@ -3300,8 +3269,8 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, message, input.AttachmentSessionID != "", taskID, input.AuthorName))
-}
+	return input, nil
+})
 
 // GetTaskThread returns the task thread view (for polling updates)
 func (h *Handler) GetTaskThread(c echo.Context) error {
@@ -3590,8 +3559,8 @@ func (h *Handler) TaskListPanel(c echo.Context) error {
 	for _, task := range tasks {
 		menus[task.ID] = components.TaskListMenuItems(task)
 	}
-	if projectID == models.AllProjectsID {
-		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
+	if models.IsAggregateProject(projectID) {
+		projects, err := h.workspaceProjectOptions(c.Request().Context(), projectID)
 		if err != nil {
 			return err
 		}

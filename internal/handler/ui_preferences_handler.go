@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -137,6 +138,26 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		for _, project := range projects {
 			available[project.ID] = true
 		}
+		servers := h.remoteServerGroups(ctx)
+		for _, server := range servers {
+			for _, project := range server.Projects {
+				available[project.ID] = true
+			}
+		}
+		// A shared tab stays pinned while any one of its copies is reachable.
+		for _, shared := range h.repoGroups(ctx, servers) {
+			available[shared.ID] = true
+		}
+		// Tabs of saved servers that are not connected yet stay until they can be checked.
+		waiting, err := h.waitingServers(ctx, servers)
+		if err != nil {
+			return err
+		}
+		wasPinned := map[string]bool{}
+		for _, id := range h.pinnedProjectIDs(ctx) {
+			wasPinned[id] = true
+		}
+		pendingRepositories := h.repositoryLookupsPending(ctx)
 		seen := make(map[string]bool)
 		valid := make([]string, 0, len(*req.PinnedProjectIDs))
 		for _, id := range *req.PinnedProjectIDs {
@@ -145,7 +166,10 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 			}
 			seen[id] = true
 			// Other windows may retain IDs deleted after their catalog was rendered.
-			if available[id] {
+			server, remote := remoteid.ServerOf(id)
+			_, serverWaiting := waiting[server]
+			// A pinned repository tab with every copy offline stays until its servers return.
+			if available[id] || remote && serverWaiting || models.IsSharedProjectID(id) && (len(waiting) > 0 || pendingRepositories) && wasPinned[id] {
 				valid = append(valid, id)
 			}
 		}
@@ -191,7 +215,7 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		if project == nil && projectID != models.AllProjectsID {
+		if project == nil && h.virtualProject(ctx, projectID) == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid project")
 		}
 		if err := h.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, projectID); err != nil {
@@ -199,4 +223,86 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		}
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// ProjectCatalog returns the project picker's options and shared-copy map so
+// open pages can follow saved servers coming and going without reloading.
+func (h *Handler) ProjectCatalog(c echo.Context) error {
+	ctx := c.Request().Context()
+	projects, err := h.projectSvc.ListSelectorOptions(ctx)
+	if err != nil {
+		return err
+	}
+	servers := h.remoteServerGroups(ctx)
+	ctx = layout.WithDesktopMode(ctx, h.desktopMode)
+	ctx = layout.WithRemoteServers(ctx, servers)
+	ctx = layout.WithSharedProjects(ctx, h.repoGroups(ctx, servers))
+	c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return layout.ProjectCatalog(projects, c.QueryParam("current")).Render(ctx, c.Response().Writer)
+}
+
+func (h *Handler) pinnedProjectIDs(ctx context.Context) []string {
+	if h.settingsRepo == nil {
+		return nil
+	}
+	raw, err := h.settingsRepo.Get(ctx, uiPreferencePinnedProjectIDsKey)
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	_ = json.Unmarshal([]byte(raw), &ids)
+	return ids
+}
+
+// projectRemembered reports a pinned tab or the last open project.
+func (h *Handler) projectRemembered(ctx context.Context, id string) bool {
+	if h.settingsRepo == nil {
+		return false
+	}
+	if selected, err := h.settingsRepo.Get(ctx, uiPreferenceSelectedProjectIDKey); err == nil && strings.TrimSpace(selected) == id {
+		return true
+	}
+	for _, pinned := range h.pinnedProjectIDs(ctx) {
+		if pinned == id {
+			return true
+		}
+	}
+	return false
+}
+
+// sharedTabOf names the combined tab a project belongs to, or "".
+func (h *Handler) sharedTabOf(ctx context.Context, projectID string) string {
+	for _, p := range h.repoGroups(ctx, h.remoteServerGroups(ctx)) {
+		if sharedHasMember(&p, projectID) {
+			return p.ID
+		}
+	}
+	return ""
+}
+
+// unpinDeletedProject closes a deleted project's tab, and its combined tab
+// once no reachable copy is left; copies on offline servers do not count.
+func (h *Handler) unpinDeletedProject(ctx context.Context, projectID, tab string) {
+	ids := h.pinnedProjectIDs(ctx)
+	if ids == nil {
+		return
+	}
+	dropTab := tab != "" && h.sharedProject(ctx, tab) == nil && !h.repositoryLookupsPending(ctx)
+	kept := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != projectID && !(dropTab && id == tab) {
+			kept = append(kept, id)
+		}
+	}
+	if len(kept) == len(ids) {
+		return
+	}
+	value, err := json.Marshal(kept)
+	if err != nil {
+		return
+	}
+	if err := h.settingsRepo.Set(ctx, uiPreferencePinnedProjectIDsKey, string(value)); err != nil {
+		applog.Infof("[handler] unpin deleted project %s: %v", projectID, err)
+	}
 }

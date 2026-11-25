@@ -135,16 +135,77 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  arrow.click();
  const projectOption=document.querySelector('#task-property-picker [data-options="destination_project"] button[data-value="` + project.ID + `"]');
  await wait(()=>projectOption.getClientRects().length>0);
+ const originalModelFetch=window.fetch;
+ let requestedModelProject='';
+ window.fetch=function(input,options){
+  const url=new URL(String(input),location.href);
+  if(url.searchParams.get('agent_options')==='1') {
+   return Promise.resolve(new Response(JSON.stringify([{id:'destination-agent',name:'Destination agent',scope:'global',project:''}]),{status:200}));
+  }
+  if(url.searchParams.get('model_options')==='1') {
+   requestedModelProject=url.searchParams.get('project_id');
+   return Promise.resolve(new Response('<li data-value="default">Default</li><li data-value="destination-model" data-picker-name="Destination model" data-picker-model="destination-model" data-picker-provider="openai">Destination model</li>',{status:200}));
+  }
+  return originalModelFetch(input,options);
+ };
+ const chainForm=document.querySelector('[data-chain-form]');
+ const chainModels=chainForm.elements.chain_child_agent_id;
+ chainModels.add(new Option('Old server model','old-server-model'));
+ chainModels.value='old-server-model';
+ chainForm.elements.chain_child_model.value='old-provider-model';
+ chainForm.elements.chain_enabled.value='true';
+ chainForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+ assert(document.querySelector('[data-chain-draft="chain_child_agent_id"]').value==='old-server-model','chain setup failed');
+ document.getElementById('task-thread-form-agent-id').value='old-server-model';
+ const agentInput=document.querySelector('[data-draft-property="agent_definition_id"]');
+ agentInput.value='old-server-agent';
  projectOption.click();
+ await wait(()=>document.querySelector('[data-options="agent_definition_id"] [data-value="destination-agent"]'));
+ assert(agentInput.value==='','old agent would be submitted');
+ const agentMenu=document.querySelector('[data-options="agent_definition_id"]');
+ assert(agentMenu.children.length===2,'old agents retained');
+ assert(!document.querySelector('[data-detail-property="agent_definition_id"]').disabled,'agent picker still disabled');
+ await wait(()=>!document.getElementById('task-thread-form-agent-select').disabled && document.querySelector('li[data-value="destination-model"]'));
+ assert(requestedModelProject==='` + project.ID + `','model request used wrong project');
+ assert(chainModels.options.length===2 && chainModels.options[1].value==='destination-model','chain models were not refreshed');
+ assert(chainModels.value==='' && !chainModels.disabled,'chain model was not reset');
+ assert(document.querySelector('[data-chain-draft="chain_child_agent_id"]').value==='','old chain model would be submitted');
+ assert(document.querySelector('[data-chain-draft="chain_child_model"]').value==='','old chain override would be submitted');
+ assert(document.querySelector('[data-chain-draft="chain_enabled"]').value==='true','destination change removed chaining');
+ assert(document.querySelector('[data-chain-model]').textContent==='Model: Use default model','chain label stayed stale');
+ // Opening the editor must not restore the old selection from its internal state.
+ document.querySelector('[data-chain-open]').click();
+ assert(chainModels.value==='' && chainForm.elements.chain_child_model.value==='','chain editor restored stale values');
+ document.getElementById('task-chain-editor').close();
+
+ assert(document.getElementById('task-thread-form-agent-id').value==='default','old server model was retained');
+ const detailModelRow=document.querySelector('[data-detail-property="agent_id"]');
+ assert(detailModelRow.dataset.value==='default','Details retained the old model');
+ const detailModels=document.querySelector('#task-property-picker [data-options="agent_id"]');
+ assert(detailModels.querySelectorAll('button').length===2,'Details retained old server options');
+ assert(detailModels.querySelector('[data-value="destination-model"]'),'destination model missing from Details');
+ detailModelRow.click();
+ await wait(()=>detailModels.querySelector('[data-value="destination-model"]').getClientRects().length>0);
+ detailModels.querySelector('[data-value="destination-model"]').click();
+ assert(document.getElementById('task-thread-form-agent-id').value==='destination-model','Details did not update composer model');
+ assert(document.getElementById('task-thread-form-agent-select').dataset.currentValue==='destination-model','composer label retained old model');
+
+ window.fetch=originalModelFetch;
  await wait(()=>document.getElementById('new-task-project').value==='` + project.ID + `');
  assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','project label did not update');
  assert(new FormData(document.getElementById('task-thread-form')).get('destination_project')==='` + project.ID + `','destination not submitted');
  assert(document.getElementById('project-selector').value==='__all_projects__','project picker switched tabs');
- // A blocked Send resumes once the destination is selected, exactly once.
+ // The composer project picker mirrors the Details choice.
+ const composerProject=document.getElementById('task-thread-form-project-select');
+ assert(composerProject,'composer project picker missing');
+ assert(composerProject.textContent.trim()==='Second browser project','composer picker did not follow Details');
+ // A blocked Send opens the composer picker and resumes once the project is chosen, exactly once.
  const draftForm=document.getElementById('task-thread-form');
  const destination=document.getElementById('new-task-project');
- destination.value='';
- document.getElementById('task-message-input').value='Run after choosing the project';
+ destination.value='';destination.dispatchEvent(new Event('change',{bubbles:true}));
+ assert(composerProject.textContent.trim()==='Choose a project','composer picker kept cleared project');
+ const message=document.getElementById('task-message-input');
+ message.value='Run after choosing the project';message.dispatchEvent(new Event('input',{bubbles:true}));
  let resumedRequests=[];
  const captureSend=function(event){
   if(event.detail.elt!==draftForm)return;
@@ -152,25 +213,29 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
   resumedRequests.push(event.detail.requestConfig.parameters);
  };
  draftForm.addEventListener('htmx:beforeRequest',captureSend);
- draftForm.requestSubmit();
- await wait(()=>projectOption.getClientRects().length>0);
+ const composerOption=()=>document.querySelector('#chat-custom-select-panel li[data-value="` + project.ID + `"]');
+ message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ await wait(()=>composerOption() && composerOption().getClientRects().length>0);
  assert(resumedRequests.length===0,'request sent before choosing owner');
- projectOption.click();
+ composerOption().click();
  await wait(()=>resumedRequests.length===1);
  assert(resumedRequests[0].destination_project==='` + project.ID + `','resumed send lost project');
  assert(resumedRequests[0].category==='active','resumed send lost Active category');
  assert(resumedRequests[0].message==='Run after choosing the project','resumed send lost message');
+ assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','Details did not follow composer picker');
  destination.dispatchEvent(new Event('change',{bubbles:true}));
  await new Promise(resolve=>setTimeout(resolve,80));
  assert(resumedRequests.length===1,'selection sent twice');
- // Cancelling the picker cancels the pending Send, not the draft.
- destination.value='';
- draftForm.requestSubmit();
- await wait(()=>projectOption.getClientRects().length>0);
- projectOption.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
- projectRow.click();
- await wait(()=>projectOption.getClientRects().length>0);
- projectOption.click();
+ // Closing the picker cancels the pending Send, not the draft.
+ destination.value='';destination.dispatchEvent(new Event('change',{bubbles:true}));
+ message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ await wait(()=>composerOption() && composerOption().getClientRects().length>0);
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+ await wait(()=>!composerOption());
+ assert(message.value==='Run after choosing the project','cancel lost the draft');
+ composerProject.click();
+ await wait(()=>composerOption() && composerOption().getClientRects().length>0);
+ composerOption().click();
  await new Promise(resolve=>setTimeout(resolve,80));
  assert(resumedRequests.length===1,'cancelled send resumed on later selection');
  draftForm.removeEventListener('htmx:beforeRequest',captureSend);

@@ -8,6 +8,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/stretchr/testify/require"
@@ -174,4 +175,16 @@ func TestChatProjectSelectionRechecksSelectedProjectBeforeCache(t *testing.T) {
 	require.False(t, h.liveEventVisible(ctx, visible, frame), "an access change clears the cached decision")
 	require.False(t, h.liveEventVisible(ctx, visible, liveFrame{Data: events.TaskEvent{TaskName: "no project"}}))
 	require.True(t, h.liveEventVisible(ctx, visible, liveFrame{Event: "ready"}))
+
+	alice := models.WithPrincipal(t.Context(), models.Principal{UserID: models.BootstrapUserID})
+	remoteProject := remoteid.ID("0123456789abcdef", "p1")
+	for _, data := range []any{
+		events.TaskEvent{ProjectID: remoteProject, TaskName: "remote", RemoteUserID: models.BootstrapUserID},
+		events.ChatEvent{ProjectID: remoteProject, RemoteUserID: models.BootstrapUserID},
+	} {
+		frame := liveFrame{Data: data}
+		require.True(t, h.liveEventVisible(alice, visible, frame), "the socket owner sees remote events")
+		require.False(t, h.liveEventVisible(ctx, visible, frame), "other local users never see another user's remote events")
+	}
+	require.False(t, h.liveEventVisible(alice, visible, liveFrame{Data: events.TaskEvent{ProjectID: remoteProject}}), "remote events without an owner are dropped")
 }

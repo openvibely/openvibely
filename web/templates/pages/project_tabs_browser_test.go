@@ -700,3 +700,45 @@ func TestBrowserFunctional_AllProjectsTabCanCloseAndReopen(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_CombinedTabMenuOpensEachCopysSettings(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	const tab, remote = "__repo_0123456789abcdef", "r-0123456789abcdef-p"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		if strings.HasSuffix(r.URL.Path, "/edit") {
+			fmt.Fprintf(w, `<div id="settings-project">%s</div>`, r.URL.Path)
+			return
+		}
+		if r.URL.Path != "/tasks" {
+			w.WriteHeader(204)
+			return
+		}
+		if r.Header.Get("HX-Request") == "true" {
+			fmt.Fprint(w, `<div></div>`)
+			return
+		}
+		ctx := layout.WithUIPreferences(layout.WithDesktopMode(context.Background(), true), layout.UIPreferences{PinnedProjectIDs: []string{"b", tab}})
+		ctx = layout.WithSharedProjects(ctx, []layout.SharedProject{{ID: tab, Name: "Foo", Members: []layout.SharedMember{{ID: "a", Name: "Foo", Machine: "This computer"}, {ID: remote, Name: "Foo", Machine: "Pi"}}}})
+		if err := layout.Base("Tasks", []models.Project{{ID: "a", Name: "Foo"}, {ID: "b", Name: "Bar"}}, "b").Render(ctx, w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id=b", "combined-tab-menu", func(b *composerFocusCDP) {
+		b.waitFor("combined tab", `String(typeof window.openVibelyProjectTabsSync==='function' && !!document.querySelector('[data-project-tab="`+tab+`"]'))`, "true")
+		openMenu := func(id string) {
+			b.evaluate(`(function(){var t=document.querySelector('[data-project-tab="` + id + `"]'),r=t.getBoundingClientRect();t.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+10,clientY:r.y+10}));return 'ok';})()`)
+		}
+		visibleItems := `document.getElementById('project-tab-menu').matches(':popover-open') && Array.from(document.querySelectorAll('#project-tab-menu [role=menuitem]:not([hidden])')).map(i=>i.textContent).join('|')`
+		openMenu(tab)
+		b.waitFor("one item per copy", visibleItems, "Settings · This computer|Settings · Pi")
+		b.click(`[data-project-settings-copy="` + remote + `"]`)
+		b.waitFor("Pi copy settings", `document.getElementById('settings-project')?.textContent || ''`, "/projects/"+remote+"/edit")
+		openMenu("b")
+		b.waitFor("normal tab keeps single item", visibleItems, "Project Settings")
+	})
+}

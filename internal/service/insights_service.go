@@ -1166,6 +1166,9 @@ func parseIdeaGradeResponse(output string) (*models.IdeaGrade, error) {
 }
 
 func insightsScopePrompt(projectID, prompt string) string {
+	if models.IsSharedProjectID(projectID) {
+		return "This is one combined analysis of every copy of one repository, kept on several machines. Produce one overall assessment.\n\n" + prompt
+	}
 	if projectID == models.AllProjectsID {
 		return "This is one combined analysis of all projects. The metrics and tasks below span all projects. Produce one overall assessment, not separate reports per project. Do not treat this scope as a single repository.\n\n" + prompt
 	}

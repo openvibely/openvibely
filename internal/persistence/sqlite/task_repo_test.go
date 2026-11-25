@@ -2127,6 +2127,13 @@ func TestTaskRepo_CountPendingByProject(t *testing.T) {
 	if len(counts) != 2 {
 		t.Errorf("expected 2 projects in map, got %d", len(counts))
 	}
+
+	for projectID, want := range map[string]int{"default": 3, project2.ID: 1, "missing": 0} {
+		got, err := repo.CountPendingForProject(ctx, projectID)
+		if err != nil || got != want {
+			t.Errorf("CountPendingForProject(%s) = %d, %v; want %d", projectID, got, err, want)
+		}
+	}
 }
 
 func TestTaskRepo_Delete(t *testing.T) {

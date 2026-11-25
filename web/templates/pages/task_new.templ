@@ -8,12 +8,13 @@ import (
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/internal/persistence"
  "github.com/openvibely/openvibely/web/templates/layout"
+ templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 func newTaskPostURL(ctx context.Context, projectID string) string {
- if layout.WorkspaceProjectID(ctx, projectID) != models.AllProjectsID { return fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", projectID) }
+ if !models.IsAggregateProject(layout.WorkspaceProjectID(ctx, projectID)) { return fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", projectID) }
  q := url.Values{"project_id": {layout.WorkspaceProjectID(ctx, projectID)}, "from": {"new"}, "thread": {"1"}}
- if projectID != models.AllProjectsID { q.Set("destination_project", projectID) }
+ if !models.IsAggregateProject(projectID) { q.Set("destination_project", projectID) }
  return "/tasks?" + q.Encode()
 }
 
@@ -79,6 +80,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      FormID: "task-thread-form", InputID: "task-message-input",
      PostEndpoint: newTaskPostURL(ctx, project.ID),
      TargetID: "main-content", DiscardDraftOnLeave: true, SelectedAgentID: "default", DefaultAgentID: projectDefaultAgentID(project), Agents: agents, ShowModelSelector: true,
+     ProjectChoices: newTaskProjectChoices(ctx, project), ProjectInputID: "new-task-project",
     })
    </div>
   </div>
@@ -89,36 +91,111 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     var root = document.getElementById('task-detail-content');
     var destination = root.querySelector('#new-task-project');
     if (destination) {
-     destination.addEventListener('invalid', function() {
-      window.taskWorkspace.openPanel('details');
-     });
-     var form = root.querySelector('#task-thread-form');
-     var pendingSend = false;
-     var projectPicker = root.querySelector('#task-property-picker');
-     form.addEventListener('htmx:configRequest', function(event) {
-      if (!destination.value) {
-       event.preventDefault();
-       pendingSend = true;
-       window.taskWorkspace.openPanel('details');
-       root.querySelector('[data-detail-property="destination_project"]').click();
-      }
-     });
-     destination.addEventListener('change', function() {
-      if (!pendingSend || !destination.value) return;
-      pendingSend = false;
-      // Let the property picker finish updating the draft and close first.
-      queueMicrotask(function() {
-       if (root.isConnected && destination.value) form.requestSubmit();
+     var modelRequest = 0;
+     function syncDetailModels(options, loading) {
+      root.querySelector('#task-chain-panel')?.dispatchEvent(new CustomEvent('draft-destination-models', {detail: {
+       loading: loading,
+       models: Array.from(options.querySelectorAll('li[data-value]')).filter(function(option) {
+        return option.dataset.value !== 'default' && option.dataset.value !== 'auto';
+       }).map(function(option) { return {id: option.dataset.value, name: option.dataset.pickerName || option.textContent}; })
+      }}));
+      var menu = root.querySelector('#task-property-picker [data-options="agent_id"]');
+      var row = root.querySelector('[data-detail-property="agent_id"]');
+      if (!menu || !row) return;
+      menu.replaceChildren();
+      options.querySelectorAll('li[data-value]').forEach(function(option) {
+       var button = document.createElement('button');
+       button.type = 'button';
+       button.className = 'ov-menu-option w-full';
+       button.dataset.value = option.dataset.value === 'auto' ? '' : option.dataset.value;
+       button.textContent = option.dataset.pickerName || option.textContent;
+       menu.appendChild(button);
       });
-     });
-     projectPicker.addEventListener('beforetoggle', function(event) {
-      if (event.newState === 'closed' && !destination.value) pendingSend = false;
-     });
-     root.addEventListener('keydown', function(event) {
-      if (event.key === 'Escape') pendingSend = false;
-     }, true);
-     root.addEventListener('pointerdown', function(event) {
-      if (!projectPicker.contains(event.target) && !event.target.closest('[data-detail-property="destination_project"]')) pendingSend = false;
+      row.dataset.value = 'default';
+      row.querySelector('[data-property-label]').textContent = 'Default';
+      row.disabled = loading;
+     }
+     var agentRequest = 0;
+     async function refreshDestinationAgents() {
+      var token = ++agentRequest;
+      var menu = root.querySelector('#task-property-picker [data-options="agent_definition_id"]');
+      var row = root.querySelector('[data-detail-property="agent_definition_id"]');
+      var input = root.querySelector('[data-draft-property="agent_definition_id"]');
+      if (!menu || !row || !input) return;
+      input.value = '';
+      row.dataset.value = '';
+      row.querySelector('[data-property-label]').textContent = 'No agent';
+      row.disabled = true;
+      menu.replaceChildren();
+      var empty = document.createElement('button');
+      empty.type = 'button';
+      empty.className = 'ov-menu-option w-full';
+      empty.dataset.value = '';
+      empty.textContent = 'No agent';
+      menu.appendChild(empty);
+      if (!destination.value) return;
+      try {
+       var response = await fetch('/tasks/new?agent_options=1&project_id=' + encodeURIComponent(destination.value));
+       if (!response.ok) throw new Error('Could not load agents');
+       var agents = await response.json();
+       if (token !== agentRequest || !root.isConnected) return;
+       agents.forEach(function(agent) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ov-menu-option w-full';
+        button.dataset.value = agent.id;
+        button.dataset.agentScope = agent.scope;
+        button.dataset.agentProject = agent.project;
+        button.textContent = agent.name;
+        menu.appendChild(button);
+       });
+       row.disabled = false;
+       row.title = '';
+      } catch (_) {
+       if (token !== agentRequest || !root.isConnected) return;
+       row.querySelector('[data-property-label]').textContent = 'Agents unavailable';
+       row.title = 'Select the project again to retry loading its agents.';
+      }
+     }
+     async function refreshDestinationModels() {
+      var token = ++modelRequest;
+      var picker = root.querySelector('#task-thread-form-agent-select');
+      var input = root.querySelector('#task-thread-form-agent-id');
+      if (!picker || !input) return;
+      window.ovModelPicker?.close();
+      input.value = 'default';
+      window._setChatCustomSelectValue?.(picker, 'default');
+      var options = picker.parentElement.querySelector('.chat-custom-select-options');
+      options.innerHTML = '<li data-value="default">Default</li>';
+      syncDetailModels(options, true);
+      root.querySelectorAll('[name="reasoning_effort"], [name="service_tier"]').forEach(function(field) { field.value = ''; });
+      picker.disabled = true;
+      picker.querySelector('.chat-custom-select-label').textContent = destination.value ? 'Loading models…' : 'Choose a project';
+      if (!destination.value) return;
+      try {
+       var response = await fetch('/tasks/new?model_options=1&project_id=' + encodeURIComponent(destination.value));
+       if (!response.ok) throw new Error('Could not load models');
+       var html = await response.text();
+       if (token !== modelRequest || !root.isConnected) return;
+       options.innerHTML = html;
+       syncDetailModels(options, false);
+       picker.disabled = false;
+       window._setChatCustomSelectValue?.(picker, 'default');
+       window.ovModelPicker?.changed(picker);
+      } catch (_) {
+       if (token !== modelRequest || !root.isConnected) return;
+       picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';
+       picker.title = 'Select the project again to retry loading its models.';
+      }
+     }
+     // The composer picker and the Details row edit the same input.
+     destination.addEventListener('change', function() {
+      refreshDestinationModels();
+      refreshDestinationAgents();
+      var row = destination.closest('[data-detail-property="destination_project"]');
+      var option = root.querySelector('#task-property-picker [data-options="destination_project"] button[data-value="' + CSS.escape(destination.value) + '"]');
+      row.dataset.value = destination.value;
+      row.querySelector('[data-property-label]').textContent = option ? option.textContent : 'Choose a project';
      });
     }
     root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {
@@ -406,7 +483,7 @@ func projectDefaultAgentID(project *models.Project) string {
 
 // Project selection uses the same compact row as the other Task properties.
 templ NewTaskProjectRow(project *models.Project, projects []models.Project) {
- if layout.WorkspaceProjectID(ctx, project.ID) == models.AllProjectsID {
+ if models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) {
   <button type="button" class="task-property-row inspector-property-row" data-detail-property="destination_project" data-value={ newTaskDestinationValue(project) } aria-haspopup="dialog">
    @components.InspectorPropertyContent("Project", newTaskDestinationLabel(project))
    <input type="hidden" id="new-task-project" name="destination_project" form="task-thread-form" data-draft-property="destination_project" value={ newTaskDestinationValue(project) }/>
@@ -414,11 +491,16 @@ templ NewTaskProjectRow(project *models.Project, projects []models.Project) {
  }
 }
 
+func newTaskProjectChoices(ctx context.Context, project *models.Project) []models.Project {
+ if !models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) { return nil }
+ return templateui.ProjectOptions(ctx)
+}
+
 func newTaskDestinationValue(project *models.Project) string {
- if project.ID == models.AllProjectsID { return "" }
+ if models.IsAggregateProject(project.ID) { return "" }
  return project.ID
 }
 func newTaskDestinationLabel(project *models.Project) string {
- if project.ID == models.AllProjectsID { return "Choose a project" }
+ if models.IsAggregateProject(project.ID) { return "Choose a project" }
  return project.Name
 }

@@ -141,8 +141,8 @@ func (r *UpcomingRepo) ListUpcomingScheduledTasks(ctx context.Context, projectID
 }
 
 func (r *UpcomingRepo) listUpcomingTasks(ctx context.Context, query string, args ...any) ([]models.UpcomingTask, error) {
-	if len(args) > 1 && args[1] == models.AllProjectsID {
-		query = strings.ReplaceAll(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID))
+	if aggregate := stringArg(args, 1); models.IsAggregateProject(aggregate) {
+		query = strings.ReplaceAll(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", aggregate))
 	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {

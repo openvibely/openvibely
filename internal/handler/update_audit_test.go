@@ -27,12 +27,12 @@ func TestSystemUpdateAuditBlocksSideEffectsAndSurvivesCancellation(t *testing.T)
 			calls := 0
 			require.NoError(t, h.auditedSystemUpdate(c, operation, func() error {
 				calls++
-				events, err := tc.stores.ProjectAccess.Audit(ctx, project.ID)
+				events, err := tc.stores.ProjectAccess.Audit(ctx, "")
 				require.NoError(t, err)
 				require.Equal(t, "system_update."+operation+".requested", events[0].Action)
 				return nil
 			}))
-			events, err := tc.stores.ProjectAccess.Audit(ctx, project.ID)
+			events, err := tc.stores.ProjectAccess.Audit(ctx, "")
 			require.NoError(t, err)
 			require.Equal(t, "system_update."+operation+".succeeded", events[0].Action)
 			require.Equal(t, models.BootstrapUserID, events[0].ActorUserID)
@@ -44,9 +44,41 @@ func TestSystemUpdateAuditBlocksSideEffectsAndSurvivesCancellation(t *testing.T)
 			failure := errors.New("coordinator failure")
 			err = h.auditedSystemUpdate(c, operation, func() error { cancel(); return failure })
 			require.ErrorIs(t, err, failure)
-			events, err = tc.stores.ProjectAccess.Audit(t.Context(), project.ID)
+			events, err = tc.stores.ProjectAccess.Audit(t.Context(), "")
 			require.NoError(t, err)
 			require.Equal(t, "system_update."+operation+".failed_or_unknown", events[0].Action)
 		})
+	}
+}
+
+func TestSystemUpdateIgnoresSelectedProject(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	h := tc.handler
+	h.SetProjectAccessService(service.NewProjectAccessService(tc.stores.ProjectAccess))
+	h.SetOrganizationService(service.NewOrganizationService(tc.stores.Organizations, "secret"))
+	// No project exists, and the remote is not connected. Neither should be
+	// necessary to administer this instance.
+	for _, operation := range []string{"apply", "cancel"} {
+		for _, selected := range []string{"", "missing", "r-0123456789abcdef-project1", models.AllProjectsID} {
+			t.Run(operation+"/"+selected, func(t *testing.T) {
+				e := echo.New()
+				e.Use(h.remoteRouting)
+				calls := 0
+				path := "/api/system/update/" + operation
+				e.POST(path, func(c echo.Context) error {
+					return h.auditedSystemUpdate(c, operation, func() error { calls++; return nil })
+				})
+				req := httptest.NewRequest("POST", path+"?project_id="+selected, nil)
+				req = req.WithContext(models.WithPrincipal(t.Context(), models.Principal{UserID: models.BootstrapUserID}))
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				require.Equal(t, 200, rec.Code, rec.Body.String())
+				require.Equal(t, 1, calls)
+				events, err := tc.stores.ProjectAccess.Audit(t.Context(), "")
+				require.NoError(t, err)
+				require.Equal(t, "system_update."+operation+".succeeded", events[0].Action)
+				require.Equal(t, "instance", events[0].TargetID)
+			})
+		}
 	}
 }

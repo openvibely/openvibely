@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/remoteid"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"net/http"
 	"strings"
 
@@ -16,19 +19,62 @@ type modelFavoritesRequest struct {
 	ImportIDs []string `json:"import_ids"`
 }
 
-func (h *Handler) GetModelFavorites(c echo.Context) error {
+type modelFavoritesArgs struct {
+	ProjectID   string
+	Request     *modelFavoritesRequest
+	HasFavorite bool
+	HasImport   bool
+}
+
+var actModelFavorites = defineAction("models.favorites", func(h *Handler, ctx context.Context, a modelFavoritesArgs) (string, authz.Permission, error) {
+	return a.ProjectID, authz.View, nil
+}, func(h *Handler, ctx context.Context, a modelFavoritesArgs) (map[string]bool, error) {
+	if a.Request == nil && (a.HasFavorite || a.HasImport) {
+		a.Request = &modelFavoritesRequest{}
+	}
+	if a.Request != nil {
+		if a.HasFavorite && a.Request.Favorite == nil {
+			value := false
+			a.Request.Favorite = &value
+		}
+		if a.HasImport && a.Request.ImportIDs == nil {
+			a.Request.ImportIDs = []string{}
+		}
+		return h.updateModelFavorites(ctx, *a.Request)
+	}
+	value, err := h.settingsRepo.Get(ctx, modelFavoritesSettingKey)
+	if err != nil {
+		return nil, err
+	}
+	return decodeModelFavorites(value)
+})
+
+func (h *Handler) modelFavoritesResponse(c echo.Context, req *modelFavoritesRequest) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "settings unavailable")
 	}
-	value, err := h.settingsRepo.Get(c.Request().Context(), modelFavoritesSettingKey)
+	project := c.QueryParam("project_id")
+	args := modelFavoritesArgs{ProjectID: project, Request: req}
+	if req != nil {
+		args.HasFavorite = req.Favorite != nil
+		args.HasImport = req.ImportIDs != nil
+	}
+	favorites, err := actModelFavorites(h, c.Request().Context(), args)
 	if err != nil {
 		return err
 	}
-	favorites, err := decodeModelFavorites(value)
-	if err != nil {
-		return err
+	if server, ok := remoteid.ServerOf(project); ok {
+		scoped := make(map[string]bool, len(favorites))
+		for id, value := range favorites {
+			scoped[remoteid.ID(server, id)] = value
+		}
+		favorites = scoped
 	}
 	return c.JSON(http.StatusOK, favorites)
+}
+
+func (h *Handler) GetModelFavorites(c echo.Context) error {
+	return h.modelFavoritesResponse(c, nil)
 }
 
 func (h *Handler) SaveModelFavorites(c echo.Context) error {
@@ -42,32 +88,35 @@ func (h *Handler) SaveModelFavorites(c echo.Context) error {
 	if err := dec.Decode(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid favorites payload")
 	}
+	return h.modelFavoritesResponse(c, &req)
+}
+
+func (h *Handler) updateModelFavorites(ctx context.Context, req modelFavoritesRequest) (map[string]bool, error) {
 	if (req.Favorite == nil) == (req.ImportIDs == nil) || len(req.ImportIDs) > 1000 {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid favorites payload")
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid favorites payload")
 	}
 	if req.Favorite != nil {
 		if !validModelFavoriteID(req.ModelID) {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid model ID")
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid model ID")
 		}
 	} else {
 		if req.ModelID != "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid favorites payload")
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid favorites payload")
 		}
 		for _, id := range req.ImportIDs {
 			if !validModelFavoriteID(id) {
-				return echo.NewHTTPError(http.StatusBadRequest, "invalid model ID")
+				return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid model ID")
 			}
 		}
 	}
-	ctx := c.Request().Context()
 	for {
 		old, err := h.settingsRepo.Get(ctx, modelFavoritesSettingKey)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		favorites, err := decodeModelFavorites(old)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if req.Favorite != nil {
 			if *req.Favorite {
@@ -82,14 +131,14 @@ func (h *Handler) SaveModelFavorites(c echo.Context) error {
 		}
 		value, err := json.Marshal(favorites)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		updated, err := h.settingsRepo.CompareAndSet(ctx, modelFavoritesSettingKey, old, string(value), nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if updated {
-			return c.JSON(http.StatusOK, favorites)
+			return favorites, nil
 		}
 	}
 }

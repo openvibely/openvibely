@@ -5,20 +5,22 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/repokey"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type ProjectRepo struct {
-	db *sql.DB
+	db         *sql.DB
+	identities *repokey.Cache
 }
 
 const projectWorkerCapacityProjectsQuery = `SELECT id, name, max_workers
 	FROM projects WHERE id != '__all_projects__' ORDER BY is_default DESC, name ASC`
 
 func NewProjectRepo(db *sql.DB) *ProjectRepo {
-	return &ProjectRepo{db: db}
+	return &ProjectRepo{db: db, identities: repokey.NewCache()}
 }
 
 func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
@@ -41,7 +43,7 @@ func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 	return projects, rows.Err()
 }
 
-const projectAPIProjectsQuery = `SELECT id, name, repo_path, created_at
+const projectAPIProjectsQuery = `SELECT id, name, repo_path, repo_url, created_at
 	FROM projects WHERE id != '__all_projects__' ORDER BY is_default DESC, name ASC`
 
 // ListAPIProjects returns the compact project projection required by
@@ -57,12 +59,22 @@ func (r *ProjectRepo) ListAPIProjects(ctx context.Context) ([]models.ProjectAPII
 	var projects []models.ProjectAPIItem
 	for rows.Next() {
 		var p models.ProjectAPIItem
-		if err := rows.Scan(&p.ID, &p.Name, &p.RepoPath, &p.CreatedAt); err != nil {
+		var repoURL string
+		if err := rows.Scan(&p.ID, &p.Name, &p.RepoPath, &repoURL, &p.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scanning API project: %w", err)
 		}
+		p.RepoKey, p.RepoPending = r.identities.State(p.ID, repoURL, p.RepoPath, repokey.LookupAllowed(ctx))
 		projects = append(projects, p)
 	}
-	return projects, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ids := map[string]bool{}
+	for _, p := range projects {
+		ids[p.ID] = true
+	}
+	r.identities.Retain(ids)
+	return projects, nil
 }
 
 // ListWorkerCapacityProjects returns the project identity, display name, and
@@ -244,7 +256,7 @@ func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
 	if err := models.ValidateProjectWorkerLimit(p.MaxWorkers, 0); err != nil {
 		return err
 	}
-	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		err := tx.QueryRowContext(ctx,
 			`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers, skill_memory_permissions)
 			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, COALESCE(?, '{"read_skills":true,"write_skills":false,"read_memories":true,"write_memories":true}'))
@@ -269,13 +281,17 @@ func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
 		}
 		return nil
 	})
+	if err == nil {
+		r.identities.Updated(p.ID, p.RepoURL, p.RepoPath)
+	}
+	return err
 }
 
 func (r *ProjectRepo) Update(ctx context.Context, p *models.Project) error {
 	if err := models.ValidateProjectWorkerLimit(p.MaxWorkers, 0); err != nil {
 		return err
 	}
-	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		if err := requireProjectMutation(ctx, tx, p.ID, false); err != nil {
 			return err
 		}
@@ -315,6 +331,10 @@ func (r *ProjectRepo) Update(ctx context.Context, p *models.Project) error {
 		}
 		return nil
 	})
+	if err == nil {
+		r.identities.Updated(p.ID, p.RepoURL, p.RepoPath)
+	}
+	return err
 }
 
 func (r *ProjectRepo) Delete(ctx context.Context, id string) error {
@@ -488,6 +508,7 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 	if len(manifest.TaskIDs) > 0 {
 		requestDeletionCleanup(r.db)
 	}
+	r.identities.Removed(id)
 	return manifest, true, nil
 }
 
@@ -518,4 +539,9 @@ func projectPermissionJSON(p *models.Project) any {
 	}
 	data, _ := json.Marshal(p.SkillMemoryPermissions)
 	return string(data)
+}
+
+// SubscribeRepositoryChanges reports changes without exposing any project data.
+func (r *ProjectRepo) SubscribeRepositoryChanges() (<-chan struct{}, func()) {
+	return r.identities.Subscribe()
 }

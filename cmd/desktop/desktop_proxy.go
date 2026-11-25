@@ -49,6 +49,10 @@ func desktopAssetProxy(backendURL *url.URL) http.Handler {
 		r = r.Clone(r.Context())
 		trusted := desktopTrustedRequest(r)
 		if desktopAuthPath(r.URL.Path) && !trusted {
+			if r.Header.Get("HX-Request") == "true" {
+				w.Header().Set("HX-Reswap", "none")
+				w.Header().Set("HX-Trigger", `{"openvibelyToast":{"message":"Desktop request rejected. Reload the window and try again.","status":"failed"}}`)
+			}
 			http.Error(w, "same-origin desktop request required", http.StatusForbidden)
 			return
 		}
@@ -71,7 +75,7 @@ func desktopAssetProxy(backendURL *url.URL) http.Handler {
 			}
 		}
 		cookieMu.Unlock()
-		// Translate only the authentication/organization origin checks. Other
+		// Translate authentication, organization, and saved-server origin checks. Other
 		// native routes use the original Wails origin for their capabilities.
 		if trusted && desktopAuthPath(r.URL.Path) {
 			// WebKit omits both headers on same-origin XMLHttpRequest (HTMX).
@@ -213,5 +217,5 @@ func desktopOriginMatches(u *url.URL, host string) bool {
 }
 
 func desktopAuthPath(path string) bool {
-	return path == "/login" || path == "/logout" || path == "/invite" || path == "/organization" || strings.HasPrefix(path, "/organization/")
+	return path == "/servers" || strings.HasPrefix(path, "/servers/") || path == "/login" || path == "/logout" || path == "/invite" || path == "/organization" || strings.HasPrefix(path, "/organization/")
 }

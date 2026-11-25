@@ -263,7 +263,17 @@ func (r *OrganizationRepo) CreateSession(ctx context.Context, hash, id string, e
 	})
 }
 func (r *OrganizationRepo) SessionUser(ctx context.Context, hash string, now int64) (*models.OrgUser, error) {
-	return scanOrgUser(r.db.QueryRowContext(ctx, orgUserSelect+`JOIN user_sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>? AND u.disabled=0 AND m.org_id='default'`, hash, now))
+	query := strings.Replace(orgUserSelect, "SELECT ", "SELECT s.expires_at,", 1) + `JOIN user_sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>? AND u.disabled=0 AND m.org_id='default'`
+	u := &models.OrgUser{}
+	err := r.db.QueryRowContext(ctx, query, hash, now).Scan(&u.SessionExpiresAt, &u.UserID, &u.OrgID, &u.Username, &u.DisplayName, &u.Role, &u.PasswordHash, &u.Disabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return u, err
+}
+func (r *OrganizationRepo) ExtendSession(ctx context.Context, hash string, now, expires int64) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE user_sessions SET expires_at=? WHERE token_hash=? AND expires_at>? AND expires_at<?`, expires, hash, now, expires)
+	return err
 }
 func (r *OrganizationRepo) RevokeSession(ctx context.Context, hash string) error {
 	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM user_sessions WHERE token_hash=?`, hash)

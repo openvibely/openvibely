@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
+	templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 func TestBrowserFunctional_NewTaskPastedTextProjectSelection(t *testing.T) {
@@ -24,7 +25,7 @@ func TestBrowserFunctional_NewTaskPastedTextProjectSelection(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/tasks/new":
-			if err := NewTask([]models.Project{project}, &all, agents, nil).Render(r.Context(), w); err != nil {
+			if err := NewTask([]models.Project{project}, &all, agents, nil).Render(templateui.WithProjectNames(r.Context(), []models.Project{project}), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks":
@@ -51,12 +52,12 @@ func TestBrowserFunctional_NewTaskPastedTextProjectSelection(t *testing.T) {
 		b.evaluate(`(function(){const input=document.getElementById('task-message-input'),data=new DataTransfer();input.value='Instructions';data.setData('text/plain','pasted context '.repeat(500));input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));return 'pasted';})()`)
 		b.waitFor("pasted preview visible", `String((function(){const card=document.querySelector('[aria-label="Edit pasted text"]');return !!card && card.getBoundingClientRect().height>0 && !card.closest('[hidden], .hidden');})())`, "true")
 		b.evaluate(`document.getElementById('task-thread-form').requestSubmit();'submitted'`)
-		b.waitFor("project picker", `String(document.querySelector('#task-property-picker')?.matches(':popover-open'))`, "true")
+		b.waitFor("project picker", `String(document.getElementById('task-thread-form-project-select')?.getAttribute('aria-expanded'))`, "true")
 		if sends.Load() != 0 {
 			t.Fatal("sent before selecting project")
 		}
 		b.waitFor("draft retained", `String(document.getElementById('task-thread-form')._captureChatSubmission().message==='Instructions\n\n'+'pasted context '.repeat(500))`, "true")
-		b.evaluate(`(function(){const destination=document.getElementById('new-task-project');destination.value='paste-project';destination.dispatchEvent(new Event('change',{bubbles:true}));return 'selected';})()`)
+		b.evaluate(`(function(){document.querySelector('#chat-custom-select-panel li[data-value="paste-project"]').click();return 'selected';})()`)
 		b.waitFor("retried submission accepted", `String(!!document.getElementById('accepted-paste'))`, "true")
 		if sends.Load() != 1 {
 			t.Fatalf("expected one send, got %d", sends.Load())

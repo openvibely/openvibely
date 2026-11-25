@@ -65,7 +65,7 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup, menus ...ma
 
 func taskListRowURL(projectID string, task models.Task) string {
     path := fmt.Sprintf("/tasks/%s?from=tasks", task.ID)
-    if projectID == models.AllProjectsID { path += "&project_id=" + url.QueryEscape(projectID) }
+    if models.IsAggregateProject(projectID) { path += "&project_id=" + url.QueryEscape(projectID) }
     return path
 }
 
@@ -203,7 +203,7 @@ templ TaskListPanel(currentProjectID string) {
             var settingsRequest = null;
             function isSettingsURL(value) {
                 var path = new URL(value, location.href).pathname;
-                return /^\/(themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(path);
+                return /^\/(servers|themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(path);
             }
             window.isSettingsWorkspaceURL = isSettingsURL;
             // Keep the workspace connected: its drafts, live subscriptions and
@@ -337,7 +337,7 @@ templ TaskListPanel(currentProjectID string) {
             var inContextSidebar = false;
             var contextChanges = null;
             var wasCollapsed = false;
-            var workspaceURL = /^\/(themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
+            var workspaceURL = /^\/(servers|themes|shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
             var workspaceURLs = new Map();
             function workspaceProject(value) {
                 return new URL(value, location.href).searchParams.get('project_id') || (document.getElementById('project-selector') || {}).value || '';
@@ -387,7 +387,7 @@ templ TaskListPanel(currentProjectID string) {
                 var reviewing = !settingsPane && !!changes && !changes.classList.contains('hidden');
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
-                var settings = appearance || workers || !!document.querySelector('#main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container, #main-content #plugin-settings, #main-content #computer-settings-content, #main-content #update-settings-content');
+                var settings = appearance || workers || !!document.querySelector('#main-content #servers-container, #main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container, #main-content #plugin-settings, #main-content #computer-settings-content, #main-content #update-settings-content');
                 var active = reviewing || settings;
                 if (active && !inContextSidebar) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');
@@ -1083,7 +1083,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 menu.replaceChildren(template.content.cloneNode(true));
                 // Keep ownership explicit even when browsing All projects or another task.
                 contextMenu.setAttribute('hx-vals', JSON.stringify({project_id: row.dataset.taskOwnerProject}));
-                if (currentProjectID() === '__all_projects__') {
+                if (window.openVibelyIsAggregateProject(currentProjectID())) {
                     menu.querySelectorAll('a[hx-get]').forEach(function(link) {
                         var url = link.getAttribute('hx-get') + '&project_id=' + encodeURIComponent(currentProjectID());
                         link.setAttribute('hx-get', url); link.setAttribute('href', url);
@@ -1193,7 +1193,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				var data = e.detail || {};
                 if (data.type === 'task_deleted') { applyTaskDeletion(data); return; }
 				if (listEvents.indexOf(data.type) === -1) return;
-				if (currentProjectID() !== '__all_projects__' && data.project_id && data.project_id !== currentProjectID()) return;
+				if (data.project_id && !window.openVibelyProjectInScope(data.project_id, currentProjectID())) return;
 				refreshSoon(300);
 			});
 			window.addEventListener('sse-live-connected', function() { refreshSoon(300); });
@@ -1338,6 +1338,10 @@ templ SettingsLinks(currentProjectID string) {
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3"></rect><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 15h10"></path></svg>
   <span class="task-list-title">Shortcuts</span>
  </a>
+	<a class="task-list-row" data-nav-base="/servers" href={ templ.SafeURL("/servers?project_id=" + url.QueryEscape(currentProjectID)) } hx-get={ "/servers?project_id=" + url.QueryEscape(currentProjectID) } hx-target="#main-content" hx-push-url="true">
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"></rect><rect x="3" y="13" width="18" height="7" rx="2"></rect><path d="M7 7.5h.01M7 16.5h.01"></path></svg>
+		<span class="task-list-title">Servers</span>
+	</a>
 	<a
 		class="task-list-row"
 		data-nav-base="/models"

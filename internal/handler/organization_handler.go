@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -47,6 +48,7 @@ func (h *Handler) organizationAuth(c echo.Context, next echo.HandlerFunc) error 
 		c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 16<<10)
 	}
 	var principal *models.OrgUser
+	var session sessionRecognition
 	if !h.authEnabled() {
 		var err error
 		principal, err = h.organizationSvc.Store.UserByID(c.Request().Context(), models.BootstrapUserID)
@@ -54,7 +56,7 @@ func (h *Handler) organizationAuth(c echo.Context, next echo.HandlerFunc) error 
 			return err
 		}
 	} else {
-		session := h.recognizeSession(c.Request(), time.Now())
+		session = h.recognizeSession(c.Request(), time.Now())
 		principal = session.orgUser
 		if session.localUser != nil {
 			c.Set("auth_user", session.localUser)
@@ -64,6 +66,9 @@ func (h *Handler) organizationAuth(c echo.Context, next echo.HandlerFunc) error 
 	}
 	if principal != nil && !principal.Disabled && principal.Role != "" {
 		c.SetRequest(c.Request().WithContext(models.WithPrincipal(c.Request().Context(), principal.Principal)))
+		if session.localToken != "" {
+			h.renewLocalSession(c, session.localToken, principal)
+		}
 		return next(c)
 	}
 	if h.isAuthPublicPath(c.Request().URL.Path) {
@@ -79,6 +84,20 @@ func (h *Handler) organizationAuth(c echo.Context, next echo.HandlerFunc) error 
 	}
 	return c.Redirect(http.StatusFound, loginURL)
 }
+
+// renewLocalSession keeps a sign-in that is in use alive, so browsers and
+// servers connected from other machines are not signed out mid-use.
+func (h *Handler) renewLocalSession(c echo.Context, token string, user *models.OrgUser) {
+	renewed, err := h.organizationSvc.RenewSession(c.Request().Context(), token, user, time.Now(), h.authCfg.Normalized().SessionTTL)
+	if err != nil {
+		applog.Infof("[auth] renew session: %v", err)
+		return
+	}
+	if renewed {
+		c.SetCookie(h.authCfg.SessionCookie(token, c.Scheme() == "https"))
+	}
+}
+
 func (h *Handler) orgAttemptKey(c echo.Context) string {
 	return h.organizationSvc.ClientIP(c.Request().RemoteAddr, strings.Join(c.Request().Header.Values("X-Forwarded-For"), ","))
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,8 +15,8 @@ import (
 
 func (h *Handler) SetPersonalGitHubService(s *service.GitHubService) { h.personalGitHub = s }
 
-func (h *Handler) savePersonalGitHub(c echo.Context) error {
-	ctx := h.projectRuntimePrincipalContext(c.Request().Context())
+func (h *Handler) savePersonalGitHubOnOwner(ctx context.Context, form ownerForm) error {
+	ctx = h.projectRuntimePrincipalContext(ctx)
 	personalMode, err := h.personalGitHub.UsesPersonalPAT(ctx)
 	if err != nil {
 		return err
@@ -23,29 +24,29 @@ func (h *Handler) savePersonalGitHub(c echo.Context) error {
 	if !personalMode {
 		// Switching a shared App installation back to PAT mode remains an
 		// organization-admin action, even though the PAT itself is personal.
-		if err := h.requireCurrentOrgAdmin(c); err != nil {
-			return projectAccessResponse(c, err)
+		if err := h.requireActionAdmin(ctx); err != nil {
+			return err
 		}
 	}
 	existing, err := h.personalGitHub.PersonalConnection(ctx)
 	if err != nil {
-		return projectAccessResponse(c, err)
+		return err
 	}
-	revision, err := strconv.ParseInt(c.FormValue("github_revision"), 10, 64)
+	revision, err := strconv.ParseInt(form.FormValue("github_revision"), 10, 64)
 	if err != nil {
 		return echo.NewHTTPError(400, "Refresh GitHub settings before saving")
 	}
-	pat := strings.TrimSpace(c.FormValue("github_pat"))
+	pat := strings.TrimSpace(form.FormValue("github_pat"))
 	login := existing.Login
 	if pat == "" {
 		pat = existing.PAT
 	} else if pat != existing.PAT {
 		login = ""
 	}
-	connection := models.GitHubConnection{PAT: pat, Login: login, AuthorName: c.FormValue("github_author_name"), AuthorEmail: c.FormValue("github_author_email"), APIEndpoint: c.FormValue("github_api_endpoint")}
+	connection := models.GitHubConnection{PAT: pat, Login: login, AuthorName: form.FormValue("github_author_name"), AuthorEmail: form.FormValue("github_author_email"), APIEndpoint: form.FormValue("github_api_endpoint")}
 	changed, err := h.personalGitHub.SavePersonalConnection(ctx, connection, revision)
 	if errors.Is(err, persistence.ErrProjectDenied) {
-		return projectAccessResponse(c, err)
+		return err
 	}
 	if err != nil {
 		return echo.NewHTTPError(400, err.Error())
@@ -58,7 +59,7 @@ func (h *Handler) savePersonalGitHub(c echo.Context) error {
 			return echo.NewHTTPError(500, "Personal connection saved, but the shared authentication mode could not be changed. Reopen GitHub settings.")
 		}
 	}
-	return returnToChannels(c)
+	return nil
 }
 func (h *Handler) lookupPersonalGitHub(c echo.Context) error {
 	if h.personalGitHub == nil {

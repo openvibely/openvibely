@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -13,7 +12,7 @@ import (
 // fields the agent create/edit dialog now exposes (runbook §Agent Create/Edit
 // Dialog lines 2029-2348) and copies them onto the agent. All fields are
 // optional; missing fields preserve the existing value.
-func applyLifecycleAgentFormFields(c echo.Context, agent *models.Agent) error {
+func applyLifecycleAgentFormFields(c ownerForm, agent *models.Agent) error {
 	if key := strings.TrimSpace(c.FormValue("key")); key != "" {
 		if err := validateAgentKey(key); err != nil {
 			return err
@@ -28,7 +27,7 @@ func applyLifecycleAgentFormFields(c echo.Context, agent *models.Agent) error {
 		agent.Scope = s
 	}
 	// A workspace selector is not an Agent ownership change.
-	if pid := strings.TrimSpace(c.FormValue("project_id")); pid != "" && pid != models.AllProjectsID {
+	if pid := strings.TrimSpace(c.FormValue("project_id")); pid != "" && !models.IsAggregateProject(pid) {
 		agent.ProjectID = pid
 	}
 	if v := strings.TrimSpace(c.FormValue("selectable_as_primary")); v != "" {

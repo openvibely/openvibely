@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -66,6 +67,10 @@ func (h *Handler) SetAgentSkillRoot(root string) {
 // embedded skills are converted to on-disk agent-owned skills before listing so
 // the assigned-agent router sees the same skills users see in the dialog.
 func (h *Handler) GetAgentSkills(c echo.Context) error {
+	if handled, err := h.remoteAgentSkill(c, "list"); handled {
+		return err
+	}
+
 	agent, err := h.agentFromParam(c)
 	if err != nil {
 		return err
@@ -77,9 +82,17 @@ func (h *Handler) GetAgentSkills(c echo.Context) error {
 	if err := h.migrateLegacyAgentSkills(c, agent, projectRoot); err != nil {
 		return err
 	}
+	out, err := h.agentSkillCatalog(agent, projectRoot)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) agentSkillCatalog(agent *models.Agent, projectRoot string) (agentSkillsResponse, error) {
 	catalog, err := agentskills.BuildAgentCatalog("agent-dialog", h.agentSkillRoot, projectRoot, agentStableKey(agent))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return agentSkillsResponse{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	out := agentSkillsResponse{
 		AgentKey:       agentStableKey(agent),
@@ -112,10 +125,14 @@ func (h *Handler) GetAgentSkills(c echo.Context) error {
 		}
 		out.RoutedSkills = append(out.RoutedSkills, view)
 	}
-	return c.JSON(http.StatusOK, out)
+	return out, nil
 }
 
 func (h *Handler) CreateAgentOwnedSkill(c echo.Context) error {
+	if handled, err := h.remoteAgentSkill(c, "create"); handled {
+		return err
+	}
+
 	agent, err := h.agentFromParam(c)
 	if err != nil {
 		return err
@@ -136,6 +153,10 @@ func (h *Handler) CreateAgentOwnedSkill(c echo.Context) error {
 }
 
 func (h *Handler) UpdateAgentOwnedSkill(c echo.Context) error {
+	if handled, err := h.remoteAgentSkill(c, "update"); handled {
+		return err
+	}
+
 	agent, err := h.agentFromParam(c)
 	if err != nil {
 		return err
@@ -162,6 +183,10 @@ func (h *Handler) UpdateAgentOwnedSkill(c echo.Context) error {
 }
 
 func (h *Handler) ArchiveAgentOwnedSkill(c echo.Context) error {
+	if handled, err := h.remoteAgentSkill(c, "archive"); handled {
+		return err
+	}
+
 	agent, err := h.agentFromParam(c)
 	if err != nil {
 		return err
@@ -180,6 +205,15 @@ func (h *Handler) ArchiveAgentOwnedSkill(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.archiveAgentOwnedSkill(agent, handle, req.Reason, scope, projectRoot); err != nil {
+		return err
+	}
+
+	h.recordManualSkillEvent(c, models.SkillEventEdited, handle, models.SkillScopeAgentOwned, agent.ID)
+	return h.GetAgentSkills(c)
+}
+
+func (h *Handler) archiveAgentOwnedSkill(agent *models.Agent, handle, reason, scope, projectRoot string) error {
 	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return err
@@ -199,7 +233,7 @@ func (h *Handler) ArchiveAgentOwnedSkill(c echo.Context) error {
 	falseValue := false
 	decl.Skill.Enabled = &falseValue
 	decl.Skill.Archived = true
-	decl.Skill.ArchiveReason = strings.TrimSpace(req.Reason)
+	decl.Skill.ArchiveReason = strings.TrimSpace(reason)
 	if decl.Skill.ArchiveReason == "" {
 		decl.Skill.ArchiveReason = "Archived from the agent dialog"
 	}
@@ -210,20 +244,24 @@ func (h *Handler) ArchiveAgentOwnedSkill(c echo.Context) error {
 	if err := os.WriteFile(path, []byte(rendered), 0o644); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	h.recordManualSkillEvent(c, models.SkillEventEdited, handle, models.SkillScopeAgentOwned, agent.ID)
-	return h.GetAgentSkills(c)
+	return nil
 }
 
 func (h *Handler) writeAgentOwnedSkillFromDialog(c echo.Context, agent *models.Agent, req agentSkillSaveRequest, requireExisting bool) (*agentlibrary.ImportResult, error) {
-	handle := strings.TrimSpace(req.Handle)
-	if !validDialogSkillKey(handle) {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug and must not include an agent prefix")
-	}
 	scope := h.dialogSkillScope(c, agent, req.Scope)
 	projectRoot, err := h.agentOwnedSkillProjectRoot(c, agent)
 	if err != nil {
 		return nil, err
 	}
+	return h.writeAgentOwnedSkill(c.Request().Context(), agent, req, requireExisting, scope, projectRoot)
+}
+
+func (h *Handler) writeAgentOwnedSkill(ctx context.Context, agent *models.Agent, req agentSkillSaveRequest, requireExisting bool, scope, projectRoot string) (*agentlibrary.ImportResult, error) {
+	handle := strings.TrimSpace(req.Handle)
+	if !validDialogSkillKey(handle) {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug and must not include an agent prefix")
+	}
+
 	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return nil, err
@@ -247,7 +285,7 @@ func (h *Handler) writeAgentOwnedSkillFromDialog(c echo.Context, agent *models.A
 		return nil, err
 	}
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: projectRoot}, agentlibrary.NewRepoApplier(h.agentRepo, h.lifecycleRepo))
-	res, err := importer.WriteAgentOwnedSkill(c.Request().Context(), scope, agentStableKey(agent), decl, body)
+	res, err := importer.WriteAgentOwnedSkill(ctx, scope, agentStableKey(agent), decl, body)
 	if err != nil {
 		return res, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -347,13 +385,19 @@ func (h *Handler) currentProjectSkillRoot(c echo.Context) string {
 		return ""
 	}
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
-	if projectID == models.AllProjectsID {
+	if models.IsAggregateProject(projectID) {
 		projectID = strings.TrimSpace(c.QueryParam("skill_project_id"))
+		if !models.InScope(c.Request().Context(), projectID) {
+			return ""
+		}
 	}
 	if projectID == "" && h.projectSvc != nil {
 		projectID, _ = h.getCurrentProjectID(c)
 	}
 	if projectID == "" {
+		return ""
+	}
+	if _, ok := remoteid.ServerOf(projectID); ok {
 		return ""
 	}
 	return service.ProjectSkillRootForResolver(c.Request().Context(), h.projectRepo, projectID)
@@ -366,6 +410,9 @@ func (h *Handler) currentProjectSkillRoot(c echo.Context) string {
 // the request-derived current project when the agent has no ProjectID set.
 func (h *Handler) projectSkillRootForAgent(c echo.Context, agent *models.Agent) string {
 	if agent != nil && strings.TrimSpace(agent.ProjectID) != "" {
+		if _, ok := remoteid.ServerOf(agent.ProjectID); ok {
+			return ""
+		}
 		if h.projectRepo == nil {
 			return ""
 		}
@@ -378,7 +425,7 @@ func (h *Handler) agentOwnedSkillProjectRoot(c echo.Context, agent *models.Agent
 	if agent != nil && agent.Scope == models.AgentScopeProject {
 		agentProjectID := strings.TrimSpace(agent.ProjectID)
 		if agentProjectID != "" {
-			if requestedProjectID := strings.TrimSpace(c.QueryParam("project_id")); requestedProjectID != "" && requestedProjectID != models.AllProjectsID && requestedProjectID != agentProjectID {
+			if requestedProjectID := strings.TrimSpace(c.QueryParam("project_id")); requestedProjectID != "" && (!models.IsAggregateProject(requestedProjectID) || !models.InScope(c.Request().Context(), agentProjectID)) && requestedProjectID != agentProjectID {
 				return "", echo.NewHTTPError(http.StatusNotFound, "agent not found")
 			}
 			return h.projectSkillRootForAgent(c, agent), nil
@@ -439,6 +486,17 @@ func (h *Handler) materializeAgentToDisk(c echo.Context, agent *models.Agent, pr
 }
 
 func (h *Handler) materializeAgentToDiskWithUsedKeys(c echo.Context, agent *models.Agent, projectRoot string, usedKeys map[string]bool, overwriteExisting bool) error {
+	if agent != nil {
+		if _, remote := remoteid.ServerOf(agent.ID); remote {
+			_, err := actAgentMaintain(h, contextFromEcho(c), agentMaintainArgs{AgentID: agent.ID, Overwrite: overwriteExisting})
+			return err
+		}
+	}
+
+	return h.materializeAgentOnOwner(contextFromEcho(c), agent, projectRoot, usedKeys, overwriteExisting)
+}
+
+func (h *Handler) materializeAgentOnOwner(ctx context.Context, agent *models.Agent, projectRoot string, usedKeys map[string]bool, overwriteExisting bool) error {
 	if agent == nil || h == nil || h.agentRepo == nil || h.agentSkillRoot == "" {
 		return nil
 	}
@@ -476,13 +534,13 @@ func (h *Handler) materializeAgentToDiskWithUsedKeys(c echo.Context, agent *mode
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	decl := h.agentRootDeclarationFromModel(c, agent, scope)
+	decl := h.agentRootDeclarationOnOwner(ctx, agent, scope)
 	body := h.agentRootBodyFromModel(agent)
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: projectRoot}, nil)
-	if _, err := importer.WriteAgentRootDeclaration(c.Request().Context(), decl, body); err != nil {
+	if _, err := importer.WriteAgentRootDeclaration(ctx, decl, body); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "write agent declaration "+key+": "+err.Error())
 	}
-	if err := h.agentRepo.Update(c.Request().Context(), agent); err != nil {
+	if err := h.agentRepo.Update(ctx, agent); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return nil
@@ -512,7 +570,7 @@ func (h *Handler) usedAgentKeys(agents []models.Agent, projectRoot string) map[s
 	return used
 }
 
-func (h *Handler) agentRootDeclarationFromModel(c echo.Context, agent *models.Agent, scope string) *agentlibrary.SkillDeclaration {
+func (h *Handler) agentRootDeclarationOnOwner(ctx context.Context, agent *models.Agent, scope string) *agentlibrary.SkillDeclaration {
 	enabled := agent.Enabled
 	decl := &agentlibrary.SkillDeclaration{
 		Kind:    "openvibely.agent_skill",
@@ -528,7 +586,7 @@ func (h *Handler) agentRootDeclarationFromModel(c echo.Context, agent *models.Ag
 			SystemPrompt:        strings.TrimSpace(agent.SystemPrompt),
 		},
 		EvidenceRefs:   append([]string(nil), agent.SourceRefs...),
-		LifecycleHooks: h.lifecycleHookDeclsForAgent(contextFromEcho(c), agent.ID),
+		LifecycleHooks: h.lifecycleHookDeclsForAgent(ctx, agent.ID),
 	}
 	return decl
 }
@@ -602,6 +660,16 @@ func (h *Handler) agentRootBodyFromModel(agent *models.Agent) string {
 }
 
 func (h *Handler) migrateLegacyAgentSkills(c echo.Context, agent *models.Agent, projectRoot string) error {
+	if agent != nil {
+		if _, remote := remoteid.ServerOf(agent.ID); remote {
+			return nil
+		}
+	}
+
+	return h.migrateAgentSkillsOnOwner(contextFromEcho(c), agent, projectRoot)
+}
+
+func (h *Handler) migrateAgentSkillsOnOwner(ctx context.Context, agent *models.Agent, projectRoot string) error {
 	if agent == nil || len(agent.Skills) == 0 {
 		return nil
 	}
@@ -615,7 +683,7 @@ func (h *Handler) migrateLegacyAgentSkills(c echo.Context, agent *models.Agent, 
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "agent repo not configured")
 	}
 	if strings.TrimSpace(agent.Key) == "" || !validDialogSkillKey(agent.Key) {
-		if err := h.materializeAgentToDisk(c, agent, projectRoot); err != nil {
+		if err := h.materializeAgentOnOwner(ctx, agent, projectRoot, h.usedAgentKeys(nil, projectRoot), true); err != nil {
 			return err
 		}
 	}
@@ -664,7 +732,7 @@ func (h *Handler) migrateLegacyAgentSkills(c echo.Context, agent *models.Agent, 
 		if strings.TrimSpace(legacy.Tools) != "" {
 			body = fmt.Sprintf("Allowed legacy tools: %s\n\n%s", strings.TrimSpace(legacy.Tools), body)
 		}
-		if _, err := importer.WriteAgentOwnedSkill(c.Request().Context(), scope, agentKey, decl, body); err != nil {
+		if _, err := importer.WriteAgentOwnedSkill(ctx, scope, agentKey, decl, body); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "migrate legacy agent skill "+name+": "+err.Error())
 		}
 		converted = true
@@ -674,7 +742,7 @@ func (h *Handler) migrateLegacyAgentSkills(c echo.Context, agent *models.Agent, 
 	}
 	agent.Skills = remaining
 	agent.SelectableAsPrimary = true
-	if err := h.agentRepo.Update(c.Request().Context(), agent); err != nil {
+	if err := h.agentRepo.Update(ctx, agent); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return nil

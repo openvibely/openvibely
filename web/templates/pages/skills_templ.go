@@ -998,7 +998,7 @@ func skillProjectChoice(projectID, id string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		if projectID == models.AllProjectsID {
+		if models.IsAggregateProject(projectID) {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<label class=\"form-control mb-3\"><span class=\"label-text\">Project (for project-scoped skills)</span> <select id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err

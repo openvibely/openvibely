@@ -11,6 +11,8 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/remote"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -18,49 +20,32 @@ const threadInputMutationStatusHeader = "X-OpenVibely-Thread-Input-Status"
 
 // EditThreadInput updates only inputs that have not entered consumption.
 func (h *Handler) EditThreadInput(c echo.Context) error {
-	if h.threadInputRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-	}
 	content := strings.TrimSpace(c.FormValue("content"))
 	if content == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Message cannot be empty")
 	}
-	input, err := h.threadInputRepo.EditPending(c.Request().Context(), c.Param("inputId"), content, c.FormValue("edit_token"))
-	if errors.Is(err, persistence.ErrInputNotPending) {
-		return echo.NewHTTPError(http.StatusConflict, "This message is no longer pending and cannot be edited")
-	}
+	out, err := actInputMutation(h, h.actionCtx(c), inputMutationArgs{InputID: c.Param("inputId"), Op: "edit", Content: content, EditToken: c.FormValue("edit_token"), Resume: c.FormValue("resume") == "true"})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to edit message")
+		return err
 	}
-	if c.FormValue("resume") == "true" {
-		h.resumeEditedInput(input)
-	}
-	return c.JSON(http.StatusOK, map[string]string{"content": input.Content})
+	return c.JSON(http.StatusOK, map[string]string{"content": out.Content})
 }
 
 func (h *Handler) CancelThreadInput(c echo.Context) error {
-	inputID := c.Param("inputId")
-	if inputID == "" {
+	id := c.Param("inputId")
+	if id == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "input id is required")
 	}
-	if h.threadInputRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+	out, err := actInputMutation(h, h.actionCtx(c), inputMutationArgs{InputID: id, Op: "cancel"})
+	var httpErr *echo.HTTPError
+	if errors.As(err, &httpErr) && httpErr.Code == http.StatusNotFound {
+		out.Status, err = "not_pending", nil
 	}
-	cancelled, err := h.threadInputRepo.CancelPending(c.Request().Context(), inputID)
 	if err != nil {
-		if errors.Is(err, persistence.ErrInputNotPending) {
-			// The row is already applied, already cancelled, or is a prepared/in-flight steering
-			// row currently being consumed by a provider call.  In all cases it is no longer
-			// user-removable via this action.  Return the hidden-row fragment so HTMX removes
-			// any stale pending row from the composer UI instead of leaving it stuck.
-			c.Response().Header().Set(threadInputMutationStatusHeader, "not_pending")
-			return render(c, http.StatusOK, components.ChatInputCancelledRow(inputID))
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to cancel queued input")
+		return err
 	}
-	c.Response().Header().Set(threadInputMutationStatusHeader, "cancelled")
-	h.publishThreadInputCancelledEvent(cancelled)
-	return render(c, http.StatusOK, components.ChatInputCancelledRow(inputID))
+	c.Response().Header().Set(threadInputMutationStatusHeader, out.Status)
+	return render(c, http.StatusOK, components.ChatInputCancelledRow(id))
 }
 
 func (h *Handler) publishThreadInputCancelledEvent(input *models.ThreadInput) {
@@ -134,106 +119,37 @@ func (h *Handler) convertQueuedInputToSteering(
 }
 
 func (h *Handler) ChatQueuedInputSteer(c echo.Context) error {
-	inputID := c.Param("inputId")
-	if inputID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "input id is required")
-	}
-	if h.threadInputRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-	}
-	input, err := h.threadInputRepo.GetByID(c.Request().Context(), inputID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load queued input")
-	}
-	if input == nil || input.InputStatus != models.ThreadInputPending || input.InputMode != models.ThreadInputModeQueued {
-		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
-	}
-	ctx := c.Request().Context()
-	steering, err := h.convertQueuedInputToSteering(ctx, input, input.RunExecutionID, func() (*models.Execution, error) {
-		return h.execRepo.FindLatestActiveChatExecution(ctx, input.ProjectID)
-	})
+	a := queuedSteerArgs{InputID: c.Param("inputId"), TaskID: c.Param("taskId"), ExpectedTurnID: c.FormValue("expected_turn_id")}
+	steering, err := actQueuedChatSteer(h, h.actionCtx(c), a)
 	if err != nil {
 		return err
-	}
-	if h.chatBroadcaster != nil {
-		h.publishChatEvent(events.ChatEvent{
-			Type:           events.ChatTurnSteered,
-			ProjectID:      steering.ProjectID,
-			ExecID:         steering.ID,
-			Message:        steering.Content,
-			Source:         string(steering.Source),
-			Steering:       true,
-			HasAttachments: steering.AttachmentSessionID != "",
-		})
 	}
 	return render(c, http.StatusOK, components.ChatSteeringInputRow(steering.ID, steering.Content, steering.AttachmentSessionID != "", steering.AuthorName))
 }
 
 func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
-	taskID := c.Param("taskId")
-	inputID := c.Param("inputId")
-	if taskID == "" || inputID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "task id and input id are required")
-	}
-	if h.threadInputRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-	}
-	input, err := h.threadInputRepo.GetByID(c.Request().Context(), inputID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load queued input")
-	}
-	if input == nil || input.TaskID != taskID || input.InputStatus != models.ThreadInputPending || input.InputMode != models.ThreadInputModeQueued {
-		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
-	}
-	ctx := c.Request().Context()
-	expectedTurnID := c.FormValue("expected_turn_id")
-	steering, err := h.convertQueuedInputToSteering(ctx, input, expectedTurnID, func() (*models.Execution, error) {
-		return h.activeConversationTaskExecution(ctx, taskID)
-	})
+	a := queuedSteerArgs{InputID: c.Param("inputId"), TaskID: c.Param("taskId"), ExpectedTurnID: c.FormValue("expected_turn_id")}
+	steering, err := actQueuedTaskSteer(h, h.actionCtx(c), a)
 	if err != nil {
 		return err
 	}
-	if h.broadcaster != nil {
-		h.broadcaster.Publish(events.TaskEvent{
-			Type:           events.TaskThreadInputSteered,
-			ProjectID:      steering.ProjectID,
-			TaskID:         steering.TaskID,
-			ExecID:         steering.RunExecutionID,
-			Message:        steering.Content,
-			PendingInputID: steering.ID,
-			HasAttachments: steering.AttachmentSessionID != "",
-		})
-	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, steering.AttachmentSessionID != "", taskID, steering.AuthorName))
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, steering.AttachmentSessionID != "", a.TaskID, steering.AuthorName))
 }
 
 // Editing holds are renewed by the open editor and expire after disconnects.
 func (h *Handler) HoldThreadInputEdit(c echo.Context) error {
-	if h.threadInputRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-	}
+	op := "hold"
 	if c.FormValue("renew") == "true" {
-		err := h.threadInputRepo.RenewEditHold(c.Request().Context(), c.Param("inputId"), c.FormValue("edit_token"))
-		if errors.Is(err, persistence.ErrInputNotPending) {
-			return echo.NewHTTPError(http.StatusConflict, "Editing session expired. Copy your draft and reopen the editor.")
-		}
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to renew editing session")
-		}
+		op = "renew"
+	}
+	out, err := actInputMutation(h, h.actionCtx(c), inputMutationArgs{InputID: c.Param("inputId"), Op: op, EditToken: c.FormValue("edit_token"), Hold: c.FormValue("hold") != "false"})
+	if err != nil {
+		return err
+	}
+	if op == "renew" {
 		return c.NoContent(http.StatusNoContent)
 	}
-	hold := c.FormValue("hold") != "false"
-	input, err := h.threadInputRepo.SetEditHold(c.Request().Context(), c.Param("inputId"), hold, c.FormValue("edit_token"))
-	if errors.Is(err, persistence.ErrInputNotPending) {
-		return echo.NewHTTPError(http.StatusConflict, "This message is already being consumed")
-	}
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to hold message")
-	}
-	if !hold {
-		h.resumeEditedInput(input)
-	}
-	return c.JSON(http.StatusOK, map[string]string{"content": input.Content})
+	return c.JSON(http.StatusOK, map[string]string{"content": out.Content})
 }
 
 func (h *Handler) resumeEditedInput(input *models.ThreadInput) {
@@ -259,3 +175,91 @@ func (h *Handler) RecoverExpiredInputEdits(ctx context.Context) {
 		}
 	}
 }
+
+type queuedSteerArgs struct {
+	InputID        string
+	TaskID         string
+	ExpectedTurnID string
+}
+
+func ownQueuedSteer(h *Handler, ctx context.Context, a queuedSteerArgs) (string, authz.Permission, error) {
+	project, permission, err := inputOwner(h, ctx, a.InputID)
+	var status *remote.StatusError
+	if errors.As(err, &status) && status.Status == http.StatusNotFound {
+		return "", "", statusErr(http.StatusConflict, "queued input is no longer pending")
+	}
+	return project, permission, err
+}
+
+var actQueuedChatSteer = defineAction("chat.input.steer", ownQueuedSteer, func(h *Handler, ctx context.Context, a queuedSteerArgs) (*models.ThreadInput, error) {
+	inputID := a.InputID
+	if inputID == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "input id is required")
+	}
+	if h.threadInputRepo == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+	}
+	input, err := h.threadInputRepo.GetByID(ctx, inputID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to load queued input")
+	}
+	if input == nil || input.InputStatus != models.ThreadInputPending || input.InputMode != models.ThreadInputModeQueued {
+		return nil, echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
+	}
+
+	steering, err := h.convertQueuedInputToSteering(ctx, input, input.RunExecutionID, func() (*models.Execution, error) {
+		return h.execRepo.FindLatestActiveChatExecution(ctx, input.ProjectID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if h.chatBroadcaster != nil {
+		h.publishChatEvent(events.ChatEvent{
+			Type:           events.ChatTurnSteered,
+			ProjectID:      steering.ProjectID,
+			ExecID:         steering.ID,
+			Message:        steering.Content,
+			Source:         string(steering.Source),
+			Steering:       true,
+			HasAttachments: steering.AttachmentSessionID != "",
+		})
+	}
+	return steering, nil
+})
+var actQueuedTaskSteer = defineAction("thread.input.steer", ownQueuedSteer, func(h *Handler, ctx context.Context, a queuedSteerArgs) (*models.ThreadInput, error) {
+	taskID := a.TaskID
+	inputID := a.InputID
+	if taskID == "" || inputID == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "task id and input id are required")
+	}
+	if h.threadInputRepo == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+	}
+	input, err := h.threadInputRepo.GetByID(ctx, inputID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to load queued input")
+	}
+	if input == nil || input.TaskID != taskID || input.InputStatus != models.ThreadInputPending || input.InputMode != models.ThreadInputModeQueued {
+		return nil, echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
+	}
+
+	expectedTurnID := a.ExpectedTurnID
+	steering, err := h.convertQueuedInputToSteering(ctx, input, expectedTurnID, func() (*models.Execution, error) {
+		return h.activeConversationTaskExecution(ctx, taskID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadInputSteered,
+			ProjectID:      steering.ProjectID,
+			TaskID:         steering.TaskID,
+			ExecID:         steering.RunExecutionID,
+			Message:        steering.Content,
+			PendingInputID: steering.ID,
+			HasAttachments: steering.AttachmentSessionID != "",
+		})
+	}
+	return steering, nil
+})

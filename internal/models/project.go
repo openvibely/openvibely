@@ -32,6 +32,9 @@ type ProjectAPIItem struct {
 	Name      string
 	RepoPath  string
 	CreatedAt time.Time
+	// RepoKey identifies the repository so copies on other servers can be grouped.
+	RepoKey     string
+	RepoPending bool
 }
 
 // ProjectWorkerCapacity is the identity and configured worker limit needed to

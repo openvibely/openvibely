@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -12,19 +13,25 @@ import (
 )
 
 func (h *Handler) StopAllActiveTasks(c echo.Context) error {
-	return h.applyActiveTaskAction(c, false)
+	return h.boardAction(c, actStopActive, strings.TrimSpace(c.QueryParam("project_id")))
 }
 
 func (h *Handler) DeleteAllActiveTasks(c echo.Context) error {
-	return h.applyActiveTaskAction(c, true)
+	return h.boardAction(c, actDeleteActive, strings.TrimSpace(c.QueryParam("project_id")))
 }
 
-func (h *Handler) applyActiveTaskAction(c echo.Context, deleting bool) error {
-	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+var actStopActive = defineAction("board.stop_active", requiredBoardProject, func(h *Handler, ctx context.Context, projectID string) (int, error) {
+	return 0, h.applyActiveTaskAction(ctx, projectID, false)
+})
+
+var actDeleteActive = defineAction("board.delete_active", requiredBoardProject, func(h *Handler, ctx context.Context, projectID string) (int, error) {
+	return 0, h.applyActiveTaskAction(ctx, projectID, true)
+})
+
+func (h *Handler) applyActiveTaskAction(ctx context.Context, projectID string, deleting bool) error {
 	if projectID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+		return statusErr(http.StatusBadRequest, "project_id is required")
 	}
-	ctx := c.Request().Context()
 	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(ctx, projectID, "", "", "")
 	if err != nil {
 		return err
@@ -56,11 +63,5 @@ func (h *Handler) applyActiveTaskAction(c echo.Context, deleting bool) error {
 			actionErrors = append(actionErrors, err)
 		}
 	}
-	if err := errors.Join(actionErrors...); err != nil {
-		return err
-	}
-	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, nil)
-	}
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
+	return errors.Join(actionErrors...)
 }

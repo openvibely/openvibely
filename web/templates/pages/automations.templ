@@ -75,7 +75,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
  function changed(event) {
   var node = root(); if (!node) return;
   var project = new URL(node.dataset.cardPaginationUrl, location.href).searchParams.get('project_id');
-  if (event && event.type === 'sse-automation-event' && project !== '__all_projects__' && event.detail && event.detail.project_id !== project) return;
+  if (event && event.type === 'sse-automation-event' && event.detail && !window.openVibelyProjectInScope(event.detail.project_id, project)) return;
   pending = true; clearTimeout(timer);timer = setTimeout(refresh,100);
  }
  window.addEventListener('sse-automation-event', changed);
@@ -1232,7 +1232,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<section class={ "min-w-0 min-h-0", templ.KV("mb-5", !automationBuilderUsesEditShell(page)), templ.KV("mb-0", automationBuilderUsesEditShell(page)), templ.KV("flex flex-1 min-h-[20rem] flex-col", automationBuilderUsesEditShell(page)) } data-automation-draft-canvas data-automation-view-root data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 
 
-                if layout.WorkspaceProjectID(ctx, currentProjectID) == models.AllProjectsID && page.AutomationID == "" {
+                if models.IsAggregateProject(layout.WorkspaceProjectID(ctx, currentProjectID)) && page.AutomationID == "" {
                     <label class="mb-3 flex items-center gap-2 text-sm">Project
                         <select id="automation-destination-project" name="destination_project" form="automation-design-form" class="select select-bordered select-sm" aria-label="Project">
                             <option value="">Choose project</option>
@@ -2344,7 +2344,7 @@ const (
 func automationWorkspacePostURL(ctx context.Context, page models.AutomationBuilderPage, ownerID string) string {
  scope := layout.WorkspaceProjectID(ctx, ownerID)
  destination := automationBuilderPostURL(page, scope)
- if scope == models.AllProjectsID && page.AutomationID == "" && ownerID != models.AllProjectsID { destination += "&destination_project=" + url.QueryEscape(ownerID) }
+ if models.IsAggregateProject(scope) && page.AutomationID == "" && !models.IsAggregateProject(ownerID) { destination += "&destination_project=" + url.QueryEscape(ownerID) }
  return destination
 }
 

@@ -101,6 +101,9 @@ func (h *Handler) executeAutomationSaveAction(ctx context.Context, params stream
 }
 
 func (h *Handler) previewAutomationDescription(ctx context.Context, projectID, description string) (*models.AutomationDraftResult, error) {
+	return actAutomationDescribe(h, ctx, automationDescriptionArgs{ProjectID: projectID, Description: description})
+}
+func (h *Handler) previewAutomationDescriptionLocal(ctx context.Context, projectID, description string) (*models.AutomationDraftResult, error) {
 	if h.automationDraftSvc == nil || h.automationCapabilitySvc == nil || h.llmSvc == nil || h.llmConfigRepo == nil {
 		return nil, errors.New("automation description generation is unavailable")
 	}

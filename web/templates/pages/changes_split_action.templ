@@ -116,7 +116,8 @@ templ changesSplitActionScript() {
    let settingsLoading=true,prefs=null,linkedTarget=null,choices=[],pending=Promise.resolve(),saveFailed=false,busy=false,saveCount=0,page=0,branchVersion=0,githubError='',localVersion=0,localChecked='',localLoading=false,mergeAllowed=false,rebaseAllowed=false;
    const linked=root.dataset.linkedPr==='true',canLocal=root.dataset.localAvailable==='true';
    function showError(message){error.textContent=message||'';error.hidden=!message;}
-   async function request(url,options){const response=await fetch(url,{credentials:'same-origin',...options});if(!response.ok){let message='Request failed ('+response.status+')';try{const data=await response.json();message=data.message||message;}catch{}throw new Error(message);}return response.status===204?null:response.json();}
+   function scopedURL(path){const url=new URL(path,location.origin);url.searchParams.set('project_id',root.dataset.projectId);return url.pathname+url.search;}
+   async function request(url,options){const response=await fetch(scopedURL(url),{credentials:'same-origin',...options});if(!response.ok){let message='Request failed ('+response.status+')';try{const data=await response.json();message=data.message||message;}catch{}throw new Error(message);}return response.status===204?null:response.json();}
    function fill(select,items){select.replaceChildren(...items.map(item=>{const option=document.createElement('option');option.value=item.value;option.textContent=item.label;return option;}));}
    const nativePopover=typeof panel.showPopover==='function'&&typeof panel.hidePopover==='function';
    if(!nativePopover){panel.removeAttribute('popover');toggle.removeAttribute('popovertarget');}
@@ -184,7 +185,7 @@ templ changesSplitActionScript() {
     let transport,values;
     if(prefs.mode==='pr'){transport=find('[data-changes-pr-transport]');values={target_repo:prefs.repository,base:prefs.branch};}
     else{transport=Array.from(root.querySelectorAll('[data-merge-type]')).find(el=>el.dataset.mergeType===prefs.method);values={merge_type:prefs.method,merge_source:'changes_tab',changes_target:prefs.local_branch};}
-    if(!transport)return;transport.setAttribute('hx-vals',JSON.stringify(values));window.htmx.process(transport);controller.close(false);transport.click();
+    if(!transport)return;transport.setAttribute('hx-post',scopedURL(transport.getAttribute('hx-post')));transport.setAttribute('hx-vals',JSON.stringify(values));window.htmx.process(transport);controller.close(false);transport.click();
    });
    root.addEventListener('htmx:beforeRequest',()=>{busy=true;render();});
    root.addEventListener('htmx:afterRequest',()=>{busy=false;render();});

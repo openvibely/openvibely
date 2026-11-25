@@ -1015,3 +1015,26 @@ func TestHandler_GetModelCapacity_RepositoryError(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
+
+func TestCapacityAPIIgnoresProjectSelection(t *testing.T) {
+	h, e := setupHubHandler(t)
+	project := createProject(t, h, "Project 1")
+	paths := []string{"/api/capacity/global", "/api/capacity/projects", "/api/capacity/models", "/api/capacity/projects/" + project.ID}
+	for _, path := range paths {
+		baseline := httptest.NewRecorder()
+		e.ServeHTTP(baseline, serversRequest("GET", path, nil))
+		require.Equal(t, 200, baseline.Code, baseline.Body.String())
+		for _, selection := range []string{"r-0123456789abcdef-project1", models.AllProjectsID, models.SharedProjectID("missing")} {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, serversRequest("GET", path+"?project_id="+selection, nil))
+			require.Equal(t, 200, rec.Code, rec.Body.String())
+			require.JSONEq(t, baseline.Body.String(), rec.Body.String())
+		}
+	}
+	for _, path := range []string{"/api/capacity/projects/r-0123456789abcdef-project1", "/api/capacity/models/r-0123456789abcdef-model1"} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, serversRequest("GET", path, nil))
+		require.Equal(t, 400, rec.Code, rec.Body.String())
+		require.Empty(t, rec.Header().Get("HX-Redirect"))
+	}
+}

@@ -31,8 +31,10 @@ type Organization struct {
 }
 type OrgUser struct {
 	Principal
-	PasswordHash string `json:"-"`
+	PasswordHash string `json:"-" remote:"-"`
 	Disabled     bool   `json:"disabled"`
+	// SessionExpiresAt is set only by session lookups.
+	SessionExpiresAt int64 `json:"-" remote:"-"`
 }
 type OrgInvitation struct {
 	ID        string `json:"id"`

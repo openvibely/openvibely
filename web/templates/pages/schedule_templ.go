@@ -1627,7 +1627,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if projectID(currentProject) == models.AllProjectsID {
+		if models.IsAggregateProject(projectID(currentProject)) {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "<label class=\"form-control mb-3\"><span class=\"label-text\">Project</span> <select name=\"destination_project\" class=\"select select-bordered\" required onchange=\"const agents=this.form.querySelector('[name=agent_definition_id]');if(agents){Array.from(agents.options).forEach(option=>{const unavailable=!!option.dataset.projectId &amp;&amp; option.dataset.projectId!==this.value;option.hidden=unavailable;option.disabled=unavailable;});if(agents.selectedOptions[0]?.disabled)agents.value='';}\"><option value=\"\">Choose project</option> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err

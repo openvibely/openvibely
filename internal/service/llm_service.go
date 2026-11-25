@@ -2376,11 +2376,14 @@ func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message 
 func (s *LLMService) callAgentDirectWithDefinitionMode(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool, rawDirectPrompt bool) (string, int, error) {
 	ctx = s.gitContext(ctx)
 	if s.updateTracker != nil {
-		done, err := s.updateTracker.Start(update.WorkChat)
+		done, err := s.updateTracker.StartWithin(ctx, update.WorkChat)
 		if err != nil {
 			return "", 0, err
 		}
 		defer done()
+	}
+	if s.updateTracker != nil {
+		ctx = s.updateTracker.AdmittedContext(ctx)
 	}
 	applog.Infof("[agent-svc] CallAgentDirect agent=%s model=%s message_len=%d workDir=%s disable_tools=%v agent_def=%t", agent.Name, agent.Model, len(message), workDir, disableTools, agentDef != nil)
 

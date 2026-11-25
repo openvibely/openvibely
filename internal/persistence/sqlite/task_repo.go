@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -504,8 +503,8 @@ func (r *TaskRepo) listEmptyBreadcrumbSelector(ctx context.Context, projectID, c
 
 func (r *TaskRepo) listBreadcrumbSelectorRows(ctx context.Context, query string, capacity int, args ...any) ([]models.BreadcrumbSelectorItem, error) {
 	// The explicit virtual workspace broadens this bounded read only.
-	if len(args) > 0 && args[0] == models.AllProjectsID {
-		query = strings.ReplaceAll(query, "project_id = ?", analyticsProjectPredicate(ctx, "project_id", models.AllProjectsID))
+	if aggregate := stringArg(args, 0); models.IsAggregateProject(aggregate) {
+		query = strings.ReplaceAll(query, "project_id = ?", analyticsProjectPredicate(ctx, "project_id", aggregate))
 	}
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -617,8 +616,8 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 	query := `SELECT ` + selectColumns + `
 				 FROM tasks t WHERE t.project_id = ?`
 	args := []any{projectID}
-	if projectID == models.AllProjectsID && category != string(models.CategoryChat) {
-		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category NOT IN ('chat','page_chat') AND ` + accessibleProjectPredicate(ctx, "t.project_id", false)
+	if models.IsAggregateProject(projectID) && category != string(models.CategoryChat) {
+		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category NOT IN ('chat','page_chat') AND ` + aggregateProjectPredicate(ctx, "t.project_id", projectID, false)
 		args = nil
 	}
 	if category != "" {
@@ -649,134 +648,8 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 		return nil, err
 	}
 
-	switch category {
-	case string(models.CategoryBacklog):
-		sortTasks(tasks, backlogSort)
-	case string(models.CategoryCompleted):
-		sortTasks(tasks, completedSort)
-	default:
-		sortCategoryTasks(tasks, models.CategoryBacklog, backlogSort)
-		sortCategoryTasks(tasks, models.CategoryCompleted, completedSort)
-	}
-
+	models.SortTasksWithCategorySorts(tasks, category, backlogSort, completedSort)
 	return tasks, nil
-}
-
-func sortCategoryTasks(tasks []models.Task, category models.TaskCategory, sortBy string) {
-	if len(tasks) < 2 || sortBy == "" {
-		return
-	}
-
-	categoryIndexes := make([]int, 0, len(tasks))
-	categoryTasks := make([]models.Task, 0, len(tasks))
-	for i, task := range tasks {
-		if task.Category == category {
-			categoryIndexes = append(categoryIndexes, i)
-			categoryTasks = append(categoryTasks, task)
-		}
-	}
-	if len(categoryTasks) < 2 {
-		return
-	}
-
-	sortTasks(categoryTasks, sortBy)
-	for i, idx := range categoryIndexes {
-		tasks[idx] = categoryTasks[i]
-	}
-}
-
-func sortTasks(tasks []models.Task, sortBy string) {
-	if len(tasks) < 2 || sortBy == "" {
-		return
-	}
-
-	sort.SliceStable(tasks, func(i, j int) bool {
-		return taskSortLess(tasks[i], tasks[j], sortBy)
-	})
-}
-
-func taskSortLess(a models.Task, b models.Task, sortBy string) bool {
-	switch sortBy {
-	case "title_asc":
-		aTitle := strings.ToLower(a.Title)
-		bTitle := strings.ToLower(b.Title)
-		if aTitle != bTitle {
-			return aTitle < bTitle
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "title_desc":
-		aTitle := strings.ToLower(a.Title)
-		bTitle := strings.ToLower(b.Title)
-		if aTitle != bTitle {
-			return aTitle > bTitle
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "created_asc":
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.Before(b.CreatedAt)
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "created_desc":
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.After(b.CreatedAt)
-		}
-		return taskDisplayOrderDesc(a, b)
-	case "completed_asc":
-		aTime := completedSortTime(a)
-		bTime := completedSortTime(b)
-		if !aTime.Equal(bTime) {
-			return aTime.Before(bTime)
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "completed_desc":
-		aTime := completedSortTime(a)
-		bTime := completedSortTime(b)
-		if !aTime.Equal(bTime) {
-			return aTime.After(bTime)
-		}
-		return taskDisplayOrderDesc(a, b)
-	case "priority_asc":
-		if a.Priority != b.Priority {
-			return a.Priority < b.Priority
-		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.Before(b.CreatedAt)
-		}
-		return taskDisplayOrderAsc(a, b)
-	case "priority_desc":
-		if a.Priority != b.Priority {
-			return a.Priority > b.Priority
-		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.After(b.CreatedAt)
-		}
-		return taskDisplayOrderDesc(a, b)
-	default:
-		return taskDisplayOrderAsc(a, b)
-	}
-}
-
-// completedSortTime returns CompletedAt if set, falling back to UpdatedAt.
-// Tasks in the completed category always have CompletedAt set after migration 096.
-func completedSortTime(t models.Task) time.Time {
-	if t.CompletedAt != nil {
-		return *t.CompletedAt
-	}
-	return t.UpdatedAt
-}
-
-func taskDisplayOrderAsc(a models.Task, b models.Task) bool {
-	if a.DisplayOrder != b.DisplayOrder {
-		return a.DisplayOrder < b.DisplayOrder
-	}
-	return a.CreatedAt.Before(b.CreatedAt)
-}
-
-func taskDisplayOrderDesc(a models.Task, b models.Task) bool {
-	if a.DisplayOrder != b.DisplayOrder {
-		return a.DisplayOrder > b.DisplayOrder
-	}
-	return a.CreatedAt.After(b.CreatedAt)
 }
 
 func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {
@@ -1264,7 +1137,7 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 			return fmt.Errorf("getting active tail order: %w", err)
 		}
 		for i := range candidates {
-			if projectID == models.AllProjectsID {
+			if models.IsAggregateProject(projectID) {
 				if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, candidates[i].ProjectID).Scan(&nextOrder); err != nil {
 					return err
 				}
@@ -2722,8 +2595,8 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 }
 
 func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, projectID string) ([]persistence.TaskWithSchedule, error) {
-	if projectID == models.AllProjectsID {
-		query = strings.ReplaceAll(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", models.AllProjectsID))
+	if models.IsAggregateProject(projectID) {
+		query = strings.ReplaceAll(query, "t.project_id = ?", analyticsProjectPredicate(ctx, "t.project_id", projectID))
 	}
 	rows, err := r.db.QueryContext(ctx, query, projectID)
 	if err != nil {
@@ -2861,6 +2734,17 @@ func (r *TaskRepo) CountPendingByProject(ctx context.Context) (map[string]int, e
 		counts[projectID] = count
 	}
 	return counts, rows.Err()
+}
+
+// CountPendingForProject is CountPendingByProject for a single project.
+func (r *TaskRepo) CountPendingForProject(ctx context.Context, projectID string) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE project_id = ? AND category = 'active' AND status IN ('pending', 'queued')`, projectID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting pending tasks for project: %w", err)
+	}
+	return count, nil
 }
 
 // ResetOrphanedRunning reclaims tasks whose process-local runner was lost.
@@ -3045,7 +2929,7 @@ func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (in
 			return fmt.Errorf("getting active tail order: %w", err)
 		}
 		for i := range activated {
-			if projectID == models.AllProjectsID {
+			if models.IsAggregateProject(projectID) {
 				if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, activated[i].ProjectID).Scan(&nextOrder); err != nil {
 					return err
 				}
@@ -3126,7 +3010,7 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 // The newPosition is the target display_order (0-indexed).
 // All tasks between the old and new positions will have their display_order adjusted.
 func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition int, projectScope ...string) error {
-	return r.reorderTaskInScope(ctx, taskID, newPosition, len(projectScope) > 0 && projectScope[0] == models.AllProjectsID, "", false)
+	return r.reorderTaskInScope(ctx, taskID, newPosition, len(projectScope) > 0 && models.IsAggregateProject(projectScope[0]), "", false)
 }
 
 // ListBacklogByPriority returns backlog tasks for a project, filtered by priority.

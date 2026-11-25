@@ -1670,8 +1670,8 @@ func buildAnalyticsInsights(current models.OutcomeMetrics, previous *models.Outc
 // analyticsProjectPredicate keeps single-project queries indexed and restricts
 // aggregate reads to accessible real projects. It consumes one argument.
 func analyticsProjectPredicate(ctx context.Context, column, projectID string) string {
-	if projectID == models.AllProjectsID {
-		return "(? = '__all_projects__' AND " + accessibleProjectPredicate(ctx, column, false) + ")"
+	if models.IsAggregateProject(projectID) {
+		return "(? != '' AND " + aggregateProjectPredicate(ctx, column, projectID, false) + ")"
 	}
 	return column + " = ?"
 }

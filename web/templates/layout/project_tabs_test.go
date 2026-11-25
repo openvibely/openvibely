@@ -259,9 +259,11 @@ func TestAllProjectsPinDefaultsAndSavedOmission(t *testing.T) {
 		{"closed", []string{"a"}, `["a"]`},
 		{"empty saved", []string{}, `[]`},
 		{"reordered", []string{"a", models.AllProjectsID}, `["a","__all_projects__"]`},
+		{"deleted local", []string{"gone", "a"}, `["a"]`},
+		{"server still connecting", []string{"r-0123456789abcdef-foo", "a"}, `["r-0123456789abcdef-foo","a"]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := pinnedProjectJSON(pinnedProjects(projects, tc.ids)); got != tc.want {
+			if got := pinnedProjectJSON(context.Background(), projects, tc.ids); got != tc.want {
 				t.Fatalf("got %s want %s", got, tc.want)
 			}
 		})

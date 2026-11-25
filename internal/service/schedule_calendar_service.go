@@ -17,12 +17,12 @@ func ApplyScheduleCalendarAction(ctx context.Context, repo persistence.ScheduleS
 }
 
 func validateScheduleCalendarAction(projectID string, action models.ScheduleCalendarAction) error {
-	if projectID == models.AllProjectsID && action.Action == "undo_projects" {
+	if models.IsAggregateProject(projectID) && action.Action == "undo_projects" {
 		if len(action.ProjectActions) == 0 || len(action.ProjectActions) > 2000 {
 			return persistence.ErrScheduleCalendarSelection
 		}
 		for id, part := range action.ProjectActions {
-			if id == "" || id == models.AllProjectsID || len(part.ProjectActions) != 0 {
+			if id == "" || models.IsAggregateProject(id) || len(part.ProjectActions) != 0 {
 				return persistence.ErrScheduleCalendarSelection
 			}
 			if err := validateScheduleCalendarAction(id, part); err != nil {

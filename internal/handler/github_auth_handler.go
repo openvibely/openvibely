@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,32 +24,11 @@ func (h *Handler) githubRuntimeSettingsPreflight(projectID string) (persistence.
 }
 
 func (h *Handler) renderGitHubRuntimeSettings(c echo.Context, projectID string) error {
-	if h.githubAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "GitHub auth not configured")
-	}
-	actors, err := h.githubAuthRepo.ListAuthorizedActors(c.Request().Context())
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load GitHub authorized actors")
-	}
-	bindings, err := h.githubAuthRepo.ListReviewerIdentities(c.Request().Context(), projectID)
+	state, err := actGitHubRuntimeState(h, c.Request().Context(), projectID)
 	if err != nil {
 		return err
 	}
-	for i := range actors {
-		for j := range bindings {
-			if actors[i].ID == bindings[j].ActorID {
-				actors[i].ReviewerIdentity = &bindings[j]
-			}
-		}
-	}
-	var inbox *models.GitHubProjectInbox
-	if strings.TrimSpace(projectID) != "" {
-		inbox, err = h.githubAuthRepo.GetProjectInbox(c.Request().Context(), projectID)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load GitHub project inbox")
-		}
-	}
-	return render(c, http.StatusOK, components.GitHubRuntimeSettings(actors, inbox, projectID))
+	return render(c, http.StatusOK, components.GitHubRuntimeSettings(state.Actors, state.Inbox, projectID))
 }
 
 // GitHubRuntimeSettingsFragment returns generic GitHub runtime trust/inbox settings.
@@ -65,6 +45,9 @@ func (h *Handler) GitHubRuntimeSettingsFragment(c echo.Context) error {
 
 // AddGitHubAuthorizedActor adds or updates a system-level GitHub authorized actor.
 func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
+	if handled, err := h.remoteChannelTrust(c, "github", "create"); handled {
+		return err
+	}
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
 	if err := h.authorizeChannelTrustOperation(c, projectID, true); err != nil {
 		return err
@@ -101,6 +84,9 @@ func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
 
 // RemoveGitHubAuthorizedActor removes a system-level GitHub authorized actor.
 func (h *Handler) RemoveGitHubAuthorizedActor(c echo.Context) error {
+	if handled, err := h.remoteChannelTrust(c, "github", "delete"); handled {
+		return err
+	}
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if err := h.authorizeChannelTrustOperation(c, projectID, true); err != nil {
 		return err
@@ -125,31 +111,8 @@ func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 		}
 		c.SetRequest(c.Request().WithContext(ctx))
 	}
-	authRepo, err := h.githubRuntimeSettingsPreflight(projectID)
-	if err != nil {
+	if _, err := actGitHubInbox(h, c.Request().Context(), githubInboxArgs{ProjectID: projectID, Login: c.FormValue("github_login"), Enabled: c.FormValue("enabled") == "true"}); err != nil {
 		return err
-	}
-	githubLogin := persistence.NormalizeGitHubLogin(c.FormValue("github_login"))
-	if githubLogin == "" {
-		existing, err := authRepo.GetProjectInbox(c.Request().Context(), projectID)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load GitHub project inbox: "+err.Error())
-		}
-		if existing != nil {
-			existing.Enabled = false
-			if err := authRepo.UpsertProjectInbox(c.Request().Context(), existing); err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
-			}
-		}
-		return h.renderGitHubRuntimeSettings(c, projectID)
-	}
-	inbox := &models.GitHubProjectInbox{
-		ProjectID:   projectID,
-		GitHubLogin: githubLogin,
-		Enabled:     c.FormValue("enabled") == "true",
-	}
-	if err := authRepo.UpsertProjectInbox(c.Request().Context(), inbox); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
 	}
 	return h.renderGitHubRuntimeSettings(c, projectID)
 }
@@ -157,6 +120,9 @@ func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 // BindGitHubReviewerIdentity requires explicit administrator attestation of the
 // provider host, immutable numeric identity, and project application user.
 func (h *Handler) BindGitHubReviewerIdentity(c echo.Context) error {
+	if handled, err := h.remoteChannelTrust(c, "github", "bind"); handled {
+		return err
+	}
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
 	if err := h.authorizeChannelTrustOperation(c, projectID, true); err != nil {
 		return err
@@ -174,3 +140,77 @@ func (h *Handler) BindGitHubReviewerIdentity(c echo.Context) error {
 	}
 	return h.renderGitHubRuntimeSettings(c, projectID)
 }
+
+type githubInboxArgs struct {
+	ProjectID, Login string
+	Enabled          bool
+}
+
+var actGitHubInbox = defineAction("github.inbox", func(h *Handler, ctx context.Context, a githubInboxArgs) (string, authz.Permission, error) {
+	return a.ProjectID, authz.Manage, nil
+}, func(h *Handler, ctx context.Context, a githubInboxArgs) (struct{}, error) {
+	projectID := a.ProjectID
+	authRepo, err := h.githubRuntimeSettingsPreflight(projectID)
+	if err != nil {
+		return struct{}{}, err
+	}
+	githubLogin := persistence.NormalizeGitHubLogin(a.Login)
+	if githubLogin == "" {
+		existing, err := authRepo.GetProjectInbox(ctx, projectID)
+		if err != nil {
+			return struct{}{}, statusErr(http.StatusInternalServerError, "Failed to load GitHub project inbox: "+err.Error())
+		}
+		if existing != nil {
+			existing.Enabled = false
+			if err := authRepo.UpsertProjectInbox(ctx, existing); err != nil {
+				return struct{}{}, statusErr(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
+			}
+		}
+		return struct{}{}, nil
+	}
+	inbox := &models.GitHubProjectInbox{
+		ProjectID:   projectID,
+		GitHubLogin: githubLogin,
+		Enabled:     a.Enabled,
+	}
+	if err := authRepo.UpsertProjectInbox(ctx, inbox); err != nil {
+		return struct{}{}, statusErr(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
+	}
+	return struct{}{}, nil
+})
+
+type githubRuntimeState struct {
+	Actors []models.GitHubAuthorizedActor
+	Inbox  *models.GitHubProjectInbox
+}
+
+var actGitHubRuntimeState = defineAction("github.runtime_state", func(h *Handler, ctx context.Context, projectID string) (string, authz.Permission, error) {
+	return projectID, authz.View, nil
+}, func(h *Handler, ctx context.Context, projectID string) (githubRuntimeState, error) {
+	if h.githubAuthRepo == nil {
+		return githubRuntimeState{}, statusErr(http.StatusInternalServerError, "GitHub auth not configured")
+	}
+	actors, err := h.githubAuthRepo.ListAuthorizedActors(ctx)
+	if err != nil {
+		return githubRuntimeState{}, statusErr(http.StatusInternalServerError, "Failed to load GitHub authorized actors")
+	}
+	bindings, err := h.githubAuthRepo.ListReviewerIdentities(ctx, projectID)
+	if err != nil {
+		return githubRuntimeState{}, err
+	}
+	for i := range actors {
+		for j := range bindings {
+			if actors[i].ID == bindings[j].ActorID {
+				actors[i].ReviewerIdentity = &bindings[j]
+			}
+		}
+	}
+	var inbox *models.GitHubProjectInbox
+	if strings.TrimSpace(projectID) != "" {
+		inbox, err = h.githubAuthRepo.GetProjectInbox(ctx, projectID)
+		if err != nil {
+			return githubRuntimeState{}, statusErr(http.StatusInternalServerError, "Failed to load GitHub project inbox")
+		}
+	}
+	return githubRuntimeState{Actors: actors, Inbox: inbox}, nil
+})

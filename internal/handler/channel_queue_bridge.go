@@ -78,6 +78,9 @@ func recoverQueuedInputIDs(
 }
 
 func (h *Handler) RecoverQueuedInputs(ctx context.Context) {
+	if h.localServicesAllowed != nil && !h.localServicesAllowed() {
+		return
+	}
 	if h.chatInputRequestRepo != nil && h.chatInputRequests != nil {
 		// Use the normal recovered-question handler for answers committed before
 		// a restart but never delivered to the old broker. The fixed TTL gives

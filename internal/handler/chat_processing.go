@@ -331,6 +331,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.CancellationContext != nil {
 		baseCtx = params.CancellationContext
 	}
+	if params.updateWorkDone != nil && h.updateWorkTracker != nil {
+		baseCtx = h.updateWorkTracker.AdmittedContext(baseCtx)
+	}
 	baseCtx = h.followupAuthorizationContext(baseCtx)
 	if h.organizationSvc != nil && strings.HasPrefix(params.PrincipalID, "user:") {
 		user, err := h.organizationSvc.Store.UserByID(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))

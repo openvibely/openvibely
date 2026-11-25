@@ -11,6 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -91,13 +92,6 @@ func cardMutationSource(c echo.Context) bool {
 	return c.FormValue("merge_source") == "task_card"
 }
 
-func rejectTaskCardMutation(c echo.Context, message string) error {
-	if isHTMX(c) {
-		setHTMXToast(c, message, "failed")
-	}
-	return c.String(http.StatusConflict, message)
-}
-
 func (h *Handler) taskCardPullRequestEligibility(task *models.Task, project *models.Project) (bool, string) {
 	return h.taskCardPullRequestEligibilityWithLocks(task, project, nil)
 }
@@ -138,64 +132,145 @@ func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	state, eligible, _ := h.taskCardMergeEligibility(c.Request().Context(), task, "merge")
-	project, _ := h.projectRepo.GetByID(c.Request().Context(), projectID)
+	menu, err := h.taskCardMergeMenu(c.Request().Context(), task.ID)
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, components.TaskCardMergeSubmenus(task, projectID, menu))
+}
 
+func (h *Handler) taskCardMergeMenu(ctx context.Context, taskID string) (components.TaskCardMergeMenuState, error) {
+	var menu components.TaskCardMergeMenuState
+	if remote, err := h.remoteAct(ctx, taskID, "task.merge_menu", taskID, &menu); remote {
+		return menu, err
+	}
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil || task == nil {
+		return menu, err
+	}
+	state, eligible, _ := h.taskCardMergeEligibility(ctx, task, "merge")
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	if task.MergeTargetBranch == "" && project != nil && project.RepoPath != "" {
 		task.MergeTargetBranch = service.GetDefaultBranch(project.RepoPath)
 	}
-	var taskPR *models.TaskPullRequest
 	if h.taskPullRequestRepo != nil {
-		taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), task.ID)
+		menu.PullRequest, _ = h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
 	}
-	fastForwardEligible := false
 	if eligible {
-		fastForwardEligible, _ = taskCardMergeModeEligibility(c.Request().Context(), task, state, "ff")
+		menu.FastForwardEligible, _ = taskCardMergeModeEligibility(ctx, task, state, "ff")
 	}
-	prEligible, _ := h.taskCardPullRequestEligibility(task, project)
-	return render(c, http.StatusOK, components.TaskCardMergeSubmenus(task, projectID, components.TaskCardMergeMenuState{
-		LocalEligible:       eligible,
-		FastForwardEligible: fastForwardEligible,
-		RebaseEligible:      eligible && state.RebaseAvailable,
-		PullEligible:        prEligible,
-		PullRequest:         taskPR,
-		TargetBranch:        task.MergeTargetBranch,
-	}))
+	menu.LocalEligible = eligible
+	menu.RebaseEligible = eligible && state.RebaseAvailable
+	menu.PullEligible, _ = h.taskCardPullRequestEligibility(task, project)
+	menu.TargetBranch = task.MergeTargetBranch
+	return menu, nil
 }
 
 // UpdateTaskAutoMerge toggles auto-merge for a task.
 func (h *Handler) UpdateTaskAutoMerge(c echo.Context) error {
-	taskID := c.Param("taskId")
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	goalValue := c.FormValue("auto_merge_on_goal_achieved")
-	autoMerge := formBoolEnabled(c, "auto_merge", false)
-	var autoMergeOnGoalAchieved *bool
-	if goalValue != "" || c.FormValue("auto_merge_on_goal_achieved_present") != "" {
+	args := autoMergeArgs{TaskID: c.Param("taskId"), TargetBranch: c.FormValue("merge_target_branch")}
+	args.AutoMerge = formBoolEnabled(c, "auto_merge", false)
+	if c.FormValue("auto_merge_on_goal_achieved") != "" || c.FormValue("auto_merge_on_goal_achieved_present") != "" {
 		enabled := formBoolEnabled(c, "auto_merge_on_goal_achieved", false)
-		autoMergeOnGoalAchieved = &enabled
+		args.OnGoalAchieved = &enabled
 	}
-	targetBranch := c.FormValue("merge_target_branch")
-	if targetBranch == "" {
-		targetBranch = task.MergeTargetBranch
-	}
-
-	if err := h.taskRepo.UpdateAutoMergeSettings(c.Request().Context(), taskID, autoMerge, autoMergeOnGoalAchieved, targetBranch); err != nil {
-		applog.Infof("[handler] UpdateTaskAutoMerge error: %v", err)
+	task, err := actAutoMerge(h, c.Request().Context(), args)
+	if err != nil {
 		return err
 	}
-
-	task.AutoMerge = autoMerge
-	if autoMergeOnGoalAchieved != nil {
-		task.AutoMergeOnGoalAchieved = *autoMergeOnGoalAchieved
-	}
-	task.MergeTargetBranch = targetBranch
-
-	// Re-fetch and return the worktree info fragment
 	return h.renderWorktreeInfo(c, task)
+}
+
+type autoMergeArgs struct {
+	TaskID         string
+	AutoMerge      bool
+	OnGoalAchieved *bool
+	TargetBranch   string
+}
+
+var actAutoMerge = defineAction("task.automerge", func(h *Handler, ctx context.Context, a autoMergeArgs) (string, authz.Permission, error) {
+	return editTask(h, ctx, a.TaskID)
+}, func(h *Handler, ctx context.Context, a autoMergeArgs) (*models.Task, error) {
+	task, err := h.loadTask(ctx, a.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if a.TargetBranch == "" {
+		a.TargetBranch = task.MergeTargetBranch
+	}
+	if err := h.taskRepo.UpdateAutoMergeSettings(ctx, a.TaskID, a.AutoMerge, a.OnGoalAchieved, a.TargetBranch); err != nil {
+		applog.Infof("[handler] UpdateTaskAutoMerge error: %v", err)
+		return nil, err
+	}
+	task.AutoMerge = a.AutoMerge
+	if a.OnGoalAchieved != nil {
+		task.AutoMergeOnGoalAchieved = *a.OnGoalAchieved
+	}
+	task.MergeTargetBranch = a.TargetBranch
+	return task, nil
+})
+
+// mutationOutcome is how a worktree action's result is shown: a toast, then
+// either a refreshed View or a plain Code/Message response.
+type mutationOutcome struct {
+	Code    int
+	Message string
+	// Toast is the toast status; without ToastAlways it shows only to HTMX.
+	Toast          string
+	ToastAlways    bool
+	ToastTask      bool
+	RefreshChanges bool
+	LinkURL        string
+	LinkText       string
+	View           string
+}
+
+const (
+	viewCard     = "card"
+	viewChanges  = "changes"
+	viewWorktree = "worktree"
+	viewBoard    = "board"
+	viewNone     = "none"
+)
+
+func failText(code int, message string) mutationOutcome {
+	return mutationOutcome{Code: code, Message: message, Toast: "failed"}
+}
+
+func failView(view, message string) mutationOutcome {
+	return mutationOutcome{View: view, Message: message, Toast: "failed"}
+}
+
+func (h *Handler) respondMutation(c echo.Context, taskID string, o mutationOutcome) error {
+	if o.Toast != "" && (o.ToastAlways || isHTMX(c)) {
+		var triggers map[string]any
+		if o.RefreshChanges {
+			triggers = map[string]any{"refreshChanges": true}
+		}
+		toastTask := ""
+		if o.ToastTask {
+			toastTask = taskID
+		}
+		setHTMXToastWithOptionsAndTriggers(c, o.Message, o.Toast, o.LinkURL, o.LinkText, toastTask, "", "", triggers)
+	}
+	switch o.View {
+	case viewCard:
+		return h.renderTaskCardRefresh(c, taskID)
+	case viewChanges:
+		return h.GetTaskChanges(c)
+	case viewWorktree, viewBoard:
+		task, err := h.loadTask(c.Request().Context(), taskID)
+		if err != nil {
+			return actionHTTPError(err)
+		}
+		if o.View == viewBoard {
+			return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		}
+		return h.renderWorktreeInfo(c, task)
+	case viewNone:
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.String(o.Code, o.Message)
 }
 
 type taskBranchMutationPreflight struct {
@@ -398,41 +473,99 @@ func (h *Handler) rebaseTaskBranchOptions(taskID, projectID string, fromTaskCard
 	}
 }
 
+// branchMutationArgs requests a merge or rebase. CardProjectID is the board
+// a task card action came from.
+type branchMutationArgs struct {
+	TaskID         string
+	CardProjectID  string
+	FromTaskCard   bool
+	FromChangesTab bool
+	MergeType      string
+	Target         string
+}
+
+func ownBranchMutation(h *Handler, ctx context.Context, a branchMutationArgs) (string, authz.Permission, error) {
+	return editTask(h, ctx, a.TaskID)
+}
+
+func (h *Handler) parseBranchMutation(c echo.Context) (branchMutationArgs, error) {
+	a := branchMutationArgs{
+		TaskID:         c.Param("taskId"),
+		CardProjectID:  strings.TrimSpace(c.FormValue("project_id")),
+		FromTaskCard:   c.FormValue("merge_source") == "task_card",
+		FromChangesTab: c.FormValue("merge_source") == "changes_tab",
+		MergeType:      c.FormValue("merge_type"),
+		Target:         strings.TrimSpace(c.FormValue("changes_target")),
+	}
+	if a.Target != "" {
+		if _, _, err := h.changesActionContext(c); err != nil {
+			return a, err
+		}
+	}
+	return a, nil
+}
+
 // MergeTaskBranch manually merges a task's worktree branch to target.
 func (h *Handler) MergeTaskBranch(c echo.Context) error {
-	taskID := c.Param("taskId")
-	fromTaskCard := c.FormValue("merge_source") == "task_card"
-	projectID := strings.TrimSpace(c.FormValue("project_id"))
-	preflight, err := h.loadTaskBranchMutation(c.Request().Context(), taskID, projectID, fromTaskCard)
+	args, err := h.parseBranchMutation(c)
 	if err != nil {
 		return err
+	}
+	if args.MergeType == "" {
+		args.MergeType = "merge"
+	}
+	out, err := actMergeTaskBranch(h, c.Request().Context(), args)
+	if err != nil {
+		return err
+	}
+	return h.respondMutation(c, args.TaskID, out)
+}
+
+func (h *Handler) applyChangesTarget(ctx context.Context, preflight *taskBranchMutationPreflight, target string) (string, error) {
+	if target == "" {
+		return "", nil
+	}
+	if err := h.selectChangesLocalTarget(ctx, preflight.task, preflight.project, target); err != nil {
+		return "", statusErr(http.StatusBadRequest, err.Error())
+	}
+	return target, nil
+}
+
+func mutationView(fromTaskCard, fromChangesTab bool) string {
+	if fromTaskCard {
+		return viewCard
+	}
+	if fromChangesTab {
+		return viewChanges
+	}
+	return viewWorktree
+}
+
+var actMergeTaskBranch = defineAction("task.merge", ownBranchMutation, func(h *Handler, ctx context.Context, a branchMutationArgs) (mutationOutcome, error) {
+	preflight, err := h.loadTaskBranchMutation(ctx, a.TaskID, a.CardProjectID, a.FromTaskCard)
+	if err != nil {
+		return mutationOutcome{}, err
 	}
 	task := preflight.task
 	project := preflight.project
-
-	mergeType := c.FormValue("merge_type")
-	if mergeType == "" {
-		mergeType = "merge"
-	}
-	if mergeType != "merge" && mergeType != "ff" && mergeType != "squash" {
-		if fromTaskCard {
-			return rejectTaskCardMutation(c, "Unsupported merge mode.")
+	if a.MergeType != "merge" && a.MergeType != "ff" && a.MergeType != "squash" {
+		if a.FromTaskCard {
+			return failText(http.StatusConflict, "Unsupported merge mode."), nil
 		}
-		return c.String(http.StatusBadRequest, "unsupported merge type")
+		return mutationOutcome{Code: http.StatusBadRequest, Message: "unsupported merge type"}, nil
 	}
 
-	options := h.mergeTaskBranchOptions(taskID, projectID, fromTaskCard, mergeType)
-	options.selectedTarget, err = h.prepareChangesLocalTarget(c, preflight)
-	if err != nil {
-		return err
+	options := h.mergeTaskBranchOptions(a.TaskID, a.CardProjectID, a.FromTaskCard, a.MergeType)
+	if options.selectedTarget, err = h.applyChangesTarget(ctx, preflight, a.Target); err != nil {
+		return mutationOutcome{}, err
 	}
-	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
-	if fromTaskCard {
+	h.refreshTaskBranchMutation(ctx, preflight, options)
+	if a.FromTaskCard {
 		if preflight.cardReason != "" {
-			return rejectTaskCardMutation(c, preflight.cardReason)
+			return failText(http.StatusConflict, preflight.cardReason), nil
 		}
 		if !preflight.operationEligible {
-			return rejectTaskCardMutation(c, preflight.operationReason)
+			return failText(http.StatusConflict, preflight.operationReason), nil
 		}
 	} else if !preflight.eligibility.MergeAvailable {
 		msg := preflight.eligibility.Reason
@@ -442,20 +575,16 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		if msg == "" {
 			msg = "Task branch is not currently eligible to merge"
 		}
-		if isHTMX(c) {
-			setHTMXToast(c, msg, "failed")
-		}
-		return c.String(http.StatusConflict, msg)
+		return failText(http.StatusConflict, msg), nil
 	}
 
 	if h.worktreeSvc == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
+		return mutationOutcome{}, statusErr(http.StatusInternalServerError, "worktree service not available")
 	}
 
-	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
 	targetBranch := preflight.eligibility.TargetBranch
-	result, mergeErr := h.worktreeSvc.MergeBranchValidated(c.Request().Context(), task, project.RepoPath, mergeType, func() error {
-		if err := h.revalidateTaskBranchMutation(c.Request().Context(), preflight, options); err != nil {
+	result, mergeErr := h.worktreeSvc.MergeBranchValidated(ctx, task, project.RepoPath, a.MergeType, func() error {
+		if err := h.revalidateTaskBranchMutation(ctx, preflight, options); err != nil {
 			return err
 		}
 		*task = *preflight.task
@@ -464,108 +593,84 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	})
 	if mergeErr != nil {
 		applog.Infof("[handler] MergeTaskBranch error: %v", mergeErr)
-		errMessage := "Local merge failed"
 		if errors.Is(mergeErr, service.ErrMergeEligibilityChanged) {
-			errMessage = mergeErr.Error()
-			if isHTMX(c) {
-				setHTMXToast(c, errMessage, "failed")
+			if a.FromChangesTab {
+				return failView(viewChanges, mergeErr.Error()), nil
 			}
-			if fromChangesTab {
-				return h.GetTaskChanges(c)
-			}
-			return c.String(http.StatusConflict, errMessage)
+			return failText(http.StatusConflict, mergeErr.Error()), nil
 		}
 		if errors.Is(mergeErr, service.ErrMergeInProgress) {
-			errMessage = "A local merge is already in progress for this repository. Wait for it to finish before trying another merge."
-			if isHTMX(c) {
-				setHTMXToast(c, errMessage, "failed")
-			}
-			return c.String(http.StatusConflict, errMessage)
+			return failText(http.StatusConflict, "A local merge is already in progress for this repository. Wait for it to finish before trying another merge."), nil
 		}
+		errMessage := "Local merge failed"
 		if result != nil && result.ErrorMessage != "" {
 			errMessage = fmt.Sprintf("Local merge failed: %s", result.ErrorMessage)
 		} else if mergeErr.Error() != "" {
 			errMessage = fmt.Sprintf("Local merge failed: %s", mergeErr.Error())
 		}
-		if isHTMX(c) {
-			setHTMXToast(c, errMessage, "failed")
-		}
 		// Card and Changes surfaces own authoritative retry fragments. Recoverable
 		// merge failures return a swap-safe response so HTMX applies both the
 		// refreshed controls and the failure toast. Stale eligibility failures above
 		// retain their non-success status.
-		if fromTaskCard && result != nil {
-			return h.renderTaskCardRefresh(c, taskID)
+		if a.FromTaskCard && result != nil {
+			return failView(viewCard, errMessage), nil
 		}
-		if fromChangesTab {
-			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-			return h.GetTaskChanges(c)
+		if a.FromChangesTab {
+			return failView(viewChanges, errMessage), nil
 		}
-		return c.String(http.StatusBadRequest, errMessage)
+		return failText(http.StatusBadRequest, errMessage), nil
 	}
 
+	view := mutationView(a.FromTaskCard, a.FromChangesTab)
 	if result != nil && !result.Success && len(result.ConflictFiles) > 0 {
-		if isHTMX(c) {
-			setHTMXToast(c, "Local merge has conflicts. Resolve conflicts or abort merge.", "failed")
-		}
-		// Conflicts detected - refresh the owning surface to show current retry state.
-		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-		if fromTaskCard {
-			return h.renderTaskCardRefresh(c, taskID)
-		}
-		if fromChangesTab {
-			return h.GetTaskChanges(c)
-		}
-		return h.renderWorktreeInfo(c, task)
-	}
-
-	// Success - refresh task data and trigger changes tab refresh
-	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-
-	// Changes actions return the refreshed panel below. Emitting refreshChanges
-	// as well would fetch and swap that panel a second time, rebuilding its diffs.
-	// Other surfaces still need to notify the Changes panel.
-	var refreshTriggers map[string]any
-	if !fromChangesTab {
-		refreshTriggers = map[string]any{"refreshChanges": true}
+		return failView(view, "Local merge has conflicts. Resolve conflicts or abort merge."), nil
 	}
 	if targetBranch == "" {
 		targetBranch = "main"
 	}
-	setHTMXToastWithOptionsAndTriggers(c, fmt.Sprintf("Merged locally into %s", targetBranch), "completed", "", "", task.ID, "", "", refreshTriggers)
-
-	if fromTaskCard {
-		return h.renderTaskCardRefresh(c, taskID)
-	}
-	if fromChangesTab {
-		return h.GetTaskChanges(c)
-	}
-	return h.renderWorktreeInfo(c, task)
-}
+	// Changes actions return the refreshed panel. Emitting refreshChanges
+	// as well would fetch and swap that panel a second time, rebuilding its diffs.
+	return mutationOutcome{
+		View:           view,
+		Message:        fmt.Sprintf("Merged locally into %s", targetBranch),
+		Toast:          "completed",
+		ToastAlways:    true,
+		ToastTask:      true,
+		RefreshChanges: !a.FromChangesTab,
+	}, nil
+})
 
 // RebaseTaskBranch rebases a task's worktree branch onto its target branch.
 func (h *Handler) RebaseTaskBranch(c echo.Context) error {
-	taskID := c.Param("taskId")
-	fromTaskCard := c.FormValue("merge_source") == "task_card"
-	projectID := strings.TrimSpace(c.FormValue("project_id"))
-	options := h.rebaseTaskBranchOptions(taskID, projectID, fromTaskCard)
-	preflight, err := h.loadTaskBranchMutation(c.Request().Context(), taskID, projectID, fromTaskCard)
+	args, err := h.parseBranchMutation(c)
 	if err != nil {
 		return err
+	}
+	out, err := actRebaseTaskBranch(h, c.Request().Context(), args)
+	if err != nil {
+		return err
+	}
+	return h.respondMutation(c, args.TaskID, out)
+}
+
+var actRebaseTaskBranch = defineAction("task.rebase", ownBranchMutation, func(h *Handler, ctx context.Context, a branchMutationArgs) (mutationOutcome, error) {
+	options := h.rebaseTaskBranchOptions(a.TaskID, a.CardProjectID, a.FromTaskCard)
+	preflight, err := h.loadTaskBranchMutation(ctx, a.TaskID, a.CardProjectID, a.FromTaskCard)
+	if err != nil {
+		return mutationOutcome{}, err
 	}
 	task := preflight.task
 	project := preflight.project
-	options.selectedTarget, err = h.prepareChangesLocalTarget(c, preflight)
-	if err != nil {
-		return err
+	if options.selectedTarget, err = h.applyChangesTarget(ctx, preflight, a.Target); err != nil {
+		return mutationOutcome{}, err
 	}
-	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
-	if fromTaskCard {
+	h.refreshTaskBranchMutation(ctx, preflight, options)
+	if a.FromTaskCard {
 		if preflight.cardReason != "" {
-			return rejectTaskCardMutation(c, preflight.cardReason)
+			return failText(http.StatusConflict, preflight.cardReason), nil
 		}
 		if !preflight.operationEligible {
-			return rejectTaskCardMutation(c, preflight.operationReason)
+			return failText(http.StatusConflict, preflight.operationReason), nil
 		}
 	} else if !preflight.eligibility.MergeAvailable || !preflight.operationEligible {
 		msg := preflight.eligibility.Reason
@@ -577,18 +682,15 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 		if msg == "" {
 			msg = "Task branch is not currently eligible to rebase"
 		}
-		if isHTMX(c) {
-			setHTMXToast(c, msg, "failed")
-		}
-		return c.String(http.StatusConflict, msg)
+		return failText(http.StatusConflict, msg), nil
 	}
 	if h.worktreeSvc == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
+		return mutationOutcome{}, statusErr(http.StatusInternalServerError, "worktree service not available")
 	}
 
 	targetBranch := preflight.eligibility.TargetBranch
-	result, rebaseErr := h.worktreeSvc.RebaseBranchValidated(c.Request().Context(), task, project.RepoPath, func() error {
-		if err := h.revalidateTaskBranchMutation(c.Request().Context(), preflight, options); err != nil {
+	result, rebaseErr := h.worktreeSvc.RebaseBranchValidated(ctx, task, project.RepoPath, func() error {
+		if err := h.revalidateTaskBranchMutation(ctx, preflight, options); err != nil {
 			return err
 		}
 		*task = *preflight.task
@@ -598,20 +700,13 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	if rebaseErr != nil {
 		applog.Infof("[handler] RebaseTaskBranch error: %v", rebaseErr)
 		if errors.Is(rebaseErr, service.ErrMergeEligibilityChanged) {
-			if fromTaskCard {
-				return rejectTaskCardMutation(c, rebaseErr.Error())
+			if a.FromTaskCard {
+				return failText(http.StatusConflict, rebaseErr.Error()), nil
 			}
-			if isHTMX(c) {
-				setHTMXToast(c, rebaseErr.Error(), "failed")
-			}
-			return h.GetTaskChanges(c)
+			return failView(viewChanges, rebaseErr.Error()), nil
 		}
 		if errors.Is(rebaseErr, service.ErrMergeInProgress) {
-			errMessage := "A local merge or rebase is already in progress for this repository. Wait for it to finish before rebasing."
-			if isHTMX(c) {
-				setHTMXToast(c, errMessage, "failed")
-			}
-			return c.String(http.StatusConflict, errMessage)
+			return failText(http.StatusConflict, "A local merge or rebase is already in progress for this repository. Wait for it to finish before rebasing."), nil
 		}
 		errMessage := "Rebase failed"
 		if result != nil && result.ErrorMessage != "" {
@@ -619,58 +714,38 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 		} else if rebaseErr.Error() != "" {
 			errMessage = fmt.Sprintf("Rebase failed: %s", rebaseErr.Error())
 		}
-		if isHTMX(c) {
-			setHTMXToast(c, errMessage, "failed")
+		if a.FromTaskCard && result != nil {
+			return failView(viewCard, errMessage), nil
 		}
-		if fromTaskCard && result != nil {
-			return h.renderTaskCardRefresh(c, taskID)
-		}
-		return c.String(http.StatusBadRequest, errMessage)
+		return failText(http.StatusBadRequest, errMessage), nil
 	}
 
+	view := viewChanges
+	if a.FromTaskCard {
+		view = viewCard
+	}
 	if result != nil && !result.Success && len(result.ConflictFiles) > 0 {
 		msg := fmt.Sprintf("Rebase onto %s had conflicts and was aborted. Rebase manually and resolve the conflicts, or ask the agent to reconcile with %s, then try again.", targetBranch, targetBranch)
 		if result.ErrorMessage != "" {
 			msg = result.ErrorMessage
 		}
-		if isHTMX(c) {
-			setHTMXToast(c, msg, "failed")
-		}
-		if fromTaskCard {
-			return h.renderTaskCardRefresh(c, taskID)
-		}
-		return h.GetTaskChanges(c)
+		return failView(view, msg), nil
 	}
-
+	msg := fmt.Sprintf("Rebased task branch onto %s", targetBranch)
 	if result != nil && result.UpToDate {
-		setHTMXToast(c, fmt.Sprintf("Task branch is already up to date with %s", targetBranch), "completed")
-	} else {
-		setHTMXToast(c, fmt.Sprintf("Rebased task branch onto %s", targetBranch), "completed")
+		msg = fmt.Sprintf("Task branch is already up to date with %s", targetBranch)
 	}
+	return mutationOutcome{View: view, Message: msg, Toast: "completed", ToastAlways: true}, nil
+})
+
+func taskPullRequestFailure(fromTaskCard bool, message string) mutationOutcome {
 	if fromTaskCard {
-		return h.renderTaskCardRefresh(c, taskID)
+		return mutationOutcome{Code: http.StatusBadRequest, Message: message, Toast: "failed"}
 	}
-	return h.GetTaskChanges(c)
+	return mutationOutcome{View: viewNone, Message: message, Toast: "failed", ToastAlways: true}
 }
 
-func taskPullRequestFailure(c echo.Context, fromTaskCard bool, message string) error {
-	if fromTaskCard {
-		if isHTMX(c) {
-			setHTMXToast(c, message, "failed")
-		}
-		return c.String(http.StatusBadRequest, message)
-	}
-	setHTMXToast(c, message, "failed")
-	return c.NoContent(http.StatusNoContent)
-}
-
-func taskCardPullRequestNotFound(c echo.Context) error {
-	const message = "Task not found"
-	if isHTMX(c) {
-		setHTMXToast(c, message, "failed")
-	}
-	return c.String(http.StatusNotFound, message)
-}
+var taskCardPullRequestNotFound = mutationOutcome{Code: http.StatusNotFound, Message: "Task not found", Toast: "failed"}
 
 func (h *Handler) taskPullRequestProjectContext(c echo.Context) (string, bool, error) {
 	ctx := c.Request().Context()
@@ -706,60 +781,89 @@ func (h *Handler) taskPullRequestProjectContext(c echo.Context) (string, bool, e
 	return selectedProjectID, true, nil
 }
 
+// pullRequestArgs opens a PR. ProjectID is the project the request was made
+// in; when set, the task must belong to it.
+type pullRequestArgs struct {
+	TaskID       string
+	ProjectID    string
+	FromTaskCard bool
+	TargetRepo   string
+	Base         string
+}
+
 // CreateTaskPullRequest creates or reuses a pull request for a task worktree branch.
 func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
-	taskID := c.Param("taskId")
-	fromTaskCard := cardMutationSource(c)
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		if fromTaskCard {
-			return taskCardPullRequestNotFound(c)
-		}
-		return taskPullRequestFailure(c, false, "Task not found")
+	args := pullRequestArgs{
+		TaskID:       c.Param("taskId"),
+		FromTaskCard: cardMutationSource(c),
+		TargetRepo:   strings.TrimSpace(c.FormValue("target_repo")),
+		Base:         strings.TrimSpace(c.FormValue("base")),
 	}
-	requestProjectID := ""
-	if fromTaskCard {
-		requestProjectID = strings.TrimSpace(c.FormValue("project_id"))
-		if requestProjectID == "" || task.ProjectID != requestProjectID {
-			return taskCardPullRequestNotFound(c)
+	if args.FromTaskCard {
+		args.ProjectID = strings.TrimSpace(c.FormValue("project_id"))
+		if args.ProjectID == "" {
+			return h.respondMutation(c, args.TaskID, taskCardPullRequestNotFound)
 		}
 	} else {
-		var hasRequestProject bool
-		var projectErr error
-		requestProjectID, hasRequestProject, projectErr = h.taskPullRequestProjectContext(c)
-		if projectErr != nil || (hasRequestProject && task.ProjectID != requestProjectID) {
-			return taskCardPullRequestNotFound(c)
+		projectID, hasProject, err := h.taskPullRequestProjectContext(c)
+		if err != nil || (hasProject && projectID == "") {
+			return h.respondMutation(c, args.TaskID, taskCardPullRequestNotFound)
 		}
-		if !hasRequestProject {
-			requestProjectID = task.ProjectID
-		}
+		args.ProjectID = projectID
 	}
-	project, err := h.projectRepo.GetByID(c.Request().Context(), requestProjectID)
+	out, err := actPullRequest(h, c.Request().Context(), args)
+	var status *echo.HTTPError
+	if errors.As(err, &status) && status.Code == http.StatusNotFound {
+		if args.FromTaskCard {
+			return h.respondMutation(c, args.TaskID, taskCardPullRequestNotFound)
+		}
+		return h.respondMutation(c, args.TaskID, taskPullRequestFailure(false, "Task not found"))
+	}
+	if err != nil {
+		return err
+	}
+	return h.respondMutation(c, args.TaskID, out)
+}
+
+var actPullRequest = defineAction("task.pullrequest", func(h *Handler, ctx context.Context, a pullRequestArgs) (string, authz.Permission, error) {
+	return editTask(h, ctx, a.TaskID)
+}, func(h *Handler, ctx context.Context, a pullRequestArgs) (mutationOutcome, error) {
+	task, err := h.taskSvc.GetByID(ctx, a.TaskID)
+	if err != nil || task == nil {
+		if a.FromTaskCard {
+			return taskCardPullRequestNotFound, nil
+		}
+		return taskPullRequestFailure(false, "Task not found"), nil
+	}
+	if a.ProjectID != "" && task.ProjectID != a.ProjectID {
+		return taskCardPullRequestNotFound, nil
+	}
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
-		return taskPullRequestFailure(c, fromTaskCard, "Project has no repository path configured")
+		return taskPullRequestFailure(a.FromTaskCard, "Project has no repository path configured"), nil
 	}
-	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
+	h.recoverTaskWorktreeState(ctx, task, project)
 	if task.WorktreeBranch == "" {
-		return taskPullRequestFailure(c, fromTaskCard, "Task has no worktree branch")
+		return taskPullRequestFailure(a.FromTaskCard, "Task has no worktree branch"), nil
 	}
 	if h.githubSvc == nil {
-		if fromTaskCard {
-			return taskPullRequestFailure(c, true, "GitHub integration is not configured")
+		out := taskPullRequestFailure(a.FromTaskCard, "GitHub integration is not configured")
+		if !a.FromTaskCard {
+			out.LinkURL, out.LinkText = "/channels", "Open Channels"
 		}
-		setHTMXToastWithLink(c, "GitHub integration is not configured", "failed", "/channels", "Open Channels")
-		return c.NoContent(http.StatusNoContent)
+		return out, nil
 	}
 	if h.taskPullRequestRepo == nil {
-		return taskPullRequestFailure(c, fromTaskCard, "Task pull request repository not available")
+		return taskPullRequestFailure(a.FromTaskCard, "Task pull request repository not available"), nil
 	}
 
 	var eligibilityReason string
-	result, mutationErr := h.newTaskPullRequestService().OpenForTaskValidated(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
-		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
-		TargetRepoURL: strings.TrimSpace(c.FormValue("target_repo")),
-		Base:          strings.TrimSpace(c.FormValue("base")),
+	result, mutationErr := h.newTaskPullRequestService().OpenForTaskValidated(ctx, project, task, service.OpenTaskPullRequestOptions{
+		CommitMessage: h.buildPullRequestPrepCommitMessage(ctx, task),
+		TargetRepoURL: a.TargetRepo,
+		Base:          a.Base,
 	}, func() (*models.Project, *models.Task, error) {
-		currentTask, loadErr := h.taskSvc.GetByID(c.Request().Context(), taskID)
+		currentTask, loadErr := h.taskSvc.GetByID(ctx, a.TaskID)
 		if loadErr != nil || currentTask == nil {
 			eligibilityReason = "Task not found."
 			return nil, nil, errTaskMutationEligibilityChanged
@@ -768,7 +872,7 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 			eligibilityReason = "Task project eligibility changed."
 			return nil, nil, errTaskMutationEligibilityChanged
 		}
-		currentProject, loadErr := h.projectRepo.GetByID(c.Request().Context(), currentTask.ProjectID)
+		currentProject, loadErr := h.projectRepo.GetByID(ctx, currentTask.ProjectID)
 		if loadErr != nil || currentProject == nil || strings.TrimSpace(currentProject.RepoPath) == "" {
 			eligibilityReason = "Task project repository eligibility changed."
 			return nil, nil, errTaskMutationEligibilityChanged
@@ -781,35 +885,34 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 			eligibilityReason = "Wait for the task to finish before creating a PR."
 			return nil, nil, errTaskMutationEligibilityChanged
 		}
-		h.recoverTaskWorktreeState(c.Request().Context(), currentTask, currentProject)
-		if fromTaskCard {
+		h.recoverTaskWorktreeState(ctx, currentTask, currentProject)
+		if a.FromTaskCard {
 			if eligible, reason := h.taskCardPullRequestEligibility(currentTask, currentProject); !eligible {
 				eligibilityReason = reason
 				return nil, nil, errTaskMutationEligibilityChanged
 			}
 		}
-		task = currentTask
 		return currentProject, currentTask, nil
 	})
 	if errors.Is(mutationErr, errTaskMutationEligibilityChanged) {
-		return rejectTaskCardMutation(c, eligibilityReason)
+		return failText(http.StatusConflict, eligibilityReason), nil
 	}
 	if mutationErr != nil {
-		return taskPullRequestFailure(c, fromTaskCard, formatTaskPullRequestError(mutationErr))
+		return taskPullRequestFailure(a.FromTaskCard, formatTaskPullRequestError(mutationErr)), nil
 	}
 
+	msg := fmt.Sprintf("GitHub PR reused (#%d)", result.PullRequest.Number)
 	if result.ReusedExistingRecord {
-		setHTMXToast(c, fmt.Sprintf("GitHub PR already exists (#%d)", result.PullRequest.Number), "success")
+		msg = fmt.Sprintf("GitHub PR already exists (#%d)", result.PullRequest.Number)
 	} else if result.Created {
-		setHTMXToast(c, fmt.Sprintf("GitHub PR created (#%d)", result.PullRequest.Number), "success")
-	} else {
-		setHTMXToast(c, fmt.Sprintf("GitHub PR reused (#%d)", result.PullRequest.Number), "success")
+		msg = fmt.Sprintf("GitHub PR created (#%d)", result.PullRequest.Number)
 	}
-	if fromTaskCard {
-		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+	view := viewChanges
+	if a.FromTaskCard {
+		view = viewBoard
 	}
-	return h.GetTaskChanges(c)
-}
+	return mutationOutcome{View: view, Message: msg, Toast: "success", ToastAlways: true}, nil
+})
 
 func formatTaskPullRequestError(err error) string {
 	if err == nil {
@@ -903,36 +1006,55 @@ func (h *Handler) revalidateTaskConflictRecovery(ctx context.Context, taskID str
 	return freshEligibility, nil
 }
 
+type conflictArgs struct {
+	TaskID         string
+	FromChangesTab bool
+}
+
+func ownConflict(h *Handler, ctx context.Context, a conflictArgs) (string, authz.Permission, error) {
+	return editTask(h, ctx, a.TaskID)
+}
+
+func parseConflictArgs(c echo.Context) conflictArgs {
+	return conflictArgs{TaskID: c.Param("taskId"), FromChangesTab: c.FormValue("merge_source") == "changes_tab"}
+}
+
+func conflictFailure(fromChangesTab bool, status int, message string) mutationOutcome {
+	if fromChangesTab {
+		return failView(viewChanges, message)
+	}
+	return failText(status, message)
+}
+
 // ResolveTaskConflicts triggers AI-assisted conflict resolution.
 func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
-	taskID := c.Param("taskId")
-	preflight, err := h.preflightTaskConflictRecovery(c.Request().Context(), taskID, c.FormValue("merge_source") == "changes_tab", func(*models.Task) error {
+	args := parseConflictArgs(c)
+	out, err := actResolveConflicts(h, c.Request().Context(), args)
+	if err != nil {
+		return err
+	}
+	return h.respondMutation(c, args.TaskID, out)
+}
+
+var actResolveConflicts = defineAction("task.conflicts.resolve", ownConflict, func(h *Handler, ctx context.Context, a conflictArgs) (mutationOutcome, error) {
+	preflight, err := h.preflightTaskConflictRecovery(ctx, a.TaskID, a.FromChangesTab, func(*models.Task) error {
 		if h.worktreeSvc == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
+			return statusErr(http.StatusInternalServerError, "worktree service not available")
 		}
 		return nil
 	})
 	if err != nil {
-		return err
+		return mutationOutcome{}, err
 	}
-
 	task := preflight.task
-	project := preflight.project
-	eligibility := preflight.eligibility
-	fromChangesTab := preflight.fromChangesTab
-	if !eligibility.ConflictRecovery {
-		msg := "No active merge conflicts remain. Merge actions have been refreshed."
-		if isHTMX(c) {
-			setHTMXToast(c, msg, "info")
-		}
-		if fromChangesTab {
-			return h.GetTaskChanges(c)
-		}
-		return c.String(http.StatusConflict, msg)
+	if !preflight.eligibility.ConflictRecovery {
+		out := conflictFailure(a.FromChangesTab, http.StatusConflict, "No active merge conflicts remain. Merge actions have been refreshed.")
+		out.Toast = "info"
+		return out, nil
 	}
 
-	result, resolveErr := h.worktreeSvc.ResolveConflictsWithAIValidated(c.Request().Context(), task, project.RepoPath, func() error {
-		_, err := h.revalidateTaskConflictRecovery(c.Request().Context(), taskID, task, project)
+	result, resolveErr := h.worktreeSvc.ResolveConflictsWithAIValidated(ctx, task, preflight.project.RepoPath, func() error {
+		_, err := h.revalidateTaskConflictRecovery(ctx, a.TaskID, task, preflight.project)
 		return err
 	})
 	if resolveErr != nil {
@@ -950,67 +1072,54 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 		} else if resolveErr.Error() != "" {
 			errMessage = resolveErr.Error()
 		}
-		if isHTMX(c) {
-			setHTMXToast(c, errMessage, "failed")
-		}
-		if fromChangesTab {
-			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-			return h.GetTaskChanges(c)
-		}
-		return c.String(status, errMessage)
+		return conflictFailure(a.FromChangesTab, status, errMessage), nil
 	}
 
+	out := mutationOutcome{View: mutationView(false, a.FromChangesTab)}
 	if result != nil && !result.Success {
-		msg := "AI could not resolve all conflicts. Resolve conflicts manually or abort the merge."
+		out.Toast = "failed"
+		out.Message = "AI could not resolve all conflicts. Resolve conflicts manually or abort the merge."
 		if result.ErrorMessage != "" {
-			msg = result.ErrorMessage
-		}
-		if isHTMX(c) {
-			setHTMXToast(c, msg, "failed")
+			out.Message = result.ErrorMessage
 		}
 	}
-
-	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if fromChangesTab {
-		return h.GetTaskChanges(c)
-	}
-	return h.renderWorktreeInfo(c, task)
-}
+	return out, nil
+})
 
 // AbortTaskMerge aborts an in-progress merge for a task.
 func (h *Handler) AbortTaskMerge(c echo.Context) error {
-	taskID := c.Param("taskId")
-	preflight, err := h.preflightTaskConflictRecovery(c.Request().Context(), taskID, c.FormValue("merge_source") == "changes_tab", nil)
+	args := parseConflictArgs(c)
+	out, err := actAbortMerge(h, c.Request().Context(), args)
 	if err != nil {
 		return err
 	}
+	return h.respondMutation(c, args.TaskID, out)
+}
 
+var actAbortMerge = defineAction("task.conflicts.abort", ownConflict, func(h *Handler, ctx context.Context, a conflictArgs) (mutationOutcome, error) {
+	preflight, err := h.preflightTaskConflictRecovery(ctx, a.TaskID, a.FromChangesTab, nil)
+	if err != nil {
+		return mutationOutcome{}, err
+	}
 	task := preflight.task
 	project := preflight.project
 	eligibility := preflight.eligibility
-	fromChangesTab := preflight.fromChangesTab
 	if !eligibility.ConflictRecovery {
-		msg := "No active merge remains. Merge actions have been refreshed."
-		if isHTMX(c) {
-			setHTMXToast(c, msg, "info")
-		}
-		if fromChangesTab {
-			return h.GetTaskChanges(c)
-		}
-		return c.String(http.StatusConflict, msg)
+		out := conflictFailure(a.FromChangesTab, http.StatusConflict, "No active merge remains. Merge actions have been refreshed.")
+		out.Toast = "info"
+		return out, nil
 	}
 
 	abortBranch := task.WorktreeBranch
 	abortTarget := eligibility.TargetBranch
-	abortErr := h.worktreeSvc.AbortMergeForTaskValidated(c.Request().Context(), taskID, project.RepoPath, abortBranch, abortTarget, models.MergeStatusPending, func() error {
-		freshEligibility, err := h.revalidateTaskConflictRecovery(c.Request().Context(), taskID, task, project)
+	abortErr := h.worktreeSvc.AbortMergeForTaskValidated(ctx, a.TaskID, project.RepoPath, abortBranch, abortTarget, models.MergeStatusPending, func() error {
+		freshEligibility, err := h.revalidateTaskConflictRecovery(ctx, a.TaskID, task, project)
 		if err != nil {
 			return err
 		}
 		if task.WorktreeBranch != abortBranch || freshEligibility.TargetBranch != abortTarget {
 			return fmt.Errorf("%w: task conflict metadata changed before abort", service.ErrMergeEligibilityChanged)
 		}
-		eligibility = freshEligibility
 		return nil
 	})
 	if abortErr != nil {
@@ -1023,49 +1132,46 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 			errMessage = abortErr.Error()
 			status = http.StatusConflict
 		}
-		if isHTMX(c) {
-			setHTMXToast(c, errMessage, "failed")
-		}
-		if fromChangesTab {
-			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-			return h.GetTaskChanges(c)
-		}
-		return c.String(status, errMessage)
+		return conflictFailure(a.FromChangesTab, status, errMessage), nil
 	}
-
-	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if fromChangesTab {
-		return h.GetTaskChanges(c)
-	}
-	return h.renderWorktreeInfo(c, task)
-}
+	return mutationOutcome{View: mutationView(false, a.FromChangesTab)}, nil
+})
 
 // CleanupTaskWorktree removes the worktree for a task.
 func (h *Handler) CleanupTaskWorktree(c echo.Context) error {
 	taskID := c.Param("taskId")
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	if h.worktreeSvc == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
-	}
-
-	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
-	}
-
 	deleteBranch := c.FormValue("delete_branch") == "on" || c.FormValue("delete_branch") == "true"
-	if cleanErr := h.worktreeSvc.CleanupWorktree(c.Request().Context(), task, project.RepoPath, deleteBranch); cleanErr != nil {
-		applog.Infof("[handler] CleanupTaskWorktree error: %v", cleanErr)
-		return echo.NewHTTPError(http.StatusInternalServerError, cleanErr.Error())
+	if _, err := actCleanupWorktree(h, c.Request().Context(), cleanupWorktreeArgs{TaskID: taskID, DeleteBranch: deleteBranch}); err != nil {
+		return err
 	}
-
-	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-	return h.renderWorktreeInfo(c, task)
+	return h.respondMutation(c, taskID, mutationOutcome{View: viewWorktree})
 }
+
+type cleanupWorktreeArgs struct {
+	TaskID       string
+	DeleteBranch bool
+}
+
+var actCleanupWorktree = defineAction("task.worktree.cleanup", func(h *Handler, ctx context.Context, a cleanupWorktreeArgs) (string, authz.Permission, error) {
+	return editTask(h, ctx, a.TaskID)
+}, func(h *Handler, ctx context.Context, a cleanupWorktreeArgs) (struct{}, error) {
+	task, err := h.loadTask(ctx, a.TaskID)
+	if err != nil {
+		return struct{}{}, err
+	}
+	if h.worktreeSvc == nil {
+		return struct{}{}, statusErr(http.StatusInternalServerError, "worktree service not available")
+	}
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return struct{}{}, statusErr(http.StatusBadRequest, "project has no repo path")
+	}
+	if err := h.worktreeSvc.CleanupWorktree(ctx, task, project.RepoPath, a.DeleteBranch); err != nil {
+		applog.Infof("[handler] CleanupTaskWorktree error: %v", err)
+		return struct{}{}, statusErr(http.StatusInternalServerError, err.Error())
+	}
+	return struct{}{}, nil
+})
 
 // GetTaskWorktreeInfo returns the worktree info panel for a task (HTMX partial).
 func (h *Handler) GetTaskWorktreeInfo(c echo.Context) error {
@@ -1078,8 +1184,14 @@ func (h *Handler) GetTaskWorktreeInfo(c echo.Context) error {
 }
 
 func (h *Handler) renderWorktreeInfo(c echo.Context, task *models.Task) error {
-	// Resolve project repo path for file stats
 	ctx := c.Request().Context()
+	var info worktreeInfo
+	if remote, err := h.remoteAct(ctx, task.ID, "worktree.info", task.ID, &info); remote {
+		if err != nil {
+			return err
+		}
+		return render(c, http.StatusOK, pages.WorktreeInfoPanel(info.Task, info.FileStats))
+	}
 	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	h.recoverTaskWorktreeState(ctx, task, project)
 	var fileStats []service.WorktreeFileStat
