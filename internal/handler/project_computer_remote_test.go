@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
@@ -183,15 +184,23 @@ func TestRemoteProjectComputerAsksToReconnectWhenSignedOut(t *testing.T) {
 	}
 }
 
-func TestComputerSettingsRejectRemoteSelectionWithoutConnecting(t *testing.T) {
+func TestComputerSettingsIgnoresRemoteNavigationButRejectsRemoteSave(t *testing.T) {
 	h, e := setupHubHandler(t)
 	h.computerSvc = service.NewProjectComputerService(h.projectRepo, handlerComputerProvisioner{})
 	local := createProject(t, h, "Local computer settings")
 	remoteProject := remoteid.ID("abcdef0123456789", "project")
-	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, serversRequest(method, "/settings/computer?project_id="+url.QueryEscape(remoteProject), url.Values{"idle_minutes": {"88"}}))
-		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	for _, selection := range []string{remoteProject, models.SharedProjectID("example/repo")} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, serversRequest(method, "/settings/computer?project_id="+url.QueryEscape(selection), url.Values{"idle_minutes": {"88"}}))
+			if method == http.MethodGet {
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.Contains(t, rec.Body.String(), local.Name)
+				require.NotContains(t, rec.Body.String(), "value=\""+selection+"\"")
+			} else {
+				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			}
+		}
 	}
 	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, remoteProject))
 	rec := httptest.NewRecorder()

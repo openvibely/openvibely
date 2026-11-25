@@ -21,7 +21,10 @@ func (h *Handler) ProjectComputerSettings(c echo.Context) error {
 	c.SetRequest(c.Request().WithContext(remote.WithServer(c.Request().Context(), "")))
 	id := strings.TrimSpace(c.QueryParam("project_id"))
 	if _, isRemote := remoteid.ServerOf(id); isRemote || models.IsSharedProjectID(id) {
-		return echo.NewHTTPError(http.StatusBadRequest, "Manage remote computers on their server's OV app.")
+		if c.Request().Method != http.MethodGet {
+			return echo.NewHTTPError(http.StatusBadRequest, "Manage remote computers on their server's OV app.")
+		}
+		id = ""
 	}
 	if h.computerSvc == nil {
 		return echo.NewHTTPError(503, "Project computers unavailable")
