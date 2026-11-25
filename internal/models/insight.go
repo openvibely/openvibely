@@ -151,28 +151,3 @@ type IdeaGrade struct {
 	StrategyScore  float64   `json:"strategy_score"`  // 0-100
 	CreatedAt      time.Time `json:"created_at"`
 }
-
-// InsightDashboardData aggregates all data for the insights page
-type InsightDashboardData struct {
-	NewInsights       []Insight      `json:"new_insights"`
-	RecentInsights    []Insight      `json:"recent_insights"`
-	LatestReport      *InsightReport `json:"latest_report,omitempty"`
-	Stats             InsightStats   `json:"stats"`
-	LatestHealthCheck *HealthCheck   `json:"latest_health_check,omitempty"`
-	HealthHistory     []HealthCheck  `json:"health_history,omitempty"`
-	LatestIdeaGrade   *IdeaGrade     `json:"latest_idea_grade,omitempty"`
-	IdeaGradeHistory  []IdeaGrade    `json:"idea_grade_history,omitempty"`
-}
-
-// InsightStats holds summary stats for the insights page
-type InsightStats struct {
-	TotalInsights int     `json:"total_insights"`
-	NewCount      int     `json:"new_count"`
-	AcceptedCount int     `json:"accepted_count"`
-	RejectedCount int     `json:"rejected_count"`
-	ResolvedCount int     `json:"resolved_count"`
-	AvgConfidence float64 `json:"avg_confidence"`
-	BugPatterns   int     `json:"bug_patterns"`
-	TechDebtItems int     `json:"tech_debt_items"`
-	Optimizations int     `json:"optimizations"`
-}
