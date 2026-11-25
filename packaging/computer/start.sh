@@ -62,6 +62,26 @@ run_desktop x11vnc -noshm -display "$DISPLAY" -localhost -rfbport "$vnc" -viewon
 run_desktop x11vnc -noshm -display "$DISPLAY" -localhost -rfbport "$control" -forever -shared -nopw -nowait_bog -wait 10 -defer 0 >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/vnc-control.log" 2>&1 &
 run_desktop websockify "127.0.0.1:$view_ws" "127.0.0.1:$vnc" >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/websockify-view.log" 2>&1 &
 run_desktop websockify "127.0.0.1:$control_ws" "127.0.0.1:$control" >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/websockify-control.log" 2>&1 &
+# xfwm4 saved its stock defaults into each desktop's settings; drop the unchanged
+# ones once so the image's theme defaults apply.
+run_desktop python3 - <<'EOF' || true
+import os, re
+path = os.path.join(os.environ["XDG_CONFIG_HOME"], "xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml")
+marker = path + ".ov-theme-1"
+if os.path.isfile(path) and not os.path.islink(path) and not os.path.exists(marker):
+    stock = {"theme": "Default", "title_font": "Sans Bold 9", "button_layout": "O|SHMC"}
+    with open(path) as f:
+        text = f.read()
+    for name, value in stock.items():
+        text = re.sub(r'\n\s*<property name="%s" type="string" value="%s"/>' % (name, re.escape(value)), "", text)
+    tmp = path + ".ov-tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    open(marker, "w").close()
+EOF
 run_desktop dbus-run-session -- xfce4-session >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/xfce.log" 2>&1 &
 run_desktop /usr/local/bin/openvibely-browser --restore-last-session >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/browser.log" 2>&1 &
 browser_pid=$!
