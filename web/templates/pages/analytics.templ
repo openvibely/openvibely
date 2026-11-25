@@ -314,6 +314,22 @@ templ analyticsContent(currentProject *models.Project, accountAccess ...bool) {
                     var workspaceProjectID = dataEl.dataset.workspaceProjectId || projectID;
 						var charts = window._analyticsCharts;
 						var eventSignal = window._analyticsAbortController.signal;
+                        var pendingScopeURL = '';
+                        function refreshScope() {
+                            if (!pendingScopeURL || !dataEl.isConnected || dataEl.closest('#settings-retained-workspace') || location.pathname !== '/analytics' || document.querySelector('dialog[open]')) return;
+                            var url = pendingScopeURL;
+                            pendingScopeURL = '';
+                            Promise.resolve(htmx.ajax('GET', url, {target:'#main-content', swap:'innerHTML'})).catch(function() { pendingScopeURL = url; });
+                        }
+                        window.addEventListener('openvibely-workspace-scope-changed', function(event) {
+                            if (!dataEl.isConnected || dataEl.closest('#settings-retained-workspace')) return;
+                            var url = new URL(location.href);
+                            url.searchParams.set('project_id', event.detail.projectID);
+                            pendingScopeURL = url.pathname + url.search + url.hash;
+                            refreshScope();
+                        }, {signal:eventSignal});
+                        document.addEventListener('close', function() { setTimeout(refreshScope, 0); }, {capture:true, signal:eventSignal});
+
                         document.body.addEventListener('accountUsageUpdated', function() { if(selectedView === 'usage') loadUsageAccounts(false); }, {signal:eventSignal});
                         const themeObserver = new MutationObserver(function() {
                             if (!dataEl.isConnected) { themeObserver.disconnect(); return; }

@@ -865,3 +865,48 @@ func TestBrowserFunctional_ChatStartupRegroup(t *testing.T) {
 		t.Log("state:", b.evaluate(`JSON.stringify({tabs:Array.from(document.querySelectorAll('[data-project-tab]')).map(x=>x.dataset.projectTab),selection:document.getElementById('project-selector').value,list:document.getElementById('task-list-groups').getAttribute('hx-get'),url:location.pathname+location.search})`))
 	})
 }
+
+func TestBrowserFunctional_ListScopeRefreshAfterDialog(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, page := range []string{"automations", "analytics"} {
+		t.Run(page, func(t *testing.T) {
+			projects := []models.Project{{ID: "local", Name: "Local"}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path != "/"+page {
+					w.WriteHeader(204)
+					return
+				}
+				if r.Header.Get("HX-Request") == "true" {
+					if page == "automations" {
+						fmt.Fprintf(w, `<div id="automations-container"><div id="automations-card-list"><span id="refreshed-scope">%s</span></div></div>`, r.URL.Query().Get("project_id"))
+					} else {
+						fmt.Fprintf(w, `<div id="refreshed-scope">%s</div>`, r.URL.Query().Get("project_id"))
+					}
+					return
+				}
+				if page == "automations" {
+					_ = AutomationsPage(projects, "local", nil, false).Render(r.Context(), w)
+				} else {
+					_ = Analytics(projects, &projects[0]).Render(r.Context(), w)
+				}
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL+"/"+page+"?project_id=local", "scope-dialog-"+page, func(b *composerFocusCDP) {
+				if page == "automations" {
+					b.waitFor("ready", `String(!!window.openAutomationNewModal)`, "true")
+					b.evaluate(`document.getElementById('automation-template-modal').showModal();'open'`)
+				} else {
+					b.waitFor("preview ready", `String(!!document.querySelector('dialog[data-analytics-preview]'))`, "true")
+					b.evaluate(`document.querySelector('dialog[data-analytics-preview]').showModal();'open'`)
+				}
+				b.evaluate(`window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed',{detail:{projectID:'__repo_group'}}));'changed'`)
+				b.waitFor("dialog preserved", `String(!!document.querySelector('dialog[open]')&&!document.getElementById('refreshed-scope'))`, "true")
+				b.evaluate(`document.querySelector('dialog[open]').close();document.activeElement.blur();'closed'`)
+				b.waitFor("combined data fetched", `document.getElementById('refreshed-scope')?.textContent||''`, "__repo_group")
+			})
+		})
+	}
+}

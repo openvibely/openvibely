@@ -542,9 +542,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         // the grouped navigation scope separately.
                         window.dispatchEvent(new CustomEvent('openvibely-workspace-scope-changed', {detail: {projectID: target, previousProjectID: current}}));
                         if (listPage && window.openVibelyRetargetLiveEvents) window.openVibelyRetargetLiveEvents(target, '');
-                        if (listPage && url.pathname !== '/tasks' && !document.querySelector('dialog[open]')) {
-                            navigateProject(url.pathname + url.search + url.hash, target);
-                        }
+
                     }
                     window.addEventListener('openvibely-servers-changed', refreshProjectCatalog);
                     // Covers a server that connected before this page's live socket did.
