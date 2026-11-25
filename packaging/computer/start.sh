@@ -64,7 +64,7 @@ run_desktop websockify "127.0.0.1:$view_ws" "127.0.0.1:$vnc" >"/run/ov-desktops/
 run_desktop websockify "127.0.0.1:$control_ws" "127.0.0.1:$control" >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/websockify-control.log" 2>&1 &
 # xfwm4 saved its stock defaults into each desktop's settings; drop the unchanged
 # ones once so the image's theme defaults apply.
-run_desktop python3 - <<'EOF'
+run_desktop python3 - <<'EOF' || true
 import os, re
 path = os.path.join(os.environ["XDG_CONFIG_HOME"], "xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml")
 marker = path + ".ov-theme-1"
@@ -74,8 +74,12 @@ if os.path.isfile(path) and not os.path.islink(path) and not os.path.exists(mark
         text = f.read()
     for name, value in stock.items():
         text = re.sub(r'\n\s*<property name="%s" type="string" value="%s"/>' % (name, re.escape(value)), "", text)
-    with open(path, "w") as f:
+    tmp = path + ".ov-tmp"
+    with open(tmp, "w") as f:
         f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
     open(marker, "w").close()
 EOF
 run_desktop dbus-run-session -- xfce4-session >"/run/ov-desktops/$OPENVIBELY_DESKTOP_ID/xfce.log" 2>&1 &
