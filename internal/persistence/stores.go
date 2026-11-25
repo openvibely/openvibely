@@ -400,16 +400,12 @@ type InsightsStore interface {
 	GetCompletedBugFixes(ctx context.Context, projectID string, limit int) ([]models.Task, error)
 	GetFailedTaskPatterns(ctx context.Context, projectID string, minFailures int) ([]InsightFailedTaskPattern, error)
 	GetInsight(ctx context.Context, projectID string, id string) (*models.Insight, error)
-	GetLatestHealthCheck(ctx context.Context, projectID string) (*models.HealthCheck, error)
-	GetLatestIdeaGrade(ctx context.Context, projectID string) (*models.IdeaGrade, error)
 	GetSlowExecutions(ctx context.Context, projectID string, minDurationSecs int, limit int) ([]struct {
 		TaskTitle string
 		Duration  int
 		AgentName string
 	}, error)
 	ListByType(ctx context.Context, projectID string, insightType models.InsightType, limit int) ([]models.Insight, error)
-	ListHealthChecks(ctx context.Context, projectID string, limit int) ([]models.HealthCheck, error)
-	ListIdeaGrades(ctx context.Context, projectID string, limit int) ([]models.IdeaGrade, error)
 	ListReports(ctx context.Context, projectID string, limit int) ([]models.InsightReport, error)
 	UpdateStatus(ctx context.Context, projectID string, id string, status models.InsightStatus) error
 }

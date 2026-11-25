@@ -69,9 +69,9 @@ var readMethods = map[string]map[string]bool{
 	},
 	"Insights": {
 		"GetCompletedBugFixes": true, "GetFailedTaskPatterns": true,
-		"GetInsight": true, "GetLatestHealthCheck": true, "GetLatestIdeaGrade": true,
+		"GetInsight":        true,
 		"GetSlowExecutions": true,
-		"ListByType":        true, "ListHealthChecks": true, "ListIdeaGrades": true, "ListReports": true,
+		"ListByType":        true, "ListReports": true,
 	},
 	"LLMConfigs": {
 		"ExistsByID": true, "GetByID": true, "GetByIDs": true, "GetDefault": true, "GetDefaultID": true,

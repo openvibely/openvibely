@@ -467,12 +467,8 @@ var paramNames = map[string]map[string][]string{
 		"GetCompletedBugFixes":  {"projectID", "limit"},
 		"GetFailedTaskPatterns": {"projectID", "minFailures"},
 		"GetInsight":            {"projectID", "id"},
-		"GetLatestHealthCheck":  {"projectID"},
-		"GetLatestIdeaGrade":    {"projectID"},
 		"GetSlowExecutions":     {"projectID", "minDurationSecs", "limit"},
 		"ListByType":            {"projectID", "insightType", "limit"},
-		"ListHealthChecks":      {"projectID", "limit"},
-		"ListIdeaGrades":        {"projectID", "limit"},
 		"ListReports":           {"projectID", "limit"},
 		"UpdateStatus":          {"projectID", "id", "status"},
 	},
@@ -3586,20 +3582,6 @@ func (s *InsightsStore) GetInsight(ctx context.Context, a1 string, a2 string) (r
 	return s.local.GetInsight(ctx, a1, a2)
 }
 
-func (s *InsightsStore) GetLatestHealthCheck(ctx context.Context, a1 string) (r0 *models.HealthCheck, r1 error) {
-	if s.r.Remote(ctx, "Insights", "GetLatestHealthCheck", []any{a1}, func() []any { r0, r1 = s.local.GetLatestHealthCheck(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.GetLatestHealthCheck(ctx, a1)
-}
-
-func (s *InsightsStore) GetLatestIdeaGrade(ctx context.Context, a1 string) (r0 *models.IdeaGrade, r1 error) {
-	if s.r.Remote(ctx, "Insights", "GetLatestIdeaGrade", []any{a1}, func() []any { r0, r1 = s.local.GetLatestIdeaGrade(ctx, a1); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.GetLatestIdeaGrade(ctx, a1)
-}
-
 func (s *InsightsStore) GetSlowExecutions(ctx context.Context, a1 string, a2 int, a3 int) (r0 []struct {
 	TaskTitle string
 	Duration  int
@@ -3616,20 +3598,6 @@ func (s *InsightsStore) ListByType(ctx context.Context, a1 string, a2 models.Ins
 		return
 	}
 	return s.local.ListByType(ctx, a1, a2, a3)
-}
-
-func (s *InsightsStore) ListHealthChecks(ctx context.Context, a1 string, a2 int) (r0 []models.HealthCheck, r1 error) {
-	if s.r.Remote(ctx, "Insights", "ListHealthChecks", []any{a1, a2}, func() []any { r0, r1 = s.local.ListHealthChecks(ctx, a1, a2); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.ListHealthChecks(ctx, a1, a2)
-}
-
-func (s *InsightsStore) ListIdeaGrades(ctx context.Context, a1 string, a2 int) (r0 []models.IdeaGrade, r1 error) {
-	if s.r.Remote(ctx, "Insights", "ListIdeaGrades", []any{a1, a2}, func() []any { r0, r1 = s.local.ListIdeaGrades(ctx, a1, a2); return []any{r0, r1} }, &r0, &r1) {
-		return
-	}
-	return s.local.ListIdeaGrades(ctx, a1, a2)
 }
 
 func (s *InsightsStore) ListReports(ctx context.Context, a1 string, a2 int) (r0 []models.InsightReport, r1 error) {
