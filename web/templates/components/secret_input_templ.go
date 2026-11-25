@@ -42,7 +42,7 @@ func SecretInputVisibilityScript() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<script>\n\t\t(function() {\n\t\t\tif (window.openVibelySecretInputVisibility) {\n\t\t\t\twindow.togglePasswordVisibility = window.openVibelySecretInputVisibility.togglePasswordVisibility;\n\t\t\t\twindow.resetSecretInputVisibility = window.openVibelySecretInputVisibility.resetSecretInputVisibility;\n\t\t\t\treturn;\n\t\t\t}\n\n\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input || !button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst willReveal = input.type === 'password';\n\t\t\t\tinput.type = willReveal ? 'text' : 'password';\n\t\t\t\tif (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);\n\t\t\t\tif (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);\n\t\t\t\tbutton.setAttribute('aria-pressed', willReveal ? 'true' : 'false');\n\t\t\t}\n\n\t\t\tfunction resetSecretInputVisibility(inputId) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input) return;\n\t\t\t\tinput.type = 'password';\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"togglePasswordVisibility('\" + inputId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\twindow.openVibelySecretInputVisibility = {\n\t\t\t\ttogglePasswordVisibility: togglePasswordVisibility,\n\t\t\t\tresetSecretInputVisibility: resetSecretInputVisibility,\n\t\t\t};\n\t\t\twindow.togglePasswordVisibility = togglePasswordVisibility;\n\t\t\twindow.resetSecretInputVisibility = resetSecretInputVisibility;\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n\t\t/* Keep the shared reveal control anchored during button press/focus. */\n\t\t.password-toggle-btn:active,\n\t\t.password-toggle-btn:focus,\n\t\t.password-toggle-btn:focus-visible {\n\t\t\ttransform: translate(0, -50%) !important;\n\t\t}\n\t\t.password-toggle-btn.top-2:active,\n\t\t.password-toggle-btn.top-2:focus,\n\t\t.password-toggle-btn.top-2:focus-visible {\n\t\t\ttransform: translate(0, 0) !important;\n\t\t}\n\t</style><script>\n\t\t(function() {\n\t\t\tif (window.openVibelySecretInputVisibility) {\n\t\t\t\twindow.togglePasswordVisibility = window.openVibelySecretInputVisibility.togglePasswordVisibility;\n\t\t\t\twindow.resetSecretInputVisibility = window.openVibelySecretInputVisibility.resetSecretInputVisibility;\n\t\t\t\treturn;\n\t\t\t}\n\n\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input || !button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst willReveal = input.type === 'password';\n\t\t\t\tinput.type = willReveal ? 'text' : 'password';\n\t\t\t\tif (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);\n\t\t\t\tif (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);\n\t\t\t\tbutton.setAttribute('aria-pressed', willReveal ? 'true' : 'false');\n\t\t\t}\n\n\t\t\tfunction resetSecretInputVisibility(inputId) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input) return;\n\t\t\t\tinput.type = 'password';\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"togglePasswordVisibility('\" + inputId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\twindow.openVibelySecretInputVisibility = {\n\t\t\t\ttogglePasswordVisibility: togglePasswordVisibility,\n\t\t\t\tresetSecretInputVisibility: resetSecretInputVisibility,\n\t\t\t};\n\t\t\twindow.togglePasswordVisibility = togglePasswordVisibility;\n\t\t\twindow.resetSecretInputVisibility = resetSecretInputVisibility;\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -82,7 +82,7 @@ func SecretInput(config SecretInputConfig) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 67, Col: 17}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 80, Col: 17}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 			if templ_7745c5c3_Err != nil {
@@ -113,7 +113,7 @@ func SecretInput(config SecretInputConfig) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.Placeholder).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 69, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 82, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -126,7 +126,7 @@ func SecretInput(config SecretInputConfig) templ.Component {
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.Value).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 70, Col: 23}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 83, Col: 23}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 			if templ_7745c5c3_Err != nil {
@@ -139,7 +139,7 @@ func SecretInput(config SecretInputConfig) templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.AutoComplete).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 71, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 84, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 			if templ_7745c5c3_Err != nil {
@@ -157,7 +157,7 @@ func SecretInput(config SecretInputConfig) templ.Component {
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.Name).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 73, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 86, Col: 22}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 				if templ_7745c5c3_Err != nil {
@@ -198,7 +198,7 @@ func SecretInput(config SecretInputConfig) templ.Component {
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(config.MaxLength)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 82, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 95, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 				if templ_7745c5c3_Err != nil {
@@ -250,7 +250,7 @@ func SecretInput(config SecretInputConfig) templ.Component {
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.AriaLabel).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 92, Col: 32}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/secret_input.templ`, Line: 105, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 			if templ_7745c5c3_Err != nil {

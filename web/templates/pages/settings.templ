@@ -1568,17 +1568,6 @@ templ settingsContent(view ChannelsSettingsView) {
 	<!-- Webhook available agents data for JavaScript -->
 	<div id="webhook_agents_data" data-agents={ agentsJSON(view.AgentPickerOptions) } style="display:none"></div>
 	<style>
-		/* Keep password toggle button fixed inside input across press/focus states */
-		.password-toggle-btn:active,
-		.password-toggle-btn:focus,
-		.password-toggle-btn:focus-visible {
-			transform: translate(0, -50%) !important;
-		}
-		.password-toggle-btn.top-2:active,
-		.password-toggle-btn.top-2:focus,
-		.password-toggle-btn.top-2:focus-visible {
-			transform: translate(0, 0) !important;
-		}
 		.secret-textarea-masked {
 			-webkit-text-security: disc;
 		}
