@@ -1281,7 +1281,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			window.addEventListener('resize', function() { setWidth(currentWidth(), false); });
 			function activeProjectID() {
 				var fromURL = new URLSearchParams(location.search).get('project_id');
-				if (fromURL) return fromURL;
+				if (fromURL) return window.openVibelyProjectPage(window.openVibelyProjectTab(fromURL));
 				var sel = document.getElementById('project-selector');
 				return sel ? sel.value : '';
 			}

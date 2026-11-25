@@ -824,3 +824,44 @@ func TestBrowserFunctional_SettingsRegroupReloadsRetainedLists(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_ChatStartupRegroup(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projects := []models.Project{{ID: "local-one", Name: "OpenVibely"}}
+	group := layout.SharedProject{ID: "__repo_1234567890abcdef", Name: "OpenVibely", Members: []layout.SharedMember{{ID: "local-one", Name: "OpenVibely", Machine: "Local"}, {ID: "r-1234567890abcdef-remote-one", Name: "OpenVibely", Machine: "Remote"}}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/wails/runtime.js" {
+			w.Header().Set("Content-Type", "text/javascript")
+			fmt.Fprint(w, `export const Window={};`)
+			return
+		}
+		if r.URL.Path == "/ui/preferences" {
+			w.WriteHeader(204)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		ctx := layout.WithUIPreferences(layout.WithDesktopMode(context.Background(), true), layout.UIPreferences{PinnedProjectIDs: []string{"local-one"}})
+		if r.URL.Path == "/ui/project-catalog" {
+			ctx = layout.WithSharedProjects(ctx, []layout.SharedProject{group})
+			_ = layout.ProjectCatalog(projects, "local-one").Render(ctx, w)
+			return
+		}
+		if r.URL.Path != "/chat" {
+			w.WriteHeader(204)
+			return
+		}
+		_ = layout.Base("Chat", projects, "local-one").Render(ctx, w)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id=local-one", "audit-settings-regroup", func(b *composerFocusCDP) {
+		b.waitFor("tabs ready", `String(!!window.openVibelyProjectTabsRender)`, "true")
+		b.evaluate(`document.body.insertAdjacentHTML('beforeend','<dialog id=server_modal><input id=server_password></dialog>');document.getElementById('server_modal').showModal();document.getElementById('server_password').value='keep me';window.dispatchEvent(new Event('openvibely-servers-changed')); 'sent'`)
+		b.waitFor("catalog loaded", `String(!!window.openVibelySharedProjects['__repo_1234567890abcdef'])`, "true")
+		b.waitFor("settings sidebar grouped", `String(document.getElementById('project-selector').value==='__repo_1234567890abcdef' && document.getElementById('task-list-groups').getAttribute('hx-get')==='/tasks/sidebar?project_id=__repo_1234567890abcdef' && location.pathname==='/chat')`, "true")
+		b.waitFor("modal and return scope preserved", `String(document.getElementById('server_modal').open && document.getElementById('server_password').value==='keep me' && location.search==='?project_id=local-one')`, "true")
+		t.Log("state:", b.evaluate(`JSON.stringify({tabs:Array.from(document.querySelectorAll('[data-project-tab]')).map(x=>x.dataset.projectTab),selection:document.getElementById('project-selector').value,list:document.getElementById('task-list-groups').getAttribute('hx-get'),url:location.pathname+location.search})`))
+	})
+}
