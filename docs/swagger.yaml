@@ -1255,6 +1255,10 @@ definitions:
         type: array
       swarm_config:
         type: string
+      swarm_parent:
+        allOf:
+        - $ref: '#/definitions/models.Task'
+        description: Read-only parent summary for child detail pages
       swarm_role:
         $ref: '#/definitions/models.SwarmRole'
       swarm_sequence:
