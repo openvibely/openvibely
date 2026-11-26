@@ -3424,6 +3424,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
 				:is(#chat-page-root, #tab-chat):has([data-thread-empty-stage]:not([hidden])) { position: relative; isolation: isolate; }
 				:is(#chat-page-root, #tab-chat):has([data-thread-empty-stage]:not([hidden])) .chat-input-shadow-gutter { position: relative; z-index: 1; }
+				:is(#chat-page-root, #tab-chat):has([data-thread-empty-stage]:not([hidden]))::after { content: ""; flex: 0 1 calc(50% + 7vh - 109px); min-height: 0; }
+				#tab-chat:has([data-thread-empty-stage]:not([hidden]))::after { flex-basis: calc(50% + 7vh - 121px); }
 				.ov-thread-empty-stage { position: absolute; z-index: 0; pointer-events: none; overflow: hidden; }
 				.ov-thread-empty-stage canvas { display: block; width: 100%; height: 100%; opacity: .55; }
 				.ov-thread-empty-stage[hidden] { display: none; }
