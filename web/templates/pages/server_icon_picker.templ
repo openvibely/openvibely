@@ -4,7 +4,7 @@ import "github.com/openvibely/openvibely/web/templates/components"
 import "github.com/openvibely/openvibely/web/templates/layout"
 
 templ serverIconCategories() {
- <div class="px-3 pb-2"><select id="server-icon-category" class="select select-bordered select-sm w-full" aria-label="Icon category">
+ <div class="server-icon-category-row"><select id="server-icon-category" class="select select-bordered select-sm w-full" aria-label="Icon category">
  <option value="">All icons</option>
  for _, category := range []string{"Creatures & mascots", "Space & magic", "Nature & weather", "Food & drink", "Games & celebrations", "Adventure & oddities", "Faces"} {
  <option value={ category }>{ category }</option>
@@ -38,6 +38,7 @@ templ ServerIconPicker() {
  .server-name-row{display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:16px}
  .server-credentials-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
  .server-name-row .input,.server-credentials-row .input{width:100%;min-width:0}
+ .server-icon-category-row{padding:12px 12px 8px}
  #server-icon-category{height:36px;min-height:36px;line-height:normal;padding-top:0;padding-bottom:0}
  #server-icon-picker .ov-menu-scroll{overscroll-behavior:contain}
  #server-icon-picker{width:min(430px,calc(100vw - 24px))}

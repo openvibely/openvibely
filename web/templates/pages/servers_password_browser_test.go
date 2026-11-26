@@ -36,6 +36,7 @@ func TestBrowserFunctional_ServerPasswordReveal(t *testing.T) {
 		browser.waitFor("saved icon", `document.getElementById('server_icon').value`, "spider")
 		browser.click("#server-icon-trigger")
 		browser.waitFor("icon menu open", `String(document.getElementById('server-icon-picker').matches(':popover-open'))`, "true")
+		browser.waitFor("category separated from search divider", `String(document.getElementById('server-icon-category').getBoundingClientRect().top-document.querySelector('#server-icon-picker .ov-menu-search').getBoundingClientRect().bottom>=12)`, "true")
 		browser.evaluate(`document.querySelector('#server-icon-picker .ov-menu-scroll').dispatchEvent(new WheelEvent('wheel',{deltaY:140,bubbles:true,cancelable:true}));'ok'`)
 		browser.waitFor("wheel scroll", `String(document.querySelector('#server-icon-picker .ov-menu-scroll').scrollTop>0)`, "true")
 		browser.evaluate(`document.querySelector('#server-icon-picker .ov-menu-scroll').scrollTop=0;'ok'`)
