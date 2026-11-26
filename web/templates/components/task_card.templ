@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/internal/remoteid"
  templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/taskstate"
@@ -379,8 +380,13 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						<p data-task-prompt class="text-sm opacity-60 mt-1 line-clamp-3 sm:line-clamp-2 break-words">{ task.Prompt }</p>
 					}
 					<div class="flex gap-1 mt-1 flex-wrap">
-                        if label := templateui.ProjectLabel(ctx, task.ProjectID); label != "" {
-                            <span class="badge badge-sm badge-outline" data-project-label>{ label }</span>
+                        if label := templateui.ProjectLabel(ctx, task.ProjectID); label != "" && projectID == models.AllProjectsID {
+                            <span class="badge badge-sm badge-outline" data-project-label>{ strings.TrimSuffix(label, " · "+templateui.ProjectServerName(ctx, task.ProjectID)) }</span>
+                        }
+                        if _, _, remote := remoteid.Split(task.ProjectID); remote {
+                            <span class="inline-flex items-center" tabindex="0" aria-label={ templateui.ProjectServerName(ctx, task.ProjectID) } data-tip={ templateui.ProjectServerName(ctx, task.ProjectID) }>
+                                @templateui.ProjectServerIcon(ctx, task.ProjectID)
+                            </span>
                         }
 						if task.ParentTaskID != nil {
 							<span class="badge badge-sm badge-secondary inline-flex items-center">

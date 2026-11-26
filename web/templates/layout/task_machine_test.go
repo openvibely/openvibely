@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/remoteid"
+	templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"strings"
 	"testing"
@@ -67,5 +68,40 @@ func TestTaskMachineComposerDestination(t *testing.T) {
 	ServerIcon("spider", "server").Render(ctx, &icon)
 	if strings.Count(out.String(), icon.String()) != 1 {
 		t.Fatal("remote destination must render its saved icon once")
+	}
+}
+
+func TestTaskCardMachineBadges(t *testing.T) {
+	server := "0123456789abcdef"
+	remote := remoteid.ID(server, "project")
+	ctx := WithTaskMachines(context.Background(), map[string]TaskMachine{server: {Name: "oldmac", Kind: "laptop", Icon: "spider"}})
+	ctx = templateui.WithProjectNames(ctx, []models.Project{{ID: "local", Name: "Foo · This computer"}, {ID: remote, Name: "Foo · oldmac"}})
+	var icon strings.Builder
+	if err := ServerIcon("spider", "server").Render(ctx, &icon); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"local", "__repo_group", models.AllProjectsID} {
+		for _, project := range []string{"local", remote} {
+			var out strings.Builder
+			if err := components.TaskCard(models.Task{ID: "task", ProjectID: project, Title: "Example"}, scope, "backlog", nil, nil).Render(ctx, &out); err != nil {
+				t.Fatal(err)
+			}
+			s := out.String()
+			if strings.Contains(s, "This computer") || strings.Contains(s, "Foo ·") {
+				t.Fatal("redundant server label on card")
+			}
+			if strings.Contains(s, "data-project-label") != (scope == models.AllProjectsID) {
+				t.Fatalf("incorrect project label for %s", scope)
+			}
+			if scope == models.AllProjectsID && !strings.Contains(s, ">Foo</span>") {
+				t.Fatal("missing project name")
+			}
+			if strings.Contains(s, `data-tip="oldmac"`) != (project == remote) {
+				t.Fatal("incorrect server tooltip")
+			}
+			if project == remote && !strings.Contains(s, icon.String()) {
+				t.Fatal("missing custom remote icon")
+			}
+		}
 	}
 }
