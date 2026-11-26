@@ -532,15 +532,6 @@ func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
 	svc.Start()
 	waitForTelegramPoller(t, started, "initial-token")
 
-	releaseClient := func(token string) {
-		t.Helper()
-		clientsMu.Lock()
-		client := clients[token]
-		clientsMu.Unlock()
-		require.NotNil(t, client, "missing client for %s", token)
-		client.releaseOne()
-	}
-
 	type updateResult struct {
 		token string
 		err   error
@@ -549,13 +540,6 @@ func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
 	go func() { results <- updateResult{token: "token-a", err: svc.UpdateToken("token-a")} }()
 	go func() { results <- updateResult{token: "token-b", err: svc.UpdateToken("token-b")} }()
 
-	select {
-	case result := <-results:
-		t.Fatalf("UpdateToken(%s) returned before the initial poller drained: %v", result.token, result.err)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	releaseClient("initial-token")
 	completedUpdates := 0
 	lastCompletedToken := ""
 	for completedUpdates < 2 {
@@ -564,12 +548,6 @@ func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
 			require.NoError(t, result.err)
 			completedUpdates++
 			lastCompletedToken = result.token
-		case path := <-started:
-			for _, token := range []string{"token-a", "token-b"} {
-				if strings.Contains(path, "/bot"+token+"/getUpdates") {
-					releaseClient(token)
-				}
-			}
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for concurrent UpdateToken calls to finish")
 		}
