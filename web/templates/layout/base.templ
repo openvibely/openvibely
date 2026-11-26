@@ -5751,6 +5751,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							<circle cx="40" cy="36" r="7.5" fill="var(--fx-bright)"></circle>
 						</g>
 						<g clip-path="url(#ov-splash-visor)">
+							<ellipse class="ov-splash-visor-bg" cx="105.6" cy="33.0" rx="8.1" ry="10.6" fill="#11131a"></ellipse>
 							<ellipse class="ov-splash-amb" cx="105.6" cy="32.5" rx="7.6" ry="5.2" fill="var(--fx-visor)" opacity="0.22" filter="url(#ov-splash-glow)"></ellipse>
 							<path class="ov-splash-wave" d="M 97.4 32.5 H 113.8" stroke="var(--fx-visor)" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" opacity="0.55" filter="url(#ov-splash-glow)"></path>
 							<path class="ov-splash-wave" d="M 97.4 32.5 H 113.8" stroke="var(--fx-visor-core)" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -5763,7 +5764,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					.ov-splash-art { position: relative; width: 168px; height: 168px; isolation: isolate; animation: ov-splash-in .7s cubic-bezier(.2,.7,.2,1) both; }
 					.ov-splash-art > *, .ov-splash-avatar > * { position: absolute; inset: 0; width: 100%; height: 100%; }
 					.ov-splash-avatar { isolation: isolate; }
-					[data-theme="light"] .ov-splash-art::before { content: ""; position: absolute; inset: -14px; border-radius: 50%; background: #171a20; box-shadow: 0 10px 30px rgba(15,18,24,.18); }
+					[data-theme="light"] #ov-splash { --fx-secondary: color-mix(in oklab, oklch(var(--p)) 75%, black); --fx-bright: color-mix(in oklab, oklch(var(--p)) 55%, black); --fx-visor: color-mix(in oklab, oklch(var(--p)) 88%, white); --fx-visor-core: color-mix(in oklab, oklch(var(--p)) 18%, white); }
+					[data-theme="light"] .ov-splash-avatar { filter: invert(1) hue-rotate(180deg) saturate(1.3); }
+					[data-theme="light"] .ov-splash-nodes circle { mix-blend-mode: multiply; }
+					.ov-splash-visor-bg { display: none; }
+					[data-theme="light"] .ov-splash-visor-bg { display: inline; }
 					.ov-splash-art img { object-fit: contain; filter: grayscale(1) contrast(1.14) brightness(.98); opacity: .92; }
 					.ov-splash-tint { mix-blend-mode: color; mask-size: contain; -webkit-mask-size: contain; mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; mask-position: center; -webkit-mask-position: center; background: radial-gradient(circle at 50% 38%, oklch(var(--p) / .95) 0%, oklch(var(--p) / .52) 60%, rgba(148,163,184,.25) 100%); opacity: .78; }
 					.ov-splash-circuit { stroke-dasharray: 5 38; stroke-dashoffset: 43; opacity: .85; filter: drop-shadow(0 0 2px var(--fx-accent)); animation: ov-splash-spark 2.6s linear infinite; }
