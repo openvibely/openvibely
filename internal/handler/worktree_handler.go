@@ -13,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
 	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -33,7 +34,7 @@ func (h *Handler) renderTaskCardRefresh(c echo.Context, taskID string) error {
 	}
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
-	return render(c, http.StatusOK, components.TaskCard(*task, task.ProjectID, string(task.Category), agents, agentDefs))
+	return render(c, http.StatusOK, components.TaskCard(*task, layout.WorkspaceProjectID(c.Request().Context(), task.ProjectID), string(task.Category), agents, agentDefs))
 }
 
 func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Task, mergeType string) (taskMergeActionState, bool, string) {
