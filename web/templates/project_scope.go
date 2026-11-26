@@ -29,34 +29,36 @@ func ProjectOptions(ctx context.Context) []models.Project {
 	return projects
 }
 
-// WithServerIcons supplies trusted, rendered server icons to shared composers.
-func WithServerIcons(ctx context.Context, icons map[string]templ.Component) context.Context {
-	return context.WithValue(ctx, serverIconsKey{}, icons)
+// ServerDisplay supplies machine labels and icons for remote projects.
+type ServerDisplay struct {
+	Name string
+	Icon templ.Component
 }
 
-type serverIconsKey struct{}
+type serverDisplayKey struct{}
+
+func WithServerDisplay(ctx context.Context, lookup func(string) ServerDisplay) context.Context {
+	return context.WithValue(ctx, serverDisplayKey{}, lookup)
+}
+
+func projectServerDisplay(ctx context.Context, projectID string) ServerDisplay {
+	server, _, remote := remoteid.Split(projectID)
+	if !remote {
+		return ServerDisplay{Name: "This computer"}
+	}
+	if lookup, ok := ctx.Value(serverDisplayKey{}).(func(string) ServerDisplay); ok {
+		return lookup(server)
+	}
+	return ServerDisplay{}
+}
 
 func ProjectServerIcon(ctx context.Context, projectID string) templ.Component {
-	server, _, remote := remoteid.Split(projectID)
-	if remote {
-		icons, _ := ctx.Value(serverIconsKey{}).(map[string]templ.Component)
-		if icon := icons[server]; icon != nil {
-			return icon
-		}
+	if icon := projectServerDisplay(ctx, projectID).Icon; icon != nil {
+		return icon
 	}
 	return templ.NopComponent
 }
 
-type serverNamesKey struct{}
-
-func WithServerNames(ctx context.Context, names map[string]string) context.Context {
-	return context.WithValue(ctx, serverNamesKey{}, names)
-}
 func ProjectServerName(ctx context.Context, projectID string) string {
-	server, _, remote := remoteid.Split(projectID)
-	if !remote {
-		return "This computer"
-	}
-	names, _ := ctx.Value(serverNamesKey{}).(map[string]string)
-	return names[server]
+	return projectServerDisplay(ctx, projectID).Name
 }

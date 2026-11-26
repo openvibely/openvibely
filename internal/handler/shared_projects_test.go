@@ -120,8 +120,16 @@ func TestSharedProjectAcrossMachines(t *testing.T) {
 	chat := get("/chat?project_id=" + shared.ID)
 	require.Equal(t, http.StatusOK, chat.Code, chat.Body.String())
 	require.Contains(t, chat.Body.String(), `id="shared-chat-form-project-select"`)
-	require.Contains(t, chat.Body.String(), `data-value="`+localProject.ID+`">Foo · This computer`)
-	require.Contains(t, chat.Body.String(), `data-value="`+remoteid.ID(serverID, remoteProject.ID)+`">Foo · Box`)
+	for id, label := range map[string]string{
+		localProject.ID:                         "This computer",
+		remoteid.ID(serverID, remoteProject.ID): "Box",
+	} {
+		_, after, found := strings.Cut(chat.Body.String(), `<li data-value="`+id+`">`)
+		require.True(t, found, "missing destination %s", id)
+		option, _, closed := strings.Cut(after, "</li>")
+		require.True(t, closed)
+		require.True(t, strings.HasSuffix(strings.TrimSpace(option), "</span>"+label), "destination %s: %s", id, option)
+	}
 	require.Contains(t, chat.Body.String(), `data-project-send-url="/chat/send?project_id="`)
 	require.Equal(t, http.StatusBadRequest, func() int {
 		rec := httptest.NewRecorder()

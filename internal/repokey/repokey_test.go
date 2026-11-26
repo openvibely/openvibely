@@ -56,7 +56,7 @@ func TestForPrefersSavedURLThenUpstreamThenOrigin(t *testing.T) {
 	if got := For("https://github.com/other/bar", dir); got != "github.com/other/bar" {
 		t.Fatalf("saved URL = %q", got)
 	}
-	run("commit", "-q", "--allow-empty", "-m", "init")
+	run("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "init")
 	wt := filepath.Join(t.TempDir(), "wt")
 	run("worktree", "add", "-q", wt)
 	if got := For("", wt); got != "github.com/acme/foo" {

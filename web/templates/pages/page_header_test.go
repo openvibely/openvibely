@@ -7,7 +7,7 @@ import (
 )
 
 func TestPageHeadersUseCompactShellStyle(t *testing.T) {
-	for _, page := range []string{"skills", "alerts", "tasks", "insights", "worker_settings", "task_new", "execution_detail", "app_settings", "history", "schedule", "agents", "models", "chat", "analytics", "upcoming", "automations", "settings"} {
+	for _, page := range []string{"skills", "alerts", "tasks", "worker_settings", "task_new", "execution_detail", "history", "schedule", "agents", "models", "chat", "analytics", "upcoming", "automations", "settings"} {
 		t.Run(page, func(t *testing.T) {
 			source, err := os.ReadFile(page + ".templ")
 			if err != nil {

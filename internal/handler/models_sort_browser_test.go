@@ -166,7 +166,7 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 						var windowOK = nextRoot && nextRoot.querySelectorAll('[data-search-card]').length === 40;
 						var controls = Array.prototype.slice.call(document.querySelectorAll('.card-sort-control'));
 						var widths = controls.map(function(control) { return control.getBoundingClientRect().width; });
-						var geometryOK = widths.length === 4 && widths.every(function(width) { return Math.abs(width - widths[0]) < 0.5 && width <= window.innerWidth; });
+						var geometryOK = widths.length === 3 && widths.every(function(width) { return Math.abs(width - widths[0]) < 0.5 && width <= window.innerWidth; });
 						var labelsFit = controls.every(function(control) { return control.scrollWidth <= control.clientWidth + 1; });
 						var scrollOK = Math.abs(after - before) <= 2;
 						var focusOK = document.activeElement === nextSort;

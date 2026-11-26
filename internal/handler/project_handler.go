@@ -637,16 +637,19 @@ func render(c echo.Context, status int, component templ.Component) error {
 	ctx := c.Request().Context()
 	if h, ok := c.Get("handler").(*Handler); ok {
 		ctx = templateui.WithMessageAuthors(ctx, h.authEnabled())
-		machines := map[string]layout.TaskMachine{}
-		saved, _ := h.loadSavedServers(ctx)
-		for _, server := range saved {
-			kind := "server"
-			if conn := h.remoteHub().Get(principalUserID(ctx), server.ID); conn != nil {
-				kind = conn.MachineType()
+		machineCtx := ctx
+		ctx = layout.WithTaskMachineLoader(ctx, func() map[string]layout.TaskMachine {
+			machines := map[string]layout.TaskMachine{}
+			saved, _ := h.loadSavedServers(machineCtx)
+			for _, server := range saved {
+				kind := "server"
+				if conn := h.remoteHub().Get(principalUserID(machineCtx), server.ID); conn != nil {
+					kind = conn.MachineType()
+				}
+				machines[server.ID] = layout.TaskMachine{Name: server.Name, Kind: kind, Icon: server.Icon}
 			}
-			machines[server.ID] = layout.TaskMachine{Name: server.Name, Kind: kind, Icon: server.Icon}
-		}
-		ctx = layout.WithTaskMachines(ctx, machines)
+			return machines
+		})
 
 		var servers []layout.RemoteServer
 		workspace := layout.WorkspaceProjectID(ctx, c.QueryParam("project_id"))

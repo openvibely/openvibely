@@ -9,7 +9,7 @@ import (
 )
 
 func TestComposerDestinationLabel(t *testing.T) {
-	ctx := templateui.WithServerNames(context.Background(), map[string]string{"0123456789abcdef": "oldmac"})
+	ctx := templateui.WithServerDisplay(context.Background(), func(string) templateui.ServerDisplay { return templateui.ServerDisplay{Name: "oldmac"} })
 	for _, tc := range []struct {
 		id, name string
 		shared   bool
