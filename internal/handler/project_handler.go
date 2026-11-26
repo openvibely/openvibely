@@ -644,7 +644,7 @@ func render(c echo.Context, status int, component templ.Component) error {
 			if conn := h.remoteHub().Get(principalUserID(ctx), server.ID); conn != nil {
 				kind = conn.MachineType()
 			}
-			machines[server.ID] = layout.TaskMachine{Name: server.Name, Kind: kind}
+			machines[server.ID] = layout.TaskMachine{Name: server.Name, Kind: kind, Icon: server.Icon}
 		}
 		ctx = layout.WithTaskMachines(ctx, machines)
 

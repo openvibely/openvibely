@@ -18,6 +18,8 @@ const (
 // SavedServer is a remote OpenVibely server. Passwords are excluded from API serialization.
 type SavedServer struct {
 	ID         string `json:"id"`
+ Icon string `json:"icon,omitempty"`
+ MachineType string `json:"-"`
 	Name       string `json:"name"`
 	URL        string `json:"url"`
 	Username   string `json:"username"`
@@ -100,14 +102,18 @@ templ ServersContent(data ServersPageData) {
 				<h3 id="server_modal_title" class="font-bold text-lg mb-1 pr-10">Add Server</h3>
 				<p class="text-sm opacity-60 mb-4">Sign in with your account on that server. Your password is saved so you can reveal or update it later.</p>
 				<form id="server_form" hx-post="/servers" hx-target="#servers-card-list" hx-swap="outerHTML" autocomplete="off">
-					<div class="form-control mb-3">
+					<div class="server-name-row">
+<div class="form-control mb-3">
 						<label class="label" for="server_name"><span class="label-text">Name</span></label>
 						<input type="text" id="server_name" name="name" class="input input-bordered" maxlength="80" placeholder="Team server"/>
 					</div>
+@ServerIconPicker()
+</div>
 					<div class="form-control mb-3">
 						<label class="label" for="server_url"><span class="label-text">URL</span></label>
 						<input type="text" id="server_url" name="url" class="input input-bordered" required placeholder="https://ov.example.com" inputmode="url" spellcheck="false"/>
 					</div>
+<div class="server-credentials-row">
 					<div class="form-control mb-3">
 						<label class="label" for="server_username"><span class="label-text">Username</span></label>
 						<input type="text" id="server_username" name="username" class="input input-bordered" maxlength="200" autocomplete="username" spellcheck="false"/>
@@ -121,6 +127,7 @@ templ ServersContent(data ServersPageData) {
 })
 @components.SecretInputVisibilityScript()
 					</div>
+</div>
 					<label class="label cursor-pointer justify-start gap-3 mb-2">
 						<input type="hidden" name="enabled" value="false" id="server_enabled_hidden" disabled/>
 						<input type="checkbox" id="server_enabled" class="toggle toggle-sm toggle-primary" checked onchange="document.getElementById('server_enabled_hidden').disabled = this.checked"/>
@@ -158,6 +165,7 @@ templ ServersContent(data ServersPageData) {
 					var id = d.serverId || '';
 					field('server_modal_title').textContent = id ? (d.serverStatus === 'connected' ? 'Edit Server' : 'Reconnect ' + d.serverName) : 'Add Server';
 					field('server_name').value = d.serverName || '';
+ window.setServerIcon?.(d.serverIcon || '', d.serverMachine || 'server');
 					field('server_url').value = d.serverUrl || '';
 					field('server_username').value = d.serverUsername || '';
 					field('server_password').value = d.serverPassword || '';
@@ -242,6 +250,8 @@ templ ServersCardList(data ServersPageData) {
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-server-id={ server.ID }
 						data-server-name={ server.Name }
+ data-server-icon={ server.Icon }
+ data-server-machine={ server.MachineType }
 						data-server-url={ server.URL }
 						data-server-username={ server.Username }
  data-server-password={ server.Password }
@@ -263,7 +273,8 @@ templ ServersCardList(data ServersPageData) {
 							</div>
 							<div class="pr-12">
 								<h3 class="font-bold flex items-center gap-2">
-									{ server.Name }
+									<span class="server-card-icon" aria-hidden="true">@layout.ServerIcon(server.Icon, server.MachineType)</span>
+{ server.Name }
 									<span class={ "badge badge-sm", serverStatusClass(server) }>{ serverStatusLabel(server) }</span>
 								</h3>
 								<p class="text-sm opacity-60 break-all">{ server.URL }</p>

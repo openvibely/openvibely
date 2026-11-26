@@ -13,7 +13,7 @@ import (
 func TestBrowserFunctional_ServerPasswordReveal(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	var content bytes.Buffer
-	if err := ServersContent(ServersPageData{Servers: []SavedServer{{ID: "0123456789abcdef", Name: "Remote", URL: "http://localhost:3001", Enabled: true, Password: "saved-password"}}}).Render(context.Background(), &content); err != nil {
+	if err := ServersContent(ServersPageData{Servers: []SavedServer{{ID: "0123456789abcdef", Name: "Remote", URL: "http://localhost:3001", Enabled: true, Password: "saved-password", Icon: "spider", MachineType: "laptop"}}}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -33,10 +33,20 @@ func TestBrowserFunctional_ServerPasswordReveal(t *testing.T) {
 		browser.click("#server_modal .password-toggle-btn")
 		browser.evaluate(`server_modal.close();openServerModal();'ok'`)
 		browser.evaluate(`server_modal.close();openServerModal(document.querySelector('[data-server-id]'));'ok'`)
+		browser.waitFor("saved icon", `document.getElementById('server_icon').value`, "spider")
+		browser.click("#server-icon-trigger")
+		browser.waitFor("icon menu open", `String(document.getElementById('server-icon-picker').matches(':popover-open'))`, "true")
+		browser.evaluate(`document.getElementById('server-icon-category').value='Food & drink';document.getElementById('server-icon-category').dispatchEvent(new Event('change'));let search=document.querySelector('#server-icon-picker input');search.value='cherry';search.dispatchEvent(new Event('input',{bubbles:true}));'ok'`)
+		browser.waitFor("cherry in food", `Array.from(document.querySelectorAll('#server-icon-picker button[data-value]')).filter(b=>!b.hidden).map(b=>b.dataset.value).join(',')`, "cherry")
+		browser.click("#server-icon-picker button[data-value=cherry]")
+		browser.waitFor("chosen icon", `document.getElementById('server_icon').value+':'+document.getElementById('server-icon-trigger').textContent.trim()`, "cherry:Cherry")
+		browser.evaluate(`server_modal.close();openServerModal(document.querySelector('[data-server-id]'));'ok'`)
+		browser.waitFor("reloaded saved choice", `document.getElementById('server_icon').value`, "spider")
 		browser.waitFor("saved password masked", `document.getElementById('server_password').type+':'+document.getElementById('server_password').value`, "password:saved-password")
 		browser.click("#server_modal .password-toggle-btn")
 		browser.waitFor("saved password revealed", `document.getElementById('server_password').type+':'+document.getElementById('server_password').value`, "text:saved-password")
 		browser.evaluate(`server_modal.close();openServerModal();'ok'`)
+		browser.waitFor("reset icon", `document.getElementById('server_icon').value`, "")
 		browser.waitFor("reset password", `document.getElementById('server_password').type+':'+document.getElementById('server_password').value`, "password:")
 	})
 }

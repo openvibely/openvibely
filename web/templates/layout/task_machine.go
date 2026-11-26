@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-type TaskMachine struct{ Name, Kind string }
+type TaskMachine struct{ Name, Kind, Icon string }
 type taskMachinesKey struct{}
 
 func WithTaskMachines(ctx context.Context, machines map[string]TaskMachine) context.Context {

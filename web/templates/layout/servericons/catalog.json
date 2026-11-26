@@ -1,0 +1,1622 @@
+[
+  {
+    "Name": "spider",
+    "Label": "Spider",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "bat",
+    "Label": "Bat",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "dragon",
+    "Label": "Dragon",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "alien",
+    "Label": "Alien",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "ghost",
+    "Label": "Ghost",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "ghost-2",
+    "Label": "Ghost 2",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "ghost-3",
+    "Label": "Ghost 3",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "skull",
+    "Label": "Skull",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "pumpkin-scary",
+    "Label": "Pumpkin Scary",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "robot",
+    "Label": "Robot",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "robot-face",
+    "Label": "Robot Face",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "cat",
+    "Label": "Cat",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "dog",
+    "Label": "Dog",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "deer",
+    "Label": "Deer",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "horse",
+    "Label": "Horse",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "horse-toy",
+    "Label": "Horse Toy",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "pig",
+    "Label": "Pig",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "pig-money",
+    "Label": "Pig Money",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "butterfly",
+    "Label": "Butterfly",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "fish",
+    "Label": "Fish",
+    "Categories": "Creatures & mascots|Food & drink"
+  },
+  {
+    "Name": "fish-bone",
+    "Label": "Fish Bone",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "bug",
+    "Label": "Bug",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "paw",
+    "Label": "Paw",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "snail",
+    "Label": "Snail",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "bone",
+    "Label": "Bone",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "poo",
+    "Label": "Poo",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "cookie-man",
+    "Label": "Cookie Man",
+    "Categories": "Creatures & mascots|Food & drink"
+  },
+  {
+    "Name": "snowman",
+    "Label": "Snowman",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "spy",
+    "Label": "Spy",
+    "Categories": "Creatures & mascots"
+  },
+  {
+    "Name": "ufo",
+    "Label": "Ufo",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "rocket",
+    "Label": "Rocket",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "planet",
+    "Label": "Planet",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "comet",
+    "Label": "Comet",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "meteor",
+    "Label": "Meteor",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "galaxy",
+    "Label": "Galaxy",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "universe",
+    "Label": "Universe",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "moon",
+    "Label": "Moon",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "moon-stars",
+    "Label": "Moon Stars",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "sun",
+    "Label": "Sun",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "sun-moon",
+    "Label": "Sun Moon",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "stars",
+    "Label": "Stars",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "star",
+    "Label": "Star",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "sparkles",
+    "Label": "Sparkles",
+    "Categories": "Space & magic|Games & celebrations"
+  },
+  {
+    "Name": "sparkles-2",
+    "Label": "Sparkles 2",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "sparkle",
+    "Label": "Sparkle",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "rainbow",
+    "Label": "Rainbow",
+    "Categories": "Space & magic|Nature & weather"
+  },
+  {
+    "Name": "telescope",
+    "Label": "Telescope",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "satellite",
+    "Label": "Satellite",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "jetpack",
+    "Label": "Jetpack",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "atom",
+    "Label": "Atom",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "crystal-ball",
+    "Label": "Crystal Ball",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "wand",
+    "Label": "Wand",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "sword",
+    "Label": "Sword",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "swords",
+    "Label": "Swords",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "trident",
+    "Label": "Trident",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "crown",
+    "Label": "Crown",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "diamond",
+    "Label": "Diamond",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "treasure-chest",
+    "Label": "Treasure Chest",
+    "Categories": "Space & magic|Adventure & oddities"
+  },
+  {
+    "Name": "bomb",
+    "Label": "Bomb",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "flame",
+    "Label": "Flame",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "pentagram",
+    "Label": "Pentagram",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "infinity",
+    "Label": "Infinity",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "yin-yang",
+    "Label": "Yin Yang",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-aquarius",
+    "Label": "Zodiac Aquarius",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-aries",
+    "Label": "Zodiac Aries",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-cancer",
+    "Label": "Zodiac Cancer",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-capricorn",
+    "Label": "Zodiac Capricorn",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-gemini",
+    "Label": "Zodiac Gemini",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-leo",
+    "Label": "Zodiac Leo",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-libra",
+    "Label": "Zodiac Libra",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-pisces",
+    "Label": "Zodiac Pisces",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-sagittarius",
+    "Label": "Zodiac Sagittarius",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-scorpio",
+    "Label": "Zodiac Scorpio",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-taurus",
+    "Label": "Zodiac Taurus",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "zodiac-virgo",
+    "Label": "Zodiac Virgo",
+    "Categories": "Space & magic"
+  },
+  {
+    "Name": "mushroom",
+    "Label": "Mushroom",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "cactus",
+    "Label": "Cactus",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "cherry",
+    "Label": "Cherry",
+    "Categories": "Nature & weather|Food & drink"
+  },
+  {
+    "Name": "flower",
+    "Label": "Flower",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "leaf",
+    "Label": "Leaf",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "clover",
+    "Label": "Clover",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "clover-2",
+    "Label": "Clover 2",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "plant",
+    "Label": "Plant",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "plant-2",
+    "Label": "Plant 2",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "seedling",
+    "Label": "Seedling",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "tree",
+    "Label": "Tree",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "trees",
+    "Label": "Trees",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "christmas-tree",
+    "Label": "Christmas Tree",
+    "Categories": "Nature & weather|Adventure & oddities"
+  },
+  {
+    "Name": "feather",
+    "Label": "Feather",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "mountain",
+    "Label": "Mountain",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "volcano",
+    "Label": "Volcano",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "iceberg",
+    "Label": "Iceberg",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "snowflake",
+    "Label": "Snowflake",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "tornado",
+    "Label": "Tornado",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "storm",
+    "Label": "Storm",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "wind",
+    "Label": "Wind",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "cloud-storm",
+    "Label": "Cloud Storm",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "cloud-snow",
+    "Label": "Cloud Snow",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "cloud-rain",
+    "Label": "Cloud Rain",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "bolt",
+    "Label": "Bolt",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "droplet",
+    "Label": "Droplet",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "whirl",
+    "Label": "Whirl",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "spiral",
+    "Label": "Spiral",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "ripple",
+    "Label": "Ripple",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "sun-high",
+    "Label": "Sun High",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "sunrise",
+    "Label": "Sunrise",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "sunset",
+    "Label": "Sunset",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "umbrella",
+    "Label": "Umbrella",
+    "Categories": "Nature & weather|Adventure & oddities"
+  },
+  {
+    "Name": "acorn",
+    "Label": "Acorn",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "wheat",
+    "Label": "Wheat",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "grain",
+    "Label": "Grain",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "twig",
+    "Label": "Twig",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "wood",
+    "Label": "Wood",
+    "Categories": "Nature & weather"
+  },
+  {
+    "Name": "apple",
+    "Label": "Apple",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "avocado",
+    "Label": "Avocado",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "banana",
+    "Label": "Banana",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "lemon",
+    "Label": "Lemon",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "lemon-2",
+    "Label": "Lemon 2",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "melon",
+    "Label": "Melon",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "grape",
+    "Label": "Grape",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "carrot",
+    "Label": "Carrot",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "pepper",
+    "Label": "Pepper",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "egg",
+    "Label": "Egg",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "egg-cracked",
+    "Label": "Egg Cracked",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "egg-fried",
+    "Label": "Egg Fried",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "eggs",
+    "Label": "Eggs",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "bread",
+    "Label": "Bread",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "baguette",
+    "Label": "Baguette",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "cheese",
+    "Label": "Cheese",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "meat",
+    "Label": "Meat",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "sausage",
+    "Label": "Sausage",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "burger",
+    "Label": "Burger",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "pizza",
+    "Label": "Pizza",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "dumpling",
+    "Label": "Dumpling",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "soup",
+    "Label": "Soup",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "salad",
+    "Label": "Salad",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "bowl",
+    "Label": "Bowl",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "bowl-chopsticks",
+    "Label": "Bowl Chopsticks",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "bowl-spoon",
+    "Label": "Bowl Spoon",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "cookie",
+    "Label": "Cookie",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "candy",
+    "Label": "Candy",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "cake",
+    "Label": "Cake",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "cake-roll",
+    "Label": "Cake Roll",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "ice-cream",
+    "Label": "Ice Cream",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "ice-cream-2",
+    "Label": "Ice Cream 2",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "lollipop",
+    "Label": "Lollipop",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "chocolate",
+    "Label": "Chocolate",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "coffee",
+    "Label": "Coffee",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "mug",
+    "Label": "Mug",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "teapot",
+    "Label": "Teapot",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "cup",
+    "Label": "Cup",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "beer",
+    "Label": "Beer",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "bottle",
+    "Label": "Bottle",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "glass",
+    "Label": "Glass",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "glass-cocktail",
+    "Label": "Glass Cocktail",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "glass-champagne",
+    "Label": "Glass Champagne",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "glass-gin",
+    "Label": "Glass Gin",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "salt",
+    "Label": "Salt",
+    "Categories": "Food & drink"
+  },
+  {
+    "Name": "balloon",
+    "Label": "Balloon",
+    "Categories": "Games & celebrations|Games & celebrations|Adventure & oddities"
+  },
+  {
+    "Name": "confetti",
+    "Label": "Confetti",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "gift",
+    "Label": "Gift",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "gift-card",
+    "Label": "Gift Card",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "device-gamepad",
+    "Label": "Device Gamepad",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "device-gamepad-2",
+    "Label": "Device Gamepad 2",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "device-gamepad-3",
+    "Label": "Device Gamepad 3",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "device-nintendo",
+    "Label": "Device Nintendo",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "pokeball",
+    "Label": "Pokeball",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "puzzle",
+    "Label": "Puzzle",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "puzzle-2",
+    "Label": "Puzzle 2",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "dice",
+    "Label": "Dice",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "dice-1",
+    "Label": "Dice 1",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "dice-2",
+    "Label": "Dice 2",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "dice-3",
+    "Label": "Dice 3",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "dice-4",
+    "Label": "Dice 4",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "dice-5",
+    "Label": "Dice 5",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "dice-6",
+    "Label": "Dice 6",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "chess",
+    "Label": "Chess",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "chess-bishop",
+    "Label": "Chess Bishop",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "chess-king",
+    "Label": "Chess King",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "chess-knight",
+    "Label": "Chess Knight",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "chess-queen",
+    "Label": "Chess Queen",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "chess-rook",
+    "Label": "Chess Rook",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "joker",
+    "Label": "Joker",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "cards",
+    "Label": "Cards",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "play-card",
+    "Label": "Play Card",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "play-card-star",
+    "Label": "Play Card Star",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "poker-chip",
+    "Label": "Poker Chip",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "spade",
+    "Label": "Spade",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "clubs",
+    "Label": "Clubs",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "hearts",
+    "Label": "Hearts",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "diamonds",
+    "Label": "Diamonds",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "trophy",
+    "Label": "Trophy",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "medal",
+    "Label": "Medal",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "award",
+    "Label": "Award",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "rosette",
+    "Label": "Rosette",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "bow",
+    "Label": "Bow",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "tie",
+    "Label": "Tie",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "mask",
+    "Label": "Mask",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "theater",
+    "Label": "Theater",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "music",
+    "Label": "Music",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "guitar-pick",
+    "Label": "Guitar Pick",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "piano",
+    "Label": "Piano",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "vinyl",
+    "Label": "Vinyl",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "headphones",
+    "Label": "Headphones",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "bell",
+    "Label": "Bell",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "fidget-spinner",
+    "Label": "Fidget Spinner",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "diabolo",
+    "Label": "Diabolo",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "bowling",
+    "Label": "Bowling",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ball-bowling",
+    "Label": "Ball Bowling",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ball-football",
+    "Label": "Ball Football",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ball-basketball",
+    "Label": "Ball Basketball",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ball-tennis",
+    "Label": "Ball Tennis",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ball-volleyball",
+    "Label": "Ball Volleyball",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ball-baseball",
+    "Label": "Ball Baseball",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ball-american-football",
+    "Label": "Ball American Football",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ping-pong",
+    "Label": "Ping Pong",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "sport-billiard",
+    "Label": "Sport Billiard",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "skateboard",
+    "Label": "Skateboard",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "roller-skating",
+    "Label": "Roller Skating",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "ice-skating",
+    "Label": "Ice Skating",
+    "Categories": "Games & celebrations"
+  },
+  {
+    "Name": "anchor",
+    "Label": "Anchor",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "sailboat",
+    "Label": "Sailboat",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "sailboat-2",
+    "Label": "Sailboat 2",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "submarine",
+    "Label": "Submarine",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "ship",
+    "Label": "Ship",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "zeppelin",
+    "Label": "Zeppelin",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "plane",
+    "Label": "Plane",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "helicopter",
+    "Label": "Helicopter",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "drone",
+    "Label": "Drone",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "parachute",
+    "Label": "Parachute",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "tent",
+    "Label": "Tent",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "campfire",
+    "Label": "Campfire",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "caravan",
+    "Label": "Caravan",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "car-suv",
+    "Label": "Car Suv",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "motorbike",
+    "Label": "Motorbike",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "bike",
+    "Label": "Bike",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "scooter",
+    "Label": "Scooter",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "unicycle",
+    "Label": "Unicycle",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "sleigh",
+    "Label": "Sleigh",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "rollercoaster",
+    "Label": "Rollercoaster",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "bucket",
+    "Label": "Bucket",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "shovel-pitchforks",
+    "Label": "Shovel Pitchforks",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "axe",
+    "Label": "Axe",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "pick",
+    "Label": "Pick",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "hammer",
+    "Label": "Hammer",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "horseshoe",
+    "Label": "Horseshoe",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "lasso",
+    "Label": "Lasso",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "compass",
+    "Label": "Compass",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "map-pin",
+    "Label": "Map Pin",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "binoculars",
+    "Label": "Binoculars",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "sunglasses",
+    "Label": "Sunglasses",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "eyeglass",
+    "Label": "Eyeglass",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "moustache",
+    "Label": "Moustache",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "sock",
+    "Label": "Sock",
+    "Categories": "Adventure & oddities|Adventure & oddities"
+  },
+  {
+    "Name": "hand-love-you",
+    "Label": "Hand Love You",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "hand-two-fingers",
+    "Label": "Hand Two Fingers",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "hand-middle-finger",
+    "Label": "Hand Middle Finger",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "peace",
+    "Label": "Peace",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "heart",
+    "Label": "Heart",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "heart-broken",
+    "Label": "Heart Broken",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "heart-flame",
+    "Label": "Heart Flame",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "heart-spark",
+    "Label": "Heart Spark",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "eye",
+    "Label": "Eye",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "eye-heart",
+    "Label": "Eye Heart",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "eye-star",
+    "Label": "Eye Star",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "dental",
+    "Label": "Dental",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "brain",
+    "Label": "Brain",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "magnet",
+    "Label": "Magnet",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "hourglass",
+    "Label": "Hourglass",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "lamp-2",
+    "Label": "Lamp 2",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "beach",
+    "Label": "Beach",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "umbrella-2",
+    "Label": "Umbrella 2",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "flip-flops",
+    "Label": "Flip Flops",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "lifebuoy",
+    "Label": "Lifebuoy",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "yarn",
+    "Label": "Yarn",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "needle-thread",
+    "Label": "Needle Thread",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "vacuum-cleaner",
+    "Label": "Vacuum Cleaner",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "plunger",
+    "Label": "Plunger",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "toilet-paper",
+    "Label": "Toilet Paper",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "coffin",
+    "Label": "Coffin",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "grave",
+    "Label": "Grave",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "grave-2",
+    "Label": "Grave 2",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "radioactive",
+    "Label": "Radioactive",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "biohazard",
+    "Label": "Biohazard",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "virus",
+    "Label": "Virus",
+    "Categories": "Adventure & oddities"
+  },
+  {
+    "Name": "mood-angry",
+    "Label": "Mood Angry",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-annoyed",
+    "Label": "Mood Annoyed",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-annoyed-2",
+    "Label": "Mood Annoyed 2",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-boy",
+    "Label": "Mood Boy",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-confused",
+    "Label": "Mood Confused",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-crazy-happy",
+    "Label": "Mood Crazy Happy",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-cry",
+    "Label": "Mood Cry",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-empty",
+    "Label": "Mood Empty",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-happy",
+    "Label": "Mood Happy",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-heart",
+    "Label": "Mood Heart",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-kid",
+    "Label": "Mood Kid",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-look-down",
+    "Label": "Mood Look Down",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-look-left",
+    "Label": "Mood Look Left",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-look-right",
+    "Label": "Mood Look Right",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-nerd",
+    "Label": "Mood Nerd",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-nervous",
+    "Label": "Mood Nervous",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-neutral",
+    "Label": "Mood Neutral",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-puzzled",
+    "Label": "Mood Puzzled",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-sad",
+    "Label": "Mood Sad",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-sad-2",
+    "Label": "Mood Sad 2",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-sad-dizzy",
+    "Label": "Mood Sad Dizzy",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-sad-squint",
+    "Label": "Mood Sad Squint",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-sick",
+    "Label": "Mood Sick",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-silence",
+    "Label": "Mood Silence",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-sing",
+    "Label": "Mood Sing",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-smile",
+    "Label": "Mood Smile",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-smile-beam",
+    "Label": "Mood Smile Beam",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-smile-dizzy",
+    "Label": "Mood Smile Dizzy",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-spark",
+    "Label": "Mood Spark",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-surprised",
+    "Label": "Mood Surprised",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-tongue",
+    "Label": "Mood Tongue",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-tongue-wink",
+    "Label": "Mood Tongue Wink",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-tongue-wink-2",
+    "Label": "Mood Tongue Wink 2",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-unamused",
+    "Label": "Mood Unamused",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-wink",
+    "Label": "Mood Wink",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-wink-2",
+    "Label": "Mood Wink 2",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-wrrr",
+    "Label": "Mood Wrrr",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "mood-xd",
+    "Label": "Mood Xd",
+    "Categories": "Faces"
+  },
+  {
+    "Name": "sticker-smile",
+    "Label": "Sticker Smile",
+    "Categories": "Faces"
+  }
+]

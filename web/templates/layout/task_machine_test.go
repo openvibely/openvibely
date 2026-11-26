@@ -36,3 +36,17 @@ func TestTaskMachineRows(t *testing.T) {
 		t.Fatal("older server fallback")
 	}
 }
+
+func TestTaskMachineCustomIcon(t *testing.T) {
+	server := "0123456789abcdef"
+	project := remoteid.ID(server, "project")
+	ctx := WithTaskMachines(context.Background(), map[string]TaskMachine{server: {Name: "oldmac", Kind: "laptop", Icon: "spider"}})
+	var out, icon strings.Builder
+	if err := TaskListPanelContentWithProjects(project, []TaskListGroup{{Label: "Active", Tasks: []models.Task{{ID: "task", ProjectID: project, Title: "Remote task"}}}}, nil).Render(ctx, &out); err != nil {
+		t.Fatal(err)
+	}
+	ServerIcon("spider", "server").Render(ctx, &icon)
+	if !strings.Contains(out.String(), icon.String()) || !strings.Contains(out.String(), `data-tip="oldmac"`) {
+		t.Fatal("custom icon or server tooltip missing")
+	}
+}

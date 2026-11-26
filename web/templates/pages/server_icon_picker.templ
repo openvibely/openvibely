@@ -1,0 +1,73 @@
+package pages
+
+import "github.com/openvibely/openvibely/web/templates/components"
+import "github.com/openvibely/openvibely/web/templates/layout"
+
+templ serverIconCategories() {
+ <div class="px-3 pb-2"><select id="server-icon-category" class="select select-bordered select-sm w-full" aria-label="Icon category">
+ <option value="">All icons</option>
+ for _, category := range []string{"Creatures & mascots", "Space & magic", "Nature & weather", "Food & drink", "Games & celebrations", "Adventure & oddities", "Faces"} {
+ <option value={ category }>{ category }</option>
+ }
+ </select></div>
+}
+
+templ ServerIconPicker() {
+ <div id="server-icon-control" class="form-control mb-3">
+ <label class="label" for="server-icon-trigger"><span class="label-text">Icon</span></label>
+ <input type="hidden" id="server_icon" name="icon"/>
+ <button type="button" id="server-icon-trigger" class="input input-bordered flex items-center gap-2 w-full" data-value="" data-picker-align="end" aria-haspopup="dialog" aria-controls="server-icon-picker">
+ <span data-icon-preview>@layout.MachineIcon("server")</span><span data-icon-label>Automatic</span><svg class="ml-auto" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+ </button>
+ @components.InspectorPicker("server-icon-picker", serverIconCategories()) {
+ <div data-options class="server-icon-grid">
+ <button type="button" class="ov-menu-option server-icon-auto" data-value="" title="Automatic">@layout.MachineIcon("server")<span>Automatic</span></button>
+ for _, icon := range layout.ServerIconChoices() {
+ <button type="button" class="ov-menu-option" data-value={ icon.Name } data-categories={ icon.Categories } title={ icon.Label } aria-label={ icon.Label }>
+ @layout.ServerIcon(icon.Name, "server")<span class="sr-only">{ icon.Label }</span>
+ </button>
+ }
+ </div>
+ }
+ for _, kind := range []string{"server", "laptop", "desktop", "cloud"} {
+ <template data-machine-preview={ kind }>@layout.MachineIcon(kind)</template>
+ }
+ </div>
+ <style>
+ #server_modal .modal-box{max-width:680px}
+ .server-name-row{display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:16px}
+ .server-credentials-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+ .server-name-row .input,.server-credentials-row .input{width:100%;min-width:0}
+ #server-icon-picker{width:min(430px,calc(100vw - 24px))}
+ .server-icon-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px;padding:4px}
+ .server-icon-grid .ov-menu-option{justify-content:center;padding:10px;min-width:0}
+ .server-icon-grid .server-icon-auto{grid-column:1/-1;justify-content:flex-start;gap:10px}
+ #server-icon-trigger [data-icon-preview] svg,.server-card-icon svg{width:20px;height:20px;flex-shrink:0}
+ .server-card-icon{display:inline-flex;vertical-align:middle;margin-right:6px}
+ .server-icon-grid svg{width:20px;height:20px;flex-shrink:0}
+ @media(max-width:550px){.server-name-row{grid-template-columns:minmax(0,1fr) 150px}.server-credentials-row{grid-template-columns:minmax(0,1fr);gap:0}}
+ </style>
+ <script>
+ (function(){
+ const root=document.getElementById('server-icon-control'), popup=document.getElementById('server-icon-picker');
+ const trigger=document.getElementById('server-icon-trigger'), input=document.getElementById('server_icon'), category=document.getElementById('server-icon-category');
+ const picker=window.createInspectorPicker(root,popup,null,b=>!b.dataset.value||!category.value||(b.dataset.categories||'').split('|').includes(category.value));
+ let machine='server';
+ window.setServerIcon=function(value,kind){
+ machine=['server','laptop','desktop','cloud'].includes(kind)?kind:'server';
+ const option=Array.from(popup.querySelectorAll('button[data-value]')).find(b=>b.dataset.value===value);
+ value=option?value:'';
+ input.value=value;trigger.dataset.value=value;
+ const svg=value?option.querySelector('svg'):root.querySelector('template[data-machine-preview="'+machine+'"]').content.querySelector('svg');
+ trigger.querySelector('[data-icon-preview]').replaceChildren(svg.cloneNode(true));
+ trigger.querySelector('[data-icon-label]').textContent=value?option.getAttribute('aria-label'):'Automatic';
+ popup.querySelector('.server-icon-auto svg').replaceWith(root.querySelector('template[data-machine-preview="'+machine+'"]').content.querySelector('svg').cloneNode(true));
+ };
+ trigger.addEventListener('click',()=>picker.open(trigger));
+ category.addEventListener('keydown',e=>e.stopPropagation());
+ category.addEventListener('change',()=>popup.querySelector('input').dispatchEvent(new Event('input',{bubbles:true})));
+ popup.addEventListener('click',e=>{const option=e.target.closest('button[data-value]');if(!option)return;window.setServerIcon(option.dataset.value,machine);picker.close();picker.returnFocus(trigger);});
+ document.getElementById('server_modal').addEventListener('close',()=>picker.close());
+ })();
+ </script>
+}

@@ -440,3 +440,36 @@ func TestServerPasswordReplacementAndDeletion(t *testing.T) {
 	require.NotContains(t, raw, "updated-password")
 	require.NotContains(t, raw, "old-password")
 }
+
+func TestServerIconPersistence(t *testing.T) {
+	h, e := setupHubHandler(t)
+	save := func(id, icon string, include bool) int {
+		values := url.Values{"url": {"http://localhost:3001"}, "enabled": {"false"}}
+		if include {
+			values.Set("icon", icon)
+		}
+		path := "/servers"
+		if id != "" {
+			path += "/" + id
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, serversRequest(http.MethodPost, path, values))
+		return rec.Code
+	}
+	require.Equal(t, http.StatusOK, save("", "spider", true))
+	id := savedServerID(t, h)
+	get := func() string {
+		s, err := h.findSavedServer(context.Background(), id)
+		require.NoError(t, err)
+		return s.Icon
+	}
+	require.Equal(t, "spider", get())
+	require.Equal(t, http.StatusOK, save(id, "", false))
+	require.Equal(t, "spider", get())
+	require.Equal(t, http.StatusBadRequest, save(id, "../../anything", true))
+	require.Equal(t, "spider", get())
+	require.Equal(t, http.StatusOK, save(id, "cherry", true))
+	require.Equal(t, "cherry", get())
+	require.Equal(t, http.StatusOK, save(id, "", true))
+	require.Empty(t, get())
+}

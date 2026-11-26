@@ -638,6 +638,7 @@ func (h *Handler) serverViews(ctx context.Context) ([]pages.SavedServer, error) 
 					servers[i].Status = pages.ServerStatusOffline
 				}
 				servers[i].Version = conn.Version()
+				servers[i].MachineType = conn.MachineType()
 			}
 		}
 	}

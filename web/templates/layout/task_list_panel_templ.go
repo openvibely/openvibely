@@ -413,7 +413,7 @@ func TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup, 
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = MachineIcon(taskMachine(ctx, task.ProjectID).Kind).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = ServerIcon(taskMachine(ctx, task.ProjectID).Icon, taskMachine(ctx, task.ProjectID).Kind).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

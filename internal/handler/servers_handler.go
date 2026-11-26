@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -64,16 +65,20 @@ func serverFormError(c echo.Context, message string) error {
 }
 
 type serverForm struct {
-	name, url, username, password string
-	enabled                       bool
+	name, url, username, password, icon string
+	enabled                             bool
 }
 
 func readServerForm(c echo.Context) (serverForm, error) {
 	f := serverForm{
 		name:     strings.TrimSpace(c.FormValue("name")),
+		icon:     strings.TrimSpace(c.FormValue("icon")),
 		username: strings.TrimSpace(c.FormValue("username")),
 		password: c.FormValue("password"),
 		enabled:  c.FormValue("enabled") != "false",
+	}
+	if !layout.ValidServerIcon(f.icon) {
+		return f, errors.New("unknown server icon")
 	}
 	normalized, err := normalizeServerURL(c.FormValue("url"))
 	if err != nil {
@@ -153,6 +158,9 @@ func (h *Handler) SaveServer(c echo.Context) error {
 	}
 	previous := servers[index]
 	servers[index].Password = form.password
+	if _, provided := c.Request().PostForm["icon"]; provided {
+		servers[index].Icon = form.icon
+	}
 	servers[index].Name, servers[index].URL, servers[index].Username, servers[index].Enabled = form.name, form.url, form.username, form.enabled
 	if err := h.storeSavedServers(ctx, servers); err != nil {
 		return err
