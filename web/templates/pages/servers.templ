@@ -275,7 +275,6 @@ templ ServersCardList(data ServersPageData) {
 								<h3 class="font-bold flex items-center gap-2">
 									<span class="server-card-icon" aria-hidden="true">@layout.ServerIcon(server.Icon, server.MachineType)</span>
 { server.Name }
-									<span class={ "badge badge-sm", serverStatusClass(server) }>{ serverStatusLabel(server) }</span>
 								</h3>
 								<p class="text-sm opacity-60 break-all">{ server.URL }</p>
 								if server.SignedInAs != "" {
@@ -286,6 +285,9 @@ templ ServersCardList(data ServersPageData) {
 								if server.Version != "" {
 									<p class="text-sm opacity-60">Version { server.Version }</p>
 								}
+								<div class="mt-2 flex items-center gap-2">
+									<span class={ "badge badge-sm", serverStatusClass(server) }>{ serverStatusLabel(server) }</span>
+								</div>
 							</div>
 						</div>
 					</div>
