@@ -57,16 +57,17 @@ func TestSharedProjectChatPickerInChrome(t *testing.T) {
  const option=id=>document.querySelector('#chat-custom-select-panel li[data-value="'+id+'"]');
  await wait(()=>option('` + remoteCopy + `'));
  assert(sent.length===0,'sent before choosing a copy');
- assert(option('` + localProject.ID + `').textContent.includes('Foo · This computer'),'local copy label');
- assert(option('` + remoteCopy + `').textContent.includes('Foo · Box'),'remote copy label');
+ assert(option('` + localProject.ID + `').textContent.trim()==='This computer','local copy label');
+ assert(option('` + remoteCopy + `').textContent.trim()==='Box','remote copy label');
  option('` + remoteCopy + `').click();
  await wait(()=>sent.length===1);
  assert(sent[0]==='/chat/send?project_id=` + url.QueryEscape(remoteCopy) + `','wrong send URL: '+sent[0]);
- assert(picker.textContent.trim()==='Foo · Box','picker label');
+ assert(picker.textContent.trim()==='Box','picker label');
  const xhr={responseText:'<div>ok</div>',status:200,getResponseHeader:()=>null};
  form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,xhr:xhr,successful:true,requestConfig:{}}}));
  await wait(()=>location.pathname==='/chat' && new URLSearchParams(location.search).get('project_id')==='` + remoteCopy + `' && document.getElementById('chat-page-root'));
- assert(document.getElementById('project-selector').value==='` + remoteCopy + `','did not switch to the copy');
+ assert(document.getElementById('chat-page-root').dataset.projectId==='` + remoteCopy + `','conversation did not use remote copy');
+ assert(document.getElementById('project-selector').value==='` + shared.ID + `','workspace lost shared group');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)+' url='+location.href})}
  })();</script>`
