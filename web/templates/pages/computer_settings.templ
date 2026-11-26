@@ -14,10 +14,9 @@ templ ComputerSettingsPage(projects []models.Project, options []models.Project, 
 }
 
 templ ComputerSettingsContent(projects []models.Project, id string, values models.ComputerSettings, available bool, saved bool, message string) {
- <div id="computer-settings-content">
+ <div id="computer-settings-content" class="focused-settings">
  <style>
- #computer-settings-content{max-width:760px;padding:12px 0 32px;font-size:13px}
- #computer-settings-content h1{font-size:18px;font-weight:500;margin:0 0 24px}
+ #computer-settings-content{font-size:13px}
  #computer-settings-content .project-choice{display:flex;align-items:center;justify-content:space-between;padding-bottom:22px;gap:24px}
  #computer-settings-content .muted{opacity:.55;font-size:12px;line-height:1.5;margin-top:5px}
  #computer-settings-content .section-heading{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.5;margin:24px 0 6px;font-weight:500}

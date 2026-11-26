@@ -75,7 +75,7 @@ func ShortcutsContent() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"shortcuts-container\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"shortcuts-container\" class=\"focused-settings\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -83,7 +83,7 @@ func ShortcutsContent() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Shortcuts</h2></div><div class=\"flex flex-wrap items-center gap-2 mb-6\"><div class=\"w-full max-w-xs flex-1 min-w-44\"><div class=\"card border border-base-300 bg-base-100 shadow-sm\"><input type=\"search\" data-shortcut-search aria-label=\"Search shortcuts\" class=\"w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0\" placeholder=\"Search shortcuts…\" autocomplete=\"off\"></div></div><select data-shortcut-category aria-label=\"Shortcut category\" class=\"select select-bordered select-sm font-normal\"><option value=\"\">All categories</option> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<h1>Shortcuts</h1><div class=\"flex flex-wrap items-center gap-2 mb-6\"><div class=\"w-full max-w-xs flex-1 min-w-44\"><div class=\"card border border-base-300 bg-base-100 shadow-sm\"><input type=\"search\" data-shortcut-search aria-label=\"Search shortcuts\" class=\"w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0\" placeholder=\"Search shortcuts…\" autocomplete=\"off\"></div></div><select data-shortcut-category aria-label=\"Shortcut category\" class=\"select select-bordered select-sm font-normal\"><option value=\"\">All categories</option> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -95,7 +95,7 @@ func ShortcutsContent() templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templruntime.NewAttributeExpression(group.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 30, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 28, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 			if templ_7745c5c3_Err != nil {
@@ -108,7 +108,7 @@ func ShortcutsContent() templ.Component {
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(group.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 30, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 28, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
@@ -131,7 +131,7 @@ func ShortcutsContent() templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(group.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 36, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 34, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -144,7 +144,7 @@ func ShortcutsContent() templ.Component {
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(group.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 37, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 35, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -157,7 +157,7 @@ func ShortcutsContent() templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(group.Description)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 38, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 36, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -175,7 +175,7 @@ func ShortcutsContent() templ.Component {
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templruntime.NewAttributeExpression(strconv.FormatBool(entry.MacOnly)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 41, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 39, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 				if templ_7745c5c3_Err != nil {
@@ -188,7 +188,7 @@ func ShortcutsContent() templ.Component {
 				var templ_7745c5c3_Var10 string
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(entry.Action)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 43, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 41, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
@@ -201,7 +201,7 @@ func ShortcutsContent() templ.Component {
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(entry.Context)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 44, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 42, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 				if templ_7745c5c3_Err != nil {
@@ -225,7 +225,7 @@ func ShortcutsContent() templ.Component {
 						var templ_7745c5c3_Var12 string
 						templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(key).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 51, Col: 58}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 49, Col: 58}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 						if templ_7745c5c3_Err != nil {
@@ -238,7 +238,7 @@ func ShortcutsContent() templ.Component {
 						var templ_7745c5c3_Var13 string
 						templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(key)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 51, Col: 66}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/shortcuts.templ`, Line: 49, Col: 66}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 						if templ_7745c5c3_Err != nil {
@@ -260,7 +260,7 @@ func ShortcutsContent() templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</div><div data-shortcut-empty hidden class=\"text-center py-12\" role=\"status\" aria-live=\"polite\"><p class=\"font-medium\">No shortcuts found</p><p class=\"text-sm opacity-60 mt-2\">Try another action or a different category.</p><button type=\"button\" data-shortcut-reset class=\"btn btn-sm btn-ghost mt-3\">Clear filters</button></div><style>\n   #shortcuts-container .shortcut-groups { max-width: 1010px; }\n   #shortcuts-container .shortcut-row { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:13px 16px; border-bottom:1px solid oklch(var(--bc) / .1); }\n   #shortcuts-container .shortcut-row:last-child { border-bottom:0; }\n   #shortcuts-container .shortcut-keys { display:flex; align-items:center; justify-content:flex-end; gap:5px; flex-shrink:0; }\n   #shortcuts-container [hidden] { display:none!important; }\n   @media(max-width:640px) { #shortcuts-container .shortcut-row { flex-wrap:wrap; gap:10px; } }\n  </style><script>\n   (function() {\n    var root = document.getElementById('shortcuts-container');\n    if (!root || root._shortcutsInitialized) return;\n    root._shortcutsInitialized = true;\n    var apple = /Mac|iPhone|iPad|iPod/.test(navigator.platform);\n    var labels = {mod: apple ? '⌘' : 'Ctrl', shift: apple ? '⇧' : 'Shift', forwardDelete: apple ? 'Fn + Delete' : 'Delete'};\n    var names = {mod: apple ? 'Command Cmd' : 'Control Ctrl', shift: 'Shift', forwardDelete: apple ? 'Fn Delete' : 'Delete'};\n    root.querySelectorAll('[data-shortcut-key]').forEach(function(key) {\n     var token = key.dataset.shortcutKey;\n     key.textContent = labels[token] || token;\n     if (names[token]) key.setAttribute('aria-label', names[token]);\n    });\n    var search = root.querySelector('[data-shortcut-search]');\n    var category = root.querySelector('[data-shortcut-category]');\n    function filter() {\n     var query = search.value.trim().toLowerCase(), any = false;\n     root.querySelectorAll('[data-shortcut-group]').forEach(function(group) {\n      var shown = false;\n      group.querySelectorAll('[data-shortcut-row]').forEach(function(row) {\n       var keys = Array.from(row.querySelectorAll('[data-shortcut-key]')).map(function(key) {return names[key.dataset.shortcutKey] || key.textContent;}).join(' ');\n       var matches = (apple || row.dataset.macOnly !== 'true') && (!category.value || category.value === group.dataset.shortcutGroup) && (group.dataset.shortcutGroup + ' ' + row.textContent + ' ' + keys).toLowerCase().includes(query);\n       row.hidden = !matches;\n       shown = shown || matches;\n      });\n      group.hidden = !shown;\n      any = any || shown;\n     });\n     root.querySelector('[data-shortcut-empty]').hidden = any;\n    }\n    search.addEventListener('input', filter);\n    category.addEventListener('change', filter);\n    root.querySelector('[data-shortcut-reset]').addEventListener('click', function() {search.value = ''; category.value = ''; filter(); search.focus();});\n    filter();\n   })();\n  </script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</div><div data-shortcut-empty hidden class=\"text-center py-12\" role=\"status\" aria-live=\"polite\"><p class=\"font-medium\">No shortcuts found</p><p class=\"text-sm opacity-60 mt-2\">Try another action or a different category.</p><button type=\"button\" data-shortcut-reset class=\"btn btn-sm btn-ghost mt-3\">Clear filters</button></div><style>\n   #shortcuts-container .shortcut-row { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:13px 16px; border-bottom:1px solid oklch(var(--bc) / .1); }\n   #shortcuts-container .shortcut-row:last-child { border-bottom:0; }\n   #shortcuts-container .shortcut-keys { display:flex; align-items:center; justify-content:flex-end; gap:5px; flex-shrink:0; }\n   #shortcuts-container [hidden] { display:none!important; }\n   @media(max-width:640px) { #shortcuts-container .shortcut-row { flex-wrap:wrap; gap:10px; } }\n  </style><script>\n   (function() {\n    var root = document.getElementById('shortcuts-container');\n    if (!root || root._shortcutsInitialized) return;\n    root._shortcutsInitialized = true;\n    var apple = /Mac|iPhone|iPad|iPod/.test(navigator.platform);\n    var labels = {mod: apple ? '⌘' : 'Ctrl', shift: apple ? '⇧' : 'Shift', forwardDelete: apple ? 'Fn + Delete' : 'Delete'};\n    var names = {mod: apple ? 'Command Cmd' : 'Control Ctrl', shift: 'Shift', forwardDelete: apple ? 'Fn Delete' : 'Delete'};\n    root.querySelectorAll('[data-shortcut-key]').forEach(function(key) {\n     var token = key.dataset.shortcutKey;\n     key.textContent = labels[token] || token;\n     if (names[token]) key.setAttribute('aria-label', names[token]);\n    });\n    var search = root.querySelector('[data-shortcut-search]');\n    var category = root.querySelector('[data-shortcut-category]');\n    function filter() {\n     var query = search.value.trim().toLowerCase(), any = false;\n     root.querySelectorAll('[data-shortcut-group]').forEach(function(group) {\n      var shown = false;\n      group.querySelectorAll('[data-shortcut-row]').forEach(function(row) {\n       var keys = Array.from(row.querySelectorAll('[data-shortcut-key]')).map(function(key) {return names[key.dataset.shortcutKey] || key.textContent;}).join(' ');\n       var matches = (apple || row.dataset.macOnly !== 'true') && (!category.value || category.value === group.dataset.shortcutGroup) && (group.dataset.shortcutGroup + ' ' + row.textContent + ' ' + keys).toLowerCase().includes(query);\n       row.hidden = !matches;\n       shown = shown || matches;\n      });\n      group.hidden = !shown;\n      any = any || shown;\n     });\n     root.querySelector('[data-shortcut-empty]').hidden = any;\n    }\n    search.addEventListener('input', filter);\n    category.addEventListener('change', filter);\n    root.querySelector('[data-shortcut-reset]').addEventListener('click', function() {search.value = ''; category.value = ''; filter(); search.focus();});\n    filter();\n   })();\n  </script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

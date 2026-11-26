@@ -76,14 +76,14 @@ func UpdateSettingsContent(projectID string, snapshot update.CoordinatorSnapshot
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"update-settings-content\"><style>\n #update-settings-content{max-width:760px;padding:12px 0 32px;font-size:13px}\n #update-settings-content h1{font-size:18px;font-weight:500;margin:0 0 24px}\n #update-settings-content .muted{opacity:.55;font-size:12px;line-height:1.5;margin-top:5px}\n #update-settings-content .setting-row{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:58px;border-bottom:1px solid oklch(var(--bc)/.07);padding:10px 0}\n #update-settings-content .label-copy{line-height:1.5}\n #update-settings-content .settings-footer{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-top:24px}\n #update-settings-content .settings-footer .btn{font-size:12px;height:32px;min-height:32px;font-weight:500;border-radius:7px;padding:0 14px}\n </style><h1 style=\"margin-bottom:5px\">App updates</h1><p class=\"muted\" style=\"margin-bottom:24px\">Version ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"update-settings-content\" class=\"focused-settings\"><style>\n #update-settings-content{font-size:13px}\n #update-settings-content .muted{opacity:.55;font-size:12px;line-height:1.5;margin-top:5px}\n #update-settings-content .setting-row{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:58px;border-bottom:1px solid oklch(var(--bc)/.07);padding:10px 0}\n #update-settings-content .label-copy{line-height:1.5}\n #update-settings-content .settings-footer{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-top:24px}\n #update-settings-content .settings-footer .btn{font-size:12px;height:32px;min-height:32px;font-weight:500;border-radius:7px;padding:0 14px}\n </style><h1 style=\"margin-bottom:5px\">App updates</h1><p class=\"muted\" style=\"margin-bottom:24px\">Version ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(snapshot.CurrentVersion)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 28, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 27, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -96,7 +96,7 @@ func UpdateSettingsContent(projectID string, snapshot update.CoordinatorSnapshot
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL("/settings/updates?project_id=" + url.QueryEscape(projectID))).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 29, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 28, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -109,7 +109,7 @@ func UpdateSettingsContent(projectID string, snapshot update.CoordinatorSnapshot
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/settings/updates?project_id=" + url.QueryEscape(projectID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 29, Col: 178}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 28, Col: 178}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -149,7 +149,7 @@ func UpdateSettingsContent(projectID string, snapshot update.CoordinatorSnapshot
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(snapshot.ConfigurationError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 38, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 37, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -174,7 +174,7 @@ func UpdateSettingsContent(projectID string, snapshot update.CoordinatorSnapshot
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 44, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/update_settings.templ`, Line: 43, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {

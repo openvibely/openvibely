@@ -1594,6 +1594,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				/* Compact page navigation, scoped away from dialogs and section headings. */
 				#main-content:has([data-page-header]) { padding-top: 0; }
 				#main-content { padding-bottom: 4px; margin-bottom: 10px; }
+				#main-content .focused-settings { width: 100%; max-width: 760px; margin-inline: auto; padding-block: clamp(24px, 4vh, 56px) 40px; }
+				#main-content .focused-settings > h1 { font-size: 18px; font-weight: 500; margin: 0 0 24px; }
 				#main-content[data-page-loading] { display: flex; align-items: center; justify-content: center; }
 				#main-content[data-page-loading] > * { display: none !important; }
 				#main-content[data-page-loading]::after { content: ""; width: 20px; height: 20px; border-radius: 9999px; border: 2px solid oklch(var(--bc) / .5); border-right-color: transparent; animation: ov-page-spin .7s linear infinite; }

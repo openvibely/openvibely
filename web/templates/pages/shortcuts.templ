@@ -13,11 +13,9 @@ templ Shortcuts(projects []models.Project, projectID string) {
 }
 
 templ ShortcutsContent() {
- <div id="shortcuts-container">
+ <div id="shortcuts-container" class="focused-settings">
   @layout.PageTitle("Shortcuts")
-  <div data-page-header class="flex items-center justify-between mb-6">
-   <h2 class="text-2xl font-bold">Shortcuts</h2>
-  </div>
+  <h1>Shortcuts</h1>
   <div class="flex flex-wrap items-center gap-2 mb-6">
    <div class="w-full max-w-xs flex-1 min-w-44">
     <div class="card border border-base-300 bg-base-100 shadow-sm">
@@ -64,7 +62,6 @@ templ ShortcutsContent() {
    <button type="button" data-shortcut-reset class="btn btn-sm btn-ghost mt-3">Clear filters</button>
   </div>
   <style>
-   #shortcuts-container .shortcut-groups { max-width: 1010px; }
    #shortcuts-container .shortcut-row { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:13px 16px; border-bottom:1px solid oklch(var(--bc) / .1); }
    #shortcuts-container .shortcut-row:last-child { border-bottom:0; }
    #shortcuts-container .shortcut-keys { display:flex; align-items:center; justify-content:flex-end; gap:5px; flex-shrink:0; }

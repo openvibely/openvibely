@@ -14,10 +14,9 @@ templ UpdateSettingsPage(projects []models.Project, projectID string, snapshot u
 }
 
 templ UpdateSettingsContent(projectID string, snapshot update.CoordinatorSnapshot, canManage, saved bool, message string) {
- <div id="update-settings-content">
+ <div id="update-settings-content" class="focused-settings">
  <style>
- #update-settings-content{max-width:760px;padding:12px 0 32px;font-size:13px}
- #update-settings-content h1{font-size:18px;font-weight:500;margin:0 0 24px}
+ #update-settings-content{font-size:13px}
  #update-settings-content .muted{opacity:.55;font-size:12px;line-height:1.5;margin-top:5px}
  #update-settings-content .setting-row{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:58px;border-bottom:1px solid oklch(var(--bc)/.07);padding:10px 0}
  #update-settings-content .label-copy{line-height:1.5}
