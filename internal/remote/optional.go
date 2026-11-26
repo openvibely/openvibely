@@ -29,7 +29,9 @@ func init() {
 	paramNames["Executions"]["StartStructuredOutput"] = []string{"id"}
 	paramNames["Executions"]["SealStructuredOutput"] = []string{"id", "digest", "total"}
 	paramNames["Executions"]["AppendStructuredOutput"] = []string{"id", "changes"}
-	paramNames["Executions"]["ListDisplayExecutions"] = []string{"projectID", "taskID", "before", "limit", "budget"}
+	// This cursor is an execution reference; unlike numeric display-tail offsets,
+	// it must participate in routing and have its remote prefix stripped.
+	paramNames["Executions"]["ListDisplayExecutions"] = []string{"projectID", "taskID", "beforeExecID", "limit", "budget"}
 	paramNames["Executions"]["ReadProjectDisplayTail"] = []string{"projectID", "id", "before", "budget"}
 	paramNames["Executions"]["ReadProjectDisplayTailRevision"] = []string{"projectID", "id", "before", "budget", "revision"}
 	paramNames["Executions"]["GetDisplayExecutionTail"] = []string{"id"}
@@ -39,15 +41,15 @@ func init() {
 	paramNames["Executions"]["GetChatCompactionCheckpointIfChanged"] = []string{"scopeType", "scopeID", "previous"}
 }
 
-func (s *ExecutionStore) ListDisplayExecutions(ctx context.Context, projectID, taskID, before string, limit, budget int) (r0 []models.Execution, r1 bool, r2 error) {
+func (s *ExecutionStore) ListDisplayExecutions(ctx context.Context, projectID, taskID, beforeExecID string, limit, budget int) (r0 []models.Execution, r1 bool, r2 error) {
 	d := s.local.(displayStore)
-	if s.r.Remote(ctx, "Executions", "ListDisplayExecutions", []any{projectID, taskID, before, limit, budget}, func() []any {
-		r0, r1, r2 = d.ListDisplayExecutions(ctx, projectID, taskID, before, limit, budget)
+	if s.r.Remote(ctx, "Executions", "ListDisplayExecutions", []any{projectID, taskID, beforeExecID, limit, budget}, func() []any {
+		r0, r1, r2 = d.ListDisplayExecutions(ctx, projectID, taskID, beforeExecID, limit, budget)
 		return []any{r0, r1, r2}
 	}, &r0, &r1, &r2) {
 		return
 	}
-	return d.ListDisplayExecutions(ctx, projectID, taskID, before, limit, budget)
+	return d.ListDisplayExecutions(ctx, projectID, taskID, beforeExecID, limit, budget)
 }
 
 func (s *ExecutionStore) ReadProjectDisplayTail(ctx context.Context, projectID, id string, before int64, budget int) (r0 models.DisplayTail, r1 error) {
