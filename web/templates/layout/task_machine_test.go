@@ -20,7 +20,10 @@ func TestTaskMachineRows(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := out.String()
-		for _, want := range []string{`data-tip="This computer"`, `data-tip="oldmac"`, `M3 19l18 0`, `tabindex="0"`} {
+		if strings.Contains(s, `data-tip="This computer"`) || strings.Count(s, `class="task-machine-badge"`) != 1 {
+			t.Fatal("only remote tasks should have machine badges")
+		}
+		for _, want := range []string{`data-tip="oldmac"`, `M3 19l18 0`, `tabindex="0"`} {
 			if !strings.Contains(s, want) {
 				t.Errorf("missing %s", want)
 			}
