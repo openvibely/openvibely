@@ -1999,12 +1999,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					item.setAttribute('aria-selected', val === currentValue ? 'true' : 'false');
 					item.dataset.value = val;
 					item.className = 'ov-menu-option';
+					item.setAttribute('data-project-selector-option', '');
 					item.style.whiteSpace = 'nowrap';
-					var check = document.createElement('span');
-					check.className = 'ov-menu-check';
-					check.setAttribute('aria-hidden', 'true');
-					check.textContent = val === currentValue ? '✓' : '';
-					item.appendChild(check);
                     var serverIcon = li.querySelector('[data-server-icon]');
                     if (serverIcon && serverIcon.querySelector('svg')) item.appendChild(serverIcon.cloneNode(true));
 					var textSpan = document.createElement('span');
