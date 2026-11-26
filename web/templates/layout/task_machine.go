@@ -14,10 +14,12 @@ type taskMachinesKey struct{}
 
 func WithTaskMachines(ctx context.Context, machines map[string]TaskMachine) context.Context {
 	icons := make(map[string]templ.Component, len(machines))
+	names := make(map[string]string, len(machines))
 	for id, machine := range machines {
 		icons[id] = ServerIcon(machine.Icon, machine.Kind)
+		names[id] = machine.Name
 	}
-	return context.WithValue(templateui.WithServerIcons(ctx, icons), taskMachinesKey{}, machines)
+	return context.WithValue(templateui.WithServerNames(templateui.WithServerIcons(ctx, icons), names), taskMachinesKey{}, machines)
 }
 func taskMachine(ctx context.Context, projectID string) TaskMachine {
 	server, _, remote := remoteid.Split(projectID)

@@ -46,3 +46,17 @@ func ProjectServerIcon(ctx context.Context, projectID string) templ.Component {
 	}
 	return templ.NopComponent
 }
+
+type serverNamesKey struct{}
+
+func WithServerNames(ctx context.Context, names map[string]string) context.Context {
+	return context.WithValue(ctx, serverNamesKey{}, names)
+}
+func ProjectServerName(ctx context.Context, projectID string) string {
+	server, _, remote := remoteid.Split(projectID)
+	if !remote {
+		return "This computer"
+	}
+	names, _ := ctx.Value(serverNamesKey{}).(map[string]string)
+	return names[server]
+}

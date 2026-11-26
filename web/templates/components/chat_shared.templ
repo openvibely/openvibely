@@ -128,6 +128,7 @@ type ChatInputFormConfig struct {
 	QueuedSteerEndpointFor func(models.ThreadInput) string
 	// ProjectChoices adds a composer project picker; sending waits until one is chosen.
 	ProjectChoices []models.Project
+ ProjectServerOnly bool
 	ProjectInputID string // hidden input that holds the chosen project ID
 	ProjectSendURL string // optional send URL prefix; the chosen project ID is appended
 	ProjectOpenURL string // optional URL prefix opened with the chosen project ID after a successful send
@@ -1710,7 +1711,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none">Choose a project</span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
 								for _, project := range config.ProjectChoices {
-									<li data-value={ project.ID }><span data-server-icon class="inline-flex shrink-0 [&_svg]:w-4 [&_svg]:h-4">@templateui.ProjectServerIcon(ctx, project.ID)</span>{ project.Name }</li>
+									<li data-value={ project.ID }><span data-server-icon class="inline-flex shrink-0 [&_svg]:w-4 [&_svg]:h-4">@templateui.ProjectServerIcon(ctx, project.ID)</span>{ composerDestinationLabel(ctx, project, config.ProjectServerOnly) }</li>
 								}
 							</ul>
 						</div>
@@ -1947,7 +1948,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			window._chatCustomSelectPanelReady = true;
 			var _cspanel = document.createElement('ul');
 			_cspanel.id = 'chat-custom-select-panel';
-			_cspanel.className = 'ov-menu ov-menu-actions ov-menu-scroll';
+			_cspanel.className = 'ov-menu ov-menu-list ov-menu-scroll';
 			_cspanel.setAttribute('role', 'listbox');
 			_cspanel.style.cssText = 'position:fixed;z-index:9999;display:none;list-style:none;margin:0;' +
 				'min-width:160px;max-height:280px;';
@@ -7599,4 +7600,15 @@ templ ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) {
 								for _, agent := range agents {
 									<li data-value={ agent.ID } data-picker-name={ agent.Name } data-picker-model={ agent.Model } data-picker-provider={ pickerProvider(agent) } data-picker-efforts={ pickerEfforts(agent) } data-picker-default={ pickerDefaultEffort(agent) } data-picker-fast={ fmt.Sprint(models.ModelSupportsFastMode(agent.Provider, agent.Model)) } data-picker-tier={ agent.EffectiveServiceTier() }>{ agent.Name } ({ agent.Model })</li>
 								}
+}
+
+func composerDestinationLabel(ctx context.Context, project models.Project, serverOnly bool) string {
+ if serverOnly {
+  name := templateui.ProjectServerName(ctx, project.ID)
+  if name != "" {
+   if i := strings.Index(project.Name, " · " + name); i >= 0 { return project.Name[i+len(" · "):] }
+   return name
+  }
+ }
+ return project.Name
 }

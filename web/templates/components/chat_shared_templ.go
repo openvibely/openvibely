@@ -141,10 +141,11 @@ type ChatInputFormConfig struct {
 	PendingInputs          []models.ThreadInput
 	QueuedSteerEndpointFor func(models.ThreadInput) string
 	// ProjectChoices adds a composer project picker; sending waits until one is chosen.
-	ProjectChoices []models.Project
-	ProjectInputID string // hidden input that holds the chosen project ID
-	ProjectSendURL string // optional send URL prefix; the chosen project ID is appended
-	ProjectOpenURL string // optional URL prefix opened with the chosen project ID after a successful send
+	ProjectChoices    []models.Project
+	ProjectServerOnly bool
+	ProjectInputID    string // hidden input that holds the chosen project ID
+	ProjectSendURL    string // optional send URL prefix; the chosen project ID is appended
+	ProjectOpenURL    string // optional URL prefix opened with the chosen project ID after a successful send
 }
 
 // chatElementIDs returns derived element IDs based on the form ID prefix.
@@ -428,7 +429,7 @@ func chatBubble(role, content string, author []string, tail []*models.DisplayTai
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(chatAuthorLabel(ctx, role, author))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 258, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 259, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -446,7 +447,7 @@ func chatBubble(role, content string, author []string, tail []*models.DisplayTai
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(CleanDisplayContent(content))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 262, Col: 122}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 263, Col: 122}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
@@ -464,7 +465,7 @@ func chatBubble(role, content string, author []string, tail []*models.DisplayTai
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templruntime.NewAttributeExpression(displayTailCursor(tail)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 264, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 265, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 			if templ_7745c5c3_Err != nil {
@@ -477,7 +478,7 @@ func chatBubble(role, content string, author []string, tail []*models.DisplayTai
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatContentRevision(content)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 264, Col: 132}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 265, Col: 132}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
@@ -490,7 +491,7 @@ func chatBubble(role, content string, author []string, tail []*models.DisplayTai
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(content).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 264, Col: 161}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 265, Col: 161}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 			if templ_7745c5c3_Err != nil {
@@ -535,7 +536,7 @@ func ChatTerminalError(errorMsg string) templ.Component {
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs("Error: " + errorMsg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 273, Col: 158}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 274, Col: 158}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 			if templ_7745c5c3_Err != nil {
@@ -611,7 +612,7 @@ func ChatBubbleError(role, errorMsg, output string, tail ...*models.DisplayTail)
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(role)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 281, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 282, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
@@ -629,7 +630,7 @@ func ChatBubbleError(role, errorMsg, output string, tail ...*models.DisplayTail)
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(displayTailCursor(tail)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 285, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 286, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 			if templ_7745c5c3_Err != nil {
@@ -642,7 +643,7 @@ func ChatBubbleError(role, errorMsg, output string, tail ...*models.DisplayTail)
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatContentRevision(output)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 285, Col: 131}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 286, Col: 131}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
@@ -655,7 +656,7 @@ func ChatBubbleError(role, errorMsg, output string, tail ...*models.DisplayTail)
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(output).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 285, Col: 159}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 286, Col: 159}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
@@ -739,7 +740,7 @@ func ChatBubbleThinking(role string) templ.Component {
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(role)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 296, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 297, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -822,7 +823,7 @@ func ChatBubbleRunning(role, partialOutput string) templ.Component {
 		var templ_7745c5c3_Var30 string
 		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(role)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 311, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 312, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
@@ -853,7 +854,7 @@ func ChatBubbleRunning(role, partialOutput string) templ.Component {
 			var templ_7745c5c3_Var31 string
 			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(cleanedOutput)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 320, Col: 107}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 321, Col: 107}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 			if templ_7745c5c3_Err != nil {
@@ -941,7 +942,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 		var templ_7745c5c3_Var35 string
 		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(chatAuthorLabel(ctx, role, author))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 333, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 334, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 		if templ_7745c5c3_Err != nil {
@@ -959,7 +960,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(attachments)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 339, Col: 42}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 340, Col: 42}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -977,7 +978,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(CleanDisplayContent(content))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 344, Col: 121}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 345, Col: 121}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 		if templ_7745c5c3_Err != nil {
@@ -1001,7 +1002,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var38 string
 					templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(MessageAttachmentDownloadURL(att, projectID))).ResolveURL(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 351, Col: 77}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 352, Col: 77}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 					if templ_7745c5c3_Err != nil {
@@ -1014,7 +1015,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var39 string
 					templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(att.FileName).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 351, Col: 167}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 352, Col: 167}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 					if templ_7745c5c3_Err != nil {
@@ -1027,7 +1028,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var40 string
 					templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(FileURLMode(MessageAttachmentDownloadURL(att, projectID), "thumbnail"))).ResolveURL(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 353, Col: 101}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 354, Col: 101}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 					if templ_7745c5c3_Err != nil {
@@ -1040,7 +1041,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var41 string
 					templ_7745c5c3_Var41, templ_7745c5c3_Err = templruntime.NewAttributeExpression(att.FileName).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 354, Col: 28}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 355, Col: 28}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 					if templ_7745c5c3_Err != nil {
@@ -1053,7 +1054,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var42 string
 					templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(att.FileName)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 365, Col: 49}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 366, Col: 49}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 					if templ_7745c5c3_Err != nil {
@@ -1066,7 +1067,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var43 string
 					templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(FormatFileSize(att.FileSize))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 366, Col: 46}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 367, Col: 46}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 					if templ_7745c5c3_Err != nil {
@@ -1084,7 +1085,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var44 string
 					templ_7745c5c3_Var44, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(MessageAttachmentDownloadURL(att, projectID))).ResolveURL(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 370, Col: 76}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 371, Col: 76}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 					if templ_7745c5c3_Err != nil {
@@ -1097,7 +1098,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var45 string
 					templ_7745c5c3_Var45, templ_7745c5c3_Err = templruntime.NewAttributeExpression(att.FileName).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 370, Col: 160}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 371, Col: 160}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 					if templ_7745c5c3_Err != nil {
@@ -1110,7 +1111,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var46 string
 					templ_7745c5c3_Var46, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(MessageAttachmentDownloadURL(att, projectID))).ResolveURL(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 370, Col: 260}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 371, Col: 260}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 					if templ_7745c5c3_Err != nil {
@@ -1123,7 +1124,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var47 string
 					templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(att.FileName)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 370, Col: 331}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 371, Col: 331}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 					if templ_7745c5c3_Err != nil {
@@ -1149,7 +1150,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var48 string
 					templ_7745c5c3_Var48, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(MessageAttachmentDownloadURL(att, projectID))).ResolveURL(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 374, Col: 77}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 375, Col: 77}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 					if templ_7745c5c3_Err != nil {
@@ -1162,7 +1163,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var49 string
 					templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(att.FileName)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 375, Col: 23}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 376, Col: 23}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 					if templ_7745c5c3_Err != nil {
@@ -1175,7 +1176,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 					var templ_7745c5c3_Var50 string
 					templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(FormatFileSize(att.FileSize))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 377, Col: 64}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 378, Col: 64}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 					if templ_7745c5c3_Err != nil {
@@ -1264,7 +1265,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var54 string
 		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(role)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 394, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 395, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 		if templ_7745c5c3_Err != nil {
@@ -1277,7 +1278,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var55 string
 		templ_7745c5c3_Var55, templ_7745c5c3_Err = templruntime.NewAttributeExpression("streaming-thinking-" + execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 397, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 398, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 		if templ_7745c5c3_Err != nil {
@@ -1298,7 +1299,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var56 string
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templruntime.NewAttributeExpression("mixture-progress-" + execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 401, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 402, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 		if templ_7745c5c3_Err != nil {
@@ -1311,7 +1312,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var57 string
 		templ_7745c5c3_Var57, templ_7745c5c3_Err = templruntime.NewAttributeExpression(execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 401, Col: 121}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 402, Col: 121}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 		if templ_7745c5c3_Err != nil {
@@ -1324,7 +1325,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var58 string
 		templ_7745c5c3_Var58, templ_7745c5c3_Err = templruntime.NewAttributeExpression("streaming-message-" + execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 403, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 404, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 		if templ_7745c5c3_Err != nil {
@@ -1337,7 +1338,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var59 string
 		templ_7745c5c3_Var59, templ_7745c5c3_Err = templruntime.NewAttributeExpression(execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 405, Col: 25}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 406, Col: 25}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var59)
 		if templ_7745c5c3_Err != nil {
@@ -1350,7 +1351,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var60 string
 		templ_7745c5c3_Var60, templ_7745c5c3_Err = templruntime.NewAttributeExpression(messagesContainerID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 406, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 407, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 		if templ_7745c5c3_Err != nil {
@@ -1363,7 +1364,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var61 string
 		templ_7745c5c3_Var61, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pausePollingTargetID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 407, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 408, Col: 52}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
 		if templ_7745c5c3_Err != nil {
@@ -1376,7 +1377,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var62 string
 		templ_7745c5c3_Var62, templ_7745c5c3_Err = templruntime.NewAttributeExpression(boolStr(isThread)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 408, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 409, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
 		if templ_7745c5c3_Err != nil {
@@ -1389,7 +1390,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		var templ_7745c5c3_Var63 string
 		templ_7745c5c3_Var63, templ_7745c5c3_Err = templruntime.NewAttributeExpression("streaming-dots-" + execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 411, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 412, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 		if templ_7745c5c3_Err != nil {
@@ -1477,7 +1478,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var67 string
 		templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.JoinStringErrs(role)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 836, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 837, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var67))
 		if templ_7745c5c3_Err != nil {
@@ -1495,7 +1496,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var68 string
 			templ_7745c5c3_Var68, templ_7745c5c3_Err = templruntime.NewAttributeExpression("streaming-thinking-resume-" + execID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 840, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 841, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 			if templ_7745c5c3_Err != nil {
@@ -1521,7 +1522,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var69 string
 		templ_7745c5c3_Var69, templ_7745c5c3_Err = templruntime.NewAttributeExpression("mixture-progress-" + execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 845, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 846, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 		if templ_7745c5c3_Err != nil {
@@ -1534,7 +1535,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var70 string
 		templ_7745c5c3_Var70, templ_7745c5c3_Err = templruntime.NewAttributeExpression(execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 845, Col: 121}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 846, Col: 121}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 		if templ_7745c5c3_Err != nil {
@@ -1561,7 +1562,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var71 string
 			templ_7745c5c3_Var71, templ_7745c5c3_Err = templruntime.NewAttributeExpression("streaming-message-" + execID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 42}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 42}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
 			if templ_7745c5c3_Err != nil {
@@ -1592,7 +1593,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var74 string
 			templ_7745c5c3_Var74, templ_7745c5c3_Err = templruntime.NewAttributeExpression(displayTailCursor(tail)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 187}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 187}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 			if templ_7745c5c3_Err != nil {
@@ -1605,7 +1606,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var75 string
 			templ_7745c5c3_Var75, templ_7745c5c3_Err = templruntime.NewAttributeExpression(displayTailContext(tail)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 236}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 236}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 			if templ_7745c5c3_Err != nil {
@@ -1618,7 +1619,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var76 string
 			templ_7745c5c3_Var76, templ_7745c5c3_Err = templruntime.NewAttributeExpression(displayTailContextOffsets(tail)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 300}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 300}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 			if templ_7745c5c3_Err != nil {
@@ -1631,7 +1632,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var77 string
 			templ_7745c5c3_Var77, templ_7745c5c3_Err = templruntime.NewAttributeExpression(execID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 324}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 324}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
 			if templ_7745c5c3_Err != nil {
@@ -1644,7 +1645,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var78 string
 			templ_7745c5c3_Var78, templ_7745c5c3_Err = templruntime.NewAttributeExpression(displayTailOffset(partialContent, tail)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 393}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 393}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 			if templ_7745c5c3_Err != nil {
@@ -1657,7 +1658,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var79 string
 			templ_7745c5c3_Var79, templ_7745c5c3_Err = templruntime.NewAttributeExpression(messagesContainerID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 441}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 441}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var79)
 			if templ_7745c5c3_Err != nil {
@@ -1670,7 +1671,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var80 string
 			templ_7745c5c3_Var80, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pausePollingTargetID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 492}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 492}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
 			if templ_7745c5c3_Err != nil {
@@ -1683,7 +1684,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var81 string
 			templ_7745c5c3_Var81, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatContentRevision(partialContent)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 579}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 579}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
 			if templ_7745c5c3_Err != nil {
@@ -1696,7 +1697,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var82 string
 			templ_7745c5c3_Var82, templ_7745c5c3_Err = templruntime.NewAttributeExpression(partialContent).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 849, Col: 615}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 850, Col: 615}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var82)
 			if templ_7745c5c3_Err != nil {
@@ -1731,7 +1732,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var83 string
 			templ_7745c5c3_Var83, templ_7745c5c3_Err = templruntime.NewAttributeExpression("streaming-dots-resume-" + execID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 887, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 888, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var83)
 			if templ_7745c5c3_Err != nil {
@@ -1863,7 +1864,7 @@ func pendingAttachmentBadge(label, title string) templ.Component {
 		var templ_7745c5c3_Var89 string
 		templ_7745c5c3_Var89, templ_7745c5c3_Err = templruntime.NewAttributeExpression(title).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1313, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1314, Col: 104}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var89)
 		if templ_7745c5c3_Err != nil {
@@ -1876,7 +1877,7 @@ func pendingAttachmentBadge(label, title string) templ.Component {
 		var templ_7745c5c3_Var90 string
 		templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1317, Col: 15}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1318, Col: 15}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var90))
 		if templ_7745c5c3_Err != nil {
@@ -1914,7 +1915,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var92 string
 		templ_7745c5c3_Var92, templ_7745c5c3_Err = templruntime.NewAttributeExpression("thread-input-" + inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1322, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1323, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
 		if templ_7745c5c3_Err != nil {
@@ -1927,7 +1928,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var93 string
 		templ_7745c5c3_Var93, templ_7745c5c3_Err = templruntime.NewAttributeExpression(inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1322, Col: 193}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1323, Col: 193}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 		if templ_7745c5c3_Err != nil {
@@ -1940,7 +1941,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var94 string
 		templ_7745c5c3_Var94, templ_7745c5c3_Err = templruntime.NewAttributeExpression(taskID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1322, Col: 217}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1323, Col: 217}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var94)
 		if templ_7745c5c3_Err != nil {
@@ -1958,7 +1959,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 			var templ_7745c5c3_Var95 string
 			templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.JoinStringErrs(chatAuthorLabel(ctx, "User", author))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1324, Col: 75}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1325, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var95))
 			if templ_7745c5c3_Err != nil {
@@ -1976,7 +1977,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var96 string
 		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1326, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1327, Col: 75}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var96))
 		if templ_7745c5c3_Err != nil {
@@ -2004,7 +2005,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 			var templ_7745c5c3_Var97 string
 			templ_7745c5c3_Var97, templ_7745c5c3_Err = templruntime.NewAttributeExpression(steerEndpoint).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1332, Col: 126}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1333, Col: 126}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 			if templ_7745c5c3_Err != nil {
@@ -2017,7 +2018,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 			var templ_7745c5c3_Var98 string
 			templ_7745c5c3_Var98, templ_7745c5c3_Err = templruntime.NewAttributeExpression("#thread-input-" + inputID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1332, Col: 167}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1333, Col: 167}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
 			if templ_7745c5c3_Err != nil {
@@ -2035,7 +2036,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var99 string
 		templ_7745c5c3_Var99, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/thread-inputs/" + inputID + "/cancel").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1335, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1336, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
 		if templ_7745c5c3_Err != nil {
@@ -2048,7 +2049,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var100 string
 		templ_7745c5c3_Var100, templ_7745c5c3_Err = templruntime.NewAttributeExpression("#thread-input-" + inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1335, Col: 191}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1336, Col: 191}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
 		if templ_7745c5c3_Err != nil {
@@ -2111,7 +2112,7 @@ func ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAtt
 		var templ_7745c5c3_Var103 string
 		templ_7745c5c3_Var103, templ_7745c5c3_Err = templruntime.NewAttributeExpression(taskID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1349, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1350, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 		if templ_7745c5c3_Err != nil {
@@ -2124,7 +2125,7 @@ func ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAtt
 		var templ_7745c5c3_Var104 string
 		templ_7745c5c3_Var104, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pendingInputsOOBTarget(taskID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1349, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1350, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var104)
 		if templ_7745c5c3_Err != nil {
@@ -2195,7 +2196,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var107 string
 		templ_7745c5c3_Var107, templ_7745c5c3_Err = templruntime.NewAttributeExpression("thread-input-" + inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1359, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1360, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 		if templ_7745c5c3_Err != nil {
@@ -2208,7 +2209,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var108 string
 		templ_7745c5c3_Var108, templ_7745c5c3_Err = templruntime.NewAttributeExpression(inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1359, Col: 195}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1360, Col: 195}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var108)
 		if templ_7745c5c3_Err != nil {
@@ -2221,7 +2222,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var109 string
 		templ_7745c5c3_Var109, templ_7745c5c3_Err = templruntime.NewAttributeExpression(taskID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1359, Col: 219}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1360, Col: 219}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var109)
 		if templ_7745c5c3_Err != nil {
@@ -2235,7 +2236,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 			var templ_7745c5c3_Var110 string
 			templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.JoinStringErrs(chatAuthorLabel(ctx, "User", author))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1363, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1364, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var110))
 			if templ_7745c5c3_Err != nil {
@@ -2253,7 +2254,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var111 string
 		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1366, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1367, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 		if templ_7745c5c3_Err != nil {
@@ -2276,7 +2277,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var112 string
 		templ_7745c5c3_Var112, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/thread-inputs/" + inputID + "/cancel").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1373, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1374, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var112)
 		if templ_7745c5c3_Err != nil {
@@ -2289,7 +2290,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var113 string
 		templ_7745c5c3_Var113, templ_7745c5c3_Err = templruntime.NewAttributeExpression("#thread-input-" + inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1373, Col: 191}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1374, Col: 191}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var113)
 		if templ_7745c5c3_Err != nil {
@@ -2352,7 +2353,7 @@ func ChatComposerQueuedInputRowsForTask(inputs []models.ThreadInput, steerEndpoi
 		var templ_7745c5c3_Var116 string
 		templ_7745c5c3_Var116, templ_7745c5c3_Err = templruntime.NewAttributeExpression(taskID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1387, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1388, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var116)
 		if templ_7745c5c3_Err != nil {
@@ -2428,7 +2429,7 @@ func ChatInputCancelledRow(inputID string) templ.Component {
 		var templ_7745c5c3_Var119 string
 		templ_7745c5c3_Var119, templ_7745c5c3_Err = templruntime.NewAttributeExpression("thread-input-" + inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1402, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1403, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var119)
 		if templ_7745c5c3_Err != nil {
@@ -2441,7 +2442,7 @@ func ChatInputCancelledRow(inputID string) templ.Component {
 		var templ_7745c5c3_Var120 string
 		templ_7745c5c3_Var120, templ_7745c5c3_Err = templruntime.NewAttributeExpression(inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1402, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1403, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var120)
 		if templ_7745c5c3_Err != nil {
@@ -2479,7 +2480,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var122 string
 		templ_7745c5c3_Var122, templ_7745c5c3_Err = templruntime.NewAttributeExpression(containerID + "-earlier-loader").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1407, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1408, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var122)
 		if templ_7745c5c3_Err != nil {
@@ -2492,7 +2493,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var123 string
 		templ_7745c5c3_Var123, templ_7745c5c3_Err = templruntime.NewAttributeExpression(containerID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1410, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1411, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var123)
 		if templ_7745c5c3_Err != nil {
@@ -2505,7 +2506,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var124 string
 		templ_7745c5c3_Var124, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", limit)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1411, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1412, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var124)
 		if templ_7745c5c3_Err != nil {
@@ -2518,7 +2519,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var125 string
 		templ_7745c5c3_Var125, templ_7745c5c3_Err = templruntime.NewAttributeExpression(url).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1412, Col: 14}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1413, Col: 14}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var125)
 		if templ_7745c5c3_Err != nil {
@@ -2531,7 +2532,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var126 string
 		templ_7745c5c3_Var126, templ_7745c5c3_Err = templruntime.NewAttributeExpression("#" + containerID + "-earlier-loader").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1414, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1415, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var126)
 		if templ_7745c5c3_Err != nil {
@@ -2616,7 +2617,7 @@ func chatExecutionPairContent(exec models.Execution, task *models.Task, executio
 			var templ_7745c5c3_Var128 string
 			templ_7745c5c3_Var128, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatContentRevision(exec.DisplayPlan)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1451, Col: 102}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1452, Col: 102}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
 			if templ_7745c5c3_Err != nil {
@@ -2629,7 +2630,7 @@ func chatExecutionPairContent(exec models.Execution, task *models.Task, executio
 			var templ_7745c5c3_Var129 string
 			templ_7745c5c3_Var129, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.DisplayPlan).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1451, Col: 140}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1452, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var129)
 			if templ_7745c5c3_Err != nil {
@@ -2669,7 +2670,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var131 string
 			templ_7745c5c3_Var131, templ_7745c5c3_Err = templruntime.NewAttributeExpression("chat-execution-" + exec.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1459, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1460, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var131)
 			if templ_7745c5c3_Err != nil {
@@ -2682,7 +2683,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var132 string
 			templ_7745c5c3_Var132, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1459, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1460, Col: 129}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var132)
 			if templ_7745c5c3_Err != nil {
@@ -2695,7 +2696,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var133 string
 			templ_7745c5c3_Var133, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(exec.Status)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1459, Col: 170}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1460, Col: 170}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var133)
 			if templ_7745c5c3_Err != nil {
@@ -2708,7 +2709,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var134 string
 			templ_7745c5c3_Var134, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ChatExecutionRevision(exec)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1459, Col: 226}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1460, Col: 226}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var134)
 			if templ_7745c5c3_Err != nil {
@@ -2721,7 +2722,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var135 string
 			templ_7745c5c3_Var135, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.StartedAt.Format(time.RFC3339Nano)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1459, Col: 286}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1460, Col: 286}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var135)
 			if templ_7745c5c3_Err != nil {
@@ -2734,7 +2735,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var136 string
 			templ_7745c5c3_Var136, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(exec.HistoryOrder)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1459, Col: 339}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1460, Col: 339}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var136)
 			if templ_7745c5c3_Err != nil {
@@ -2760,7 +2761,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var137 string
 			templ_7745c5c3_Var137, templ_7745c5c3_Err = templruntime.NewAttributeExpression("chat-execution-" + exec.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1463, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1464, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var137)
 			if templ_7745c5c3_Err != nil {
@@ -2773,7 +2774,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var138 string
 			templ_7745c5c3_Var138, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1463, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1464, Col: 129}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var138)
 			if templ_7745c5c3_Err != nil {
@@ -2786,7 +2787,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var139 string
 			templ_7745c5c3_Var139, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(exec.Status)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1463, Col: 170}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1464, Col: 170}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var139)
 			if templ_7745c5c3_Err != nil {
@@ -2799,7 +2800,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var140 string
 			templ_7745c5c3_Var140, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ChatExecutionRevision(exec)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1463, Col: 226}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1464, Col: 226}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var140)
 			if templ_7745c5c3_Err != nil {
@@ -2812,7 +2813,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var141 string
 			templ_7745c5c3_Var141, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.StartedAt.Format(time.RFC3339Nano)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1463, Col: 286}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1464, Col: 286}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var141)
 			if templ_7745c5c3_Err != nil {
@@ -2825,7 +2826,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var142 string
 			templ_7745c5c3_Var142, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(exec.HistoryOrder)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1463, Col: 339}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1464, Col: 339}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var142)
 			if templ_7745c5c3_Err != nil {
@@ -2873,7 +2874,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var144 string
 			templ_7745c5c3_Var144, templ_7745c5c3_Err = templruntime.NewAttributeExpression("chat-execution-" + exec.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1471, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1472, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var144)
 			if templ_7745c5c3_Err != nil {
@@ -2886,7 +2887,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var145 string
 			templ_7745c5c3_Var145, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1471, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1472, Col: 129}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var145)
 			if templ_7745c5c3_Err != nil {
@@ -2899,7 +2900,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var146 string
 			templ_7745c5c3_Var146, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(exec.Status)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1471, Col: 170}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1472, Col: 170}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var146)
 			if templ_7745c5c3_Err != nil {
@@ -2912,7 +2913,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var147 string
 			templ_7745c5c3_Var147, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ChatExecutionRevision(exec)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1471, Col: 226}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1472, Col: 226}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var147)
 			if templ_7745c5c3_Err != nil {
@@ -2925,7 +2926,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var148 string
 			templ_7745c5c3_Var148, templ_7745c5c3_Err = templruntime.NewAttributeExpression(exec.StartedAt.Format(time.RFC3339Nano)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1471, Col: 286}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1472, Col: 286}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var148)
 			if templ_7745c5c3_Err != nil {
@@ -2938,7 +2939,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var149 string
 			templ_7745c5c3_Var149, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(exec.HistoryOrder)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1471, Col: 339}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1472, Col: 339}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var149)
 			if templ_7745c5c3_Err != nil {
@@ -2984,7 +2985,7 @@ func ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTarg
 		var templ_7745c5c3_Var151 string
 		templ_7745c5c3_Var151, templ_7745c5c3_Err = templruntime.NewAttributeExpression("chat-execution-" + execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1481, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1482, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var151)
 		if templ_7745c5c3_Err != nil {
@@ -2997,7 +2998,7 @@ func ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTarg
 		var templ_7745c5c3_Var152 string
 		templ_7745c5c3_Var152, templ_7745c5c3_Err = templruntime.NewAttributeExpression(execID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1484, Col: 23}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1485, Col: 23}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var152)
 		if templ_7745c5c3_Err != nil {
@@ -3015,7 +3016,7 @@ func ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTarg
 			var templ_7745c5c3_Var153 string
 			templ_7745c5c3_Var153, templ_7745c5c3_Err = templruntime.NewAttributeExpression(execution[0].StartedAt.Format(time.RFC3339Nano)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1487, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1488, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var153)
 			if templ_7745c5c3_Err != nil {
@@ -3028,7 +3029,7 @@ func ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTarg
 			var templ_7745c5c3_Var154 string
 			templ_7745c5c3_Var154, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(execution[0].HistoryOrder)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1488, Col: 61}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1489, Col: 61}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var154)
 			if templ_7745c5c3_Err != nil {
@@ -3149,7 +3150,7 @@ func ChatEmptyState(message string) templ.Component {
 		var templ_7745c5c3_Var158 string
 		templ_7745c5c3_Var158, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1522, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1523, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var158))
 		if templ_7745c5c3_Err != nil {
@@ -3187,7 +3188,7 @@ func ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, 
 		var templ_7745c5c3_Var160 string
 		templ_7745c5c3_Var160, templ_7745c5c3_Err = templruntime.NewAttributeExpression(targetID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1528, Col: 15}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1529, Col: 15}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var160)
 		if templ_7745c5c3_Err != nil {
@@ -3200,7 +3201,7 @@ func ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, 
 		var templ_7745c5c3_Var161 string
 		templ_7745c5c3_Var161, templ_7745c5c3_Err = templruntime.NewAttributeExpression(boolStr(isRunning)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1529, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1530, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var161)
 		if templ_7745c5c3_Err != nil {
@@ -3213,7 +3214,7 @@ func ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, 
 		var templ_7745c5c3_Var162 string
 		templ_7745c5c3_Var162, templ_7745c5c3_Err = templruntime.NewAttributeExpression(activeTurnID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1530, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1531, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var162)
 		if templ_7745c5c3_Err != nil {
@@ -3231,7 +3232,7 @@ func ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, 
 			var templ_7745c5c3_Var163 string
 			templ_7745c5c3_Var163, templ_7745c5c3_Err = templruntime.NewAttributeExpression(stopEndpointForTurn(stopEndpoint, activeTurnID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1532, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1533, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var163)
 			if templ_7745c5c3_Err != nil {
@@ -3312,7 +3313,7 @@ func chatComposerActionButton(stopEndpoint string, isRunning bool) templ.Compone
 			var templ_7745c5c3_Var165 string
 			templ_7745c5c3_Var165, templ_7745c5c3_Err = templruntime.NewAttributeExpression(stopEndpoint).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1574, Col: 25}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1575, Col: 25}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var165)
 			if templ_7745c5c3_Err != nil {
@@ -3365,7 +3366,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var167 string
 		templ_7745c5c3_Var167, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1614, Col: 21}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1615, Col: 21}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var167)
 		if templ_7745c5c3_Err != nil {
@@ -3378,7 +3379,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var168 string
 		templ_7745c5c3_Var168, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.PostEndpoint).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1617, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1618, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var168)
 		if templ_7745c5c3_Err != nil {
@@ -3391,7 +3392,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var169 string
 		templ_7745c5c3_Var169, templ_7745c5c3_Err = templruntime.NewAttributeExpression("#" + config.TargetID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1619, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1620, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var169)
 		if templ_7745c5c3_Err != nil {
@@ -3404,7 +3405,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var170 string
 		templ_7745c5c3_Var170, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.InputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1621, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1622, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var170)
 		if templ_7745c5c3_Err != nil {
@@ -3417,7 +3418,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var171 string
 		templ_7745c5c3_Var171, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "ClearAttachments").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1622, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1623, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var171)
 		if templ_7745c5c3_Err != nil {
@@ -3430,7 +3431,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var172 string
 		templ_7745c5c3_Var172, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatMessageHistoryStorageKey(config)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1623, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1624, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var172)
 		if templ_7745c5c3_Err != nil {
@@ -3443,7 +3444,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var173 string
 		templ_7745c5c3_Var173, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatAttachmentStateKey(config)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1624, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1625, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var173)
 		if templ_7745c5c3_Err != nil {
@@ -3456,7 +3457,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var174 string
 		templ_7745c5c3_Var174, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.SteerEndpoint).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1625, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1626, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var174)
 		if templ_7745c5c3_Err != nil {
@@ -3474,7 +3475,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var175 string
 			templ_7745c5c3_Var175, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/conversation/model-settings?project_id=" + config.ProjectID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1628, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1629, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var175)
 			if templ_7745c5c3_Err != nil {
@@ -3492,7 +3493,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				var templ_7745c5c3_Var176 string
 				templ_7745c5c3_Var176, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.TaskID).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1630, Col: 46}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1631, Col: 46}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var176)
 				if templ_7745c5c3_Err != nil {
@@ -3512,7 +3513,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var177 string
 			templ_7745c5c3_Var177, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.TaskID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1634, Col: 44}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1635, Col: 44}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var177)
 			if templ_7745c5c3_Err != nil {
@@ -3535,7 +3536,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var178 string
 			templ_7745c5c3_Var178, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.ProjectID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1638, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1639, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var178)
 			if templ_7745c5c3_Err != nil {
@@ -3553,7 +3554,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var179 string
 		templ_7745c5c3_Var179, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatDropOverlayID(config.FormID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1643, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1644, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var179)
 		if templ_7745c5c3_Err != nil {
@@ -3571,7 +3572,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var180 string
 			templ_7745c5c3_Var180, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-agent-id").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1654, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1655, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var180)
 			if templ_7745c5c3_Err != nil {
@@ -3584,7 +3585,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var181 string
 			templ_7745c5c3_Var181, templ_7745c5c3_Err = templruntime.NewAttributeExpression(selectedAgentOrAuto(config.SelectedAgentID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1654, Col: 127}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1655, Col: 127}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var181)
 			if templ_7745c5c3_Err != nil {
@@ -3603,7 +3604,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var182 string
 			templ_7745c5c3_Var182, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-chat-mode").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1657, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1658, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var182)
 			if templ_7745c5c3_Err != nil {
@@ -3616,7 +3617,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var183 string
 			templ_7745c5c3_Var183, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatModeOrDefault(config.ChatMode)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1657, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1658, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var183)
 			if templ_7745c5c3_Err != nil {
@@ -3635,7 +3636,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var184 string
 			templ_7745c5c3_Var184, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-project-id").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1660, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1661, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var184)
 			if templ_7745c5c3_Err != nil {
@@ -3648,7 +3649,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var185 string
 			templ_7745c5c3_Var185, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.ProjectID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1660, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1661, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var185)
 			if templ_7745c5c3_Err != nil {
@@ -3666,7 +3667,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var186 string
 		templ_7745c5c3_Var186, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatSessionInputID(config.FormID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1662, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1663, Col: 62}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var186)
 		if templ_7745c5c3_Err != nil {
@@ -3684,7 +3685,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var187 string
 			templ_7745c5c3_Var187, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.ActiveTurnID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1664, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1665, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var187)
 			if templ_7745c5c3_Err != nil {
@@ -3708,7 +3709,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var188 string
 		templ_7745c5c3_Var188, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatAttachmentPreviewID(config.FormID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1670, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1671, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var188)
 		if templ_7745c5c3_Err != nil {
@@ -3721,7 +3722,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var189 string
 		templ_7745c5c3_Var189, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "ClearAttachments").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1673, Col: 116}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1674, Col: 116}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var189)
 		if templ_7745c5c3_Err != nil {
@@ -3734,7 +3735,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var190 string
 		templ_7745c5c3_Var190, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatAttachmentListID(config.FormID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1675, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1676, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var190)
 		if templ_7745c5c3_Err != nil {
@@ -3755,7 +3756,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var191 string
 		templ_7745c5c3_Var191, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-pasted-text").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1679, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1680, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var191)
 		if templ_7745c5c3_Err != nil {
@@ -3768,7 +3769,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var192 string
 		templ_7745c5c3_Var192, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.InputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1683, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1684, Col: 24}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var192)
 		if templ_7745c5c3_Err != nil {
@@ -3786,7 +3787,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var193 string
 			templ_7745c5c3_Var193, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-project-select").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1700, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1701, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var193)
 			if templ_7745c5c3_Err != nil {
@@ -3799,7 +3800,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var194 string
 			templ_7745c5c3_Var194, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.ProjectInputID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1702, Col: 50}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1703, Col: 50}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var194)
 			if templ_7745c5c3_Err != nil {
@@ -3812,7 +3813,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var195 string
 			templ_7745c5c3_Var195, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.ProjectSendURL).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1703, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1704, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var195)
 			if templ_7745c5c3_Err != nil {
@@ -3825,7 +3826,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var196 string
 			templ_7745c5c3_Var196, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.ProjectOpenURL).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1704, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1705, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var196)
 			if templ_7745c5c3_Err != nil {
@@ -3843,7 +3844,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				var templ_7745c5c3_Var197 string
 				templ_7745c5c3_Var197, templ_7745c5c3_Err = templruntime.NewAttributeExpression(project.ID).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1713, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1714, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var197)
 				if templ_7745c5c3_Err != nil {
@@ -3862,9 +3863,9 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var198 string
-				templ_7745c5c3_Var198, templ_7745c5c3_Err = templ.JoinStringErrs(project.Name)
+				templ_7745c5c3_Var198, templ_7745c5c3_Err = templ.JoinStringErrs(composerDestinationLabel(ctx, project, config.ProjectServerOnly))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1713, Col: 182}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1714, Col: 234}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var198))
 				if templ_7745c5c3_Err != nil {
@@ -3888,7 +3889,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var199 string
 			templ_7745c5c3_Var199, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-agent-select").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1724, Col: 44}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1725, Col: 44}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var199)
 			if templ_7745c5c3_Err != nil {
@@ -3901,7 +3902,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var200 string
 			templ_7745c5c3_Var200, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-agent-id").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1726, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1727, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var200)
 			if templ_7745c5c3_Err != nil {
@@ -3914,7 +3915,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var201 string
 			templ_7745c5c3_Var201, templ_7745c5c3_Err = templruntime.NewAttributeExpression(selectedAgentOrAuto(config.SelectedAgentID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1727, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1728, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var201)
 			if templ_7745c5c3_Err != nil {
@@ -3927,7 +3928,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var202 string
 			templ_7745c5c3_Var202, templ_7745c5c3_Err = templ.JoinStringErrs(selectedAgentLabel(config.SelectedAgentID, config.Agents))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1730, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1731, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var202))
 			if templ_7745c5c3_Err != nil {
@@ -3954,7 +3955,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var203 string
 			templ_7745c5c3_Var203, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-mode-select").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1742, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1743, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var203)
 			if templ_7745c5c3_Err != nil {
@@ -3967,7 +3968,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var204 string
 			templ_7745c5c3_Var204, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-chat-mode").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1744, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1745, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var204)
 			if templ_7745c5c3_Err != nil {
@@ -3980,7 +3981,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var205 string
 			templ_7745c5c3_Var205, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatModeOrDefault(config.ChatMode)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1745, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1746, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var205)
 			if templ_7745c5c3_Err != nil {
@@ -3998,7 +3999,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var206 string
 		templ_7745c5c3_Var206, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-action-cluster").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1756, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1757, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var206)
 		if templ_7745c5c3_Err != nil {
@@ -4011,7 +4012,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var207 string
 		templ_7745c5c3_Var207, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatFileInputID(config.FormID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1758, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1759, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var207)
 		if templ_7745c5c3_Err != nil {
@@ -4024,7 +4025,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var208 string
 		templ_7745c5c3_Var208, templ_7745c5c3_Err = templruntime.NewAttributeExpression(chatFileInputID(config.FormID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1763, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1764, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var208)
 		if templ_7745c5c3_Err != nil {
@@ -4037,7 +4038,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var209 string
 		templ_7745c5c3_Var209, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-mic-btn").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1765, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1766, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var209)
 		if templ_7745c5c3_Err != nil {
@@ -4050,7 +4051,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var210 string
 		templ_7745c5c3_Var210, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.FormID + "-primary-action").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1776, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1777, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var210)
 		if templ_7745c5c3_Err != nil {
@@ -4063,7 +4064,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var211 string
 		templ_7745c5c3_Var211, templ_7745c5c3_Err = templruntime.NewAttributeExpression(boolStr(config.IsRunning)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1777, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1778, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var211)
 		if templ_7745c5c3_Err != nil {
@@ -4076,7 +4077,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var212 string
 		templ_7745c5c3_Var212, templ_7745c5c3_Err = templruntime.NewAttributeExpression(config.ActiveTurnID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1778, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1779, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var212)
 		if templ_7745c5c3_Err != nil {
@@ -4094,7 +4095,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var213 string
 			templ_7745c5c3_Var213, templ_7745c5c3_Err = templruntime.NewAttributeExpression(stopEndpointForTurn(config.StopEndpoint, config.ActiveTurnID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1780, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1781, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var213)
 			if templ_7745c5c3_Err != nil {
@@ -4113,7 +4114,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 278, "</div></div></div></form></div><!-- Shared input form scripts: Enter key, file upload, drag-and-drop --><script type=\"text/javascript\">\n\t\t\t// Shared, swap-safe composer focus lifecycle for Chat and task Threads.\n\t\t\tif (!window._openVibelyComposerFocusReady) {\n\t\t\t\twindow._openVibelyComposerFocusReady = true;\n\t\t\t\twindow._openVibelyComposerFocusState = { token: 0, timer: 0, historyTimer: 0, interaction: 0, navigationTrigger: null, pendingTextarea: null };\n\t\t\t\tvar _composerFocusState = window._openVibelyComposerFocusState;\n\n\t\t\t\tfunction _cancelComposerFocus(consume) {\n\t\t\t\t\t// Retain a live pending composer across swap cancellation so an\n\t\t\t\t\t// intervening user action can consume the attempt before settling.\n\t\t\t\t\tvar pending = _composerFocusState.pendingTextarea;\n\t\t\t\t\tif (consume === true && pending) pending.dataset.composerFocusInitialized = 'true';\n\t\t\t\t\tif (consume === true || (pending && !pending.isConnected)) _composerFocusState.pendingTextarea = null;\n\t\t\t\t\t_composerFocusState.token++;\n\t\t\t\t\tif (_composerFocusState.timer) window.clearTimeout(_composerFocusState.timer);\n\t\t\t\t\tif (_composerFocusState.historyTimer) window.clearTimeout(_composerFocusState.historyTimer);\n\t\t\t\t\t_composerFocusState.timer = 0;\n\t\t\t\t\t_composerFocusState.historyTimer = 0;\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusInteraction() {\n\t\t\t\t\t_composerFocusState.navigationTrigger = null;\n\t\t\t\t\t_composerFocusState.interaction++;\n\t\t\t\t\t_cancelComposerFocus(true);\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusVisible(element) {\n\t\t\t\t\tif (!element || !element.isConnected || element.disabled || element.hidden) return false;\n\t\t\t\t\tif (element.closest('[hidden], [inert], .hidden, dialog:not([open])')) return false;\n\t\t\t\t\tvar style = window.getComputedStyle ? window.getComputedStyle(element) : null;\n\t\t\t\t\treturn !style || (style.display !== 'none' && style.visibility !== 'hidden');\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusOverlayActive() {\n\t\t\t\t\tvar overlays = document.querySelectorAll('dialog[open], [role=\"dialog\"][aria-modal=\"true\"], [data-chat-actions-open=\"true\"], [aria-haspopup][aria-expanded=\"true\"], [data-openvibely-menu-open=\"true\"]');\n\t\t\t\t\tfor (var i = 0; i < overlays.length; i++) {\n\t\t\t\t\t\tvar overlay = overlays[i];\n\t\t\t\t\t\tif (overlay.tagName === 'DIALOG' && !overlay.open) continue;\n\t\t\t\t\t\tif (_composerFocusVisible(overlay)) return true;\n\t\t\t\t\t}\n\t\t\t\t\treturn false;\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusMeaningful(element) {\n\t\t\t\t\tif (!element || element === document.body || element === document.documentElement) return false;\n\t\t\t\t\treturn _composerFocusVisible(element) && element.matches('input, textarea, select, button, a[href], [contenteditable=\"true\"], [tabindex]:not([tabindex=\"-1\"])');\n\t\t\t\t}\n\n\t\t\t\tfunction _cancelComposerFocusForSwap(event) {\n\t\t\t\t\tvar target = event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\tvar composer = target && target.closest && target.closest('form[data-composer-auto-focus=\"true\"]');\n\t\t\t\t\tvar textarea = composer && composer.querySelector('textarea[name=\"message\"]');\n\t\t\t\t\tvar replacesTextarea = textarea && target.contains(textarea);\n\t\t\t\t\tvar containsComposer = target && target.querySelector && target.querySelector('form[data-composer-auto-focus=\"true\"]');\n\t\t\t\t\t// Control-only refreshes leave the pending textarea intact, and\n\t\t\t\t\t// their settle target cannot restart the form's focus request.\n\t\t\t\t\tif (!target || target.id === 'main-content' || replacesTextarea || containsComposer) {\n\t\t\t\t\t\t_cancelComposerFocus();\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusNavigationTrigger(event) {\n\t\t\t\t\tvar target = event && event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\tvar active = document.activeElement;\n\t\t\t\t\tif (!target || target.id !== 'main-content' || !active || !active.matches) return null;\n\t\t\t\t\t// HTMX restores matching button IDs across task navigation. That\n\t\t\t\t\t// breadcrumb focus belongs to navigation, not a new editing choice.\n\t\t\t\t\tif (active.matches('[data-breadcrumb-selector-button]') && active.closest('#task-detail-content')) return active;\n\t\t\t\t\tif (!active.matches('[data-nav-base]')) return null;\n\t\t\t\t\tvar displayedPath = window.openVibelyDisplayedURL ? new URL(window.openVibelyDisplayedURL(), window.location.href).pathname : window.location.pathname;\n\t\t\t\t\treturn active.getAttribute('data-nav-base') === displayedPath ? active : null;\n\t\t\t\t}\n\n\t\t\t\tfunction _rememberComposerFocusNavigationTrigger(event) {\n\t\t\t\t\tvar target = event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\t// Keep the page navigation trigger through the lazy thread swap.\n\t\t\t\t\tif (target && target.id === 'main-content') _composerFocusState.navigationTrigger = _composerFocusNavigationTrigger(event);\n\t\t\t\t}\n\n\t\t\t\twindow.openVibelyCancelComposerFocus = _cancelComposerFocus;\n\t\t\t\twindow.openVibelyRequestComposerFocus = function(options) {\n\t\t\t\t\toptions = options || {};\n\t\t\t\t\tvar root = options.root || document;\n\t\t\t\t\tvar form = root.matches && root.matches('form[data-composer-auto-focus=\"true\"]')\n\t\t\t\t\t\t? root\n\t\t\t\t\t\t: root.querySelector && root.querySelector('form[data-composer-auto-focus=\"true\"]');\n\t\t\t\t\tif (!form || !_composerFocusVisible(form)) return false;\n\t\t\t\t\tvar textarea = form.querySelector('textarea[name=\"message\"]');\n\t\t\t\t\tif (!textarea || !_composerFocusVisible(textarea)) return false;\n\t\t\t\t\tif (!options.force && textarea.dataset.composerFocusInitialized === 'true') return false;\n\n\t\t\t\t\t_cancelComposerFocus();\n\t\t\t\t\t_composerFocusState.pendingTextarea = textarea;\n\t\t\t\t\tvar token = _composerFocusState.token;\n\t\t\t\t\tvar interaction = _composerFocusState.interaction;\n\t\t\t\t\tvar trigger = options.trigger || null;\n\t\t\t\t\t_composerFocusState.timer = window.setTimeout(function() {\n\t\t\t\t\t\t_composerFocusState.timer = window.setTimeout(function() {\n\t\t\t\t\t\t\t_composerFocusState.timer = 0;\n\t\t\t\t\t\t\tif (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return;\n\t\t\t\t\t\t\tvar liveForm = document.getElementById(form.id);\n\t\t\t\t\t\t\tvar liveTextarea = liveForm && liveForm.querySelector('textarea[name=\"message\"]');\n\t\t\t\t\t\t\tif (liveForm !== form || liveTextarea !== textarea || !_composerFocusVisible(liveTextarea)) return;\n\t\t\t\t\t\t\t_composerFocusState.pendingTextarea = null;\n\t\t\t\t\t\t\ttextarea.dataset.composerFocusInitialized = 'true';\n\t\t\t\t\t\t\tif (_composerFocusOverlayActive()) return;\n\t\t\t\t\t\t\tvar active = document.activeElement;\n\t\t\t\t\t\t\tvar allowedTrigger = trigger || _composerFocusState.navigationTrigger;\n\t\t\t\t\t\t\t_composerFocusState.navigationTrigger = null;\n\t\t\t\t\t\t\tif (_composerFocusMeaningful(active) && active !== liveTextarea && active !== allowedTrigger) return;\n\t\t\t\t\t\t\tliveTextarea.focus({ preventScroll: true });\n\t\t\t\t\t\t}, 0);\n\t\t\t\t\t}, 0);\n\t\t\t\t\treturn true;\n\t\t\t\t};\n\n\t\t\t\tdocument.addEventListener('pointerdown', _composerFocusInteraction, true);\n\t\t\t\tdocument.addEventListener('keydown', _composerFocusInteraction, true);\n\t\t\t\tdocument.addEventListener('focusin', function(event) {\n\t\t\t\t\tif (event.target && event.target.matches && event.target.matches('textarea[data-composer-focus-initialized=\"true\"]')) return;\n\t\t\t\t\t// HTMX can restore the breadcrumb's focus after the composer\n\t\t\t\t\t// script runs. This is part of the swap, not user interaction.\n\t\t\t\t\tvar restoredBreadcrumb = event.target && event.target.closest && event.target.closest('#task-detail-content [data-breadcrumb-selector-button]');\n\t\t\t\t\tvar swappingPage = restoredBreadcrumb && restoredBreadcrumb.closest('#main-content.htmx-swapping, #main-content.htmx-settling');\n\t\t\t\t\tif (swappingPage && _composerFocusState.pendingTextarea) {\n\t\t\t\t\t\t_composerFocusState.navigationTrigger = restoredBreadcrumb;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\t_composerFocusInteraction();\n\t\t\t\t}, true);\n\t\t\t\tdocument.addEventListener('htmx:beforeSwap', _cancelComposerFocusForSwap);\n\t\t\t\tdocument.addEventListener('htmx:afterSwap', _rememberComposerFocusNavigationTrigger);\n\t\t\t\tdocument.addEventListener('htmx:beforeHistorySave', function() { _cancelComposerFocus(); });\n\t\t\t\tdocument.addEventListener('htmx:afterSettle', function(event) {\n\t\t\t\t\tvar target = event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\twindow.openVibelyRequestComposerFocus({ root: target || document, reason: 'htmx-settle', trigger: _composerFocusNavigationTrigger(event) });\n\t\t\t\t});\n\t\t\t\tdocument.addEventListener('htmx:historyRestore', function(event) {\n\t\t\t\t\t_cancelComposerFocus();\n\t\t\t\t\tvar token = _composerFocusState.token;\n\t\t\t\t\tvar interaction = _composerFocusState.interaction;\n\t\t\t\t\tvar target = event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\t_composerFocusState.historyTimer = window.setTimeout(function() {\n\t\t\t\t\t\t_composerFocusState.historyTimer = 0;\n\t\t\t\t\t\tif (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return;\n\t\t\t\t\t\twindow.openVibelyRequestComposerFocus({ root: target || document, reason: 'history-restore', force: true });\n\t\t\t\t\t}, 0);\n\t\t\t\t});\n\t\t\t\twindow.addEventListener('pagehide', function() { _cancelComposerFocus(); });\n\t\t\t}\n\n\t\t\t// Global portal-style custom select implementation.\n\t\t\t// Positioned with getBoundingClientRect() + position:fixed so it always\n\t\t// anchors near the trigger button regardless of scroll within overflow:auto\n\t\t// containers — fixing the mobile Chrome popup displacement bug.\n\t\t// Guard ensures this runs only once even when multiple ChatInputForms exist.\n\t\tif (!window._chatCustomSelectPanelReady) {\n\t\t\twindow._chatCustomSelectPanelReady = true;\n\t\t\tvar _cspanel = document.createElement('ul');\n\t\t\t_cspanel.id = 'chat-custom-select-panel';\n\t\t\t_cspanel.className = 'ov-menu ov-menu-actions ov-menu-scroll';\n\t\t\t_cspanel.setAttribute('role', 'listbox');\n\t\t\t_cspanel.style.cssText = 'position:fixed;z-index:9999;display:none;list-style:none;margin:0;' +\n\t\t\t\t'min-width:160px;max-height:280px;';\n\t\t\tdocument.body.appendChild(_cspanel);\n\n\t\t\tvar _csActiveBtn = null;\n\n            var customSelectMenus = new WeakMap();\n            function customSelectMenu(btn) {\n                var menu = customSelectMenus.get(btn);\n                if (!menu) {\n                    menu = window.ovMenuController.create({\n                        trigger: btn, panels: [_cspanel],\n                        isOpen: function() { return _csActiveBtn === btn && _cspanel.style.display !== 'none'; },\n                        open: function() { _csShow(btn); }, close: _csHide,\n                    });\n                    customSelectMenus.set(btn, menu);\n                }\n                return menu;\n            }\n            function _csClose() {\n                if (window.ovModelPicker) window.ovModelPicker.close(false);\n                if (_csActiveBtn) customSelectMenu(_csActiveBtn).close(false);\n            }\n            function _csOpen(btn) {\n                if (btn.classList.contains('chat-model-select') && window.ovModelPicker) window.ovModelPicker.open(btn);\n                else customSelectMenu(btn).open();\n            }\n\t\t\tfunction _csHide() {\n\t\t\t\tif (_csActiveBtn) {\n\t\t\t\t\t_csActiveBtn.setAttribute('aria-expanded', 'false');\n\t\t\t\t\t_csActiveBtn = null;\n\t\t\t\t}\n\t\t\t\t_cspanel.style.display = 'none';\n\t\t\t\t_cspanel.innerHTML = '';\n\t\t\t}\n\n\t\t\tfunction _csShow(btn) {\n\t\t\t\tvar optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');\n\t\t\t\tif (!optList) return;\n\t\t\t\tvar currentValue = btn.dataset.currentValue || '';\n\t\t\t\t_cspanel.innerHTML = '';\n\t\t\t\tvar items = optList.querySelectorAll('li[data-value]');\n\t\t\t\titems.forEach(function(li) {\n\t\t\t\t\tvar val = li.dataset.value;\n\t\t\t\t\tvar label = li.textContent.trim();\n\t\t\t\t\tvar item = document.createElement('li');\n\t\t\t\t\titem.setAttribute('role', 'option');\n\t\t\t\t\titem.setAttribute('aria-selected', val === currentValue ? 'true' : 'false');\n\t\t\t\t\titem.dataset.value = val;\n\t\t\t\t\titem.className = 'ov-menu-option';\n\t\t\t\t\titem.setAttribute('data-project-selector-option', '');\n\t\t\t\t\titem.style.whiteSpace = 'nowrap';\n                    var serverIcon = li.querySelector('[data-server-icon]');\n                    if (serverIcon && serverIcon.querySelector('svg')) item.appendChild(serverIcon.cloneNode(true));\n\t\t\t\t\tvar textSpan = document.createElement('span');\n\t\t\t\t\ttextSpan.style.cssText = 'flex:1;min-width:0;';\n\t\t\t\t\ttextSpan.textContent = label;\n\t\t\t\t\titem.appendChild(textSpan);\n\t\t\t\t\titem.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\te.stopPropagation();\n\t\t\t\t\t\tvar prevBtn = _csActiveBtn;\n\t\t\t\t\t\t_csClose();\n\t\t\t\t\t\tif (!prevBtn) return;\n\t\t\t\t\t\twindow._setChatCustomSelectValue(prevBtn, val);\n\t\t\t\t\t\tprevBtn.dispatchEvent(new CustomEvent('chat-select-change', { detail: { value: val }, bubbles: true }));\n\t\t\t\t\t});\n\t\t\t\t\t_cspanel.appendChild(item);\n\t\t\t\t});\n\n\t\t\t\t// Position using getBoundingClientRect() — accurate on mobile regardless of\n\t\t\t\t// scroll position within overflow:auto ancestor containers.\n\t\t\t\tvar rect = btn.getBoundingClientRect();\n\t\t\t\tvar panelEstH = Math.min(280, items.length * 34 + 10);\n\t\t\t\tvar spaceAbove = rect.top;\n\t\t\t\tvar spaceBelow = window.innerHeight - rect.bottom;\n\t\t\t\t_cspanel.style.display = 'block';\n\t\t\t\t_cspanel.style.minWidth = Math.max(rect.width, 160) + 'px';\n\t\t\t\tif (spaceAbove >= panelEstH || spaceAbove > spaceBelow) {\n\t\t\t\t\t// Open upward (preferred when composer is at bottom of screen)\n\t\t\t\t\t_cspanel.style.top = 'auto';\n\t\t\t\t\t_cspanel.style.bottom = (window.innerHeight - rect.top) + 'px';\n\t\t\t\t} else {\n\t\t\t\t\t// Open downward\n\t\t\t\t\t_cspanel.style.top = rect.bottom + 'px';\n\t\t\t\t\t_cspanel.style.bottom = 'auto';\n\t\t\t\t}\n\t\t\t\t_cspanel.style.left = rect.left + 'px';\n\t\t\t\t// Correct horizontal overflow after paint\n\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\tvar pr = _cspanel.getBoundingClientRect();\n\t\t\t\t\tif (pr.right > window.innerWidth - 4) {\n\t\t\t\t\t\t_cspanel.style.left = Math.max(4, window.innerWidth - pr.width - 4) + 'px';\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\t_csActiveBtn = btn;\n\t\t\t\tbtn.setAttribute('aria-expanded', 'true');\n\t\t\t}\n\n\t\t\twindow._openChatCustomSelectPanel = _csOpen;\n\t\t\twindow._closeChatCustomSelectPanel = _csClose;\n\n\t\t\t// Reposition on resize so the panel stays near the trigger\n\t\t\twindow.addEventListener('resize', function() {\n\t\t\t\tif (_csActiveBtn) _csShow(_csActiveBtn);\n\t\t\t});\n\t\t}\n\n\t\t// Initialize a custom select button: sets initial label from current value and binds click.\n\t\twindow._initChatCustomSelect = function(btn) {\n\t\t\tvar currentValue = btn.dataset.currentValue;\n\t\t\tvar optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');\n\t\t\tif (!optList) return;\n\t\t\tvar matchingLi = null;\n\t\t\toptList.querySelectorAll('li[data-value]').forEach(function(li) {\n\t\t\t\tif (li.dataset.value === currentValue) matchingLi = li;\n\t\t\t});\n\t\t\tvar firstLi = optList.querySelector('li[data-value]');\n\t\t\tvar label = matchingLi ? (matchingLi.dataset.pickerName || matchingLi.textContent.trim()) : (btn.dataset.placeholder || (firstLi ? firstLi.textContent.trim() : ''));\n\t\t\tvar labelEl = btn.querySelector('.chat-custom-select-label');\n\t\t\tif (labelEl) labelEl.textContent = label;\n\t\t\tif (!btn._chatCustomSelectBound) {\n\t\t\t\tbtn._chatCustomSelectBound = true;\n\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\te.stopPropagation();\n\t\t\t\t\tif (btn.classList.contains('chat-model-select') && window.ovModelPicker) window.ovModelPicker.toggle(btn, e);\n                    else if (btn.getAttribute('aria-expanded') === 'true') window._closeChatCustomSelectPanel();\n                    else window._openChatCustomSelectPanel(btn);\n\t\t\t\t});\n\t\t\t}\n\t\t};\n\n\t\t// Update a custom select button's displayed label and stored value.\n\t\twindow._setChatCustomSelectValue = function(btn, value) {\n\t\t\tif (!btn) return;\n\t\t\tvar optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');\n\t\t\tif (!optList) return;\n\t\t\tvar matchingLi = null;\n\t\t\toptList.querySelectorAll('li[data-value]').forEach(function(li) {\n\t\t\t\tif (li.dataset.value === value) matchingLi = li;\n\t\t\t});\n\t\t\tif (!matchingLi) return;\n\t\t\tvar label = (matchingLi.dataset.pickerName || matchingLi.textContent.trim());\n\t\t\tvar labelEl = btn.querySelector('.chat-custom-select-label');\n\t\t\tif (labelEl) labelEl.textContent = label;\n\t\t\tbtn.dataset.currentValue = value;\n\t\t};\n\n\t\t(function() {\n\t\t\t// Find our form by walking up from the script tag\n\t\t\tvar script = document.currentScript;\n\t\t\tvar wrapper = script ? script.previousElementSibling : null;\n\t\t\tvar form = wrapper ? wrapper.querySelector('form.chat-input-container') : null;\n\t\t\tif (!form || form.tagName !== 'FORM') return;\n\t\t\t// Fragment scripts can run again while the existing composer survives.\n\t\t\t// Bind once per DOM form so one drop cannot start multiple upload queues.\n\t\t\t// Use a property, not an attribute: restored/cloned forms need fresh handlers.\n\t\t\tif (form._chatInputInitialized) return;\n\t\t\tform._chatInputInitialized = true;\n\t\t\tvar formId = form.id;\n\t\t\tvar inputId = form.querySelector('textarea[name=\"message\"]').id;\n\t\t\tvar messageInput = document.getElementById(inputId);\n\t\t\t// Pasted text is draft content, kept separate from uploaded files.\n\t\t\tvar pasteScope = form.getAttribute('data-attachment-state-key');\n\t\t\tvar pasteKey = pasteScope ? pasteScope + '-pasted-text' : '';\n\t\t\twindow._ovPasteDrafts = window._ovPasteDrafts || {};\n\t\t\tvar pastedTexts = pasteKey ? window._ovPasteDrafts[pasteKey] : [];\n\t\t\tif (!pastedTexts) {\n\t\t\t\ttry { pastedTexts = JSON.parse(sessionStorage.getItem(pasteKey) || '[]'); } catch (_) {}\n\t\t\t\tif (!Array.isArray(pastedTexts)) pastedTexts = [];\n\t\t\t\tpastedTexts = pastedTexts.filter(function(item) { return item && typeof item.text === 'string' && typeof item.id === 'string'; });\n\t\t\t}\n\t\t\tif (pasteKey) window._ovPasteDrafts[pasteKey] = pastedTexts;\n\t\t\tvar pasteCards = form.querySelector('[data-pasted-text-cards]');\n\t\t\tfunction composerMessage() {\n\t\t\t\treturn [messageInput.value].concat(pastedTexts.map(function(item) { return item.text; })).filter(function(text) { return text !== ''; }).join('\\n\\n');\n\t\t\t}\n\t\t\tfunction savePastes() {\n\t\t\t\tif (!pasteKey) return;\n\t\t\t\twindow._ovPasteDrafts[pasteKey] = pastedTexts;\n\t\t\t\ttry { sessionStorage.setItem(pasteKey, JSON.stringify(pastedTexts)); } catch (_) {}\n\t\t\t}\n\t\t\tform._refreshPastedTextDraft = function() {\n\t\t\t\tif (pasteKey) pastedTexts = window._ovPasteDrafts[pasteKey] || [];\n\t\t\t\trenderPastes();\n\t\t\t\trefreshPrimaryActionForInput();\n\t\t\t};\n\t\t\tfunction refreshPasteComposers() {\n\t\t\t\tform._refreshPastedTextDraft();\n\t\t\t\tif (!pasteKey) return;\n\t\t\t\tdocument.querySelectorAll('form[data-attachment-state-key]').forEach(function(current) {\n\t\t\t\t\tif (current !== form && current.getAttribute('data-attachment-state-key') === pasteScope && current._refreshPastedTextDraft) current._refreshPastedTextDraft();\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction acceptSubmittedPastes(payload) {\n\t\t\t\tif (!payload || !payload.pastedTextSnapshot) return;\n\t\t\t\t// A detached sender must reconcile the latest draft, not its old copy.\n\t\t\t\tvar latest = pasteKey ? (window._ovPasteDrafts[pasteKey] || []) : pastedTexts;\n\t\t\t\tpastedTexts = latest.filter(function(item) {\n\t\t\t\t\treturn !payload.pastedTextSnapshot.some(function(sent) { return sent.id === item.id && sent.text === item.text; });\n\t\t\t\t});\n\t\t\t\tsavePastes();\n\t\t\t\trefreshPasteComposers();\n\t\t\t}\n\t\t\tfunction renderPastes() {\n\t\t\t\tpasteCards.replaceChildren();\n\t\t\t\tpasteCards.hidden = pastedTexts.length === 0;\n\t\t\t\tpastedTexts.forEach(function(item) {\n\t\t\t\t\tvar card = document.createElement('div');\n\t\t\t\t\tcard.className = 'ov-paste-card bg-base-100';\n\t\t\t\t\tvar icon = document.createElement('button');\n\t\t\t\t\ticon.type = 'button';\n\t\t\t\t\ticon.className = 'ov-paste-icon';\n\t\t\t\t\ticon.setAttribute('aria-label', 'Open pasted text editor');\n\t\t\t\t\ticon.innerHTML = '<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3M14 4h2a2 2 0 0 1 2 2v2\"/><rect x=\"8\" y=\"2\" width=\"6\" height=\"4\" rx=\"1\"/><rect x=\"11\" y=\"10\" width=\"10\" height=\"12\" rx=\"1\"/><path d=\"M14 14h4m-4 4h4\"/></svg>';\n\t\t\t\t\ticon.onclick = function() { editPaste(item, icon); };\n\t\t\t\t\tvar content = document.createElement('div');\n\t\t\t\t\tcontent.className = 'ov-paste-copy';\n\t\t\t\t\tvar edit = document.createElement('button');\n\t\t\t\t\tedit.type = 'button';\n\t\t\t\t\tedit.className = 'ov-paste-title';\n\t\t\t\t\tedit.setAttribute('aria-label', 'Edit pasted text');\n\t\t\t\t\tedit.textContent = item.text.trim().slice(0, 80) || 'Pasted text';\n\t\t\t\t\tedit.onclick = function() { editPaste(item, edit); };\n\t\t\t\t\tcard.onclick = function(event) {\n\t\t\t\t\t\tif (!event.target.closest('button')) editPaste(item, edit);\n\t\t\t\t\t};\n\t\t\t\t\tvar show = document.createElement('button');\n\t\t\t\t\tshow.type = 'button';\n\t\t\t\t\tshow.className = 'ov-paste-show btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';\n\t\t\t\t\tshow.textContent = 'Show in composer';\n\t\t\t\t\tshow.onclick = function() {\n\t\t\t\t\t\tmessageInput.value += (messageInput.value ? '\\n\\n' : '') + item.text;\n\t\t\t\t\t\tpastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });\n\t\t\t\t\t\tpastesChanged();\n\t\t\t\t\t\tmessageInput.focus();\n\t\t\t\t\t\tmessageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);\n\t\t\t\t\t\tmessageInput.scrollTop = messageInput.scrollHeight;\n\t\t\t\t\t};\n\t\t\t\t\tvar remove = document.createElement('button');\n\t\t\t\t\tremove.type = 'button';\n\t\t\t\t\tremove.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';\n\t\t\t\t\tremove.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\tremove.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg>';\n\t\t\t\t\tremove.setAttribute('aria-label', 'Remove pasted text');\n\t\t\t\t\tremove.onclick = function() {\n\t\t\t\t\t\tpastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });\n\t\t\t\t\t\tpastesChanged();\n\t\t\t\t\t\tmessageInput.focus();\n\t\t\t\t\t};\n\t\t\t\t\tcontent.append(edit, show);\n\t\t\t\t\tcard.append(icon, content, remove);\n\t\t\t\t\tpasteCards.append(card);\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction pastesChanged() {\n\t\t\t\tsavePastes();\n\t\t\t\trenderPastes();\n\t\t\t\tmessageInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\t\t\tfunction editPaste(item, trigger) {\n\t\t\t\tvar dialog = document.createElement('dialog');\n\t\t\t\tdialog.className = 'rounded-xl bg-base-100 text-base-content p-6 shadow-xl';\n\t\t\t\tdialog.style.cssText = 'width:min(800px,92vw);max-height:85vh';\n\t\t\t\tdialog.setAttribute('aria-label', 'Edit pasted text');\n\t\t\t\tvar heading = document.createElement('h2');\n\t\t\t\theading.className = 'font-semibold text-lg mb-3 pr-10';\n\t\t\t\theading.textContent = 'Edit pasted text';\n\t\t\t\tvar close = document.createElement('button');\n\t\t\t\tclose.type = 'button';\n\t\t\t\tclose.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';\n\t\t\t\tclose.setAttribute('aria-label', 'Close pasted text editor');\n\t\t\t\tclose.setAttribute('data-tooltip-disabled', '');\n\t\t\t\tclose.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M6 18L18 6M6 6l12 12\"></path></svg>';\n\t\t\t\tclose.onclick = function() { closePasteEditor(); };\n\t\t\t\tvar editor = document.createElement('textarea');\n\t\t\t\teditor.className = 'w-full rounded-lg border border-base-content/20 bg-base-100 p-3 font-mono text-sm';\n\t\t\t\teditor.style.height = '50vh';\n\t\t\t\teditor.setAttribute('aria-label', 'Pasted text');\n\t\t\t\teditor.value = item.text;\n\t\t\t\tvar actions = document.createElement('div');\n\t\t\t\tactions.className = 'flex justify-end gap-2 mt-3';\n\t\t\t\tfunction action(label, callback) {\n\t\t\t\t\tvar button = document.createElement('button');\n\t\t\t\t\tbutton.type = 'button'; button.className = 'btn btn-sm'; button.textContent = label;\n\t\t\t\t\tbutton.onclick = callback; actions.append(button);\n\t\t\t\t}\n\t\t\t\tvar disposed = false;\n\t\t\t\tvar lifecycle = new AbortController();\n\t\t\t\tvar observer = new MutationObserver(function() {\n\t\t\t\t\tif (!form.isConnected || !dialog.isConnected || !dialog.open) closePasteEditor(false);\n\t\t\t\t});\n\t\t\t\tfunction closePasteEditor(restoreFocus) {\n\t\t\t\t\tif (disposed) return;\n\t\t\t\t\tdisposed = true;\n\t\t\t\t\tobserver.disconnect();\n\t\t\t\t\tlifecycle.abort();\n\t\t\t\t\tdialog.close(); dialog.remove();\n\t\t\t\t\tif (restoreFocus !== false && form.isConnected) {\n\t\t\t\t\t\tif (trigger.isConnected) trigger.focus(); else if (messageInput.isConnected) messageInput.focus();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\taction('Cancel', closePasteEditor);\n\t\t\t\taction('Save', function() {\n\t\t\t\t\tif (disposed || !form.isConnected) { closePasteEditor(false); return; }\n\t\t\t\t\tif (!pastedTexts.some(function(value) { return value.id === item.id; }) && editor.value) pastedTexts.push({ id: item.id, text: editor.value });\n\t\t\t\t\tpastedTexts = pastedTexts.map(function(value) { return value.id === item.id ? { id: item.id, text: editor.value } : value; }).filter(function(value) { return value.text !== ''; });\n\t\t\t\t\tpastesChanged(); closePasteEditor();\n\t\t\t\t});\n\t\t\t\tdialog.append(heading, close, editor, actions);\n\t\t\t\tvar outsidePress = false;\n\t\t\t\tfunction outsideDialog(event) {\n\t\t\t\t\tvar bounds = dialog.getBoundingClientRect();\n\t\t\t\t\treturn event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom);\n\t\t\t\t}\n\t\t\t\tdialog.addEventListener('pointerdown', function(event) { outsidePress = event.button === 0 && outsideDialog(event); });\n\t\t\t\tdialog.addEventListener('click', function(event) {\n\t\t\t\t\tif (outsidePress && outsideDialog(event)) closePasteEditor();\n\t\t\t\t\toutsidePress = false;\n\t\t\t\t});\n\t\t\t\tdialog.addEventListener('cancel', function(event) { event.preventDefault(); closePasteEditor(); });\n\t\t\t\tdialog.addEventListener('close', function() { closePasteEditor(false); }, { signal: lifecycle.signal });\n\t\t\t\twindow.addEventListener('popstate', function() { closePasteEditor(false); }, { signal: lifecycle.signal });\n\t\t\t\twindow.addEventListener('pagehide', function() { closePasteEditor(false); }, { signal: lifecycle.signal });\n\t\t\t\tdocument.body.addEventListener('htmx:beforeCleanupElement', function(event) {\n\t\t\t\t\tvar element = event.detail && event.detail.elt;\n\t\t\t\t\tif (element && (element === form || element.contains(form))) closePasteEditor(false);\n\t\t\t\t}, { signal: lifecycle.signal });\n\t\t\t\tdocument.body.append(dialog);\n\t\t\t\tobserver.observe(document.body, { childList: true, subtree: true });\n\t\t\t\tobserver.observe(dialog, { attributes: true, attributeFilter: ['open'] });\n\t\t\t\tdialog.showModal(); editor.focus();\n\t\t\t}\n\t\t\tfunction pastedTextID() {\n\t\t\t\tvar cryptoAPI = window.crypto;\n\t\t\t\tif (!cryptoAPI) return null;\n\t\t\t\tif (typeof cryptoAPI.randomUUID === 'function') return cryptoAPI.randomUUID();\n\t\t\t\t// getRandomValues is also available on plain HTTP origins.\n\t\t\t\tif (typeof cryptoAPI.getRandomValues !== 'function') return null;\n\t\t\t\tvar bytes = cryptoAPI.getRandomValues(new Uint8Array(16));\n\t\t\t\tbytes[6] = (bytes[6] & 15) | 64;\n\t\t\t\tbytes[8] = (bytes[8] & 63) | 128;\n\t\t\t\tvar hex = Array.from(bytes, function(byte) { return byte.toString(16).padStart(2, '0'); }).join('');\n\t\t\t\treturn hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);\n\t\t\t}\n\t\t\tmessageInput.addEventListener('paste', function(event) {\n\t\t\t\tif (!event.clipboardData || messageInput.disabled || messageInput.readOnly) return;\n\t\t\t\tif (event.clipboardData.files.length) return;\n\t\t\t\tvar text = event.clipboardData.getData('text/plain');\n\t\t\t\tif (text.length < 5000) return;\n\t\t\t\tvar nextPastes;\n\t\t\t\ttry {\n\t\t\t\t\tvar id = pastedTextID();\n\t\t\t\t\tif (!id) return;\n\t\t\t\t\tnextPastes = pastedTexts.concat({ id: id, text: text });\n\t\t\t\t} catch (_) {\n\t\t\t\t\t// Leave the selection and default paste intact if preparation fails.\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tevent.preventDefault();\n\t\t\t\tmessageInput.setRangeText('', messageInput.selectionStart, messageInput.selectionEnd, 'end');\n\t\t\t\tpastedTexts = nextPastes;\n\t\t\t\tpastesChanged();\n\t\t\t});\n\t\t\trenderPastes();\n\t\t\tif (window.openVibelyRequestComposerFocus) {\n\t\t\t\tvar requestInitialComposerFocus = function() {\n\t\t\t\t\tvar liveForm = document.getElementById(formId);\n\t\t\t\t\tif (liveForm === form) window.openVibelyRequestComposerFocus({ root: form, reason: 'fragment-init' });\n\t\t\t\t};\n\t\t\t\tif (document.readyState === 'loading') window.addEventListener('load', requestInitialComposerFocus, { once: true });\n\t\t\t\telse requestInitialComposerFocus();\n\t\t\t}\n\t\t\tvar sessionInput = form.querySelector('input[name=\"attachment_session_id\"]');\n\t\t\tvar fileInput = form.querySelector('input[type=\"file\"]');\n\t\t\tvar preview = form.querySelector('[id$=\"-attachments-preview\"]');\n\t\t\tvar listContainer = form.querySelector('[id$=\"-attachments-list\"]');\n\t\t\tvar dropOverlay = form.querySelector('[id$=\"-drop-overlay\"]');\n\t\t\tvar clearBtn = form.querySelector('[data-clear-func]');\n\t\t\tvar clearFuncName = clearBtn ? clearBtn.getAttribute('data-clear-func') : (formId + 'ClearAttachments');\n\t\t\t\tvar agentSelect = form.querySelector('[id$=\"-agent-select\"]');\n\t\t\t\tvar agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;\n\t\t\t\t\tvar modeSelect = form.querySelector('[id$=\"-mode-select\"]');\n\t\t\t\t\tvar modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;\n\t\t\t\t\t\tvar normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';\n\t\t\t\t\t\tvar steerEndpoint = form.getAttribute('data-steer-endpoint') || '';\n\t\t\t\t\t\tfunction chatComposerUsesAppleShortcuts() {\n\t\t\t\t\t\t\tvar platform = '';\n\t\t\t\t\t\t\tif (navigator.userAgentData && navigator.userAgentData.platform) platform = navigator.userAgentData.platform;\n\t\t\t\t\t\t\telse platform = navigator.platform || navigator.userAgent || '';\n\t\t\t\t\t\t\treturn /Mac|iPhone|iPad|iPod|iOS/i.test(platform);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar usesAppleShortcuts = chatComposerUsesAppleShortcuts();\n\t\t\t\t\t\t\tvar shortcutModifierHeld = false;\n\t\t\t\t\t\t\tvar steerRequestInFlight = false;\n\t\t\t\t\t\t\tvar steerRequestSignature = '';\n\t\t\t\t\t\t\tvar steerFallbackPending = false;\n\t\t\t\t\t\t\tvar queuedSteerSubmissions = [];\n\t\t\t\t\t\t\tfunction shortcutModifierPressed(event) {\n\t\t\t\t\t\t\treturn usesAppleShortcuts ? event.metaKey : event.ctrlKey;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction shortcutHint() {\n\t\t\t\t\t\t\treturn usesAppleShortcuts\n\t\t\t\t\t\t\t\t? '⏎ sends or queues · ⌘+⏎ steers'\n\t\t\t\t\t\t\t\t: 'Enter sends or queues · Ctrl+Enter steers';\n\t\t\t\t\t\t}\n\t\t\t\t\t\twindow.refreshChatComposerShortcutHint = function(textarea) {\n\t\t\t\t\t\t\tif (!textarea) return;\n\t\t\t\t\t\t\ttextarea.setAttribute('placeholder', shortcutHint());\n\t\t\t\t\t\t};\n\t\t\t\t\t\twindow.refreshChatComposerShortcutHint(messageInput);\n\t\t\t\t\t\t\t\tfunction currentSubmitButton() {\n\t\t\t\t\t\t\t\t\treturn form.querySelector('button[type=\"submit\"]');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tfunction buildPrimaryActionButton(kind, stopEndpoint) {\n\t\t\t\t\t\t\t\t\tvar button = document.createElement('button');\n\t\t\t\t\t\t\t\t\tbutton.className = 'btn btn-primary btn-sm' + (kind === 'stop' ? '' : ' chat-send-button') + ' rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0';\n\t\t\t\t\t\t\t\t\tif (kind === 'stop') {\n\t\t\t\t\t\t\t\t\t\tbutton.type = 'button';\n\t\t\t\t\t\t\t\t\t\tbutton.setAttribute('hx-post', stopEndpoint);\n\t\t\t\t\t\t\t\t\t\t// Stop must remain independent of the composer's send queue.\n\t\t\t\t\t\t\t\t\t\tbutton.setAttribute('hx-sync', 'this:drop');\n\t\t\t\t\t\t\t\t\t\tbutton.setAttribute('hx-swap', 'none');\n\t\t\t\t\t\t\t\t\t\tbutton.title = 'Stop response';\n\t\t\t\t\t\t\t\t\t\tbutton.setAttribute('aria-label', 'Stop response');\n\t\t\t\t\t\t\t\t\t\tbutton.innerHTML = '<svg data-composer-stop-icon=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"></rect></svg><svg data-composer-steer-icon=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 hidden\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 3l20 9-20 9 5-9-5-9z\"></path></svg>';\n\t\t\t\t\t\t\t\t\t\treturn button;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tbutton.type = 'submit';\n\t\t\t\t\t\t\t\t\tbutton.title = 'Send message';\n\t\t\t\t\t\t\t\t\tbutton.setAttribute('aria-label', 'Send message');\n\t\t\t\t\t\t\t\t\tbutton.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 3l20 9-20 9 5-9-5-9z\"></path></svg>';\n\t\t\t\t\t\t\t\t\treturn button;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tfunction primaryActionStopEndpoint(action) {\n\t\t\t\t\t\t\t\t\tif (!action) return '';\n\t\t\t\t\t\t\t\t\tvar endpoint = action.getAttribute('data-composer-stop-endpoint') || '';\n\t\t\t\t\t\t\t\t\tvar stopButton = action.querySelector('button[aria-label=\"Stop response\"][hx-post]');\n\t\t\t\t\t\t\t\t\tif (!endpoint && stopButton) endpoint = stopButton.getAttribute('hx-post') || '';\n\t\t\t\t\t\t\t\t\tif (endpoint) action.setAttribute('data-composer-stop-endpoint', endpoint);\n\t\t\t\t\t\t\t\t\treturn endpoint;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tfunction refreshPrimaryActionForInput() {\n\t\t\t\t\t\t\t\t\tvar action = document.getElementById(formId + '-primary-action');\n\t\t\t\t\t\t\t\t\tif (!action) return;\n\t\t\t\t\t\t\t\t\tvar running = action.getAttribute('data-composer-running') === 'true';\n\t\t\t\t\t\t\t\t\tvar hasContent = !!(messageInput && composerMessage().trim() !== '');\n\t\t\t\t\t\t\t\t\tvar stopEndpoint = primaryActionStopEndpoint(action);\n\t\t\t\t\t\t\t\t\tvar wantStop = running && !hasContent && !!stopEndpoint;\n\t\t\t\t\t\t\t\t\tvar wantLabel = wantStop ? 'Stop response' : 'Send message';\n\t\t\t\t\t\t\t\t\tvar currentButton = action.querySelector('button');\n\t\t\t\t\t\t\t\t\tif (currentButton && currentButton.getAttribute('aria-label') === wantLabel) {\n\t\t\t\t\t\t\t\t\t\tupdatePrimaryActionModifierVisual();\n\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\taction.innerHTML = '';\n\t\t\t\t\t\t\t\t\taction.appendChild(buildPrimaryActionButton(wantStop ? 'stop' : 'send', stopEndpoint));\n\t\t\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(action);\n\t\t\t\t\t\t\t\t\tupdatePrimaryActionModifierVisual();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tfunction updatePrimaryActionModifierVisual() {\n\t\t\t\t\t\t\t\t\t\tvar action = document.getElementById(formId + '-primary-action');\n\t\t\t\t\t\t\t\t\t\tvar showSteer = shortcutModifierHeld && action && action.getAttribute('data-composer-running') === 'true';\n\t\t\t\t\t\t\t\tvar stopIcon = action ? action.querySelector('[data-composer-stop-icon]') : null;\n\t\t\t\t\t\t\t\tvar steerIcon = action ? action.querySelector('[data-composer-steer-icon]') : null;\n\t\t\t\t\t\t\t\tif (stopIcon) stopIcon.classList.toggle('hidden', !!showSteer);\n\t\t\t\t\t\t\t\tif (steerIcon) steerIcon.classList.toggle('hidden', !showSteer);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction consumeShortcutModifierVisual() {\n\t\t\t\t\t\t\t\tshortcutModifierHeld = false;\n\t\t\t\t\t\t\t\tupdatePrimaryActionModifierVisual();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction isShortcutModifierKey(event) {\n\t\t\t\t\t\t\t\treturn usesAppleShortcuts ? event.key === 'Meta' : event.key === 'Control';\n\t\t\t\t\t\t\t}\n                            // Dispose global modifier listeners when this composer is replaced.\n                            if (form._modifierAbort) form._modifierAbort.abort();\n                            var modifierAbort = new AbortController();\n                            form._modifierAbort = modifierAbort;\n                            var modifierObserver = new MutationObserver(function() {\n                                if (!form.isConnected) modifierAbort.abort();\n                            });\n                            modifierObserver.observe(document.body, {childList: true, subtree: true});\n                            modifierAbort.signal.addEventListener('abort', function() { modifierObserver.disconnect(); }, {once: true});\n                            document.addEventListener('keydown', function(event) {\n                                if (!form.isConnected || !isShortcutModifierKey(event)) return;\n                                shortcutModifierHeld = true;\n                                updatePrimaryActionModifierVisual();\n                            }, {signal: modifierAbort.signal});\n                            document.addEventListener('keyup', function(event) {\n                                if (!form.isConnected || !isShortcutModifierKey(event)) return;\n                                consumeShortcutModifierVisual();\n                            }, {signal: modifierAbort.signal});\n                            window.addEventListener('blur', consumeShortcutModifierVisual, {signal: modifierAbort.signal});\n\t\t\t\t\t\t// Each send owns its values while HTMX waits for the form's queue.\n\t\t\t\t\t\t// The picker uses this same capture before awaiting model settings.\n\t\t\t\t\t\tform._captureChatSubmission = function(payload, intent) {\n\t\t\t\t\t\t\tvar fields = new FormData(form);\n\t\t\t\t\t\t\tvar parameters = Object.create(null);\n\t\t\t\t\t\t\tfields.forEach(function(value, name) {\n\t\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(parameters, name)) {\n\t\t\t\t\t\t\t\t\tparameters[name] = [].concat(parameters[name], value);\n\t\t\t\t\t\t\t\t} else parameters[name] = value;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tvar snapshot = Object.assign({\n\t\t\t\t\t\t\t\tmessage: composerMessage(),\n\t\t\t\t\t\t\t\tcomposerText: messageInput.value,\n\t\t\t\t\t\t\t\tpastedTextSnapshot: pastedTexts.map(function(item) { return { id: item.id, text: item.text }; }),\n\t\t\t\t\t\t\t\tattachmentSessionID: sessionInput ? sessionInput.value : '',\n\t\t\t\t\t\t\t\tmodelID: fields.has('agent_id') ? fields.get('agent_id') : undefined,\n\t\t\t\t\t\t\t\treasoningEffort: fields.has('reasoning_effort') ? fields.get('reasoning_effort') : undefined,\n serviceTier: fields.has('service_tier') ? fields.get('service_tier') : undefined,\n\t\t\t\t\t\t\t\tsubmitIntent: form.getAttribute('data-submit-intent') || 'normal'\n\t\t\t\t\t\t\t}, payload || {});\n\t\t\t\t\t\t\tsnapshot.parameters = Object.assign(parameters, snapshot.parameters || {});\n\t\t\t\t\t\t\tif (intent) snapshot.submitIntent = intent;\n\t\t\t\t\t\t\treturn snapshot;\n\t\t\t\t\t\t};\n\t\t\t\t\t\tform.addEventListener('submit', function(event) {\n\t\t\t\t\t\t\tif (event.target !== form) return;\n\t\t\t\t\t\t\tevent._chatSubmissionPayload = form._captureChatSubmission(event._chatSubmissionPayload || form._chatNextSubmissionPayload);\n\t\t\t\t\t\t\tform._chatNextSubmissionPayload = null;\n\t\t\t\t\t\t}, true);\n\t\t\t\t\t\tform.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\t\t\tif (event.detail.elt !== form) return;\n\t\t\t\t\t\t\tvar sourceEvent = event.detail.triggeringEvent;\n\t\t\t\t\t\t\tvar payload = sourceEvent && sourceEvent._chatSubmissionPayload;\n\t\t\t\t\t\t\tif (!payload) return;\n\t\t\t\t\t\t\tvar parameters = event.detail.parameters;\n\t\t\t\t\t\t\tObject.assign(parameters, payload.parameters || {}, {\n\t\t\t\t\t\t\t\tmessage: payload.message,\n\t\t\t\t\t\t\t\tattachment_session_id: payload.attachmentSessionID\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tif (payload.modelID !== undefined) parameters.agent_id = payload.modelID;\n\t\t\t\t\t\t\tif (payload.reasoningEffort !== undefined) parameters.reasoning_effort = payload.reasoningEffort;\n if (payload.serviceTier !== undefined) parameters.service_tier = payload.serviceTier;\n\t\t\t\t\t\t\tif (payload.expectedTurnID !== undefined) parameters.expected_turn_id = payload.expectedTurnID;\n\t\t\t\t\t\t\tif (payload.managedModelSelection) parameters.model_selection_managed = '1';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tfunction safeSubmit() {\n\t\t\t\t\t\t\tvar submitBtn = currentSubmitButton();\n\t\t\t\t\t\t\t\t\tif (typeof form.requestSubmit === 'function') {\n\t\t\t\t\t\t\t\t\t\tform.requestSubmit(submitBtn || undefined);\n\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar submitEvent = new Event('submit', { bubbles: true, cancelable: true });\n\t\t\t\t\t\t\tform.dispatchEvent(submitEvent);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction submitComposer(endpoint, intent, payload) {\n\t\t\t\t\t\t\t\tif (!endpoint) return;\n\t\t\t\t\t\t\t\tvar submittedMessage = payload && typeof payload.message === 'string' ? payload.message : composerMessage();\n\t\t\t\t\t\t\t\tif (submittedMessage.trim() === '') return;\n\t\t\t\t\t\t\t\tif (intent === 'steer' && typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\t\t\tvar expectedTurnInput = form.querySelector('input[name=\"expected_turn_id\"]');\n\t\t\t\t\t\t\t\t\tpayload = form._captureChatSubmission(payload || {\n\t\t\t\t\t\t\t\t\t\tmessage: composerMessage(),\n\t\t\t\t\t\t\t\t\t\tattachmentSessionID: sessionInput ? sessionInput.value : '',\n\t\t\t\t\t\t\t\t\t\texpectedTurnID: expectedTurnInput ? expectedTurnInput.value : ''\n\t\t\t\t\t\t\t\t\t}, 'steer');\n\t\t\t\t\t\t\t\t\tvar signature = JSON.stringify([payload.message, payload.attachmentSessionID, payload.expectedTurnID]);\n\t\t\t\t\t\t\t\t\tif (steerRequestInFlight) {\n\t\t\t\t\t\t\t\t\t\tif (signature === steerRequestSignature || queuedSteerSubmissions.some(function(submission) { return submission.signature === signature; })) return;\n\t\t\t\t\t\t\t\t\t\tqueuedSteerSubmissions.push({signature: signature, payload: payload});\n\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tsteerRequestSignature = signature;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tvar visibleMessageBeforePayload = messageInput ? messageInput.value : '';\n\t\t\t\t\t\t\t\tvar visibleSessionBeforePayload = sessionInput ? sessionInput.value : '';\n\t\t\t\t\t\t\t\tvar restorePayloadValues = !!payload;\n\t\t\t\t\t\t\t\tif (restorePayloadValues) {\n\t\t\t\t\t\t\t\t\tif (messageInput && typeof payload.message === 'string') messageInput.value = payload.message;\n\t\t\t\t\t\t\t\t\tif (sessionInput && typeof payload.attachmentSessionID === 'string') sessionInput.value = payload.attachmentSessionID;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tform.setAttribute('data-submit-intent', intent || 'normal');\n\t\t\t\t\t\t\t\tform._chatNextSubmissionPayload = payload || null;\n\t\t\t\t\t\t\t\tif (intent === 'steer' && typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\t\t\tsteerRequestInFlight = true;\n\t\t\t\t\t\t\t\t\tsteerFallbackPending = false;\n\t\t\t\t\t\t\t\t\tvar steeringEvent = new Event('chat:steer');\n\t\t\t\t\t\t\t\t\tsteeringEvent._chatSubmissionPayload = payload;\n\t\t\t\t\t\t\t\t\tvar options = {\n\t\t\t\t\t\t\t\t\tsource: form,\n\t\t\t\t\t\t\t\t\tevent: steeringEvent,\n\t\t\t\t\t\t\t\t\ttarget: '#pending-thread-inputs',\n\t\t\t\t\t\t\t\t\tswap: form.getAttribute('hx-swap') || 'beforeend'\n\t\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\t\t\t\tif (payload) {\n\t\t\t\t\t\t\t\t\t\t\toptions.values = {\n\t\t\t\t\t\t\t\t\t\t\t\tmessage: payload.message,\n\t\t\t\t\t\t\t\t\t\t\t\tattachment_session_id: payload.attachmentSessionID,\n\t\t\t\t\t\t\t\t\t\t\t\texpected_turn_id: payload.expectedTurnID\n\t\t\t\t\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\t\tvar steerRequest = htmx.ajax('POST', endpoint, options);\n\t\t\t\t\t\t\t\t\t\t// HTMX resolves queued ajax promises before sending the request.\n\t\t\t\t\t\t\t\t\t\t// Release steering only on its actual afterRequest event.\n\t\t\t\t\t\t\t\t\t\tif (steerRequest && typeof steerRequest.catch === 'function') {\n\t\t\t\t\t\t\t\t\t\t\tsteerRequest.catch(function() {});\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t} catch (error) {\n\t\t\t\t\t\t\t\t\t\tfinishSteerRequest();\n\t\t\t\t\t\t\t\t\t\tthrow error;\n\t\t\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\t\t\tif (form._chatNextSubmissionPayload === payload) form._chatNextSubmissionPayload = null;\n\t\t\t\t\t\t\t\t\t\tif (restorePayloadValues) {\n\t\t\t\t\t\t\t\t\t\t\tif (messageInput) messageInput.value = visibleMessageBeforePayload;\n\t\t\t\t\t\t\t\t\t\t\tif (sessionInput) sessionInput.value = visibleSessionBeforePayload;\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tform.setAttribute('hx-post', endpoint);\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tsafeSubmit();\n\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\tif (restorePayloadValues) {\n\t\t\t\t\t\t\t\t\tif (messageInput) messageInput.value = visibleMessageBeforePayload;\n\t\t\t\t\t\t\t\t\tif (sessionInput) sessionInput.value = visibleSessionBeforePayload;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// A picker failure can end a fallback before HTMX creates a request,\n\t\t\t\t\t\t\t// so no afterRequest event will release the steering queue.\n\t\t\t\t\t\t\tform._chatSubmissionFailed = function(payload) {\n\t\t\t\t\t\t\t\tif (!payload || !payload.fallbackFromSteer || !steerFallbackPending) return;\n\t\t\t\t\t\t\t\tsteerFallbackPending = false;\n\t\t\t\t\t\t\t\tfinishSteerRequest();\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\tfunction finishSteerRequest() {\n\t\t\t\t\t\t\t\tif (steerFallbackPending) return;\n\t\t\t\t\t\t\t\tsteerRequestInFlight = false;\n\t\t\t\t\t\t\t\tsteerRequestSignature = '';\n\t\t\t\t\t\t\t\tif (!queuedSteerSubmissions.length) return;\n\t\t\t\t\t\t\t\tvar nextSubmission = queuedSteerSubmissions.shift();\n\t\t\t\t\t\t\t\tsubmitComposer(steerEndpoint, 'steer', nextSubmission.payload);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction composerHasActiveTurn() {\n\t\t\t\t\t\t\tvar action = document.getElementById(formId + '-primary-action');\n\t\t\t\t\t\t\treturn !!action && action.getAttribute('data-composer-running') === 'true';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction clearExpectedTurnIDWhenIdle() {\n\t\t\t\t\t\t\tif (composerHasActiveTurn()) return;\n\t\t\t\t\t\t\tvar guard = form.querySelector('input[name=\"expected_turn_id\"]');\n\t\t\t\t\t\t\tif (guard) guard.remove();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction activeTurnID() {\n\t\t\t\t\t\t\tvar targetSelector = form.getAttribute('hx-target') || '';\n\t\t\t\t\t\t\tvar target = targetSelector && targetSelector.charAt(0) === '#' ? document.getElementById(targetSelector.slice(1)) : null;\n\t\t\t\t\t\t\tvar pairs = target ? target.querySelectorAll('[data-execution-pair=\"true\"][data-exec-status=\"running\"], [data-execution-pair=\"true\"][data-exec-status=\"queued\"]') : [];\n\t\t\t\t\t\t\t\tif (pairs.length) return pairs[pairs.length - 1].getAttribute('data-exec-id') || '';\n\t\t\t\t\t\t\t\tvar action = document.getElementById(formId + '-primary-action');\n\t\t\t\t\t\t\t\tvar actionTurnID = action ? action.getAttribute('data-active-turn-id') || '' : '';\n\t\t\t\t\t\t\t\tif (actionTurnID) return actionTurnID;\n\t\t\t\t\t\t\t\tif (!composerHasActiveTurn()) {\n\t\t\t\t\t\t\t\tclearExpectedTurnIDWhenIdle();\n\t\t\t\t\t\t\t\treturn '';\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar guard = form.querySelector('input[name=\"expected_turn_id\"]');\n\t\t\t\t\t\t\treturn guard ? guard.value : '';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction setExpectedTurnID(turnID) {\n\t\t\t\t\t\t\tvar guard = form.querySelector('input[name=\"expected_turn_id\"]');\n\t\t\t\t\t\t\tif (!guard) {\n\t\t\t\t\t\t\t\tguard = document.createElement('input');\n\t\t\t\t\t\t\t\tguard.type = 'hidden';\n\t\t\t\t\t\t\t\tguard.name = 'expected_turn_id';\n\t\t\t\t\t\t\t\tform.appendChild(guard);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tguard.value = turnID;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction deferSteerWhileSendPending() {\n\t\t\t\t\t\t\tif (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !composerMessage().trim()) return false;\n\t\t\t\t\t\t\tdeferredSteer = form._captureChatSubmission(null, 'steer');\n\t\t\t\t\t\t\treturn true;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction flushDeferredSteer() {\n\t\t\t\t\t\t\tif (!deferredSteer || normalRequestInFlight > 0) return;\n\t\t\t\t\t\t\tvar turnID = activeTurnID();\n\t\t\t\t\t\t\tif (!turnID) return;\n\t\t\t\t\t\t\tvar payload = deferredSteer;\n\t\t\t\t\t\t\tdeferredSteer = null;\n\t\t\t\t\t\t\tpayload.expectedTurnID = turnID;\n\t\t\t\t\t\t\tsetExpectedTurnID(turnID);\n\t\t\t\t\t\t\tsubmitComposer(steerEndpoint, 'steer', payload);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tfunction handleComposerStateMutation() {\n\t\t\t\t\t\t\t\t\t\t// Polling keeps the form's listeners but resets server-rendered\n\t\t\t\t\t\t\t\t\t\t// children. Restore the client-owned draft preview in its stable slot.\n\t\t\t\t\t\t\t\t\t\tif (pasteCards.children.length !== pastedTexts.length || pasteCards.hidden !== (pastedTexts.length === 0)) renderPastes();\n\t\t\t\t\t\t\t\t\t\tclearExpectedTurnIDWhenIdle();\n\t\t\t\t\t\t\t\t\t\trefreshPrimaryActionForInput();\n\t\t\t\t\t\t\t\t\t\tflushDeferredSteer();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tif (typeof MutationObserver !== 'undefined') {\n\t\t\t\t\t\t\t\t\t\tnew MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true });\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tclearExpectedTurnIDWhenIdle();\n\t\t\t\t\t\t\trefreshPrimaryActionForInput();\n\n\t\t\t\t\tvar messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';\n\t\t\t\t\tvar messageHistoryLimit = 50;\n\t\t\t\tvar messageHistoryEntries = [];\n\t\t\t\tvar messageHistoryIndex = -1;\n\t\t\t\tvar messageHistoryDraft = '';\n\t\t\t\tvar normalRequestInFlight = 0;\n\t\t\t\tvar deferredSteer = null;\n\t\t\t\tvar suppressMessageHistoryInputReset = false;\n\n\t\t\t\t// Keep submitted history usable when browser storage is unavailable.\n\t\t\t\twindow._chatMessageHistories = window._chatMessageHistories || Object.create(null);\n\n\t\t\t\tfunction renderedMessageHistory() {\n\t\t\t\t\t// Stay inside the submitting thread, including when its form is detached.\n\t\t\t\t\t// New-task forms have no transcript history to recover.\n\t\t\t\t\tvar root = form.closest('#task-thread-view, #chat-page-root');\n\t\t\t\t\tif (!root) return [];\n\t\t\t\t\tif (window.materializeVirtualChatRows) window.materializeVirtualChatRows(root, {renderLazy:false});\n\t\t\t\t\tvar entries = [];\n\t\t\t\t\troot.querySelectorAll('.chat-bubble-user-msg .chat-bubble-inner > div:first-child, #pending-thread-inputs [data-pending-input-content]').forEach(function(node) {\n\t\t\t\t\t\tvar message = node.textContent || '';\n\t\t\t\t\t\tif (message.trim() && entries[entries.length - 1] !== message) entries.push(message);\n\t\t\t\t\t});\n\t\t\t\t\treturn entries.slice(-messageHistoryLimit);\n\t\t\t\t}\n\n                function mergeMessageHistory(saved, rendered) {\n                    // Align matching occurrences, rather than deduplicating by text: a\n                    // user can send the same message again later. Both lists are bounded.\n                    // Sends are trimmed by the server. Match that representation but\n                    // retain the saved text so recall preserves the user's whitespace.\n                    var savedKeys = saved.map(function(message) { return message.trim(); });\n                    var renderedKeys = rendered.map(function(message) { return message.trim(); });\n                    var lengths = Array.from({length: saved.length + 1}, function() {\n                        return Array(rendered.length + 1).fill(0);\n                    });\n                    for (var i = saved.length - 1; i >= 0; i--) {\n                        for (var j = rendered.length - 1; j >= 0; j--) {\n                            lengths[i][j] = savedKeys[i] === renderedKeys[j]\n                                ? 1 + lengths[i + 1][j + 1]\n                                : Math.max(lengths[i + 1][j], lengths[i][j + 1]);\n                        }\n                    }\n                    var entries = [], i = 0, j = 0;\n                    while (i < saved.length && j < rendered.length) {\n                        if (savedKeys[i] === renderedKeys[j]) {\n                            entries.push(saved[i++]); j++;\n                        } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {\n                            entries.push(saved[i++]);\n                        } else {\n                            entries.push(rendered[j++]);\n                        }\n                    }\n                    return entries.concat(saved.slice(i), rendered.slice(j)).slice(-messageHistoryLimit);\n                }\n\n                function loadMessageHistory() {\n                    if (!messageHistoryStorageKey) return [];\n                    var entries = window._chatMessageHistories[messageHistoryStorageKey];\n                    if (!entries || !entries.length) {\n                        entries = [];\n                        try {\n                            var raw = localStorage.getItem(messageHistoryStorageKey);\n                            var parsed = raw ? JSON.parse(raw) : [];\n                            if (Array.isArray(parsed)) {\n                                entries = parsed.filter(function(entry) { return typeof entry === 'string' && entry.trim() !== ''; }).slice(-messageHistoryLimit);\n                            }\n                        } catch (e) {\n                            // The server-rendered thread remains available without storage.\n                        }\n                    }\n                    return mergeMessageHistory(entries, renderedMessageHistory());\n                }\n\n\t\t\t\tfunction saveMessageHistory(entries) {\n\t\t\t\t\tif (!messageHistoryStorageKey) return;\n\t\t\t\t\ttry {\n\t\t\t\t\t\tlocalStorage.setItem(messageHistoryStorageKey, JSON.stringify(entries.slice(-messageHistoryLimit)));\n\t\t\t\t\t\tdelete window._chatMessageHistories[messageHistoryStorageKey];\n\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t// Prefer this newer session copy over a stale cache when storage is full.\n\t\t\t\t\t\twindow._chatMessageHistories[messageHistoryStorageKey] = entries.slice(-messageHistoryLimit);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction rememberSubmittedMessage(message) {\n\t\t\t\t\tvar trimmed = (message || '').trim();\n\t\t\t\t\tif (!trimmed) return;\n\t\t\t\t\tmessageHistoryEntries = loadMessageHistory();\n\t\t\t\t\tvar lastIndex = messageHistoryEntries.length - 1;\n\t\t\t\t\tif (lastIndex >= 0 && messageHistoryEntries[lastIndex].trim() === trimmed) {\n\t\t\t\t\t\t// The response may already have rendered the server-trimmed copy.\n\t\t\t\t\t\t// Keep one entry, retaining the exact text the user submitted.\n\t\t\t\t\t\tmessageHistoryEntries[lastIndex] = message;\n\t\t\t\t\t} else {\n\t\t\t\t\t\tmessageHistoryEntries.push(message);\n\t\t\t\t\t}\n\t\t\t\t\tmessageHistoryEntries = messageHistoryEntries.slice(-messageHistoryLimit);\n\t\t\t\t\tsaveMessageHistory(messageHistoryEntries);\n\t\t\t\t}\n\n\t\t\t\tfunction resetMessageHistoryNavigation() {\n\t\t\t\t\tmessageHistoryIndex = -1;\n\t\t\t\t\tmessageHistoryDraft = '';\n\t\t\t\t}\n\n\t\t\t\tfunction setMessageInputFromHistory(value) {\n\t\t\t\t\tif (!messageInput) return;\n\t\t\t\t\tmessageInput.value = value;\n\t\t\t\t\tsuppressMessageHistoryInputReset = true;\n\t\t\t\t\tmessageInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t\t\tsuppressMessageHistoryInputReset = false;\n\t\t\t\t\tif (typeof messageInput.setSelectionRange === 'function') {\n\t\t\t\t\t\tmessageInput.setSelectionRange(0, 0);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction isAtMessageHistoryBoundary(textarea, key) {\n\t\t\t\t\tif (!textarea) return false;\n\t\t\t\t\tvar start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : 0;\n\t\t\t\t\tvar end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;\n\t\t\t\t\tif (start !== end) return false;\n\t\t\t\t\treturn key === 'ArrowUp' ? textarea.value.slice(0, start).indexOf('\\n') === -1 : textarea.value.slice(end).indexOf('\\n') === -1;\n\t\t\t\t}\n\n\t\t\t\tfunction handleMessageHistoryKeydown(e) {\n\t\t\t\t\tif (!messageInput || !messageHistoryStorageKey) return false;\n\t\t\t\t\tif (e.defaultPrevented || e.isComposing || e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return false;\n\t\t\t\t\tif (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return false;\n\t\t\t\t\tif (e.key === 'Escape') {\n\t\t\t\t\t\tif (messageHistoryIndex === -1) return false;\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tsetMessageInputFromHistory(messageHistoryDraft);\n\t\t\t\t\t\tresetMessageHistoryNavigation();\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t}\n\t\t\t\t\tif (messageInput.selectionStart !== messageInput.selectionEnd) return false;\n\t\t\t\t\tif (messageHistoryIndex === -1 && messageInput.value !== '' && !isAtMessageHistoryBoundary(messageInput, e.key)) return false;\n\t\t\t\t\tif (e.key === 'ArrowDown' && messageHistoryIndex === -1) return false;\n\n\t\t\t\t\tmessageHistoryEntries = loadMessageHistory();\n\t\t\t\t\tif (messageHistoryEntries.length === 0) return false;\n\t\t\t\t\te.preventDefault();\n\n\t\t\t\t\tif (e.key === 'ArrowUp') {\n\t\t\t\t\t\tif (messageHistoryIndex === -1) messageHistoryDraft = messageInput.value;\n\t\t\t\t\t\tif (messageHistoryIndex < messageHistoryEntries.length - 1) messageHistoryIndex++;\n\t\t\t\t\t\tsetMessageInputFromHistory(messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]);\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t}\n\n\t\t\t\t\tif (messageHistoryIndex > 0) {\n\t\t\t\t\t\tmessageHistoryIndex--;\n\t\t\t\t\t\tsetMessageInputFromHistory(messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tsetMessageInputFromHistory(messageHistoryDraft);\n\t\t\t\t\t\tresetMessageHistoryNavigation();\n\t\t\t\t\t}\n\t\t\t\t\treturn true;\n\t\t\t\t}\n\n\t\t\tvar attachmentUploadQueue = Promise.resolve();\n\t\t\tvar attachmentUploadGeneration = 0;\n\t\t\tvar attachmentStateKey = form.getAttribute('data-attachment-state-key') || '';\n\t\t\twindow._chatPendingAttachmentStates = window._chatPendingAttachmentStates || {};\n\n\t\t\tfunction appendPendingAttachmentRow(targetList, attachment) {\n\t\t\t\tif (!targetList || !attachment) return;\n\t\t\t\ttargetList.setAttribute('data-image-gallery-group', '');\n\t\t\t\tvar filename = String(attachment.filename || '');\n\t\t\t\tvar size = parseInt(attachment.size || '0', 10) || 0;\n\t\t\t\tvar div = document.createElement('div');\n\t\t\t\tdiv.className = 'flex items-center gap-2 text-sm';\n\t\t\t\tdiv.setAttribute('data-pending-attachment', 'true');\n\t\t\t\tdiv.setAttribute('data-pending-attachment-filename', filename);\n\t\t\t\tdiv.setAttribute('data-pending-attachment-size', String(size));\n\t\t\t\tdiv.dataset.pendingAttachmentMediaType = attachment.media_type || '';\n\t\t\t\tdiv.dataset.pendingAttachmentSession = attachment.session_id || '';\n\t\t\t\tdiv.innerHTML = '<svg class=\"w-4 h-4 text-base-content/70\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13\"></path></svg>';\n\t\t\t\tvar name = document.createElement('span');\n\t\t\t\tname.className = 'font-medium';\n\t\t\t\tname.textContent = filename;\n\t\t\t\tif ((attachment.media_type || '').startsWith('image/') && attachment.session_id) {\n                    var link = document.createElement('a');\n                    link.href = '/chat/attachments/pending/' + encodeURIComponent(attachment.session_id) + '/' + encodeURIComponent(filename);\n                    link.dataset.imageGalleryItem = '';\n                    link.dataset.imageName = filename;\n                    link.className = 'flex items-center gap-2 min-w-0';\n                    var thumb = document.createElement('img');\n                    thumb.src = link.href;\n                    thumb.alt = filename;\n                    link.appendChild(thumb);\n                    link.appendChild(name);\n                    div.replaceChildren(link);\n                } else {\n                    div.appendChild(name);\n                }\n                var sizeLabel = document.createElement('span');\n\t\t\t\tsizeLabel.className = 'text-xs opacity-60';\n\t\t\t\tsizeLabel.textContent = formatBytes(size);\n\t\t\t\tdiv.appendChild(sizeLabel);\n\t\t\t\ttargetList.appendChild(div);\n\t\t\t}\n\n\t\t\t\tfunction readPendingAttachmentState(targetForm) {\n\t\t\t\t\tif (!targetForm) return null;\n\t\t\t\t\tvar targetSession = targetForm.querySelector('input[name=\"attachment_session_id\"]');\n\t\t\t\t\tvar targetList = targetForm.querySelector('[id$=\"-attachments-list\"]');\n\t\t\t\t\tvar sessionID = targetSession ? (targetSession.value || targetSession.getAttribute('value') || '') : '';\n\t\t\t\t\tif (!sessionID) return null;\n\t\t\t\t\tvar attachments = [];\n\t\t\t\t\tif (targetList) {\n\t\t\t\t\t\ttargetList.querySelectorAll('[data-pending-attachment=\"true\"]').forEach(function(row) {\n\t\t\t\t\t\t\tattachments.push({\n\t\t\t\t\t\t\t\tfilename: row.getAttribute('data-pending-attachment-filename') || '',\n\t\t\t\t\t\t\t\tsize: parseInt(row.getAttribute('data-pending-attachment-size') || '0', 10) || 0,\n\t\t\t\t\t\t\t\tmedia_type: row.dataset.pendingAttachmentMediaType || '',\n\t\t\t\t\t\t\t\tsession_id: row.dataset.pendingAttachmentSession || ''\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\treturn { sessionID: sessionID, attachments: attachments };\n\t\t\t\t}\n\n\t\t\t\twindow.saveChatPendingAttachmentState = function(formOrID) {\n\t\t\t\t\tvar targetForm = typeof formOrID === 'string' ? document.getElementById(formOrID) : formOrID;\n\t\t\t\t\tif (!targetForm) return null;\n\t\t\t\t\tvar key = targetForm.getAttribute('data-attachment-state-key') || '';\n\t\t\t\t\tif (!key) return null;\n\t\t\t\t\tvar state = readPendingAttachmentState(targetForm);\n\t\t\t\t\tif (!state) return null;\n\t\t\t\t\tvar targetSession = targetForm.querySelector('input[name=\"attachment_session_id\"]');\n\t\t\t\t\tif (targetSession) targetSession.setAttribute('value', state.sessionID);\n\t\t\t\t\twindow._chatPendingAttachmentStates[key] = state;\n\t\t\t\t\ttry { sessionStorage.setItem(key, JSON.stringify(state)); } catch (_) {}\n\t\t\t\t\treturn state;\n\t\t\t\t};\n\n\t\t\t\twindow.restoreChatPendingAttachmentState = function(formOrID) {\n\t\t\t\t\tvar targetForm = typeof formOrID === 'string' ? document.getElementById(formOrID) : formOrID;\n\t\t\t\t\tif (!targetForm) return false;\n\t\t\t\t\tvar key = targetForm.getAttribute('data-attachment-state-key') || '';\n\t\t\t\t\tif (!key) return false;\n\t\t\t\t\tvar state = window._chatPendingAttachmentStates[key] || null;\n\t\t\t\t\tif (!state) {\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tvar stored = sessionStorage.getItem(key);\n\t\t\t\t\t\t\tstate = stored ? JSON.parse(stored) : null;\n\t\t\t\t\t\t} catch (_) { state = null; }\n\t\t\t\t\t}\n\t\t\t\t\tif (!state || !state.sessionID) return false;\n\t\t\t\t\tvar targetSession = targetForm.querySelector('input[name=\"attachment_session_id\"]');\n\t\t\t\t\tvar targetPreview = targetForm.querySelector('[id$=\"-attachments-preview\"]');\n\t\t\t\t\tvar targetList = targetForm.querySelector('[id$=\"-attachments-list\"]');\n\t\t\t\t\tif (!targetSession || !targetList) return false;\n\t\t\t\t\ttargetSession.value = state.sessionID;\n\t\t\t\t\ttargetSession.setAttribute('value', state.sessionID);\n\t\t\t\t\ttargetList.innerHTML = '';\n\t\t\t\t\t(state.attachments || []).forEach(function(attachment) { appendPendingAttachmentRow(targetList, attachment); });\n\t\t\t\t\tif (targetPreview) targetPreview.classList.toggle('hidden', (state.attachments || []).length === 0);\n\t\t\t\t\twindow._chatPendingAttachmentStates[key] = state;\n\t\t\t\t\treturn true;\n\t\t\t\t};\n\n\t\t\t// Clear attachments function (registered on window for onclick handlers)\n\t\t\t\twindow[clearFuncName] = function() {\n\t\t\t\t\tattachmentUploadGeneration++;\n\t\t\t\t\tif (preview) preview.classList.add('hidden');\n\t\t\t\t\tif (listContainer) listContainer.innerHTML = '';\n\t\t\t\t\tif (sessionInput) {\n\t\t\t\t\t\tsessionInput.value = '';\n\t\t\t\t\t\tsessionInput.setAttribute('value', '');\n\t\t\t\t\t}\n\t\t\t\t\tif (fileInput) fileInput.value = '';\n\t\t\t\t\tif (attachmentStateKey) {\n\t\t\t\t\t\tdelete window._chatPendingAttachmentStates[attachmentStateKey];\n\t\t\t\t\t\ttry { sessionStorage.removeItem(attachmentStateKey); } catch (_) {}\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t\twindow.restoreChatPendingAttachmentState(form);\n\t\t\t\tif (!window._chatPendingAttachmentHistoryBound) {\n\t\t\t\t\twindow._chatPendingAttachmentHistoryBound = true;\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeHistorySave', function() {\n\t\t\t\t\t\tdocument.querySelectorAll('form[data-attachment-state-key]').forEach(function(historyForm) {\n\t\t\t\t\t\t\tif (window.saveChatPendingAttachmentState) window.saveChatPendingAttachmentState(historyForm);\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t\tdocument.body.addEventListener('htmx:historyRestore', function() {\n\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\tdocument.querySelectorAll('form[data-attachment-state-key]').forEach(function(restoredForm) {\n\t\t\t\t\t\t\t\tif (window.restoreChatPendingAttachmentState) window.restoreChatPendingAttachmentState(restoredForm);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}, 0);\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t// Wire up the Clear All button\n\t\t\tif (clearBtn) {\n\t\t\t\tclearBtn.onclick = function() { window[clearFuncName](); };\n\t\t\t}\n\n\t\t\t\t\t\t// Keyboard submission and message history navigation\n\t\t\t\t\t\tif (messageInput) {\n\t\t\t\t\t\tmessageInput.addEventListener('keydown', function(e) {\n\t\t\t\t\t\t\tif (handleMessageHistoryKeydown(e)) return;\n\t\t\t\t\t\t\tif (e.isComposing || e.keyCode === 229) return;\n\t\t\t\t\t\t\tif (e.key === 'Enter' && !e.shiftKey) {\n\t\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\t\tif (shortcutModifierPressed(e)) {\n\t\t\t\t\t\t\t\t\tconsumeShortcutModifierVisual();\n\t\t\t\t\t\t\t\t\tvar turnID = activeTurnID();\n\t\t\t\t\t\t\t\t\tif (steerEndpoint && turnID) {\n\t\t\t\t\t\t\t\t\t\tsetExpectedTurnID(turnID);\n\t\t\t\t\t\t\t\t\t\tsubmitComposer(steerEndpoint, 'steer');\n\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tif (deferSteerWhileSendPending()) return;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tsubmitComposer(normalPostEndpoint, 'normal');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\tmessageInput.addEventListener('input', function() {\n\t\t\t\t\t\t\t\t\trefreshPrimaryActionForInput();\n\t\t\t\t\t\t\t\t\tif (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t// Normalize primary-action clicks to the shared submit paths, even after\n\t\t\t\t\t// the button is replaced out-of-band between Send and Stop. A platform\n\t\t\t\t\t// modifier on the primary control requests guarded steering whenever the\n\t\t\t\t\t// transcript already has an active turn, even if the action swap still shows Send;\n\t\t\t\t\t// an unavailable/stale steering request leaves the draft untouched.\n\t\t\t\t\tform.addEventListener('click', function(e) {\n\t\t\t\t\t\tvar primaryAction = e.target && e.target.closest ? e.target.closest('[id=\"' + formId + '-primary-action\"] button') : null;\n\t\t\t\t\t\tif (!primaryAction || !form.contains(primaryAction)) return;\n\t\t\t\t\t\tvar isStopAction = primaryAction.getAttribute('aria-label') === 'Stop response';\n\t\t\t\t\t\tif (shortcutModifierPressed(e)) {\n\t\t\t\t\t\t\tconsumeShortcutModifierVisual();\n\t\t\t\t\t\t\tvar turnID = activeTurnID();\n\t\t\t\t\t\t\tif (steerEndpoint && turnID) {\n\t\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\t\te.stopImmediatePropagation();\n\t\t\t\t\t\t\t\tsetExpectedTurnID(turnID);\n\t\t\t\t\t\t\t\tsubmitComposer(steerEndpoint, 'steer');\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (deferSteerWhileSendPending()) {\n\t\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\t\te.stopImmediatePropagation();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (isStopAction) {\n\t\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\t\te.stopImmediatePropagation();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (isStopAction) return;\n\t\t\t\t\t\tif (primaryAction.type !== 'submit') return;\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\te.stopImmediatePropagation();\n\t\t\t\t\t\tsubmitComposer(normalPostEndpoint, 'normal');\n\t\t\t\t\t}, true);\n\t\t\t// The shared picker loads and saves model preferences through the API.\n\t\t\tvar projectIdInput = form.querySelector('input[name=\"_project_id\"]');\n\t\t\tvar projectId = projectIdInput ? projectIdInput.value : '';\n\t\t\tvar modeStorageKey = projectId ? 'chat-mode-' + projectId : '';\n\n\t\t\tif (agentSelect && agentInput) {\n\t\t\t\t// Initialize the custom select UI (set label from current value, bind click handler)\n\t\t\t\tif (window._initChatCustomSelect) window._initChatCustomSelect(agentSelect);\n\t\t\t\tif (window.ovModelPicker) window.ovModelPicker.init(agentSelect);\n\t\t\t\tagentSelect.addEventListener('chat-select-change', function(e) {\n\t\t\t\t\tagentInput.value = e.detail.value;\n\t\t\t\t\tif (window.ovModelPicker) window.ovModelPicker.changed(agentSelect);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\t// Chat mode selector -> hidden input sync + localStorage persistence\n\t\t\tif (modeSelect && modeInput) {\n\t\t\t\tvar modeOptList = modeSelect.parentElement ? modeSelect.parentElement.querySelector('.chat-custom-select-options') : null;\n\t\t\t\t// Initialize the custom select UI (set label from current value, bind click handler)\n\t\t\t\tif (window._initChatCustomSelect) window._initChatCustomSelect(modeSelect);\n\t\t\t\tfunction reevaluatePlanPrompt() {\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t}, 0);\n\t\t\t\t}\n\t\t\t\t// Mark selector as not hydrated until default + persisted restore is applied.\n\t\t\t\tmodeSelect.dataset.hydrated = 'false';\n\t\t\t\t// Ensure UI reflects current hidden default first\n\t\t\t\tif (modeInput.value) {\n\t\t\t\t\tif (window._setChatCustomSelectValue) window._setChatCustomSelectValue(modeSelect, modeInput.value);\n\t\t\t\t}\n\n\t\t\t\t// Restore persisted selection\n\t\t\t\tif (modeStorageKey) {\n\t\t\t\t\tvar savedMode = localStorage.getItem(modeStorageKey);\n\t\t\t\t\tif (savedMode) {\n\t\t\t\t\t\tvar modeExists = false;\n\t\t\t\t\t\tif (modeOptList) {\n\t\t\t\t\t\t\tmodeOptList.querySelectorAll('li[data-value]').forEach(function(li) {\n\t\t\t\t\t\t\t\tif (li.dataset.value === savedMode) modeExists = true;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (modeExists) {\n\t\t\t\t\t\t\tif (window._setChatCustomSelectValue) window._setChatCustomSelectValue(modeSelect, savedMode);\n\t\t\t\t\t\t\tmodeInput.value = savedMode;\n\t\t\t\t\t\t\treevaluatePlanPrompt();\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\tlocalStorage.removeItem(modeStorageKey);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tmodeSelect.dataset.hydrated = 'true';\n\n\t\t\t\t\tmodeSelect.addEventListener('chat-select-change', function(e) {\n\t\t\t\t\t\tmodeInput.value = e.detail.value;\n\t\t\t\t\t\tif (modeStorageKey) {\n\t\t\t\t\t\t\tlocalStorage.setItem(modeStorageKey, e.detail.value);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tmodeSelect.dataset.hydrated = 'true';\n\t\t\t\t\t\treevaluatePlanPrompt();\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t// Aggregate workspaces send to one chosen project; Send opens the picker until then.\n\t\t\tvar projectSelect = form.querySelector('[id$=\"-project-select\"]');\n\t\t\tvar projectInput = projectSelect ? document.getElementById(projectSelect.getAttribute('data-project-input')) : null;\n\t\t\tvar projectSendPending = false;\n\t\t\tfunction chosenProject() { return projectInput ? projectInput.value : ''; }\n\t\t\tfunction openProjectPicker() {\n\t\t\t\tif (window._closeChatCustomSelectPanel) window._closeChatCustomSelectPanel();\n\t\t\t\tif (window._openChatCustomSelectPanel) window._openChatCustomSelectPanel(projectSelect);\n\t\t\t}\n\t\t\tif (projectSelect && projectInput) {\n\t\t\t\tif (window._initChatCustomSelect) window._initChatCustomSelect(projectSelect);\n\t\t\t\tvar syncProjectLabel = function() {\n\t\t\t\t\tif (projectInput.value) window._setChatCustomSelectValue(projectSelect, projectInput.value);\n\t\t\t\t\telse {\n\t\t\t\t\t\tprojectSelect.dataset.currentValue = '';\n\t\t\t\t\t\tprojectSelect.querySelector('.chat-custom-select-label').textContent = projectSelect.dataset.placeholder;\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t\tsyncProjectLabel();\n                var modelRequest = 0;\n                async function refreshProjectModels() {\n                    var token = ++modelRequest;\n                    var picker = form.querySelector('[id$=\"-agent-select\"]');\n                    var input = form.querySelector('[name=\"agent_id\"]');\n                    if (!picker || !input) return;\n                    window.ovModelPicker?.close();\n                    input.value = 'default';\n                    var options = picker.parentElement.querySelector('.chat-custom-select-options');\n                    options.innerHTML = '<li data-value=\"default\">Default</li>';\n                    form.querySelectorAll('[name=\"reasoning_effort\"], [name=\"service_tier\"]').forEach(function(field) { field.value = ''; });\n                    picker.disabled = true;\n                    picker.querySelector('.chat-custom-select-label').textContent = 'Loading models…';\n                    try {\n                        var response = await fetch('/tasks/new?model_options=1&project_id=' + encodeURIComponent(chosenProject()));\n                        if (!response.ok) throw new Error('Models unavailable');\n                        var html = await response.text();\n                        if (token !== modelRequest || !form.isConnected) return;\n                        options.innerHTML = html;\n                        picker.disabled = false;\n                        window._setChatCustomSelectValue?.(picker, 'default');\n                        window.ovModelPicker?.changed(picker);\n                    } catch (_) {\n                        if (token === modelRequest && form.isConnected) picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';\n                    }\n                }\n\t\t\t\tvar uploadedForProject = projectInput.value;\n\t\t\t\tprojectInput.addEventListener('change', function() {\n\t\t\t\t\tsyncProjectLabel();\n                    if (projectSelect.getAttribute('data-project-send-url')) refreshProjectModels();\n\t\t\t\t\t// Uploaded files are staged on the previous project's server.\n\t\t\t\t\tif (uploadedForProject !== projectInput.value && window[clearFuncName]) window[clearFuncName]();\n\t\t\t\t\tuploadedForProject = projectInput.value;\n\t\t\t\t});\n\t\t\t\tprojectSelect.addEventListener('chat-select-change', function(e) {\n\t\t\t\t\tprojectInput.value = e.detail.value;\n\t\t\t\t\tprojectInput.dispatchEvent(new Event('change', {bubbles: true}));\n\t\t\t\t\tif (!projectSendPending) return;\n\t\t\t\t\tprojectSendPending = false;\n\t\t\t\t\tsubmitComposer(normalPostEndpoint, 'normal');\n\t\t\t\t});\n\t\t\t\t// Closing the picker without a choice cancels the waiting Send, not the draft.\n\t\t\t\tnew MutationObserver(function() {\n\t\t\t\t\tif (projectSelect.getAttribute('aria-expanded') === 'false') projectSendPending = false;\n\t\t\t\t}).observe(projectSelect, {attributes: true, attributeFilter: ['aria-expanded']});\n\t\t\t\tform.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\tif (event.detail.elt !== form || event.detail.path !== normalPostEndpoint) return;\n\t\t\t\t\tif (!chosenProject()) {\n\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\topenProjectPicker();\n\t\t\t\t\t\tprojectSendPending = true;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar sendURL = projectSelect.getAttribute('data-project-send-url');\n\t\t\t\t\tif (sendURL) event.detail.path = sendURL + encodeURIComponent(chosenProject());\n\t\t\t\t});\n\t\t\t\tform.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar openURL = projectSelect.getAttribute('data-project-open-url');\n\t\t\t\t\tvar request = event.detail.xhr;\n\t\t\t\t\tif (event.detail.elt !== form || !openURL || !event.detail.successful || !request || !(request.responseText || '').trim()) return;\n\t\t\t\t\twindow.openVibelyNavigate(openURL + encodeURIComponent(chosenProject()));\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction formatBytes(bytes) {\n\t\t\t\tif (bytes < 1024) return bytes + ' B';\n\t\t\t\tvar k = 1024;\n\t\t\t\tvar sizes = ['KB', 'MB', 'GB'];\n\t\t\t\tvar i = Math.floor(Math.log(bytes) / Math.log(k));\n\t\t\t\treturn (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i - 1];\n\t\t\t}\n\n\t\t\t\tasync function uploadFiles(files, uploadGeneration) {\n\t\t\t\t\tvar existingAttachmentCount = listContainer ? listContainer.querySelectorAll('[data-pending-attachment]').length : 0;\n\t\t\t\t\tif (existingAttachmentCount + files.length > 3) {\n\t\t\t\t\t\talert('Maximum 3 files allowed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar maxSize = 25 * 1024 * 1024;\n\t\t\t\t\tfor (var j = 0; j < files.length; j++) {\n\t\t\t\t\t\tif (files[j].size > (/\\.(mp4|m4v|mov|webm|ogv)$/i.test(files[j].name) ? 200 * 1024 * 1024 : maxSize)) {\n\t\t\t\t\t\t\talert('File \"' + files[j].name + '\" exceeds the upload size limit');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tvar formData = new FormData();\n\t\t\t\t\tif (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);\n\t\t\t\t\tfiles.forEach(function(file) { formData.append('files', file); });\n\t\t\t\t\ttry {\n\t\t\t\t\t\tvar uploadProjectId = projectSelect ? chosenProject() : (projectId || (document.getElementById('task-detail-content')?.dataset.projectId || ''));\n\t\t\t\t\t\tif (projectSelect && !uploadProjectId) {\n\t\t\t\t\t\t\topenProjectPicker();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar response = await fetch('/chat/attachments' + (uploadProjectId ? '?project_id='+encodeURIComponent(uploadProjectId) : ''), {\n\t\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\t\tbody: formData\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\t\tif (await window.openVibelyPermissionErrors?.fetch(response)) return;\n\t\t\t\t\t\t\tvar error = await response.text();\n\t\t\t\t\t\t\talert('Upload failed: ' + error);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar result = await response.json();\n\t\t\t\t\t\tif (uploadGeneration !== attachmentUploadGeneration) return;\n\t\t\t\t\t\tif (sessionInput) sessionInput.value = result.session_id;\n\t\t\t\t\t\tif (preview) preview.classList.remove('hidden');\n\t\t\t\t\t\tresult.attachments.forEach(function(att) {\n\t\t\t\t\t\t\tappendPendingAttachmentRow(listContainer, att);\n\t\t\t\t\t\t});\n\t\t\t\t\t\twindow.saveChatPendingAttachmentState(form);\n\t\t\t\t\t\t// Auto-scroll to show the attachment preview after upload\n\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t// Use this composer's transcript, including embedded conversations.\n\t\t\t\t\t\t\tvar chatMessages = document.querySelector(form.getAttribute('hx-target'));\n\t\t\t\t\t\t\tif (chatMessages && window.chatAutoScroll) {\n\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, true);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t} catch (error) {\n\t\t\t\t\t\tconsole.error('Upload error:', error);\n\t\t\t\t\t\talert('Upload failed: ' + error.message);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction handleFiles(files) {\n\t\t\t\t\tif (files.length === 0) return;\n\t\t\t\t\tvar filesToUpload = files.slice();\n\t\t\t\t\tvar uploadGeneration = attachmentUploadGeneration;\n\t\t\t\t\tattachmentUploadQueue = attachmentUploadQueue.then(function() {\n\t\t\t\t\t\tif (uploadGeneration !== attachmentUploadGeneration) return;\n\t\t\t\t\t\treturn uploadFiles(filesToUpload, uploadGeneration);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t// File input handler\n\t\t\tif (fileInput) {\n\t\t\t\tfileInput.addEventListener('change', function(e) {\n\t\t\t\t\thandleFiles(Array.from(e.target.files));\n\t\t\t\t\te.target.value = '';\n\t\t\t\t});\n\t\t\t}\n\n\n\t\t\t// The Linux native bridge uses WebKit's chooser API for genuine OS drops\n\t\t\t// because affected WebKitGTK versions hide DataTransfer File objects.\n\t\t\tform._ovAcceptNativeFileDrop = function() {\n\t\t\t\tdragCounter = 0;\n\t\t\t\tif (dropOverlay) dropOverlay.classList.add('hidden');\n\t\t\t\tif (fileInput && !fileInput.disabled) fileInput.click();\n\t\t\t};\n\t\t\twindow.ovAcceptNativeFileDrop = function(x, y) {\n\t\t\t\tvar target = document.elementFromPoint(x, y);\n\t\t\t\tvar targetForm = target && target.closest('form');\n\t\t\t\tif (targetForm && targetForm._ovAcceptNativeFileDrop) targetForm._ovAcceptNativeFileDrop();\n\t\t\t};\n\t\t\t// File drags may expose items before the FileList becomes available.\n\t\t\tfunction isFileDrag(transfer) {\n\t\t\t\treturn transfer && (window._ovNativeFileDrag || Array.from(transfer.types || []).indexOf('Files') !== -1 ||\n\t\t\t\t\tArray.from(transfer.items || []).some(function(item) { return item.kind === 'file'; }) ||\n\t\t\t\t\t(transfer.files && transfer.files.length > 0));\n\t\t\t}\n\t\t\t// Drag-and-drop\n\t\t\tvar dragCounter = 0;\n\t\t\tform.addEventListener('dragenter', function(e) {\n\t\t\t\tif (!isFileDrag(e.dataTransfer)) return;\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t\tdragCounter++;\n\t\t\t\tif (dropOverlay) dropOverlay.classList.remove('hidden');\n\t\t\t});\n\t\t\tform.addEventListener('dragover', function(e) {\n\t\t\t\tif (!isFileDrag(e.dataTransfer)) return;\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t\t// Negotiate a copy with native file managers, including Linux/WebKit.\n\t\t\t\te.dataTransfer.dropEffect = 'copy';\n\t\t\t});\n\t\t\tform.addEventListener('dragleave', function(e) {\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t\tdragCounter--;\n\t\t\t\tif (dragCounter <= 0) {\n\t\t\t\t\tdragCounter = 0;\n\t\t\t\t\tif (dropOverlay) dropOverlay.classList.add('hidden');\n\t\t\t\t}\n\t\t\t});\n\t\t\tform.addEventListener('drop', function(e) {\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t\tdragCounter = 0;\n\t\t\t\tif (dropOverlay) dropOverlay.classList.add('hidden');\n\t\t\t\tvar transfer = e.dataTransfer;\n\t\t\t\tif (!transfer) return;\n\t\t\t\t// Snapshot File objects synchronously: the drag data is protected after\n\t\t\t\t// this event returns, while uploads run on an asynchronous queue.\n\t\t\t\tvar files = Array.from(transfer.files || []);\n\t\t\t\tif (files.length === 0) {\n\t\t\t\t\tfiles = Array.from(transfer.items || []).filter(function(item) {\n\t\t\t\t\t\treturn item.kind === 'file';\n\t\t\t\t\t}).map(function(item) { return item.getAsFile(); }).filter(Boolean);\n\t\t\t\t}\n\t\t\t\tif (files.length > 0) handleFiles(files);\n\t\t\t});\n\n\t\t\t// Speech-to-text via Web Speech API with audio level detection\n\t\t\t(function() {\n\t\t\t\tvar micBtn = form.querySelector('.stt-btn');\n\t\t\t\tif (!micBtn || !messageInput) return;\n\n\t\t\t\tvar micIcon = micBtn.querySelector('.stt-mic-icon');\n\t\t\t\tvar stopIcon = micBtn.querySelector('.stt-stop-icon');\n\t\t\t\tvar recognition = null;\n\t\t\t\tvar isRecording = false;\n\t\t\t\tvar manualStop = false;\n\n\t\t\t\t// Audio analysis for silence detection\n\t\t\t\tvar audioContext = null;\n\t\t\t\tvar audioAnalyzer = null;\n\t\t\t\tvar audioStream = null;\n\t\t\t\tvar silenceTimer = null;\n\t\t\t\tvar silenceThreshold = 2000; // 2 seconds like Chrome plugin\n\t\t\t\tvar audioLevel = 0;\n\t\t\t\tvar countdownInterval = null;\n\t\t\t\tvar countdownSeconds = 0;\n\n\t\t\t\t// Speech transcription state\n\t\t\t\tvar finalTranscript = '';\n\t\t\t\tvar startPos = 0;\n\t\t\t\tvar existingText = '';\n\t\t\t\tvar initialValue = '';\n\t\t\t\tvar prefix = '';\n\t\t\t\tvar suffix = '';\n\n\t\t\t\t// Check browser support\n\t\t\t\tvar SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;\n\t\t\t\tif (!SpeechRecognition) {\n\t\t\t\t\tmicBtn.title = 'Speech-to-text not supported in this browser';\n\t\t\t\t\tmicBtn.classList.add('opacity-20', 'cursor-not-allowed');\n\t\t\t\t\tmicBtn.classList.remove('hover:opacity-100', 'hover:bg-base-300');\n\t\t\t\t\tmicBtn.setAttribute('aria-label', 'Speech-to-text not supported');\n\t\t\t\t\tmicBtn.onclick = function() {\n\t\t\t\t\t\talert('Speech-to-text is not supported in this browser. Please use Chrome, Edge, or Safari.');\n\t\t\t\t\t};\n\t\t\t\t\treturn;\n\t\t\t\t}\n\n\t\t\t\tfunction startRecording() {\n\t\t\t\t\trecognition = new SpeechRecognition();\n\t\t\t\t\trecognition.continuous = true;\n\t\t\t\t\trecognition.interimResults = true;\n\t\t\t\t\trecognition.lang = navigator.language || 'en-US';\n\n\t\t\t\t\tfinalTranscript = '';\n\t\t\t\t\tstartPos = messageInput.selectionStart || messageInput.value.length;\n\t\t\t\t\texistingText = messageInput.value;\n\t\t\t\t\tinitialValue = messageInput.value;\n\t\t\t\t\tmanualStop = false;\n\n\t\t\t\t\t// Insert at cursor position or append\n\t\t\t\t\tprefix = existingText.substring(0, startPos);\n\t\t\t\t\tsuffix = existingText.substring(startPos);\n\t\t\t\t\tif (prefix.length > 0 && !prefix.endsWith(' ') && !prefix.endsWith('\\n')) {\n\t\t\t\t\t\tprefix += ' ';\n\t\t\t\t\t}\n\n\t\t\t\t\trecognition.onstart = function() {\n\t\t\t\t\t\tconsole.log('[STT] Recognition started');\n\t\t\t\t\t\t// Start audio analysis for silence detection\n\t\t\t\t\t\tstartAudioAnalysis();\n\t\t\t\t\t};\n\n\t\t\t\t\trecognition.onresult = function(event) {\n\t\t\t\t\t\tvar interimTranscript = '';\n\t\t\t\t\t\tfor (var i = event.resultIndex; i < event.results.length; i++) {\n\t\t\t\t\t\t\tvar transcript = event.results[i][0].transcript;\n\t\t\t\t\t\t\tif (event.results[i].isFinal) {\n\t\t\t\t\t\t\t\tfinalTranscript += transcript + ' ';\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tinterimTranscript += transcript;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Show interim + final results in the textarea\n\t\t\t\t\t\tmessageInput.value = prefix + finalTranscript + interimTranscript + suffix;\n\t\t\t\t\t\t// Trigger input event for draft persistence\n\t\t\t\t\t\tmessageInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t\t\t};\n\n\t\t\t\t\trecognition.onerror = function(event) {\n\t\t\t\t\t\tif (event.error === 'not-allowed') {\n\t\t\t\t\t\t\talert('Microphone access was denied. Please allow microphone access in your browser settings.');\n\t\t\t\t\t\t} else if (event.error === 'no-speech') {\n\t\t\t\t\t\t\t// Silence detected - this is normal, don't alert\n\t\t\t\t\t\t} else if (event.error !== 'aborted') {\n\t\t\t\t\t\t\tconsole.error('Speech recognition error:', event.error);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tstopListening();\n\t\t\t\t\t};\n\n\t\t\t\t\trecognition.onend = function() {\n\t\t\t\t\t\tconsole.log('[STT] Recognition ended, manualStop=' + manualStop);\n\t\t\t\t\t\t// If continuous mode, restart unless manually stopped\n\t\t\t\t\t\tif (isRecording && !manualStop) {\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\trecognition.start();\n\t\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\t\tconsole.error('[STT] Failed to restart recognition:', e);\n\t\t\t\t\t\t\t\tstopListening();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\n\t\t\t\t\ttry {\n\t\t\t\t\t\trecognition.start();\n\t\t\t\t\t\tisRecording = true;\n\t\t\t\t\t\tmicBtn.classList.add('stt-recording');\n\t\t\t\t\t\tmicBtn.classList.remove('opacity-50');\n\t\t\t\t\t\tmicBtn.setAttribute('aria-label', 'Stop recording');\n\t\t\t\t\t\tmicBtn.title = 'Stop recording';\n\t\t\t\t\t\tif (micIcon) micIcon.classList.add('hidden');\n\t\t\t\t\t\tif (stopIcon) stopIcon.classList.remove('hidden');\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tconsole.error('Failed to start speech recognition:', err);\n\t\t\t\t\t\talert('Failed to start speech recognition. Please try again.');\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction startAudioAnalysis() {\n\t\t\t\t\tif (audioContext) return;\n\n\t\t\t\t\tnavigator.mediaDevices.getUserMedia({ audio: true })\n\t\t\t\t\t\t.then(function(stream) {\n\t\t\t\t\t\t\taudioStream = stream;\n\t\t\t\t\t\t\taudioContext = new (window.AudioContext || window.webkitAudioContext)();\n\t\t\t\t\t\t\taudioAnalyzer = audioContext.createAnalyser();\n\t\t\t\t\t\t\taudioAnalyzer.fftSize = 2048;\n\n\t\t\t\t\t\t\tvar source = audioContext.createMediaStreamSource(stream);\n\t\t\t\t\t\t\tsource.connect(audioAnalyzer);\n\n\t\t\t\t\t\t\t// Start monitoring audio levels\n\t\t\t\t\t\t\tmonitorAudioLevel();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(function(err) {\n\t\t\t\t\t\t\tconsole.error('[STT] Failed to start audio analysis:', err);\n\t\t\t\t\t\t\t// Don't stop voice recognition if audio analysis fails\n\t\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\tfunction monitorAudioLevel() {\n\t\t\t\t\tif (!audioAnalyzer || !isRecording) return;\n\n\t\t\t\t\tvar bufferLength = audioAnalyzer.frequencyBinCount;\n\t\t\t\t\tvar dataArray = new Uint8Array(bufferLength);\n\n\t\t\t\t\tvar checkLevel = function() {\n\t\t\t\t\t\tif (!isRecording || !audioAnalyzer) return;\n\n\t\t\t\t\t\taudioAnalyzer.getByteFrequencyData(dataArray);\n\n\t\t\t\t\t\t// Calculate average volume\n\t\t\t\t\t\tvar sum = dataArray.reduce(function(a, b) { return a + b; }, 0);\n\t\t\t\t\t\taudioLevel = sum / bufferLength;\n\n\t\t\t\t\t\t// Silence threshold: if volume is below 10 (very quiet)\n\t\t\t\t\t\tvar isSilent = audioLevel < 10;\n\n\t\t\t\t\t\tif (isSilent) {\n\t\t\t\t\t\t\t// Start or continue silence timer\n\t\t\t\t\t\t\tif (!silenceTimer) {\n\t\t\t\t\t\t\t\tstartSilenceTimer();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t// Reset silence timer if user is speaking\n\t\t\t\t\t\t\tclearSilenceTimer();\n\t\t\t\t\t\t\tclearCountdown();\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Continue monitoring\n\t\t\t\t\t\trequestAnimationFrame(checkLevel);\n\t\t\t\t\t};\n\n\t\t\t\t\tcheckLevel();\n\t\t\t\t}\n\n\t\t\t\tfunction startSilenceTimer() {\n\t\t\t\t\tif (silenceTimer) return;\n\n\t\t\t\t\tconsole.log('[STT] Silence detected, starting timer...');\n\n\t\t\t\t\t// Start countdown visual feedback\n\t\t\t\t\tcountdownSeconds = Math.ceil(silenceThreshold / 1000);\n\t\t\t\t\tstartCountdown();\n\n\t\t\t\t\tsilenceTimer = setTimeout(function() {\n\t\t\t\t\t\tconsole.log('[STT] Silence threshold reached, auto-submitting...');\n\t\t\t\t\t\tautoSubmitVoiceFeedback();\n\t\t\t\t\t}, silenceThreshold);\n\t\t\t\t}\n\n\t\t\t\tfunction clearSilenceTimer() {\n\t\t\t\t\tif (silenceTimer) {\n\t\t\t\t\t\tclearTimeout(silenceTimer);\n\t\t\t\t\t\tsilenceTimer = null;\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction startCountdown() {\n\t\t\t\t\tclearCountdown();\n\n\t\t\t\t\tupdateCountdownDisplay();\n\n\t\t\t\t\tcountdownInterval = setInterval(function() {\n\t\t\t\t\t\tcountdownSeconds--;\n\t\t\t\t\t\tif (countdownSeconds <= 0) {\n\t\t\t\t\t\t\tclearCountdown();\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\tupdateCountdownDisplay();\n\t\t\t\t\t\t}\n\t\t\t\t\t}, 1000);\n\t\t\t\t}\n\n\t\t\t\tfunction updateCountdownDisplay() {\n\t\t\t\t\tif (countdownSeconds > 0) {\n\t\t\t\t\t\tmicBtn.title = 'Auto-send in ' + countdownSeconds + 's...';\n\t\t\t\t\t} else {\n\t\t\t\t\t\tmicBtn.title = 'Recording...';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction clearCountdown() {\n\t\t\t\t\tif (countdownInterval) {\n\t\t\t\t\t\tclearInterval(countdownInterval);\n\t\t\t\t\t\tcountdownInterval = null;\n\t\t\t\t\t}\n\t\t\t\t\tcountdownSeconds = 0;\n\t\t\t\t\tif (isRecording) {\n\t\t\t\t\t\tmicBtn.title = 'Recording...';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction stopAudioAnalysis() {\n\t\t\t\t\tif (audioContext) {\n\t\t\t\t\t\taudioContext.close();\n\t\t\t\t\t\taudioContext = null;\n\t\t\t\t\t}\n\t\t\t\t\tif (audioStream) {\n\t\t\t\t\t\taudioStream.getTracks().forEach(function(track) { track.stop(); });\n\t\t\t\t\t\taudioStream = null;\n\t\t\t\t\t}\n\t\t\t\t\taudioAnalyzer = null;\n\t\t\t\t\taudioLevel = 0;\n\t\t\t\t}\n\n\t\t\t\tfunction autoSubmitVoiceFeedback() {\n\t\t\t\t\t// Stop listening first\n\t\t\t\t\tstopListening();\n\n\t\t\t\t\t// Wait a moment for final transcript to be processed\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t// Submit the feedback if there's text\n\t\t\t\t\t\t\tif (messageInput.value.trim()) {\n\t\t\t\t\t\t\t\tsafeSubmit();\n\t\t\t\t\t\t\t}\t\t\t\t\t}, 500);\n\t\t\t\t}\n\n\t\t\t\tfunction stopListening() {\n\t\t\t\t\tisRecording = false;\n\t\t\t\t\tclearSilenceTimer();\n\t\t\t\t\tclearCountdown();\n\t\t\t\t\tstopAudioAnalysis();\n\n\t\t\t\t\tif (recognition) {\n\t\t\t\t\t\ttry { recognition.stop(); } catch (e) { /* ignore */ }\n\t\t\t\t\t\trecognition = null;\n\t\t\t\t\t}\n\n\t\t\t\t\tmicBtn.classList.remove('stt-recording');\n\t\t\t\t\tmicBtn.classList.add('opacity-50');\n\t\t\t\t\tmicBtn.setAttribute('aria-label', 'Start speech to text');\n\t\t\t\t\tmicBtn.title = 'Speech to text';\n\t\t\t\t\tif (micIcon) micIcon.classList.remove('hidden');\n\t\t\t\t\tif (stopIcon) stopIcon.classList.add('hidden');\n\t\t\t\t}\n\n\t\t\t\tmicBtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\tif (isRecording) {\n\t\t\t\t\t\tmanualStop = true;\n\t\t\t\t\t\tstopListening();\n\t\t\t\t\t} else {\n\t\t\t\t\t\tstartRecording();\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\t// Stop recording on form submit\n\t\t\t\tform.addEventListener('submit', function() {\n\t\t\t\t\tif (isRecording) {\n\t\t\t\t\t\tmanualStop = true;\n\t\t\t\t\t\tstopListening();\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t})();\n\n\t\t\t\t\t// Clear only the draft and attachment session accepted by this request.\n\t\t\t\t\t// A user may type or attach a steering update while an earlier send is still in flight.\n\t\t\t\t\tform.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\t\t\tif (!event.detail || event.detail.elt !== form) return;\n\t\t\t\t\t\tvar triggeringEvent = event.detail.requestConfig && event.detail.requestConfig.triggeringEvent;\n\t\t\t\t\t\tvar payload = (triggeringEvent && triggeringEvent._chatSubmissionPayload) || form._chatNextSubmissionPayload || form._captureChatSubmission();\n\t\t\t\t\t\tform._chatNextSubmissionPayload = null;\n\t\t\t\t\t\tvar request = event.detail.xhr || {};\n\t\t\t\t\t\trequest._chatSubmittedPayload = payload;\n\t\t\t\t\t\trequest._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';\n\t\t\t\t\t\trequest._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();\n\t\t\t\t\t\tif (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;\n\t\t\t\t\t\t\t\trequest._chatSubmittedMessage = payload ? payload.message : composerMessage();\n\t\t\t\t\t\t\t\trequest._chatSubmittedAttachmentSession = payload ? payload.attachmentSessionID : (sessionInput ? sessionInput.value : '');\n\t\t\t\t\t\t\t\trequest._chatSubmittedFallbackFromSteer = !!(payload && payload.fallbackFromSteer);\t\t\t\t\t});\n\n\t\t\t\t\tform.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\t\tif (!event.detail || event.detail.elt !== form) return;\n\t\t\t\t\t\tvar request = event.detail.xhr || {};\n\t\t\t\t\t\tvar completedIntent = request._chatSubmittedIntent || 'normal';\n\t\t\t\t\t\tvar submittedMessage = request._chatSubmittedMessage || '';\n\t\t\t\t\t\tvar submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';\n\t\t\t\t\t\tvar accepted = false;\n\t\t\t\t\t\tvar replayAsNormal = false;\n\t\t\t\t\t\tvar createdTaskID = request.status >= 200 && request.status < 300 && request.getResponseHeader('X-Created-Task-ID');\n\t\t\t\t\t\t// HX-Location returns before HTMX sets detail.successful.\n\t\t\t\t\t\tif (event.detail.successful || createdTaskID) {\n\t\t\t\t\t\t\tvar responseText = request.responseText || '';\n\t\t\t\t\t\t\t// First-message creation redirects with an empty body, but explicitly\n\t\t\t\t\t\t\t// acknowledges acceptance and supplies the new task's history scope.\n\t\t\t\t\t\t\tif (createdTaskID) messageHistoryStorageKey = 'openvibely-task-thread-message-history-' + createdTaskID;\n\t\t\t\t\t\t\t// Keep user draft intact for empty model-setup guard responses.\n\t\t\t\t\t\t\tif (responseText.trim() !== '' || createdTaskID) {\n\t\t\t\t\t\t\t\taccepted = true;\n                                document.body.dispatchEvent(new Event('taskAttachmentsChanged'));\n\t\t\t\t\t\t\t\tif (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);\n\t\t\t\t\t\t\t\trememberSubmittedMessage(submittedMessage);\n\t\t\t\t\t\t\t\tresetMessageHistoryNavigation();\n\t\t\t\t\t\t\t\t\tvar submittedText = request._chatSubmittedPayload ? request._chatSubmittedPayload.composerText : submittedMessage;\n\t\t\t\t\t\t\t\t\tif (messageInput && (messageInput.value === submittedText || messageInput.value === submittedMessage)) {\n\t\t\t\t\t\t\t\t\t\tmessageInput.value = '';\n\t\t\t\t\t\t\t\t\t\tmessageInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t\t\t\t\t\t\t\trefreshPrimaryActionForInput();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tacceptSubmittedPastes(request._chatSubmittedPayload);\n\t\t\t\t\t\t\t\t\tif (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} else if (completedIntent === 'steer' && !request._chatSubmittedFallbackFromSteer && submittedMessage.trim() !== '' && request.status === 409) {\n\t\t\t\t\t\t\treplayAsNormal = true;\n\t\t\t\t\t\t\tsteerFallbackPending = true;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (completedIntent === 'normal') normalRequestInFlight = Math.max(0, normalRequestInFlight - 1);\n\t\t\t\t\t\tif (completedIntent === 'normal' && !accepted) deferredSteer = null;\n\t\t\t\t\t\tform.setAttribute('hx-post', normalPostEndpoint);\n\t\t\t\t\t\tform.removeAttribute('data-submit-intent');\n\t\t\t\t\t\tif (accepted && deferredSteer) setTimeout(flushDeferredSteer, 0);\n\t\t\t\t\t\tif (completedIntent === 'normal' && request._chatSubmittedFallbackFromSteer) {\n\t\t\t\t\t\t\tsteerFallbackPending = false;\n\t\t\t\t\t\t\tsetTimeout(finishSteerRequest, 0);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (completedIntent === 'steer' && !replayAsNormal) setTimeout(finishSteerRequest, 0);\n\t\t\t\t\t\tif (replayAsNormal) {\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\tsubmitComposer(normalPostEndpoint, 'normal', Object.assign({}, request._chatSubmittedPayload || {}, {\n\t\t\t\t\t\t\t\t\tmessage: submittedMessage,\n\t\t\t\t\t\t\t\t\tattachmentSessionID: submittedAttachmentSession,\n\t\t\t\t\t\t\t\t\tfallbackFromSteer: true,\n\t\t\t\t\t\t\t\t\tsubmitIntent: 'normal'\n\t\t\t\t\t\t\t\t}));\n\t\t\t\t\t\t\t}, 0);\n\t\t\t\t\t\t}\n\t\t\t\t\t});\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 278, "</div></div></div></form></div><!-- Shared input form scripts: Enter key, file upload, drag-and-drop --><script type=\"text/javascript\">\n\t\t\t// Shared, swap-safe composer focus lifecycle for Chat and task Threads.\n\t\t\tif (!window._openVibelyComposerFocusReady) {\n\t\t\t\twindow._openVibelyComposerFocusReady = true;\n\t\t\t\twindow._openVibelyComposerFocusState = { token: 0, timer: 0, historyTimer: 0, interaction: 0, navigationTrigger: null, pendingTextarea: null };\n\t\t\t\tvar _composerFocusState = window._openVibelyComposerFocusState;\n\n\t\t\t\tfunction _cancelComposerFocus(consume) {\n\t\t\t\t\t// Retain a live pending composer across swap cancellation so an\n\t\t\t\t\t// intervening user action can consume the attempt before settling.\n\t\t\t\t\tvar pending = _composerFocusState.pendingTextarea;\n\t\t\t\t\tif (consume === true && pending) pending.dataset.composerFocusInitialized = 'true';\n\t\t\t\t\tif (consume === true || (pending && !pending.isConnected)) _composerFocusState.pendingTextarea = null;\n\t\t\t\t\t_composerFocusState.token++;\n\t\t\t\t\tif (_composerFocusState.timer) window.clearTimeout(_composerFocusState.timer);\n\t\t\t\t\tif (_composerFocusState.historyTimer) window.clearTimeout(_composerFocusState.historyTimer);\n\t\t\t\t\t_composerFocusState.timer = 0;\n\t\t\t\t\t_composerFocusState.historyTimer = 0;\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusInteraction() {\n\t\t\t\t\t_composerFocusState.navigationTrigger = null;\n\t\t\t\t\t_composerFocusState.interaction++;\n\t\t\t\t\t_cancelComposerFocus(true);\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusVisible(element) {\n\t\t\t\t\tif (!element || !element.isConnected || element.disabled || element.hidden) return false;\n\t\t\t\t\tif (element.closest('[hidden], [inert], .hidden, dialog:not([open])')) return false;\n\t\t\t\t\tvar style = window.getComputedStyle ? window.getComputedStyle(element) : null;\n\t\t\t\t\treturn !style || (style.display !== 'none' && style.visibility !== 'hidden');\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusOverlayActive() {\n\t\t\t\t\tvar overlays = document.querySelectorAll('dialog[open], [role=\"dialog\"][aria-modal=\"true\"], [data-chat-actions-open=\"true\"], [aria-haspopup][aria-expanded=\"true\"], [data-openvibely-menu-open=\"true\"]');\n\t\t\t\t\tfor (var i = 0; i < overlays.length; i++) {\n\t\t\t\t\t\tvar overlay = overlays[i];\n\t\t\t\t\t\tif (overlay.tagName === 'DIALOG' && !overlay.open) continue;\n\t\t\t\t\t\tif (_composerFocusVisible(overlay)) return true;\n\t\t\t\t\t}\n\t\t\t\t\treturn false;\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusMeaningful(element) {\n\t\t\t\t\tif (!element || element === document.body || element === document.documentElement) return false;\n\t\t\t\t\treturn _composerFocusVisible(element) && element.matches('input, textarea, select, button, a[href], [contenteditable=\"true\"], [tabindex]:not([tabindex=\"-1\"])');\n\t\t\t\t}\n\n\t\t\t\tfunction _cancelComposerFocusForSwap(event) {\n\t\t\t\t\tvar target = event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\tvar composer = target && target.closest && target.closest('form[data-composer-auto-focus=\"true\"]');\n\t\t\t\t\tvar textarea = composer && composer.querySelector('textarea[name=\"message\"]');\n\t\t\t\t\tvar replacesTextarea = textarea && target.contains(textarea);\n\t\t\t\t\tvar containsComposer = target && target.querySelector && target.querySelector('form[data-composer-auto-focus=\"true\"]');\n\t\t\t\t\t// Control-only refreshes leave the pending textarea intact, and\n\t\t\t\t\t// their settle target cannot restart the form's focus request.\n\t\t\t\t\tif (!target || target.id === 'main-content' || replacesTextarea || containsComposer) {\n\t\t\t\t\t\t_cancelComposerFocus();\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction _composerFocusNavigationTrigger(event) {\n\t\t\t\t\tvar target = event && event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\tvar active = document.activeElement;\n\t\t\t\t\tif (!target || target.id !== 'main-content' || !active || !active.matches) return null;\n\t\t\t\t\t// HTMX restores matching button IDs across task navigation. That\n\t\t\t\t\t// breadcrumb focus belongs to navigation, not a new editing choice.\n\t\t\t\t\tif (active.matches('[data-breadcrumb-selector-button]') && active.closest('#task-detail-content')) return active;\n\t\t\t\t\tif (!active.matches('[data-nav-base]')) return null;\n\t\t\t\t\tvar displayedPath = window.openVibelyDisplayedURL ? new URL(window.openVibelyDisplayedURL(), window.location.href).pathname : window.location.pathname;\n\t\t\t\t\treturn active.getAttribute('data-nav-base') === displayedPath ? active : null;\n\t\t\t\t}\n\n\t\t\t\tfunction _rememberComposerFocusNavigationTrigger(event) {\n\t\t\t\t\tvar target = event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\t// Keep the page navigation trigger through the lazy thread swap.\n\t\t\t\t\tif (target && target.id === 'main-content') _composerFocusState.navigationTrigger = _composerFocusNavigationTrigger(event);\n\t\t\t\t}\n\n\t\t\t\twindow.openVibelyCancelComposerFocus = _cancelComposerFocus;\n\t\t\t\twindow.openVibelyRequestComposerFocus = function(options) {\n\t\t\t\t\toptions = options || {};\n\t\t\t\t\tvar root = options.root || document;\n\t\t\t\t\tvar form = root.matches && root.matches('form[data-composer-auto-focus=\"true\"]')\n\t\t\t\t\t\t? root\n\t\t\t\t\t\t: root.querySelector && root.querySelector('form[data-composer-auto-focus=\"true\"]');\n\t\t\t\t\tif (!form || !_composerFocusVisible(form)) return false;\n\t\t\t\t\tvar textarea = form.querySelector('textarea[name=\"message\"]');\n\t\t\t\t\tif (!textarea || !_composerFocusVisible(textarea)) return false;\n\t\t\t\t\tif (!options.force && textarea.dataset.composerFocusInitialized === 'true') return false;\n\n\t\t\t\t\t_cancelComposerFocus();\n\t\t\t\t\t_composerFocusState.pendingTextarea = textarea;\n\t\t\t\t\tvar token = _composerFocusState.token;\n\t\t\t\t\tvar interaction = _composerFocusState.interaction;\n\t\t\t\t\tvar trigger = options.trigger || null;\n\t\t\t\t\t_composerFocusState.timer = window.setTimeout(function() {\n\t\t\t\t\t\t_composerFocusState.timer = window.setTimeout(function() {\n\t\t\t\t\t\t\t_composerFocusState.timer = 0;\n\t\t\t\t\t\t\tif (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return;\n\t\t\t\t\t\t\tvar liveForm = document.getElementById(form.id);\n\t\t\t\t\t\t\tvar liveTextarea = liveForm && liveForm.querySelector('textarea[name=\"message\"]');\n\t\t\t\t\t\t\tif (liveForm !== form || liveTextarea !== textarea || !_composerFocusVisible(liveTextarea)) return;\n\t\t\t\t\t\t\t_composerFocusState.pendingTextarea = null;\n\t\t\t\t\t\t\ttextarea.dataset.composerFocusInitialized = 'true';\n\t\t\t\t\t\t\tif (_composerFocusOverlayActive()) return;\n\t\t\t\t\t\t\tvar active = document.activeElement;\n\t\t\t\t\t\t\tvar allowedTrigger = trigger || _composerFocusState.navigationTrigger;\n\t\t\t\t\t\t\t_composerFocusState.navigationTrigger = null;\n\t\t\t\t\t\t\tif (_composerFocusMeaningful(active) && active !== liveTextarea && active !== allowedTrigger) return;\n\t\t\t\t\t\t\tliveTextarea.focus({ preventScroll: true });\n\t\t\t\t\t\t}, 0);\n\t\t\t\t\t}, 0);\n\t\t\t\t\treturn true;\n\t\t\t\t};\n\n\t\t\t\tdocument.addEventListener('pointerdown', _composerFocusInteraction, true);\n\t\t\t\tdocument.addEventListener('keydown', _composerFocusInteraction, true);\n\t\t\t\tdocument.addEventListener('focusin', function(event) {\n\t\t\t\t\tif (event.target && event.target.matches && event.target.matches('textarea[data-composer-focus-initialized=\"true\"]')) return;\n\t\t\t\t\t// HTMX can restore the breadcrumb's focus after the composer\n\t\t\t\t\t// script runs. This is part of the swap, not user interaction.\n\t\t\t\t\tvar restoredBreadcrumb = event.target && event.target.closest && event.target.closest('#task-detail-content [data-breadcrumb-selector-button]');\n\t\t\t\t\tvar swappingPage = restoredBreadcrumb && restoredBreadcrumb.closest('#main-content.htmx-swapping, #main-content.htmx-settling');\n\t\t\t\t\tif (swappingPage && _composerFocusState.pendingTextarea) {\n\t\t\t\t\t\t_composerFocusState.navigationTrigger = restoredBreadcrumb;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\t_composerFocusInteraction();\n\t\t\t\t}, true);\n\t\t\t\tdocument.addEventListener('htmx:beforeSwap', _cancelComposerFocusForSwap);\n\t\t\t\tdocument.addEventListener('htmx:afterSwap', _rememberComposerFocusNavigationTrigger);\n\t\t\t\tdocument.addEventListener('htmx:beforeHistorySave', function() { _cancelComposerFocus(); });\n\t\t\t\tdocument.addEventListener('htmx:afterSettle', function(event) {\n\t\t\t\t\tvar target = event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\twindow.openVibelyRequestComposerFocus({ root: target || document, reason: 'htmx-settle', trigger: _composerFocusNavigationTrigger(event) });\n\t\t\t\t});\n\t\t\t\tdocument.addEventListener('htmx:historyRestore', function(event) {\n\t\t\t\t\t_cancelComposerFocus();\n\t\t\t\t\tvar token = _composerFocusState.token;\n\t\t\t\t\tvar interaction = _composerFocusState.interaction;\n\t\t\t\t\tvar target = event.detail && (event.detail.target || event.detail.elt);\n\t\t\t\t\t_composerFocusState.historyTimer = window.setTimeout(function() {\n\t\t\t\t\t\t_composerFocusState.historyTimer = 0;\n\t\t\t\t\t\tif (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return;\n\t\t\t\t\t\twindow.openVibelyRequestComposerFocus({ root: target || document, reason: 'history-restore', force: true });\n\t\t\t\t\t}, 0);\n\t\t\t\t});\n\t\t\t\twindow.addEventListener('pagehide', function() { _cancelComposerFocus(); });\n\t\t\t}\n\n\t\t\t// Global portal-style custom select implementation.\n\t\t\t// Positioned with getBoundingClientRect() + position:fixed so it always\n\t\t// anchors near the trigger button regardless of scroll within overflow:auto\n\t\t// containers — fixing the mobile Chrome popup displacement bug.\n\t\t// Guard ensures this runs only once even when multiple ChatInputForms exist.\n\t\tif (!window._chatCustomSelectPanelReady) {\n\t\t\twindow._chatCustomSelectPanelReady = true;\n\t\t\tvar _cspanel = document.createElement('ul');\n\t\t\t_cspanel.id = 'chat-custom-select-panel';\n\t\t\t_cspanel.className = 'ov-menu ov-menu-list ov-menu-scroll';\n\t\t\t_cspanel.setAttribute('role', 'listbox');\n\t\t\t_cspanel.style.cssText = 'position:fixed;z-index:9999;display:none;list-style:none;margin:0;' +\n\t\t\t\t'min-width:160px;max-height:280px;';\n\t\t\tdocument.body.appendChild(_cspanel);\n\n\t\t\tvar _csActiveBtn = null;\n\n            var customSelectMenus = new WeakMap();\n            function customSelectMenu(btn) {\n                var menu = customSelectMenus.get(btn);\n                if (!menu) {\n                    menu = window.ovMenuController.create({\n                        trigger: btn, panels: [_cspanel],\n                        isOpen: function() { return _csActiveBtn === btn && _cspanel.style.display !== 'none'; },\n                        open: function() { _csShow(btn); }, close: _csHide,\n                    });\n                    customSelectMenus.set(btn, menu);\n                }\n                return menu;\n            }\n            function _csClose() {\n                if (window.ovModelPicker) window.ovModelPicker.close(false);\n                if (_csActiveBtn) customSelectMenu(_csActiveBtn).close(false);\n            }\n            function _csOpen(btn) {\n                if (btn.classList.contains('chat-model-select') && window.ovModelPicker) window.ovModelPicker.open(btn);\n                else customSelectMenu(btn).open();\n            }\n\t\t\tfunction _csHide() {\n\t\t\t\tif (_csActiveBtn) {\n\t\t\t\t\t_csActiveBtn.setAttribute('aria-expanded', 'false');\n\t\t\t\t\t_csActiveBtn = null;\n\t\t\t\t}\n\t\t\t\t_cspanel.style.display = 'none';\n\t\t\t\t_cspanel.innerHTML = '';\n\t\t\t}\n\n\t\t\tfunction _csShow(btn) {\n\t\t\t\tvar optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');\n\t\t\t\tif (!optList) return;\n\t\t\t\tvar currentValue = btn.dataset.currentValue || '';\n\t\t\t\t_cspanel.innerHTML = '';\n\t\t\t\tvar items = optList.querySelectorAll('li[data-value]');\n\t\t\t\titems.forEach(function(li) {\n\t\t\t\t\tvar val = li.dataset.value;\n\t\t\t\t\tvar label = li.textContent.trim();\n\t\t\t\t\tvar item = document.createElement('li');\n\t\t\t\t\titem.setAttribute('role', 'option');\n\t\t\t\t\titem.setAttribute('aria-selected', val === currentValue ? 'true' : 'false');\n\t\t\t\t\titem.dataset.value = val;\n\t\t\t\t\titem.className = 'ov-menu-option';\n\t\t\t\t\titem.setAttribute('data-project-selector-option', '');\n\t\t\t\t\titem.style.whiteSpace = 'nowrap';\n                    var serverIcon = li.querySelector('[data-server-icon]');\n                    if (serverIcon && serverIcon.querySelector('svg')) item.appendChild(serverIcon.cloneNode(true));\n\t\t\t\t\tvar textSpan = document.createElement('span');\n\t\t\t\t\ttextSpan.style.cssText = 'flex:1;min-width:0;';\n\t\t\t\t\ttextSpan.textContent = label;\n\t\t\t\t\titem.appendChild(textSpan);\n\t\t\t\t\titem.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\te.stopPropagation();\n\t\t\t\t\t\tvar prevBtn = _csActiveBtn;\n\t\t\t\t\t\t_csClose();\n\t\t\t\t\t\tif (!prevBtn) return;\n\t\t\t\t\t\twindow._setChatCustomSelectValue(prevBtn, val);\n\t\t\t\t\t\tprevBtn.dispatchEvent(new CustomEvent('chat-select-change', { detail: { value: val }, bubbles: true }));\n\t\t\t\t\t});\n\t\t\t\t\t_cspanel.appendChild(item);\n\t\t\t\t});\n\n\t\t\t\t// Position using getBoundingClientRect() — accurate on mobile regardless of\n\t\t\t\t// scroll position within overflow:auto ancestor containers.\n\t\t\t\tvar rect = btn.getBoundingClientRect();\n\t\t\t\tvar panelEstH = Math.min(280, items.length * 34 + 10);\n\t\t\t\tvar spaceAbove = rect.top;\n\t\t\t\tvar spaceBelow = window.innerHeight - rect.bottom;\n\t\t\t\t_cspanel.style.display = 'block';\n\t\t\t\t_cspanel.style.minWidth = Math.max(rect.width, 160) + 'px';\n\t\t\t\tif (spaceAbove >= panelEstH || spaceAbove > spaceBelow) {\n\t\t\t\t\t// Open upward (preferred when composer is at bottom of screen)\n\t\t\t\t\t_cspanel.style.top = 'auto';\n\t\t\t\t\t_cspanel.style.bottom = (window.innerHeight - rect.top) + 'px';\n\t\t\t\t} else {\n\t\t\t\t\t// Open downward\n\t\t\t\t\t_cspanel.style.top = rect.bottom + 'px';\n\t\t\t\t\t_cspanel.style.bottom = 'auto';\n\t\t\t\t}\n\t\t\t\t_cspanel.style.left = rect.left + 'px';\n\t\t\t\t// Correct horizontal overflow after paint\n\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\tvar pr = _cspanel.getBoundingClientRect();\n\t\t\t\t\tif (pr.right > window.innerWidth - 4) {\n\t\t\t\t\t\t_cspanel.style.left = Math.max(4, window.innerWidth - pr.width - 4) + 'px';\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\t_csActiveBtn = btn;\n\t\t\t\tbtn.setAttribute('aria-expanded', 'true');\n\t\t\t}\n\n\t\t\twindow._openChatCustomSelectPanel = _csOpen;\n\t\t\twindow._closeChatCustomSelectPanel = _csClose;\n\n\t\t\t// Reposition on resize so the panel stays near the trigger\n\t\t\twindow.addEventListener('resize', function() {\n\t\t\t\tif (_csActiveBtn) _csShow(_csActiveBtn);\n\t\t\t});\n\t\t}\n\n\t\t// Initialize a custom select button: sets initial label from current value and binds click.\n\t\twindow._initChatCustomSelect = function(btn) {\n\t\t\tvar currentValue = btn.dataset.currentValue;\n\t\t\tvar optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');\n\t\t\tif (!optList) return;\n\t\t\tvar matchingLi = null;\n\t\t\toptList.querySelectorAll('li[data-value]').forEach(function(li) {\n\t\t\t\tif (li.dataset.value === currentValue) matchingLi = li;\n\t\t\t});\n\t\t\tvar firstLi = optList.querySelector('li[data-value]');\n\t\t\tvar label = matchingLi ? (matchingLi.dataset.pickerName || matchingLi.textContent.trim()) : (btn.dataset.placeholder || (firstLi ? firstLi.textContent.trim() : ''));\n\t\t\tvar labelEl = btn.querySelector('.chat-custom-select-label');\n\t\t\tif (labelEl) labelEl.textContent = label;\n\t\t\tif (!btn._chatCustomSelectBound) {\n\t\t\t\tbtn._chatCustomSelectBound = true;\n\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\te.stopPropagation();\n\t\t\t\t\tif (btn.classList.contains('chat-model-select') && window.ovModelPicker) window.ovModelPicker.toggle(btn, e);\n                    else if (btn.getAttribute('aria-expanded') === 'true') window._closeChatCustomSelectPanel();\n                    else window._openChatCustomSelectPanel(btn);\n\t\t\t\t});\n\t\t\t}\n\t\t};\n\n\t\t// Update a custom select button's displayed label and stored value.\n\t\twindow._setChatCustomSelectValue = function(btn, value) {\n\t\t\tif (!btn) return;\n\t\t\tvar optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');\n\t\t\tif (!optList) return;\n\t\t\tvar matchingLi = null;\n\t\t\toptList.querySelectorAll('li[data-value]').forEach(function(li) {\n\t\t\t\tif (li.dataset.value === value) matchingLi = li;\n\t\t\t});\n\t\t\tif (!matchingLi) return;\n\t\t\tvar label = (matchingLi.dataset.pickerName || matchingLi.textContent.trim());\n\t\t\tvar labelEl = btn.querySelector('.chat-custom-select-label');\n\t\t\tif (labelEl) labelEl.textContent = label;\n\t\t\tbtn.dataset.currentValue = value;\n\t\t};\n\n\t\t(function() {\n\t\t\t// Find our form by walking up from the script tag\n\t\t\tvar script = document.currentScript;\n\t\t\tvar wrapper = script ? script.previousElementSibling : null;\n\t\t\tvar form = wrapper ? wrapper.querySelector('form.chat-input-container') : null;\n\t\t\tif (!form || form.tagName !== 'FORM') return;\n\t\t\t// Fragment scripts can run again while the existing composer survives.\n\t\t\t// Bind once per DOM form so one drop cannot start multiple upload queues.\n\t\t\t// Use a property, not an attribute: restored/cloned forms need fresh handlers.\n\t\t\tif (form._chatInputInitialized) return;\n\t\t\tform._chatInputInitialized = true;\n\t\t\tvar formId = form.id;\n\t\t\tvar inputId = form.querySelector('textarea[name=\"message\"]').id;\n\t\t\tvar messageInput = document.getElementById(inputId);\n\t\t\t// Pasted text is draft content, kept separate from uploaded files.\n\t\t\tvar pasteScope = form.getAttribute('data-attachment-state-key');\n\t\t\tvar pasteKey = pasteScope ? pasteScope + '-pasted-text' : '';\n\t\t\twindow._ovPasteDrafts = window._ovPasteDrafts || {};\n\t\t\tvar pastedTexts = pasteKey ? window._ovPasteDrafts[pasteKey] : [];\n\t\t\tif (!pastedTexts) {\n\t\t\t\ttry { pastedTexts = JSON.parse(sessionStorage.getItem(pasteKey) || '[]'); } catch (_) {}\n\t\t\t\tif (!Array.isArray(pastedTexts)) pastedTexts = [];\n\t\t\t\tpastedTexts = pastedTexts.filter(function(item) { return item && typeof item.text === 'string' && typeof item.id === 'string'; });\n\t\t\t}\n\t\t\tif (pasteKey) window._ovPasteDrafts[pasteKey] = pastedTexts;\n\t\t\tvar pasteCards = form.querySelector('[data-pasted-text-cards]');\n\t\t\tfunction composerMessage() {\n\t\t\t\treturn [messageInput.value].concat(pastedTexts.map(function(item) { return item.text; })).filter(function(text) { return text !== ''; }).join('\\n\\n');\n\t\t\t}\n\t\t\tfunction savePastes() {\n\t\t\t\tif (!pasteKey) return;\n\t\t\t\twindow._ovPasteDrafts[pasteKey] = pastedTexts;\n\t\t\t\ttry { sessionStorage.setItem(pasteKey, JSON.stringify(pastedTexts)); } catch (_) {}\n\t\t\t}\n\t\t\tform._refreshPastedTextDraft = function() {\n\t\t\t\tif (pasteKey) pastedTexts = window._ovPasteDrafts[pasteKey] || [];\n\t\t\t\trenderPastes();\n\t\t\t\trefreshPrimaryActionForInput();\n\t\t\t};\n\t\t\tfunction refreshPasteComposers() {\n\t\t\t\tform._refreshPastedTextDraft();\n\t\t\t\tif (!pasteKey) return;\n\t\t\t\tdocument.querySelectorAll('form[data-attachment-state-key]').forEach(function(current) {\n\t\t\t\t\tif (current !== form && current.getAttribute('data-attachment-state-key') === pasteScope && current._refreshPastedTextDraft) current._refreshPastedTextDraft();\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction acceptSubmittedPastes(payload) {\n\t\t\t\tif (!payload || !payload.pastedTextSnapshot) return;\n\t\t\t\t// A detached sender must reconcile the latest draft, not its old copy.\n\t\t\t\tvar latest = pasteKey ? (window._ovPasteDrafts[pasteKey] || []) : pastedTexts;\n\t\t\t\tpastedTexts = latest.filter(function(item) {\n\t\t\t\t\treturn !payload.pastedTextSnapshot.some(function(sent) { return sent.id === item.id && sent.text === item.text; });\n\t\t\t\t});\n\t\t\t\tsavePastes();\n\t\t\t\trefreshPasteComposers();\n\t\t\t}\n\t\t\tfunction renderPastes() {\n\t\t\t\tpasteCards.replaceChildren();\n\t\t\t\tpasteCards.hidden = pastedTexts.length === 0;\n\t\t\t\tpastedTexts.forEach(function(item) {\n\t\t\t\t\tvar card = document.createElement('div');\n\t\t\t\t\tcard.className = 'ov-paste-card bg-base-100';\n\t\t\t\t\tvar icon = document.createElement('button');\n\t\t\t\t\ticon.type = 'button';\n\t\t\t\t\ticon.className = 'ov-paste-icon';\n\t\t\t\t\ticon.setAttribute('aria-label', 'Open pasted text editor');\n\t\t\t\t\ticon.innerHTML = '<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3M14 4h2a2 2 0 0 1 2 2v2\"/><rect x=\"8\" y=\"2\" width=\"6\" height=\"4\" rx=\"1\"/><rect x=\"11\" y=\"10\" width=\"10\" height=\"12\" rx=\"1\"/><path d=\"M14 14h4m-4 4h4\"/></svg>';\n\t\t\t\t\ticon.onclick = function() { editPaste(item, icon); };\n\t\t\t\t\tvar content = document.createElement('div');\n\t\t\t\t\tcontent.className = 'ov-paste-copy';\n\t\t\t\t\tvar edit = document.createElement('button');\n\t\t\t\t\tedit.type = 'button';\n\t\t\t\t\tedit.className = 'ov-paste-title';\n\t\t\t\t\tedit.setAttribute('aria-label', 'Edit pasted text');\n\t\t\t\t\tedit.textContent = item.text.trim().slice(0, 80) || 'Pasted text';\n\t\t\t\t\tedit.onclick = function() { editPaste(item, edit); };\n\t\t\t\t\tcard.onclick = function(event) {\n\t\t\t\t\t\tif (!event.target.closest('button')) editPaste(item, edit);\n\t\t\t\t\t};\n\t\t\t\t\tvar show = document.createElement('button');\n\t\t\t\t\tshow.type = 'button';\n\t\t\t\t\tshow.className = 'ov-paste-show btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';\n\t\t\t\t\tshow.textContent = 'Show in composer';\n\t\t\t\t\tshow.onclick = function() {\n\t\t\t\t\t\tmessageInput.value += (messageInput.value ? '\\n\\n' : '') + item.text;\n\t\t\t\t\t\tpastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });\n\t\t\t\t\t\tpastesChanged();\n\t\t\t\t\t\tmessageInput.focus();\n\t\t\t\t\t\tmessageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);\n\t\t\t\t\t\tmessageInput.scrollTop = messageInput.scrollHeight;\n\t\t\t\t\t};\n\t\t\t\t\tvar remove = document.createElement('button');\n\t\t\t\t\tremove.type = 'button';\n\t\t\t\t\tremove.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';\n\t\t\t\t\tremove.setAttribute('data-tooltip-disabled', '');\n\t\t\t\t\tremove.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg>';\n\t\t\t\t\tremove.setAttribute('aria-label', 'Remove pasted text');\n\t\t\t\t\tremove.onclick = function() {\n\t\t\t\t\t\tpastedTexts = pastedTexts.filter(function(value) { return value.id !== item.id; });\n\t\t\t\t\t\tpastesChanged();\n\t\t\t\t\t\tmessageInput.focus();\n\t\t\t\t\t};\n\t\t\t\t\tcontent.append(edit, show);\n\t\t\t\t\tcard.append(icon, content, remove);\n\t\t\t\t\tpasteCards.append(card);\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction pastesChanged() {\n\t\t\t\tsavePastes();\n\t\t\t\trenderPastes();\n\t\t\t\tmessageInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\t\t\tfunction editPaste(item, trigger) {\n\t\t\t\tvar dialog = document.createElement('dialog');\n\t\t\t\tdialog.className = 'rounded-xl bg-base-100 text-base-content p-6 shadow-xl';\n\t\t\t\tdialog.style.cssText = 'width:min(800px,92vw);max-height:85vh';\n\t\t\t\tdialog.setAttribute('aria-label', 'Edit pasted text');\n\t\t\t\tvar heading = document.createElement('h2');\n\t\t\t\theading.className = 'font-semibold text-lg mb-3 pr-10';\n\t\t\t\theading.textContent = 'Edit pasted text';\n\t\t\t\tvar close = document.createElement('button');\n\t\t\t\tclose.type = 'button';\n\t\t\t\tclose.className = 'btn btn-circle btn-ghost btn-xs ov-modal-close';\n\t\t\t\tclose.setAttribute('aria-label', 'Close pasted text editor');\n\t\t\t\tclose.setAttribute('data-tooltip-disabled', '');\n\t\t\t\tclose.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M6 18L18 6M6 6l12 12\"></path></svg>';\n\t\t\t\tclose.onclick = function() { closePasteEditor(); };\n\t\t\t\tvar editor = document.createElement('textarea');\n\t\t\t\teditor.className = 'w-full rounded-lg border border-base-content/20 bg-base-100 p-3 font-mono text-sm';\n\t\t\t\teditor.style.height = '50vh';\n\t\t\t\teditor.setAttribute('aria-label', 'Pasted text');\n\t\t\t\teditor.value = item.text;\n\t\t\t\tvar actions = document.createElement('div');\n\t\t\t\tactions.className = 'flex justify-end gap-2 mt-3';\n\t\t\t\tfunction action(label, callback) {\n\t\t\t\t\tvar button = document.createElement('button');\n\t\t\t\t\tbutton.type = 'button'; button.className = 'btn btn-sm'; button.textContent = label;\n\t\t\t\t\tbutton.onclick = callback; actions.append(button);\n\t\t\t\t}\n\t\t\t\tvar disposed = false;\n\t\t\t\tvar lifecycle = new AbortController();\n\t\t\t\tvar observer = new MutationObserver(function() {\n\t\t\t\t\tif (!form.isConnected || !dialog.isConnected || !dialog.open) closePasteEditor(false);\n\t\t\t\t});\n\t\t\t\tfunction closePasteEditor(restoreFocus) {\n\t\t\t\t\tif (disposed) return;\n\t\t\t\t\tdisposed = true;\n\t\t\t\t\tobserver.disconnect();\n\t\t\t\t\tlifecycle.abort();\n\t\t\t\t\tdialog.close(); dialog.remove();\n\t\t\t\t\tif (restoreFocus !== false && form.isConnected) {\n\t\t\t\t\t\tif (trigger.isConnected) trigger.focus(); else if (messageInput.isConnected) messageInput.focus();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\taction('Cancel', closePasteEditor);\n\t\t\t\taction('Save', function() {\n\t\t\t\t\tif (disposed || !form.isConnected) { closePasteEditor(false); return; }\n\t\t\t\t\tif (!pastedTexts.some(function(value) { return value.id === item.id; }) && editor.value) pastedTexts.push({ id: item.id, text: editor.value });\n\t\t\t\t\tpastedTexts = pastedTexts.map(function(value) { return value.id === item.id ? { id: item.id, text: editor.value } : value; }).filter(function(value) { return value.text !== ''; });\n\t\t\t\t\tpastesChanged(); closePasteEditor();\n\t\t\t\t});\n\t\t\t\tdialog.append(heading, close, editor, actions);\n\t\t\t\tvar outsidePress = false;\n\t\t\t\tfunction outsideDialog(event) {\n\t\t\t\t\tvar bounds = dialog.getBoundingClientRect();\n\t\t\t\t\treturn event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom);\n\t\t\t\t}\n\t\t\t\tdialog.addEventListener('pointerdown', function(event) { outsidePress = event.button === 0 && outsideDialog(event); });\n\t\t\t\tdialog.addEventListener('click', function(event) {\n\t\t\t\t\tif (outsidePress && outsideDialog(event)) closePasteEditor();\n\t\t\t\t\toutsidePress = false;\n\t\t\t\t});\n\t\t\t\tdialog.addEventListener('cancel', function(event) { event.preventDefault(); closePasteEditor(); });\n\t\t\t\tdialog.addEventListener('close', function() { closePasteEditor(false); }, { signal: lifecycle.signal });\n\t\t\t\twindow.addEventListener('popstate', function() { closePasteEditor(false); }, { signal: lifecycle.signal });\n\t\t\t\twindow.addEventListener('pagehide', function() { closePasteEditor(false); }, { signal: lifecycle.signal });\n\t\t\t\tdocument.body.addEventListener('htmx:beforeCleanupElement', function(event) {\n\t\t\t\t\tvar element = event.detail && event.detail.elt;\n\t\t\t\t\tif (element && (element === form || element.contains(form))) closePasteEditor(false);\n\t\t\t\t}, { signal: lifecycle.signal });\n\t\t\t\tdocument.body.append(dialog);\n\t\t\t\tobserver.observe(document.body, { childList: true, subtree: true });\n\t\t\t\tobserver.observe(dialog, { attributes: true, attributeFilter: ['open'] });\n\t\t\t\tdialog.showModal(); editor.focus();\n\t\t\t}\n\t\t\tfunction pastedTextID() {\n\t\t\t\tvar cryptoAPI = window.crypto;\n\t\t\t\tif (!cryptoAPI) return null;\n\t\t\t\tif (typeof cryptoAPI.randomUUID === 'function') return cryptoAPI.randomUUID();\n\t\t\t\t// getRandomValues is also available on plain HTTP origins.\n\t\t\t\tif (typeof cryptoAPI.getRandomValues !== 'function') return null;\n\t\t\t\tvar bytes = cryptoAPI.getRandomValues(new Uint8Array(16));\n\t\t\t\tbytes[6] = (bytes[6] & 15) | 64;\n\t\t\t\tbytes[8] = (bytes[8] & 63) | 128;\n\t\t\t\tvar hex = Array.from(bytes, function(byte) { return byte.toString(16).padStart(2, '0'); }).join('');\n\t\t\t\treturn hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);\n\t\t\t}\n\t\t\tmessageInput.addEventListener('paste', function(event) {\n\t\t\t\tif (!event.clipboardData || messageInput.disabled || messageInput.readOnly) return;\n\t\t\t\tif (event.clipboardData.files.length) return;\n\t\t\t\tvar text = event.clipboardData.getData('text/plain');\n\t\t\t\tif (text.length < 5000) return;\n\t\t\t\tvar nextPastes;\n\t\t\t\ttry {\n\t\t\t\t\tvar id = pastedTextID();\n\t\t\t\t\tif (!id) return;\n\t\t\t\t\tnextPastes = pastedTexts.concat({ id: id, text: text });\n\t\t\t\t} catch (_) {\n\t\t\t\t\t// Leave the selection and default paste intact if preparation fails.\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tevent.preventDefault();\n\t\t\t\tmessageInput.setRangeText('', messageInput.selectionStart, messageInput.selectionEnd, 'end');\n\t\t\t\tpastedTexts = nextPastes;\n\t\t\t\tpastesChanged();\n\t\t\t});\n\t\t\trenderPastes();\n\t\t\tif (window.openVibelyRequestComposerFocus) {\n\t\t\t\tvar requestInitialComposerFocus = function() {\n\t\t\t\t\tvar liveForm = document.getElementById(formId);\n\t\t\t\t\tif (liveForm === form) window.openVibelyRequestComposerFocus({ root: form, reason: 'fragment-init' });\n\t\t\t\t};\n\t\t\t\tif (document.readyState === 'loading') window.addEventListener('load', requestInitialComposerFocus, { once: true });\n\t\t\t\telse requestInitialComposerFocus();\n\t\t\t}\n\t\t\tvar sessionInput = form.querySelector('input[name=\"attachment_session_id\"]');\n\t\t\tvar fileInput = form.querySelector('input[type=\"file\"]');\n\t\t\tvar preview = form.querySelector('[id$=\"-attachments-preview\"]');\n\t\t\tvar listContainer = form.querySelector('[id$=\"-attachments-list\"]');\n\t\t\tvar dropOverlay = form.querySelector('[id$=\"-drop-overlay\"]');\n\t\t\tvar clearBtn = form.querySelector('[data-clear-func]');\n\t\t\tvar clearFuncName = clearBtn ? clearBtn.getAttribute('data-clear-func') : (formId + 'ClearAttachments');\n\t\t\t\tvar agentSelect = form.querySelector('[id$=\"-agent-select\"]');\n\t\t\t\tvar agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;\n\t\t\t\t\tvar modeSelect = form.querySelector('[id$=\"-mode-select\"]');\n\t\t\t\t\tvar modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;\n\t\t\t\t\t\tvar normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';\n\t\t\t\t\t\tvar steerEndpoint = form.getAttribute('data-steer-endpoint') || '';\n\t\t\t\t\t\tfunction chatComposerUsesAppleShortcuts() {\n\t\t\t\t\t\t\tvar platform = '';\n\t\t\t\t\t\t\tif (navigator.userAgentData && navigator.userAgentData.platform) platform = navigator.userAgentData.platform;\n\t\t\t\t\t\t\telse platform = navigator.platform || navigator.userAgent || '';\n\t\t\t\t\t\t\treturn /Mac|iPhone|iPad|iPod|iOS/i.test(platform);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar usesAppleShortcuts = chatComposerUsesAppleShortcuts();\n\t\t\t\t\t\t\tvar shortcutModifierHeld = false;\n\t\t\t\t\t\t\tvar steerRequestInFlight = false;\n\t\t\t\t\t\t\tvar steerRequestSignature = '';\n\t\t\t\t\t\t\tvar steerFallbackPending = false;\n\t\t\t\t\t\t\tvar queuedSteerSubmissions = [];\n\t\t\t\t\t\t\tfunction shortcutModifierPressed(event) {\n\t\t\t\t\t\t\treturn usesAppleShortcuts ? event.metaKey : event.ctrlKey;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction shortcutHint() {\n\t\t\t\t\t\t\treturn usesAppleShortcuts\n\t\t\t\t\t\t\t\t? '⏎ sends or queues · ⌘+⏎ steers'\n\t\t\t\t\t\t\t\t: 'Enter sends or queues · Ctrl+Enter steers';\n\t\t\t\t\t\t}\n\t\t\t\t\t\twindow.refreshChatComposerShortcutHint = function(textarea) {\n\t\t\t\t\t\t\tif (!textarea) return;\n\t\t\t\t\t\t\ttextarea.setAttribute('placeholder', shortcutHint());\n\t\t\t\t\t\t};\n\t\t\t\t\t\twindow.refreshChatComposerShortcutHint(messageInput);\n\t\t\t\t\t\t\t\tfunction currentSubmitButton() {\n\t\t\t\t\t\t\t\t\treturn form.querySelector('button[type=\"submit\"]');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tfunction buildPrimaryActionButton(kind, stopEndpoint) {\n\t\t\t\t\t\t\t\t\tvar button = document.createElement('button');\n\t\t\t\t\t\t\t\t\tbutton.className = 'btn btn-primary btn-sm' + (kind === 'stop' ? '' : ' chat-send-button') + ' rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0';\n\t\t\t\t\t\t\t\t\tif (kind === 'stop') {\n\t\t\t\t\t\t\t\t\t\tbutton.type = 'button';\n\t\t\t\t\t\t\t\t\t\tbutton.setAttribute('hx-post', stopEndpoint);\n\t\t\t\t\t\t\t\t\t\t// Stop must remain independent of the composer's send queue.\n\t\t\t\t\t\t\t\t\t\tbutton.setAttribute('hx-sync', 'this:drop');\n\t\t\t\t\t\t\t\t\t\tbutton.setAttribute('hx-swap', 'none');\n\t\t\t\t\t\t\t\t\t\tbutton.title = 'Stop response';\n\t\t\t\t\t\t\t\t\t\tbutton.setAttribute('aria-label', 'Stop response');\n\t\t\t\t\t\t\t\t\t\tbutton.innerHTML = '<svg data-composer-stop-icon=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"></rect></svg><svg data-composer-steer-icon=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 hidden\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 3l20 9-20 9 5-9-5-9z\"></path></svg>';\n\t\t\t\t\t\t\t\t\t\treturn button;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tbutton.type = 'submit';\n\t\t\t\t\t\t\t\t\tbutton.title = 'Send message';\n\t\t\t\t\t\t\t\t\tbutton.setAttribute('aria-label', 'Send message');\n\t\t\t\t\t\t\t\t\tbutton.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 3l20 9-20 9 5-9-5-9z\"></path></svg>';\n\t\t\t\t\t\t\t\t\treturn button;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tfunction primaryActionStopEndpoint(action) {\n\t\t\t\t\t\t\t\t\tif (!action) return '';\n\t\t\t\t\t\t\t\t\tvar endpoint = action.getAttribute('data-composer-stop-endpoint') || '';\n\t\t\t\t\t\t\t\t\tvar stopButton = action.querySelector('button[aria-label=\"Stop response\"][hx-post]');\n\t\t\t\t\t\t\t\t\tif (!endpoint && stopButton) endpoint = stopButton.getAttribute('hx-post') || '';\n\t\t\t\t\t\t\t\t\tif (endpoint) action.setAttribute('data-composer-stop-endpoint', endpoint);\n\t\t\t\t\t\t\t\t\treturn endpoint;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tfunction refreshPrimaryActionForInput() {\n\t\t\t\t\t\t\t\t\tvar action = document.getElementById(formId + '-primary-action');\n\t\t\t\t\t\t\t\t\tif (!action) return;\n\t\t\t\t\t\t\t\t\tvar running = action.getAttribute('data-composer-running') === 'true';\n\t\t\t\t\t\t\t\t\tvar hasContent = !!(messageInput && composerMessage().trim() !== '');\n\t\t\t\t\t\t\t\t\tvar stopEndpoint = primaryActionStopEndpoint(action);\n\t\t\t\t\t\t\t\t\tvar wantStop = running && !hasContent && !!stopEndpoint;\n\t\t\t\t\t\t\t\t\tvar wantLabel = wantStop ? 'Stop response' : 'Send message';\n\t\t\t\t\t\t\t\t\tvar currentButton = action.querySelector('button');\n\t\t\t\t\t\t\t\t\tif (currentButton && currentButton.getAttribute('aria-label') === wantLabel) {\n\t\t\t\t\t\t\t\t\t\tupdatePrimaryActionModifierVisual();\n\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\taction.innerHTML = '';\n\t\t\t\t\t\t\t\t\taction.appendChild(buildPrimaryActionButton(wantStop ? 'stop' : 'send', stopEndpoint));\n\t\t\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(action);\n\t\t\t\t\t\t\t\t\tupdatePrimaryActionModifierVisual();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tfunction updatePrimaryActionModifierVisual() {\n\t\t\t\t\t\t\t\t\t\tvar action = document.getElementById(formId + '-primary-action');\n\t\t\t\t\t\t\t\t\t\tvar showSteer = shortcutModifierHeld && action && action.getAttribute('data-composer-running') === 'true';\n\t\t\t\t\t\t\t\tvar stopIcon = action ? action.querySelector('[data-composer-stop-icon]') : null;\n\t\t\t\t\t\t\t\tvar steerIcon = action ? action.querySelector('[data-composer-steer-icon]') : null;\n\t\t\t\t\t\t\t\tif (stopIcon) stopIcon.classList.toggle('hidden', !!showSteer);\n\t\t\t\t\t\t\t\tif (steerIcon) steerIcon.classList.toggle('hidden', !showSteer);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction consumeShortcutModifierVisual() {\n\t\t\t\t\t\t\t\tshortcutModifierHeld = false;\n\t\t\t\t\t\t\t\tupdatePrimaryActionModifierVisual();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction isShortcutModifierKey(event) {\n\t\t\t\t\t\t\t\treturn usesAppleShortcuts ? event.key === 'Meta' : event.key === 'Control';\n\t\t\t\t\t\t\t}\n                            // Dispose global modifier listeners when this composer is replaced.\n                            if (form._modifierAbort) form._modifierAbort.abort();\n                            var modifierAbort = new AbortController();\n                            form._modifierAbort = modifierAbort;\n                            var modifierObserver = new MutationObserver(function() {\n                                if (!form.isConnected) modifierAbort.abort();\n                            });\n                            modifierObserver.observe(document.body, {childList: true, subtree: true});\n                            modifierAbort.signal.addEventListener('abort', function() { modifierObserver.disconnect(); }, {once: true});\n                            document.addEventListener('keydown', function(event) {\n                                if (!form.isConnected || !isShortcutModifierKey(event)) return;\n                                shortcutModifierHeld = true;\n                                updatePrimaryActionModifierVisual();\n                            }, {signal: modifierAbort.signal});\n                            document.addEventListener('keyup', function(event) {\n                                if (!form.isConnected || !isShortcutModifierKey(event)) return;\n                                consumeShortcutModifierVisual();\n                            }, {signal: modifierAbort.signal});\n                            window.addEventListener('blur', consumeShortcutModifierVisual, {signal: modifierAbort.signal});\n\t\t\t\t\t\t// Each send owns its values while HTMX waits for the form's queue.\n\t\t\t\t\t\t// The picker uses this same capture before awaiting model settings.\n\t\t\t\t\t\tform._captureChatSubmission = function(payload, intent) {\n\t\t\t\t\t\t\tvar fields = new FormData(form);\n\t\t\t\t\t\t\tvar parameters = Object.create(null);\n\t\t\t\t\t\t\tfields.forEach(function(value, name) {\n\t\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(parameters, name)) {\n\t\t\t\t\t\t\t\t\tparameters[name] = [].concat(parameters[name], value);\n\t\t\t\t\t\t\t\t} else parameters[name] = value;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tvar snapshot = Object.assign({\n\t\t\t\t\t\t\t\tmessage: composerMessage(),\n\t\t\t\t\t\t\t\tcomposerText: messageInput.value,\n\t\t\t\t\t\t\t\tpastedTextSnapshot: pastedTexts.map(function(item) { return { id: item.id, text: item.text }; }),\n\t\t\t\t\t\t\t\tattachmentSessionID: sessionInput ? sessionInput.value : '',\n\t\t\t\t\t\t\t\tmodelID: fields.has('agent_id') ? fields.get('agent_id') : undefined,\n\t\t\t\t\t\t\t\treasoningEffort: fields.has('reasoning_effort') ? fields.get('reasoning_effort') : undefined,\n serviceTier: fields.has('service_tier') ? fields.get('service_tier') : undefined,\n\t\t\t\t\t\t\t\tsubmitIntent: form.getAttribute('data-submit-intent') || 'normal'\n\t\t\t\t\t\t\t}, payload || {});\n\t\t\t\t\t\t\tsnapshot.parameters = Object.assign(parameters, snapshot.parameters || {});\n\t\t\t\t\t\t\tif (intent) snapshot.submitIntent = intent;\n\t\t\t\t\t\t\treturn snapshot;\n\t\t\t\t\t\t};\n\t\t\t\t\t\tform.addEventListener('submit', function(event) {\n\t\t\t\t\t\t\tif (event.target !== form) return;\n\t\t\t\t\t\t\tevent._chatSubmissionPayload = form._captureChatSubmission(event._chatSubmissionPayload || form._chatNextSubmissionPayload);\n\t\t\t\t\t\t\tform._chatNextSubmissionPayload = null;\n\t\t\t\t\t\t}, true);\n\t\t\t\t\t\tform.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\t\t\tif (event.detail.elt !== form) return;\n\t\t\t\t\t\t\tvar sourceEvent = event.detail.triggeringEvent;\n\t\t\t\t\t\t\tvar payload = sourceEvent && sourceEvent._chatSubmissionPayload;\n\t\t\t\t\t\t\tif (!payload) return;\n\t\t\t\t\t\t\tvar parameters = event.detail.parameters;\n\t\t\t\t\t\t\tObject.assign(parameters, payload.parameters || {}, {\n\t\t\t\t\t\t\t\tmessage: payload.message,\n\t\t\t\t\t\t\t\tattachment_session_id: payload.attachmentSessionID\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tif (payload.modelID !== undefined) parameters.agent_id = payload.modelID;\n\t\t\t\t\t\t\tif (payload.reasoningEffort !== undefined) parameters.reasoning_effort = payload.reasoningEffort;\n if (payload.serviceTier !== undefined) parameters.service_tier = payload.serviceTier;\n\t\t\t\t\t\t\tif (payload.expectedTurnID !== undefined) parameters.expected_turn_id = payload.expectedTurnID;\n\t\t\t\t\t\t\tif (payload.managedModelSelection) parameters.model_selection_managed = '1';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tfunction safeSubmit() {\n\t\t\t\t\t\t\tvar submitBtn = currentSubmitButton();\n\t\t\t\t\t\t\t\t\tif (typeof form.requestSubmit === 'function') {\n\t\t\t\t\t\t\t\t\t\tform.requestSubmit(submitBtn || undefined);\n\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar submitEvent = new Event('submit', { bubbles: true, cancelable: true });\n\t\t\t\t\t\t\tform.dispatchEvent(submitEvent);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfunction submitComposer(endpoint, intent, payload) {\n\t\t\t\t\t\t\t\tif (!endpoint) return;\n\t\t\t\t\t\t\t\tvar submittedMessage = payload && typeof payload.message === 'string' ? payload.message : composerMessage();\n\t\t\t\t\t\t\t\tif (submittedMessage.trim() === '') return;\n\t\t\t\t\t\t\t\tif (intent === 'steer' && typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\t\t\tvar expectedTurnInput = form.querySelector('input[name=\"expected_turn_id\"]');\n\t\t\t\t\t\t\t\t\tpayload = form._captureChatSubmission(payload || {\n\t\t\t\t\t\t\t\t\t\tmessage: composerMessage(),\n\t\t\t\t\t\t\t\t\t\tattachmentSessionID: sessionInput ? sessionInput.value : '',\n\t\t\t\t\t\t\t\t\t\texpectedTurnID: expectedTurnInput ? expectedTurnInput.value : ''\n\t\t\t\t\t\t\t\t\t}, 'steer');\n\t\t\t\t\t\t\t\t\tvar signature = JSON.stringify([payload.message, payload.attachmentSessionID, payload.expectedTurnID]);\n\t\t\t\t\t\t\t\t\tif (steerRequestInFlight) {\n\t\t\t\t\t\t\t\t\t\tif (signature === steerRequestSignature || queuedSteerSubmissions.some(function(submission) { return submission.signature === signature; })) return;\n\t\t\t\t\t\t\t\t\t\tqueuedSteerSubmissions.push({signature: signature, payload: payload});\n\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tsteerRequestSignature = signature;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tvar visibleMessageBeforePayload = messageInput ? messageInput.value : '';\n\t\t\t\t\t\t\t\tvar visibleSessionBeforePayload = sessionInput ? sessionInput.value : '';\n\t\t\t\t\t\t\t\tvar restorePayloadValues = !!payload;\n\t\t\t\t\t\t\t\tif (restorePayloadValues) {\n\t\t\t\t\t\t\t\t\tif (messageInput && typeof payload.message === 'string') messageInput.value = payload.message;\n\t\t\t\t\t\t\t\t\tif (sessionInput && typeof payload.attachmentSessionID === 'string') sessionInput.value = payload.attachmentSessionID;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tform.setAttribute('data-submit-intent', intent || 'normal');\n\t\t\t\t\t\t\t\tform._chatNextSubmissionPayload = payload || null;\n\t\t\t\t\t\t\t\tif (intent === 'steer' && typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\t\t\tsteerRequestInFlight = true;\n\t\t\t\t\t\t\t\t\tsteerFallbackPending = false;\n\t\t\t\t\t\t\t\t\tvar steeringEvent = new Event('chat:steer');\n\t\t\t\t\t\t\t\t\tsteeringEvent._chatSubmissionPayload = payload;\n\t\t\t\t\t\t\t\t\tvar options = {\n\t\t\t\t\t\t\t\t\tsource: form,\n\t\t\t\t\t\t\t\t\tevent: steeringEvent,\n\t\t\t\t\t\t\t\t\ttarget: '#pending-thread-inputs',\n\t\t\t\t\t\t\t\t\tswap: form.getAttribute('hx-swap') || 'beforeend'\n\t\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\t\t\t\tif (payload) {\n\t\t\t\t\t\t\t\t\t\t\toptions.values = {\n\t\t\t\t\t\t\t\t\t\t\t\tmessage: payload.message,\n\t\t\t\t\t\t\t\t\t\t\t\tattachment_session_id: payload.attachmentSessionID,\n\t\t\t\t\t\t\t\t\t\t\t\texpected_turn_id: payload.expectedTurnID\n\t\t\t\t\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\t\tvar steerRequest = htmx.ajax('POST', endpoint, options);\n\t\t\t\t\t\t\t\t\t\t// HTMX resolves queued ajax promises before sending the request.\n\t\t\t\t\t\t\t\t\t\t// Release steering only on its actual afterRequest event.\n\t\t\t\t\t\t\t\t\t\tif (steerRequest && typeof steerRequest.catch === 'function') {\n\t\t\t\t\t\t\t\t\t\t\tsteerRequest.catch(function() {});\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t} catch (error) {\n\t\t\t\t\t\t\t\t\t\tfinishSteerRequest();\n\t\t\t\t\t\t\t\t\t\tthrow error;\n\t\t\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\t\t\tif (form._chatNextSubmissionPayload === payload) form._chatNextSubmissionPayload = null;\n\t\t\t\t\t\t\t\t\t\tif (restorePayloadValues) {\n\t\t\t\t\t\t\t\t\t\t\tif (messageInput) messageInput.value = visibleMessageBeforePayload;\n\t\t\t\t\t\t\t\t\t\t\tif (sessionInput) sessionInput.value = visibleSessionBeforePayload;\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tform.setAttribute('hx-post', endpoint);\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tsafeSubmit();\n\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\tif (restorePayloadValues) {\n\t\t\t\t\t\t\t\t\tif (messageInput) messageInput.value = visibleMessageBeforePayload;\n\t\t\t\t\t\t\t\t\tif (sessionInput) sessionInput.value = visibleSessionBeforePayload;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// A picker failure can end a fallback before HTMX creates a request,\n\t\t\t\t\t\t\t// so no afterRequest event will release the steering queue.\n\t\t\t\t\t\t\tform._chatSubmissionFailed = function(payload) {\n\t\t\t\t\t\t\t\tif (!payload || !payload.fallbackFromSteer || !steerFallbackPending) return;\n\t\t\t\t\t\t\t\tsteerFallbackPending = false;\n\t\t\t\t\t\t\t\tfinishSteerRequest();\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\tfunction finishSteerRequest() {\n\t\t\t\t\t\t\t\tif (steerFallbackPending) return;\n\t\t\t\t\t\t\t\tsteerRequestInFlight = false;\n\t\t\t\t\t\t\t\tsteerRequestSignature = '';\n\t\t\t\t\t\t\t\tif (!queuedSteerSubmissions.length) return;\n\t\t\t\t\t\t\t\tvar nextSubmission = queuedSteerSubmissions.shift();\n\t\t\t\t\t\t\t\tsubmitComposer(steerEndpoint, 'steer', nextSubmission.payload);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction composerHasActiveTurn() {\n\t\t\t\t\t\t\tvar action = document.getElementById(formId + '-primary-action');\n\t\t\t\t\t\t\treturn !!action && action.getAttribute('data-composer-running') === 'true';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction clearExpectedTurnIDWhenIdle() {\n\t\t\t\t\t\t\tif (composerHasActiveTurn()) return;\n\t\t\t\t\t\t\tvar guard = form.querySelector('input[name=\"expected_turn_id\"]');\n\t\t\t\t\t\t\tif (guard) guard.remove();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction activeTurnID() {\n\t\t\t\t\t\t\tvar targetSelector = form.getAttribute('hx-target') || '';\n\t\t\t\t\t\t\tvar target = targetSelector && targetSelector.charAt(0) === '#' ? document.getElementById(targetSelector.slice(1)) : null;\n\t\t\t\t\t\t\tvar pairs = target ? target.querySelectorAll('[data-execution-pair=\"true\"][data-exec-status=\"running\"], [data-execution-pair=\"true\"][data-exec-status=\"queued\"]') : [];\n\t\t\t\t\t\t\t\tif (pairs.length) return pairs[pairs.length - 1].getAttribute('data-exec-id') || '';\n\t\t\t\t\t\t\t\tvar action = document.getElementById(formId + '-primary-action');\n\t\t\t\t\t\t\t\tvar actionTurnID = action ? action.getAttribute('data-active-turn-id') || '' : '';\n\t\t\t\t\t\t\t\tif (actionTurnID) return actionTurnID;\n\t\t\t\t\t\t\t\tif (!composerHasActiveTurn()) {\n\t\t\t\t\t\t\t\tclearExpectedTurnIDWhenIdle();\n\t\t\t\t\t\t\t\treturn '';\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar guard = form.querySelector('input[name=\"expected_turn_id\"]');\n\t\t\t\t\t\t\treturn guard ? guard.value : '';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction setExpectedTurnID(turnID) {\n\t\t\t\t\t\t\tvar guard = form.querySelector('input[name=\"expected_turn_id\"]');\n\t\t\t\t\t\t\tif (!guard) {\n\t\t\t\t\t\t\t\tguard = document.createElement('input');\n\t\t\t\t\t\t\t\tguard.type = 'hidden';\n\t\t\t\t\t\t\t\tguard.name = 'expected_turn_id';\n\t\t\t\t\t\t\t\tform.appendChild(guard);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tguard.value = turnID;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction deferSteerWhileSendPending() {\n\t\t\t\t\t\t\tif (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !composerMessage().trim()) return false;\n\t\t\t\t\t\t\tdeferredSteer = form._captureChatSubmission(null, 'steer');\n\t\t\t\t\t\t\treturn true;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction flushDeferredSteer() {\n\t\t\t\t\t\t\tif (!deferredSteer || normalRequestInFlight > 0) return;\n\t\t\t\t\t\t\tvar turnID = activeTurnID();\n\t\t\t\t\t\t\tif (!turnID) return;\n\t\t\t\t\t\t\tvar payload = deferredSteer;\n\t\t\t\t\t\t\tdeferredSteer = null;\n\t\t\t\t\t\t\tpayload.expectedTurnID = turnID;\n\t\t\t\t\t\t\tsetExpectedTurnID(turnID);\n\t\t\t\t\t\t\tsubmitComposer(steerEndpoint, 'steer', payload);\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tfunction handleComposerStateMutation() {\n\t\t\t\t\t\t\t\t\t\t// Polling keeps the form's listeners but resets server-rendered\n\t\t\t\t\t\t\t\t\t\t// children. Restore the client-owned draft preview in its stable slot.\n\t\t\t\t\t\t\t\t\t\tif (pasteCards.children.length !== pastedTexts.length || pasteCards.hidden !== (pastedTexts.length === 0)) renderPastes();\n\t\t\t\t\t\t\t\t\t\tclearExpectedTurnIDWhenIdle();\n\t\t\t\t\t\t\t\t\t\trefreshPrimaryActionForInput();\n\t\t\t\t\t\t\t\t\t\tflushDeferredSteer();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tif (typeof MutationObserver !== 'undefined') {\n\t\t\t\t\t\t\t\t\t\tnew MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true });\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\tclearExpectedTurnIDWhenIdle();\n\t\t\t\t\t\t\trefreshPrimaryActionForInput();\n\n\t\t\t\t\tvar messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';\n\t\t\t\t\tvar messageHistoryLimit = 50;\n\t\t\t\tvar messageHistoryEntries = [];\n\t\t\t\tvar messageHistoryIndex = -1;\n\t\t\t\tvar messageHistoryDraft = '';\n\t\t\t\tvar normalRequestInFlight = 0;\n\t\t\t\tvar deferredSteer = null;\n\t\t\t\tvar suppressMessageHistoryInputReset = false;\n\n\t\t\t\t// Keep submitted history usable when browser storage is unavailable.\n\t\t\t\twindow._chatMessageHistories = window._chatMessageHistories || Object.create(null);\n\n\t\t\t\tfunction renderedMessageHistory() {\n\t\t\t\t\t// Stay inside the submitting thread, including when its form is detached.\n\t\t\t\t\t// New-task forms have no transcript history to recover.\n\t\t\t\t\tvar root = form.closest('#task-thread-view, #chat-page-root');\n\t\t\t\t\tif (!root) return [];\n\t\t\t\t\tif (window.materializeVirtualChatRows) window.materializeVirtualChatRows(root, {renderLazy:false});\n\t\t\t\t\tvar entries = [];\n\t\t\t\t\troot.querySelectorAll('.chat-bubble-user-msg .chat-bubble-inner > div:first-child, #pending-thread-inputs [data-pending-input-content]').forEach(function(node) {\n\t\t\t\t\t\tvar message = node.textContent || '';\n\t\t\t\t\t\tif (message.trim() && entries[entries.length - 1] !== message) entries.push(message);\n\t\t\t\t\t});\n\t\t\t\t\treturn entries.slice(-messageHistoryLimit);\n\t\t\t\t}\n\n                function mergeMessageHistory(saved, rendered) {\n                    // Align matching occurrences, rather than deduplicating by text: a\n                    // user can send the same message again later. Both lists are bounded.\n                    // Sends are trimmed by the server. Match that representation but\n                    // retain the saved text so recall preserves the user's whitespace.\n                    var savedKeys = saved.map(function(message) { return message.trim(); });\n                    var renderedKeys = rendered.map(function(message) { return message.trim(); });\n                    var lengths = Array.from({length: saved.length + 1}, function() {\n                        return Array(rendered.length + 1).fill(0);\n                    });\n                    for (var i = saved.length - 1; i >= 0; i--) {\n                        for (var j = rendered.length - 1; j >= 0; j--) {\n                            lengths[i][j] = savedKeys[i] === renderedKeys[j]\n                                ? 1 + lengths[i + 1][j + 1]\n                                : Math.max(lengths[i + 1][j], lengths[i][j + 1]);\n                        }\n                    }\n                    var entries = [], i = 0, j = 0;\n                    while (i < saved.length && j < rendered.length) {\n                        if (savedKeys[i] === renderedKeys[j]) {\n                            entries.push(saved[i++]); j++;\n                        } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {\n                            entries.push(saved[i++]);\n                        } else {\n                            entries.push(rendered[j++]);\n                        }\n                    }\n                    return entries.concat(saved.slice(i), rendered.slice(j)).slice(-messageHistoryLimit);\n                }\n\n                function loadMessageHistory() {\n                    if (!messageHistoryStorageKey) return [];\n                    var entries = window._chatMessageHistories[messageHistoryStorageKey];\n                    if (!entries || !entries.length) {\n                        entries = [];\n                        try {\n                            var raw = localStorage.getItem(messageHistoryStorageKey);\n                            var parsed = raw ? JSON.parse(raw) : [];\n                            if (Array.isArray(parsed)) {\n                                entries = parsed.filter(function(entry) { return typeof entry === 'string' && entry.trim() !== ''; }).slice(-messageHistoryLimit);\n                            }\n                        } catch (e) {\n                            // The server-rendered thread remains available without storage.\n                        }\n                    }\n                    return mergeMessageHistory(entries, renderedMessageHistory());\n                }\n\n\t\t\t\tfunction saveMessageHistory(entries) {\n\t\t\t\t\tif (!messageHistoryStorageKey) return;\n\t\t\t\t\ttry {\n\t\t\t\t\t\tlocalStorage.setItem(messageHistoryStorageKey, JSON.stringify(entries.slice(-messageHistoryLimit)));\n\t\t\t\t\t\tdelete window._chatMessageHistories[messageHistoryStorageKey];\n\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t// Prefer this newer session copy over a stale cache when storage is full.\n\t\t\t\t\t\twindow._chatMessageHistories[messageHistoryStorageKey] = entries.slice(-messageHistoryLimit);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction rememberSubmittedMessage(message) {\n\t\t\t\t\tvar trimmed = (message || '').trim();\n\t\t\t\t\tif (!trimmed) return;\n\t\t\t\t\tmessageHistoryEntries = loadMessageHistory();\n\t\t\t\t\tvar lastIndex = messageHistoryEntries.length - 1;\n\t\t\t\t\tif (lastIndex >= 0 && messageHistoryEntries[lastIndex].trim() === trimmed) {\n\t\t\t\t\t\t// The response may already have rendered the server-trimmed copy.\n\t\t\t\t\t\t// Keep one entry, retaining the exact text the user submitted.\n\t\t\t\t\t\tmessageHistoryEntries[lastIndex] = message;\n\t\t\t\t\t} else {\n\t\t\t\t\t\tmessageHistoryEntries.push(message);\n\t\t\t\t\t}\n\t\t\t\t\tmessageHistoryEntries = messageHistoryEntries.slice(-messageHistoryLimit);\n\t\t\t\t\tsaveMessageHistory(messageHistoryEntries);\n\t\t\t\t}\n\n\t\t\t\tfunction resetMessageHistoryNavigation() {\n\t\t\t\t\tmessageHistoryIndex = -1;\n\t\t\t\t\tmessageHistoryDraft = '';\n\t\t\t\t}\n\n\t\t\t\tfunction setMessageInputFromHistory(value) {\n\t\t\t\t\tif (!messageInput) return;\n\t\t\t\t\tmessageInput.value = value;\n\t\t\t\t\tsuppressMessageHistoryInputReset = true;\n\t\t\t\t\tmessageInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t\t\tsuppressMessageHistoryInputReset = false;\n\t\t\t\t\tif (typeof messageInput.setSelectionRange === 'function') {\n\t\t\t\t\t\tmessageInput.setSelectionRange(0, 0);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction isAtMessageHistoryBoundary(textarea, key) {\n\t\t\t\t\tif (!textarea) return false;\n\t\t\t\t\tvar start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : 0;\n\t\t\t\t\tvar end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;\n\t\t\t\t\tif (start !== end) return false;\n\t\t\t\t\treturn key === 'ArrowUp' ? textarea.value.slice(0, start).indexOf('\\n') === -1 : textarea.value.slice(end).indexOf('\\n') === -1;\n\t\t\t\t}\n\n\t\t\t\tfunction handleMessageHistoryKeydown(e) {\n\t\t\t\t\tif (!messageInput || !messageHistoryStorageKey) return false;\n\t\t\t\t\tif (e.defaultPrevented || e.isComposing || e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return false;\n\t\t\t\t\tif (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return false;\n\t\t\t\t\tif (e.key === 'Escape') {\n\t\t\t\t\t\tif (messageHistoryIndex === -1) return false;\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tsetMessageInputFromHistory(messageHistoryDraft);\n\t\t\t\t\t\tresetMessageHistoryNavigation();\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t}\n\t\t\t\t\tif (messageInput.selectionStart !== messageInput.selectionEnd) return false;\n\t\t\t\t\tif (messageHistoryIndex === -1 && messageInput.value !== '' && !isAtMessageHistoryBoundary(messageInput, e.key)) return false;\n\t\t\t\t\tif (e.key === 'ArrowDown' && messageHistoryIndex === -1) return false;\n\n\t\t\t\t\tmessageHistoryEntries = loadMessageHistory();\n\t\t\t\t\tif (messageHistoryEntries.length === 0) return false;\n\t\t\t\t\te.preventDefault();\n\n\t\t\t\t\tif (e.key === 'ArrowUp') {\n\t\t\t\t\t\tif (messageHistoryIndex === -1) messageHistoryDraft = messageInput.value;\n\t\t\t\t\t\tif (messageHistoryIndex < messageHistoryEntries.length - 1) messageHistoryIndex++;\n\t\t\t\t\t\tsetMessageInputFromHistory(messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]);\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t}\n\n\t\t\t\t\tif (messageHistoryIndex > 0) {\n\t\t\t\t\t\tmessageHistoryIndex--;\n\t\t\t\t\t\tsetMessageInputFromHistory(messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tsetMessageInputFromHistory(messageHistoryDraft);\n\t\t\t\t\t\tresetMessageHistoryNavigation();\n\t\t\t\t\t}\n\t\t\t\t\treturn true;\n\t\t\t\t}\n\n\t\t\tvar attachmentUploadQueue = Promise.resolve();\n\t\t\tvar attachmentUploadGeneration = 0;\n\t\t\tvar attachmentStateKey = form.getAttribute('data-attachment-state-key') || '';\n\t\t\twindow._chatPendingAttachmentStates = window._chatPendingAttachmentStates || {};\n\n\t\t\tfunction appendPendingAttachmentRow(targetList, attachment) {\n\t\t\t\tif (!targetList || !attachment) return;\n\t\t\t\ttargetList.setAttribute('data-image-gallery-group', '');\n\t\t\t\tvar filename = String(attachment.filename || '');\n\t\t\t\tvar size = parseInt(attachment.size || '0', 10) || 0;\n\t\t\t\tvar div = document.createElement('div');\n\t\t\t\tdiv.className = 'flex items-center gap-2 text-sm';\n\t\t\t\tdiv.setAttribute('data-pending-attachment', 'true');\n\t\t\t\tdiv.setAttribute('data-pending-attachment-filename', filename);\n\t\t\t\tdiv.setAttribute('data-pending-attachment-size', String(size));\n\t\t\t\tdiv.dataset.pendingAttachmentMediaType = attachment.media_type || '';\n\t\t\t\tdiv.dataset.pendingAttachmentSession = attachment.session_id || '';\n\t\t\t\tdiv.innerHTML = '<svg class=\"w-4 h-4 text-base-content/70\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13\"></path></svg>';\n\t\t\t\tvar name = document.createElement('span');\n\t\t\t\tname.className = 'font-medium';\n\t\t\t\tname.textContent = filename;\n\t\t\t\tif ((attachment.media_type || '').startsWith('image/') && attachment.session_id) {\n                    var link = document.createElement('a');\n                    link.href = '/chat/attachments/pending/' + encodeURIComponent(attachment.session_id) + '/' + encodeURIComponent(filename);\n                    link.dataset.imageGalleryItem = '';\n                    link.dataset.imageName = filename;\n                    link.className = 'flex items-center gap-2 min-w-0';\n                    var thumb = document.createElement('img');\n                    thumb.src = link.href;\n                    thumb.alt = filename;\n                    link.appendChild(thumb);\n                    link.appendChild(name);\n                    div.replaceChildren(link);\n                } else {\n                    div.appendChild(name);\n                }\n                var sizeLabel = document.createElement('span');\n\t\t\t\tsizeLabel.className = 'text-xs opacity-60';\n\t\t\t\tsizeLabel.textContent = formatBytes(size);\n\t\t\t\tdiv.appendChild(sizeLabel);\n\t\t\t\ttargetList.appendChild(div);\n\t\t\t}\n\n\t\t\t\tfunction readPendingAttachmentState(targetForm) {\n\t\t\t\t\tif (!targetForm) return null;\n\t\t\t\t\tvar targetSession = targetForm.querySelector('input[name=\"attachment_session_id\"]');\n\t\t\t\t\tvar targetList = targetForm.querySelector('[id$=\"-attachments-list\"]');\n\t\t\t\t\tvar sessionID = targetSession ? (targetSession.value || targetSession.getAttribute('value') || '') : '';\n\t\t\t\t\tif (!sessionID) return null;\n\t\t\t\t\tvar attachments = [];\n\t\t\t\t\tif (targetList) {\n\t\t\t\t\t\ttargetList.querySelectorAll('[data-pending-attachment=\"true\"]').forEach(function(row) {\n\t\t\t\t\t\t\tattachments.push({\n\t\t\t\t\t\t\t\tfilename: row.getAttribute('data-pending-attachment-filename') || '',\n\t\t\t\t\t\t\t\tsize: parseInt(row.getAttribute('data-pending-attachment-size') || '0', 10) || 0,\n\t\t\t\t\t\t\t\tmedia_type: row.dataset.pendingAttachmentMediaType || '',\n\t\t\t\t\t\t\t\tsession_id: row.dataset.pendingAttachmentSession || ''\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\treturn { sessionID: sessionID, attachments: attachments };\n\t\t\t\t}\n\n\t\t\t\twindow.saveChatPendingAttachmentState = function(formOrID) {\n\t\t\t\t\tvar targetForm = typeof formOrID === 'string' ? document.getElementById(formOrID) : formOrID;\n\t\t\t\t\tif (!targetForm) return null;\n\t\t\t\t\tvar key = targetForm.getAttribute('data-attachment-state-key') || '';\n\t\t\t\t\tif (!key) return null;\n\t\t\t\t\tvar state = readPendingAttachmentState(targetForm);\n\t\t\t\t\tif (!state) return null;\n\t\t\t\t\tvar targetSession = targetForm.querySelector('input[name=\"attachment_session_id\"]');\n\t\t\t\t\tif (targetSession) targetSession.setAttribute('value', state.sessionID);\n\t\t\t\t\twindow._chatPendingAttachmentStates[key] = state;\n\t\t\t\t\ttry { sessionStorage.setItem(key, JSON.stringify(state)); } catch (_) {}\n\t\t\t\t\treturn state;\n\t\t\t\t};\n\n\t\t\t\twindow.restoreChatPendingAttachmentState = function(formOrID) {\n\t\t\t\t\tvar targetForm = typeof formOrID === 'string' ? document.getElementById(formOrID) : formOrID;\n\t\t\t\t\tif (!targetForm) return false;\n\t\t\t\t\tvar key = targetForm.getAttribute('data-attachment-state-key') || '';\n\t\t\t\t\tif (!key) return false;\n\t\t\t\t\tvar state = window._chatPendingAttachmentStates[key] || null;\n\t\t\t\t\tif (!state) {\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tvar stored = sessionStorage.getItem(key);\n\t\t\t\t\t\t\tstate = stored ? JSON.parse(stored) : null;\n\t\t\t\t\t\t} catch (_) { state = null; }\n\t\t\t\t\t}\n\t\t\t\t\tif (!state || !state.sessionID) return false;\n\t\t\t\t\tvar targetSession = targetForm.querySelector('input[name=\"attachment_session_id\"]');\n\t\t\t\t\tvar targetPreview = targetForm.querySelector('[id$=\"-attachments-preview\"]');\n\t\t\t\t\tvar targetList = targetForm.querySelector('[id$=\"-attachments-list\"]');\n\t\t\t\t\tif (!targetSession || !targetList) return false;\n\t\t\t\t\ttargetSession.value = state.sessionID;\n\t\t\t\t\ttargetSession.setAttribute('value', state.sessionID);\n\t\t\t\t\ttargetList.innerHTML = '';\n\t\t\t\t\t(state.attachments || []).forEach(function(attachment) { appendPendingAttachmentRow(targetList, attachment); });\n\t\t\t\t\tif (targetPreview) targetPreview.classList.toggle('hidden', (state.attachments || []).length === 0);\n\t\t\t\t\twindow._chatPendingAttachmentStates[key] = state;\n\t\t\t\t\treturn true;\n\t\t\t\t};\n\n\t\t\t// Clear attachments function (registered on window for onclick handlers)\n\t\t\t\twindow[clearFuncName] = function() {\n\t\t\t\t\tattachmentUploadGeneration++;\n\t\t\t\t\tif (preview) preview.classList.add('hidden');\n\t\t\t\t\tif (listContainer) listContainer.innerHTML = '';\n\t\t\t\t\tif (sessionInput) {\n\t\t\t\t\t\tsessionInput.value = '';\n\t\t\t\t\t\tsessionInput.setAttribute('value', '');\n\t\t\t\t\t}\n\t\t\t\t\tif (fileInput) fileInput.value = '';\n\t\t\t\t\tif (attachmentStateKey) {\n\t\t\t\t\t\tdelete window._chatPendingAttachmentStates[attachmentStateKey];\n\t\t\t\t\t\ttry { sessionStorage.removeItem(attachmentStateKey); } catch (_) {}\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t\twindow.restoreChatPendingAttachmentState(form);\n\t\t\t\tif (!window._chatPendingAttachmentHistoryBound) {\n\t\t\t\t\twindow._chatPendingAttachmentHistoryBound = true;\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeHistorySave', function() {\n\t\t\t\t\t\tdocument.querySelectorAll('form[data-attachment-state-key]').forEach(function(historyForm) {\n\t\t\t\t\t\t\tif (window.saveChatPendingAttachmentState) window.saveChatPendingAttachmentState(historyForm);\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t\tdocument.body.addEventListener('htmx:historyRestore', function() {\n\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\tdocument.querySelectorAll('form[data-attachment-state-key]').forEach(function(restoredForm) {\n\t\t\t\t\t\t\t\tif (window.restoreChatPendingAttachmentState) window.restoreChatPendingAttachmentState(restoredForm);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}, 0);\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t// Wire up the Clear All button\n\t\t\tif (clearBtn) {\n\t\t\t\tclearBtn.onclick = function() { window[clearFuncName](); };\n\t\t\t}\n\n\t\t\t\t\t\t// Keyboard submission and message history navigation\n\t\t\t\t\t\tif (messageInput) {\n\t\t\t\t\t\tmessageInput.addEventListener('keydown', function(e) {\n\t\t\t\t\t\t\tif (handleMessageHistoryKeydown(e)) return;\n\t\t\t\t\t\t\tif (e.isComposing || e.keyCode === 229) return;\n\t\t\t\t\t\t\tif (e.key === 'Enter' && !e.shiftKey) {\n\t\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\t\tif (shortcutModifierPressed(e)) {\n\t\t\t\t\t\t\t\t\tconsumeShortcutModifierVisual();\n\t\t\t\t\t\t\t\t\tvar turnID = activeTurnID();\n\t\t\t\t\t\t\t\t\tif (steerEndpoint && turnID) {\n\t\t\t\t\t\t\t\t\t\tsetExpectedTurnID(turnID);\n\t\t\t\t\t\t\t\t\t\tsubmitComposer(steerEndpoint, 'steer');\n\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tif (deferSteerWhileSendPending()) return;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tsubmitComposer(normalPostEndpoint, 'normal');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\tmessageInput.addEventListener('input', function() {\n\t\t\t\t\t\t\t\t\trefreshPrimaryActionForInput();\n\t\t\t\t\t\t\t\t\tif (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t// Normalize primary-action clicks to the shared submit paths, even after\n\t\t\t\t\t// the button is replaced out-of-band between Send and Stop. A platform\n\t\t\t\t\t// modifier on the primary control requests guarded steering whenever the\n\t\t\t\t\t// transcript already has an active turn, even if the action swap still shows Send;\n\t\t\t\t\t// an unavailable/stale steering request leaves the draft untouched.\n\t\t\t\t\tform.addEventListener('click', function(e) {\n\t\t\t\t\t\tvar primaryAction = e.target && e.target.closest ? e.target.closest('[id=\"' + formId + '-primary-action\"] button') : null;\n\t\t\t\t\t\tif (!primaryAction || !form.contains(primaryAction)) return;\n\t\t\t\t\t\tvar isStopAction = primaryAction.getAttribute('aria-label') === 'Stop response';\n\t\t\t\t\t\tif (shortcutModifierPressed(e)) {\n\t\t\t\t\t\t\tconsumeShortcutModifierVisual();\n\t\t\t\t\t\t\tvar turnID = activeTurnID();\n\t\t\t\t\t\t\tif (steerEndpoint && turnID) {\n\t\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\t\te.stopImmediatePropagation();\n\t\t\t\t\t\t\t\tsetExpectedTurnID(turnID);\n\t\t\t\t\t\t\t\tsubmitComposer(steerEndpoint, 'steer');\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (deferSteerWhileSendPending()) {\n\t\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\t\te.stopImmediatePropagation();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (isStopAction) {\n\t\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\t\te.stopImmediatePropagation();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (isStopAction) return;\n\t\t\t\t\t\tif (primaryAction.type !== 'submit') return;\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\te.stopImmediatePropagation();\n\t\t\t\t\t\tsubmitComposer(normalPostEndpoint, 'normal');\n\t\t\t\t\t}, true);\n\t\t\t// The shared picker loads and saves model preferences through the API.\n\t\t\tvar projectIdInput = form.querySelector('input[name=\"_project_id\"]');\n\t\t\tvar projectId = projectIdInput ? projectIdInput.value : '';\n\t\t\tvar modeStorageKey = projectId ? 'chat-mode-' + projectId : '';\n\n\t\t\tif (agentSelect && agentInput) {\n\t\t\t\t// Initialize the custom select UI (set label from current value, bind click handler)\n\t\t\t\tif (window._initChatCustomSelect) window._initChatCustomSelect(agentSelect);\n\t\t\t\tif (window.ovModelPicker) window.ovModelPicker.init(agentSelect);\n\t\t\t\tagentSelect.addEventListener('chat-select-change', function(e) {\n\t\t\t\t\tagentInput.value = e.detail.value;\n\t\t\t\t\tif (window.ovModelPicker) window.ovModelPicker.changed(agentSelect);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\t// Chat mode selector -> hidden input sync + localStorage persistence\n\t\t\tif (modeSelect && modeInput) {\n\t\t\t\tvar modeOptList = modeSelect.parentElement ? modeSelect.parentElement.querySelector('.chat-custom-select-options') : null;\n\t\t\t\t// Initialize the custom select UI (set label from current value, bind click handler)\n\t\t\t\tif (window._initChatCustomSelect) window._initChatCustomSelect(modeSelect);\n\t\t\t\tfunction reevaluatePlanPrompt() {\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t}, 0);\n\t\t\t\t}\n\t\t\t\t// Mark selector as not hydrated until default + persisted restore is applied.\n\t\t\t\tmodeSelect.dataset.hydrated = 'false';\n\t\t\t\t// Ensure UI reflects current hidden default first\n\t\t\t\tif (modeInput.value) {\n\t\t\t\t\tif (window._setChatCustomSelectValue) window._setChatCustomSelectValue(modeSelect, modeInput.value);\n\t\t\t\t}\n\n\t\t\t\t// Restore persisted selection\n\t\t\t\tif (modeStorageKey) {\n\t\t\t\t\tvar savedMode = localStorage.getItem(modeStorageKey);\n\t\t\t\t\tif (savedMode) {\n\t\t\t\t\t\tvar modeExists = false;\n\t\t\t\t\t\tif (modeOptList) {\n\t\t\t\t\t\t\tmodeOptList.querySelectorAll('li[data-value]').forEach(function(li) {\n\t\t\t\t\t\t\t\tif (li.dataset.value === savedMode) modeExists = true;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (modeExists) {\n\t\t\t\t\t\t\tif (window._setChatCustomSelectValue) window._setChatCustomSelectValue(modeSelect, savedMode);\n\t\t\t\t\t\t\tmodeInput.value = savedMode;\n\t\t\t\t\t\t\treevaluatePlanPrompt();\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\tlocalStorage.removeItem(modeStorageKey);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tmodeSelect.dataset.hydrated = 'true';\n\n\t\t\t\t\tmodeSelect.addEventListener('chat-select-change', function(e) {\n\t\t\t\t\t\tmodeInput.value = e.detail.value;\n\t\t\t\t\t\tif (modeStorageKey) {\n\t\t\t\t\t\t\tlocalStorage.setItem(modeStorageKey, e.detail.value);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tmodeSelect.dataset.hydrated = 'true';\n\t\t\t\t\t\treevaluatePlanPrompt();\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t// Aggregate workspaces send to one chosen project; Send opens the picker until then.\n\t\t\tvar projectSelect = form.querySelector('[id$=\"-project-select\"]');\n\t\t\tvar projectInput = projectSelect ? document.getElementById(projectSelect.getAttribute('data-project-input')) : null;\n\t\t\tvar projectSendPending = false;\n\t\t\tfunction chosenProject() { return projectInput ? projectInput.value : ''; }\n\t\t\tfunction openProjectPicker() {\n\t\t\t\tif (window._closeChatCustomSelectPanel) window._closeChatCustomSelectPanel();\n\t\t\t\tif (window._openChatCustomSelectPanel) window._openChatCustomSelectPanel(projectSelect);\n\t\t\t}\n\t\t\tif (projectSelect && projectInput) {\n\t\t\t\tif (window._initChatCustomSelect) window._initChatCustomSelect(projectSelect);\n\t\t\t\tvar syncProjectLabel = function() {\n\t\t\t\t\tif (projectInput.value) window._setChatCustomSelectValue(projectSelect, projectInput.value);\n\t\t\t\t\telse {\n\t\t\t\t\t\tprojectSelect.dataset.currentValue = '';\n\t\t\t\t\t\tprojectSelect.querySelector('.chat-custom-select-label').textContent = projectSelect.dataset.placeholder;\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t\tsyncProjectLabel();\n                var modelRequest = 0;\n                async function refreshProjectModels() {\n                    var token = ++modelRequest;\n                    var picker = form.querySelector('[id$=\"-agent-select\"]');\n                    var input = form.querySelector('[name=\"agent_id\"]');\n                    if (!picker || !input) return;\n                    window.ovModelPicker?.close();\n                    input.value = 'default';\n                    var options = picker.parentElement.querySelector('.chat-custom-select-options');\n                    options.innerHTML = '<li data-value=\"default\">Default</li>';\n                    form.querySelectorAll('[name=\"reasoning_effort\"], [name=\"service_tier\"]').forEach(function(field) { field.value = ''; });\n                    picker.disabled = true;\n                    picker.querySelector('.chat-custom-select-label').textContent = 'Loading models…';\n                    try {\n                        var response = await fetch('/tasks/new?model_options=1&project_id=' + encodeURIComponent(chosenProject()));\n                        if (!response.ok) throw new Error('Models unavailable');\n                        var html = await response.text();\n                        if (token !== modelRequest || !form.isConnected) return;\n                        options.innerHTML = html;\n                        picker.disabled = false;\n                        window._setChatCustomSelectValue?.(picker, 'default');\n                        window.ovModelPicker?.changed(picker);\n                    } catch (_) {\n                        if (token === modelRequest && form.isConnected) picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';\n                    }\n                }\n\t\t\t\tvar uploadedForProject = projectInput.value;\n\t\t\t\tprojectInput.addEventListener('change', function() {\n\t\t\t\t\tsyncProjectLabel();\n                    if (projectSelect.getAttribute('data-project-send-url')) refreshProjectModels();\n\t\t\t\t\t// Uploaded files are staged on the previous project's server.\n\t\t\t\t\tif (uploadedForProject !== projectInput.value && window[clearFuncName]) window[clearFuncName]();\n\t\t\t\t\tuploadedForProject = projectInput.value;\n\t\t\t\t});\n\t\t\t\tprojectSelect.addEventListener('chat-select-change', function(e) {\n\t\t\t\t\tprojectInput.value = e.detail.value;\n\t\t\t\t\tprojectInput.dispatchEvent(new Event('change', {bubbles: true}));\n\t\t\t\t\tif (!projectSendPending) return;\n\t\t\t\t\tprojectSendPending = false;\n\t\t\t\t\tsubmitComposer(normalPostEndpoint, 'normal');\n\t\t\t\t});\n\t\t\t\t// Closing the picker without a choice cancels the waiting Send, not the draft.\n\t\t\t\tnew MutationObserver(function() {\n\t\t\t\t\tif (projectSelect.getAttribute('aria-expanded') === 'false') projectSendPending = false;\n\t\t\t\t}).observe(projectSelect, {attributes: true, attributeFilter: ['aria-expanded']});\n\t\t\t\tform.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\tif (event.detail.elt !== form || event.detail.path !== normalPostEndpoint) return;\n\t\t\t\t\tif (!chosenProject()) {\n\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\topenProjectPicker();\n\t\t\t\t\t\tprojectSendPending = true;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar sendURL = projectSelect.getAttribute('data-project-send-url');\n\t\t\t\t\tif (sendURL) event.detail.path = sendURL + encodeURIComponent(chosenProject());\n\t\t\t\t});\n\t\t\t\tform.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar openURL = projectSelect.getAttribute('data-project-open-url');\n\t\t\t\t\tvar request = event.detail.xhr;\n\t\t\t\t\tif (event.detail.elt !== form || !openURL || !event.detail.successful || !request || !(request.responseText || '').trim()) return;\n\t\t\t\t\twindow.openVibelyNavigate(openURL + encodeURIComponent(chosenProject()));\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction formatBytes(bytes) {\n\t\t\t\tif (bytes < 1024) return bytes + ' B';\n\t\t\t\tvar k = 1024;\n\t\t\t\tvar sizes = ['KB', 'MB', 'GB'];\n\t\t\t\tvar i = Math.floor(Math.log(bytes) / Math.log(k));\n\t\t\t\treturn (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i - 1];\n\t\t\t}\n\n\t\t\t\tasync function uploadFiles(files, uploadGeneration) {\n\t\t\t\t\tvar existingAttachmentCount = listContainer ? listContainer.querySelectorAll('[data-pending-attachment]').length : 0;\n\t\t\t\t\tif (existingAttachmentCount + files.length > 3) {\n\t\t\t\t\t\talert('Maximum 3 files allowed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar maxSize = 25 * 1024 * 1024;\n\t\t\t\t\tfor (var j = 0; j < files.length; j++) {\n\t\t\t\t\t\tif (files[j].size > (/\\.(mp4|m4v|mov|webm|ogv)$/i.test(files[j].name) ? 200 * 1024 * 1024 : maxSize)) {\n\t\t\t\t\t\t\talert('File \"' + files[j].name + '\" exceeds the upload size limit');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tvar formData = new FormData();\n\t\t\t\t\tif (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);\n\t\t\t\t\tfiles.forEach(function(file) { formData.append('files', file); });\n\t\t\t\t\ttry {\n\t\t\t\t\t\tvar uploadProjectId = projectSelect ? chosenProject() : (projectId || (document.getElementById('task-detail-content')?.dataset.projectId || ''));\n\t\t\t\t\t\tif (projectSelect && !uploadProjectId) {\n\t\t\t\t\t\t\topenProjectPicker();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar response = await fetch('/chat/attachments' + (uploadProjectId ? '?project_id='+encodeURIComponent(uploadProjectId) : ''), {\n\t\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\t\tbody: formData\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\t\tif (await window.openVibelyPermissionErrors?.fetch(response)) return;\n\t\t\t\t\t\t\tvar error = await response.text();\n\t\t\t\t\t\t\talert('Upload failed: ' + error);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar result = await response.json();\n\t\t\t\t\t\tif (uploadGeneration !== attachmentUploadGeneration) return;\n\t\t\t\t\t\tif (sessionInput) sessionInput.value = result.session_id;\n\t\t\t\t\t\tif (preview) preview.classList.remove('hidden');\n\t\t\t\t\t\tresult.attachments.forEach(function(att) {\n\t\t\t\t\t\t\tappendPendingAttachmentRow(listContainer, att);\n\t\t\t\t\t\t});\n\t\t\t\t\t\twindow.saveChatPendingAttachmentState(form);\n\t\t\t\t\t\t// Auto-scroll to show the attachment preview after upload\n\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t// Use this composer's transcript, including embedded conversations.\n\t\t\t\t\t\t\tvar chatMessages = document.querySelector(form.getAttribute('hx-target'));\n\t\t\t\t\t\t\tif (chatMessages && window.chatAutoScroll) {\n\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, true);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t} catch (error) {\n\t\t\t\t\t\tconsole.error('Upload error:', error);\n\t\t\t\t\t\talert('Upload failed: ' + error.message);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction handleFiles(files) {\n\t\t\t\t\tif (files.length === 0) return;\n\t\t\t\t\tvar filesToUpload = files.slice();\n\t\t\t\t\tvar uploadGeneration = attachmentUploadGeneration;\n\t\t\t\t\tattachmentUploadQueue = attachmentUploadQueue.then(function() {\n\t\t\t\t\t\tif (uploadGeneration !== attachmentUploadGeneration) return;\n\t\t\t\t\t\treturn uploadFiles(filesToUpload, uploadGeneration);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t// File input handler\n\t\t\tif (fileInput) {\n\t\t\t\tfileInput.addEventListener('change', function(e) {\n\t\t\t\t\thandleFiles(Array.from(e.target.files));\n\t\t\t\t\te.target.value = '';\n\t\t\t\t});\n\t\t\t}\n\n\n\t\t\t// The Linux native bridge uses WebKit's chooser API for genuine OS drops\n\t\t\t// because affected WebKitGTK versions hide DataTransfer File objects.\n\t\t\tform._ovAcceptNativeFileDrop = function() {\n\t\t\t\tdragCounter = 0;\n\t\t\t\tif (dropOverlay) dropOverlay.classList.add('hidden');\n\t\t\t\tif (fileInput && !fileInput.disabled) fileInput.click();\n\t\t\t};\n\t\t\twindow.ovAcceptNativeFileDrop = function(x, y) {\n\t\t\t\tvar target = document.elementFromPoint(x, y);\n\t\t\t\tvar targetForm = target && target.closest('form');\n\t\t\t\tif (targetForm && targetForm._ovAcceptNativeFileDrop) targetForm._ovAcceptNativeFileDrop();\n\t\t\t};\n\t\t\t// File drags may expose items before the FileList becomes available.\n\t\t\tfunction isFileDrag(transfer) {\n\t\t\t\treturn transfer && (window._ovNativeFileDrag || Array.from(transfer.types || []).indexOf('Files') !== -1 ||\n\t\t\t\t\tArray.from(transfer.items || []).some(function(item) { return item.kind === 'file'; }) ||\n\t\t\t\t\t(transfer.files && transfer.files.length > 0));\n\t\t\t}\n\t\t\t// Drag-and-drop\n\t\t\tvar dragCounter = 0;\n\t\t\tform.addEventListener('dragenter', function(e) {\n\t\t\t\tif (!isFileDrag(e.dataTransfer)) return;\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t\tdragCounter++;\n\t\t\t\tif (dropOverlay) dropOverlay.classList.remove('hidden');\n\t\t\t});\n\t\t\tform.addEventListener('dragover', function(e) {\n\t\t\t\tif (!isFileDrag(e.dataTransfer)) return;\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t\t// Negotiate a copy with native file managers, including Linux/WebKit.\n\t\t\t\te.dataTransfer.dropEffect = 'copy';\n\t\t\t});\n\t\t\tform.addEventListener('dragleave', function(e) {\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t\tdragCounter--;\n\t\t\t\tif (dragCounter <= 0) {\n\t\t\t\t\tdragCounter = 0;\n\t\t\t\t\tif (dropOverlay) dropOverlay.classList.add('hidden');\n\t\t\t\t}\n\t\t\t});\n\t\t\tform.addEventListener('drop', function(e) {\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t\tdragCounter = 0;\n\t\t\t\tif (dropOverlay) dropOverlay.classList.add('hidden');\n\t\t\t\tvar transfer = e.dataTransfer;\n\t\t\t\tif (!transfer) return;\n\t\t\t\t// Snapshot File objects synchronously: the drag data is protected after\n\t\t\t\t// this event returns, while uploads run on an asynchronous queue.\n\t\t\t\tvar files = Array.from(transfer.files || []);\n\t\t\t\tif (files.length === 0) {\n\t\t\t\t\tfiles = Array.from(transfer.items || []).filter(function(item) {\n\t\t\t\t\t\treturn item.kind === 'file';\n\t\t\t\t\t}).map(function(item) { return item.getAsFile(); }).filter(Boolean);\n\t\t\t\t}\n\t\t\t\tif (files.length > 0) handleFiles(files);\n\t\t\t});\n\n\t\t\t// Speech-to-text via Web Speech API with audio level detection\n\t\t\t(function() {\n\t\t\t\tvar micBtn = form.querySelector('.stt-btn');\n\t\t\t\tif (!micBtn || !messageInput) return;\n\n\t\t\t\tvar micIcon = micBtn.querySelector('.stt-mic-icon');\n\t\t\t\tvar stopIcon = micBtn.querySelector('.stt-stop-icon');\n\t\t\t\tvar recognition = null;\n\t\t\t\tvar isRecording = false;\n\t\t\t\tvar manualStop = false;\n\n\t\t\t\t// Audio analysis for silence detection\n\t\t\t\tvar audioContext = null;\n\t\t\t\tvar audioAnalyzer = null;\n\t\t\t\tvar audioStream = null;\n\t\t\t\tvar silenceTimer = null;\n\t\t\t\tvar silenceThreshold = 2000; // 2 seconds like Chrome plugin\n\t\t\t\tvar audioLevel = 0;\n\t\t\t\tvar countdownInterval = null;\n\t\t\t\tvar countdownSeconds = 0;\n\n\t\t\t\t// Speech transcription state\n\t\t\t\tvar finalTranscript = '';\n\t\t\t\tvar startPos = 0;\n\t\t\t\tvar existingText = '';\n\t\t\t\tvar initialValue = '';\n\t\t\t\tvar prefix = '';\n\t\t\t\tvar suffix = '';\n\n\t\t\t\t// Check browser support\n\t\t\t\tvar SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;\n\t\t\t\tif (!SpeechRecognition) {\n\t\t\t\t\tmicBtn.title = 'Speech-to-text not supported in this browser';\n\t\t\t\t\tmicBtn.classList.add('opacity-20', 'cursor-not-allowed');\n\t\t\t\t\tmicBtn.classList.remove('hover:opacity-100', 'hover:bg-base-300');\n\t\t\t\t\tmicBtn.setAttribute('aria-label', 'Speech-to-text not supported');\n\t\t\t\t\tmicBtn.onclick = function() {\n\t\t\t\t\t\talert('Speech-to-text is not supported in this browser. Please use Chrome, Edge, or Safari.');\n\t\t\t\t\t};\n\t\t\t\t\treturn;\n\t\t\t\t}\n\n\t\t\t\tfunction startRecording() {\n\t\t\t\t\trecognition = new SpeechRecognition();\n\t\t\t\t\trecognition.continuous = true;\n\t\t\t\t\trecognition.interimResults = true;\n\t\t\t\t\trecognition.lang = navigator.language || 'en-US';\n\n\t\t\t\t\tfinalTranscript = '';\n\t\t\t\t\tstartPos = messageInput.selectionStart || messageInput.value.length;\n\t\t\t\t\texistingText = messageInput.value;\n\t\t\t\t\tinitialValue = messageInput.value;\n\t\t\t\t\tmanualStop = false;\n\n\t\t\t\t\t// Insert at cursor position or append\n\t\t\t\t\tprefix = existingText.substring(0, startPos);\n\t\t\t\t\tsuffix = existingText.substring(startPos);\n\t\t\t\t\tif (prefix.length > 0 && !prefix.endsWith(' ') && !prefix.endsWith('\\n')) {\n\t\t\t\t\t\tprefix += ' ';\n\t\t\t\t\t}\n\n\t\t\t\t\trecognition.onstart = function() {\n\t\t\t\t\t\tconsole.log('[STT] Recognition started');\n\t\t\t\t\t\t// Start audio analysis for silence detection\n\t\t\t\t\t\tstartAudioAnalysis();\n\t\t\t\t\t};\n\n\t\t\t\t\trecognition.onresult = function(event) {\n\t\t\t\t\t\tvar interimTranscript = '';\n\t\t\t\t\t\tfor (var i = event.resultIndex; i < event.results.length; i++) {\n\t\t\t\t\t\t\tvar transcript = event.results[i][0].transcript;\n\t\t\t\t\t\t\tif (event.results[i].isFinal) {\n\t\t\t\t\t\t\t\tfinalTranscript += transcript + ' ';\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tinterimTranscript += transcript;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Show interim + final results in the textarea\n\t\t\t\t\t\tmessageInput.value = prefix + finalTranscript + interimTranscript + suffix;\n\t\t\t\t\t\t// Trigger input event for draft persistence\n\t\t\t\t\t\tmessageInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t\t\t};\n\n\t\t\t\t\trecognition.onerror = function(event) {\n\t\t\t\t\t\tif (event.error === 'not-allowed') {\n\t\t\t\t\t\t\talert('Microphone access was denied. Please allow microphone access in your browser settings.');\n\t\t\t\t\t\t} else if (event.error === 'no-speech') {\n\t\t\t\t\t\t\t// Silence detected - this is normal, don't alert\n\t\t\t\t\t\t} else if (event.error !== 'aborted') {\n\t\t\t\t\t\t\tconsole.error('Speech recognition error:', event.error);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tstopListening();\n\t\t\t\t\t};\n\n\t\t\t\t\trecognition.onend = function() {\n\t\t\t\t\t\tconsole.log('[STT] Recognition ended, manualStop=' + manualStop);\n\t\t\t\t\t\t// If continuous mode, restart unless manually stopped\n\t\t\t\t\t\tif (isRecording && !manualStop) {\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\trecognition.start();\n\t\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\t\tconsole.error('[STT] Failed to restart recognition:', e);\n\t\t\t\t\t\t\t\tstopListening();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\n\t\t\t\t\ttry {\n\t\t\t\t\t\trecognition.start();\n\t\t\t\t\t\tisRecording = true;\n\t\t\t\t\t\tmicBtn.classList.add('stt-recording');\n\t\t\t\t\t\tmicBtn.classList.remove('opacity-50');\n\t\t\t\t\t\tmicBtn.setAttribute('aria-label', 'Stop recording');\n\t\t\t\t\t\tmicBtn.title = 'Stop recording';\n\t\t\t\t\t\tif (micIcon) micIcon.classList.add('hidden');\n\t\t\t\t\t\tif (stopIcon) stopIcon.classList.remove('hidden');\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tconsole.error('Failed to start speech recognition:', err);\n\t\t\t\t\t\talert('Failed to start speech recognition. Please try again.');\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction startAudioAnalysis() {\n\t\t\t\t\tif (audioContext) return;\n\n\t\t\t\t\tnavigator.mediaDevices.getUserMedia({ audio: true })\n\t\t\t\t\t\t.then(function(stream) {\n\t\t\t\t\t\t\taudioStream = stream;\n\t\t\t\t\t\t\taudioContext = new (window.AudioContext || window.webkitAudioContext)();\n\t\t\t\t\t\t\taudioAnalyzer = audioContext.createAnalyser();\n\t\t\t\t\t\t\taudioAnalyzer.fftSize = 2048;\n\n\t\t\t\t\t\t\tvar source = audioContext.createMediaStreamSource(stream);\n\t\t\t\t\t\t\tsource.connect(audioAnalyzer);\n\n\t\t\t\t\t\t\t// Start monitoring audio levels\n\t\t\t\t\t\t\tmonitorAudioLevel();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(function(err) {\n\t\t\t\t\t\t\tconsole.error('[STT] Failed to start audio analysis:', err);\n\t\t\t\t\t\t\t// Don't stop voice recognition if audio analysis fails\n\t\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\tfunction monitorAudioLevel() {\n\t\t\t\t\tif (!audioAnalyzer || !isRecording) return;\n\n\t\t\t\t\tvar bufferLength = audioAnalyzer.frequencyBinCount;\n\t\t\t\t\tvar dataArray = new Uint8Array(bufferLength);\n\n\t\t\t\t\tvar checkLevel = function() {\n\t\t\t\t\t\tif (!isRecording || !audioAnalyzer) return;\n\n\t\t\t\t\t\taudioAnalyzer.getByteFrequencyData(dataArray);\n\n\t\t\t\t\t\t// Calculate average volume\n\t\t\t\t\t\tvar sum = dataArray.reduce(function(a, b) { return a + b; }, 0);\n\t\t\t\t\t\taudioLevel = sum / bufferLength;\n\n\t\t\t\t\t\t// Silence threshold: if volume is below 10 (very quiet)\n\t\t\t\t\t\tvar isSilent = audioLevel < 10;\n\n\t\t\t\t\t\tif (isSilent) {\n\t\t\t\t\t\t\t// Start or continue silence timer\n\t\t\t\t\t\t\tif (!silenceTimer) {\n\t\t\t\t\t\t\t\tstartSilenceTimer();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t// Reset silence timer if user is speaking\n\t\t\t\t\t\t\tclearSilenceTimer();\n\t\t\t\t\t\t\tclearCountdown();\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Continue monitoring\n\t\t\t\t\t\trequestAnimationFrame(checkLevel);\n\t\t\t\t\t};\n\n\t\t\t\t\tcheckLevel();\n\t\t\t\t}\n\n\t\t\t\tfunction startSilenceTimer() {\n\t\t\t\t\tif (silenceTimer) return;\n\n\t\t\t\t\tconsole.log('[STT] Silence detected, starting timer...');\n\n\t\t\t\t\t// Start countdown visual feedback\n\t\t\t\t\tcountdownSeconds = Math.ceil(silenceThreshold / 1000);\n\t\t\t\t\tstartCountdown();\n\n\t\t\t\t\tsilenceTimer = setTimeout(function() {\n\t\t\t\t\t\tconsole.log('[STT] Silence threshold reached, auto-submitting...');\n\t\t\t\t\t\tautoSubmitVoiceFeedback();\n\t\t\t\t\t}, silenceThreshold);\n\t\t\t\t}\n\n\t\t\t\tfunction clearSilenceTimer() {\n\t\t\t\t\tif (silenceTimer) {\n\t\t\t\t\t\tclearTimeout(silenceTimer);\n\t\t\t\t\t\tsilenceTimer = null;\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction startCountdown() {\n\t\t\t\t\tclearCountdown();\n\n\t\t\t\t\tupdateCountdownDisplay();\n\n\t\t\t\t\tcountdownInterval = setInterval(function() {\n\t\t\t\t\t\tcountdownSeconds--;\n\t\t\t\t\t\tif (countdownSeconds <= 0) {\n\t\t\t\t\t\t\tclearCountdown();\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\tupdateCountdownDisplay();\n\t\t\t\t\t\t}\n\t\t\t\t\t}, 1000);\n\t\t\t\t}\n\n\t\t\t\tfunction updateCountdownDisplay() {\n\t\t\t\t\tif (countdownSeconds > 0) {\n\t\t\t\t\t\tmicBtn.title = 'Auto-send in ' + countdownSeconds + 's...';\n\t\t\t\t\t} else {\n\t\t\t\t\t\tmicBtn.title = 'Recording...';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction clearCountdown() {\n\t\t\t\t\tif (countdownInterval) {\n\t\t\t\t\t\tclearInterval(countdownInterval);\n\t\t\t\t\t\tcountdownInterval = null;\n\t\t\t\t\t}\n\t\t\t\t\tcountdownSeconds = 0;\n\t\t\t\t\tif (isRecording) {\n\t\t\t\t\t\tmicBtn.title = 'Recording...';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction stopAudioAnalysis() {\n\t\t\t\t\tif (audioContext) {\n\t\t\t\t\t\taudioContext.close();\n\t\t\t\t\t\taudioContext = null;\n\t\t\t\t\t}\n\t\t\t\t\tif (audioStream) {\n\t\t\t\t\t\taudioStream.getTracks().forEach(function(track) { track.stop(); });\n\t\t\t\t\t\taudioStream = null;\n\t\t\t\t\t}\n\t\t\t\t\taudioAnalyzer = null;\n\t\t\t\t\taudioLevel = 0;\n\t\t\t\t}\n\n\t\t\t\tfunction autoSubmitVoiceFeedback() {\n\t\t\t\t\t// Stop listening first\n\t\t\t\t\tstopListening();\n\n\t\t\t\t\t// Wait a moment for final transcript to be processed\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t// Submit the feedback if there's text\n\t\t\t\t\t\t\tif (messageInput.value.trim()) {\n\t\t\t\t\t\t\t\tsafeSubmit();\n\t\t\t\t\t\t\t}\t\t\t\t\t}, 500);\n\t\t\t\t}\n\n\t\t\t\tfunction stopListening() {\n\t\t\t\t\tisRecording = false;\n\t\t\t\t\tclearSilenceTimer();\n\t\t\t\t\tclearCountdown();\n\t\t\t\t\tstopAudioAnalysis();\n\n\t\t\t\t\tif (recognition) {\n\t\t\t\t\t\ttry { recognition.stop(); } catch (e) { /* ignore */ }\n\t\t\t\t\t\trecognition = null;\n\t\t\t\t\t}\n\n\t\t\t\t\tmicBtn.classList.remove('stt-recording');\n\t\t\t\t\tmicBtn.classList.add('opacity-50');\n\t\t\t\t\tmicBtn.setAttribute('aria-label', 'Start speech to text');\n\t\t\t\t\tmicBtn.title = 'Speech to text';\n\t\t\t\t\tif (micIcon) micIcon.classList.remove('hidden');\n\t\t\t\t\tif (stopIcon) stopIcon.classList.add('hidden');\n\t\t\t\t}\n\n\t\t\t\tmicBtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\tif (isRecording) {\n\t\t\t\t\t\tmanualStop = true;\n\t\t\t\t\t\tstopListening();\n\t\t\t\t\t} else {\n\t\t\t\t\t\tstartRecording();\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\t// Stop recording on form submit\n\t\t\t\tform.addEventListener('submit', function() {\n\t\t\t\t\tif (isRecording) {\n\t\t\t\t\t\tmanualStop = true;\n\t\t\t\t\t\tstopListening();\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t})();\n\n\t\t\t\t\t// Clear only the draft and attachment session accepted by this request.\n\t\t\t\t\t// A user may type or attach a steering update while an earlier send is still in flight.\n\t\t\t\t\tform.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\t\t\tif (!event.detail || event.detail.elt !== form) return;\n\t\t\t\t\t\tvar triggeringEvent = event.detail.requestConfig && event.detail.requestConfig.triggeringEvent;\n\t\t\t\t\t\tvar payload = (triggeringEvent && triggeringEvent._chatSubmissionPayload) || form._chatNextSubmissionPayload || form._captureChatSubmission();\n\t\t\t\t\t\tform._chatNextSubmissionPayload = null;\n\t\t\t\t\t\tvar request = event.detail.xhr || {};\n\t\t\t\t\t\trequest._chatSubmittedPayload = payload;\n\t\t\t\t\t\trequest._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';\n\t\t\t\t\t\trequest._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();\n\t\t\t\t\t\tif (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;\n\t\t\t\t\t\t\t\trequest._chatSubmittedMessage = payload ? payload.message : composerMessage();\n\t\t\t\t\t\t\t\trequest._chatSubmittedAttachmentSession = payload ? payload.attachmentSessionID : (sessionInput ? sessionInput.value : '');\n\t\t\t\t\t\t\t\trequest._chatSubmittedFallbackFromSteer = !!(payload && payload.fallbackFromSteer);\t\t\t\t\t});\n\n\t\t\t\t\tform.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\t\tif (!event.detail || event.detail.elt !== form) return;\n\t\t\t\t\t\tvar request = event.detail.xhr || {};\n\t\t\t\t\t\tvar completedIntent = request._chatSubmittedIntent || 'normal';\n\t\t\t\t\t\tvar submittedMessage = request._chatSubmittedMessage || '';\n\t\t\t\t\t\tvar submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';\n\t\t\t\t\t\tvar accepted = false;\n\t\t\t\t\t\tvar replayAsNormal = false;\n\t\t\t\t\t\tvar createdTaskID = request.status >= 200 && request.status < 300 && request.getResponseHeader('X-Created-Task-ID');\n\t\t\t\t\t\t// HX-Location returns before HTMX sets detail.successful.\n\t\t\t\t\t\tif (event.detail.successful || createdTaskID) {\n\t\t\t\t\t\t\tvar responseText = request.responseText || '';\n\t\t\t\t\t\t\t// First-message creation redirects with an empty body, but explicitly\n\t\t\t\t\t\t\t// acknowledges acceptance and supplies the new task's history scope.\n\t\t\t\t\t\t\tif (createdTaskID) messageHistoryStorageKey = 'openvibely-task-thread-message-history-' + createdTaskID;\n\t\t\t\t\t\t\t// Keep user draft intact for empty model-setup guard responses.\n\t\t\t\t\t\t\tif (responseText.trim() !== '' || createdTaskID) {\n\t\t\t\t\t\t\t\taccepted = true;\n                                document.body.dispatchEvent(new Event('taskAttachmentsChanged'));\n\t\t\t\t\t\t\t\tif (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);\n\t\t\t\t\t\t\t\trememberSubmittedMessage(submittedMessage);\n\t\t\t\t\t\t\t\tresetMessageHistoryNavigation();\n\t\t\t\t\t\t\t\t\tvar submittedText = request._chatSubmittedPayload ? request._chatSubmittedPayload.composerText : submittedMessage;\n\t\t\t\t\t\t\t\t\tif (messageInput && (messageInput.value === submittedText || messageInput.value === submittedMessage)) {\n\t\t\t\t\t\t\t\t\t\tmessageInput.value = '';\n\t\t\t\t\t\t\t\t\t\tmessageInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t\t\t\t\t\t\t\trefreshPrimaryActionForInput();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tacceptSubmittedPastes(request._chatSubmittedPayload);\n\t\t\t\t\t\t\t\t\tif (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} else if (completedIntent === 'steer' && !request._chatSubmittedFallbackFromSteer && submittedMessage.trim() !== '' && request.status === 409) {\n\t\t\t\t\t\t\treplayAsNormal = true;\n\t\t\t\t\t\t\tsteerFallbackPending = true;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (completedIntent === 'normal') normalRequestInFlight = Math.max(0, normalRequestInFlight - 1);\n\t\t\t\t\t\tif (completedIntent === 'normal' && !accepted) deferredSteer = null;\n\t\t\t\t\t\tform.setAttribute('hx-post', normalPostEndpoint);\n\t\t\t\t\t\tform.removeAttribute('data-submit-intent');\n\t\t\t\t\t\tif (accepted && deferredSteer) setTimeout(flushDeferredSteer, 0);\n\t\t\t\t\t\tif (completedIntent === 'normal' && request._chatSubmittedFallbackFromSteer) {\n\t\t\t\t\t\t\tsteerFallbackPending = false;\n\t\t\t\t\t\t\tsetTimeout(finishSteerRequest, 0);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (completedIntent === 'steer' && !replayAsNormal) setTimeout(finishSteerRequest, 0);\n\t\t\t\t\t\tif (replayAsNormal) {\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\tsubmitComposer(normalPostEndpoint, 'normal', Object.assign({}, request._chatSubmittedPayload || {}, {\n\t\t\t\t\t\t\t\t\tmessage: submittedMessage,\n\t\t\t\t\t\t\t\t\tattachmentSessionID: submittedAttachmentSession,\n\t\t\t\t\t\t\t\t\tfallbackFromSteer: true,\n\t\t\t\t\t\t\t\t\tsubmitIntent: 'normal'\n\t\t\t\t\t\t\t\t}));\n\t\t\t\t\t\t\t}, 0);\n\t\t\t\t\t\t}\n\t\t\t\t\t});\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4146,7 +4147,7 @@ func ChatLatestMessageButton(messagesID string, trackerKey string) templ.Compone
 		var templ_7745c5c3_Var215 string
 		templ_7745c5c3_Var215, templ_7745c5c3_Err = templruntime.NewAttributeExpression(messagesID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 3684, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 3685, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var215)
 		if templ_7745c5c3_Err != nil {
@@ -4159,7 +4160,7 @@ func ChatLatestMessageButton(messagesID string, trackerKey string) templ.Compone
 		var templ_7745c5c3_Var216 string
 		templ_7745c5c3_Var216, templ_7745c5c3_Err = templruntime.NewAttributeExpression(trackerKey).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 3685, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 3686, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var216)
 		if templ_7745c5c3_Err != nil {
@@ -4360,7 +4361,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		var templ_7745c5c3_Var219 string
 		templ_7745c5c3_Var219, templ_7745c5c3_Err = templruntime.NewAttributeExpression("thread-input-" + inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7544, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7545, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var219)
 		if templ_7745c5c3_Err != nil {
@@ -4373,7 +4374,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		var templ_7745c5c3_Var220 string
 		templ_7745c5c3_Var220, templ_7745c5c3_Err = templruntime.NewAttributeExpression(inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7544, Col: 194}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7545, Col: 194}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var220)
 		if templ_7745c5c3_Err != nil {
@@ -4386,7 +4387,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		var templ_7745c5c3_Var221 string
 		templ_7745c5c3_Var221, templ_7745c5c3_Err = templruntime.NewAttributeExpression(taskID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7544, Col: 218}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7545, Col: 218}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var221)
 		if templ_7745c5c3_Err != nil {
@@ -4399,7 +4400,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		var templ_7745c5c3_Var222 string
 		templ_7745c5c3_Var222, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7547, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7548, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var222))
 		if templ_7745c5c3_Err != nil {
@@ -4412,7 +4413,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		var templ_7745c5c3_Var223 string
 		templ_7745c5c3_Var223, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/thread-inputs/" + inputID + "/cancel").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7551, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7552, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var223)
 		if templ_7745c5c3_Err != nil {
@@ -4425,7 +4426,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		var templ_7745c5c3_Var224 string
 		templ_7745c5c3_Var224, templ_7745c5c3_Err = templruntime.NewAttributeExpression("#thread-input-" + inputID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7551, Col: 191}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7552, Col: 191}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var224)
 		if templ_7745c5c3_Err != nil {
@@ -4509,7 +4510,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 		var templ_7745c5c3_Var226 string
 		templ_7745c5c3_Var226, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pickerDefaultAgent(agents, defaultAgentID).ID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7598, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7599, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var226)
 		if templ_7745c5c3_Err != nil {
@@ -4522,7 +4523,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 		var templ_7745c5c3_Var227 string
 		templ_7745c5c3_Var227, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pickerDefaultDetail(agents, defaultAgentID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7598, Col: 172}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7599, Col: 172}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var227)
 		if templ_7745c5c3_Err != nil {
@@ -4540,7 +4541,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var228 string
 			templ_7745c5c3_Var228, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 34}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 34}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var228)
 			if templ_7745c5c3_Err != nil {
@@ -4553,7 +4554,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var229 string
 			templ_7745c5c3_Var229, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var229)
 			if templ_7745c5c3_Err != nil {
@@ -4566,7 +4567,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var230 string
 			templ_7745c5c3_Var230, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.Model).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var230)
 			if templ_7745c5c3_Err != nil {
@@ -4579,7 +4580,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var231 string
 			templ_7745c5c3_Var231, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pickerProvider(agent)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 147}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 147}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var231)
 			if templ_7745c5c3_Err != nil {
@@ -4592,7 +4593,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var232 string
 			templ_7745c5c3_Var232, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pickerEfforts(agent)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 192}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 192}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var232)
 			if templ_7745c5c3_Err != nil {
@@ -4605,7 +4606,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var233 string
 			templ_7745c5c3_Var233, templ_7745c5c3_Err = templruntime.NewAttributeExpression(pickerDefaultEffort(agent)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 243}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 243}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var233)
 			if templ_7745c5c3_Err != nil {
@@ -4618,7 +4619,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var234 string
 			templ_7745c5c3_Var234, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprint(models.ModelSupportsFastMode(agent.Provider, agent.Model))).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 334}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 334}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var234)
 			if templ_7745c5c3_Err != nil {
@@ -4631,7 +4632,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var235 string
 			templ_7745c5c3_Var235, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.EffectiveServiceTier()).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 384}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 384}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var235)
 			if templ_7745c5c3_Err != nil {
@@ -4644,7 +4645,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var236 string
 			templ_7745c5c3_Var236, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 399}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 399}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var236))
 			if templ_7745c5c3_Err != nil {
@@ -4657,7 +4658,7 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 			var templ_7745c5c3_Var237 string
 			templ_7745c5c3_Var237, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7600, Col: 416}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 7601, Col: 416}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var237))
 			if templ_7745c5c3_Err != nil {
@@ -4670,6 +4671,19 @@ func ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) temp
 		}
 		return nil
 	})
+}
+
+func composerDestinationLabel(ctx context.Context, project models.Project, serverOnly bool) string {
+	if serverOnly {
+		name := templateui.ProjectServerName(ctx, project.ID)
+		if name != "" {
+			if i := strings.Index(project.Name, " · "+name); i >= 0 {
+				return project.Name[i+len(" · "):]
+			}
+			return name
+		}
+	}
+	return project.Name
 }
 
 var _ = templruntime.GeneratedTemplate
