@@ -1,0 +1,191 @@
+// One transport owner per document (browser tab or native window). View cleanup
+// releases subscriptions only. Computer subscriptions deliver authorized state snapshots.
+(function () {
+    'use strict';
+    if (window.openVibelyLive) return;
+    var socket = null, nextID = 0, connected = false;
+    var connectionRetry = window.openVibelyRetry(connect, {initialDelay:250, jitter:250});
+    var subscriptions = new Map();
+    // U+FEFF is output content, including at a replay/frame boundary.
+    var encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {ignoreBOM: true});
+    function send(command) {
+        if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(command));
+    }
+    function notify(entry, type, data) {
+        var event = {type: type, data: data};
+        var callbacks = (entry.listeners[type] || []).slice();
+        if (entry['on' + type]) callbacks.push(entry['on' + type]);
+        callbacks.forEach(function (fn) { try { fn(event); } catch (error) { console.error('[live] subscriber callback', error); } });
+    }
+    function command(entry) {
+        return Object.assign({}, entry.command, {offset: entry.offset});
+    }
+    async function nativeTicket() {
+        var controller = new AbortController();
+        var deadline;
+        var timeout = new Promise(function (_, reject) {
+            deadline = setTimeout(function () {
+                controller.abort();
+                reject(Error('Native live ticket timed out'));
+            }, 10000);
+        });
+        try {
+            // Bound headers and body together. The race also releases connection
+            // ownership if a native proxy fails to settle the aborted request.
+            return await Promise.race([timeout, (async function () {
+                var response = await fetch('/events/native-ticket', {
+                    method: 'POST', headers: {'X-OpenVibely-Live': '1'}, signal: controller.signal
+                });
+                if (!response.ok) throw Error('Native live ticket unavailable');
+                return await response.json();
+            })()]);
+        } finally {
+            clearTimeout(deadline);
+        }
+    }
+    async function connect(attempt) {
+        if (socket) return;
+        var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/events/ws';
+        var protocols = [];
+        var ws;
+        try {
+            if (document.documentElement.getAttribute('data-openvibely-native-window') === 'true') {
+                var ticket = await nativeTicket();
+                url = ticket.url;
+                protocols = ['openvibely-live', 'ticket.' + ticket.ticket];
+            }
+            ws = new WebSocket(url, protocols);
+        } catch (error) {
+            attempt.fail();
+            return;
+        }
+        if (!attempt.current()) { ws.close(); return; }
+        socket = ws;
+        ws.onmessage = function (event) {
+            if (socket !== ws) return;
+            var frame;
+            try { frame = JSON.parse(event.data); } catch (_) { ws.close(); return; }
+            if (frame.event === 'ready') {
+                attempt.success();
+                connected = true;
+                subscriptions.forEach(function (entry) { entry.retry.cancel(); entry.retry.start(); });
+                window.dispatchEvent(new CustomEvent('live-transport-connected'));
+                return;
+            }
+            if (frame.event === 'system_update') {
+                window.dispatchEvent(new CustomEvent('live-system-update', {detail: frame.data}));
+                return;
+            }
+            if (frame.event === 'servers_changed') window.dispatchEvent(new CustomEvent('openvibely-servers-changed'));
+            if (frame.event === 'reconcile' || frame.event === 'servers_changed') {
+                // Only sent after notification loss. Renew computer subscriptions
+                // to receive authorized snapshots over this socket, not HTTP.
+                if (frame.event === 'reconcile') subscriptions.forEach(function (entry, id) {
+                    if (entry.command.op !== 'computer') return;
+                    entry.retry.cancel();
+                    send({op:'unsubscribe', id:id});
+                    entry.retry.start();
+                });
+                window.dispatchEvent(new CustomEvent('sse-live-connected', {detail: {reconnected: true, reconciliation: true}}));
+                if (window.htmx) window.htmx.trigger('body', 'alertUpdate');
+                return;
+            }
+            var entry = subscriptions.get(frame.id);
+            if (!entry) return; // A late frame from a detached view or old project.
+            if (frame.event === 'retry') {
+                notify(entry, 'retry', frame.data || '');
+                entry.retry.fail();
+                return;
+            }
+            if (frame.event === 'subscribed') {
+                // Computer admission precedes its fallible status read. Wait for the snapshot.
+                if (entry.command.op !== 'computer') entry.retry.success();
+                notify(entry, 'open', ''); return;
+            }
+            if (frame.event === 'computer_status') entry.retry.success();
+            if (frame.event === 'message') {
+                entry.retry.success();
+                var start = frame.start || 0, end = frame.offset || 0;
+                if (end <= entry.offset) return;
+                if (start > entry.offset) { ws.close(); return; }
+                var bytes = encoder.encode(frame.data);
+                var delta = decoder.decode(bytes.subarray(Math.max(0, entry.offset - start)));
+                entry.offset = end;
+                notify(entry, 'message', delta);
+                return;
+            }
+            if (frame.event === 'reset') {
+                entry.retry.success();
+                entry.offset = frame.offset || 0;
+                notify(entry, 'reset', frame.data || '');
+                return;
+            }
+            if (frame.event === 'done' || frame.event === 'error') {
+                subscriptions.delete(frame.id);
+                entry.retry.dispose();
+                entry.readyState = 2;
+            }
+            notify(entry, frame.event, typeof frame.data === 'string' ? frame.data : JSON.stringify(frame.data));
+        };
+        ws.onclose = function () {
+            if (socket !== ws) return;
+            socket = null;
+            connected = false;
+            window.dispatchEvent(new CustomEvent('live-transport-disconnected'));
+            // Connection failures are not execution failures. Keep buffers and
+            // offsets and replay only unapplied bytes after the new handshake.
+            subscriptions.forEach(function (entry) { entry.retry.cancel(); });
+            connectionRetry.fail();
+        };
+        ws.onerror = function () { ws.close(); };
+    }
+    function subscribe(cmd, handlers) {
+        var id = String(++nextID);
+        cmd.id = id;
+        var entry = {command: cmd, offset: cmd.offset || 0, listeners: {}, readyState: 1};
+        entry.retry = window.openVibelyRetry(function () {
+            if (connected && subscriptions.get(id) === entry) send(command(entry));
+            else entry.retry.cancel();
+        });
+        entry.addEventListener = function (name, fn) { (entry.listeners[name] || (entry.listeners[name] = [])).push(fn); };
+        entry.close = function () {
+            if (!subscriptions.has(id)) return;
+            subscriptions.delete(id);
+            entry.retry.dispose();
+            entry.readyState = 2;
+            send({op: 'unsubscribe', id: id});
+        };
+        if (handlers) {
+            entry.onopen = handlers.onopen;
+            entry.onmessage = handlers.onmessage;
+            Object.keys(handlers.listeners || {}).forEach(function (name) { entry.addEventListener(name, handlers.listeners[name]); });
+        }
+        subscriptions.set(id, entry);
+        if (connected) entry.retry.start();
+        if (!socket) connectionRetry.start();
+        return entry;
+    }
+    window.openVibelyLive = {
+        execution: function (execID, offset, projectID) {
+            var selector = document.getElementById('project-selector');
+            projectID = projectID || (selector && selector.value) || new URLSearchParams(location.search).get('project_id');
+            return subscribe({op: 'execution', exec_id: execID, project_id: projectID, offset: offset});
+        },
+        computer: function (projectID, taskID, options, handlers) {
+            return subscribe(Object.assign({op:'computer', project_id:projectID, task_id:taskID || '', native:!!options?.viewer_id && document.documentElement.dataset.runtime === 'desktop'}, options || {}), handlers);
+        },
+        accountUsage: function (handlers) {
+            return subscribe({op: 'account_usage'}, handlers);
+        },
+        live: function (projectID, taskID, handlers) {
+            // Notification scope is independent of execution subscriptions, which
+            // may stay live in the thread snapshot owner after navigation.
+            return subscribe({op: 'live', project_id: projectID, task_id: taskID || ''}, handlers);
+        }
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { connectionRetry.start(); }, {once: true});
+    else connectionRetry.start();
+    window.addEventListener('online', function () {
+        if (!socket && !connectionRetry.active) { connectionRetry.cancel(); connectionRetry.start(); }
+    });
+})();

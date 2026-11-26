@@ -16,7 +16,7 @@
   function composer(stage) { var h = host(stage); return h && h.querySelector('.chat-input-shadow-gutter'); }
 
   // Cover the host from the transcript top down, bleeding into main's padding.
-  function place(stage) {
+  function position(stage) {
     var h = host(stage), cb = stage.offsetParent;
     if (!h || !cb) return null;
     var hr = h.getBoundingClientRect(), cr = cb.getBoundingClientRect();
@@ -28,21 +28,30 @@
     stage.style.right = Math.round(cr.right - Math.min(mr.right, hr.right + 24)) + 'px';
     stage.style.bottom = Math.round(cr.bottom - Math.min(mr.bottom, hr.bottom + 24)) + 'px';
     var r = stage.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
+    return r.width && r.height ? r : null;
+  }
+
+  // The canvas is window-wide and centered so panel resizes only clip it, never stretch it.
+  function place(stage) {
+    var r = position(stage);
+    if (!r) return null;
     var canvas = stage.querySelector('canvas');
     var dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(r.width * dpr);
-    canvas.height = Math.round(r.height * dpr);
+    var W = Math.ceil(Math.max(r.width, window.innerWidth)), H = Math.ceil(r.height);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
     var ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return {ctx: ctx, r: r, W: Math.ceil(r.width), H: Math.ceil(r.height)};
+    return {ctx: ctx, r: r, W: W, H: H, spread: r.width};
   }
 
   function dotColor() {
     return document.documentElement.getAttribute('data-theme') === 'light' ? 'rgba(89,102,242,.32)' : 'rgba(116,128,255,.36)';
   }
 
-  function dots(img, W, H, plot) {
+  function dots(img, W, H, spread, plot) {
     var size = H * 1.08, cx = W / 2, cy = H * .44, step = 5;
     var off = document.createElement('canvas');
     off.width = W; off.height = H;
@@ -57,7 +66,7 @@
         var a = px[i + 3] / 255;
         var lum = (px[i] * .3 + px[i + 1] * .59 + px[i + 2] * .11) / 255;
         var v = a * (.25 + lum * .95);
-        var d = Math.hypot((x - cx) / (W * .62), (y - cy) / (H * .72));
+        var d = Math.hypot((x - cx) / (spread * .62), (y - cy) / (H * .72));
         v = Math.max(v, Math.max(0, noise(x, y) - .6) * Math.max(0, 1 - d));
         if (v > bayer[(y / step) & 3][(x / step) & 3] + (rnd() - .5) * .12) plot(x, y);
       }
@@ -70,7 +79,7 @@
     var g = img && img.complete && place(stage);
     if (!g) return;
     g.ctx.fillStyle = dotColor();
-    dots(img, g.W, g.H, function(x, y) { g.ctx.fillRect(x, y, 1.6, 1.6); });
+    dots(img, g.W, g.H, g.spread, function(x, y) { g.ctx.fillRect(x, y, 1.6, 1.6); });
     stage.querySelector('canvas').style.opacity = '';
   }
 
@@ -84,7 +93,7 @@
     var ax = g.W / 2;
     var ay = fr ? fr.top - g.r.top - 40 - asize / 2 : g.H * .3;
     var list = [];
-    var geo = dots(img, g.W, g.H, function(x, y) { list.push(x, y); });
+    var geo = dots(img, g.W, g.H, g.spread, function(x, y) { list.push(x, y); });
     var k = asize / (g.H * 1.08), maxR = asize * .42, diag = Math.hypot(g.W, g.H);
     var parts = [];
     for (var i = 0; i < list.length; i += 2) {
@@ -142,8 +151,10 @@
     var timer = 0;
     var observer = new ResizeObserver(function() {
       if (!stage.isConnected) { observer.disconnect(); return; }
+      if (stage._ovPlaying || stage.hidden) return;
+      var r = position(stage), canvas = stage.querySelector('canvas');
       clearTimeout(timer);
-      timer = setTimeout(function() { if (!stage._ovPlaying && !stage.hidden) drawStatic(stage); }, 120);
+      if (r && (Math.ceil(r.height) !== canvas.offsetHeight || r.width > canvas.offsetWidth)) timer = setTimeout(function() { drawStatic(stage); }, 120);
     });
     observer.observe(host(stage));
   }

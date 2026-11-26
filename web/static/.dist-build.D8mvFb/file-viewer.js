@@ -1,0 +1,476 @@
+(()=>{
+ if(window.OVFileViewer)return;
+ // Custom-element registration covers initial markup and later fragment insertion
+ // without observing Chat, task fragments, or even the gallery's rendered cells.
+ const sheetsSource=document.currentScript.dataset.sheetsSrc;
+ let sheetsLoading;
+ function loadSheets(){
+  if(window.OVFileSheets)return Promise.resolve(window.OVFileSheets);
+  if(!sheetsLoading)sheetsLoading=new Promise((resolve,reject)=>{
+   const script=document.createElement('script');script.src=sheetsSource;
+   script.onload=()=>resolve(window.OVFileSheets);
+   script.onerror=()=>{script.remove();sheetsLoading=null;reject(Error('Could not load spreadsheet preview'))};
+   document.head.append(script);
+  });
+  return sheetsLoading;
+ }
+ customElements.define('ov-spreadsheet',class extends HTMLElement{
+  connectedCallback(){
+   // Defer until the HTML parser has supplied the element's children.
+   if(!this.ready){this.ready=true;setTimeout(()=>this.renderSheet(),0)}
+  }
+  async renderSheet(){
+   if(!this.isConnected){this.ready=false;return}
+   try{const sheets=await loadSheets();if(this.isConnected)await sheets.render(this)}
+   catch(error){
+    const status=this.querySelector('[data-sheet-status]');if(!status)return;
+    const retry=document.createElement('button');retry.type='button';retry.className='v-button';retry.textContent='Try again';retry.dataset.sheetRetry='';
+    retry.onclick=()=>this.renderSheet();status.replaceChildren(error.message+' ',retry);
+   }finally{this.ready=false}
+  }
+ });
+ let savingDownload=false;
+ document.addEventListener('click',async event=>{
+  if(document.documentElement.dataset.runtime!=='desktop')return;
+  const link=event.target.closest('a[href]');if(!link)return;
+  const url=new URL(link.href,location.href);
+  const supported=/^\/(files\/[^/]+|attachments\/[^/]+\/download|chat\/attachments\/[^/]+\/download|chat\/attachments\/pending\/[^/]+\/[^/]+)$/.test(url.pathname);
+  if(url.protocol!==location.protocol||url.host!==location.host||!supported||(!link.hasAttribute('download')&&url.searchParams.get('download')!=='1'))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(savingDownload)return;
+  savingDownload=true;link.setAttribute('aria-busy','true');
+  try{
+   const response=await fetch(url,{method:'POST',headers:{'X-OpenVibely-Save':'1'}});
+   if(!response.ok)throw Error('Could not save the file. Please try again.');
+   const result=await response.json();
+   if(result.saved)window.showToast?.('File saved.','success');
+  }catch(error){window.showToast?.(error.message,'failed')}
+  finally{savingDownload=false;link.removeAttribute('aria-busy')}
+ },true);
+ const dialog=document.getElementById('image-gallery'),content=dialog.querySelector('[data-result-content]');
+ const title=dialog.querySelector('[data-result-title]'),download=dialog.querySelector('[data-gallery-download]');
+ const stage=dialog.querySelector('[data-gallery-stage]'),imageControls=dialog.querySelector('[data-image-controls]');
+ const prev=dialog.querySelector('[data-gallery-prev]'),next=dialog.querySelector('[data-gallery-next]');
+ const selector='[data-image-gallery-item],[data-file-preview]';
+ let controller,opener,group,items=[],index=0,ticket=0,currentKind='',pointerOpened=false,owner=null,opening=0,svgPreview=null;
+ function mode(raw,key){const url=new URL(raw,location.href);for(const k of ['view','raw','download','thumbnail'])url.searchParams.delete(k);url.searchParams.set(key,'1');return url.href}
+ function original(raw){const url=new URL(raw,location.href);return url.origin===location.origin&&/\/(attachments|files)\//.test(url.pathname)?mode(raw,'download'):raw}
+ let borrowedHTML=null;
+ function restoreHTML(){
+  if(!borrowedHTML)return;
+  const {frame,canvas}=borrowedHTML;borrowedHTML=null;frame.hidden=false;
+  canvas.removeAttribute('data-file-html-expanded');
+  if(canvas.isConnected&&frame.isConnected&&canvas.moveBefore)canvas.moveBefore(frame,canvas.firstChild);
+  else canvas.insertBefore(frame,canvas.firstChild);
+ }
+ const pendingHTMLFrames=new Map();
+ function prepareHTMLFrames(root){
+  root.querySelectorAll('iframe').forEach(frame=>{
+   frame.style.visibility='hidden';
+   // A stalled subresource must not hide an otherwise usable document forever.
+   const reveal=()=>{
+    clearTimeout(timer);pendingHTMLFrames.delete(frame);
+    frame.removeEventListener('load',reveal);frame.style.removeProperty('visibility');
+   };
+   const timer=setTimeout(reveal,1500);
+   pendingHTMLFrames.set(frame,reveal);
+   frame.addEventListener('load',reveal,{once:true});
+  });
+ }
+ function clear(){
+  restoreHTML();
+  svgPreview?.dispose();svgPreview=null;
+  dialog.querySelectorAll('header [data-sheet-tabs],header [data-sheet-count]').forEach(node=>node.remove());
+  content.dispatchEvent(new CustomEvent('ov:file-replace',{bubbles:true}));
+  window.OVFileImage?.clear();
+  content.querySelectorAll('video,audio').forEach(m=>{m.pause();m.removeAttribute('src');m.load()});
+  content.replaceChildren();content.hidden=true;stage.hidden=true;imageControls.hidden=true;
+ }
+ function itemFrom(element,url){
+  const raw=url||element?.href||element?.dataset.imageUrl||element?.dataset.filePreview;
+  let kind=element?.hasAttribute('data-image-gallery-item')?(element.dataset.mediaKind||'image'):'';
+  const name=element?.dataset.imageName||element?.dataset.fileName||element?.textContent.trim()||'File preview';
+  let preview=raw;
+  if(kind){const u=new URL(raw,location.href);if(u.origin===location.origin&&/\/(attachments|files)\//.test(u.pathname))preview=mode(raw,kind==='video'?'raw':'thumbnail')}
+  const svgSource=element?.closest('.chat-svg-preview')?.querySelector('pre > code.language-svg')?.textContent;
+  return {element,raw,url:preview,kind,name,download:original(raw),svgSource};
+ }
+ async function show(at){
+  if(at<0||at>=items.length)return;
+  index=at;const item=items[index],id=++ticket;controller?.abort();controller=new AbortController();
+  if(dialog.contains(document.activeElement))dialog.focus({preventScroll:true});
+  clear();
+  svgPreview=window.createChatSVGPreview?.(item.svgSource);
+  const display=svgPreview?{...item,url:svgPreview.url,download:svgPreview.download}:item;
+  currentKind=item.kind;previewKind(currentKind);title.textContent=item.name;download.href=display.download;download.download=item.name;download.hidden=false;
+  dialog.querySelector('[data-gallery-count]').textContent=(index+1)+' / '+items.length;
+  prev.disabled=index===0;next.disabled=index===items.length-1;
+  if(item.kind){stage.hidden=false;imageControls.hidden=false;window.OVFileImage.render(display);return}
+  content.hidden=false;
+  const loading=document.createElement('div');loading.className='file-preview-loading';loading.setAttribute('role','status');loading.setAttribute('aria-label','Loading preview');
+  const spinner=document.createElement('span');spinner.className='loading loading-spinner loading-sm text-primary';spinner.setAttribute('aria-hidden','true');loading.append(spinner);content.replaceChildren(loading);
+  try{
+   const response=await fetch(mode(item.raw,'view'),{signal:controller.signal});
+   if(!response.ok){let message='Preview unavailable';try{message=(await response.json()).message||message}catch{}throw Error(message)}
+   const html=await response.text();if(id!==ticket||!dialog.open)return;
+   // Parse off-document so the replacement iframe never starts a second load.
+   const template=document.createElement('template');template.innerHTML=html;
+   const canvas=item.element?.closest('.file-html-canvas')||item.element?.nextElementSibling;
+   const liveFrame=canvas?.classList.contains('file-html-canvas')?canvas.querySelector('iframe'):null;
+   const replacement=template.content.querySelector('[data-file-viewer="html"] iframe');
+   let marker;
+   if(replacement&&liveFrame?.isConnected&&content.moveBefore&&liveFrame.src===new URL(replacement.getAttribute('src'),location.href).href){
+    marker=document.createComment('Expanded HTML preview');replacement.replaceWith(marker);
+   }
+   prepareHTMLFrames(template.content);
+   content.replaceChildren(template.content);
+   if(marker){
+    marker.parentNode.moveBefore(liveFrame,marker);marker.remove();
+    borrowedHTML={frame:liveFrame,canvas};
+    canvas.setAttribute('data-file-html-expanded','');
+   }
+   const header=content.querySelector('[data-file-header],[data-document-header]');
+   if(header){title.textContent=header.querySelector('h3')?.textContent||item.name;download.download=title.textContent;const link=header.querySelector('a');if(link)download.href=link.href;header.remove()}
+   // A Files-panel link may not have media metadata. Use the server's renderer kind.
+   const media=content.querySelector('[data-file-viewer="image"] img,[data-file-viewer="video"] video');
+   if(media){currentKind=media.tagName==='VIDEO'?'video':'image';previewKind(currentKind);const rendered={...item,name:title.textContent,kind:currentKind,url:media.src};content.replaceChildren();content.hidden=true;stage.hidden=false;imageControls.hidden=false;window.OVFileImage.render(rendered);return}
+   if(content.querySelector('[data-files-list]')){title.textContent='Files';download.hidden=true}
+   window.OVFilesPDF?.render(content);
+   content.querySelectorAll('[data-file-code]').forEach(code=>window.hljs?.highlightElement(code));
+   content.querySelectorAll('[data-file-markdown]').forEach(node=>{node.innerHTML=window.renderChatMarkdown?window.renderChatMarkdown(node.textContent):window.sanitizeChatHTML(window.marked.parse(node.textContent))});
+  }catch(err){
+   if(err.name==='AbortError'||id!==ticket)return;
+   content.replaceChildren();const status=document.createElement('p');status.role='status';status.textContent=err.message;
+   const retry=document.createElement('button');retry.textContent='Retry';retry.onclick=()=>show(index);content.append(status,retry);
+  }
+ }
+ // Cache immutable row models and serialize extraction so a cold transcript
+ // cannot launch a worker for every row at once or block the opening click.
+ const modelLinks=new WeakMap();
+ let extractionQueue=Promise.resolve();
+ function modelFileLinks(model){
+  if(modelLinks.has(model))return modelLinks.get(model);
+  if(!model.segments.some(segment=>(segment.type==='text'||segment.type==='thinking')&&(segment.content||'').includes('/files/'))){modelLinks.set(model,[]);return []}
+  const pending=extractionQueue.then(()=>new Promise(resolve=>setTimeout(resolve,0))).then(async()=>{
+   const source=model.segments.filter(segment=>segment.type==='text'||segment.type==='thinking').map(segment=>segment.content||'').join('');
+   if(!source.includes('/files/'))return [];
+   // The async renderer uses a worker and incremental sanitization for large rows.
+   const rendered=window.renderChatMarkdownAsync?await window.renderChatMarkdownAsync(source):source.length<64*1024?window.renderChatMarkdown?.(source):null;
+   if(!rendered)return [];
+   let root=rendered;
+   if(typeof rendered==='string'){const template=document.createElement('template');template.innerHTML=rendered;root=template.content;}
+   return Array.from(root.querySelectorAll('a[href]')).filter(link=>{
+    let url;try{url=new URL(link.href,location.href)}catch{return false}
+    if(url.origin!==location.origin||!/^\/files\/(?:r-[a-f0-9]{16}-)?[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return false;
+    link.dataset.filePreview='';return true;
+   }).map(link=>{link.remove();return link});
+  });
+  extractionQueue=pending.catch(()=>{});
+  const result=pending.catch(()=>{modelLinks.delete(model);return []});
+  modelLinks.set(model,result);return result;
+ }
+ async function open(url,trigger,event){
+  const request=++opening;
+  if (!dialog.contains(trigger)) {
+   const root=trigger?.closest('#task-detail-content,#chat-page-root');
+   owner=root?{id:root.id,task:root.dataset.taskId||'',project:root.dataset.projectId||''}:null;
+  }
+  // Snapshot a list before replacing an in-dialog Files panel.
+  group=trigger?.closest('[data-image-gallery-group],[data-files-list],.chat-markdown');
+  let candidates=group?Array.from(group.querySelectorAll(selector)):[];
+  const conversation=trigger?.closest('#task-detail-content,#chat-page-root');
+  const identity=raw=>{const url=new URL(raw,location.href);for(const key of ['view','raw','download','thumbnail'])url.searchParams.delete(key);return url.href};
+  const linkIdentity=link=>identity(link.href||link.dataset.imageUrl||link.dataset.filePreview);
+  if(conversation){
+   group=conversation;
+   candidates=window.queryChatVirtualElements?window.queryChatVirtualElements(conversation,selector,async model=>(await modelFileLinks(model)).map(link=>{const copy=link.cloneNode(true);copy.href=scopeFileURL(copy.getAttribute('href'),conversation);return copy})):Array.from(conversation.querySelectorAll(selector));
+  }
+  if(!dialog.contains(trigger)){opener=trigger;pointerOpened=!!event && event.detail>0}else group=null;
+  // Show the requested file immediately while offscreen links are collected.
+  items=[itemFrom(trigger,url)];
+  if(!dialog.open)dialog.showModal();show(0);
+  dialog.focus({preventScroll:true});
+  let links;try{links=await candidates}catch{return}
+  if(request!==opening||!dialog.open)return;
+  const seen=new Set();
+  links=links.filter(link=>{const key=linkIdentity(link);if(seen.has(key))return false;seen.add(key);return true});
+  // Expand buttons are not file links; match their URL to the original attachment.
+  const at=links.findIndex(link=>linkIdentity(link)===identity(url));
+  if(at<0)return;
+  items=links.map(link=>itemFrom(link));index=at;
+  dialog.querySelector('[data-gallery-count]').textContent=(index+1)+' / '+items.length;
+  prev.disabled=index===0;next.disabled=index===items.length-1;
+ }
+ function previewKind(kind){
+  dialog.dataset.previewKind=kind;
+  const viewer=dialog.querySelector('.image-gallery-viewer');
+  [prev,next].forEach(button=>viewer.append(button));
+  dialog.querySelector('[data-result-actions]').hidden=true;
+  dialog.querySelector('.image-gallery-tools').append(download);
+  imageControls.hidden=false;
+  ['minus','plus','fit'].forEach(name=>dialog.querySelector('[data-gallery-'+name+']').hidden=kind!=='image');
+ }
+ function close(){opening++;if(dialog.open)dialog.close()}
+ document.addEventListener('click',event=>{
+  const link=event.target.closest(selector);
+  if(!link||event.defaultPrevented||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+  event.preventDefault();event.stopPropagation();open(link.href||link.dataset.imageUrl||link.dataset.filePreview,link,event);
+ });
+ prev.onclick=()=>show(index-1);next.onclick=()=>show(index+1);
+ dialog.querySelector('[data-gallery-close]').onclick=close;
+ dialog.addEventListener('close',()=>{if(dialog.open)return;opening++;ticket++;controller?.abort();clear();title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected){if(pointerOpened)opener.blur();else opener.focus({preventScroll:true});}opener=null});
+ dialog.addEventListener('keydown',event=>{
+  if(event.defaultPrevented||event.isComposing||event.altKey||event.metaKey||event.ctrlKey||event.target.closest('input,textarea,select,[contenteditable],[data-sheet-grid]'))return;
+  if(event.key==='Escape'){event.preventDefault();close();return}
+  if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();show(index+(event.key==='ArrowRight'?1:-1));return}
+  if(currentKind==='image'&&['+','=','-','0'].includes(event.key)){event.preventDefault();window.OVFileImage.key(event.key)}
+ });
+ dialog.addEventListener('click',event=>{const toggle=event.target.closest('[data-file-html-mode]');if(toggle){const root=toggle.closest('[data-file-viewer]'),source=toggle.dataset.fileHtmlMode==='source';root.querySelector('iframe').hidden=source;root.querySelector('[data-file-source]').hidden=!source}});
+ // The preview owns its loaded content and item snapshot. Replacing a
+ // message/attachment during background refresh must not dismiss it.
+ document.addEventListener('htmx:beforeSwap',event=>{
+  const target=event.detail?.target;
+  if(event.detail?.shouldSwap && dialog.open && target?.id==='main-content')close();
+ });
+ window.addEventListener('popstate',close);
+ new MutationObserver(()=>{
+  if(!dialog.open||!owner)return;
+  const root=document.getElementById(owner.id);
+  if(!root||(root.dataset.taskId||'')!==owner.task||(root.dataset.projectId||'')!==owner.project)close();
+ }).observe(document.body,{childList:true,subtree:true});
+ window.imageGallery={close,refreshItem(element){const at=items.findIndex(item=>item.element===element);if(at<0)return;items[at]=itemFrom(element);if(at===index){if(currentKind==='image'&&window.OVFileImage.refresh(items[at])){download.href=items[at].download}else show(at)}}};
+ // Route only generated-file URLs, using the conversation owner rather than
+ // the selected workspace. Persisted Markdown and external links are untouched.
+ function scopeFileURL(raw,owner){
+  const project=owner?.closest('#task-detail-content,#chat-page-root,#plugin-page-root')?.dataset.projectId;
+  const prefix=project?.match(/^r-[a-f0-9]{16}-/)?.[0];
+  if(!prefix)return raw;
+  let url;try{url=new URL(raw,location.href)}catch{return raw}
+  if(url.protocol!==location.protocol||url.host!==location.host)return raw;
+  const match=url.pathname.match(/^\/files\/([a-f0-9]+)$/);
+  if(!match)return raw;
+  const requested=url.searchParams.get('project_id');
+  if(requested&&requested.startsWith('r-')&&!requested.startsWith(prefix))return raw;
+  url.pathname='/files/'+prefix+match[1];
+  url.searchParams.set('project_id',requested?(requested.startsWith(prefix)?requested:prefix+requested):project);
+  return url.pathname+url.search+url.hash;
+ }
+ function scopeFileLinks(root,owner){
+  root.querySelectorAll('a[href],img[src]').forEach(node=>{
+   const attr=node.tagName==='IMG'?'src':'href',raw=node.getAttribute(attr);
+   const scoped=scopeFileURL(raw,owner||node);
+   if(scoped!==raw)node.setAttribute(attr,scoped);
+  });
+ }
+ // Retain enhanced published file links while the surrounding response is rebuilt.
+ function prepareStream(fragment,previous){
+  scopeFileLinks(fragment,previous);
+  const saved=new Map();
+  const key=link=>link.href+'\n'+link.textContent;
+  const links=Array.from(previous.querySelectorAll('a[data-file-link-bound][data-image-gallery-item],a[data-file-link-bound][data-file-preview]'));
+  for(let owner=previous.parentElement;owner;owner=owner.parentElement)if(owner._filePreviewPool)links.push(...owner._filePreviewPool.querySelectorAll('a[data-file-link-bound]'));
+  links.forEach(link=>{
+   const identity=key(link);if(!saved.has(identity))saved.set(identity,[]);saved.get(identity).push(link);
+  });
+  fragment.querySelectorAll('a[href]').forEach(link=>{
+   const retained=saved.get(key(link))?.shift();if(!retained)return;
+   const canvas=retained.nextElementSibling?.classList.contains('file-html-canvas')?retained.nextElementSibling:null;
+   link.replaceWith(retained);
+   if(canvas){
+    if(previous.isConnected&&canvas.isConnected){
+     const marker=document.createComment('HTML preview');retained.after(marker);
+     (fragment._fileStreamMoves ||= []).push([marker,canvas]);
+    }else retained.after(canvas);
+   }
+   const scope=retained.closest('.chat-markdown')||retained.parentElement;
+   scope.dataset.imageGalleryGroup='';
+   if(dialog.open&&retained===opener)group=scope;
+  });
+ }
+ // Attach destinations before moving browsing contexts; ordinary DOM insertion
+ // reloads an iframe even when the exact same element is reused.
+ // Engines without state-preserving moves must keep the iframe's entire
+ // ancestor chain attached. Replace surrounding prose/tools in place instead.
+ function commitStreamInPlace(fragment,previous){
+  const moves=fragment._fileStreamMoves||[];
+  function patch(parent,desired){
+   const children=Array.from(desired.childNodes),groups=new Map();
+   // Plan all destinations before removing anything. Several desired rows can
+   // share one existing live-tail wrapper, which must remain attached as a unit.
+   children.forEach((fresh,index)=>{
+    for(const [marker,retained] of moves){
+     if(fresh!==marker&&!fresh.contains(marker))continue;
+     let ancestor=retained;
+     while(ancestor.parentNode&&ancestor.parentNode!==parent)ancestor=ancestor.parentNode;
+     if(ancestor.parentNode!==parent||(ancestor===retained&&fresh!==marker))continue;
+     const group=groups.get(ancestor);
+     if(group)group.end=index;else groups.set(ancestor,{node:ancestor,start:index,end:index});
+    }
+   });
+   let cursor=parent.firstChild;
+   for(let index=0;index<children.length;index++){
+    const fresh=children[index],group=Array.from(groups.values()).find(group=>group.start===index);
+    let node=fresh;
+    if(group){
+     node=group.node;
+     if(group.end===index&&fresh.nodeType!==Node.COMMENT_NODE&&node.nodeName===fresh.nodeName&&node.style?.display!=='contents'){
+      for(const attr of Array.from(node.attributes))if(!fresh.hasAttribute(attr.name))node.removeAttribute(attr.name);
+      for(const attr of fresh.attributes)node.setAttribute(attr.name,attr.value);
+      if(fresh._chatMarkdownSource!==undefined)node._chatMarkdownSource=fresh._chatMarkdownSource;
+      patch(node,fresh);
+     }else if(group.end!==index||!moves.some(([marker,retained])=>fresh===marker&&node===retained)){
+      const wrapper=document.createDocumentFragment();
+      for(let i=index;i<=group.end;i++)wrapper.append(children[i]);
+      patch(node,wrapper);
+     }
+     index=group.end;
+    }else{
+     // A genuine Markdown structure change may require a new parent. Ordinary
+     // text deltas and completion retain the planned ancestor groups above.
+     for(const [marker,retained] of moves)if(fresh===marker||fresh.contains(marker)){
+      marker.replaceWith(retained);if(fresh===marker)node=retained;
+     }
+    }
+    if(node.parentNode===parent){
+     while(cursor&&cursor!==node){const next=cursor.nextSibling;cursor.remove();cursor=next}
+    }else parent.insertBefore(node,cursor);
+    cursor=node.nextSibling;
+   }
+   while(cursor){const next=cursor.nextSibling;cursor.remove();cursor=next}
+  }
+  patch(previous,fragment);
+ }
+ // Adopt the existing Markdown element as a virtual row on engines that cannot
+ // move an iframe. Its surrounding wrappers are retained by commitStreamInPlace.
+ function previewRows(owner,models){
+  const result=new Map();
+  if(owner.moveBefore)return result;
+  // Thinking can be nested in an expanded Compact group. Retain this
+  // owner's entire row so neither the disclosure nor its iframe is detached.
+  const candidates=Array.from(new Set(Array.from(owner.querySelectorAll('.file-html-canvas'),canvas=>
+   canvas.closest('.stream-thinking-body')?(owner._chatVirtualRows?.find(row=>row.node?.contains(canvas))?.node||canvas.closest('details.stream-thinking')):canvas.closest('.chat-markdown')).filter(Boolean)));
+  if(!candidates.length)return result;
+  // Preserve the text section's position and source, including offscreen rows.
+  // Identical links elsewhere in the response must not claim this section's iframe.
+  const sourceOf=model=>model.segments.map(segment=>segment.content||'').join('').trim();
+  const prior=owner._chatVirtualRows?.filter(row=>row.model.segments.some(segment=>segment.type==='text'||segment.type==='thinking'));
+  const blocks=Array.from(owner.querySelectorAll('.chat-markdown')).filter(node=>typeof node._chatMarkdownSource==='string');
+  const origins=candidates.map(node=>{
+   const ordinal=prior?prior.findIndex(row=>row.node===node||row.node?.contains(node)):blocks.indexOf(node);
+   return {node,ordinal,source:ordinal>=0&&prior?sourceOf(prior[ordinal].model):(node._chatMarkdownSource||node._thinkingSource||node.querySelector('details.stream-thinking')?._thinkingSource||'').trim()};
+  });
+  const texts=models.map((model,index)=>({model,index,source:sourceOf(model)})).filter(entry=>entry.model.segments.some(segment=>segment.type==='text'||segment.type==='thinking'));
+  // Verify actual Markdown links as well: prose/code mentions are not previews.
+  const identity=link=>new URL(link.getAttribute('href'),location.href).href+'\n'+link.textContent;
+  const projected=new Map();
+  async function linksFor(entry){
+   if(!projected.has(entry.index))projected.set(entry.index,new Set((await modelFileLinks(entry.model)).map(identity)));
+   return projected.get(entry.index);
+  }
+  return (async()=>{
+   for(const origin of origins){
+    const identities=Array.from(origin.node.querySelectorAll('a[data-file-link-bound]')).filter(link=>link.nextElementSibling?.classList.contains('file-html-canvas')).map(identity);
+    const compatible=entry=>!!entry&&!!origin.source&&(entry.source===origin.source||entry.source.startsWith(origin.source));
+    const atOrdinal=texts[origin.ordinal];
+    const preferred=compatible(atOrdinal)?atOrdinal:null;
+    const contextual=texts.filter(entry=>compatible(entry)&&!result.has(entry.index));
+    let destination=preferred&&!result.has(preferred.index)?preferred:contextual.length===1?contextual[0]:null;
+    if(destination){
+     const links=await linksFor(destination);
+     if(!identities.some(key=>links.has(key)))destination=null;
+    }
+    if(!destination){
+     // Source rewrites may change the section ordinal. Reuse only when the
+     // remaining real links identify one destination, never the first duplicate.
+     const matches=[];
+     for(const entry of texts){
+      if(result.has(entry.index))continue;
+      const links=await linksFor(entry);
+      if(identities.some(key=>links.has(key)))matches.push(entry);
+     }
+     if(matches.length===1)destination=matches[0];
+    }
+    if(destination)result.set(destination.index,origin.node);
+   }
+   return result;
+  })();
+ }
+ function commitStream(fragment,previous){
+  if(!previous.moveBefore&&fragment._fileStreamMoves?.length){commitStreamInPlace(fragment,previous);return}
+  const old=Array.from(previous.childNodes);
+  previous.append(fragment);
+  for(const [marker,node] of fragment._fileStreamMoves||[]){
+   const pool=node.parentElement?.hasAttribute('data-chat-preview-pool')?node.parentElement:null;
+   if(marker.parentNode.moveBefore&&node.isConnected&&marker.isConnected)marker.parentNode.moveBefore(node,marker);
+   else marker.before(node);
+   marker.remove();
+   if(pool&&!pool.childNodes.length){
+    const owner=pool.parentElement;
+    if(owner?._filePreviewPool===pool){delete owner._filePreviewPool;delete owner._filePreviewSource}
+    pool.remove();
+   }
+  }
+  const retained=new Set((fragment._fileStreamMoves||[]).map(entry=>entry[1]));
+  old.forEach(node=>{if(node.parentNode===previous&&!retained.has(node))node.remove()});
+ }
+ function retainVirtual(owner,source,reused){
+  if(!owner.isConnected||!owner.moveBefore)return;
+  let pool=owner._filePreviewPool;
+  if(pool&&!(typeof source==='string'&&source.startsWith(owner._filePreviewSource))){pool.remove();pool=null}
+  const links=Array.from(owner.querySelectorAll('a[data-file-link-bound][data-file-preview]')).filter(link=>
+   !pool?.contains(link)&&!reused.some(node=>node.contains(link))&&link.nextElementSibling?.classList.contains('file-html-canvas')&&
+   typeof source==='string'&&source.includes(link.getAttribute('href')));
+  if(links.length){
+   if(!pool){pool=document.createElement('div');pool.hidden=true;pool.setAttribute('data-chat-preview-pool','');owner.append(pool)}
+   for(const link of links){const canvas=link.nextElementSibling;pool.moveBefore(link,null);pool.moveBefore(canvas,null)}
+  }
+  if(pool&&!pool.childNodes.length){pool.remove();pool=null}
+  if(pool){owner._filePreviewPool=pool;owner._filePreviewSource=source}
+  else{delete owner._filePreviewPool;delete owner._filePreviewSource}
+  return pool;
+ }
+ window.OVFileViewer={open,mode,prepareStream,commitStream,retainVirtual,previewRows};
+ // Events missed while disconnected are not replayed by the live stream.
+ window.addEventListener('sse-live-connected',event=>{
+  if(!event.detail?.reconnected)return;
+  document.querySelectorAll('[data-task-files]').forEach(panel=>window.htmx.trigger(panel,'taskFilesChanged'));
+ });
+ window.addEventListener('sse-task-event',event=>{
+  const update=event.detail;
+  if(update?.type!=='task_files_changed')return;
+  document.querySelectorAll('[data-task-files]').forEach(panel=>{
+   if(panel.dataset.taskFiles===update.task_id&&panel.dataset.projectId===update.project_id)
+    window.htmx.trigger(panel,'taskFilesChanged');
+  });
+ });
+ document.addEventListener('click',async event=>{
+ const expand=event.target.closest('.file-html-canvas button');if(expand){const frame=expand.closest('.file-html-canvas').querySelector('iframe');if(frame)open(frame.src,expand,event);return}
+ const files=event.target.closest('[data-files-panel]');if(files){open(files.dataset.filesPanel,files,event);return}
+ const attach=event.target.closest('[data-file-attach]');if(!attach)return;
+ const status=dialog.querySelector('[data-file-attach-status]');attach.disabled=true;
+ try{const input=document.querySelector('form input[name=attachment_session_id]')?.closest('form')?.querySelector('input[type=file]');if(!input)throw Error('Open a conversation composer to attach this file.');const response=await fetch(mode(attach.dataset.fileAttach,'download'));if(!response.ok)throw Error('Could not read this file');const blob=await response.blob(),transfer=new DataTransfer();transfer.items.add(new File([blob],attach.dataset.fileName,{type:blob.type}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));dialog.close()}catch(err){if(status)status.textContent=err.message}finally{attach.disabled=false}
+ });
+ // Server-rendered preview links already own their thumbnail and gallery group.
+ // Only enhance ordinary published links, such as links in model responses.
+ function scanLinks(root=document){scopeFileLinks(root);root.querySelectorAll('a[href]:not([data-file-link-bound]):not([data-image-gallery-item]):not([data-file-preview])').forEach(link=>{
+ if(link.closest('[data-thread-refresh-preview]'))return;
+ let url;try{url=new URL(link.href,location.href)}catch{return}
+ if(url.origin!==location.origin||!/^\/files\/(?:r-[a-f0-9]{16}-)?[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return;
+ link.dataset.fileLinkBound='';link.dataset.filePreview='';
+ if(link.closest('[data-result-content]'))return;
+ const meta=new URL(url);meta.searchParams.set('metadata','1');fetch(meta).then(r=>r.ok?r.json():null).then(file=>{
+ if(!file||!link.isConnected||link.closest('[data-thread-refresh-preview]'))return;
+ if(/^(image|video)\//.test(file.media_type)||/\.svg$/i.test(file.file_name)){
+ const video=file.media_type.startsWith('video/');link.removeAttribute('data-file-preview');link.dataset.imageGalleryItem='';link.dataset.imageName=file.file_name;link.dataset.mediaKind=video?'video':'image';(link.closest('.chat-markdown')||link.parentElement).dataset.imageGalleryGroup='';const preview=document.createElement(video?'video':'img');preview.src=mode(url,video?'raw':'thumbnail');preview.alt=file.file_name;preview.style.cssText='max-width:100%;max-height:400px;object-fit:contain';if(video){preview.muted=true;preview.preload='metadata'}link.prepend(preview);return;
+ }
+ if(!/^text\/html(?:;|$)/i.test(file.media_type)&&! /\.html?$/i.test(file.file_name))return;
+ link.dataset.fileName=file.file_name;
+ // Thinking links open the viewer on demand without embedding a live mockup.
+ if(link.closest('details.stream-thinking'))return;
+ const canvas=document.createElement('div');canvas.className='file-html-canvas';const frame=document.createElement('iframe');frame.title=file.file_name;frame.setAttribute('sandbox','allow-scripts');frame.referrerPolicy='no-referrer';frame.src=mode(url,'raw');const expand=document.createElement('button');expand.type='button';expand.textContent='Expand';canvas.append(frame,expand);prepareHTMLFrames(canvas);link.after(canvas);
+ }).catch(()=>{});
+ })}
+ let scanQueued=false;new MutationObserver(()=>{
+  for(const [frame,reveal] of pendingHTMLFrames)if(!frame.isConnected)reveal();
+  if(scanQueued)return;scanQueued=true;requestAnimationFrame(()=>{scanQueued=false;scanLinks()})}).observe(document.body,{childList:true,subtree:true});scanLinks();
+})();
