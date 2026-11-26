@@ -263,7 +263,7 @@ func TestDesktopWindowProxiesEphemeralBackendWithPersistentStorage(t *testing.T)
 		t.Fatalf("read desktop proxy: %v", err)
 	}
 	source := string(content) + "\n" + string(proxyContent)
-	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       "/chat",`) || !strings.Contains(source, `httputil.NewSingleHostReverseProxy(backendURL)`) || !strings.Contains(source, `proxy.FlushInterval = -1`) {
+	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       "/tasks/new",`) || !strings.Contains(source, `httputil.NewSingleHostReverseProxy(backendURL)`) || !strings.Contains(source, `proxy.FlushInterval = -1`) {
 		t.Fatal("desktop launcher must keep loading the server UI through a Wails WebView window")
 	}
 	for _, disallowed := range []string{`DataPath:`, `PrivateMode`, `Incognito`, `Ephemeral`, `ClearBrowsingData`} {

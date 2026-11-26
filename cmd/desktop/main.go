@@ -265,7 +265,7 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		Name:           "main",
 		Title:          "OpenVibely",
 		// Open the workspace directly instead of taking an extra redirect through root.
-		URL:       "/chat",
+		URL:       "/tasks/new",
 		Width:     1280,
 		Height:    820,
 		MinWidth:  desktopMinWidth,

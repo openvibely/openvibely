@@ -332,7 +332,7 @@ func (h *Handler) finishLogin(c echo.Context) error {
 	}
 	if h.desktopLoginRequest(c) {
 		if next == "/" {
-			next = "/chat"
+			next = "/tasks/new"
 		}
 		return c.JSON(http.StatusOK, map[string]string{"destination": next})
 	}

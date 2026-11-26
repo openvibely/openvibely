@@ -58,8 +58,8 @@ func TestHome_Redirect(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303, got %d", rec.Code)
 	}
-	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/chat") {
-		t.Errorf("expected redirect to /chat, got %q", loc)
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/tasks/new") {
+		t.Errorf("expected redirect to /tasks/new, got %q", loc)
 	}
 }
 

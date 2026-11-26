@@ -101,7 +101,7 @@ func TestAuthLogin_DesktopNavigatesDirectly(t *testing.T) {
 	h, e := authTestHandler(t)
 	h.SetDesktopMode(true)
 	for _, test := range []struct{ next, destination string }{
-		{"", "/chat"},
+		{"", "/tasks/new"},
 		{"/tasks?project_id=one", "/tasks?project_id=one"},
 	} {
 		form := url.Values{"username": {"admin"}, "password": {"secret"}, "next": {base64.RawURLEncoding.EncodeToString([]byte(test.next))}}

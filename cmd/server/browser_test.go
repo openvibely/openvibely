@@ -27,7 +27,7 @@ func TestStartupBrowserWaitsForHealthAndUsesBoundURL(t *testing.T) {
 		if requests.Load() < 3 {
 			t.Error("opened before readiness")
 		}
-		if target != srv.URL+"/chat" {
+		if target != srv.URL+"/tasks/new" {
 			t.Errorf("target = %q", target)
 		}
 		return nil

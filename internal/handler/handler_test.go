@@ -2551,12 +2551,12 @@ func TestHandler_UpdateModel_PostFallback(t *testing.T) {
 	}
 }
 
-func TestHandler_HomeRedirectsToChat(t *testing.T) {
+func TestHandler_HomeRedirectsToNewTask(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	rec := htmxGet(e, "/")
 	assertCode(t, rec, http.StatusSeeOther)
-	if loc := rec.Header().Get("Location"); loc != "/chat" {
-		t.Fatalf("expected redirect to /chat, got %q", loc)
+	if loc := rec.Header().Get("Location"); loc != "/tasks/new" {
+		t.Fatalf("expected redirect to /tasks/new, got %q", loc)
 	}
 }
 

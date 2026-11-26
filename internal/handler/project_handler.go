@@ -35,7 +35,7 @@ const (
 )
 
 func (h *Handler) Home(c echo.Context) error {
-	target := "/chat"
+	target := "/tasks/new"
 	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" {
 		target += "?project_id=" + url.QueryEscape(projectID)
 	}

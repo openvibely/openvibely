@@ -36,7 +36,7 @@ func openStartupBrowser(ctx context.Context, baseURL, noBrowser string, open fun
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if err := open(baseURL + "/chat"); err != nil {
+				if err := open(baseURL + "/tasks/new"); err != nil {
 					return fmt.Errorf("open browser: %w", err)
 				}
 				return nil
