@@ -280,13 +280,12 @@ func TestTelegramServiceWaitsForStoppedPollerBeforeRestart(t *testing.T) {
 	}()
 
 	select {
-	case <-stopped:
-		t.Fatal("blocking stop returned before the old long-poll request drained")
-	case <-time.After(50 * time.Millisecond):
+	case ok := <-stopped:
+		assert.True(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("blocking stop did not cancel the old long-poll request")
 	}
-
-	client.unblock()
-	assert.True(t, <-stopped)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&client.activeUpdates))
 }
 
 func TestTelegramServiceConflictClassifierMatchesTypedTelegramError(t *testing.T) {
@@ -4658,4 +4657,48 @@ func TestTelegramInboundUpdateResolvesProjectWhilePriorTurnSwitchesProject(t *te
 	cachedProjectID, ok, _ := svc.cachedTelegramActiveProject(userID)
 	require.True(t, ok)
 	require.Equal(t, persistedProjectID, cachedProjectID)
+}
+
+func TestTelegramStopAndWaitCancelsLongPollAndAllowsRestart(t *testing.T) {
+	started := make(chan struct{}, 2)
+	cancelled := make(chan struct{}, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/getMe") {
+			fmt.Fprint(w, `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"test"}}`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			_, _ = io.Copy(io.Discard, r.Body)
+			started <- struct{}{}
+			<-r.Context().Done()
+			cancelled <- struct{}{}
+		}
+	}))
+	defer server.Close()
+	bot, err := tgbotapi.NewBotAPIWithClient("test-token", server.URL+"/bot%s/%s", server.Client())
+	require.NoError(t, err)
+	svc := &TelegramService{bot: bot}
+	defer svc.Stop()
+	for i := 0; i < 2; i++ {
+		svc.Start()
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("poll did not start")
+		}
+		done := make(chan struct{})
+		go func() { svc.StopAndWait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("shutdown did not cancel the active long poll")
+		}
+		select {
+		case <-cancelled:
+		case <-time.After(2 * time.Second):
+			t.Fatal("server did not observe request cancellation")
+		}
+		assert.False(t, svc.IsRunning())
+		assert.Same(t, server.Client(), bot.Client, "polling must not replace the shared message client")
+	}
 }

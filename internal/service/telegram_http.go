@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,17 @@ import (
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 )
+
+// telegramPollClient binds library-created polling requests to the poller's
+// lifetime without changing the shared client used to send messages.
+type telegramPollClient struct {
+	client tgbotapi.HTTPClient
+	ctx    context.Context
+}
+
+func (c telegramPollClient) Do(req *http.Request) (*http.Response, error) {
+	return c.client.Do(req.WithContext(c.ctx))
+}
 
 // Wrap the HTTP client, not its transport: http.Client adds the credential-bearing
 // URL to transport errors. Sanitize before the Telegram library or callers see it.

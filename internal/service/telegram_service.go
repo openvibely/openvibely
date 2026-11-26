@@ -445,6 +445,9 @@ func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done ch
 		s.lifecycleMu.Unlock()
 		close(done)
 	}()
+	// Keep the shared bot untouched: only getUpdates uses this cancellable client.
+	pollBot := *bot
+	pollBot.Client = telegramPollClient{client: bot.Client, ctx: ctx}
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
@@ -459,7 +462,11 @@ func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done ch
 		default:
 		}
 
-		updates, err := bot.GetUpdates(u)
+		updates, err := pollBot.GetUpdates(u)
+		if ctx.Err() != nil {
+			applog.Infof("[telegram] bot stopped")
+			return
+		}
 		if err != nil {
 			if isTelegramConflictError(err) {
 				if time.Since(lastConflictLog) >= 30*time.Second {
