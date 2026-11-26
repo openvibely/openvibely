@@ -565,6 +565,33 @@ func TestReconcileInstalledPluginMCPRunning_UsesAllInstalledPlugins(t *testing.T
 	}
 }
 
+func TestReconcileInstalledPluginMCPRunning_DoesNotSeedEmptyInstall(t *testing.T) {
+	root := t.TempDir()
+	origRoot, origImport, origReconcile := userPluginBaseFn, importMarketplaceFn, reconcilePersistentFn
+	t.Cleanup(func() {
+		userPluginBaseFn, importMarketplaceFn, reconcilePersistentFn = origRoot, origImport, origReconcile
+	})
+	userPluginBaseFn = func() string { return root }
+	importMarketplaceFn = func(context.Context, string) error {
+		t.Fatal("starting installed plugins must not download marketplaces")
+		return nil
+	}
+	called := false
+	reconcilePersistentFn = func(ctx context.Context, servers []models.MCPServerConfig, workDir string) error {
+		called = true
+		if len(servers) != 0 {
+			t.Fatalf("empty install resolved %d servers", len(servers))
+		}
+		return nil
+	}
+	if err := EnsureInstalledPluginMCPRunning(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("must reconcile even when no servers remain installed")
+	}
+}
+
 func TestNormalizeAndParsePluginIDs(t *testing.T) {
 	got := NormalizePluginIDs([]string{
 		" beta@market ",

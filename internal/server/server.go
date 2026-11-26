@@ -456,6 +456,12 @@ type Options struct {
 // The caller is responsible for calling Instance.Shutdown when done, or
 // listening for OS signals and calling it from a signal handler.
 func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instance, error) {
+	startupPhase := time.Now()
+	logStartupPhase := func(name string) {
+		applog.Infof("[startup] %s elapsed=%s", name, time.Since(startupPhase))
+		startupPhase = time.Now()
+	}
+
 	go machinetype.Local()
 	if cfg == nil {
 		return nil, fmt.Errorf("config is nil")
@@ -516,6 +522,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	fileChangeBroadcaster := events.NewFileChangeBroadcasterWithLimit(cfg.LiveLimits.LiveSubscriptions)
 	executionStreamHub := events.NewExecutionStreamHubWithLimit(cfg.LiveLimits.ExecutionSubscriptions)
 
+	logStartupPhase("configuration")
 	// Database
 	backend, err := openPersistence(cfg, broadcaster)
 	if err != nil {
@@ -529,6 +536,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		return nil, fmt.Errorf("reading database schema version: %w", err)
 	}
 
+	logStartupPhase("database")
 	// Stores
 	localStores := backend.Stores()
 	remoteHub := &remote.Hub{OnTask: broadcaster.Publish, OnChat: chatBroadcaster.Publish}
@@ -1116,6 +1124,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	if wdErr != nil || workDir == "" {
 		workDir = "."
 	}
+	logStartupPhase("services")
 	mcpBootCtx, mcpBootCancel := context.WithTimeout(context.Background(), 45*time.Second)
 	if mcpErr := agentplugins.EnsureInstalledPluginMCPRunning(mcpBootCtx, workDir); mcpErr != nil {
 		applog.Infof("warning: persistent plugin MCP startup incomplete: %v", mcpErr)
@@ -1138,6 +1147,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		alertCancel()
 	}
 	mcpBootCancel()
+	logStartupPhase("installed plugin servers")
 
 	// Start background services
 	srvCtx, srvCancel := context.WithCancel(ctx)
@@ -1431,6 +1441,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	}
 
 	// Serve in background.
+	logStartupPhase("HTTP listener")
 	e.Listener = ln
 	go func() {
 		if sErr := e.Start(""); sErr != nil {

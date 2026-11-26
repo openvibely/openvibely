@@ -64,6 +64,7 @@ func disableAutomaticUpdatesForE2E(t *testing.T, data string) {
 
 type automaticAppE2E struct {
 	exited                                                                  chan struct{}
+	stopTree                                                                func() error
 	t                                                                       *testing.T
 	root, data, installed, installUnit, distribution, baseURL, service, key string
 	cmd                                                                     *exec.Cmd
@@ -108,9 +109,11 @@ func (a *automaticAppE2E) start() {
 		cmd.Env = append(cmd.Env, desktopTestEnvironment()...)
 	}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err := cmd.Start(); err != nil {
+	stopTree, err := startPackagedApp(cmd)
+	if err != nil {
 		a.t.Fatal(err)
 	}
+	a.stopTree = stopTree
 	a.cmd = cmd
 	a.exited = make(chan struct{})
 	go func() { defer close(a.exited); _ = cmd.Wait() }()
@@ -118,6 +121,12 @@ func (a *automaticAppE2E) start() {
 		a.baseURL = waitForDesktopBaseURLFromLogs(a.t, logs)
 	}
 	a.wait(func(s CoordinatorSnapshot) bool { return s.CurrentVersion == "0.5.0" }, "initial version")
+	for _, line := range strings.Split(logs(), "\n") {
+		if strings.Contains(line, "[startup]") {
+			a.t.Log(line)
+		}
+	}
+
 	if a.distribution == "desktop" {
 		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
@@ -132,6 +141,12 @@ func (a *automaticAppE2E) start() {
 func (a *automaticAppE2E) stop() {
 	started := time.Now()
 	defer func() { a.t.Logf("phase stop: %s", time.Since(started)) }()
+	if a.stopTree != nil {
+		if err := a.stopTree(); err != nil {
+			a.t.Errorf("close app process tree: %v", err)
+		}
+		a.stopTree = nil
+	}
 	// Drain the helper and app together, including successors created during cleanup.
 	command := ExecutableUpdateHelperCommand
 	if a.distribution == "desktop" && runtime.GOOS == "darwin" {

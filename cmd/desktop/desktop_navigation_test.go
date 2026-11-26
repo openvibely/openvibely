@@ -63,7 +63,8 @@ func TestNativeDesktopNavigation(t *testing.T) {
 	authBackend := desktopAuthBackend(t)
 	for _, mode := range []string{"auth", "login", "logout", "invite", "original-create", "create", "automation", "get-307", "organization", "absolute", "session-expired", "refresh", "external"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+			// Separate startup (70s), navigation (30s), and shutdown budgets.
+			ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 			defer cancel()
 			profile := testutil.NativeBrowserTempDir(t)
 			command := exec.CommandContext(ctx, binary, mode, fixturePath, htmx, authBackend.BaseURL, profile)

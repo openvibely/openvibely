@@ -382,10 +382,10 @@ func UninstallPlugin(ctx context.Context, pluginID string) error {
 
 // ReconcileInstalledPluginMCPRunning reconciles persistent plugin MCP servers to all installed plugins.
 func ReconcileInstalledPluginMCPRunning(ctx context.Context, workDir string) error {
-	state, err := DiscoverState(ctx)
-	if err != nil && len(state.Installed) == 0 {
-		return err
-	}
+	// Starting installed servers only requires local state. DiscoverState also
+	// downloads default marketplaces on a fresh install, blocking app startup
+	// on unrelated network/Git work when there are no servers to start.
+	state := discoverStateLocal()
 	servers, resolveErr := pluginServersForIDs(ctx, installedPluginIDs(state.Installed))
 	if resolveErr != nil {
 		return resolveErr

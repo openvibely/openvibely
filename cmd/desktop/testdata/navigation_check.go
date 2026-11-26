@@ -12,6 +12,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -175,13 +176,41 @@ func main() {
 		Windows: application.WindowsWindow{WebView2CompositionHosting: true},
 	})
 	var passed bool
+	ready := make(chan struct{})
+	var readyOnce sync.Once
+	loadedEvent := events.Windows.WebViewNavigationCompleted
+	switch runtime.GOOS {
+	case "darwin":
+		loadedEvent = events.Mac.WebViewDidFinishNavigation
+	case "linux":
+		loadedEvent = events.Linux.WindowLoadFinished
+	}
+	win.OnWindowEvent(loadedEvent, func(*application.WindowEvent) {
+		readyOnce.Do(func() { close(ready) })
+	})
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		go func() {
+			// ApplicationStarted precedes WebView2 controller creation. Do not
+			// spend the navigation budget, or call Quit, during that initialization.
+			started := time.Now()
+			startupTimer := time.NewTimer(70 * time.Second)
+			select {
+			case <-ready:
+				startupTimer.Stop()
+				fmt.Printf("READY platform=%s/%s mode=%s elapsed=%s\n", runtime.GOOS, runtime.GOARCH, mode, time.Since(started))
+			case <-startupTimer.C:
+				// Leave Wails its full 60-second controller deadline. If startup
+				// still hangs, exit without reentering its partial window teardown.
+				fmt.Fprintf(os.Stderr, "STARTUP FAILED mode=%s: first page did not load within 70s\n", mode)
+				os.Exit(1)
+			}
 			reached := false
+			navigationTimer := time.NewTimer(30 * time.Second)
+			defer navigationTimer.Stop()
 			select {
 			case <-done:
 				reached = true
-			case <-time.After(30 * time.Second):
+			case <-navigationTimer.C:
 			}
 			time.AfterFunc(200*time.Millisecond, func() {
 				application.InvokeAsync(func() {

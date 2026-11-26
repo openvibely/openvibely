@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -314,4 +316,140 @@ func stopWindowsCleanupProcess(process *windowsCleanupProcess) error {
 		return fmt.Errorf("terminate: %w", err)
 	}
 	return nil
+}
+
+// The test owns the job, so it survives app exits and update restarts. Starting
+// suspended prevents children from escaping before job assignment.
+func startPackagedApp(cmd *exec.Cmd) (func() error, error) {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	closeJob := func() error { return windows.CloseHandle(job) }
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		_ = closeJob()
+		return nil, err
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
+	if err = cmd.Start(); err != nil {
+		_ = closeJob()
+		return nil, err
+	}
+	if err = assignAndResumePackagedApp(job, uint32(cmd.Process.Pid)); err != nil {
+		_ = cmd.Process.Kill()
+		_ = closeJob()
+		_ = cmd.Wait()
+		return nil, err
+	}
+	return func() error {
+		// Keep the job open while discovering and waiting for members. Closing
+		// it first would kill parents before their children can be captured.
+		err := drainPackagedAppJob(job, time.Now().Add(5*time.Second))
+		return errors.Join(err, closeJob())
+	}, nil
+}
+
+var cleanupIsProcessInJob = windows.NewLazySystemDLL("kernel32.dll").NewProc("IsProcessInJob")
+
+func drainPackagedAppJob(job windows.Handle, deadline time.Time) error {
+	owned := make(map[uint32]*windowsCleanupProcess)
+	defer func() {
+		for _, process := range owned {
+			windows.CloseHandle(process.handle)
+		}
+	}()
+	for time.Now().Before(deadline) {
+		// Job membership includes descendants even after their parent exits.
+		// Retaining handles prevents PID reuse while draining successive scans.
+		var members struct {
+			assigned uint32
+			count    uint32
+			pids     [4096]uintptr
+		}
+		if err := windows.QueryInformationJobObject(job, windows.JobObjectBasicProcessIdList,
+			uintptr(unsafe.Pointer(&members)), uint32(unsafe.Sizeof(members)), nil); err != nil {
+			return fmt.Errorf("query app job members: %w", err)
+		}
+		if members.count < members.assigned || members.count > uint32(len(members.pids)) {
+			return fmt.Errorf("app job member list incomplete: %d of %d", members.count, members.assigned)
+		}
+		for _, id := range members.pids[:members.count] {
+			pid := uint32(id)
+			if owned[pid] != nil {
+				continue
+			}
+			process, err := openWindowsCleanupProcess(pid, "app job member")
+			if err != nil {
+				return fmt.Errorf("inspect app job PID %d: %w", pid, err)
+			}
+			if process == nil {
+				continue // Exited during inspection; rescan before declaring success.
+			}
+			// A PID could have been reused between the query and OpenProcess.
+			var belongs int32
+			ok, _, callErr := cleanupIsProcessInJob.Call(uintptr(process.handle), uintptr(job), uintptr(unsafe.Pointer(&belongs)))
+			if ok == 0 || belongs == 0 {
+				windows.CloseHandle(process.handle)
+				if ok == 0 {
+					return fmt.Errorf("check app job membership for PID %d: %w", pid, callErr)
+				}
+				continue
+			}
+			owned[pid] = process
+		}
+		// Capture all members before requesting termination. Kill captured
+		// processes rather than the job so newly spawned children are still
+		// discoverable on the next scan, before we terminate and wait for them.
+		for _, process := range owned {
+			if err := stopWindowsCleanupProcess(process); err != nil {
+				return fmt.Errorf("stop app job PID %d: %w", process.pid, err)
+			}
+		}
+		for _, process := range owned {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return fmt.Errorf("app job cleanup deadline reached waiting for PID %d", process.pid)
+			}
+			status, err := windows.WaitForSingleObject(process.handle, uint32(remaining.Milliseconds()))
+			if err != nil || status != windows.WAIT_OBJECT_0 {
+				return fmt.Errorf("wait for app job PID %d: status=%#x error=%v", process.pid, status, err)
+			}
+		}
+		if members.count == 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("app job cleanup did not finish before its deadline")
+}
+
+func assignAndResumePackagedApp(job windows.Handle, pid uint32) error {
+	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(process)
+	if err = windows.AssignProcessToJobObject(job, process); err != nil {
+		return err
+	}
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(snapshot)
+	entry := windows.ThreadEntry32{Size: uint32(unsafe.Sizeof(windows.ThreadEntry32{}))}
+	for err = windows.Thread32First(snapshot, &entry); err == nil; err = windows.Thread32Next(snapshot, &entry) {
+		if entry.OwnerProcessID != pid {
+			continue
+		}
+		thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID)
+		if err != nil {
+			return err
+		}
+		_, err = windows.ResumeThread(thread)
+		windows.CloseHandle(thread)
+		return err
+	}
+	return fmt.Errorf("find suspended app thread: %w", err)
 }
