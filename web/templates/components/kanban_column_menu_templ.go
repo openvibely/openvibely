@@ -44,14 +44,14 @@ func KanbanFilter(category, key, label string, values, labels []string) templ.Co
 			}
 			ctx = templ.InitializeContext(ctx)
 			for i, value := range values {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<li><button type=\"button\" data-kanban-filter=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<li><button type=\"button\" class=\"ov-menu-choice\" data-kanban-filter=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templruntime.NewAttributeExpression(key).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 53}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 76}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 				if templ_7745c5c3_Err != nil {
@@ -64,7 +64,7 @@ func KanbanFilter(category, key, label string, values, labels []string) templ.Co
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templruntime.NewAttributeExpression(value).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 74}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 97}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 				if templ_7745c5c3_Err != nil {
@@ -77,7 +77,7 @@ func KanbanFilter(category, key, label string, values, labels []string) templ.Co
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(labels[i]).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 106}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 129}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 				if templ_7745c5c3_Err != nil {
@@ -90,7 +90,7 @@ func KanbanFilter(category, key, label string, values, labels []string) templ.Co
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(category).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 131}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 154}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 				if templ_7745c5c3_Err != nil {
@@ -103,7 +103,7 @@ func KanbanFilter(category, key, label string, values, labels []string) templ.Co
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(labels[i])
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 266}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 11, Col: 289}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -246,14 +246,14 @@ func KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSor
 						date = "completed"
 					}
 					for i, value := range []string{date + "_desc", date + "_asc", "title_asc", "title_desc", "priority_desc", "priority_asc"} {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<li><button type=\"button\" tabindex=\"0\" class=\"whitespace-nowrap\" aria-pressed=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<li><button type=\"button\" tabindex=\"0\" class=\"whitespace-nowrap ov-menu-choice\" aria-pressed=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var13 string
 						templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%t", sort == value)).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 39, Col: 117}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 39, Col: 132}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 						if templ_7745c5c3_Err != nil {
@@ -266,7 +266,7 @@ func KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSor
 						var templ_7745c5c3_Var14 string
 						templ_7745c5c3_Var14, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/sort?project_id=%s&sort=%s", cat, projectID, value)).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 39, Col: 257}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 39, Col: 272}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 						if templ_7745c5c3_Err != nil {
