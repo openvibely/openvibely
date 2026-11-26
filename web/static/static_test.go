@@ -14,6 +14,7 @@ var layoutAssets = []string{
 	"chat-input-requests.js",
 	"thread-empty-stage.js",
 	"ov-avatar.png",
+	"ov-avatar-light.png",
 	"app-utilities.css",
 	"vendor/htmx.min.js",
 	"vendor/idiomorph-ext.min.js",

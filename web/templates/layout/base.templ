@@ -5719,8 +5719,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 			<div id="ov-splash" aria-hidden="true">
 				<div class="ov-splash-art">
 					<div class="ov-splash-avatar">
-						<img src={ static.URL("ov-avatar.png") } alt="" width="168" height="168"/>
-						<div class="ov-splash-tint" style={ "mask-image:url(" + static.URL("ov-avatar.png") + ");-webkit-mask-image:url(" + static.URL("ov-avatar.png") + ")" }></div>
+						<img class="ov-splash-img-dark" src={ static.URL("ov-avatar.png") } alt="" width="168" height="168"/>
+						<div class="ov-splash-tint ov-splash-img-dark" style={ "mask-image:url(" + static.URL("ov-avatar.png") + ");-webkit-mask-image:url(" + static.URL("ov-avatar.png") + ")" }></div>
+						<img class="ov-splash-img-light" src={ static.URL("ov-avatar-light.png") } alt="" width="168" height="168"/>
+						<div class="ov-splash-tint ov-splash-img-light" style={ "mask-image:url(" + static.URL("ov-avatar-light.png") + ");-webkit-mask-image:url(" + static.URL("ov-avatar-light.png") + ")" }></div>
 					</div>
 					<svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
 						<defs>
@@ -5751,7 +5753,6 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							<circle cx="40" cy="36" r="7.5" fill="var(--fx-bright)"></circle>
 						</g>
 						<g clip-path="url(#ov-splash-visor)">
-							<ellipse class="ov-splash-visor-bg" cx="105.6" cy="33.0" rx="8.1" ry="10.6" fill="#11131a"></ellipse>
 							<ellipse class="ov-splash-amb" cx="105.6" cy="32.5" rx="7.6" ry="5.2" fill="var(--fx-visor)" opacity="0.22" filter="url(#ov-splash-glow)"></ellipse>
 							<path class="ov-splash-wave" d="M 97.4 32.5 H 113.8" stroke="var(--fx-visor)" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" opacity="0.55" filter="url(#ov-splash-glow)"></path>
 							<path class="ov-splash-wave" d="M 97.4 32.5 H 113.8" stroke="var(--fx-visor-core)" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -5764,13 +5765,14 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					.ov-splash-art { position: relative; width: 168px; height: 168px; isolation: isolate; animation: ov-splash-in .7s cubic-bezier(.2,.7,.2,1) both; }
 					.ov-splash-art > *, .ov-splash-avatar > * { position: absolute; inset: 0; width: 100%; height: 100%; }
 					.ov-splash-avatar { isolation: isolate; }
-					[data-theme="light"] #ov-splash { --fx-secondary: color-mix(in oklab, oklch(var(--p)) 75%, black); --fx-bright: color-mix(in oklab, oklch(var(--p)) 55%, black); --fx-visor: color-mix(in oklab, oklch(var(--p)) 88%, white); --fx-visor-core: color-mix(in oklab, oklch(var(--p)) 18%, white); }
-					[data-theme="light"] .ov-splash-avatar { filter: invert(1) hue-rotate(180deg) saturate(1.3); }
+					[data-theme="light"] #ov-splash { --fx-secondary: color-mix(in oklab, oklch(var(--p)) 84%, white); --fx-bright: color-mix(in oklab, oklch(var(--p)) 86%, black); --fx-visor: color-mix(in oklab, oklch(var(--p)) 88%, white); --fx-visor-core: color-mix(in oklab, oklch(var(--p)) 18%, white); }
+					.ov-splash-img-light, [data-theme="light"] .ov-splash-img-dark { display: none; }
+					[data-theme="light"] .ov-splash-img-light { display: block; }
 					[data-theme="light"] .ov-splash-nodes circle { mix-blend-mode: multiply; }
-					.ov-splash-visor-bg { display: none; }
-					[data-theme="light"] .ov-splash-visor-bg { display: inline; }
 					.ov-splash-art img { object-fit: contain; filter: grayscale(1) contrast(1.14) brightness(.98); opacity: .92; }
+					.ov-splash-art img.ov-splash-img-light { filter: grayscale(1) contrast(1.18) brightness(.88); opacity: .96; }
 					.ov-splash-tint { mix-blend-mode: color; mask-size: contain; -webkit-mask-size: contain; mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; mask-position: center; -webkit-mask-position: center; background: radial-gradient(circle at 50% 38%, oklch(var(--p) / .95) 0%, oklch(var(--p) / .52) 60%, rgba(148,163,184,.25) 100%); opacity: .78; }
+					.ov-splash-tint.ov-splash-img-light { opacity: .84; }
 					.ov-splash-circuit { stroke-dasharray: 5 38; stroke-dashoffset: 43; opacity: .85; filter: drop-shadow(0 0 2px var(--fx-accent)); animation: ov-splash-spark 2.6s linear infinite; }
 					.ov-splash-circuit:nth-child(2) { animation-duration: 3.2s; animation-delay: -1.5s; }
 					.ov-splash-circuit:nth-child(3) { animation-duration: 2.9s; animation-delay: -.8s; }
