@@ -49,6 +49,10 @@ templ TaskCardActionsScript() {
 				var endpoint = button.dataset.mergeEndpoint || '';
 				if (!taskID || !projectID || !mode || !endpoint) return;
 				var path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;
+                // Keep the viewing scope in the URL and the task owner in the form.
+                var selector = document.getElementById('project-selector');
+                var workspace = selector && selector.value || projectID;
+                path += '?project_id=' + encodeURIComponent(workspace);
 				var dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');
                 var sidebar = dropdown && dropdown.hasAttribute('data-task-list-context-menu');
 				window._taskCardActionRequest = {path: path, taskID: taskID, label: button.dataset.mergeLabel || 'Task action', sidebar: !!sidebar};
