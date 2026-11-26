@@ -2,7 +2,9 @@ package templates
 
 import (
 	"context"
+	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 )
 
 type projectNamesKey struct{}
@@ -25,4 +27,22 @@ func ProjectLabel(ctx context.Context, projectID string) string {
 func ProjectOptions(ctx context.Context) []models.Project {
 	projects, _ := ctx.Value(projectOptionsKey{}).([]models.Project)
 	return projects
+}
+
+// WithServerIcons supplies trusted, rendered server icons to shared composers.
+func WithServerIcons(ctx context.Context, icons map[string]templ.Component) context.Context {
+	return context.WithValue(ctx, serverIconsKey{}, icons)
+}
+
+type serverIconsKey struct{}
+
+func ProjectServerIcon(ctx context.Context, projectID string) templ.Component {
+	server, _, remote := remoteid.Split(projectID)
+	if remote {
+		icons, _ := ctx.Value(serverIconsKey{}).(map[string]templ.Component)
+		if icon := icons[server]; icon != nil {
+			return icon
+		}
+	}
+	return templ.NopComponent
 }

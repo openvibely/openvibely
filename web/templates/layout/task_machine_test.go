@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/remoteid"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"strings"
 	"testing"
 )
@@ -51,5 +52,20 @@ func TestTaskMachineCustomIcon(t *testing.T) {
 	ServerIcon("spider", "server").Render(ctx, &icon)
 	if !strings.Contains(out.String(), icon.String()) || !strings.Contains(out.String(), `data-tip="oldmac"`) {
 		t.Fatal("custom icon or server tooltip missing")
+	}
+}
+
+func TestTaskMachineComposerDestination(t *testing.T) {
+	server := "0123456789abcdef"
+	project := remoteid.ID(server, "project")
+	ctx := WithTaskMachines(context.Background(), map[string]TaskMachine{server: {Name: "oldmac", Kind: "laptop", Icon: "spider"}})
+	var out, icon strings.Builder
+	err := components.ChatInputForm(components.ChatInputFormConfig{FormID: "test", InputID: "input", ProjectChoices: []models.Project{{ID: "local", Name: "Local"}, {ID: project, Name: "oldmac"}}}).Render(ctx, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ServerIcon("spider", "server").Render(ctx, &icon)
+	if strings.Count(out.String(), icon.String()) != 1 {
+		t.Fatal("remote destination must render its saved icon once")
 	}
 }

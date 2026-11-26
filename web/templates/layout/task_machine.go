@@ -2,8 +2,10 @@ package layout
 
 import (
 	"context"
+	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/machinetype"
 	"github.com/openvibely/openvibely/internal/remoteid"
+	templateui "github.com/openvibely/openvibely/web/templates"
 	"strings"
 )
 
@@ -11,7 +13,11 @@ type TaskMachine struct{ Name, Kind, Icon string }
 type taskMachinesKey struct{}
 
 func WithTaskMachines(ctx context.Context, machines map[string]TaskMachine) context.Context {
-	return context.WithValue(ctx, taskMachinesKey{}, machines)
+	icons := make(map[string]templ.Component, len(machines))
+	for id, machine := range machines {
+		icons[id] = ServerIcon(machine.Icon, machine.Kind)
+	}
+	return context.WithValue(templateui.WithServerIcons(ctx, icons), taskMachinesKey{}, machines)
 }
 func taskMachine(ctx context.Context, projectID string) TaskMachine {
 	server, _, remote := remoteid.Split(projectID)

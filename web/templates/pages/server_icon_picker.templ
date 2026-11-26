@@ -38,6 +38,8 @@ templ ServerIconPicker() {
  .server-name-row{display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:16px}
  .server-credentials-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
  .server-name-row .input,.server-credentials-row .input{width:100%;min-width:0}
+ #server-icon-category{height:36px;min-height:36px;line-height:normal;padding-top:0;padding-bottom:0}
+ #server-icon-picker .ov-menu-scroll{overscroll-behavior:contain}
  #server-icon-picker{width:min(430px,calc(100vw - 24px))}
  .server-icon-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px;padding:4px}
  .server-icon-grid .ov-menu-option{justify-content:center;padding:10px;min-width:0}
@@ -52,6 +54,15 @@ templ ServerIconPicker() {
  const root=document.getElementById('server-icon-control'), popup=document.getElementById('server-icon-picker');
  const trigger=document.getElementById('server-icon-trigger'), input=document.getElementById('server_icon'), category=document.getElementById('server-icon-category');
  const picker=window.createInspectorPicker(root,popup,null,b=>!b.dataset.value||!category.value||(b.dataset.categories||'').split('|').includes(category.value));
+ // WebKit can lose native wheel scrolling on top-layer popovers inside
+ // modal dialogs. Own vertical scrolling within this grid only.
+ const list=popup.querySelector('.ov-menu-scroll');
+ list.addEventListener('wheel',e=>{
+ if(e.ctrlKey||e.metaKey||!e.deltaY||Math.abs(e.deltaX)>Math.abs(e.deltaY))return;
+ const unit=e.deltaMode===1?16:e.deltaMode===2?list.clientHeight:1;
+ list.scrollTop+=e.deltaY*unit;
+ e.preventDefault();
+ },{passive:false});
  let machine='server';
  window.setServerIcon=function(value,kind){
  machine=['server','laptop','desktop','cloud'].includes(kind)?kind:'server';

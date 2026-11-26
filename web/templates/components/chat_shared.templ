@@ -1710,7 +1710,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none">Choose a project</span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
 								for _, project := range config.ProjectChoices {
-									<li data-value={ project.ID }>{ project.Name }</li>
+									<li data-value={ project.ID }><span data-server-icon class="inline-flex shrink-0 [&_svg]:w-4 [&_svg]:h-4">@templateui.ProjectServerIcon(ctx, project.ID)</span>{ project.Name }</li>
 								}
 							</ul>
 						</div>
@@ -2005,6 +2005,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					check.setAttribute('aria-hidden', 'true');
 					check.textContent = val === currentValue ? '✓' : '';
 					item.appendChild(check);
+                    var serverIcon = li.querySelector('[data-server-icon]');
+                    if (serverIcon && serverIcon.querySelector('svg')) item.appendChild(serverIcon.cloneNode(true));
 					var textSpan = document.createElement('span');
 					textSpan.style.cssText = 'flex:1;min-width:0;';
 					textSpan.textContent = label;
