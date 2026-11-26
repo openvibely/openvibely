@@ -59,3 +59,4 @@ bin/
 
 # Downloaded front-end build inputs (pinned in scripts/build-assets.sh)
 web/assets/.cache/
+web/static/.dist-build.*/
