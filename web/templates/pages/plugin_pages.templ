@@ -213,12 +213,17 @@ templ PluginSettingsContent(v PluginSettingsView) {
 				<p class="text-sm opacity-60 py-8 text-center">No pages found. Use + to add a page.</p>
 			}
 			for _, r := range v.Instances {
-				<div class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 transition-all min-w-0" data-plugin-instance-row={ r.Instance.ID } data-plugin-card-id={ r.Instance.ID } data-card-sort-name={ r.Instance.Title } data-search-card data-search-text={ r.Instance.Title + " " + r.Instance.PluginID }>
+				<div class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 transition-all min-w-0" data-plugin-instance-row={ r.Instance.ID } data-plugin-card-id={ r.Instance.ID } data-card-sort-name={ r.Instance.Title } data-search-card data-search-text={ r.Instance.Title + " " + r.Instance.PluginID }
+                    if r.Instance.Enabled {
+                        style="cursor: pointer"
+                        onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; this.querySelector('[data-plugin-page-open]').click()"
+                    }
+                >
 					<div class="card-body relative">
 						<div class="absolute top-4 right-4">
 							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + r.Instance.Title}) {
 								if r.Instance.Enabled {
-									<li><a href={ templ.SafeURL("/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(r.Instance.ProjectID)) }>Open</a></li>
+									<li><a href={ templ.SafeURL("/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(r.Instance.ProjectID)) } hx-get={ "/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(r.Instance.ProjectID) } hx-target="#main-content" hx-push-url="true">Open</a></li>
 								}
 								if r.Instance.Enabled {
 									<li><button hx-post={ v.URL("/instances/" + r.Instance.ID + "/disable") } hx-target="#plugin-settings" hx-swap="outerHTML">Disable</button></li>
@@ -231,7 +236,13 @@ templ PluginSettingsContent(v PluginSettingsView) {
 								<li><button class="text-error" onclick={ templ.ComponentScript{Call: "document.activeElement.blur();document.getElementById('plugin-delete-" + r.Instance.ID + "').showModal()"} }>Delete</button></li>
 							}
 						</div>
-						<h3 class="card-title pr-12">{ r.Instance.Title }</h3>
+						<h3 class="card-title pr-12">
+                            if r.Instance.Enabled {
+                                <a data-plugin-page-open href={ templ.SafeURL("/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(r.Instance.ProjectID)) } hx-get={ "/p/" + r.Instance.ID + "?project_id=" + url.QueryEscape(r.Instance.ProjectID) } hx-target="#main-content" hx-push-url="true">{ r.Instance.Title }</a>
+                            } else {
+                                { r.Instance.Title }
+                            }
+                        </h3>
 
 						if r.Description != "" {
  <p class="text-sm opacity-60">{ r.Description }</p>
