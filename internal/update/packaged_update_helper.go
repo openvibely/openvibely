@@ -784,7 +784,7 @@ func traceExecutableUpdateHelperIntegration(format string, args ...any) {
 	if os.Getenv(updateIntegrationHelperLogEnv) == "" {
 		return
 	}
-	_, _ = fmt.Fprintf(os.Stderr, "[update-helper] "+format+"\n", args...)
+	_, _ = fmt.Fprintf(os.Stderr, "[update-helper] "+format+" at="+time.Now().UTC().Format(time.RFC3339Nano)+"\n", args...)
 }
 
 func runExecutableUpdateRecoveryHelper(ctx context.Context, cfg ExecutableUpdateHelperConfig, staged LocalStagedUpdate) error {

@@ -988,6 +988,8 @@ func buildGoCommand(t *testing.T, pkg, output string, values map[string]string) 
 }
 
 func buildGoCommandWithTags(t *testing.T, pkg, output string, values map[string]string, tags []string) {
+	started := time.Now()
+	defer func() { t.Logf("phase build %s (%s): %s", pkg, output, time.Since(started)) }()
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		t.Fatal(err)

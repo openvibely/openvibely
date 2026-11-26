@@ -5,3 +5,5 @@ package update
 import "testing"
 
 func killExecutablePlatform(t *testing.T, executables ...string) bool { return false }
+
+func registerPackagedCleanupDiagnostics(t *testing.T, root string) {}

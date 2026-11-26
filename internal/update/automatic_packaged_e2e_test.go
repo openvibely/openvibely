@@ -74,6 +74,8 @@ type automaticAppE2E struct {
 }
 
 func (a *automaticAppE2E) start() {
+	started := time.Now()
+	defer func() { a.t.Logf("phase start: %s", time.Since(started)) }()
 	a.t.Helper()
 	if err := os.WriteFile(filepath.Join(a.root, "clock"), []byte(fmt.Sprint(int64(a.clockOffset))), 0600); err != nil {
 		a.t.Fatal(err)
@@ -128,6 +130,8 @@ func (a *automaticAppE2E) start() {
 	}
 }
 func (a *automaticAppE2E) stop() {
+	started := time.Now()
+	defer func() { a.t.Logf("phase stop: %s", time.Since(started)) }()
 	// Drain the helper and app together, including successors created during cleanup.
 	command := ExecutableUpdateHelperCommand
 	if a.distribution == "desktop" && runtime.GOOS == "darwin" {
@@ -161,6 +165,8 @@ func (a *automaticAppE2E) snapshot() (CoordinatorSnapshot, error) {
 	return s, err
 }
 func (a *automaticAppE2E) wait(check func(CoordinatorSnapshot) bool, label string) CoordinatorSnapshot {
+	started := time.Now()
+	defer func() { a.t.Logf("phase %s: %s", "wait "+label, time.Since(started)) }()
 	a.t.Helper()
 	deadline := time.Now().Add(150 * time.Second)
 	var s CoordinatorSnapshot
@@ -180,6 +186,8 @@ func (a *automaticAppE2E) wait(check func(CoordinatorSnapshot) bool, label strin
 	return s
 }
 func (a *automaticAppE2E) post(path, body string, want int) {
+	started := time.Now()
+	defer func() { a.t.Logf("phase %s: %s", "POST "+path, time.Since(started)) }()
 	a.t.Helper()
 	client := &http.Client{Timeout: 150 * time.Second}
 	req, err := http.NewRequest(http.MethodPost, a.baseURL+path, strings.NewReader(body))
@@ -227,13 +235,15 @@ func (a *automaticAppE2E) success() {
 // Advancing the app's update clock also requests a background check. Wait for
 // acknowledgement after that check, not an arbitrary wall-clock sleep.
 func (a *automaticAppE2E) advance(duration time.Duration) {
+	started := time.Now()
+	defer func() { a.t.Logf("phase advance clock: %s", time.Since(started)) }()
 	a.t.Helper()
 	a.clockOffset += duration
 	value := fmt.Sprint(int64(a.clockOffset))
 	if err := os.WriteFile(filepath.Join(a.root, "clock.next"), []byte(value), 0600); err != nil {
 		a.t.Fatal(err)
 	}
-	if err := os.Rename(filepath.Join(a.root, "clock.next"), filepath.Join(a.root, "clock")); err != nil {
+	if err := atomicReplace(filepath.Join(a.root, "clock.next"), filepath.Join(a.root, "clock")); err != nil {
 		a.t.Fatal(err)
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -266,6 +276,17 @@ func (a *automaticAppE2E) quiet(downloads *atomic.Int32, want int32) {
 
 func runAutomaticPackagedScenario(t *testing.T, distribution string, builds map[string]string, scenario string) {
 	root := t.TempDir()
+	registerPackagedCleanupDiagnostics(t, root)
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(filepath.Join(root, "helper.log")); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.Contains(line, "[update-helper]") {
+					t.Log(line)
+				}
+			}
+		}
+	})
+	setupStarted := time.Now()
 	a := &automaticAppE2E{t: t, root: root, data: filepath.Join(root, "data"), distribution: distribution, validationOutcome: packagedUpdateOutcomeSucceeded}
 	if scenario == "rollback_no_auto_retry" {
 		a.validationOutcome = packagedUpdateOutcomeRolledBack
@@ -348,6 +369,7 @@ func runAutomaticPackagedScenario(t *testing.T, distribution string, builds map[
 	if needsWork {
 		work = preparePendingApprovalE2E(t, a.data, workGate)
 	}
+	t.Logf("phase scenario setup: %s", time.Since(setupStarted))
 	a.start()
 	if scenario == "disable_enable" {
 		a.settings(false)

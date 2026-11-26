@@ -5,6 +5,7 @@ package update
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,76 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+// Register immediately after TempDir so this runs after process/log cleanup,
+// but before testing removes the directory and loses the offending path.
+func registerPackagedCleanupDiagnostics(t *testing.T, root string) {
+	t.Cleanup(func() {
+		started := time.Now()
+		defer func() { t.Logf("phase remove scenario directory: %s", time.Since(started)) }()
+		deadline := started.Add(2 * time.Second)
+		for {
+			err := os.RemoveAll(root)
+			if err == nil {
+				return
+			}
+			if time.Now().Before(deadline) {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			var pathErr *os.PathError
+			if errors.As(err, &pathErr) {
+				logWindowsPathUsers(t, pathErr.Path)
+			}
+			t.Errorf("remove scenario directory: %v", err)
+			return
+		}
+	})
+}
+
+// This is diagnostic only: a process holding a path is not necessarily owned
+// by this test, so never terminate processes discovered here.
+func logWindowsPathUsers(t *testing.T, path string) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Logf("inspect locked path %q: %v", path, err)
+		return
+	}
+	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		t.Logf("open locked path %q for inspection: %v", path, err)
+		return
+	}
+	defer windows.CloseHandle(h)
+	// FILE_PROCESS_IDS_USING_FILE_INFORMATION: ULONG count followed by an
+	// aligned array of ULONG_PTR process IDs. Works on amd64 and arm64.
+	var users struct {
+		count uint32
+		pids  [4096]uintptr
+	}
+	var status windows.IO_STATUS_BLOCK
+	const fileProcessIdsUsingFileInformation = 47
+	err = windows.NtQueryInformationFile(h, &status, (*byte)(unsafe.Pointer(&users)), uint32(unsafe.Sizeof(users)), fileProcessIdsUsingFileInformation)
+	if err != nil {
+		t.Logf("query processes using %q: %v", path, err)
+		return
+	}
+	t.Logf("path %q has %d process handles (includes this diagnostic process, pid=%d)", path, users.count, os.Getpid())
+	for _, pid := range users.pids[:min(int(users.count), len(users.pids))] {
+		process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+		if err != nil {
+			t.Logf("path %q: pid=%d, inspection error=%v", path, pid, err)
+			continue
+		}
+		name := make([]uint16, 32768)
+		size := uint32(len(name))
+		err = windows.QueryFullProcessImageName(process, 0, &name[0], &size)
+		windows.CloseHandle(process)
+		t.Logf("path %q: pid=%d executable=%q inspection error=%v", path, pid, windows.UTF16ToString(name[:size]), err)
+	}
+}
 
 func killExecutablePlatform(t *testing.T, executables ...string) bool {
 	t.Helper()
