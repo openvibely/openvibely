@@ -465,7 +465,12 @@ templ TaskListPanel(currentProjectID string) {
                     if (appearance && el.dataset.settingsLink === section) el.setAttribute('aria-current', 'page');
                     else el.removeAttribute('aria-current');
                 });
-                if (appearance) document.getElementById('appearance-section-title').textContent = {themes: 'Themes', layout: 'Layout', chat: 'Chat'}[section];
+                if (appearance) {
+                    var focused = section === 'chat' || section === 'layout';
+                    document.getElementById('themes-container').classList.toggle('focused-settings', focused);
+                    document.querySelector('#themes-container .appearance-header').toggleAttribute('data-page-header', !focused);
+                    document.getElementById('appearance-section-title').textContent = {themes: 'Themes', layout: 'Layout', chat: 'Chat'}[section];
+                }
                 document.querySelectorAll('[data-settings-back]').forEach(function(el) {
                     el.setAttribute('href', workspaceURL);
                     el.setAttribute('hx-get', workspaceURL);

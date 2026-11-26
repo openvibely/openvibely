@@ -31,7 +31,7 @@ templ Themes(projects []models.Project, currentProjectID string, catalog []theme
 templ ThemesContent(catalog []themes.Theme) {
 	<div id="themes-container" data-search-container>
 		@layout.PageTitle("Appearance")
-		<div data-page-header class="flex items-center justify-between mb-6">
+		<div data-page-header class="appearance-header flex items-center justify-between mb-6">
 			<h2 id="appearance-section-title" class="text-2xl font-bold">Themes</h2>
 		</div>
 		<style>
@@ -74,14 +74,14 @@ templ ThemesContent(catalog []themes.Theme) {
 			.display-preview[data-preview-step="on"] { --dp-card: var(--conversation-card-raised); }
 		</style>
 		<section class="mb-8" data-display-prefs data-settings-section="layout" hidden>
-			<div class="flex flex-col gap-3 max-w-2xl mb-6">
+			<div class="flex flex-col gap-3 mb-6">
 				@displayToggle("surfaces", "Surfaces", "Choose the background colors used for the outer frame, page and cards.", "default", "Default", "layered", "Layered", "Use the theme’s standard backgrounds for the frame, page and cards.", "Separate the frame, page and cards with distinct background shades.")
 				@displayToggle("layout", "Task list", "Float the task list beside the page with a gap, or join them into one surface.", "floating", "Floating", "unified", "Unified", "Keep a gap between the task list and the main page.", "Join the task list and main page into one continuous surface.")
 				@displayToggle("tabs", "Project tabs", "Keep project tabs separate from the page, or connect the active tab to it.", "detached", "Detached", "attached", "Attached", "Keep project tabs separate from the page below.", "Connect the active project tab to the page below.")
 			</div>
             <h3 class="text-sm font-medium mt-6 mb-2">Account usage meters</h3>
             <p class="text-xs opacity-60 mb-3">Choose how subscription allowance appears in the rail. Stronger color shows what’s left; faded color shows what’s used.</p>
-            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl mb-6">
+            <div class="grid gap-3 sm:grid-cols-2 mb-6">
                 @usageMeterStyleCard("letters", "Letters + rings", "Weekly outer ring; 5-hour inner ring when available.")
                 @usageMeterStyleCard("logos", "Logos + rings", "Provider logo inside the same allowance rings.")
                 @usageMeterStyleCard("fill", "Logo fill", "Weekly remaining fills the logo; 5-hour allowance appears below.")
@@ -89,7 +89,7 @@ templ ThemesContent(catalog []themes.Theme) {
             </div>
 			<h3 class="text-sm font-medium mt-6 mb-2">Task board columns</h3>
 			<p class="text-xs opacity-60 mb-2">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
-			<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl">
+			<div class="grid gap-4 sm:grid-cols-2">
 				@boardColumnsCard("tint", "Faint tint", "Columns tinted a quarter of the way from page to frame.")
 				@boardColumnsCard("filled", "Filled", "Columns filled with the frame color.")
 				@boardColumnsCard("inset", "Inset cards", "Columns in the card color, cards sunk in the page color.")
@@ -97,7 +97,7 @@ templ ThemesContent(catalog []themes.Theme) {
 			</div>
 		</section>
 		<section data-display-prefs data-settings-section="chat" hidden>
-			<div class="flex flex-col gap-3 max-w-2xl">
+			<div class="flex flex-col gap-3">
 				@displayToggle("output", "Tool output", "Compact folds consecutive tool activity into a single expandable row. Assistant messages stay visible.", "full", "Full", "compact", "Compact", "Show tool calls and their results directly in the conversation.", "Fold consecutive tools and thinking into expandable groups. Assistant text stays visible.")
 				@displayToggle("thread", "Width", "Use the available width for conversations, or center them in a narrower column for easier reading.", "full", "Full width", "focused", "Focused", "Let conversations fill the available page width.", "Center conversations in a narrower column for easier reading.")
 				@displayToggle("bubbles", "Assistant bubbles", "Show assistant messages directly on the page, or give them a filled bubble background.", "off", "Off", "on", "On", "Show assistant messages directly on the page.", "Place assistant messages inside filled bubbles.")
