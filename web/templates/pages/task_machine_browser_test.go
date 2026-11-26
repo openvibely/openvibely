@@ -23,9 +23,10 @@ func TestBrowserFunctional_TaskMachineTooltips(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "machine-tooltip", func(b *composerFocusCDP) {
 		b.waitFor("ready", `String(!!window.openVibelyTooltip)`, "true")
-		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));document.querySelector('[aria-label="This computer"]').focus({preventScroll:true});document.querySelector('[aria-label="This computer"]').dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'focus'`)
-		b.waitFor("local focus tooltip", `document.getElementById('ov-shared-tooltip').textContent`, "This computer")
-		b.evaluate(`document.querySelector('[aria-label="This computer"]').blur();document.querySelector('[aria-label="oldmac"]').dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'hover'`)
+		b.waitFor("no local machine badge", `String(document.querySelector('[aria-label="This computer"]') === null)`, "true")
+		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));document.querySelector('[aria-label="oldmac"]').focus({preventScroll:true});document.querySelector('[aria-label="oldmac"]').dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'focus'`)
+		b.waitFor("remote focus tooltip", `document.getElementById('ov-shared-tooltip').textContent`, "oldmac")
+		b.evaluate(`document.querySelector('[aria-label="oldmac"]').blur();document.querySelector('[aria-label="oldmac"]').dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'hover'`)
 		b.waitFor("remote tooltip", `document.getElementById('ov-shared-tooltip').textContent`, "oldmac")
 	})
 }
