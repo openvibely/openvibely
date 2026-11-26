@@ -5738,6 +5738,16 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							<path class="ov-splash-circuit" d="M 145 70 V 44 L 154 36" stroke="var(--fx-bright)" stroke-width="1.2" stroke-linecap="round"></path>
 							<path class="ov-splash-circuit" d="M 155 69 V 48 L 164 42" stroke="var(--fx-secondary)" stroke-width="1.1" stroke-linecap="round"></path>
 						</g>
+						<g class="ov-splash-nodes">
+							<circle cx="67" cy="18" r="7" fill="var(--fx-accent)"></circle>
+							<circle cx="134" cy="18" r="7" fill="var(--fx-secondary)"></circle>
+							<circle cx="189" cy="91" r="7" fill="var(--fx-accent)"></circle>
+							<circle cx="167" cy="155" r="7" fill="var(--fx-secondary)"></circle>
+							<circle cx="145" cy="178" r="6.5" fill="var(--fx-accent)"></circle>
+							<circle cx="51" cy="175" r="6.5" fill="var(--fx-secondary)"></circle>
+							<circle cx="14" cy="82" r="6.5" fill="var(--fx-accent)"></circle>
+							<circle cx="40" cy="36" r="7.5" fill="var(--fx-bright)"></circle>
+						</g>
 						<g clip-path="url(#ov-splash-visor)">
 							<ellipse class="ov-splash-amb" cx="105.6" cy="32.5" rx="7.6" ry="5.2" fill="var(--fx-visor)" opacity="0.22" filter="url(#ov-splash-glow)"></ellipse>
 							<path class="ov-splash-wave" d="M 97.4 32.5 H 113.8" stroke="var(--fx-visor)" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" opacity="0.55" filter="url(#ov-splash-glow)"></path>
@@ -5754,12 +5764,19 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					.ov-splash-art img { object-fit: contain; filter: grayscale(1) contrast(1.14) brightness(.98); opacity: .92; }
 					[data-theme="light"] .ov-splash-art img { filter: grayscale(1) contrast(1.25) brightness(.72); opacity: .88; }
 					.ov-splash-tint { mix-blend-mode: color; mask-size: contain; -webkit-mask-size: contain; mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; mask-position: center; -webkit-mask-position: center; background: radial-gradient(circle at 50% 38%, oklch(var(--p) / .95) 0%, oklch(var(--p) / .52) 60%, rgba(148,163,184,.25) 100%); opacity: .78; }
-					.ov-splash-orbits { opacity: .62; }
-					.ov-splash-circuits { opacity: .68; }
-					.ov-splash-circuit { stroke-dasharray: 5 38; stroke-dashoffset: 43; opacity: .85; filter: drop-shadow(0 0 2px var(--fx-accent)); animation: ov-splash-spark 3.8s linear infinite; }
-					.ov-splash-circuit:nth-child(2) { animation-duration: 4.6s; animation-delay: -1.5s; }
-					.ov-splash-circuit:nth-child(3) { animation-duration: 4.1s; animation-delay: -.8s; }
-					.ov-splash-circuit:nth-child(4) { animation-duration: 5s; animation-delay: -2.4s; }
+					.ov-splash-circuit { stroke-dasharray: 5 38; stroke-dashoffset: 43; opacity: .85; filter: drop-shadow(0 0 2px var(--fx-accent)); animation: ov-splash-spark 2.6s linear infinite; }
+					.ov-splash-circuit:nth-child(2) { animation-duration: 3.2s; animation-delay: -1.5s; }
+					.ov-splash-circuit:nth-child(3) { animation-duration: 2.9s; animation-delay: -.8s; }
+					.ov-splash-circuit:nth-child(4) { animation-duration: 3.5s; animation-delay: -2.4s; }
+					.ov-splash-nodes circle { opacity: 0; transform-box: fill-box; transform-origin: center; mix-blend-mode: screen; filter: blur(2px); animation: ov-splash-node 5.6s ease-in-out infinite; }
+					.ov-splash-nodes circle:nth-child(2) { animation-delay: .7s; }
+					.ov-splash-nodes circle:nth-child(3) { animation-delay: 1.4s; }
+					.ov-splash-nodes circle:nth-child(4) { animation-delay: 2.1s; }
+					.ov-splash-nodes circle:nth-child(5) { animation-delay: 2.8s; }
+					.ov-splash-nodes circle:nth-child(6) { animation-delay: 3.5s; }
+					.ov-splash-nodes circle:nth-child(7) { animation-delay: 4.2s; }
+					.ov-splash-nodes circle:nth-child(8) { animation-delay: 4.9s; }
+					@keyframes ov-splash-node { 0%, 100% { opacity: 0; transform: scale(.7); } 14% { opacity: .58; transform: scale(1.16); } 32% { opacity: 0; transform: scale(.85); } }
 					@keyframes ov-splash-in { from { opacity: 0; transform: scale(.94); } }
 					@keyframes ov-splash-spark { 0% { stroke-dashoffset: 43; opacity: 0; } 14% { opacity: .9; } 72% { opacity: .8; } 100% { stroke-dashoffset: -6; opacity: 0; } }
 				</style>
@@ -5772,15 +5789,15 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						if (seen || (nav && nav.type !== 'navigate') || matchMedia('(prefers-reduced-motion: reduce)').matches) { splash.remove(); return; }
 						var start = performance.now();
 						var orbits = splash.querySelectorAll('.ov-splash-orbits > g'), waves = splash.querySelectorAll('.ov-splash-wave'), amb = splash.querySelector('.ov-splash-amb');
-						var angles = [22, 165, 290], speeds = [.16, -.12, .23];
+						var angles = [22, 165, 290], speeds = [.34, -.24, .48];
 						(function tick(now) {
 							if (!splash.isConnected) return;
-							var t = (now || start) / 1000 * 2.2;
+							var t = (now || start) / 1000 * 3.3;
 							orbits.forEach(function(g, i) { angles[i] = (angles[i] + speeds[i] + 360) % 360; g.setAttribute('transform', 'rotate(' + angles[i].toFixed(2) + ' 100 100)'); });
 							var beat = .65 + .35 * Math.pow(Math.max(0, Math.sin(t * .55)), 4), pts = [];
 							for (var i = 0; i <= 18; i++) {
 								var u = i / 18, env = Math.sin(u * Math.PI), w = Math.sin(u * 13.5 - t * 2) * .62 + Math.sin(u * 23 + t * 2.9) * .38;
-								pts.push((i ? 'L ' : 'M ') + (97.4 + u * 16.4).toFixed(1) + ' ' + (32.5 + w * env * env * 1.25 * (1.2 + beat * 1.1)).toFixed(1));
+								pts.push((i ? 'L ' : 'M ') + (97.4 + u * 16.4).toFixed(1) + ' ' + (32.5 + w * env * env * 1.65 * (1.2 + beat * 1.1)).toFixed(1));
 							}
 							waves.forEach(function(p) { p.setAttribute('d', pts.join(' ')); });
 							amb.setAttribute('opacity', (.18 + beat * .14).toFixed(2));
