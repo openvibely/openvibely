@@ -49,7 +49,7 @@
 
   function dotColor(stage) {
     var probe = document.createElement('i');
-    var alpha = document.documentElement.getAttribute('data-theme') === 'light' ? .32 : .36;
+    var alpha = document.documentElement.getAttribute('data-theme') === 'light' ? .62 : .36;
     probe.style.color = 'oklch(var(--p) / ' + alpha + ')';
     stage.appendChild(probe);
     var color = getComputedStyle(probe).color;
