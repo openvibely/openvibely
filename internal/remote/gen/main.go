@@ -244,7 +244,7 @@ func writeMethod(w *bytes.Buffer, storeField, typeName, local, name string, sig 
 		fmt.Fprintf(w, "\tif s.r.Remote(ctx, %q, %q, []any{%s}, func() []any { %s = %s; return []any{%s} }, %s) {\n\t\treturn\n\t}\n",
 			storeField, name, strings.Join(args, ", "), strings.Join(resNames, ", "), localCall, strings.Join(resNames, ", "), strings.Join(resPtrs, ", "))
 	case errLast && hasCtx:
-		fmt.Fprintf(w, "\tif s.r.Refuse(ctx, %q, []any{%s}) {\n\t\tr%d = ErrUnsupported\n\t\treturn\n\t}\n", storeField, stringArgs(params, hasCtx), results.Len()-1)
+		fmt.Fprintf(w, "\tif s.r.Refuse(ctx, %q, %q, []any{%s}) {\n\t\tr%d = ErrUnsupported\n\t\treturn\n\t}\n", storeField, name, stringArgs(params, hasCtx), results.Len()-1)
 	}
 	fmt.Fprintf(w, "\t%s\n}\n\n", ret)
 }
@@ -257,6 +257,8 @@ func stringArgs(params *types.Tuple, hasCtx bool) string {
 		}
 		if transmittable(params.At(i).Type()) {
 			out = append(out, fmt.Sprintf("a%d", i))
+		} else {
+			out = append(out, "nil")
 		}
 	}
 	return strings.Join(out, ", ")

@@ -48,12 +48,13 @@ func contextServer(ctx context.Context) string {
 }
 
 // Refuse reports whether a non-transmittable call targets a remote server.
-func (r *Router) Refuse(ctx context.Context, store string, args []any) bool {
+func (r *Router) Refuse(ctx context.Context, store, method string, args []any) bool {
 	if !routable(store) {
 		return false
 	}
-	server, mixed := argServer(args)
-	return mixed || server != "" || contextServer(ctx) != ""
+	ids := routingIDs(store, method, args)
+	server, mixed := argServer(ids)
+	return mixed || server != "" || (len(ids) == 0 && contextServer(ctx) != "")
 }
 
 // Remote runs the call remotely when args (or ctx) name a remote server, or
@@ -63,9 +64,11 @@ func (r *Router) Remote(ctx context.Context, store, method string, args []any, l
 	if !routable(store) {
 		return false
 	}
-	server, mixed := argServer(args)
-	if server == "" && aggregateArg(args) == "" && store != "Projects" && store != "ProjectAccess" {
-		// An explicit aggregate scope must not inherit an action's remote server.
+	ids := routingIDs(store, method, args)
+	server, mixed := argServer(ids)
+	if server == "" && len(ids) == 0 && store != "Projects" && store != "ProjectAccess" {
+		// Explicit resource IDs (including local and aggregate IDs) take precedence
+		// over a page's remote context.
 		// Project lists drive local navigation; a remote page still lists local projects.
 		server = contextServer(ctx)
 	}
@@ -78,7 +81,7 @@ func (r *Router) Remote(ctx context.Context, store, method string, args []any, l
 		if _, ok := models.PrincipalFromContext(ctx); !ok {
 			return false
 		}
-		aggregate := aggregateArg(args)
+		aggregate := aggregateArg(ids)
 		if local == nil || aggregate == "" || !IsRead(store, method) || r.Hub == nil || !mergeable(results) {
 			return false
 		}
@@ -214,7 +217,10 @@ func prepareArgs(store, method, server string, args []any, scoped bool) ([]byte,
 		return nil, err
 	}
 	names := paramNames[store][method]
-	strip := func(_ string, s string) string {
+	strip := func(name string, s string) string {
+		if !resourceIDName(name) {
+			return s
+		}
 		if scoped && models.IsSharedProjectID(s) {
 			return models.AllProjectsID
 		}
@@ -225,7 +231,11 @@ func prepareArgs(store, method, server string, args []any, scoped bool) ([]byte,
 			v.SetString(Self)
 			continue
 		}
-		walk(v, strip, nil, "", 0)
+		name := ""
+		if i < len(names) {
+			name = names[i]
+		}
+		walk(v, strip, nil, name, 0)
 	}
 	return encodeValues(copies)
 }

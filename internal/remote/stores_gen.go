@@ -1635,7 +1635,7 @@ func (s *AttachmentStore) CreateGeneratedFile(ctx context.Context, a1 *models.Ge
 }
 
 func (s *AttachmentStore) CreateInTx(ctx context.Context, a1 persistence.Tx, a2 *models.Attachment) (r0 error) {
-	if s.r.Refuse(ctx, "Attachments", []any{a2}) {
+	if s.r.Refuse(ctx, "Attachments", "CreateInTx", []any{nil, a2}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -2438,7 +2438,7 @@ func (s *ChatAttachmentStore) Create(ctx context.Context, a1 *models.ChatAttachm
 }
 
 func (s *ChatAttachmentStore) CreateInTx(ctx context.Context, a1 persistence.Tx, a2 *models.ChatAttachment) (r0 error) {
-	if s.r.Refuse(ctx, "ChatAttachments", []any{a2}) {
+	if s.r.Refuse(ctx, "ChatAttachments", "CreateInTx", []any{nil, a2}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -2771,7 +2771,7 @@ func (s *EmailInboundReceiptStore) Record(ctx context.Context, a1 string, a2 str
 }
 
 func (s *EmailInboundReceiptStore) WithHandoff(ctx context.Context, a1 string, a2 string, a3 func(persistence.Tx) error) (r0 bool, r1 error) {
-	if s.r.Refuse(ctx, "EmailInboundReceipts", []any{a1, a2}) {
+	if s.r.Refuse(ctx, "EmailInboundReceipts", "WithHandoff", []any{a1, a2, nil}) {
 		r1 = ErrUnsupported
 		return
 	}
@@ -2911,7 +2911,7 @@ func (s *ExecutionStore) CreateDirectTaskFollowupOrQueue(ctx context.Context, a1
 }
 
 func (s *ExecutionStore) CreateInTx(ctx context.Context, a1 persistence.Tx, a2 *models.Execution) (r0 error) {
-	if s.r.Refuse(ctx, "Executions", []any{a2}) {
+	if s.r.Refuse(ctx, "Executions", "CreateInTx", []any{nil, a2}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -4126,7 +4126,7 @@ func (s *ProjectStore) Create(ctx context.Context, a1 *models.Project) (r0 error
 }
 
 func (s *ProjectStore) DeleteWithCleanupManifest(ctx context.Context, a1 string, a2 func(persistence.TaskDeletionManifest) error) (r0 persistence.TaskDeletionManifest, r1 bool, r2 error) {
-	if s.r.Refuse(ctx, "Projects", []any{a1}) {
+	if s.r.Refuse(ctx, "Projects", "DeleteWithCleanupManifest", []any{a1, nil}) {
 		r2 = ErrUnsupported
 		return
 	}
@@ -4134,7 +4134,7 @@ func (s *ProjectStore) DeleteWithCleanupManifest(ctx context.Context, a1 string,
 }
 
 func (s *ProjectStore) ForEachRepoRoot(ctx context.Context, a1 func(persistence.ProjectRepoRoot)) (r0 error) {
-	if s.r.Refuse(ctx, "Projects", []any{}) {
+	if s.r.Refuse(ctx, "Projects", "ForEachRepoRoot", []any{nil}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -4387,7 +4387,7 @@ func (s *ScheduleStore) Update(ctx context.Context, a1 *models.Schedule) (r0 err
 }
 
 func (s *ScheduleStore) UpdateBatchForProject(ctx context.Context, a1 string, a2 []string, a3 func(*models.Schedule) error) (r0 error) {
-	if s.r.Refuse(ctx, "Schedules", []any{a1, a2}) {
+	if s.r.Refuse(ctx, "Schedules", "UpdateBatchForProject", []any{a1, a2, nil}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -4451,7 +4451,7 @@ func (s *SettingsStore) GetMany(ctx context.Context, a1 []string) (r0 map[string
 }
 
 func (s *SettingsStore) MatchesInTx(ctx context.Context, a1 persistence.Tx, a2 map[string]string) (r0 bool, r1 error) {
-	if s.r.Refuse(ctx, "Settings", []any{a2}) {
+	if s.r.Refuse(ctx, "Settings", "MatchesInTx", []any{nil, a2}) {
 		r1 = ErrUnsupported
 		return
 	}
@@ -4592,7 +4592,7 @@ func (s *SlackInboundReceiptStore) Exists(ctx context.Context, a1 string) (r0 bo
 }
 
 func (s *SlackInboundReceiptStore) WithHandoff(ctx context.Context, a1 string, a2 func(persistence.Tx) error) (r0 bool, r1 error) {
-	if s.r.Refuse(ctx, "SlackInboundReceipts", []any{a1}) {
+	if s.r.Refuse(ctx, "SlackInboundReceipts", "WithHandoff", []any{a1, nil}) {
 		r1 = ErrUnsupported
 		return
 	}
@@ -4621,7 +4621,7 @@ func (s *SlackTaskContextStore) Upsert(ctx context.Context, a1 *models.SlackTask
 }
 
 func (s *SlackTaskContextStore) UpsertInTx(ctx context.Context, a1 persistence.Tx, a2 *models.SlackTaskContext) (r0 error) {
-	if s.r.Refuse(ctx, "SlackTaskContexts", []any{a2}) {
+	if s.r.Refuse(ctx, "SlackTaskContexts", "UpsertInTx", []any{nil, a2}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -4664,7 +4664,7 @@ func (s *TaskCommitStatStore) FirstProducedCommitStatTime(ctx context.Context, a
 }
 
 func (s *TaskCommitStatStore) ForEachProducedCommitStatChangedFilesJSON(ctx context.Context, a1 string, a2 time.Time, a3 func(changedFilesJSON string) error) (r0 error) {
-	if s.r.Refuse(ctx, "TaskCommitStats", []any{a1, a2}) {
+	if s.r.Refuse(ctx, "TaskCommitStats", "ForEachProducedCommitStatChangedFilesJSON", []any{a1, a2, nil}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -4672,7 +4672,7 @@ func (s *TaskCommitStatStore) ForEachProducedCommitStatChangedFilesJSON(ctx cont
 }
 
 func (s *TaskCommitStatStore) ForEachProducedCommitStatSubject(ctx context.Context, a1 string, a2 time.Time, a3 func(subject string) error) (r0 error) {
-	if s.r.Refuse(ctx, "TaskCommitStats", []any{a1, a2}) {
+	if s.r.Refuse(ctx, "TaskCommitStats", "ForEachProducedCommitStatSubject", []any{a1, a2, nil}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -4959,7 +4959,7 @@ func (s *TaskStore) Create(ctx context.Context, a1 *models.Task) (r0 error) {
 }
 
 func (s *TaskStore) CreateInTx(ctx context.Context, a1 persistence.Tx, a2 *models.Task) (r0 error) {
-	if s.r.Refuse(ctx, "Tasks", []any{a2}) {
+	if s.r.Refuse(ctx, "Tasks", "CreateInTx", []any{nil, a2}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -4967,7 +4967,7 @@ func (s *TaskStore) CreateInTx(ctx context.Context, a1 persistence.Tx, a2 *model
 }
 
 func (s *TaskStore) CreateWithGoalAndCallback(ctx context.Context, a1 *models.Task, a2 *models.TaskGoal, a3 func(persistence.Tx) error) (r0 error) {
-	if s.r.Refuse(ctx, "Tasks", []any{a1, a2}) {
+	if s.r.Refuse(ctx, "Tasks", "CreateWithGoalAndCallback", []any{a1, a2, nil}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -4989,7 +4989,7 @@ func (s *TaskStore) DeleteBlockedChildrenByParent(ctx context.Context, a1 string
 }
 
 func (s *TaskStore) DeleteWithCleanupManifest(ctx context.Context, a1 string, a2 func(persistence.TaskDeletionManifest) error) (r0 persistence.TaskDeletionManifest, r1 bool, r2 error) {
-	if s.r.Refuse(ctx, "Tasks", []any{a1}) {
+	if s.r.Refuse(ctx, "Tasks", "DeleteWithCleanupManifest", []any{a1, nil}) {
 		r2 = ErrUnsupported
 		return
 	}
@@ -4997,7 +4997,7 @@ func (s *TaskStore) DeleteWithCleanupManifest(ctx context.Context, a1 string, a2
 }
 
 func (s *TaskStore) DeleteWithCleanupManifestIfCategory(ctx context.Context, a1 string, a2 string, a3 models.TaskCategory, a4 func(persistence.TaskDeletionManifest) error) (r0 persistence.TaskDeletionManifest, r1 bool, r2 error) {
-	if s.r.Refuse(ctx, "Tasks", []any{a1, a2, a3}) {
+	if s.r.Refuse(ctx, "Tasks", "DeleteWithCleanupManifestIfCategory", []any{a1, a2, a3, nil}) {
 		r2 = ErrUnsupported
 		return
 	}
@@ -5005,7 +5005,7 @@ func (s *TaskStore) DeleteWithCleanupManifestIfCategory(ctx context.Context, a1 
 }
 
 func (s *TaskStore) DeleteWithCleanupManifestIfObserved(ctx context.Context, a1 *models.Task, a2 func(persistence.TaskDeletionManifest) error) (r0 persistence.TaskDeletionManifest, r1 bool, r2 error) {
-	if s.r.Refuse(ctx, "Tasks", []any{a1}) {
+	if s.r.Refuse(ctx, "Tasks", "DeleteWithCleanupManifestIfObserved", []any{a1, nil}) {
 		r2 = ErrUnsupported
 		return
 	}
@@ -5341,7 +5341,7 @@ func (s *TaskStore) ReorderTaskRelative(ctx context.Context, a1 string, a2 strin
 }
 
 func (s *TaskStore) ReserveCalendarPlanner(ctx context.Context, a1 string, a2 func(*models.Task) (*models.Task, error)) (r0 *persistence.ActiveLaneTaskAdmission, r1 error) {
-	if s.r.Refuse(ctx, "Tasks", []any{a1}) {
+	if s.r.Refuse(ctx, "Tasks", "ReserveCalendarPlanner", []any{a1, nil}) {
 		r1 = ErrUnsupported
 		return
 	}
@@ -5562,7 +5562,7 @@ func (s *TaskStore) UpdateXOrigin(ctx context.Context, a1 string) (r0 error) {
 }
 
 func (s *TaskStore) UpdateXOriginInTx(ctx context.Context, a1 persistence.Tx, a2 string) (r0 error) {
-	if s.r.Refuse(ctx, "Tasks", []any{a2}) {
+	if s.r.Refuse(ctx, "Tasks", "UpdateXOriginInTx", []any{nil, a2}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -5745,7 +5745,7 @@ func (s *ThreadInputStore) CreateQueued(ctx context.Context, a1 *models.ThreadIn
 }
 
 func (s *ThreadInputStore) CreateQueuedInTx(ctx context.Context, a1 persistence.Tx, a2 *models.ThreadInput) (r0 error) {
-	if s.r.Refuse(ctx, "ThreadInputs", []any{a2}) {
+	if s.r.Refuse(ctx, "ThreadInputs", "CreateQueuedInTx", []any{nil, a2}) {
 		r0 = ErrUnsupported
 		return
 	}
@@ -6260,7 +6260,7 @@ func (s *XInboundReceiptStore) Claim(ctx context.Context, a1 string, a2 string, 
 }
 
 func (s *XInboundReceiptStore) CompleteWithHandoff(ctx context.Context, a1 string, a2 string, a3 *string, a4 func(persistence.Tx) error) (r0 bool, r1 error) {
-	if s.r.Refuse(ctx, "XInboundReceipts", []any{a1, a2, a3}) {
+	if s.r.Refuse(ctx, "XInboundReceipts", "CompleteWithHandoff", []any{a1, a2, a3, nil}) {
 		r1 = ErrUnsupported
 		return
 	}
@@ -6296,7 +6296,7 @@ func (s *XTaskContextStore) Upsert(ctx context.Context, a1 *models.XTaskContext)
 }
 
 func (s *XTaskContextStore) UpsertInTx(ctx context.Context, a1 persistence.Tx, a2 *models.XTaskContext) (r0 error) {
-	if s.r.Refuse(ctx, "XTaskContexts", []any{a2}) {
+	if s.r.Refuse(ctx, "XTaskContexts", "UpsertInTx", []any{nil, a2}) {
 		r0 = ErrUnsupported
 		return
 	}

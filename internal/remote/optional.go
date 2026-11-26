@@ -24,6 +24,11 @@ type replayStore interface {
 }
 
 func init() {
+	paramNames["Executions"]["AppendEncodedReplayChanges"] = []string{"owner", "changes"}
+	paramNames["Lifecycle"]["AppendExecutionEvent"] = []string{"event"}
+	paramNames["Executions"]["StartStructuredOutput"] = []string{"id"}
+	paramNames["Executions"]["SealStructuredOutput"] = []string{"id", "digest", "total"}
+	paramNames["Executions"]["AppendStructuredOutput"] = []string{"id", "changes"}
 	paramNames["Executions"]["ListDisplayExecutions"] = []string{"projectID", "taskID", "before", "limit", "budget"}
 	paramNames["Executions"]["ReadProjectDisplayTail"] = []string{"projectID", "id", "before", "budget"}
 	paramNames["Executions"]["ReadProjectDisplayTailRevision"] = []string{"projectID", "id", "before", "budget", "revision"}
@@ -76,7 +81,7 @@ func (s *ExecutionStore) GetDisplayExecution(ctx context.Context, id string) (r0
 }
 
 func (s *ExecutionStore) AppendEncodedReplayChanges(ctx context.Context, owner models.ConversationOwner, changes []models.ConversationChange) ([]models.ConversationChange, error) {
-	if s.r.Refuse(ctx, "Executions", []any{owner}) {
+	if s.r.Refuse(ctx, "Executions", "AppendEncodedReplayChanges", []any{owner}) {
 		return nil, ErrUnsupported
 	}
 	return s.local.(replayStore).AppendEncodedReplayChanges(ctx, owner, changes)
@@ -98,7 +103,7 @@ func (s *ExecutionStore) GetChatCompactionCheckpointIfChanged(ctx context.Contex
 }
 
 func (s *LifecycleStore) AppendExecutionEvent(ctx context.Context, event *models.LifecycleExecutionEvent) error {
-	if s.r.Refuse(ctx, "Lifecycle", []any{event}) {
+	if s.r.Refuse(ctx, "Lifecycle", "AppendExecutionEvent", []any{event}) {
 		return ErrUnsupported
 	}
 	return s.local.(interface {
@@ -139,21 +144,21 @@ type structuredOutputStore interface {
 }
 
 func (s *ExecutionStore) StartStructuredOutput(ctx context.Context, id string) (int64, error) {
-	if s.r.Refuse(ctx, "Executions", []any{id}) {
+	if s.r.Refuse(ctx, "Executions", "StartStructuredOutput", []any{id}) {
 		return 0, ErrUnsupported
 	}
 	return s.local.(structuredOutputStore).StartStructuredOutput(ctx, id)
 }
 
 func (s *ExecutionStore) SealStructuredOutput(ctx context.Context, id string, digest []byte, total int) error {
-	if s.r.Refuse(ctx, "Executions", []any{id}) {
+	if s.r.Refuse(ctx, "Executions", "SealStructuredOutput", []any{id}) {
 		return ErrUnsupported
 	}
 	return s.local.(structuredOutputStore).SealStructuredOutput(ctx, id, digest, total)
 }
 
 func (s *ExecutionStore) AppendStructuredOutput(ctx context.Context, id string, changes []models.ConversationChange) ([]models.ConversationChange, error) {
-	if s.r.Refuse(ctx, "Executions", []any{id}) {
+	if s.r.Refuse(ctx, "Executions", "AppendStructuredOutput", []any{id}) {
 		return nil, ErrUnsupported
 	}
 	return s.local.(structuredOutputStore).AppendStructuredOutput(ctx, id, changes)

@@ -332,30 +332,75 @@ func jsonIDsKey(k string) bool {
 // Tag prefixes IDs in v, which must be a pointer.
 func Tag(serverID string, v any) { walk(reflect.ValueOf(v), tagger(serverID), nil, "", 0) }
 
-// argServer reports the single server referenced by args. Mixed servers fail.
-func argServer(args []any) (server string, mixed bool) {
-	var found string
-	for _, a := range args {
-		visitStrings(reflect.ValueOf(a), 0, func(s string) bool {
-			if s == "" || !strings.Contains(s, "r-") {
-				return true
+// routingIDs selects resource references using generated parameter names and
+// typed struct fields. Payload text must never determine a store's destination.
+func routingIDs(store, method string, args []any) []any {
+	names := paramNames[store][method]
+	var ids []any
+	for i, arg := range args {
+		if i >= len(names) {
+			continue
+		}
+		visitResourceIDs(reflect.ValueOf(arg), names[i], 0, func(id string) {
+			if id != "" {
+				ids = append(ids, id)
 			}
-			id, ok := remoteid.FindServer(s)
-			if !ok {
-				return true
-			}
-			if found != "" && found != id {
-				mixed = true
-				return false
-			}
-			found = id
-			return true
 		})
-		if mixed {
-			return "", true
+	}
+	return ids
+}
+
+func resourceIDName(name string) bool {
+	return !userParam(name) && (name == "id" || name == "ids" || name == "ID" || strings.HasSuffix(name, "ID") || strings.HasSuffix(name, "IDs"))
+}
+
+func visitResourceIDs(v reflect.Value, name string, depth int, visit func(string)) {
+	if depth > 12 || !v.IsValid() {
+		return
+	}
+	switch v.Kind() {
+	case reflect.String:
+		if resourceIDName(name) {
+			visit(v.String())
+		}
+	case reflect.Pointer, reflect.Interface:
+		if !v.IsNil() {
+			visitResourceIDs(v.Elem(), name, depth+1, visit)
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			field := v.Type().Field(i)
+			if field.IsExported() && !hasTag(field, "raw") {
+				visitResourceIDs(v.Field(i), field.Name, depth+1, visit)
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			return
+		}
+		for i := 0; i < v.Len(); i++ {
+			visitResourceIDs(v.Index(i), name, depth+1, visit)
 		}
 	}
-	return found, false
+}
+
+// argServer inspects only resource references selected by routingIDs.
+func argServer(args []any) (server string, mixed bool) {
+	for _, arg := range args {
+		s, ok := arg.(string)
+		if !ok {
+			continue
+		}
+		id, ok := remoteid.ServerOf(s)
+		if !ok {
+			continue
+		}
+		if server != "" && server != id {
+			return "", true
+		}
+		server = id
+	}
+	return server, false
 }
 
 // aggregateArg returns the All projects or shared project ID in args, or "".
