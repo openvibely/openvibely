@@ -47,8 +47,14 @@
     return {ctx: ctx, r: r, W: W, H: H, spread: r.width};
   }
 
-  function dotColor() {
-    return document.documentElement.getAttribute('data-theme') === 'light' ? 'rgba(89,102,242,.32)' : 'rgba(116,128,255,.36)';
+  function dotColor(stage) {
+    var probe = document.createElement('i');
+    var alpha = document.documentElement.getAttribute('data-theme') === 'light' ? .32 : .36;
+    probe.style.color = 'oklch(var(--p) / ' + alpha + ')';
+    stage.appendChild(probe);
+    var color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
   }
 
   function dots(img, W, H, spread, plot) {
@@ -78,7 +84,7 @@
     var img = images[stage.dataset.src];
     var g = img && img.complete && place(stage);
     if (!g) return;
-    g.ctx.fillStyle = dotColor();
+    g.ctx.fillStyle = dotColor(stage);
     dots(img, g.W, g.H, g.spread, function(x, y) { g.ctx.fillRect(x, y, 1.6, 1.6); });
     stage.querySelector('canvas').style.opacity = '';
   }
@@ -103,7 +109,7 @@
       parts.push(x, y, ax + ox, ay + oy, Math.hypot(x - geo.cx, y - geo.cy) / diag * .45 + Math.random() * .25);
     }
     var canvas = stage.querySelector('canvas');
-    var color = dotColor();
+    var color = dotColor(stage);
     var t0 = performance.now(), dur = 1500;
     function frame(now) {
       if (!stage.isConnected || stage.hidden) return;
@@ -181,6 +187,16 @@
     stage.hidden = false;
     drawStatic(stage);
   });
+
+  var recolor = 0;
+  new MutationObserver(function() {
+    cancelAnimationFrame(recolor);
+    recolor = requestAnimationFrame(function() {
+      document.querySelectorAll('[data-thread-empty-stage]').forEach(function(stage) {
+        if (stage._ovInit && !stage._ovPlaying && !stage.hidden) drawStatic(stage);
+      });
+    });
+  }).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-color-theme', 'style']});
 
   document.addEventListener('htmx:afterSettle', scan);
   document.addEventListener('htmx:historyRestore', scan);
