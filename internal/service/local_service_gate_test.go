@@ -53,19 +53,17 @@ func TestLocalTelegramPauseDrainsPollBeforeResume(t *testing.T) {
 	require.Eventually(t, func() bool { return atomic.LoadInt32(&client.activeUpdates) == 1 }, time.Second, time.Millisecond)
 	done := make(chan struct{})
 	go func() { svc.StopAndWait(); close(done) }()
-	require.Eventually(t, func() bool { return !svc.IsRunning() }, time.Second, time.Millisecond)
-	select {
-	case <-done:
-		t.Fatal("pause returned before poll finished")
-	default:
-	}
-	client.unblock()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("pause did not finish")
+		t.Fatal("pause did not cancel the active poll")
 	}
+	require.False(t, svc.IsRunning())
+	require.EqualValues(t, 0, atomic.LoadInt32(&client.activeUpdates), "pause must wait for the cancelled poll to exit")
+	// Leave the stub blocked: both stopping and restarting must work through
+	// the polling context, without manually completing the old request.
 	svc.Start()
 	require.True(t, svc.IsRunning())
+	require.Eventually(t, func() bool { return atomic.LoadInt32(&client.activeUpdates) == 1 }, time.Second, time.Millisecond)
 	require.EqualValues(t, 1, atomic.LoadInt32(&client.maxActiveUpdates))
 }
