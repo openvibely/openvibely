@@ -122,6 +122,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("tag arrow aligns with priority arrow", `String(Math.abs(document.querySelector('.task-tag-row label').getBoundingClientRect().left - document.querySelector('[data-detail-property="priority"] > :last-child').getBoundingClientRect().left) < 1)`, "true")
 		b.click(tagArrow)
 		b.waitFor("existing draft refreshes tags from other tasks", `String(!!document.querySelector('[data-custom-option][data-value="From Another Task"]'))`, "true")
+		b.evaluate(`document.documentElement.style.setProperty('--bc','0.8 0 0');document.querySelector('[data-custom-option][data-value="From Another Task"]').dispatchEvent(new PointerEvent('pointermove',{bubbles:true}));'hovered'`)
+		b.waitFor("async tags share hover styling", `String((() => { const fresh=document.querySelector('[data-custom-option][data-value="From Another Task"]'); const existing=document.querySelector('[data-options="tag"] [data-value="feature"]'); const hover=getComputedStyle(fresh).backgroundColor; existing.dispatchEvent(new PointerEvent('pointermove',{bubbles:true})); return hover===getComputedStyle(existing).backgroundColor && hover!=='rgba(0, 0, 0, 0)'; })())`, "true")
 		b.clickMenuBackdrop(`[data-detail-property="tag"]`)
 		b.evaluate(`window.originalTagFetch=window.fetch; window.fetch=(url,...args)=>String(url).includes('/api/tasks/tags?') ? new Promise(resolve=>window.failTagRefresh=()=>resolve(new Response(null,{status:503}))) : window.originalTagFetch(url,...args); 'delayed'`)
 		b.click(`[data-detail-property="tag"]`)
