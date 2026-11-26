@@ -107,7 +107,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 				}
 				if len(chatHistory) == 0 && len(pendingInputs) == 0 && len(pendingChatInputRequests(inputRequests)) == 0 {
-					@components.ChatEmptyState("Start a conversation by typing a message below")
+					@components.ChatEmptyStage("Start a conversation by typing a message below")
 				} else {
 					for _, exec := range chatHistory {
 						<div
@@ -1205,7 +1205,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var executionPair = execId ? document.getElementById('chat-execution-' + execId) : null;
 							var parent = executionPair || chatMessages;
 							if (card.parentElement === parent) return;
-							var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
+							var emptyState = chatMessages.querySelector('[data-chat-empty-state]');
 							if (emptyState) emptyState.remove();
 							parent.appendChild(card);
 							var tracker = window._chatPageTracker;
@@ -1399,7 +1399,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								}
 
 							// Remove empty state if present
-							var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
+							var emptyState = chatMessages.querySelector('[data-chat-empty-state]');
 							if (emptyState) emptyState.remove();
 
 									// Append user bubble and streaming assistant for a real running turn.

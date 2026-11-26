@@ -7,6 +7,7 @@ import (
  "github.com/openvibely/openvibely/web/templates/components"
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/internal/persistence"
+ "github.com/openvibely/openvibely/internal/service"
  "github.com/openvibely/openvibely/web/templates/layout"
  templateui "github.com/openvibely/openvibely/web/templates"
 )
@@ -74,7 +75,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
    }
    <div id="tab-changes" class="hidden"></div>
    <div id="tab-chat" class="flex flex-col flex-1 min-h-0">
-    <div id="task-thread-messages" data-chat-transcript class="flex-1 min-h-0 overflow-y-auto"></div>
+    <div id="task-thread-messages" data-chat-transcript class="flex-1 min-h-0 overflow-y-auto">@components.ChatEmptyStage("Describe the task below")</div>
     <div id="new-task-error" role="alert" class="text-error text-sm"></div>
     @components.ChatInputForm(components.ChatInputFormConfig{
      FormID: "task-thread-form", InputID: "task-message-input",
@@ -83,6 +84,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      ProjectServerOnly: models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, project.ID)),
      ProjectChoices: newTaskProjectChoices(ctx, project), ProjectInputID: "new-task-project",
     })
+    @NewTaskOptionsRow(project)
    </div>
   </div>
   @TaskDetailEditors(&models.Task{}, agents, agentDefs)
@@ -418,6 +420,104 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
  @TaskAutoMergeSwitches(&models.Task{})
 }
 
+// Quick controls under the composer; they mirror the Details rows.
+templ NewTaskOptionsRow(project *models.Project) {
+ <div class="ov-task-options" data-new-task-options aria-label="Task options">
+  <div class="ov-task-options-group">
+   <button type="button" class="ov-task-option" data-picker-align="up" data-detail-property="category" data-value="active" aria-haspopup="dialog" aria-label="Category">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+    <span data-property-label class="capitalize">active</span>
+   </button>
+   <button type="button" class="ov-task-option" data-picker-align="up" data-detail-property="agent_definition_id" data-value="" aria-haspopup="dialog" aria-label="Agent">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>
+    <span data-property-label>No agent</span>
+   </button>
+   <button type="button" class="ov-task-option" data-picker-align="up" data-detail-property="tag" data-quick-tag data-value="" aria-haspopup="dialog" aria-label="Tag">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+    <span data-quick-label>No tag</span>
+   </button>
+  </div>
+  <div class="ov-task-options-group">
+   <button type="button" class="ov-task-option" data-quick-auto-merge aria-pressed="false">
+    <span class="ov-task-option-dot" aria-hidden="true"></span><span>Auto-merge</span>
+   </button>
+   if branch := newTaskTargetBranch(ctx, project); branch != "" {
+    <span class="ov-task-option ov-task-option-static" title="Target branch">
+     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+     <span class="font-mono">{ branch }</span>
+    </span>
+   }
+  </div>
+  <style>
+   .ov-task-options { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 4px 0; }
+   html[data-thread-width="focused"] .ov-task-options { max-width:820px; width:100%; margin:0 auto; }
+   .ov-task-options-group { display:flex; align-items:center; gap:2px; flex-wrap:wrap; min-width:0; }
+   .ov-task-option { display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 9px; border:0; border-radius:8px; background:transparent; color:oklch(var(--bc)/.52); font-size:12px; line-height:1; white-space:nowrap; cursor:pointer; transition:background .14s ease, color .14s ease; }
+   .ov-task-option:hover, .ov-task-option[data-picker-return-focus] { background:oklch(var(--bc)/.06); color:oklch(var(--bc)/.9); }
+   .ov-task-option:disabled { opacity:.5; cursor:default; }
+   .ov-task-option[data-on="true"] { color:oklch(var(--bc)/.9); }
+   .ov-task-option svg { opacity:.78; flex-shrink:0; }
+   .ov-task-option-static { cursor:default; }
+   .ov-task-option-static:hover { background:transparent; color:oklch(var(--bc)/.52); }
+   .ov-task-option-static .font-mono { font-size:11.5px; }
+   .ov-task-option-dot { width:6px; height:6px; border-radius:50%; background:oklch(var(--bc)/.32); transition:background .15s ease; }
+   .ov-task-option[data-on="true"] .ov-task-option-dot { background:oklch(var(--su)); }
+   #tab-chat:has([data-thread-empty-stage][hidden]) [data-new-task-options] { display:none; }
+  </style>
+  <script>
+   (function() {
+    var root = document.getElementById('task-detail-content');
+    var row = root.querySelector('[data-new-task-options]');
+    var details = root.querySelector('#tab-details');
+    // Keep the quick buttons and Details rows showing the same value.
+    function mirror(from) {
+     var name = from.dataset.detailProperty, source = from.querySelector('[data-property-label]');
+     root.querySelectorAll('[data-detail-property="' + name + '"]').forEach(function(to) {
+      var label = to.querySelector('[data-property-label]');
+      if (to === from || !label || !source || (to.dataset.value === from.dataset.value && label.textContent === source.textContent)) return;
+      to.dataset.value = from.dataset.value;
+      label.textContent = source.textContent;
+     });
+    }
+    var observer = new MutationObserver(function(records) {
+     if (!root.isConnected) { observer.disconnect(); return; }
+     records.forEach(function(record) {
+      var node = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      var target = node && node.closest('[data-detail-property]');
+      if (target && target.dataset.detailProperty !== 'tag') mirror(target);
+     });
+    });
+    root.querySelectorAll('[data-detail-property="category"], [data-detail-property="agent_definition_id"]').forEach(function(el) {
+     observer.observe(el, {attributes:true, attributeFilter:['data-value'], childList:true, subtree:true, characterData:true});
+    });
+    var tagRow = details.querySelector('[data-detail-property="tag"]');
+    var quickTag = row.querySelector('[data-quick-tag]');
+    function syncTag() {
+     quickTag.dataset.value = tagRow.dataset.value;
+     quickTag.querySelector('[data-quick-label]').textContent = tagRow.querySelector('[data-property-label]').textContent;
+     quickTag.dataset.on = String(!!tagRow.dataset.value);
+    }
+    new MutationObserver(syncTag).observe(tagRow, {attributes:true, attributeFilter:['data-value'], childList:true, subtree:true, characterData:true});
+    var agentRow = details.querySelector('[data-detail-property="agent_definition_id"]');
+    var quickAgent = row.querySelector('[data-detail-property="agent_definition_id"]');
+    function syncAgent() { quickAgent.disabled = agentRow.disabled; quickAgent.dataset.on = String(!!quickAgent.dataset.value); }
+    new MutationObserver(syncAgent).observe(agentRow, {attributes:true, attributeFilter:['disabled', 'data-value']});
+    new MutationObserver(syncAgent).observe(quickAgent, {attributes:true, attributeFilter:['data-value']});
+    var quickCategory = row.querySelector('[data-detail-property="category"]');
+    function syncCategory() { quickCategory.dataset.on = String(quickCategory.dataset.value === 'active'); }
+    new MutationObserver(syncCategory).observe(quickCategory, {attributes:true, attributeFilter:['data-value']});
+    syncAgent(); syncCategory(); syncTag();
+    var merge = row.querySelector('[data-quick-auto-merge]');
+    function autoMerge() { return details.querySelector('#task-auto-merge-panel [name="auto_merge"]'); }
+    function syncMerge() { var on = !!autoMerge()?.checked; merge.dataset.on = String(on); merge.setAttribute('aria-pressed', String(on)); }
+    merge.addEventListener('click', function() { var input = autoMerge(); if (!input) return; input.checked = !input.checked; input.dispatchEvent(new Event('change', {bubbles:true})); });
+    details.addEventListener('change', function(event) { if (event.target.name === 'auto_merge') syncMerge(); });
+    syncMerge();
+   })();
+  </script>
+ </div>
+}
+
 templ NewTaskAdvancedOptions() {
 <div class="mt-3">
 									<div class="space-y-3">
@@ -471,6 +571,11 @@ templ NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTas
   <p class="text-xs opacity-60 mb-4">Settings apply when you send your first message. Active tasks start immediately; Backlog tasks are saved without running.</p>
   <details><summary class="text-sm cursor-pointer">Advanced options</summary>@NewTaskAdvancedOptions()</details>
  </div>
+}
+
+func newTaskTargetBranch(ctx context.Context, project *models.Project) string {
+ if project == nil || project.RepoPath == "" || models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) { return "" }
+ return service.GetDefaultBranchContext(ctx, project.RepoPath)
 }
 
 func newTaskDefaultModel() *string { value := "default"; return &value }

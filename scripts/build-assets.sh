@@ -103,6 +103,8 @@ cp "$assets/permission-errors.js" "$dist/permission-errors.js"
 cp "$assets/plugin-nav-overflow.js" "$dist/plugin-nav-overflow.js"
 cp "$assets/page-chat.js" "$dist/page-chat.js"
 cp "$assets/chat-input-requests.js" "$dist/chat-input-requests.js"
+cp "$assets/thread-empty-stage.js" "$dist/thread-empty-stage.js"
+cp "$assets/ov-avatar.png" "$dist/ov-avatar.png"
 # Desktop viewer code is embedded, never served as executable JS from an agent's computer.
 NOVNC_VERSION=1.6.0
 novnc=$(fetch "https://codeload.github.com/novnc/noVNC/tar.gz/refs/tags/v${NOVNC_VERSION}" "5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa")
