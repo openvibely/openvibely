@@ -47,9 +47,23 @@
     return {ctx: ctx, r: r, W: W, H: H, spread: r.width};
   }
 
+  function isLight() {
+    return document.documentElement.getAttribute('data-theme') === 'light';
+  }
+
+  function stageSrc(stage) {
+    return (isLight() && stage.dataset.srcLight) || stage.dataset.src;
+  }
+
+  function loadImage(src) {
+    var img = images[src];
+    if (!img) { img = images[src] = new Image(); img.src = src; }
+    return img;
+  }
+
   function dotColor(stage) {
     var probe = document.createElement('i');
-    var alpha = document.documentElement.getAttribute('data-theme') === 'light' ? .62 : .36;
+    var alpha = isLight() ? .72 : .36;
     probe.style.color = 'oklch(var(--p) / ' + alpha + ')';
     stage.appendChild(probe);
     var color = getComputedStyle(probe).color;
@@ -57,13 +71,20 @@
     return color;
   }
 
-  function dots(img, W, H, spread, plot) {
-    var size = H * 1.08, cx = W / 2, cy = H * .44, step = 5;
+  function dots(img, W, H, spread, light, plot) {
+    var size = H * (light ? 1.04 : 1.08), cx = W / 2, cy = H * (light ? .46 : .44), step = light ? 4 : 5;
     var off = document.createElement('canvas');
     off.width = W; off.height = H;
     var o = off.getContext('2d');
     o.drawImage(img, cx - size / 2, cy - size / 2, size, size);
     var px = o.getImageData(0, 0, W, H).data;
+    function lumAt(x, y) {
+      if (x < 0 || y < 0 || x >= W || y >= H) return 1;
+      var k = (y * W + x) * 4;
+      var al = px[k + 3] / 255;
+      var l = (px[k] * .3 + px[k + 1] * .59 + px[k + 2] * .11) / 255;
+      return l * al + (1 - al);
+    }
     var seed = 7;
     function rnd() { return (seed = (seed * 16807) % 2147483647) / 2147483647; }
     for (var y = 0; y < H; y += step) {
@@ -71,36 +92,59 @@
         var i = (y * W + x) * 4;
         var a = px[i + 3] / 255;
         var lum = (px[i] * .3 + px[i + 1] * .59 + px[i + 2] * .11) / 255;
-        var v = a * (.25 + lum * .95);
         var d = Math.hypot((x - cx) / (spread * .62), (y - cy) / (H * .72));
-        v = Math.max(v, Math.max(0, noise(x, y) - .6) * Math.max(0, 1 - d));
-        if (v > bayer[(y / step) & 3][(x / step) & 3] + (rnd() - .5) * .12) plot(x, y);
+        var amb = Math.max(0, noise(x, y) - .6) * Math.max(0, 1 - d);
+        var v;
+        if (light) {
+          var gx = lumAt(x + step, y) - lumAt(x - step, y);
+          var gy = lumAt(x, y + step) - lumAt(x, y - step);
+          var edge = Math.min(1, Math.hypot(gx, gy) * 1.6);
+          v = Math.max(a * (.12 + Math.pow(1 - lum, 1.1) * .95) + edge * .38, amb * .55);
+        } else {
+          v = Math.max(a * (.25 + lum * .95), amb);
+        }
+        var jitter = (rnd() - .5) * (light ? .10 : .12);
+        if (v > bayer[(y / step) & 3][(x / step) & 3] + jitter) plot(x, y);
       }
     }
-    return {cx: cx, cy: cy};
+    return {cx: cx, cy: cy, size: size};
   }
 
   function drawStatic(stage) {
-    var img = images[stage.dataset.src];
-    var g = img && img.complete && place(stage);
+    var img = loadImage(stageSrc(stage));
+    if (!img.complete) {
+      img.addEventListener('load', function() {
+        if (stage.isConnected && !stage.hidden && !stage._ovPlaying) drawStatic(stage);
+      }, {once: true});
+      return;
+    }
+    var g = place(stage);
     if (!g) return;
+    var light = isLight(), dotSize = light ? 1.5 : 1.6;
     g.ctx.fillStyle = dotColor(stage);
-    dots(img, g.W, g.H, g.spread, function(x, y) { g.ctx.fillRect(x, y, 1.6, 1.6); });
+    dots(img, g.W, g.H, g.spread, light, function(x, y) { g.ctx.fillRect(x, y, dotSize, dotSize); });
     stage.querySelector('canvas').style.opacity = '';
   }
 
   function play(stage) {
-    var img = images[stage.dataset.src];
+    var img = loadImage(stageSrc(stage));
+    if (!img.complete) {
+      img.addEventListener('load', function() {
+        if (stage.isConnected && !stage.hidden) play(stage);
+      }, {once: true});
+      return;
+    }
     var g = place(stage);
     if (!g) return;
+    var light = isLight(), dotSize = light ? 1.5 : 1.6;
     var form = composer(stage);
     var fr = form ? form.getBoundingClientRect() : null;
     var asize = 192;
     var ax = g.W / 2;
     var ay = fr ? fr.top - g.r.top - 40 - asize / 2 : g.H * .3;
     var list = [];
-    var geo = dots(img, g.W, g.H, g.spread, function(x, y) { list.push(x, y); });
-    var k = asize / (g.H * 1.08), maxR = asize * .42, diag = Math.hypot(g.W, g.H);
+    var geo = dots(img, g.W, g.H, g.spread, light, function(x, y) { list.push(x, y); });
+    var k = asize / geo.size, maxR = asize * .42, diag = Math.hypot(g.W, g.H);
     var parts = [];
     for (var i = 0; i < list.length; i += 2) {
       var x = list[i], y = list[i + 1];
@@ -120,7 +164,7 @@
         var t = Math.max(0, Math.min(1, (T - parts[j + 4]) / .6));
         if (t <= 0) continue;
         var e = 1 - Math.pow(1 - t, 3);
-        g.ctx.fillRect(parts[j + 2] + (parts[j] - parts[j + 2]) * e, parts[j + 3] + (parts[j + 1] - parts[j + 3]) * e, 1.6, 1.6);
+        g.ctx.fillRect(parts[j + 2] + (parts[j] - parts[j + 2]) * e, parts[j + 3] + (parts[j + 1] - parts[j + 3]) * e, dotSize, dotSize);
       }
       canvas.style.opacity = String(1 - .45 * (1 - Math.pow(1 - Math.min(1, T), 3)));
       if (T < 1.35) requestAnimationFrame(frame);
@@ -133,9 +177,7 @@
   function init(stage) {
     if (stage._ovInit) return;
     stage._ovInit = true;
-    var src = stage.dataset.src;
-    var img = images[src];
-    if (!img) { img = images[src] = new Image(); img.src = src; }
+    var img = loadImage(stageSrc(stage));
     function start() {
       if (!stage.isConnected || stage.hidden) return;
       if (reduced && reduced.matches) drawStatic(stage);
@@ -143,8 +185,9 @@
     }
     if (host(stage)) watch(stage);
     function ready() {
-      if (img.complete) requestAnimationFrame(start);
-      else img.addEventListener('load', start, {once: true});
+      var cur = loadImage(stageSrc(stage));
+      if (cur.complete) requestAnimationFrame(start);
+      else cur.addEventListener('load', start, {once: true});
     }
     var splash = document.getElementById('ov-splash');
     if (splash && !splash.classList.contains('ov-splash-out')) document.addEventListener('ov-splash-fading', ready, {once: true});

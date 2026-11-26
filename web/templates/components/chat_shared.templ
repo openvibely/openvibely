@@ -1528,7 +1528,7 @@ templ ChatEmptyState(message string) {
 // ChatEmptyStage is the dither backdrop for empty Chat and New Task threads.
 templ ChatEmptyStage(message string) {
 	<div data-chat-empty-state class="ov-empty-stage-anchor">
-		<div data-thread-empty-stage data-src={ static.URL("ov-avatar.png") } class="ov-thread-empty-stage" aria-hidden="true"><canvas></canvas></div>
+		<div data-thread-empty-stage data-src={ static.URL("ov-avatar.png") } data-src-light={ static.URL("ov-avatar-light.png") } class="ov-thread-empty-stage" aria-hidden="true"><canvas></canvas></div>
 		<span class="sr-only">{ message }</span>
 	</div>
 }
