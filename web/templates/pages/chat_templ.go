@@ -679,7 +679,7 @@ func SharedChatContent(agents []models.LLMConfig, sharedID string, choices []mod
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = components.ChatEmptyState("Choose which computer's copy to chat in, then send a message").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.ChatEmptyStage("Choose which computer's copy to chat in, then send a message").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

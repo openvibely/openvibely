@@ -12,7 +12,7 @@
     return (Math.sin(x * .011 + Math.sin(y * .007) * 2.1) + Math.sin(y * .013 - x * .004) + Math.sin((x + y) * .006)) / 6 + .5;
   }
 
-  function host(stage) { return stage.closest('#tab-chat, #chat-page-root'); }
+  function host(stage) { return stage.closest('#tab-chat, #chat-page-root, #shared-chat-root'); }
   function composer(stage) { var h = host(stage); return h && h.querySelector('.chat-input-shadow-gutter'); }
 
   // Cover the host from the transcript top down, bleeding into main's padding.
@@ -209,19 +209,19 @@
   }
 
   function stageFor(form) {
-    var h = form && form.closest && form.closest('#tab-chat, #chat-page-root');
+    var h = form && form.closest && form.closest('#tab-chat, #chat-page-root, #shared-chat-root');
     return h && h.querySelector('[data-thread-empty-stage]');
   }
   document.addEventListener('htmx:beforeRequest', function(event) {
     var elt = event.detail && event.detail.elt;
-    if (!elt || (elt.id !== 'task-thread-form' && elt.id !== 'chat-form')) return;
+    if (!elt || (elt.id !== 'task-thread-form' && elt.id !== 'chat-form' && elt.id !== 'shared-chat-form')) return;
     var stage = stageFor(elt);
     if (stage) stage.hidden = true;
   });
   document.addEventListener('htmx:afterRequest', function(event) {
     var detail = event.detail || {};
     var elt = detail.elt;
-    if (!elt || (elt.id !== 'task-thread-form' && elt.id !== 'chat-form')) return;
+    if (!elt || (elt.id !== 'task-thread-form' && elt.id !== 'chat-form' && elt.id !== 'shared-chat-form')) return;
     var xhr = detail.xhr;
     // A 204 is the server's model-setup guard: nothing was sent.
     if (detail.successful && xhr && xhr.status !== 204) return;
