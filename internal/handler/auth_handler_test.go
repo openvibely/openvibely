@@ -97,6 +97,25 @@ func TestAuthLogin_SuccessSetsCookieAndRedirects(t *testing.T) {
 	}
 }
 
+func TestAuthLogin_UsesSavedThemePreference(t *testing.T) {
+	h, e := authTestHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-theme="dark"`) || !strings.Contains(rec.Body.String(), `ov-avatar.png`) {
+		t.Fatalf("expected default dark login theme, got status %d", rec.Code)
+	}
+
+	if err := h.settingsRepo.Set(t.Context(), uiPreferenceThemeKey, "openvibely-light"); err != nil {
+		t.Fatalf("set theme pref: %v", err)
+	}
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-theme="light"`) || !strings.Contains(rec.Body.String(), `ov-avatar-light.png`) {
+		t.Fatalf("expected light login theme with light avatar, got status %d", rec.Code)
+	}
+}
+
 func TestAuthLogin_DesktopNavigatesDirectly(t *testing.T) {
 	h, e := authTestHandler(t)
 	h.SetDesktopMode(true)

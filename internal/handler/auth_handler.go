@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/themes"
 	"github.com/openvibely/openvibely/web/static"
 )
 
@@ -240,16 +241,37 @@ func (h *Handler) AuthLoginPage(c echo.Context) error {
 	return h.renderLoginPage(c, http.StatusOK, "", c.QueryParam("next"), "")
 }
 
+func (h *Handler) loginThemeMode(ctx context.Context) string {
+	id := strings.TrimSpace(h.uiPreferences(ctx).Theme)
+	if id == "light" {
+		return "light"
+	}
+	for _, theme := range themes.Catalog() {
+		if theme.ID == id {
+			if theme.Mode == "light" {
+				return "light"
+			}
+			return "dark"
+		}
+	}
+	return "dark"
+}
+
 func (h *Handler) renderLoginPage(c echo.Context, status int, username, nextValue, message string) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	next := template.HTMLEscapeString(nextValue)
 	username = template.HTMLEscapeString(username)
+	themeMode := h.loginThemeMode(c.Request().Context())
+	avatarAsset := "ov-avatar.png"
+	if themeMode == "light" {
+		avatarAsset = "ov-avatar-light.png"
+	}
 	errorHTML := ""
 	if message != "" {
 		errorHTML = `<p id="login-error" role="alert" class="text-sm text-error">` + template.HTMLEscapeString(message) + `</p>`
 	}
 	body := `<!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="` + themeMode + `">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -261,7 +283,7 @@ func (h *Handler) renderLoginPage(c echo.Context, status int, username, nextValu
   <div class="card w-full max-w-md bg-base-100 shadow-xl border border-base-300">
     <div class="card-body">
       <h1 class="sr-only">Sign in</h1>
-      <img src="` + static.URL("ov-avatar.png") + `" alt="" width="132" height="132" class="mx-auto mb-1" />
+      <img src="` + static.URL(avatarAsset) + `" alt="" width="132" height="132" class="mx-auto mb-1" />
       <p class="text-sm opacity-70 mb-2 text-center">Enter your credentials to continue.</p>
       ` + errorHTML + `
       <form method="POST" action="/login" class="space-y-4">
