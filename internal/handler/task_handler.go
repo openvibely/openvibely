@@ -24,6 +24,7 @@ import (
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/remote"
 	"github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/service/authz"
@@ -3281,7 +3282,12 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 // Normal thread requests retain their existing paging and polling behavior.
 func (h *Handler) getTaskThread(c echo.Context, detail *taskDetailContentData, selectedTab string) error {
 	taskID := c.Param("taskId")
-	ctx := c.Request().Context()
+	// A newly created thread is rendered inside the creation request, before
+	// routing runs for its task URL. Scope unqualified model reads to the task's
+	// owner, including clearing a remote scope when the new task is Local.
+	serverID, _ := remoteid.ServerOf(taskID)
+	ctx := remote.WithServer(c.Request().Context(), serverID)
+	c.SetRequest(c.Request().WithContext(ctx))
 	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskThreadWindowLimitDefault, taskThreadWindowLimitMax)
 	beforeExecID := strings.TrimSpace(c.QueryParam("before"))
 	isPoll := c.QueryParam("poll") == "1"
