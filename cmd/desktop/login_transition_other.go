@@ -4,4 +4,4 @@ package main
 
 import "github.com/wailsapp/wails/v3/pkg/application"
 
-func registerPageBackground(_ *application.App, _ *application.WebviewWindow) {}
+func registerLoginTransition(_ *application.App, _ *application.WebviewWindow) {}

@@ -111,7 +111,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 		<head>
 			<meta charset="UTF-8"/>
 			if nativeWindowMarker(ctx) == "true" {
-				@DesktopPageBackground(runtime.GOOS)
+				@DesktopNavigation(runtime.GOOS)
 			}
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=2"/>

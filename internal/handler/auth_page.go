@@ -16,11 +16,11 @@ func (h *Handler) nativeAuthWindow(c echo.Context) bool {
 // Standalone auth documents bypass Base, but still need native window chrome.
 func (h *Handler) renderAuthDocument(c echo.Context, status int, body string) error {
 	if h.nativeAuthWindow(c) {
-		var background bytes.Buffer
-		if err := layout.DesktopPageBackground(runtime.GOOS).Render(c.Request().Context(), &background); err != nil {
+		var navigation bytes.Buffer
+		if err := layout.DesktopNavigation(runtime.GOOS).Render(c.Request().Context(), &navigation); err != nil {
 			return err
 		}
-		body = strings.Replace(body, "<head>", "<head>"+background.String(), 1)
+		body = strings.Replace(body, "<head>", "<head>"+navigation.String(), 1)
 		var bar bytes.Buffer
 		if err := layout.AuthTitlebar(runtime.GOOS).Render(c.Request().Context(), &bar); err != nil {
 			return err

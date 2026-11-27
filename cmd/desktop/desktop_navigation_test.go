@@ -21,11 +21,11 @@ func TestNativeDesktopNavigation(t *testing.T) {
 		t.Skip("set OPENVIBELY_RUN_NATIVE_UI=1 with a native desktop session (Linux requires GTK3/WebKit and a display)")
 	}
 	dir := t.TempDir()
-	backgroundSource := "page_background_other.go"
+	transitionSource := "login_transition_other.go"
 	if runtime.GOOS == "darwin" {
-		backgroundSource = "page_background_darwin.go"
+		transitionSource = "login_transition_darwin.go"
 	}
-	for _, source := range []string{"desktop_proxy.go", "testdata/navigation_check.go", backgroundSource} {
+	for _, source := range []string{"desktop_proxy.go", "testdata/navigation_check.go", transitionSource} {
 		data, err := os.ReadFile(source)
 		if err != nil {
 			t.Fatal(err)
@@ -45,7 +45,7 @@ func TestNativeDesktopNavigation(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		args = append(args, "-tags", "gtk3")
 	}
-	args = append(args, "-o", binary, filepath.Join(dir, "navigation_check.go"), filepath.Join(dir, "desktop_proxy.go"), filepath.Join(dir, backgroundSource))
+	args = append(args, "-o", binary, filepath.Join(dir, "navigation_check.go"), filepath.Join(dir, "desktop_proxy.go"), filepath.Join(dir, transitionSource))
 	command := exec.CommandContext(ctx, "go", args...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build native navigation check: %v\n%s", err, output)

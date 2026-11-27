@@ -59,9 +59,20 @@ func runDesktopAuthNativeHelper(backend string) error {
 	var navigationMu sync.Mutex
 	var submitted bool
 	var documents []string
+	transitionStarted := make(chan struct{}, 1)
+	destinationReady := make(chan struct{}, 1)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/__desktop_auth_result" {
 			result := r.URL.Query().Get("result")
+			if result == "PASS" {
+				for _, signal := range []<-chan struct{}{transitionStarted, destinationReady} {
+					select {
+					case <-signal:
+					case <-time.After(5 * time.Second):
+						result = "FAIL: native login transition was not started and revealed"
+					}
+				}
+			}
 			navigationMu.Lock()
 			if result == "PASS" && !slices.Equal(documents, []string{"GET /chat"}) {
 				result = fmt.Sprintf("FAIL: documents requested after submitting login: %v", documents)
@@ -120,6 +131,17 @@ func runDesktopAuthNativeHelper(backend string) error {
   } catch (error) { report('FAIL: ' + error.message); }
 })();`,
 	})
-	registerPageBackground(app, window)
+	registerLoginTransition(app, window)
+	for name, signal := range map[string]chan struct{}{"desktop:login-navigate": transitionStarted, "desktop:login-page-ready": destinationReady} {
+		app.Event.On(name, func(event *application.CustomEvent) {
+			if event.Sender != window.Name() {
+				return
+			}
+			select {
+			case signal <- struct{}{}:
+			default:
+			}
+		})
+	}
 	return app.Run()
 }

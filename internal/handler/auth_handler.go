@@ -319,7 +319,8 @@ form.addEventListener('submit', async function(event) {
     });
     if (response.ok) {
       const result = await response.json();
-      window.location.replace(result.destination);
+      if (window.openVibelyLoginNavigate) await window.openVibelyLoginNavigate(result.destination);
+      else window.location.replace(result.destination);
       return;
     }
     if (response.status === 401) message = 'Incorrect username or password.';

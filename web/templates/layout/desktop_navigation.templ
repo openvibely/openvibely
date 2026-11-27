@@ -1,0 +1,27 @@
+package layout
+
+// Retain the native sign-in screen until the destination is ready to paint.
+templ DesktopNavigation(platform string) {
+ if platform == "darwin" {
+  <script type="module" id="desktop-login-transition">
+   import * as runtime from '/wails/runtime.js';
+   window.openVibelyLoginNavigate = async function(destination) {
+    await runtime.Events.Emit('desktop:login-navigate', destination);
+   };
+   async function revealDestination() {
+    // The sign-in document must not clear its own navigation cover.
+    if (document.querySelector('form[action="/login"]')) return;
+    const avatar = document.querySelector('#ov-splash img');
+    if (avatar && avatar.src) {
+     try { await avatar.decode(); } catch (_) {}
+    }
+    // Allow layout and the first painted frame before removing the native cover.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+     runtime.Events.Emit('desktop:login-page-ready');
+    }));
+   }
+   if (document.readyState === 'complete') revealDestination();
+   else window.addEventListener('load', revealDestination, {once: true});
+  </script>
+ }
+}

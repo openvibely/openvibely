@@ -175,7 +175,7 @@ func main() {
 		Mac:     application.MacWindow{CornerRadius: 20},
 		Windows: application.WindowsWindow{WebView2CompositionHosting: true},
 	})
-	registerPageBackground(app, win)
+	registerLoginTransition(app, win)
 	var passed bool
 	ready := make(chan struct{})
 	var readyOnce sync.Once

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +56,7 @@ func TestAuthLoginPage_Render(t *testing.T) {
 	}
 }
 
-func TestAuthLogin_NativeBackgroundBeforeStylesheets(t *testing.T) {
+func TestAuthLogin_NativeTransition(t *testing.T) {
 	h, e := authTestHandler(t)
 	h.SetDesktopMode(true)
 	for _, theme := range []string{"openvibely-dark", "openvibely-light"} {
@@ -67,10 +68,14 @@ func TestAuthLogin_NativeBackgroundBeforeStylesheets(t *testing.T) {
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)
 		html := rec.Body.String()
-		background := strings.Index(html, "color-scheme: dark;")
-		stylesheet := strings.Index(html, `rel="stylesheet"`)
-		if rec.Code != http.StatusOK || background < 0 || stylesheet < 0 || background > stylesheet {
-			t.Fatalf("%s: native login background must precede external stylesheets", theme)
+		if rec.Code != http.StatusOK || !strings.Contains(html, "await window.openVibelyLoginNavigate(result.destination)") {
+			t.Fatalf("%s: native login must await transition capture", theme)
+		}
+		if strings.Contains(html, `id="desktop-login-transition"`) != (runtime.GOOS == "darwin") {
+			t.Fatalf("%s: incorrect transition platform scope", theme)
+		}
+		if strings.Contains(html, "SetBackgroundColour") {
+			t.Fatal("login must not paint the native window")
 		}
 	}
 }
