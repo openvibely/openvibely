@@ -478,7 +478,7 @@ templ NewTaskOptionsRow() {
      quickTag.dataset.value = tagRow.dataset.value;
      quickTag.querySelector('[data-quick-label]').textContent = tagRow.querySelector('[data-property-label]').textContent;
      quickTag.dataset.on = String(!!tagRow.dataset.value);
-     quickAgent.disabled = agentRow.disabled;
+     if (quickAgent.disabled !== agentRow.disabled) quickAgent.disabled = agentRow.disabled;
      quickAgent.dataset.on = String(!!quickAgent.dataset.value);
      quickCategory.dataset.on = String(quickCategory.dataset.value === 'active');
     }
