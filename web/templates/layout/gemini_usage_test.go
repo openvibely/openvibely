@@ -29,7 +29,7 @@ func TestGeminiUsageMeterStyles(t *testing.T) {
 		return source[a : a+b]
 	}
 	helpers := slice("  const limits =", "  const nativePopover")
-	renderer := slice("  const providerLogoPaths", "  window.openVibelyUsageMeterPreview")
+	renderer := slice("  const providerLogoPaths", "  document.dispatchEvent(new CustomEvent(\"openvibely:usage-meter-ready")
 	script := `const assert=require('node:assert/strict');
  class Element {constructor(tag){this.tag=tag;this.attrs={};this.children=[];this.namespaceURI='svg';}setAttribute(k,v){this.attrs[k]=v;}append(n){this.children.push(n);}}
  const document={createElementNS:(_,tag)=>new Element(tag)};
@@ -39,7 +39,7 @@ func TestGeminiUsageMeterStyles(t *testing.T) {
  const others=[{label:'Claude and GPT models · weekly limit',used_percent:99},{label:'Gemini 4 Argon · 5-hour session',used_percent:100}];
  assert.equal(geminiMainLimit({data:{limits:others}},10080),undefined);
  assert.equal(geminiMainLimit({data:{limits:others}},300),undefined);
- for(const style of ['logos','letters','fill','bars']){
+ for(const style of ['logos','circle-dots','circle-dots-number','fill','bars']){
   const svg=svgFor(account,style);
   assert(svg.children.length>0);
   logoSequence=0;
@@ -49,10 +49,18 @@ func TestGeminiUsageMeterStyles(t *testing.T) {
   assert.equal(account.data.limits.length,3);
   const encoded=JSON.stringify(svg);
   assert(!encoded.includes('NaN'));
-  if(style==='letters')assert(encoded.includes('"textContent":"G"'));
+  if(style.startsWith('circle-dots')){
+   assert.equal(svg.children.filter(n=>n.tag==='circle').length,4);
+   assert(svg.children.some(n=>n.tag==='path'&&n.attrs.d.endsWith(' Z')));
+   const weeklyOnly=svgFor({...account,data:{limits:account.data.limits.slice(0,1)}},style);
+   assert(!weeklyOnly.children.some(n=>n.tag==='circle'));
+   assert.equal(svg.children.find(n=>n.tag==='text')?.textContent,style==='circle-dots-number'?'80':undefined);
+  }
   if(style==='bars')assert(svg.children.some(n=>n.tag==='rect'&&Number(n.attrs.width)<10));
  }
- for(const provider of ['openai','anthropic']) for(const style of ['logos','letters','fill','bars']){
+ const preview=window.openVibelyUsageMeterPreview('gemini','logos');
+ assert.equal(preview.children.filter(n=>n.tag==='circle'&&!n.attrs['stroke-dasharray']).length,2);
+ for(const provider of ['openai','anthropic']) for(const style of ['logos','circle-dots','circle-dots-number','fill','bars']){
   const svg=svgFor({provider,data:{limits:[{window_minutes:10080,used_percent:50},{window_minutes:300,used_percent:25}]}},style);
   assert(svg.children.length>0);
  }

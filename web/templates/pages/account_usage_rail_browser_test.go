@@ -225,12 +225,12 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'toggle'`)
 		b.waitFor("second click closes popup", `String(!document.getElementById('rail-account-popup').matches(':popover-open'))`, "true")
 		// Provider failure marks usage stale without replacing the provider identity.
-		b.evaluate(`window.openVibelyDisplay.set("meters", "letters"); "letters selected"`)
+		b.evaluate(`window.meterLogos = new Map([...document.querySelectorAll('.rail-account')].map(b=>[b.dataset.key,b.querySelector('svg g').innerHTML])); 'logos recorded'`)
 		mu.Lock()
 		failed = true
 		mu.Unlock()
 		b.evaluate(`document.body.dispatchEvent(new CustomEvent('accountUsageChanged')); 'failed refresh'`)
-		b.waitFor("failed meters", `String([...document.querySelectorAll('.rail-account')].every(b=>b.getAttribute('aria-label').includes('stale')&&b.querySelector('text').textContent===(b.dataset.key==='anthropic'?'A':'O')))`, "true")
+		b.waitFor("failed meters", `String([...document.querySelectorAll('.rail-account')].every(b=>b.getAttribute('aria-label').includes('stale')&&b.querySelector('svg g').innerHTML===window.meterLogos.get(b.dataset.key)))`, "true")
 		b.evaluate(`document.querySelector('[data-key="personal"]').click(); 'error popup'`)
 		b.waitFor("failure retains marked stale bars", `String(document.getElementById('rail-account-popup').querySelectorAll('[role="meter"]').length)`, "1")
 		b.waitFor("malformed grants retain refresh control", `String(document.querySelector('#rail-account-popup [data-action="refresh"]')!==null)`, "true")

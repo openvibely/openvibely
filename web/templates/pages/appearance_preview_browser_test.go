@@ -310,11 +310,11 @@ func TestBrowserFunctional_UsageMeterAppearance(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "usage-meter-appearance", func(b *composerFocusCDP) {
-		b.waitFor("meter and previews ready", `String(document.querySelectorAll('[data-meter-preview] svg').length===12&&document.querySelectorAll('.rail-account').length===1)`, "true")
+		b.waitFor("meter and previews ready", `String(document.querySelectorAll('[data-meter-preview] svg').length===15&&document.querySelectorAll('.rail-account').length===1)`, "true")
 		b.waitFor("default logo rings", `String(document.documentElement.dataset.usageMeterStyle==='logos'&&!!document.querySelector('.rail-account svg path'))`, "true")
-		for _, style := range []string{"letters", "logos", "fill", "bars"} {
+		for _, style := range []string{"logos", "circle-dots", "circle-dots-number", "fill", "bars"} {
 			b.evaluate(`selectOpenVibelyDisplay('meters','` + style + `'); 'selected'`)
-			b.waitFor("saved and rendered meter style", `(()=>{const style='`+style+`';if(localStorage.getItem('openvibely.usageMeterStyle')!==style||document.documentElement.dataset.usageMeterStyle!==style)return 'preference';const svg=document.querySelector('.rail-account svg');if(svg.getBoundingClientRect().width!==28)return 'size';if(style==='letters'&&!svg.querySelector('text'))return 'letter';if(style!=='letters'&&!svg.querySelector('path'))return 'logo';if(style==='fill'&&!svg.querySelector('clipPath'))return 'fill';if(style==='bars'&&svg.querySelectorAll('rect').length!==4)return 'bars';return 'ok'})()`, "ok")
+			b.waitFor("saved and rendered meter style", `(()=>{const style='`+style+`';if(localStorage.getItem('openvibely.usageMeterStyle')!==style||document.documentElement.dataset.usageMeterStyle!==style)return 'preference';const svg=document.querySelector('.rail-account svg');if(svg.getBoundingClientRect().width!==28)return 'size';if(!svg.querySelector('g path'))return 'logo';if(style.startsWith('circle-dots')&&svg.querySelectorAll('circle').length!==4)return 'dots';if(style==='circle-dots-number'&&svg.querySelector('text')?.textContent!=='45')return 'weekly number';if(style==='fill'&&!svg.querySelector('clipPath'))return 'fill';if(style==='bars'&&svg.querySelectorAll('rect').length!==4)return 'bars';return 'ok'})()`, "ok")
 		}
 		b.evaluate(`window.meterReloadMarker=true; 'before reload'`)
 		b.call("Page.reload", map[string]any{}, nil)
@@ -323,7 +323,7 @@ func TestBrowserFunctional_UsageMeterAppearance(t *testing.T) {
 			b.evaluate(`openVibelyThemes.apply('` + theme.ID + `'); 'theme'`)
 			b.waitFor("theme remaining allowance prominence", `(()=>{const light=document.documentElement.dataset.theme==='light';const svg=document.querySelector('.rail-account svg');const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');function brightness(token){const rect=document.createElementNS(svg.namespaceURI,'rect');rect.setAttribute('fill','var('+token+')');svg.append(rect);const color=getComputedStyle(rect).fill;rect.remove();ctx.fillStyle=light?'white':'black';ctx.fillRect(0,0,1,1);ctx.fillStyle=color;ctx.fillRect(0,0,1,1);const p=ctx.getImageData(0,0,1,1).data;return p[0]+p[1]+p[2]};const left=brightness('--ov-usage-remaining'),used=brightness('--ov-usage-used');return String(light?left<used:left>used)})()`, "true")
 		}
-		b.evaluate(`selectOpenVibelyDisplay('meters','letters');'reset'`)
+		b.evaluate(`selectOpenVibelyDisplay('meters','logos');'reset'`)
 	})
 }
 

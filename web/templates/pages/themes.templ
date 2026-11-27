@@ -82,8 +82,9 @@ templ ThemesContent(catalog []themes.Theme) {
             <h3 class="text-sm font-medium mt-6 mb-2">Account usage meters</h3>
             <p class="text-xs opacity-60 mb-3">Choose how subscription allowance appears in the rail. Stronger color shows what’s left; faded color shows what’s used.</p>
             <div class="grid gap-3 sm:grid-cols-2 mb-6">
-                @usageMeterStyleCard("letters", "Letters + rings", "Weekly outer ring; 5-hour inner ring when available.")
-                @usageMeterStyleCard("logos", "Logos + rings", "Provider logo inside the same allowance rings.")
+                @usageMeterStyleCard("logos", "Logos + rings", "Weekly outer ring and an inner ring for the 5-hour allowance when available.")
+                @usageMeterStyleCard("circle-dots", "Circle + dots", "The arc shows weekly allowance remaining. Four dots fill along the bottom for the 5-hour allowance.")
+                @usageMeterStyleCard("circle-dots-number", "Circle + dots + numbers", "The number above the arc shows the weekly percentage remaining. The dots show the 5-hour allowance.")
                 @usageMeterStyleCard("fill", "Logo fill", "Weekly remaining fills the logo; 5-hour allowance appears below.")
                 @usageMeterStyleCard("bars", "Logos + bars", "Weekly bar above the optional 5-hour bar.")
             </div>
