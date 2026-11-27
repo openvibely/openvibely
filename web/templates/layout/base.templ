@@ -5718,11 +5718,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 		<body class="h-screen bg-base-200 overflow-hidden" hx-ext="morph">
 			<div id="ov-splash" aria-hidden="true">
 				<div class="ov-splash-art">
-					<div class="ov-splash-avatar">
-						<img class="ov-splash-img-dark" src={ static.URL("ov-avatar.png") } alt="" width="168" height="168"/>
-						<div class="ov-splash-tint ov-splash-img-dark" style={ "mask-image:url(" + static.URL("ov-avatar.png") + ");-webkit-mask-image:url(" + static.URL("ov-avatar.png") + ")" }></div>
-						<img class="ov-splash-img-light" src={ static.URL("ov-avatar-light.png") } alt="" width="168" height="168"/>
-						<div class="ov-splash-tint ov-splash-img-light" style={ "mask-image:url(" + static.URL("ov-avatar-light.png") + ");-webkit-mask-image:url(" + static.URL("ov-avatar-light.png") + ")" }></div>
+					<div class="ov-splash-avatar" data-src-dark={ static.URL("ov-avatar.png") } data-src-light={ static.URL("ov-avatar-light.png") }>
+						<img alt="" width="168" height="168"/>
+						<div class="ov-splash-tint"></div>
 					</div>
 					<svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
 						<defs>
@@ -5766,13 +5764,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					.ov-splash-art > *, .ov-splash-avatar > * { position: absolute; inset: 0; width: 100%; height: 100%; }
 					.ov-splash-avatar { isolation: isolate; }
 					[data-theme="light"] #ov-splash { --fx-secondary: color-mix(in oklab, oklch(var(--p)) 84%, white); --fx-bright: color-mix(in oklab, oklch(var(--p)) 86%, black); --fx-visor: color-mix(in oklab, oklch(var(--p)) 88%, white); --fx-visor-core: color-mix(in oklab, oklch(var(--p)) 18%, white); }
-					.ov-splash-img-light, [data-theme="light"] .ov-splash-img-dark { display: none; }
-					[data-theme="light"] .ov-splash-img-light { display: block; }
 					[data-theme="light"] .ov-splash-nodes circle { mix-blend-mode: multiply; }
 					.ov-splash-art img { object-fit: contain; filter: grayscale(1) contrast(1.14) brightness(.98); opacity: .92; }
-					.ov-splash-art img.ov-splash-img-light { filter: grayscale(1) contrast(1.18) brightness(.88); opacity: .96; }
+					[data-theme="light"] .ov-splash-art img { filter: grayscale(1) contrast(1.18) brightness(.88); opacity: .96; }
 					.ov-splash-tint { mix-blend-mode: color; mask-size: contain; -webkit-mask-size: contain; mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; mask-position: center; -webkit-mask-position: center; background: radial-gradient(circle at 50% 38%, oklch(var(--p) / .95) 0%, oklch(var(--p) / .52) 60%, rgba(148,163,184,.25) 100%); opacity: .78; }
-					.ov-splash-tint.ov-splash-img-light { opacity: .84; }
+					[data-theme="light"] .ov-splash-tint { opacity: .84; }
 					.ov-splash-circuit { stroke-dasharray: 5 38; stroke-dashoffset: 43; opacity: .85; filter: drop-shadow(0 0 2px var(--fx-accent)); animation: ov-splash-spark 2.6s linear infinite; }
 					.ov-splash-circuit:nth-child(2) { animation-duration: 3.2s; animation-delay: -1.5s; }
 					.ov-splash-circuit:nth-child(3) { animation-duration: 2.9s; animation-delay: -.8s; }
@@ -5796,11 +5792,18 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						var seen = false;
 						try { seen = sessionStorage.getItem('openvibely.splash') === '1'; sessionStorage.setItem('openvibely.splash', '1'); } catch (_) { seen = true; }
 						if (seen || navigator.webdriver || (nav && nav.type !== 'navigate') || matchMedia('(prefers-reduced-motion: reduce)').matches) { splash.remove(); return; }
+						var av = splash.querySelector('.ov-splash-avatar'), img = av.querySelector('img'), tint = av.querySelector('.ov-splash-tint'), src = '';
+						function syncAvatar() {
+							var next = document.documentElement.getAttribute('data-theme') === 'light' ? av.dataset.srcLight : av.dataset.srcDark;
+							if (next && next !== src) { src = next; img.src = src; tint.style.maskImage = tint.style.webkitMaskImage = 'url(' + src + ')'; }
+						}
+						syncAvatar();
 						var start = performance.now();
 						var orbits = splash.querySelectorAll('.ov-splash-orbits > g'), waves = splash.querySelectorAll('.ov-splash-wave'), amb = splash.querySelector('.ov-splash-amb');
 						var angles = [22, 165, 290], speeds = [.34, -.24, .48];
 						(function tick(now) {
 							if (!splash.isConnected) return;
+							syncAvatar();
 							var t = (now || start) / 1000 * 3.3;
 							orbits.forEach(function(g, i) { angles[i] = (angles[i] + speeds[i] + 360) % 360; g.setAttribute('transform', 'rotate(' + angles[i].toFixed(2) + ' 100 100)'); });
 							var beat = .65 + .35 * Math.pow(Math.max(0, Math.sin(t * .55)), 4), pts = [];
