@@ -262,10 +262,6 @@ func (h *Handler) renderLoginPage(c echo.Context, status int, username, nextValu
 	next := template.HTMLEscapeString(nextValue)
 	username = template.HTMLEscapeString(username)
 	themeMode := h.loginThemeMode(c.Request().Context())
-	avatarAsset := "ov-avatar.png"
-	if themeMode == "light" {
-		avatarAsset = "ov-avatar-light.png"
-	}
 	errorHTML := ""
 	if message != "" {
 		errorHTML = `<p id="login-error" role="alert" class="text-sm text-error">` + template.HTMLEscapeString(message) + `</p>`
@@ -282,9 +278,8 @@ func (h *Handler) renderLoginPage(c echo.Context, status int, username, nextValu
 <body class="min-h-screen bg-base-200 flex items-center justify-center p-6">
   <div class="card w-full max-w-md bg-base-100 shadow-xl border border-base-300">
     <div class="card-body">
-      <h1 class="sr-only">Sign in</h1>
-      <img src="` + static.URL(avatarAsset) + `" alt="" width="132" height="132" class="mx-auto mb-1" />
-      <p class="text-sm opacity-70 mb-2 text-center">Enter your credentials to continue.</p>
+      <h1 class="card-title text-2xl">Sign in</h1>
+      <p class="text-sm opacity-70 mb-2">Enter your credentials to continue.</p>
       ` + errorHTML + `
       <form method="POST" action="/login" class="space-y-4">
         <input type="hidden" name="next" value="` + next + `" />

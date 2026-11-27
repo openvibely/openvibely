@@ -102,8 +102,8 @@ func TestAuthLogin_UsesSavedThemePreference(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-theme="dark"`) || !strings.Contains(rec.Body.String(), `ov-avatar.png`) {
-		t.Fatalf("expected default dark login theme, got status %d", rec.Code)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-theme="dark"`) || strings.Contains(rec.Body.String(), `ov-avatar`) {
+		t.Fatalf("expected default dark login theme without avatar, got status %d", rec.Code)
 	}
 
 	if err := h.settingsRepo.Set(t.Context(), uiPreferenceThemeKey, "openvibely-light"); err != nil {
@@ -111,8 +111,8 @@ func TestAuthLogin_UsesSavedThemePreference(t *testing.T) {
 	}
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-theme="light"`) || !strings.Contains(rec.Body.String(), `ov-avatar-light.png`) {
-		t.Fatalf("expected light login theme with light avatar, got status %d", rec.Code)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-theme="light"`) || strings.Contains(rec.Body.String(), `ov-avatar`) {
+		t.Fatalf("expected light login theme without avatar, got status %d", rec.Code)
 	}
 }
 
