@@ -1057,6 +1057,11 @@
   document.addEventListener(
     "submit",
     (e) => {
+      if (e.target.dataset.destinationModelsPending === "true") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       const btn = e.target.querySelector(".chat-model-select");
       if (!btn || !state(btn)) return;
       if (btn._ovResubmit) {

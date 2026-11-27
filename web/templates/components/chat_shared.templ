@@ -2509,7 +2509,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							form.dispatchEvent(submitEvent);
 						}
 							function submitComposer(endpoint, intent, payload) {
-								if (!endpoint) return;
+								if (!endpoint || form.dataset.destinationModelsPending === 'true') return;
 								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : composerMessage();
 								if (submittedMessage.trim() === '') return;
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
@@ -3106,8 +3106,22 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				};
 				syncProjectLabel();
                 var modelRequest = 0;
+                var retryModels = document.createElement('button');
+                retryModels.type = 'button';
+                retryModels.className = 'btn btn-ghost btn-xs';
+                retryModels.textContent = 'Models unavailable — Retry';
+                retryModels.hidden = true;
+                retryModels.addEventListener('click', refreshProjectModels);
+                projectSelect.parentElement.appendChild(retryModels);
+                function setDestinationPending(pending) {
+                    form.dataset.destinationModelsPending = String(pending);
+                    var send = form.querySelector('[id$="-primary-action"] button[type="submit"]');
+                    if (send) send.disabled = pending;
+                }
                 async function refreshProjectModels() {
                     var token = ++modelRequest;
+                    setDestinationPending(true);
+                    retryModels.hidden = true;
                     var picker = form.querySelector('[id$="-agent-select"]');
                     var input = form.querySelector('[name="agent_id"]');
                     if (!picker || !input) return;
@@ -3125,11 +3139,17 @@ templ ChatInputForm(config ChatInputFormConfig) {
                         var html = await response.text();
                         if (token !== modelRequest || !form.isConnected) return;
                         options.innerHTML = html;
-                        picker.disabled = false;
                         window._setChatCustomSelectValue?.(picker, 'default');
-                        await window.ovModelPicker?.restore(picker);
+                        await window.ovModelPicker.restore(picker);
+                        if (token !== modelRequest || !form.isConnected) return;
+                        if (picker._ovModelState.error) throw new Error(picker._ovModelState.error);
+                        picker.disabled = false;
+                        setDestinationPending(false);
                     } catch (_) {
-                        if (token === modelRequest && form.isConnected) picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';
+                        if (token === modelRequest && form.isConnected) {
+                            picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';
+                            retryModels.hidden = false;
+                        }
                     }
                 }
 				var uploadedForProject = projectInput.value;
@@ -3153,6 +3173,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				}).observe(projectSelect, {attributes: true, attributeFilter: ['aria-expanded']});
 				form.addEventListener('htmx:configRequest', function(event) {
 					if (event.detail.elt !== form || event.detail.path !== normalPostEndpoint) return;
+                    if (form.dataset.destinationModelsPending === 'true') { event.preventDefault(); return; }
 					if (!chosenProject()) {
 						event.preventDefault();
 						openProjectPicker();

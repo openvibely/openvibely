@@ -829,15 +829,36 @@ func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
  (async function(){try {
  const wait=()=>new Promise(r=>setTimeout(r,30)),assert=(v,m)=>{if(!v)throw Error(m)};
  const destination=document.getElementById('destination'),form=document.getElementById('shared-chat-form');
+ const originalFetch=window.fetch;
+ let releaseModels,releasePrefs;
+ const modelsGate=new Promise(r=>releaseModels=r),prefsGate=new Promise(r=>releasePrefs=r);
+ window.fetch=async function(url,opts){
+  if(String(url).startsWith('/tasks/new'))await modelsGate;
+  if(String(url).startsWith('/conversation/model-settings') && !opts?.method)await prefsGate;
+  return originalFetch(url,opts);
+ };
+ const send=form.querySelector('button[type="submit"]');
+ function assertBlocked(stage){
+  assert(send.disabled,stage+' disables Send');
+  const event=new Event('submit',{bubbles:true,cancelable:true});form.dispatchEvent(event);
+  assert(event.defaultPrevented,stage+' blocks keyboard/synthetic submission');
+ }
+ form.querySelector('[name="message"]').value='keep my draft';
  form.querySelector('[name="agent_id"]').value='local-model';
  destination.value='r-1234567890abcdef-project';destination.dispatchEvent(new Event('change',{bubbles:true}));
  const picker=document.getElementById('shared-chat-form-agent-select');
+ assertBlocked('model list loading');
+ releaseModels();
  for(let i=0;i<100&&!picker.parentElement.querySelector('[data-value="r-1234567890abcdef-model"]');i++)await wait();
  assert(picker.parentElement.querySelector('[data-value="r-1234567890abcdef-model"]'),'remote models loaded');
  assert(!picker.parentElement.querySelector('[data-value="local-model"]'),'local options removed');
 
- assert(!picker.disabled,'picker available');
+ assertBlocked('preferences loading');
+ releasePrefs();
  await picker._ovModelState.ready;
+ await wait();
+ assert(!send.disabled && !picker.disabled,'ready to send');
+ assert(form.querySelector('[name="message"]').value==='keep my draft','draft preserved');
  assert(form.querySelector('[name="agent_id"]').value==='r-1234567890abcdef-model','saved remote choice restored');
  const before=await fetch('/conversation/model-settings?project_id=r-1234567890abcdef-project').then(r=>r.json());
  assert(before.writes===0,'switching destination must not save preferences');
@@ -847,6 +868,19 @@ func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
  await picker._ovModelState.pending;
  const saved=await fetch('/conversation/model-settings?project_id=r-1234567890abcdef-project').then(r=>r.json());
  assert(saved.agent_id==='default' && saved.writes===1,'explicit model choice saved once');
+ window.fetch=(url,opts)=>String(url).startsWith('/conversation/model-settings')
+  ? Promise.resolve(new Response('unavailable',{status:503})) : originalFetch(url,opts);
+ destination.dispatchEvent(new Event('change',{bubbles:true}));
+ const retry=[...form.querySelectorAll('button')].find(b=>b.textContent.includes('Models unavailable — Retry'));
+ for(let i=0;i<100&&retry.hidden;i++)await wait();
+ assert(!retry.hidden,'failed preference load offers retry');
+ assertBlocked('failed preferences');
+ assert(form.querySelector('[name="message"]').value==='keep my draft','failed load preserves draft');
+ window.fetch=originalFetch;
+ retry.click();
+ for(let i=0;i<100&&send.disabled;i++)await wait();
+ assert(!send.disabled && retry.hidden,'successful retry enables Send');
+
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;}})();</script></body></html>`)
 	}))
