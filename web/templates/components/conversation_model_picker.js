@@ -195,7 +195,7 @@
   }
   function settingsEndpoint(btn) {
     const form = btn.closest("form");
-    const destination = form.querySelector('[data-project-send-url][data-project-input]');
+    const destination = form.querySelector('[data-project-send-url]:not([data-project-send-url=""])[data-project-input]');
     const project = destination && document.getElementById(destination.dataset.projectInput)?.value;
     const endpoint = destination
       ? (project ? '/conversation/model-settings?project_id=' + encodeURIComponent(project) : '')

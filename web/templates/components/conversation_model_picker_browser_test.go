@@ -848,3 +848,38 @@ func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
 	defer srv.Close()
 	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "shared Chat destination", 1200, 900, 15*time.Second)
 }
+
+func TestBrowserFunctional_TaskDraftDoesNotSaveChatModel(t *testing.T) {
+	chrome := testChromePath(t)
+	var content bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID: "task-thread-form", InputID: "task-message-input", TargetID: "messages", PostEndpoint: "/tasks",
+		Agents:            []models.LLMConfig{{ID: "codex", Name: "Codex", Provider: models.ProviderOpenAI}},
+		ShowModelSelector: true, SelectedAgentID: "default",
+		ProjectChoices: []models.Project{{ID: "remote-project", Name: "Remote"}}, ProjectInputID: "new-task-project",
+	}).Render(context.Background(), &content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/conversation/model-settings" {
+			t.Errorf("task draft must not access Chat preferences: %s %s", r.Method, r.URL)
+			fmt.Fprint(w, `{"agent_id":"astra"}`)
+			return
+		}
+		fmt.Fprint(w, `<!doctype html><html><body data-test-result="pending"><input id="new-task-project" value="remote-project"><div id="messages"></div><script>window.htmx={process:function(){}};</script>`+content.String()+`<script>
+(async function(){try {
+ const picker=document.getElementById('task-thread-form-agent-select');
+ await picker._ovModelState.ready;
+ window._setChatCustomSelectValue(picker,'codex');
+ picker.dispatchEvent(new CustomEvent('chat-select-change',{detail:{value:'codex'},bubbles:true}));
+ await picker._ovModelState.ready;
+ await picker._ovModelState.pending;
+ if(document.querySelector('#task-thread-form [name="agent_id"]').value!=='codex')throw Error('task selection lost');
+ document.body.dataset.testResult='pass';
+}catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;}})();
+</script></body></html>`)
+	}))
+	defer srv.Close()
+	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "task draft preference isolation", 1200, 900, 15*time.Second)
+}
