@@ -7,7 +7,6 @@ import (
  "github.com/openvibely/openvibely/web/templates/components"
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/internal/persistence"
- "github.com/openvibely/openvibely/internal/service"
  "github.com/openvibely/openvibely/web/templates/layout"
  templateui "github.com/openvibely/openvibely/web/templates"
 )
@@ -84,7 +83,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      ProjectServerOnly: models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, project.ID)),
      ProjectChoices: newTaskProjectChoices(ctx, project), ProjectInputID: "new-task-project",
     })
-    @NewTaskOptionsRow(project)
+    @NewTaskOptionsRow()
    </div>
   </div>
   @TaskDetailEditors(&models.Task{}, agents, agentDefs)
@@ -421,7 +420,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
 }
 
 // Quick controls under the composer; they mirror the Details rows.
-templ NewTaskOptionsRow(project *models.Project) {
+templ NewTaskOptionsRow() {
  <div class="ov-task-options" data-new-task-options aria-label="Task options">
   <div class="ov-task-options-group">
    <button type="button" class="ov-task-option" data-picker-align="auto" data-detail-property="category" data-value="active" aria-haspopup="dialog" aria-label="Category">
@@ -441,12 +440,6 @@ templ NewTaskOptionsRow(project *models.Project) {
    <button type="button" class="ov-task-option" data-quick-auto-merge aria-pressed="false">
     <span class="ov-task-option-dot" aria-hidden="true"></span><span>Auto-merge</span>
    </button>
-   if branch := newTaskTargetBranch(ctx, project); branch != "" {
-    <span class="ov-task-option ov-task-option-static" title="Target branch">
-     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-     <span class="font-mono">{ branch }</span>
-    </span>
-   }
   </div>
   <style>
    .ov-task-options { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 4px 0; }
@@ -457,9 +450,6 @@ templ NewTaskOptionsRow(project *models.Project) {
    .ov-task-option:disabled { opacity:.5; cursor:default; }
    .ov-task-option[data-on="true"] { color:oklch(var(--bc)/.9); }
    .ov-task-option svg { opacity:.78; flex-shrink:0; }
-   .ov-task-option-static { cursor:default; }
-   .ov-task-option-static:hover { background:transparent; color:oklch(var(--bc)/.52); }
-   .ov-task-option-static .font-mono { font-size:11.5px; }
    .ov-task-option-dot { width:6px; height:6px; border-radius:50%; background:oklch(var(--bc)/.32); transition:background .15s ease; }
    .ov-task-option[data-on="true"] .ov-task-option-dot { background:oklch(var(--su)); }
    #tab-chat:has([data-thread-empty-stage][hidden]) [data-new-task-options] { display:none; }
@@ -571,11 +561,6 @@ templ NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTas
   <p class="text-xs opacity-60 mb-4">Settings apply when you send your first message. Active tasks start immediately; Backlog tasks are saved without running.</p>
   <details><summary class="text-sm cursor-pointer">Advanced options</summary>@NewTaskAdvancedOptions()</details>
  </div>
-}
-
-func newTaskTargetBranch(ctx context.Context, project *models.Project) string {
- if project == nil || project.RepoPath == "" || models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) { return "" }
- return service.GetDefaultBranchContext(ctx, project.RepoPath)
 }
 
 func newTaskDefaultModel() *string { value := "default"; return &value }
