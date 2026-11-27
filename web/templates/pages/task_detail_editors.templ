@@ -228,7 +228,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    finally { busy = false; panel.querySelectorAll('input').forEach(function(control) { control.disabled = false; }); }
   });
   function updateDraftTag(value, label, badgeClass) {
-   var button = root.querySelector('[data-detail-property="tag"]');
+   var button = root.querySelector('#task-tag-picker-trigger') || root.querySelector('[data-detail-property="tag"]');
    var badge = button.closest('[data-tag-badge]');
    root.querySelector('[data-draft-property="tag"]').value = value;
    button.dataset.value = value;
@@ -250,7 +250,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     try {
      if (taskID) await save('tag', '');
      else updateDraftTag('', 'No tag', '');
-     returnToRow(root.querySelector('[data-detail-property="tag"]'));
+     returnToRow(root.querySelector('#task-tag-picker-trigger') || root.querySelector('[data-detail-property="tag"]'));
     } catch (error) {
      if (!error.toastOnly) errorLabel.textContent = error.message;
      remove.disabled = false;
@@ -308,7 +308,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      propertyLabel.textContent = label;
     }
     if (name === 'agent_id') composerModel(value, label);
-    hidePicker(); var row = root.querySelector('[data-detail-property="' + name + '"]'); returnToRow(row);
+    hidePicker(); var row = (current && current.isConnected) ? current : (root.querySelector('#tab-details [data-detail-property="' + name + '"]') || root.querySelector('[data-detail-property="' + name + '"]')); returnToRow(row);
    } catch (error) { if (!error.toastOnly) picker.querySelector('[data-property-error]').textContent = error.message; }
    finally { busy = false; picker.querySelectorAll('button').forEach(function(button) { button.disabled = false; }); }
   });

@@ -122,7 +122,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      async function refreshDestinationAgents() {
       var token = ++agentRequest;
       var menu = root.querySelector('#task-property-picker [data-options="agent_definition_id"]');
-      var row = root.querySelector('[data-detail-property="agent_definition_id"]');
+      var row = root.querySelector('#tab-details [data-detail-property="agent_definition_id"]');
       var input = root.querySelector('[data-draft-property="agent_definition_id"]');
       if (!menu || !row || !input) return;
       input.value = '';
