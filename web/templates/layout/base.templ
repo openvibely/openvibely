@@ -3365,6 +3365,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-surface-step] .chat-bubble-user-msg,
 				html[data-surface-step] .chat-bubble-assistant-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
 				html[data-surface-step] .chat-input-container { background-color: var(--shell-card) !important; }
+                /* The new-task title uses the composer's theme border without its surface/layout styles. */
+                .ov-new-task-title { border-color: transparent; }
+                [data-theme="light"] .ov-new-task-title { border-color: var(--ov-l-border); }
+                html[data-color-theme="openvibely-dark"] .ov-new-task-title { border-color: oklch(var(--b3)); }
+                [data-ov-theme-layer="custom"] .ov-new-task-title { border-color: var(--ov-subtle-border) !important; }
+                html:root[data-theme-surfaces]:is([data-theme="dark"], [data-surface-style="layered"]) .ov-new-task-title:not(:focus) { border-color: var(--conversation-border) !important; }
+                html:root[data-theme-surfaces][data-theme="dark"] .ov-new-task-title { border-color: var(--conversation-border) !important; }
                 /* Conversation surfaces share the theme's card-border treatment. */
                 html[data-theme="dark"][data-surface-style="default"] { --conversation-border: var(--ov-surface-default-border, var(--shell-page)); }
                 html[data-surface-style="layered"] { --conversation-border: var(--ov-surface-layered-border, var(--shell-chrome)); }
