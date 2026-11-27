@@ -5809,10 +5809,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							if (next && next !== src) { src = next; img.src = src; tint.style.maskImage = tint.style.webkitMaskImage = 'url(' + src + ')'; }
 						}
 						syncAvatar();
-						var start = performance.now();
+						var start = null, loaded = document.readyState === 'complete', hiding = false;
 						var orbits = splash.querySelectorAll('.ov-splash-orbits > g'), waves = splash.querySelectorAll('.ov-splash-wave'), amb = splash.querySelector('.ov-splash-amb');
 						var angles = [22, 165, 290], speeds = [.34, -.24, .48];
-						(function tick(now) {
+						function tick(now) {
 							if (!splash.isConnected) return;
 							syncAvatar();
 							var t = (now || start) / 1000 * 3.3;
@@ -5825,15 +5825,30 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							waves.forEach(function(p) { p.setAttribute('d', pts.join(' ')); });
 							amb.setAttribute('opacity', (.18 + beat * .14).toFixed(2));
 							requestAnimationFrame(tick);
-						})();
+						}
 						function hide() {
+							if (start === null || !loaded || hiding) return;
+							hiding = true;
 							setTimeout(function() {
 								splash.classList.add('ov-splash-out');
 								document.dispatchEvent(new Event('ov-splash-fading'));
 								setTimeout(function() { splash.remove(); }, 500);
 							}, Math.max(0, 2400 - (performance.now() - start)));
 						}
-						if (document.readyState === 'complete') hide(); else window.addEventListener('load', hide, {once: true});
+						function visible() {
+							if (start !== null || !splash.isConnected) return;
+							start = performance.now();
+							requestAnimationFrame(tick);
+							hide();
+						}
+						window.addEventListener('load', function() { loaded = true; hide(); }, {once: true});
+						if (document.getElementById('desktop-login-transition')) {
+							document.addEventListener('ov-desktop-revealed', visible, {once: true});
+						} else {
+							Promise.resolve().then(function() { return img.decode(); }).catch(function() {}).then(function() {
+								requestAnimationFrame(function() { requestAnimationFrame(visible); });
+							});
+						}
 					})();
 				</script>
 			</div>

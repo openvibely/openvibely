@@ -19,6 +19,15 @@ static void ovRemoveLoginCover(void *nativeWindow) {
     objc_setAssociatedObject(window, &ovLoginCoverKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+// Acknowledge removal in the destination document so its visible timer starts here.
+static void ovRevealLoginDestination(void *nativeWindow) {
+    NSWindow<OVLoginWebViewHost> *window = (NSWindow<OVLoginWebViewHost> *)nativeWindow;
+    ovRemoveLoginCover(window);
+    if ([window respondsToSelector:@selector(webView)]) {
+        [window.webView evaluateJavaScript:@"document.dispatchEvent(new Event('ov-desktop-revealed'));" completionHandler:nil];
+    }
+}
+
 static void ovNavigateFromLogin(void *nativeWindow, const char *navigationScript) {
     NSWindow<OVLoginWebViewHost> *window = (NSWindow<OVLoginWebViewHost> *)nativeWindow;
     if (!window || ![window respondsToSelector:@selector(webView)]) return;
@@ -79,6 +88,6 @@ func registerLoginTransition(app *application.App, window *application.WebviewWi
 		if event.Sender != window.Name() {
 			return
 		}
-		application.InvokeAsync(func() { C.ovRemoveLoginCover(window.NativeWindow()) })
+		application.InvokeAsync(func() { C.ovRevealLoginDestination(window.NativeWindow()) })
 	})
 }

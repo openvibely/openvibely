@@ -9,7 +9,7 @@ package layout
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// Retain the native sign-in screen until the destination is ready to paint.
+// Retain sign-in only until the splash (or destination without a splash) can paint.
 func DesktopNavigation(platform string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -28,7 +28,7 @@ func DesktopNavigation(platform string) templ.Component {
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if platform == "darwin" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<script type=\"module\" id=\"desktop-login-transition\">\n   import * as runtime from '/wails/runtime.js';\n   window.openVibelyLoginNavigate = async function(destination) {\n    await runtime.Events.Emit('desktop:login-navigate', destination);\n   };\n   async function revealDestination() {\n    // The sign-in document must not clear its own navigation cover.\n    if (document.querySelector('form[action=\"/login\"]')) return;\n    const avatar = document.querySelector('#ov-splash img');\n    if (avatar && avatar.src) {\n     try { await avatar.decode(); } catch (_) {}\n    }\n    // Allow layout and the first painted frame before removing the native cover.\n    requestAnimationFrame(() => requestAnimationFrame(() => {\n     runtime.Events.Emit('desktop:login-page-ready');\n    }));\n   }\n   if (document.readyState === 'complete') revealDestination();\n   else window.addEventListener('load', revealDestination, {once: true});\n  </script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<script type=\"module\" id=\"desktop-login-transition\">\n   import * as runtime from '/wails/runtime.js';\n   window.openVibelyLoginNavigate = async function(destination) {\n    await runtime.Events.Emit('desktop:login-navigate', destination);\n   };\n   async function revealDestination() {\n    // The sign-in document must not clear its own navigation cover.\n    if (document.querySelector('form[action=\"/login\"]')) return;\n    const splash = document.getElementById('ov-splash');\n    if (!splash && document.readyState !== 'complete') {\n     await new Promise(resolve => window.addEventListener('load', resolve, {once: true}));\n    }\n    const avatar = splash?.querySelector('img');\n    if (avatar && avatar.src) {\n     try { await avatar.decode(); } catch (_) {}\n    }\n    // Allow layout and the first painted frame before removing the native cover.\n    requestAnimationFrame(() => requestAnimationFrame(() => {\n     runtime.Events.Emit('desktop:login-page-ready');\n    }));\n   }\n   revealDestination();\n  </script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

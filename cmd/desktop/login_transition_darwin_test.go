@@ -47,7 +47,7 @@ int main(void) {
   [window orderBack:nil];
   [window.webView loadHTMLString:@"<html><body style='background:#191e24;color:white'>Sign in</body></html>" baseURL:nil];
   if (!spinUntil(^BOOL { return !window.webView.loading; })) return 1;
-  ovNavigateFromLogin(window, "document.body.innerHTML='Destination';");
+  ovNavigateFromLogin(window, "document.body.innerHTML='Destination';document.addEventListener('ov-desktop-revealed',()=>window.revealed=true);");
   if (!spinUntil(^BOOL { return objc_getAssociatedObject(window, &ovLoginCoverKey) != nil; })) return 2;
   NSImageView *cover = objc_getAssociatedObject(window, &ovLoginCoverKey);
   if (!cover.image || cover.superview != window.contentView) return 3;
@@ -60,8 +60,13 @@ int main(void) {
   if (!spinUntil(^BOOL { return changed; })) return 6;
   // The old sign-in image still covers the new document until ready is signalled.
   if (objc_getAssociatedObject(window, &ovLoginCoverKey) != cover) return 7;
-  ovRemoveLoginCover(window);
+  ovRevealLoginDestination(window);
   if (objc_getAssociatedObject(window, &ovLoginCoverKey) || cover.superview) return 8;
+  __block BOOL revealed = NO;
+  [window.webView evaluateJavaScript:@"window.revealed === true" completionHandler:^(id value, NSError *error) {
+   revealed = !error && [value boolValue];
+  }];
+  if (!spinUntil(^BOOL { return revealed; })) return 9;
   [window orderOut:nil];
  }
  return 0;
