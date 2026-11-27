@@ -334,7 +334,7 @@ func (c *Conn) session() (expired bool, err error) {
 	c.mu.Unlock()
 	defer c.disconnected()
 	c.changed()
-	if err := wsjson.Write(c.ctx, ws, map[string]string{"op": "live", "id": liveSubscriptionID, "project_id": models.AllProjectsID}); err != nil {
+	if err := wsjson.Write(c.ctx, ws, map[string]any{"op": "live", "id": liveSubscriptionID, "project_id": models.AllProjectsID, "local_only": true}); err != nil {
 		return false, err
 	}
 	heard()
@@ -412,7 +412,7 @@ func (c *Conn) dispatch(f Frame) {
 				select {
 				case <-c.ctx.Done():
 				case <-time.After(5 * time.Second):
-					_ = c.write(map[string]string{"op": "live", "id": liveSubscriptionID, "project_id": models.AllProjectsID})
+					_ = c.write(map[string]any{"op": "live", "id": liveSubscriptionID, "project_id": models.AllProjectsID, "local_only": true})
 				}
 			}()
 		default:
@@ -454,9 +454,6 @@ func (c *Conn) publish(f Frame) {
 		if json.Unmarshal(f.Data, &ev) != nil || c.hub.OnChat == nil {
 			return
 		}
-		if relayedEvent(ev.ProjectID, ev.TaskID, ev.ExecID) {
-			return
-		}
 		Tag(c.serverID, &ev)
 		ev.RemoteUserID = c.userID
 		c.hub.OnChat(ev)
@@ -466,24 +463,9 @@ func (c *Conn) publish(f Frame) {
 	if json.Unmarshal(f.Data, &ev) != nil || ev.Type == "" || c.hub.OnTask == nil {
 		return
 	}
-	if relayedEvent(ev.ProjectID, ev.TaskID, ev.ExecID) {
-		return
-	}
 	Tag(c.serverID, &ev)
 	ev.RemoteUserID = c.userID
 	c.hub.OnTask(ev)
-}
-
-// A hub consumes only events owned by its peer. Remote IDs belong to that
-// peer's saved-server namespace, not ours. Importing them again would circulate
-// events indefinitely when two servers are connected to each other.
-func relayedEvent(ids ...string) bool {
-	for _, id := range ids {
-		if _, remote := remoteid.ServerOf(id); remote {
-			return true
-		}
-	}
-	return false
 }
 
 func (c *Conn) write(v any) error {
