@@ -88,8 +88,9 @@ func runDesktopAuthNativeHelper(backend string) error {
 		Assets: application.AssetOptions{Handler: handler},
 		Mac:    application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
 	})
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name: "auth-test", Title: "OpenVibely authentication test", URL: "/chat", Width: 1000, Height: 700,
+		Frameless: true, Mac: application.MacWindow{CornerRadius: 20},
 		JS: `(async () => {
   const report = result => fetch('/__desktop_auth_result?result=' + encodeURIComponent(result));
   try {
@@ -119,5 +120,6 @@ func runDesktopAuthNativeHelper(backend string) error {
   } catch (error) { report('FAIL: ' + error.message); }
 })();`,
 	})
+	registerPageBackground(app, window)
 	return app.Run()
 }

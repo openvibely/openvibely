@@ -281,6 +281,7 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 	})
 	window.SetMenu(nil) // Windows/Linux: explicitly disable the window menu bar.
 	registerPlatformWindowControls(app, window)
+	registerPageBackground(app, window)
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		application.InvokeAsync(func() {
 			installFullscreenPresentation()

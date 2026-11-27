@@ -33,7 +33,20 @@ func DesktopPageBackground(platform string) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if platform == "darwin" || platform == "windows" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<script type=\"module\">\n   import * as runtime from '/wails/runtime.js';\n   // Canvas converts computed CSS colours (including oklch) to sRGB for Wails.\n   const canvas = document.createElement('canvas');\n   canvas.width = canvas.height = 1;\n   const context = canvas.getContext('2d', {willReadFrequently: true});\n   let previous = '';\n   function syncBackground() {\n    if (!context || !runtime.Window?.SetBackgroundColour) return;\n    context.clearRect(0, 0, 1, 1);\n    context.fillStyle = getComputedStyle(document.documentElement).backgroundColor;\n    context.fillRect(0, 0, 1, 1);\n    const rgba = Array.from(context.getImageData(0, 0, 1, 1).data);\n    const key = rgba.join(',');\n    if (rgba[3] !== 255 || key === previous) return;\n    previous = key;\n    runtime.Window.SetBackgroundColour(...rgba).catch(() => { previous = ''; });\n   }\n   new MutationObserver(syncBackground).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-color-theme', 'style']});\n   syncBackground();\n  </script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<script type=\"module\" id=\"desktop-page-background\" data-platform=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var2 string
+			templ_7745c5c3_Var2, templ_7745c5c3_Err = templruntime.NewAttributeExpression(platform).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/window_background.templ`, Line: 11, Col: 77}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\">\n   import * as runtime from '/wails/runtime.js';\n   // Canvas converts computed CSS colours (including oklch) to sRGB for Wails.\n   const canvas = document.createElement('canvas');\n   canvas.width = canvas.height = 1;\n   const context = canvas.getContext('2d', {willReadFrequently: true});\n   const mac = document.getElementById('desktop-page-background').dataset.platform === 'darwin';\n   let previous = '';\n   function syncBackground() {\n    if (!context) return;\n    context.clearRect(0, 0, 1, 1);\n    context.fillStyle = getComputedStyle(document.documentElement).backgroundColor;\n    context.fillRect(0, 0, 1, 1);\n    const rgba = Array.from(context.getImageData(0, 0, 1, 1).data);\n    const key = rgba.join(',');\n    if (rgba[3] !== 255 || key === previous) return;\n    previous = key;\n    // On macOS the Window API paints behind the rounded clip, not the webview.\n    const update = mac ? runtime.Events.Emit('desktop:page-background', rgba) : runtime.Window.SetBackgroundColour(...rgba);\n    Promise.resolve(update).catch(() => { previous = ''; });\n   }\n   new MutationObserver(syncBackground).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-color-theme', 'style']});\n   syncBackground();\n  </script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -8,15 +8,16 @@ templ DesktopPageBackground(platform string) {
   html[data-theme="light"] { color-scheme: light; background-color: var(--shell-page, var(--fallback-b2, oklch(var(--b2, .97 0 0)))); }
  </style>
  if platform == "darwin" || platform == "windows" {
-  <script type="module">
+  <script type="module" id="desktop-page-background" data-platform={ platform }>
    import * as runtime from '/wails/runtime.js';
    // Canvas converts computed CSS colours (including oklch) to sRGB for Wails.
    const canvas = document.createElement('canvas');
    canvas.width = canvas.height = 1;
    const context = canvas.getContext('2d', {willReadFrequently: true});
+   const mac = document.getElementById('desktop-page-background').dataset.platform === 'darwin';
    let previous = '';
    function syncBackground() {
-    if (!context || !runtime.Window?.SetBackgroundColour) return;
+    if (!context) return;
     context.clearRect(0, 0, 1, 1);
     context.fillStyle = getComputedStyle(document.documentElement).backgroundColor;
     context.fillRect(0, 0, 1, 1);
@@ -24,7 +25,9 @@ templ DesktopPageBackground(platform string) {
     const key = rgba.join(',');
     if (rgba[3] !== 255 || key === previous) return;
     previous = key;
-    runtime.Window.SetBackgroundColour(...rgba).catch(() => { previous = ''; });
+    // On macOS the Window API paints behind the rounded clip, not the webview.
+    const update = mac ? runtime.Events.Emit('desktop:page-background', rgba) : runtime.Window.SetBackgroundColour(...rgba);
+    Promise.resolve(update).catch(() => { previous = ''; });
    }
    new MutationObserver(syncBackground).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-color-theme', 'style']});
    syncBackground();
