@@ -55,6 +55,26 @@ func TestAuthLoginPage_Render(t *testing.T) {
 	}
 }
 
+func TestAuthLogin_NativeBackgroundBeforeStylesheets(t *testing.T) {
+	h, e := authTestHandler(t)
+	h.SetDesktopMode(true)
+	for _, theme := range []string{"openvibely-dark", "openvibely-light"} {
+		if err := h.settingsRepo.Set(t.Context(), uiPreferenceThemeKey, theme); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/login", nil)
+		req.Header.Set("X-OpenVibely-Native-Window", "1")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		html := rec.Body.String()
+		background := strings.Index(html, "color-scheme: dark;")
+		stylesheet := strings.Index(html, `rel="stylesheet"`)
+		if rec.Code != http.StatusOK || background < 0 || stylesheet < 0 || background > stylesheet {
+			t.Fatalf("%s: native login background must precede external stylesheets", theme)
+		}
+	}
+}
+
 func TestAuthLogin_SuccessSetsCookieAndRedirects(t *testing.T) {
 	_, e := authTestHandler(t)
 	form := url.Values{}
