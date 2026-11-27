@@ -5819,7 +5819,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							setTimeout(function() {
 								splash.classList.add('ov-splash-out');
 								document.dispatchEvent(new Event('ov-splash-fading'));
-								setTimeout(function() { splash.remove(); document.dispatchEvent(new Event('ov-splash-done')); }, 500);
+								setTimeout(function() { splash.remove(); }, 500);
 							}, Math.max(0, 2400 - (performance.now() - start)));
 						}
 						if (document.readyState === 'complete') hide(); else window.addEventListener('load', hide, {once: true});

@@ -93,7 +93,7 @@ templ InspectorPickerScript() {
   function menu(row){var controller=menus.get(row);if(!controller){controller=window.ovMenuController.create({trigger:row,panels:[picker],isOpen:function(){return current===row&&isOpen();},open:function(){show(row);},close:hide,restoreFocus:returnFocus});menus.set(row,controller);}return controller;}
   function open(row){menu(row).toggle();}
   function close(){if(current)menu(current).close(false);}
-  function place(row){var r=row.getBoundingClientRect(),end=row.dataset.pickerAlign==='end',up=row.dataset.pickerAlign==='up',auto=row.dataset.pickerAlign==='auto',gap=end||up||auto?6:0;var left=end?r.right-picker.offsetWidth:r.left;var top=up||((end||auto)&&r.bottom+gap+picker.offsetHeight>innerHeight-12)?r.top-gap-picker.offsetHeight:r.bottom+gap;picker.style.left=Math.max(12,Math.min(left,innerWidth-picker.offsetWidth-12))+'px';picker.style.top=Math.max(12,Math.min(top,innerHeight-picker.offsetHeight-12))+'px';}
+  function place(row){var r=row.getBoundingClientRect(),end=row.dataset.pickerAlign==='end',auto=row.dataset.pickerAlign==='auto',gap=end||auto?6:0;var left=end?r.right-picker.offsetWidth:r.left;var top=(end||auto)&&r.bottom+gap+picker.offsetHeight>innerHeight-12?r.top-gap-picker.offsetHeight:r.bottom+gap;picker.style.left=Math.max(12,Math.min(left,innerWidth-picker.offsetWidth-12))+'px';picker.style.top=Math.max(12,Math.min(top,innerHeight-picker.offsetHeight-12))+'px';}
   var sizeObserver=new ResizeObserver(function(){if(isOpen()&&current)place(current);});
   sizeObserver.observe(picker);
   abort.signal.addEventListener('abort',function(){sizeObserver.disconnect();},{once:true});
