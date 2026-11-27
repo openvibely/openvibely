@@ -46,6 +46,13 @@ func TestSharedProjectChatPickerInChrome(t *testing.T) {
  try {
  await wait(()=>window.openVibelyNavigate && document.getElementById('shared-chat-form') && document.getElementById('shared-chat-form')['htmx-internal-data']);
  assert(document.getElementById('project-selector').value==='` + shared.ID + `','shared project not selected');
+ const chatTop=document.querySelector('#shared-chat-form').getBoundingClientRect().top;
+ window.openVibelyNavigate('/tasks/new?project_id=` + url.QueryEscape(shared.ID) + `');
+ await wait(()=>document.getElementById('task-thread-form'));
+ const taskTop=document.getElementById('task-thread-form').getBoundingClientRect().top;
+ assert(Math.abs(chatTop-taskTop)<2,'composer tops differ: chat='+chatTop+' task='+taskTop);
+ window.openVibelyNavigate('/chat?project_id=` + url.QueryEscape(shared.ID) + `');
+ await wait(()=>document.getElementById('shared-chat-form'));
  const picker=document.getElementById('shared-chat-form-project-select');
  assert(picker && picker.textContent.trim()==='Choose a project','picker missing');
  const form=document.getElementById('shared-chat-form');
@@ -80,6 +87,8 @@ func TestSharedProjectChatPickerInChrome(t *testing.T) {
  form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,xhr:xhr,successful:true,requestConfig:{}}}));
  await wait(()=>location.pathname==='/chat' && new URLSearchParams(location.search).get('project_id')==='` + remoteCopy + `' && document.getElementById('chat-page-root'));
  assert(document.getElementById('chat-page-root').dataset.projectId==='` + remoteCopy + `','conversation did not use remote copy');
+ const regularChatTop=document.getElementById('chat-form').getBoundingClientRect().top;
+ assert(Math.abs(regularChatTop-taskTop)<2,'regular Chat composer differs from New Task: '+regularChatTop+' vs '+taskTop);
  assert(document.getElementById('project-selector').value==='` + shared.ID + `','workspace lost shared group');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)+' url='+location.href})}
