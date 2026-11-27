@@ -789,7 +789,8 @@ func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
 	chrome := testChromePath(t)
 	var content bytes.Buffer
 	var mu sync.Mutex
-	saved := "previous-model"
+	saved := "r-1234567890abcdef-model"
+	writes := 0
 	err := ChatInputForm(ChatInputFormConfig{FormID: "shared-chat-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/chat/send", Agents: []models.LLMConfig{{ID: "local-model", Name: "Local model", Provider: models.ProviderOpenAI}}, ShowModelSelector: true, ProjectChoices: []models.Project{{ID: "local", Name: "Local"}, {ID: "r-1234567890abcdef-project", Name: "Remote"}}, ProjectInputID: "destination", ProjectSendURL: "/chat/send?project_id="}).Render(context.Background(), &content)
 	if err != nil {
 		t.Fatal(err)
@@ -802,6 +803,7 @@ func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			if r.Method == http.MethodPost {
+				writes++
 				_ = r.ParseForm()
 				saved = r.FormValue("agent_id")
 			}
@@ -809,7 +811,7 @@ func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
 			if selected == "" {
 				selected = saved
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"agent_id": selected})
+			_ = json.NewEncoder(w).Encode(map[string]any{"agent_id": selected, "writes": writes})
 			return
 		}
 		if r.URL.Path == "/tasks/new" {
@@ -833,15 +835,18 @@ func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
  for(let i=0;i<100&&!picker.parentElement.querySelector('[data-value="r-1234567890abcdef-model"]');i++)await wait();
  assert(picker.parentElement.querySelector('[data-value="r-1234567890abcdef-model"]'),'remote models loaded');
  assert(!picker.parentElement.querySelector('[data-value="local-model"]'),'local options removed');
- assert(form.querySelector('[name="agent_id"]').value==='default','old selection reset');
+
  assert(!picker.disabled,'picker available');
  await picker._ovModelState.ready;
- window._setChatCustomSelectValue(picker,'r-1234567890abcdef-model');
- picker.dispatchEvent(new CustomEvent('chat-select-change',{detail:{value:'r-1234567890abcdef-model'},bubbles:true}));
+ assert(form.querySelector('[name="agent_id"]').value==='r-1234567890abcdef-model','saved remote choice restored');
+ const before=await fetch('/conversation/model-settings?project_id=r-1234567890abcdef-project').then(r=>r.json());
+ assert(before.writes===0,'switching destination must not save preferences');
+ window._setChatCustomSelectValue(picker,'default');
+ picker.dispatchEvent(new CustomEvent('chat-select-change',{detail:{value:'default'},bubbles:true}));
  await picker._ovModelState.ready;
  await picker._ovModelState.pending;
  const saved=await fetch('/conversation/model-settings?project_id=r-1234567890abcdef-project').then(r=>r.json());
- assert(saved.agent_id==='r-1234567890abcdef-model','destination remembers chosen model for replacement composer');
+ assert(saved.agent_id==='default' && saved.writes===1,'explicit model choice saved once');
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;}})();</script></body></html>`)
 	}))

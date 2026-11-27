@@ -897,6 +897,22 @@
     close,
     open(btn) { if (ownerVisible(btn)) modelMenu(btn).open(); },
     toggle(btn, event) { if (ownerVisible(btn)) modelMenu(btn).toggle(event); },
+    destinationLoading(btn) {
+      init(btn);
+      const s = state(btn);
+      s.loadToken++;
+      s.selectionPending = null;
+      s.error = "";
+      s.permissionError = false;
+      s.failedSave = false;
+      s.initialLoad = true;
+    },
+    restore(btn) {
+      init(btn);
+      const s = state(btn);
+      s.ready = load(btn, true);
+      return s.ready;
+    },
     changed(btn) {
       init(btn);
       const s = state(btn);

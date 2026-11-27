@@ -3112,6 +3112,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
                     var input = form.querySelector('[name="agent_id"]');
                     if (!picker || !input) return;
                     window.ovModelPicker?.close();
+                    window.ovModelPicker?.destinationLoading(picker);
                     input.value = 'default';
                     var options = picker.parentElement.querySelector('.chat-custom-select-options');
                     options.innerHTML = '<li data-value="default">Default</li>';
@@ -3126,7 +3127,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
                         options.innerHTML = html;
                         picker.disabled = false;
                         window._setChatCustomSelectValue?.(picker, 'default');
-                        window.ovModelPicker?.changed(picker);
+                        await window.ovModelPicker?.restore(picker);
                     } catch (_) {
                         if (token === modelRequest && form.isConnected) picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';
                     }
