@@ -25,6 +25,8 @@ import (
 // A subscription ID belongs to one view generation, not to an execution. Late
 // frames from an unsubscribed view can therefore never modify its replacement.
 type liveCommand struct {
+	// LocalOnly keeps server-to-server subscriptions from exporting imported events.
+	LocalOnly  bool   `json:"local_only,omitempty"`
 	InstanceID string `json:"instance_id,omitempty"`
 	Handle     string `json:"handle,omitempty"`
 	Op         string `json:"op"`
@@ -730,6 +732,9 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 			if !ok {
 				return
 			}
+			if cmd.LocalOnly && ev.RemoteUserID != "" {
+				continue
+			}
 			if (ev.Type == events.AccountUsageUpdated && cmd.Op != "account_usage") || (models.IsSharedProjectID(cmd.ProjectID) && !members[ev.ProjectID]) {
 				continue
 			}
@@ -739,6 +744,9 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 		case ev, ok := <-chats:
 			if !ok {
 				return
+			}
+			if cmd.LocalOnly && ev.RemoteUserID != "" {
+				continue
 			}
 			if !send(liveFrame{Event: string(ev.Type), Data: ev}) {
 				return

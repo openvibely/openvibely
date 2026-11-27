@@ -334,7 +334,7 @@ func (c *Conn) session() (expired bool, err error) {
 	c.mu.Unlock()
 	defer c.disconnected()
 	c.changed()
-	if err := wsjson.Write(c.ctx, ws, map[string]string{"op": "live", "id": liveSubscriptionID, "project_id": models.AllProjectsID}); err != nil {
+	if err := wsjson.Write(c.ctx, ws, map[string]any{"op": "live", "id": liveSubscriptionID, "project_id": models.AllProjectsID, "local_only": true}); err != nil {
 		return false, err
 	}
 	heard()
@@ -412,7 +412,7 @@ func (c *Conn) dispatch(f Frame) {
 				select {
 				case <-c.ctx.Done():
 				case <-time.After(5 * time.Second):
-					_ = c.write(map[string]string{"op": "live", "id": liveSubscriptionID, "project_id": models.AllProjectsID})
+					_ = c.write(map[string]any{"op": "live", "id": liveSubscriptionID, "project_id": models.AllProjectsID, "local_only": true})
 				}
 			}()
 		default:
