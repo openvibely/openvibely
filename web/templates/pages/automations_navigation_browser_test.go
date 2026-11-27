@@ -1370,7 +1370,7 @@ func TestAutomationEditKeepsEditableBreadcrumbWithSelectorCaretAfterName(t *test
 	if got := len(regexp.MustCompile(`<input[^>]+data-automation-name`).FindAllString(body, -1)); got != 1 {
 		t.Errorf("saved Automation edit rendered %d name inputs, want 1", got)
 	}
-	originalNameInput := `<input class="input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl" form="automation-design-form" name="automation_name" value="Saved Automation" maxlength="200" required data-automation-name aria-label="Automation name">`
+	originalNameInput := `<input class="ov-breadcrumb-name input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl" form="automation-design-form" name="automation_name" value="Saved Automation" maxlength="200" required data-automation-name aria-label="Automation name">`
 	if !strings.Contains(body, originalNameInput) {
 		t.Errorf("saved Automation edit name input must retain its exact pre-selector position and sizing classes")
 	}

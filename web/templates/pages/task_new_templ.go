@@ -138,7 +138,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" hx-target=\"#main-content\" hx-push-url=\"true\">Tasks</a> <span class=\"ml-2 flex-shrink-0 text-2xl text-base-content/30\">/</span> <input name=\"title\" form=\"task-thread-form\" aria-label=\"Task title\" placeholder=\"New task\" maxlength=\"200\" class=\"ov-new-task-title input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" hx-target=\"#main-content\" hx-push-url=\"true\">Tasks</a> <span class=\"ml-2 flex-shrink-0 text-2xl text-base-content/30\">/</span> <input name=\"title\" form=\"task-thread-form\" aria-label=\"Task title\" placeholder=\"New task\" maxlength=\"200\" class=\"ov-breadcrumb-name input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
