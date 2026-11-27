@@ -156,7 +156,7 @@
     var color = dotColor(stage);
     var t0 = performance.now(), dur = 1500;
     function frame(now) {
-      if (!stage.isConnected || stage.hidden) return;
+      if (!stage.isConnected || stage.hidden) { stage._ovPlaying = false; return; }
       var T = (now - t0) / dur;
       g.ctx.clearRect(0, 0, g.W, g.H);
       g.ctx.fillStyle = color;
